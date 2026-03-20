@@ -21,6 +21,8 @@ import { promisify } from 'util'
 import {logger} from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { buildWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
+import { formatFrameworkQuestionsAsText, createQuestionActivity } from '../utils/external-step-utils'
+import type { FrameworkQuestionGroup } from '../utils/external-step-utils'
 
 const execAsync = promisify(exec)
 
@@ -48,7 +50,7 @@ import type {
   ConversationResult,
   Message
 } from './types.js'
-import { Agent, createAssistantMessage, createToolResultMessage, createUserMessage } from '@framework'
+import { Agent, createAssistantMessage, createToolResultMessage, createUserMessage, ASK_QUESTION_SYSTEM_PROMPT } from '@framework'
 import { cloneRepository, pushCommits, hasUncommittedChanges, commitAllChanges } from '@framework'
 import type { OrchestratorEventHandler } from '@framework'
 import { UpdateAgentStepInput } from '@/types/database'
@@ -222,9 +224,9 @@ export class AgentExecutor {
       const updatedState = this.buildStateFromCompletedExecution(parentState, result as FrameworkExecutionResult)
       return { result, updatedState, gitInfo }
 
-    } catch(error) {
+    } catch (error) {
       // Handle execution error - create error step
-      await this.storage.createErrorStep(parentExecutionId, inputStepDbId, error as Error);
+        await this.storage.createErrorStep(parentExecutionId, inputStepDbId, error as Error);
       throw error
     }
   }
@@ -332,7 +334,7 @@ export class AgentExecutor {
 
     } catch (error) {
       // Handle execution error - create error step
-      await this.storage.createErrorStep(parentExecutionId, inputStepDbId, error as Error);
+        await this.storage.createErrorStep(parentExecutionId, inputStepDbId, error as Error);
       throw error
     }
   }
@@ -449,8 +451,12 @@ export class AgentExecutor {
     let projectName: string | undefined;
     let repoName: string | undefined;
 
-    // Clone repository if URL is provided
-    // Use parentExecutionId for workspace path so all agentic steps in a workflow share the same /tmp/{parentExecutionId} directory
+    const useQuestioningMode = agentChkConfig.useQuestioningMode ?? false;
+    const questionEnabled = useQuestioningMode;
+    logger.info(`[AGENT-EXECUTOR] Config Check - useQuestioningMode: ${useQuestioningMode}, questionEnabled: ${questionEnabled}`);
+
+
+
     if (repoUrl) {
       // Publish cloning_started event so frontend can show "Cloning in Remote..." status
       await workspaceEventService.publishCloningStarted(parentExecutionId, inputStepDbId);
@@ -488,7 +494,20 @@ export class AgentExecutor {
 
     const agenticConfig = { ...agentChkConfig.agentConfig, cwd: repoPath };
 
-    // Initialize framework agent
+    if (questionEnabled) {
+      const enabledTools = agenticConfig.tools?.enabled || [];
+      logger.info(`[AGENT-EXECUTOR] Tools before injection: ${JSON.stringify(enabledTools)}`);
+      if (!enabledTools.includes('ask_question')) {
+        agenticConfig.tools = {
+          ...agenticConfig.tools,
+          enabled: [...enabledTools, 'ask_question']
+        };
+        logger.info(`[AGENT-EXECUTOR] Injected ask_question. Tools are now: ${JSON.stringify(agenticConfig.tools.enabled)}`);
+      } else {
+        logger.info(`[AGENT-EXECUTOR] ask_question is already in enabled tools.`);
+      }
+    }
+
     const agent = Agent.create(agenticConfig);
 
     // Track if any commits were made during execution
@@ -517,10 +536,16 @@ export class AgentExecutor {
     );
 
     // Setup event handlers with pause and cancellation checking
-    const eventHandler = this.createPauseOrCancellationAwareEventHandler(parentExecutionId, inputStepDbId, commitTracker, repoPath || ".", agentChkConfig, abortController)
+    const eventHandler = this.createPauseOrCancellationAwareEventHandler(parentExecutionId, inputStepDbId, commitTracker, repoPath || ".", agentChkConfig, abortController, questionEnabled);
 
-    // Add event listener for all orchestrator events
-    agent.addEventListener(eventHandler)
+    agent.addEventListener(eventHandler);
+
+    let injectedSystemPrompt = conversationRequest.systemPrompt || '';
+    if (questionEnabled) {
+      injectedSystemPrompt += ASK_QUESTION_SYSTEM_PROMPT;
+    }
+
+    injectedSystemPrompt += `\n\nCurrent Dir - ${repoPath || ''} \n\n`;
 
     // Execute conversation with internal continuation support
     let result: ConversationResult | undefined;
@@ -607,9 +632,7 @@ export class AgentExecutor {
       try {
         result = await agent.execute({
           ...conversationRequest,
-          systemPrompt: conversationRequest.systemPrompt
-            ? conversationRequest.systemPrompt + `\n\nCurrent Dir - ${repoPath || ''} \n\n`
-            : conversationRequest.systemPrompt,
+          systemPrompt: injectedSystemPrompt,
           abortSignal: abortController.signal,
         });
 
@@ -818,7 +841,7 @@ export class AgentExecutor {
       throw new Error('Agent execution completed but no result was returned');
     }
 
-    if (result.error) {
+    if (result && result.error) {
       // Only throw if no commits were made (i.e., the main task failed)
       if (!commitTracker.hasCommits) {
         throw new Error(result.error)
@@ -834,6 +857,10 @@ export class AgentExecutor {
       throw new WorkflowExternalWaitException(parentExecutionId, inputStepDbId);
     }
 
+    if (!result) {
+      throw new Error("Agent execution did not return a result");
+    }
+
     return { result, gitInfo }
   }
 
@@ -847,9 +874,49 @@ export class AgentExecutor {
     commitTracker: AgentTracker,
     repoPath: string,
     agentChkConfig: FullAgenticCheckpointConfig,
-    abortController: AbortController
+    abortController: AbortController,
+    questionEnabled: boolean,
   ): OrchestratorEventHandler {
     return {
+      onUserInputRequired: async (details: {
+        toolName: string;
+        toolCallId: string;
+        data: Record<string, unknown>;
+      }) => {
+        logger.info(`[AGENT-EXECUTOR] onUserInputRequired TRIGGERED for tool: ${details.toolName}, callId: ${details.toolCallId}`);
+        if (details.toolName !== 'ask_question') return;
+        if (!questionEnabled) {
+          logger.warn(`[AGENT-EXECUTOR] Rejecting question ${details.toolCallId} — useQuestioningMode is off`);
+          return;
+        }
+
+        try {
+          const questionGroups = (details.data.questionGroups ?? []) as FrameworkQuestionGroup[];
+          logger.info(`[AGENT-EXECUTOR] Handling ask_question with ${questionGroups.length} question groups...`);
+
+          // Format questions as readable text
+          const questionText = formatFrameworkQuestionsAsText(questionGroups);
+          if (!questionText) return;
+
+          // Save the question as an LLM call step so it appears as an assistant message in the UI
+          await this.storage.createLLMCallStep(parentExecutionId, inputStepDbId, {
+            content: questionText,
+          });
+
+          // Set MANUAL mode so the continueAgenticStep endpoint routes the user's reply
+          // into the Redis message-storage branch (WAIT_FOR_EVENT + MANUAL).
+          // The endpoint will reset mode to AUTOMATIC before re-queuing so the agent
+          // completes without pausing again after processing the answer.
+          await this.storage.setExecutionMode(parentExecutionId, 'MANUAL');
+
+          await createQuestionActivity(parentExecutionId);
+
+          logger.info(`[AGENT-EXECUTOR] ❓ Question formatted as assistant message — completing turn in MANUAL mode`);
+        } catch (err) {
+          logger.error(`[AGENT-EXECUTOR] Failed to handle ask_question ${details.toolCallId}:`, err);
+        }
+      },
+
       onToolCallsRequested: async (toolCalls) => {
         await this.checkWorkflowPauseOrCancelStatusAndThrow(parentExecutionId, abortController)
 
@@ -867,6 +934,7 @@ export class AgentExecutor {
       },
 
       onToolResult: async (result) => {
+
         await this.checkWorkflowPauseOrCancelStatusAndThrow(parentExecutionId, abortController)
 
         logger.info("Tool result received:", result);
@@ -1046,7 +1114,7 @@ export class AgentExecutor {
       await this.storage.markChildExecutionCancelled(workflowExecutionId, 'execution_aborted');
       throw new WorkflowCancelledException(workflowExecutionId, 'framework_step_cancelled');
     }
-    
+
     await this.storage.markChildExecutionFailed(workflowExecutionId, this.serializeError(error as Error));
   }
 

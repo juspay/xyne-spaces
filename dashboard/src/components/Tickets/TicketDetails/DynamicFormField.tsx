@@ -180,21 +180,46 @@ const SelectFieldComponent: React.FC<{
   const [isOpen, setIsOpen] = React.useState(false);
   const [inputValue, setInputValue] = React.useState('');
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const [selectedValues, setSelectedValues] = React.useState<string[]>(() => {
+    if (field.multiple && field.default !== undefined) {
+      return Array.isArray(field.default) ? field.default : [field.default];
+    }
+    return [];
+  });
 
   // Register the field with react-hook-form
   React.useEffect(() => {
     register(field.name, {
       required: field.required === true ? `${field.label} is required` : false,
+      validate: value => {
+        if (!field.multiple || !field.required) return true;
+        return (Array.isArray(value) && value.length > 0) || `${field.label} is required`;
+      },
     });
-    if (field.default) {
+    if (!field.multiple && field.default) {
       setValue(field.name, field.default);
-      // Set display label for default value
       const defaultOption = field.options.find(o => o.value === field.default);
-      setInputValue(defaultOption?.label || field.default);
+      setInputValue(defaultOption?.label || (field.default as string));
     }
-  }, [register, field.name, field.required, field.label, field.default, setValue, field.options]);
+  }, [
+    register,
+    field.name,
+    field.required,
+    field.label,
+    field.default,
+    setValue,
+    field.options,
+    field.multiple,
+  ]);
 
-  // Filter options based on input value
+  // Keep form value in sync when multi-select selection changes
+  React.useEffect(() => {
+    if (field.multiple) {
+      setValue(field.name, selectedValues, { shouldValidate: true });
+    }
+  }, [field.multiple, field.name, selectedValues, setValue]);
+
+  // Filter options based on input value (must be before early return)
   const filteredOptions = React.useMemo(() => {
     if (!field.allowCustomValue || !inputValue.trim()) return field.options;
     const lowerInput = inputValue.toLowerCase();
@@ -204,6 +229,57 @@ const SelectFieldComponent: React.FC<{
         opt.value.toLowerCase().includes(lowerInput),
     );
   }, [field.options, field.allowCustomValue, inputValue]);
+
+  // Multi-select: checkboxes for each option
+  if (field.multiple) {
+    const toggleOption = (value: string) => {
+      setSelectedValues(prev =>
+        prev.includes(value) ? prev.filter(v => v !== value) : [...prev, value],
+      );
+    };
+    return (
+      <div className='space-y-1'>
+        {renderLabel(field.name, field.label, field.required)}
+        <div
+          className={cn(
+            'rounded-md border bg-transparent p-2 min-h-[2.25rem] max-h-40 overflow-y-auto',
+            'border-input focus-within:border-ring focus-within:ring-ring/10 focus-within:ring-[2px]',
+            !!error && 'border-destructive ring-destructive/20',
+          )}
+          role='group'
+          aria-label={field.label}
+        >
+          <div className='flex flex-col gap-1.5'>
+            {field.options.map(option => (
+              <label
+                key={option.value}
+                className={cn(
+                  'flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer',
+                  'hover:bg-accent/50 hover:text-accent-foreground',
+                )}
+              >
+                <input
+                  type='checkbox'
+                  checked={selectedValues.includes(option.value)}
+                  onChange={() => toggleOption(option.value)}
+                  className='rounded border-input text-primary focus:ring-ring'
+                  data-track-category='Tickets'
+                  data-track-name='DynamicMultiSelectOption'
+                  data-track-metadata={JSON.stringify({
+                    fieldName: field.name,
+                    value: option.value,
+                  })}
+                />
+                <span className='text-sm text-foreground'>{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        {renderDescription(field.description)}
+        {renderError(error)}
+      </div>
+    );
+  }
 
   const handleSelect = (value: string, label: string) => {
     setValue(field.name, value, { shouldValidate: true });

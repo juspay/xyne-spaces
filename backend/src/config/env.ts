@@ -126,7 +126,6 @@ const envSchema = Joi.object({
   // oh-my-opencode Plugin Configuration
   OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
   OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default(''),
-  ENABLE_IMMEDIATE_OUTPUT_STEP: Joi.boolean().default(false),
   // Web Search Configuration
   WEB_SEARCH_URL: Joi.string().uri().allow('').default(''),
   WEB_SEARCH_API_KEY: Joi.string().allow('').default(''),
@@ -355,7 +354,6 @@ export const config = {
   jwt: {
     expirationSeconds: envVars.JWT_EXPIRATION_SECONDS,
   },
-  enableImmediateOutputStep: envVars.ENABLE_IMMEDIATE_OUTPUT_STEP,
   pulse: {
     // Comma-separated channel IDs that have Pulse enabled (empty = disabled everywhere)
     enabledChannels: (envVars.PULSE_ENABLED_CHANNELS as string)

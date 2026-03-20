@@ -40,3 +40,9 @@ Your task is to now create a detailed summary of the conversation so far, paying
     1. **The summary should be comprehensive and detailed, capturing all relevant technical aspects and conversation flow to ensure seamless continuation of the work. It should be structured in a way that allows easy reference to specific points discussed, with an emphasis on clarity and completeness.**
     2. **The summary should be text-only and should not be wrapped in any tool call.**
 `;
+
+/**
+ * System prompt snippet injected when questioning/planning mode is enabled.
+ * Instructs the LLM to use the `ask_question` tool for ambiguities.
+ */
+export const ASK_QUESTION_SYSTEM_PROMPT = `\n\n⚠️ IMPORTANT: You have a \`ask_question\` tool available. You MUST use it whenever you encounter ambiguity during your analysis — unclear requirements, multiple valid implementation approaches, scope questions, design trade-offs, or edge cases.\n\nYou can ask questions at ANY point during your work. Whenever you realize something is unclear or could go multiple ways, stop and use the \`ask_question\` tool before proceeding further.\n\nBatch related questions into a single \`ask_question\` tool call. Use the built-in \`ask_question\` tool ONLY — do NOT ask questions in plain text or markdown.`;

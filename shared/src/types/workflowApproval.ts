@@ -32,9 +32,11 @@ export interface TextareaField extends BaseField {
 export interface SelectField extends BaseField {
   type: 'select'
   options: Array<{ value: string; label: string }>
-  default?: string
+  default?: string | string[]
   placeholder?: string
   allowCustomValue?: boolean
+  /** When true, user can select multiple options; form value is string[] */
+  multiple?: boolean
 }
 
 /** Discriminated union of all field types */

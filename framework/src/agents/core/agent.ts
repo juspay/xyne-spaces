@@ -372,6 +372,15 @@ export class Agent {
   }
 
   /**
+   * Get the tool executor for managing pending executions
+   * (e.g., for ask_question tool resume functionality)
+   */
+  public getToolExecutor(): ToolExecutor {
+    this.checkDisposed();
+    return this.toolManager;
+  }
+
+  /**
    * Check if agent is ready for execution
    */
   public isReady(): boolean {
@@ -585,6 +594,7 @@ export class Agent {
     eventProxy.onCompactingStarted = (...args: unknown[]): void => { void this.proxyEventToHandlers('onCompactingStarted', args); };
     eventProxy.onCompactingCompleted = (...args: unknown[]): void => { void this.proxyEventToHandlers('onCompactingCompleted', args); };
     eventProxy.onInterrupted = (...args: unknown[]): void => { void this.proxyEventToHandlers('onInterrupted', args); };
+    eventProxy.onUserInputRequired = (...args: unknown[]): void => { void this.proxyEventToHandlers('onUserInputRequired', args); };
     
     // Register the comprehensive proxy with orchestrator
     this.orchestrator.addEventListener(eventProxy);

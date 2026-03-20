@@ -80,6 +80,23 @@ export class DefaultAgentOrchestrator implements AgentOrchestrator {
       authHookType: typeof this.executionConfig.toolAuthorization,
       authHookValue: this.executionConfig.toolAuthorization ? 'function' : 'undefined'
     });
+
+    // Set up user input handler for tools that require it (e.g., ask_question)
+    this.setupUserInputHandler();
+  }
+
+  /**
+   * Set up handler for tools that require user input
+   */
+  private setupUserInputHandler(): void {
+    this.toolExecutor.setUserInputHandler((details) => {
+      // Emit event to frontend
+      void this.notifyEventHandlers('onUserInputRequired', {
+        toolName: details.toolName,
+        toolCallId: details.toolCallId,
+        data: details.data,
+      });
+    });
   }
 
   /**
@@ -734,10 +751,15 @@ export class DefaultAgentOrchestrator implements AgentOrchestrator {
       
       try {
         // Execute tool using framework tool executor with abort signal and timeout from config
-        const result = await this.toolExecutor.executeToolByName(toolCall.name, toolCall.arguments, {
-          ...(abortSignal && { abortSignal }),
-          ...(this.executionConfig.timeouts.tool && { timeout: this.executionConfig.timeouts.tool })
-        });
+        const result = await this.toolExecutor.executeToolByName(
+          toolCall.name, 
+          toolCall.arguments, 
+          {
+            ...(abortSignal && { abortSignal }),
+            ...(this.executionConfig.timeouts.tool && { timeout: this.executionConfig.timeouts.tool })
+          },
+          toolCall.id
+        );
         
         const duration = Date.now() - startTime;
         
