@@ -1,24 +1,33 @@
 You are an automation test analyst. Analyze the given Playwright spec file and perform TWO tasks:
 
 ## Task 1: Folder Placement Analysis
+
 Determine which existing e2e test folder this spec belongs to, or if a new folder should be created.
 
 ## Task 2: Scenario Coverage Analysis
+
 Check if any test scenarios in the spec file are already covered by existing feature files.
 
 ---
 
 ## Existing E2E Folder Structure:
+
 ```
 {{E2E_STRUCTURE}}
 ```
 
 ## Existing Feature Files Content:
+
 {{EXISTING_FEATURE_FILES}}
 
 ## Playwright Spec to Analyze:
+
 ```typescript
-{{PLAYWRIGHT_CONTENT}}
+{
+  {
+    PLAYWRIGHT_CONTENT;
+  }
+}
 ```
 
 ---
@@ -66,6 +75,7 @@ Check if any test scenarios in the spec file are already covered by existing fea
 ```
 
 Rules:
+
 - Output ONLY valid JSON — no markdown, no explanation text, no code fences
 - similarity_percentage: 0-100 based on how well the spec fits each folder
 - For scenario_analysis, compare the Playwright test actions against ALL existing feature file scenarios

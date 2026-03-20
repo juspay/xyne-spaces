@@ -204,3 +204,6 @@ apps/xyne-spaces/.yarn/*
 lotus/.expo/
 lotus/ios/build/
 lotus/ios/lotus.xcodeproj/project.xcworkspace/
+
+# Agents
+.sisyphus/

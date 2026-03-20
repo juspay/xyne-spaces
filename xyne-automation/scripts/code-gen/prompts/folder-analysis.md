@@ -9,7 +9,11 @@ Analyze the existing e2e test structure and recommend the best folder for this n
 ## Playwright Test Content:
 
 ```typescript
-{{PLAYWRIGHT_CONTENT}}
+{
+  {
+    PLAYWRIGHT_CONTENT;
+  }
+}
 ```
 
 ## Instructions:
@@ -48,6 +52,7 @@ Return ONLY a valid JSON response (no markdown fences, no extra text) with this 
 ```
 
 ### Output Rules:
+
 - `matches`: Top 3 existing folders ranked by similarity (0–100%). May be empty if structure is empty.
 - `recommendation.folder_name`: The single best folder (existing or new).
 - `recommendation.is_new_folder`: Set `true` if recommending a new folder, `false` if using an existing one.

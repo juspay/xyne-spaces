@@ -10,11 +10,7 @@ const common = {
   requireModule: ['ts-node/register', 'tsconfig-paths/register'],
   require: ['tests/**/*.steps.ts', 'fixtures/cucumber.*.ts'],
   format: [
-    process.env.TEST_ENV === 'local-test'
-      ? 'summary'
-      : process.env.TEST_ENV !== 'local'
-        ? 'progress'
-        : 'summary',
+    'summary',
     `summary:report/${timestamp}/cucumber-summary.log`,
     `json:report/${timestamp}/cucumber-report.json`,
     `html:report/${timestamp}/cucumber-report.html`,
@@ -23,7 +19,7 @@ const common = {
   publishQuiet: true,
   // Retry failed scenarios (override with RETRIES env var)
   retry: (() => {
-    const defaultRetries = process.env.TEST_ENV === 'test' ? 1 : 0;
+    const defaultRetries = 1;
     if (!process.env.RETRIES) return defaultRetries;
 
     const parsed = parseInt(process.env.RETRIES, 10);

@@ -1,7 +1,9 @@
-import { chromium, BrowserContext, Page, Locator } from 'playwright';
+/* eslint-disable no-console */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+
+import { BrowserContext, chromium, Page } from 'playwright';
 
 /**
  * Multi-User Playwright Recorder
@@ -295,7 +297,11 @@ function getInjectionScript(userIndex: number): string {
   `;
 }
 
-async function injectRecorder(page: Page, userIndex: number, recordedActions: RecordedAction[]): Promise<void> {
+async function injectRecorder(
+  page: Page,
+  userIndex: number,
+  recordedActions: RecordedAction[]
+): Promise<void> {
   const userNum = userIndex + 1;
   const userLabel = userIndex === 0 ? 'Admin' : `User ${userNum}`;
 

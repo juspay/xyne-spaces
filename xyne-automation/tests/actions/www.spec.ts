@@ -1,7 +1,6 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 test('www', async ({ browser }) => {
-
   // ============================================
   // User 1: Admin
   // ============================================
@@ -9,7 +8,6 @@ test('www', async ({ browser }) => {
     viewport: { width: 1280, height: 720 },
   });
   const user1Page = await user1Context.newPage();
-
 
   // ============================================
   // User 2: User 2
@@ -22,7 +20,6 @@ test('www', async ({ browser }) => {
   // ============================================
   // Recorded Multi-User Interactions
   // ============================================
-
 
   // --- Admin (user1Page) ---
   await user1Page.goto('http://localhost:5173/auth?isAdmin=true');
