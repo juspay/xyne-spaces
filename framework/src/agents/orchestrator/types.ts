@@ -113,6 +113,13 @@ export interface OrchestratorEventHandler {
   onToolResult?: (result: ToolResultMessage & { duration: number; fullToolResult?: unknown }) => void | Promise<void>;
   onToolsComplete?: (results: Array<{ id: string; name: string; success: boolean }>) => void | Promise<void>;
   
+  // User input required event (for ask_question tool)
+  onUserInputRequired?: (details: {
+    toolName: string;
+    toolCallId: string;
+    data: Record<string, unknown>;
+  }) => void | Promise<void>;
+  
   // Message events
   onMessageAdded?: (message: Message) => void | Promise<void>;
   

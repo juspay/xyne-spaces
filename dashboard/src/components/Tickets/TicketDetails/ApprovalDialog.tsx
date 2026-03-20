@@ -86,26 +86,28 @@ const ApprovalDialog: React.FC<ApprovalDialogProps> = ({
 
         {/* Form */}
         <form onSubmit={e => void handleSubmit(handleFormSubmit)(e)} className='space-y-5'>
-          {fields.length > 0 ? (
-            fields.map((field: ResponseSchemaField) => {
-              const errorMessage = errors[field.name]?.message;
-              const errorProp = typeof errorMessage === 'string' ? { error: errorMessage } : {};
-              return (
-                <div key={field.name}>
-                  <DynamicFormField
-                    field={field}
-                    register={register}
-                    setValue={setValue}
-                    {...errorProp}
-                  />
-                </div>
-              );
-            })
-          ) : (
-            <p className='text-sm text-muted-foreground'>
-              No additional information required. Click submit to approve.
-            </p>
-          )}
+          <div className='max-h-[60vh] overflow-y-auto overflow-x-hidden pr-2 space-y-5'>
+            {fields.length > 0 ? (
+              fields.map((field: ResponseSchemaField) => {
+                const errorMessage = errors[field.name]?.message;
+                const errorProp = typeof errorMessage === 'string' ? { error: errorMessage } : {};
+                return (
+                  <div key={field.name}>
+                    <DynamicFormField
+                      field={field}
+                      register={register}
+                      setValue={setValue}
+                      {...errorProp}
+                    />
+                  </div>
+                );
+              })
+            ) : (
+              <p className='text-sm text-muted-foreground'>
+                No additional information required. Click submit to approve.
+              </p>
+            )}
+          </div>
 
           {/* Actions */}
           <div className='flex justify-end gap-3 pt-5 mt-6 border-t border-border'>

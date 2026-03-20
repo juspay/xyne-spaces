@@ -2,7 +2,6 @@ import { WorkflowStorage, FrameworkExecutionResult } from '../../workflow-storag
 import { FullAgenticCheckpointConfig, WorkflowState, BaseWorkflowContext, GitInfo, GitDiffFile, GitDiffStats, AgenticContinuationOverride } from '../../workflow-types'
 import { WorkflowPausedException, WorkflowCancelledException, WorkflowExternalWaitException } from '../../exceptions/workflow-exceptions'
 import { BitbucketManager } from '@/bitbucket/apis'
-import { repositories } from '@/database/repositories'
 import { WorkflowRepository, TicketRepository } from '@/database/repositories/workflows'
 import { logger } from '@/utils/logger'
 import { exec } from 'child_process'
@@ -24,7 +23,7 @@ import {
 } from './types'
 import type { ToolPart, TextPart, ReasoningPart, StepFinishPart } from '@opencode-ai/sdk/v2'
 import { createOpenCodeEventHandler, EventProcessingStats } from './event-mapper'
-import { getStoredQuestionAnswer, handleOpenCodeQuestion } from '../../utils/external-step-utils'
+import { formatQuestionsAsText, createQuestionActivity } from '../../utils/external-step-utils'
 
 import type { ConversationRequest, ConversationResult } from '../types.js'
 
@@ -472,10 +471,10 @@ You are ONLY done when:
 
     // Questioning mode determines whether the agent can ask clarifying questions
     const useQuestioningMode = agentChkConfig.useQuestioningMode ?? false
-    const isPlanningEnabled = useQuestioningMode
-    logger.info(`[OPENCODE-EXECUTOR] 🔍 useQuestioningMode=${useQuestioningMode}, isPlanningEnabled=${isPlanningEnabled}, raw agentChkConfig.useQuestioningMode=${agentChkConfig.useQuestioningMode}`)
+    const questionEnabled = useQuestioningMode
+    logger.info(`[OPENCODE-EXECUTOR] 🔍 useQuestioningMode=${useQuestioningMode}, questionEnabled=${questionEnabled}, raw agentChkConfig.useQuestioningMode=${agentChkConfig.useQuestioningMode}`)
 
-    const questionRule = isPlanningEnabled
+    const questionRule = questionEnabled
       ? `
 ### RULE 6: CLARIFYING QUESTIONS (MANDATORY)
 You have access to a \`question\` tool that lets you ask the user clarifying questions.
@@ -537,43 +536,10 @@ Do NOT ask the user any questions. Proceed directly with the task.
       await this.replayStepsIntoSession(client, session.id, stepsToReplay)
     }
 
-    let postQuestionNudgeTimer: ReturnType<typeof setTimeout> | undefined
-    // Tracks the last question/answer so we can build a context-aware prompt if we need to create a new session
-    let lastQuestionContext: { questionTexts: string[]; userAnswers: string[][] | null } | undefined
     // Set by the handleQuestion callback when a question is asked — signals the main loop to throw
     let pendingExternalWait: { stepName: string } | undefined
     // Allows the handleQuestion callback to force-resolve the current promptWithStreaming call
     const forceResolveRef: { resolve?: () => void } = {}
-
-    // Check if there's already a stored answer from a prior question round
-    const storedQuestionAnswer = await getStoredQuestionAnswer(inputStepDbId)
-    let resumeAfterQuestionInit = false
-    if (storedQuestionAnswer) {
-      lastQuestionContext = {
-        questionTexts: storedQuestionAnswer.questionTexts,
-        userAnswers: storedQuestionAnswer.answers
-      }
-      resumeAfterQuestionInit = true
-      logger.info(`[OPENCODE-EXECUTOR] Found stored question answer from prior round — will include Q&A context in first message`)
-
-      const existingOutputSteps = await repositories.workflowSteps.findMany({
-        where: { workflowExecutionId: inputStepDbId, stepName: storedQuestionAnswer.stepName, type: 'output' }
-      })
-      if (existingOutputSteps.length === 0) {
-        try {
-          await this.storage.saveExternalStepData(
-            inputStepDbId,
-            storedQuestionAnswer.stepName,
-            { answers: storedQuestionAnswer.answers, questionTexts: storedQuestionAnswer.questionTexts }
-          )
-          logger.info(`[OPENCODE-EXECUTOR] Created output step for external step ${storedQuestionAnswer.stepName} — now marked completed`)
-        } catch (err) {
-          logger.warn(`[OPENCODE-EXECUTOR] Failed to create output step for external step:`, err)
-        }
-      } else {
-        logger.info(`[OPENCODE-EXECUTOR] Output step already exists for ${storedQuestionAnswer.stepName} — skipping duplicate creation`)
-      }
-    }
 
     const { handleEvent, getStats } = createOpenCodeEventHandler({
       inputStepDbId,
@@ -589,9 +555,9 @@ Do NOT ask the user any questions. Proceed directly with the task.
       grantPermission: async (sessionId: string, permissionId: string) => {
         await client.grantPermission(sessionId, permissionId)
       },
-      handleQuestion: async (requestId: string, sessionId: string, questions: QuestionAskedEvent['properties']['questions']) => {
+      handleQuestion: async (requestId: string, _sessionId: string, questions: QuestionAskedEvent['properties']['questions']) => {
         // Only allow questions when useQuestioningMode is enabled
-        if (!isPlanningEnabled) {
+        if (!questionEnabled) {
           logger.warn(`[OPENCODE-EXECUTOR] Rejecting question ${requestId} — useQuestioningMode is off, questions are disabled`)
           try {
             await client.rejectQuestion(requestId)
@@ -601,37 +567,24 @@ Do NOT ask the user any questions. Proceed directly with the task.
           return
         }
 
-        // Check for stored answer (resume after WAIT_FOR_EVENT — replay the user's answer)
-        const stored = await getStoredQuestionAnswer(inputStepDbId)
-        if (stored) {
-          logger.info(`[OPENCODE-EXECUTOR] Replaying stored answer for question ${requestId}`)
-          try {
-            await client.answerQuestion(requestId, stored.answers ?? [['Proceed with your best judgment']])
-            const existingOutputSteps = await repositories.workflowSteps.findMany({
-              where: { workflowExecutionId: inputStepDbId, stepName: stored.stepName, type: 'output' }
-            })
-            if (existingOutputSteps.length === 0) {
-              await this.storage.saveExternalStepData(
-                inputStepDbId,
-                stored.stepName,
-                { answers: stored.answers, questionTexts: stored.questionTexts }
-              )
-              logger.info(`[OPENCODE-EXECUTOR] Created output step for external step ${stored.stepName} — now marked completed`)
-            } else {
-              logger.info(`[OPENCODE-EXECUTOR] Output step already exists for ${stored.stepName} — skipping duplicate creation`)
-            }
-          } catch (answerErr) {
-            logger.error(`[OPENCODE-EXECUTOR] Failed to replay stored answer:`, answerErr)
-            try { await client.rejectQuestion(requestId) } catch { /* ignore */ }
-          }
-          return
-        }
+        // Format questions as readable text and save as assistant message
+        const questionText = formatQuestionsAsText(questions)
 
-        // New question — create external step, mark child WAIT_FOR_EVENT
-        const stepName = await handleOpenCodeQuestion(this.storage, inputStepDbId, parentExecutionId, requestId, sessionId, questions)
+        // Save the question as an LLM call step so it appears as an assistant message in the UI
+        await this.storage.createLLMCallStep(parentExecutionId, inputStepDbId, {
+          content: questionText,
+        })
 
-        pendingExternalWait = { stepName }
-        logger.info(`[OPENCODE-EXECUTOR] pendingExternalWait set: ${stepName}, force-resolving prompt`)
+        // Set MANUAL mode so the continueAgenticStep endpoint routes the user's reply
+        // into the Redis message-storage branch (WAIT_FOR_EVENT + MANUAL).
+        // The endpoint will reset mode to AUTOMATIC before re-queuing so the agent
+        // completes without pausing again after processing the answer.
+        await this.storage.setExecutionMode(parentExecutionId, 'MANUAL')
+
+        // Create activity record to notify user about the question
+        await createQuestionActivity(parentExecutionId)
+
+        logger.info(`[OPENCODE-EXECUTOR] ❓ Question formatted as assistant message — completing turn in MANUAL mode: ${requestId}`)
 
         if (forceResolveRef.resolve) {
           forceResolveRef.resolve()
@@ -641,7 +594,7 @@ Do NOT ask the user any questions. Proceed directly with the task.
         try {
           await client.rejectQuestion(requestId)
         } catch (rejectErr) {
-          logger.error(`[OPENCODE-EXECUTOR] Failed to reject question after creating external step:`, rejectErr)
+          logger.error(`[OPENCODE-EXECUTOR] Failed to reject question after question handling:`, rejectErr)
         }
       }
     })
@@ -665,11 +618,10 @@ Do NOT ask the user any questions. Proceed directly with the task.
 
     try {
       const userMessage = promptOverride || this.extractUserMessage(conversationRequest)
-      const MAX_CONTINUATION_ATTEMPTS = isPlanningEnabled ? 8 : 5
+      const MAX_CONTINUATION_ATTEMPTS = questionEnabled ? 8 : 5
       let continuationAttempt = 0
       let isComplete = false
-      let resumeAfterQuestion = resumeAfterQuestionInit
-      
+
       while (!isComplete && continuationAttempt < MAX_CONTINUATION_ATTEMPTS) {
         // Check if this is a continuation restart (new abort controller after Redis continuation event)
         if (continuationAttempt === 0 && abortController.signal.aborted && continuationMessage) {
@@ -677,32 +629,9 @@ Do NOT ask the user any questions. Proceed directly with the task.
         }
 
         const isFirstAttempt = continuationAttempt === 0
-        const isResumingAfterQuestion = resumeAfterQuestion
         let messageToSend: string
-        if (resumeAfterQuestion) {
-          // Build a context-aware continuation message with the Q&A context
-          const qaParts: string[] = []
-          qaParts.push(`ORIGINAL TASK:`)
-          qaParts.push(userMessage)
-          qaParts.push('')
-          if (lastQuestionContext) {
-            qaParts.push(`QUESTIONS PREVIOUSLY ASKED:`)
-            lastQuestionContext.questionTexts.forEach((q, i) => qaParts.push(`  ${i + 1}. ${q}`))
-            qaParts.push('')
-            qaParts.push(`USER'S ANSWERS:`)
-            if (lastQuestionContext.userAnswers) {
-              lastQuestionContext.userAnswers.forEach(a => qaParts.push(`  - ${a.join(', ')}`))
-            } else {
-              qaParts.push(`  (No answer was provided)`)
-            }
-            qaParts.push('')
-          }
-          qaParts.push(`Continue the task based on the user's answers. Do NOT ask any more questions — proceed with implementation.`)
-          messageToSend = qaParts.join('\n')
-          resumeAfterQuestion = false
-          lastQuestionContext = undefined
-        } else if (isFirstAttempt) {
-          if (isPlanningEnabled && !resumeAfterQuestionInit) {
+        if (isFirstAttempt) {
+          if (questionEnabled) {
             messageToSend = [
               `--- TASK ---`,
               userMessage,
@@ -721,11 +650,10 @@ Do NOT ask the user any questions. Proceed directly with the task.
           messageToSend = await this.buildContinuationPrompt(getStats(), client, session.id)
         }
         
-        // Send system prompt on first attempt OR when resuming after Q&A
-        const systemPromptToUse = (isFirstAttempt || isResumingAfterQuestion) ? systemPrompt : undefined
-        
+        // Send system prompt on first attempt
+        const systemPromptToUse = isFirstAttempt ? systemPrompt : undefined
         // Debug logging to verify prompt contents
-        logger.info(`[OPENCODE-EXECUTOR] 📤 Sending prompt (attempt=${continuationAttempt}, isFirst=${isFirstAttempt}, isResume=${isResumingAfterQuestion}):`)
+        logger.info(`[OPENCODE-EXECUTOR] 📤 Sending prompt (attempt=${continuationAttempt}, isFirst=${isFirstAttempt}):`)
         logger.info(`[OPENCODE-EXECUTOR] 📤 System prompt present: ${!!systemPromptToUse}, length: ${systemPromptToUse?.length ?? 0}`)
         if (systemPromptToUse) {
           logger.info(`[OPENCODE-EXECUTOR] 📤 System prompt (first 800 chars): ${systemPromptToUse.substring(0, 800)}`)
@@ -749,10 +677,6 @@ Do NOT ask the user any questions. Proceed directly with the task.
               undefined, // onEvent
               forceResolveRef // allows handleQuestion to force-resolve this prompt
             )
-            if (postQuestionNudgeTimer) {
-              clearTimeout(postQuestionNudgeTimer)
-              postQuestionNudgeTimer = undefined
-            }
             break
           } catch (err) {
             lastError = err
@@ -1016,12 +940,6 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
 
       } // end of non-WorkflowExternalWaitException else block
     } finally {
-      // Cancel any pending post-question nudge timer
-      if (postQuestionNudgeTimer) {
-        clearTimeout(postQuestionNudgeTimer)
-        postQuestionNudgeTimer = undefined
-      }
-
       unsubscribe()
 
       try {

@@ -3,8 +3,6 @@ import { WorkflowStepRepository } from '../database/repositories/workflowSteps';
 import { repositories } from '../database/repositories';
 import { eventService } from '@/services/eventService';
 import { logger } from '@/utils/logger';
-import { processQuestionRawResponse } from '@/workflows/utils/external-step-utils';
-import { config as appConfig } from '@/config/env';
 
 export class ExternalStepResponseController {
   private workflowStepRepository: WorkflowStepRepository;
@@ -39,39 +37,6 @@ export class ExternalStepResponseController {
         workflowStepId,
         rawResponse
       );
-
-      // TODO: This needs to be fixed — doing for testing for xyne spaces feature implementation.
-      // Immediately create the output step so that:
-      // computedStatus becomes 'completed' right away and answers are available for rendering.
-      if (appConfig.enableImmediateOutputStep) {
-        try {
-          const inputStepData = typeof workflowStep.data === 'string' ? workflowStep.data : JSON.stringify(workflowStep.data);
-          let questionTexts: string[] = [];
-          let questionCount = 0;
-          try {
-            const stepData = inputStepData ? JSON.parse(inputStepData) : null;
-            const questionData = stepData?.args?.[0];
-            const questions = questionData?.questions || [];
-            questionTexts = questions.map((q: { header?: string; question: string }) => q.header || q.question);
-            questionCount = questions.length;
-          } catch { /* keep defaults */ }
-
-          const answers = processQuestionRawResponse(rawResponse, questionCount);
-
-          await repositories.workflowSteps.create({
-            workflowExecution: { connect: { id: workflowExecutionId } },
-            stepExecutorType: 'external',
-            stepName: workflowStep.stepName || 'unknown',
-            type: 'output',
-            data: JSON.stringify({ answers, questionTexts }),
-            status: 'completed',
-          });
-          logger.info(`[ExternalStepResponse] Created output step for ${workflowStepId} — answers will be visible immediately`);
-        } catch (outputErr) {
-          // Non-fatal: the executor will create the output step later when it resumes
-          logger.warn(`[ExternalStepResponse] Failed to create output step (executor will handle it):`, outputErr);
-        }
-      }
 
       res.status(200).json({
         success: true,

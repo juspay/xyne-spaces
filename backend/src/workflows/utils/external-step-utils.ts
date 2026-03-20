@@ -1,19 +1,14 @@
 /**
- * External step utilities for the question/answer flow.
+ * Question utilities for the ask-question flow.
  *
  * Handles:
- *  - Creating external step inputs (engine convention)
- *  - Building question response schemas for the approval dialog
- *  - Retrieving and parsing stored question answers
- *  - Sending question notifications (Redis broadcast, persistent notifications, activity records)
- *  - Orchestrating the full "ask a question" flow (createExternalStepInput + notify + WAIT_FOR_EVENT)
+ *  - Formatting questions as readable text for assistant messages
+ *  - Creating activity records when questions are asked
+ *  - Framework question group flattening
  */
 
-import { WorkflowStorage } from '../workflow-storage'
-import { WorkflowExecutionStatus } from '../types/workflow-enums'
 import { repositories } from '@/database/repositories'
 import { logger } from '@/utils/logger'
-import { config as appConfig } from '@/config/env'
 import { ActivityClassification } from '@prisma/client'
 import { DatabaseClient } from '@/database/client'
 import { activityService } from '@/services/activity/activityService'
@@ -24,228 +19,100 @@ import type { QuestionAskedEvent } from '../framework/opencode/types'
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ExternalStepInputMetadata {
-  type: string
-  title: string
-  response_schema?: Record<string, unknown>
-}
-
-export interface StoredQuestionAnswer {
-  answers: string[][]
-  questionTexts: string[]
-  stepName: string
+/**
+ * Shape of a question group coming from the agentic framework's ask_question tool.
+ */
+export interface FrameworkQuestionGroup {
+  heading?: string
+  header?: string
+  questions?: Array<{
+    question: string
+    type?: string
+    options?: Array<{ id: string; label: string; description?: string }>
+    custom?: boolean
+  }>
 }
 
 // ---------------------------------------------------------------------------
-// Create external step INPUT (engine convention)
+// Question text formatting (for rendering questions as assistant messages)
 // ---------------------------------------------------------------------------
 
 /**
- * Create an external step INPUT on an execution, using the engine's data format.
- * Returns the created (or existing) workflow step.
- *
- * For `user_approval` type steps, the storage layer automatically sends
- * an approval nudge bot message to the associated ticket conversation.
+ * Format OpenCode-style questions as readable text for display as an assistant message.
  */
-export async function createExternalStepInput(
-  storage: WorkflowStorage,
-  executionId: string,
-  stepName: string,
-  args: unknown[],
-  metadata: ExternalStepInputMetadata,
-  subType?: string
-) {
-  return storage.saveExternalStepInputIfNotExists(
-    executionId,
-    stepName,
-    {
-      args,
-      externalMetadata: {
-        type: metadata.type,
-        title: metadata.title,
-        response_schema: metadata.response_schema,
-      },
-    },
-    subType ?? metadata.type
-  )
-}
+export function formatQuestionsAsText(
+  questions: QuestionAskedEvent['properties']['questions']
+): string {
+  const parts: string[] = []
+  parts.push('I have some questions before proceeding:\n')
 
-// ---------------------------------------------------------------------------
-// Question response schema builder
-// ---------------------------------------------------------------------------
-
-export function buildQuestionResponseSchema(questions: QuestionAskedEvent['properties']['questions']) {
-  const fields = questions.map((q, idx) => {
-    const fieldName = `question_${idx}`
-    const hasOptions = q.options && q.options.length > 0
-    if (hasOptions) {
-      return {
-        name: fieldName,
-        label: q.question,
-        description: q.header && q.header !== q.question ? q.header : undefined,
-        type: 'select' as const,
-        required: true,
-        options: q.options.map((opt: { label: string; description?: string }) => ({
-          value: opt.label,
-          label: opt.description ? `${opt.label} — ${opt.description}` : opt.label,
-        })),
-        allowCustomValue: q.custom ?? true,
-        placeholder: 'Select an option or type a custom answer...',
+  questions.forEach((q, idx) => {
+    parts.push(`**${idx + 1}. ${q.question}**`)
+    if (q.header && q.header !== q.question) {
+      parts.push(`   ${q.header}`)
+    }
+    if (q.options && q.options.length > 0) {
+      q.options.forEach((opt) => {
+        const desc = opt.description ? ` — ${opt.description}` : ''
+        parts.push(`   - ${opt.label}${desc}`)
+      })
+      if (q.multiple) {
+        parts.push(`   *(Select multiple)*`)
       }
     }
-    return {
-      name: fieldName,
-      label: q.question,
-      description: q.header && q.header !== q.question ? q.header : undefined,
-      type: 'textarea' as const,
-      required: true,
-      placeholder: 'Type your answer...',
-      rows: 3,
-    }
+    parts.push('')
   })
 
-  return {
-    fields,
-    description: 'The agent has questions before proceeding. Please answer below:',
-    submitLabel: 'Submit Answer',
-    cancelLabel: 'Cancel',
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Stored answer retrieval & parsing
-// ---------------------------------------------------------------------------
-
-/**
- * Retrieve a previously submitted answer for an external question step.
- * Returns null if no response has been submitted yet.
- */
-export async function getStoredQuestionAnswer(executionId: string): Promise<StoredQuestionAnswer | null> {
-  try {
-    const responses = await repositories.externalStepResponses.findByWorkflowExecutionId(executionId)
-    if (responses.length === 0) return null
-
-    const response = responses[0]
-    const inputStep = await repositories.workflowSteps.findById(response.workflowStepId)
-    if (!inputStep) return null
-
-    const stepData = inputStep.data ? JSON.parse(inputStep.data) : null
-    const questionData = stepData?.args?.[0]
-    const questions = questionData?.questions || []
-    const questionTexts = questions.map((q: { header?: string; question: string }) => q.header || q.question)
-    const questionCount = questions.length
-
-    const answers = processQuestionRawResponse(response.rawResponse, questionCount)
-    return { answers, questionTexts, stepName: inputStep.stepName || 'unknown' }
-  } catch (error) {
-    logger.error(`[ExternalStepUtils] Failed to get stored question answer:`, error)
-    return null
-  }
+  return parts.join('\n').trim()
 }
 
 /**
- * Parse the raw JSON response from the approval dialog into a string[][] structure.
- * Handles both `{ answers: [...] }` and `{ question_0: "...", question_1: "..." }` formats.
+ * Flatten framework QuestionGroup[] into the format expected by formatQuestionsAsText.
  */
-export function processQuestionRawResponse(rawResponse: string, questionCount: number): string[][] {
-  try {
-    const parsed = JSON.parse(rawResponse)
-
-    if (parsed.answers && Array.isArray(parsed.answers)) {
-      return parsed.answers
-    }
-
-    const answers: string[][] = []
-    for (let i = 0; i < (questionCount || 10); i++) {
-      const val = parsed[`question_${i}`]
-      if (val === undefined && i >= questionCount) break
-      answers.push(val ? [String(val)] : ['Proceed with your best judgment'])
-    }
-    return answers.length > 0 ? answers : [['Proceed with your best judgment']]
-  } catch {
-    return [['Proceed with your best judgment']]
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Full "handle question" orchestrator
-// ---------------------------------------------------------------------------
-
-/**
- * Orchestrates the full question flow:
- *  1. Build response schema
- *  2. Create external step INPUT
- *  3. Send notifications
- *  4. Mark child execution as WAIT_FOR_EVENT
- *
- * Returns the step name (requestId).
- */
-export async function handleOpenCodeQuestion(
-  storage: WorkflowStorage,
-  childExecutionId: string,
-  parentExecutionId: string,
-  requestId: string,
-  sessionId: string,
-  questions: QuestionAskedEvent['properties']['questions']
-): Promise<string> {
-  const timeoutMinutes = appConfig.questionTimeoutMinutes
-  const questionData = {
-    requestId,
-    sessionId,
-    childExecutionId,
-    parentExecutionId,
-    questions: questions.map(q => ({
+function flattenFrameworkQuestionGroups(
+  groups: FrameworkQuestionGroup[]
+): QuestionAskedEvent['properties']['questions'] {
+  return groups.flatMap(group => {
+    const groupHeader = group.heading || group.header || ''
+    return (group.questions ?? []).map(q => ({
       question: q.question,
-      header: q.header,
-      options: q.options || [],
-      multiple: q.multiple ?? false,
-      custom: q.custom ?? true
-    })),
-    createdAt: new Date().toISOString(),
-    timeoutAt: new Date(Date.now() + timeoutMinutes * 60 * 1000).toISOString()
-  }
+      header: groupHeader || q.question,
+      options: (q.options ?? []).map(o => ({ label: o.label, description: o.description })),
+      multiple: q.type === 'multi_select',
+      custom: q.custom ?? true,
+    }))
+  })
+}
 
-  const responseSchema = buildQuestionResponseSchema(questions)
+/**
+ * Format framework QuestionGroup[] as readable text for display as an assistant message.
+ */
+export function formatFrameworkQuestionsAsText(
+  groups: FrameworkQuestionGroup[]
+): string {
+  const flattened = flattenFrameworkQuestionGroups(groups)
+  return formatQuestionsAsText(flattened)
+}
 
-  let externalStepId: string | undefined
-  try {
-    const externalStep = await createExternalStepInput(
-      storage,
-      childExecutionId,
-      requestId,
-      [questionData],
-      {
-        type: 'user_approval',
-        title: 'Agent Question — Waiting for user answer',
-        response_schema: responseSchema
-      }
-    )
-    externalStepId = externalStep?.id
-    logger.info(`[ExternalStepUtils] ❓ External step created: stepId=${externalStepId}, stepName=${requestId}, executionId=${childExecutionId}`)
-  } catch (error) {
-    logger.error(`[ExternalStepUtils] Failed to create external step INPUT:`, error)
-  }
+// ---------------------------------------------------------------------------
+// Question activity record creation
+// ---------------------------------------------------------------------------
 
-  try {
-    await repositories.workflowExecutions.update(childExecutionId, {
-      status: WorkflowExecutionStatus.WAIT_FOR_EVENT
-    })
-    logger.info(`[ExternalStepUtils] Marked execution ${childExecutionId} as WAIT_FOR_EVENT`)
-  } catch (error) {
-    logger.error(`[ExternalStepUtils] Failed to mark ${childExecutionId} as WAIT_FOR_EVENT:`, error)
-  }
-
-  // Activity record
+/**
+ * Create an activity record when a question is asked during workflow execution.
+ * This notifies the user that the agent has a question waiting for their response.
+ */
+export async function createQuestionActivity(executionId: string): Promise<void> {
   try {
     const db = DatabaseClient.getInstance()
-    const execution = await repositories.workflowExecutions.findById(childExecutionId)
+    const execution = await repositories.workflowExecutions.findById(executionId)
     const workflowId = execution?.workflowId
     if (workflowId) {
       const workflow = await repositories.workflows.findById(workflowId)
       const ticketId = workflow?.ticketId
       if (ticketId) {
         const ticket = await db.ticket.findUnique({ where: { id: ticketId } })
-        const userId = execution?.createdBy || ticket?.createdBy
+        const userId = (execution as any)?.createdBy || ticket?.createdBy
         if (userId) {
           const workflowBot = await unifiedBotUserService.getBotByEmail('workflow-bot@bot.xyne.ai')
           await activityService.createActivity({
@@ -261,8 +128,6 @@ export async function handleOpenCodeQuestion(
       }
     }
   } catch (activityError) {
-    logger.warn(`[ExternalStepUtils] Failed to create activity record:`, activityError)
+    logger.warn(`[ExternalStepUtils] Failed to create question activity record:`, activityError)
   }
-
-  return requestId
 }
