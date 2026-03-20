@@ -18,20 +18,20 @@ export interface MemoryDocument {
   userId?: string; // Present only for 'my' scope - backend handles hiding this for 'all' scope
   sessionId: string;
   repoUrl: string;
-  commitId: string;
-  ticketId: string;
+  commitId?: string;
+  ticketId?: string;
   userQuery: string;
   tags: string[];
   filePointers: string[];
   chatSummary: string[];
-  documentType: string;
+  rawContent?: string;
   createdAt: number; // Unix timestamp (long)
   updatedAt: number; // Unix timestamp (long)
-  committedAt: number; // Unix timestamp (long)
+  committedAt?: number; // Unix timestamp (long)
   agentUsed: string;
   modelUsed: string[];
   fileStoragePath: string;
-  parentRef: string;
+  parentRef?: string;
   reviewStatus: string;
   // Relevance score from search
   relevanceScore?: number;
@@ -115,6 +115,7 @@ export interface MemoryUpdateRequest {
   chatSummary?: string[] | undefined;
   tags?: string[] | undefined;
   filePointers?: string[] | undefined;
+  rawContent?: string | undefined;
   commitId?: string | undefined;
   reviewStatus?: string | undefined;
 }
