@@ -615,7 +615,7 @@ model WorkflowExecutionLock {
   workflowExecution WorkflowExecution @relation(fields: [workflowExecutionId], references: [id], onDelete: Cascade)
 
   @@map("workflow_execution_locks")
-  @@schema("public")
+  @@schema("workflow")
 
 }
 
