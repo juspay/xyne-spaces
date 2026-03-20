@@ -247,7 +247,9 @@ export const useRecapData = () => {
   );
 
   // Fetch daily recaps for subscribed channels via Zero (cached)
-  const [dailyRecapsData] = useCachedQuery(queries.channelDailyRecaps(recapQueryArgs));
+  const [dailyRecapsData] = useCachedQuery(queries.channelDailyRecaps(recapQueryArgs), {
+    enabled: hasSubscriptions,
+  });
 
   // Fetch channel details for recap channel names using existing hook
   const channelsData = useAllChannels();
