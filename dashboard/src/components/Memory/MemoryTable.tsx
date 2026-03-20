@@ -20,9 +20,19 @@ import type {
 } from '../../types/memory';
 import Dialog from '../ui/Dialog';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import MemoryCompareView from './MemoryCompareView';
 
 const PAGE_SIZE = 10;
+
+const markdownPlugins = [remarkGfm];
+
+/** Clean raw chatSummary strings before rendering as Markdown */
+const sanitizeMarkdown = (raw: string): string => {
+  // Convert literal \n into real newlines
+  return raw.replace(/\\n/g, '\n');
+};
 
 const formatTimestamp = (timestamp: number): string => {
   if (!timestamp) return '—';
@@ -144,7 +154,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
       }),
       docType: doc.docType,
       userQuery: doc.userQuery || '—',
-      summary: doc.chatSummary?.[0] || '—',
+      rawContent: doc.rawContent || '',
       tags: doc.tags?.join(', ') || '—',
       repoUrl: doc.repoUrl || '—',
       ticketId: doc.ticketId || '—',
@@ -253,14 +263,28 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
       ),
     },
     {
-      field: 'summary',
+      field: 'rawContent',
       header: 'Summary',
       type: ColumnType.TEXT,
-      renderCell: (value: unknown) => (
-        <div className='max-w-[300px] line-clamp-2 text-foreground/80 text-sm'>
-          <RenderMessageWithHTML message={String(value)} />
-        </div>
-      ),
+      renderCell: (value: unknown) => {
+        let rawContent = '';
+        if (typeof value === 'string') {
+          rawContent = value;
+        }
+
+        // Strip markdown syntax for a plain-text one-liner in the table
+        const plain = rawContent
+          .replace(/\n/g, ' ')
+          .replace(/[#*_`~>~-]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        return (
+          <div className='max-w-[300px] truncate text-foreground/80 text-sm' title={plain}>
+            {plain || '—'}
+          </div>
+        );
+      },
     },
     {
       field: 'tags',
@@ -532,11 +556,6 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                 >
                   {selectedDocument.docType}
                 </span>
-                {selectedDocument.documentType && (
-                  <span className='text-sm text-muted-foreground'>
-                    {selectedDocument.documentType}
-                  </span>
-                )}
               </div>
 
               {/* User Query */}
@@ -551,18 +570,18 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                 </div>
               )}
 
-              {/* Chat Summary */}
+              {/* Summary - Use rawContent */}
               <div>
                 <h3 className='text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider'>
                   Summary
                 </h3>
                 <div className='text-sm text-foreground space-y-2'>
-                  {selectedDocument.chatSummary?.length > 0 ? (
-                    selectedDocument.chatSummary.map((chunk, i) => (
-                      <div key={i}>
-                        <RenderMessageWithHTML message={chunk} />
-                      </div>
-                    ))
+                  {selectedDocument.rawContent ? (
+                    <div className='bot-markdown-content memory-markdown'>
+                      <Markdown remarkPlugins={markdownPlugins}>
+                        {sanitizeMarkdown(selectedDocument.rawContent)}
+                      </Markdown>
+                    </div>
                   ) : (
                     <p className='text-muted-foreground'>No summary available</p>
                   )}
@@ -727,12 +746,17 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
                       <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Updated</td>
                       <td className='py-1.5'>{formatTimestamp(selectedDocument.updatedAt)}</td>
                     </tr>
-                    {selectedDocument.committedAt > 0 && (
-                      <tr>
-                        <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Committed</td>
-                        <td className='py-1.5'>{formatTimestamp(selectedDocument.committedAt)}</td>
-                      </tr>
-                    )}
+                    {typeof selectedDocument.committedAt === 'number' &&
+                      selectedDocument.committedAt > 0 && (
+                        <tr>
+                          <td className='py-1.5 pr-4 text-muted-foreground font-medium'>
+                            Committed
+                          </td>
+                          <td className='py-1.5'>
+                            {formatTimestamp(selectedDocument.committedAt)}
+                          </td>
+                        </tr>
+                      )}
                     {selectedDocument.relevanceScore !== undefined && (
                       <tr>
                         <td className='py-1.5 pr-4 text-muted-foreground font-medium'>Relevance</td>

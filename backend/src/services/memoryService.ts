@@ -15,8 +15,43 @@ import {
 } from '@/vespa/src/types';
 import { User } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import removeMarkdown from 'remove-markdown';
 
 const MEMORY_SCHEMA = memorySchema;
+
+/**
+ * Strip markdown syntax to produce clean plain text
+ */
+function stripMarkdown(md: string): string {
+  if (!md) return '';
+  return removeMarkdown(md);
+}
+const MAX_CHUNK_SIZE = 5000;
+export function chunkContent(content: string): string[] {
+  if (content.length <= MAX_CHUNK_SIZE) {
+    return [content];
+  }
+
+  const chunks: string[] = [];
+  let start = 0;
+
+  while (start < content.length) {
+    let end = start + MAX_CHUNK_SIZE;
+    
+    // Try to break at a newline if possible
+    if (end < content.length) {
+      const lastNewline = content.lastIndexOf('\n', end);
+      if (lastNewline > start) {
+        end = lastNewline + 1;
+      }
+    }
+    
+    chunks.push(content.substring(start, end));
+    start = end;
+  }
+
+  return chunks;
+}
 
 /**
  * Build YQL query for memory search
@@ -138,6 +173,7 @@ function transformMemoryHits(
       tags: fields.tags,
       filePointers: fields.filePointers,
       chatSummary: fields.chatSummary,
+      rawContent: fields.rawContent,
       createdAt: fields.createdAt,
       updatedAt: fields.updatedAt,
       committedAt: fields.committedAt,
@@ -257,6 +293,7 @@ export async function getMemoryById(
       tags: fields.tags,
       filePointers: fields.filePointers,
       chatSummary: fields.chatSummary,
+      rawContent: fields.rawContent,
       createdAt: fields.createdAt,
       updatedAt: fields.updatedAt,
       committedAt: fields.committedAt,
@@ -315,11 +352,14 @@ export async function updateMemory(
     }
 
     // Otherwise, create a new versioned document
-    const versionMatch = oldDoc.docId.match(/^(.*?)(-v(\d+))?$/);
-    const baseId = versionMatch?.[1] || oldDoc.docId;
-    const prevVersion = versionMatch?.[3] ? parseInt(versionMatch[3], 10) : 0;
-    const newVersion = prevVersion + 1;
-    const newDocId = `${baseId}-v${newVersion}`;
+    // Use timestamp to ensure unique new docId
+    const newDocId = `${oldDoc.docId}-${Date.now()}`;
+
+    // If rawContent is being updated, auto-derive chatSummary
+    if (fields.rawContent) {
+      const cleanedContent = stripMarkdown(fields.rawContent);
+      fields.chatSummary = chunkContent(cleanedContent);
+    }
 
     const newDoc: VespaMemoryDocument = {
       ...oldDoc,

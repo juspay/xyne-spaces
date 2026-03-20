@@ -268,6 +268,7 @@ export interface VespaMemoryDocument extends VespaDocument {
   tags: string[];
   filePointers: string[];
   chatSummary: string[];
+  rawContent?: string;
   createdAt: number;
   updatedAt: number;
   committedAt?: number;
@@ -363,6 +364,7 @@ export interface MemoryUpdateFields {
   chatSummary?: string[];
   tags?: string[];
   filePointers?: string[];
+  rawContent?: string;
   commitId?: string;
   reviewStatus?: string;
 }

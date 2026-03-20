@@ -36,6 +36,7 @@ const memorySearchSchema = z.object({
 const memoryUpdateSchema = z.object({
   userQuery: z.string().optional(),
   chatSummary: z.array(z.string()).optional(),
+  rawContent: z.string().optional(),
   tags: z.array(z.string()).optional(),
   filePointers: z.array(z.string()).optional(),
   commitId: z.string().optional(),

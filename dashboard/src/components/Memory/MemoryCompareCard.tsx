@@ -1,7 +1,17 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import type { MemoryDocument, MemoryUpdateRequest } from '../../types/memory';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Pencil, Trash2, Check, X } from 'lucide-react';
+
+const markdownPlugins = [remarkGfm];
+
+/** Clean raw chatSummary strings before rendering as Markdown */
+const sanitizeMarkdown = (raw: string): string => {
+  // Convert literal \n into real newlines
+  return raw.replace(/\\n/g, '\n');
+};
 
 /** Textarea that auto-resizes to fit its content */
 const AutoResizeTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>> = props => {
@@ -51,7 +61,7 @@ interface MemoryCompareCardProps {
 
 type EditableField =
   | 'userQuery'
-  | 'chatSummary'
+  | 'rawContent'
   | 'tags'
   | 'filePointers'
   | 'commitId'
@@ -62,8 +72,8 @@ const getFieldEditValue = (doc: MemoryDocument, field: EditableField): string =>
   switch (field) {
     case 'userQuery':
       return doc.userQuery || '';
-    case 'chatSummary':
-      return doc.chatSummary?.join('\n---\n') || '';
+    case 'rawContent':
+      return doc.rawContent || '';
     case 'tags':
       return doc.tags?.join(', ') || '';
     case 'filePointers':
@@ -80,15 +90,8 @@ const fieldToUpdateRequest = (field: EditableField, value: string): MemoryUpdate
   switch (field) {
     case 'userQuery':
       return { userQuery: value || undefined };
-    case 'chatSummary':
-      return {
-        chatSummary: value
-          ? value
-              .split('\n---\n')
-              .map(s => s.trim())
-              .filter(Boolean)
-          : [],
-      };
+    case 'rawContent':
+      return { rawContent: value || undefined };
     case 'tags':
       return {
         tags: value
@@ -265,10 +268,9 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
         <EditableSection
           label='Summary'
           labelClass={labelClass}
-          editHint='separate chunks with --- on its own line'
-          isFieldEditing={editingField === 'chatSummary'}
+          isFieldEditing={editingField === 'rawContent'}
           canEdit={!!onUpdate}
-          onStartEdit={() => startEdit('chatSummary')}
+          onStartEdit={() => startEdit('rawContent')}
           onSave={saveEdit}
           onCancel={cancelEdit}
           isUpdating={isUpdating}
@@ -281,12 +283,12 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
           }
           viewContent={
             <div className='text-sm text-foreground space-y-1'>
-              {doc.chatSummary?.length > 0 ? (
-                doc.chatSummary.map((chunk, i) => (
-                  <div key={i}>
-                    <RenderMessageWithHTML message={chunk} />
-                  </div>
-                ))
+              {doc.rawContent ? (
+                <div className='bot-markdown-content memory-markdown'>
+                  <Markdown remarkPlugins={markdownPlugins}>
+                    {sanitizeMarkdown(doc.rawContent)}
+                  </Markdown>
+                </div>
               ) : (
                 <p className='text-muted-foreground'>No summary</p>
               )}
@@ -380,7 +382,7 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
               <ReadOnlyRow label='Repo' value={doc.repoUrl} />
               <EditableMetadataRow
                 label='Commit'
-                value={doc.commitId}
+                value={doc.commitId || ''}
                 isFieldEditing={editingField === 'commitId'}
                 canEdit={!!onUpdate}
                 onStartEdit={() => startEdit('commitId')}
@@ -391,8 +393,8 @@ const MemoryCompareCard: React.FC<MemoryCompareCardProps> = ({
                 isUpdating={isUpdating}
                 mono
               />
-              <ReadOnlyRow label='Ticket' value={doc.ticketId} />
-              <ReadOnlyRow label='Parent Ref' value={doc.parentRef} mono />
+              <ReadOnlyRow label='Ticket' value={doc.ticketId || ''} />
+              <ReadOnlyRow label='Parent Ref' value={doc.parentRef || ''} mono />
               <ReviewStatusRow
                 value={doc.reviewStatus}
                 isFieldEditing={editingField === 'reviewStatus'}
@@ -509,12 +511,11 @@ const ReadOnlyRow: React.FC<{ label: string; value?: string; mono?: boolean }> =
   value,
   mono,
 }) => {
-  if (!value) return null;
   return (
     <tr>
       <td className='py-1 pr-3 text-muted-foreground font-medium w-24'>{label}</td>
       <td className={`py-1 ${mono ? 'font-mono truncate' : ''} break-all`} title={value}>
-        {value}
+        {value || '-'}
       </td>
     </tr>
   );
@@ -546,7 +547,7 @@ const EditableMetadataRow: React.FC<{
   isUpdating,
   mono,
 }) => {
-  if (!isFieldEditing && !value) return null;
+  if (!isFieldEditing && !value && !canEdit) return null;
 
   return (
     <tr className='group/metarow'>

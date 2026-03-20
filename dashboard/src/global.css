@@ -1469,6 +1469,29 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   font-size: 14px !important;
 }
 
+/* Memory table summary cell: force <p> inline so line-clamp works */
+.memory-summary-cell p {
+  display: inline;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Memory markdown: use inherited foreground color instead of forced gray */
+.memory-markdown p,
+.memory-markdown h2,
+.memory-markdown ol li,
+.memory-markdown ul li {
+  color: inherit !important;
+  padding-left: 0 !important;
+}
+
+.memory-markdown ol,
+.memory-markdown ul {
+  color: inherit !important;
+  padding-left: 20px !important;
+  margin: 4px 0 !important;
+}
+
 .ag-center-cols-viewport,
 .ag-pinned-left-cols-viewport,
 .ag-pinned-right-cols-viewport,
