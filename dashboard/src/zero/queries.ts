@@ -566,8 +566,8 @@ export const queries = defineQueries({
     if (args?.updatedAt !== undefined) {
       query = query.where(helpers =>
         helpers.or(
-          helpers.cmp('updatedAt', '>', args.updatedAt!),
-          helpers.exists('presenceStatus', p => p.where('updatedAt', '>', args.updatedAt!)),
+          helpers.cmp('updatedAt', '>', args.updatedAt),
+          helpers.exists('presenceStatus', p => p.where('updatedAt', '>', args.updatedAt)),
         ),
       );
     }

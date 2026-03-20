@@ -65,7 +65,7 @@ export function useDeltaSubscription<
   const queryName = query.query.queryName;
   const zero = useZero();
 
-  const [isInitialFetchDone, setIsInitialFetchDone] = useState(false);
+  const [isInitialFetchDone, setIsInitialFetchDone] = useState(isLoaded);
 
   // Stabilise callbacks across renders so effects don't re-fire.
   const queryRef = useRef(query);
@@ -97,7 +97,10 @@ export function useDeltaSubscription<
 
   useEffect(() => {
     if (!isHydrated) return;
-    if (isLoaded) return;
+    if (isLoaded) {
+      setIsInitialFetchDone(true);
+      return;
+    }
 
     // 1. Try warm cache (queryCacheActor, hydrated from IndexedDB).
     if (hash) {
