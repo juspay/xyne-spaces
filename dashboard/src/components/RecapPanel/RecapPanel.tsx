@@ -1,19 +1,51 @@
-import { ReactElement, useState, useEffect, useCallback, useRef } from 'react';
+import { ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import DOMPurify from 'dompurify';
 import { useNavigate, useParams, Outlet } from 'react-router-dom';
-import { Settings, Sparkles, Clock, Hash, CheckCircle, X, Check } from 'lucide-react';
-import { Virtuoso } from 'react-virtuoso';
+import {
+  Settings,
+  Sparkles,
+  Clock,
+  Hash,
+  X,
+  Check,
+  CheckCircle,
+  Mail,
+  MailOpen,
+} from 'lucide-react';
 import { useRecapData } from '../../hooks/useRecapData';
 import { CitationMetadata, RecapSubscription, RecapCard } from './RecapPanel.types';
 import { getYesterdayIST, formatRecapDate } from './RecapPanel.utils';
 import RecapSettings from './RecapSettings';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
+import { usePlatform } from '../../hooks/usePlatform';
+
+// Random greetings for the recap header
+const RECAP_GREETINGS = [
+  'Pleasant perusing 🙌',
+  'Happy reading ✨',
+  'Enjoy your read 📖',
+  'Wishing you an insightful read 💡',
+  'Hope you find this valuable 💎',
+  'Dive in and explore 🚀',
+  "Here's to a productive read ☕",
+  'Enjoy the highlights 🌟',
+  'Take a quick look through 👀',
+  'Hope this summary helps 🤝',
+  'Happy reviewing 📋',
+];
+
+// Get a random greeting (stable per session)
+const getRandomGreeting = (): string => {
+  const index = Math.floor(Math.random() * RECAP_GREETINGS.length);
+  return RECAP_GREETINGS[index] ?? RECAP_GREETINGS[0]!;
+};
 
 const RecapPanel = (): ReactElement => {
   const navigate = useNavigate();
   const params = useParams<{ channelId?: string; conversationId?: string }>();
   const zero = useZero();
+  const { isMobile } = usePlatform();
 
   // Use the cached recap data hook
   const { recapData, subscriptions, isLoadingSubscriptions, isFirstTime } = useRecapData();
@@ -34,6 +66,36 @@ const RecapPanel = (): ReactElement => {
   // Track if we've already auto-marked as read on initial open
   const hasAutoMarkedRead = useRef(false);
 
+  // Stable random greeting for this session
+  const [greeting] = useState(() => getRandomGreeting());
+
+  // Ref for auto-scrolling to selected channel card
+  const selectedCardRef = useRef<HTMLDivElement>(null);
+  const hasScrolledToCard = useRef(false);
+
+  // Auto-scroll to selected channel card when data loads
+  useEffect(() => {
+    if (params.channelId && recapData && recapData.cards.length > 0 && !hasScrolledToCard.current) {
+      // Small delay to ensure DOM is rendered
+      const timer = setTimeout(() => {
+        if (selectedCardRef.current) {
+          selectedCardRef.current.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+          hasScrolledToCard.current = true;
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [params.channelId, recapData]);
+
+  // Reset scroll flag when channel changes
+  useEffect(() => {
+    hasScrolledToCard.current = false;
+  }, [params.channelId]);
+
   // Auto-open settings modal for first-time users when they click "Choose Channels"
   // The modal is opened via handleOpenSettings
 
@@ -44,30 +106,42 @@ const RecapPanel = (): ReactElement => {
     }
   }, [justSavedFirstTime, subscriptions]);
 
-  // Auto mark as read when panel opens with recap data
+  // Auto mark as read ONLY ONCE per recap date
   // This marks all subscribed channels as seen for yesterday's recap
-  // Only runs ONCE on initial open (tracked via ref to prevent re-triggering)
+  // Only runs if:
+  // 1. User hasn't already seen this recap date (tracked by checking if any channel has lastSeenRecapDate >= yesterday)
+  // 2. There are actual recaps to display
+  // After the first auto-mark, user's "mark as unread" selections are preserved
   useEffect(() => {
     if (
       !hasAutoMarkedRead.current &&
       !isFirstTime &&
       subscriptions.length > 0 &&
       recapData?.configured &&
-      recapData.hasUnreadRecap
+      recapData.cards.length > 0
     ) {
-      hasAutoMarkedRead.current = true;
-
       const { dateObj: yesterdayDate } = getYesterdayIST();
       const yesterdayTimestamp = yesterdayDate.getTime();
-      const now = Date.now();
 
-      // Mark all subscriptions as seen for yesterday's recap
-      zero.mutate(
-        mutators.recap.markSeen({
-          recapDate: yesterdayTimestamp,
-          timestamp: now,
-        }),
-      );
+      // Check if user has already seen this recap date
+      // If ANY subscription has lastSeenRecapDate >= yesterday, user has been here before
+      const hasAlreadySeenThisRecap = subscriptions.some((sub: RecapSubscription) => {
+        return sub.lastSeenRecapDate && sub.lastSeenRecapDate >= yesterdayTimestamp;
+      });
+
+      // Only auto-mark if this is truly the first time seeing this recap
+      if (!hasAlreadySeenThisRecap) {
+        hasAutoMarkedRead.current = true;
+        const now = Date.now();
+
+        // Mark all subscriptions as seen for yesterday's recap
+        zero.mutate(
+          mutators.recap.markSeen({
+            recapDate: yesterdayTimestamp,
+            timestamp: now,
+          }),
+        );
+      }
     }
   }, [isFirstTime, subscriptions, recapData, zero]);
 
@@ -151,19 +225,33 @@ const RecapPanel = (): ReactElement => {
     }
 
     if (!conversationId) {
-      // No conversation ID - navigate to channel only within recap
-      void navigate(`/chat/dir/recap/${channelId}`);
+      // No conversation ID - navigate to channel only
+      if (isMobile) {
+        void navigate(`/chat/dir/${channelId}`);
+      } else {
+        void navigate(`/chat/dir/recap/${channelId}`);
+      }
       return;
     }
 
-    // Navigate to the thread with message highlighting - keeping recap panel open
-    // The hash format enables auto-scroll and highlight: #origin=${conversationId}&messageId=${messageId}
-    if (messageId) {
-      void navigate(
-        `/chat/dir/recap/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
-      );
+    // On mobile: Navigate to full-screen thread view
+    // On desktop: Navigate within recap route to show thread in side panel
+    if (isMobile) {
+      if (messageId) {
+        void navigate(
+          `/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
+        );
+      } else {
+        void navigate(`/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`);
+      }
     } else {
-      void navigate(`/chat/dir/recap/${channelId}/${conversationId}#origin=${conversationId}`);
+      if (messageId) {
+        void navigate(
+          `/chat/dir/recap/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
+        );
+      } else {
+        void navigate(`/chat/dir/recap/${channelId}/${conversationId}#origin=${conversationId}`);
+      }
     }
   };
 
@@ -206,6 +294,26 @@ const RecapPanel = (): ReactElement => {
     [zero],
   );
 
+  // Split cards into unread and read sections
+  const { unreadCards, readCards } = useMemo(() => {
+    if (!recapData) {
+      return { unreadCards: [], readCards: [] };
+    }
+
+    const unread: RecapCard[] = [];
+    const read: RecapCard[] = [];
+
+    for (const card of recapData.cards) {
+      if (markedAsReadChannels.has(card.channelId)) {
+        read.push(card);
+      } else {
+        unread.push(card);
+      }
+    }
+
+    return { unreadCards: unread, readCards: read };
+  }, [recapData, markedAsReadChannels]);
+
   // Render recap cards content (left/center panel)
   const renderRecapCards = (): ReactElement => {
     if (!recapData || recapData.cards.length === 0) {
@@ -220,12 +328,27 @@ const RecapPanel = (): ReactElement => {
       );
     }
 
+    // Check if this card is selected (channelId matches URL param)
+    const selectedChannelId = params.channelId;
+
     // Render a single recap card
-    const renderCard = (card: RecapCard): ReactElement => (
-      <div className='border border-gray-200 rounded-xl p-5 bg-white shadow-sm mb-5'>
+    const renderCard = (card: RecapCard, isSelected: boolean = false): ReactElement => (
+      <div
+        ref={isSelected ? selectedCardRef : null}
+        className={`border rounded-xl p-5 bg-white shadow-sm mb-5 transition-all duration-300 ${
+          isSelected
+            ? 'border-blue-500 ring-2 ring-blue-200 shadow-lg scale-[1.01]'
+            : 'border-gray-200 hover:shadow-md'
+        }`}
+      >
         <div className='flex items-center gap-2 text-gray-700 font-semibold text-base mb-4'>
           <Hash size={16} />
           <span>{card.channelName}</span>
+          {isSelected && (
+            <span className='ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full'>
+              Viewing
+            </span>
+          )}
         </div>
         <div className='mb-5'>
           <ul className='space-y-2'>
@@ -273,8 +396,8 @@ const RecapPanel = (): ReactElement => {
             }
             className={`flex items-center gap-1.5 text-sm font-medium transition-colors px-3 py-1.5 rounded-lg ${
               markedAsReadChannels.has(card.channelId)
-                ? 'text-green-600 hover:text-green-700 hover:bg-green-50'
-                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                : 'text-green-600 hover:text-green-700 hover:bg-green-50'
             }`}
             data-track-category='RECAP_PANEL'
             data-track-name={
@@ -283,12 +406,12 @@ const RecapPanel = (): ReactElement => {
           >
             {markedAsReadChannels.has(card.channelId) ? (
               <>
-                <Check size={16} className='text-green-600' />
+                <Check size={16} className='text-gray-500' />
                 <span>Mark as unread</span>
               </>
             ) : (
               <>
-                <CheckCircle size={16} className='text-gray-500' />
+                <CheckCircle size={16} className='text-green-600' />
                 <span>Mark as read</span>
               </>
             )}
@@ -297,38 +420,80 @@ const RecapPanel = (): ReactElement => {
       </div>
     );
 
+    // Render a section header
+    const renderSectionHeader = (
+      title: string,
+      count: number,
+      icon: ReactElement,
+    ): ReactElement => (
+      <div className='flex items-center gap-2 mb-3 mt-2'>
+        {icon}
+        <h3 className='text-sm font-semibold text-gray-700'>{title}</h3>
+        <span className='text-xs text-gray-400 font-medium'>({count})</span>
+      </div>
+    );
+
     return (
-      <div className='h-full flex flex-col'>
+      <div className='h-full flex flex-col overflow-hidden'>
         {/* Header Section - fixed at top */}
         <div className='text-center p-5 pb-4 flex-shrink-0'>
-          <h2 className='text-2xl font-semibold text-gray-900 mb-1'>Pleasant perusing 🙌</h2>
+          <h2 className='text-2xl font-semibold text-gray-900 mb-1'>{greeting}</h2>
           <p className='text-sm text-gray-600'>
             Recapping {recapData.meta.totalMessages} messages from {formatRecapDate(recapData.date)}
           </p>
         </div>
 
-        {/* Virtuoso scrollable area */}
-        <div className='flex-1 min-h-0 px-5 pb-6'>
-          <Virtuoso
-            data={recapData.cards}
-            computeItemKey={(_, card) => card.channelId}
-            overscan={200}
-            increaseViewportBy={{ top: 200, bottom: 300 }}
-            itemContent={(_, card) => renderCard(card)}
-            components={{
-              Footer: () =>
-                recapData.meta.estimatedTimeSavedMinutes > 0 ? (
-                  <div className='border-2 border-black-500 rounded-2xl p-6 text-center bg-white mb-5 mt-2'>
-                    <h3 className='text-lg font-bold text-gray-900 mb-2'>Rejoice!</h3>
-                    <p className='text-sm text-gray-700 mb-4'>
-                      You saved about {recapData.meta.estimatedTimeSavedMinutes} minutes catching up
-                      on {recapData.meta.totalMessages} messages in {recapData.cards.length}{' '}
-                      channels.
-                    </p>
-                  </div>
-                ) : null,
-            }}
-          />
+        {/* Scrollable content area with sections */}
+        <div className='flex-1 min-h-0 overflow-y-auto px-5 pb-6'>
+          {/* Unread Recap Section */}
+          {unreadCards.length > 0 && (
+            <div className='mb-6'>
+              {renderSectionHeader(
+                'Unread Recap',
+                unreadCards.length,
+                <Mail size={16} className='text-gray-400' />,
+              )}
+              {unreadCards.map(card => (
+                <div key={card.channelId}>
+                  {renderCard(card, card.channelId === selectedChannelId)}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Read Recap Section */}
+          {readCards.length > 0 && (
+            <div className='mb-6'>
+              {renderSectionHeader(
+                'Read Recap',
+                readCards.length,
+                <MailOpen size={16} className='text-green-500' />,
+              )}
+              {readCards.map(card => (
+                <div key={card.channelId}>
+                  {renderCard(card, card.channelId === selectedChannelId)}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Footer with time saved - enhanced with gradient */}
+          {recapData.meta.estimatedTimeSavedMinutes > 0 && (
+            <div className='rounded-2xl p-6 text-center bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 border-2 border-green-200 mb-5 mt-2 shadow-lg'>
+              <h3 className='text-lg font-bold text-gray-900 mb-2'>
+                🎉 <span className='text-green-600'>Rejoice!</span>
+              </h3>
+              <p className='text-sm text-gray-700 mb-2'>
+                You saved about{' '}
+                <span className='font-semibold text-green-600'>
+                  {recapData.meta.estimatedTimeSavedMinutes} minutes
+                </span>{' '}
+                catching up on {recapData.meta.totalMessages} messages in {recapData.cards.length}{' '}
+                channels.
+              </p>
+              <p className='text-xs text-gray-500'>Time well spent! ✨</p>
+            </div>
+          )}
         </div>
       </div>
     );

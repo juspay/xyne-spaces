@@ -38,6 +38,7 @@ import {
   Globe,
   ShieldUser,
   Brain,
+  Sparkles,
 } from 'lucide-react';
 
 import Avatar from '../ui/Avatar/Avatar';
@@ -48,6 +49,7 @@ import { isStatusExpired } from '../../utils/statusUtils';
 import { UpdateStatusModal } from './UpdateStatusModal';
 import { StatusIndicator } from '../ui/StatusIndicator';
 import { useMissedCallCount } from '../../hooks/useMissedCallCount';
+import { useRecapUnreadCount } from '../../hooks/useRecapData';
 import { usePlatform } from '../../hooks/usePlatform';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
@@ -193,6 +195,11 @@ const mobileNavigationItems = [
     label: 'Threads',
     icon: MessageCircle,
   },
+  {
+    path: '/chat/recap',
+    label: 'Recap',
+    icon: Sparkles,
+  },
 ];
 
 const AppSidebar = (): ReactElement => {
@@ -201,6 +208,7 @@ const AppSidebar = (): ReactElement => {
   const currentUser = useSelf();
   const permissions = usePermissions();
   const missedCallCount = useMissedCallCount();
+  const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const { isMobile } = usePlatform();
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
@@ -311,6 +319,7 @@ const AppSidebar = (): ReactElement => {
         isOnChat={hasChannelOrThreadId}
         onNavigationClick={handleNavigationClick}
         missedCallCount={missedCallCount}
+        recapUnreadCount={recapUnreadCount}
       />
     );
   }
@@ -463,6 +472,7 @@ const MobileNavbar = ({
   isOnChat,
   onNavigationClick,
   missedCallCount,
+  recapUnreadCount,
 }: {
   filteredNavigationItems: {
     path: string;
@@ -473,6 +483,7 @@ const MobileNavbar = ({
   isOnChat: boolean;
   onNavigationClick: (label: string) => void;
   missedCallCount: number;
+  recapUnreadCount: number;
 }): ReactElement => {
   const analyticsPermission = useCanViewAnalytics();
   const { isMobile } = usePlatform();
@@ -644,6 +655,8 @@ const MobileNavbar = ({
                       );
                     }
 
+                    const showRecapBadge = item.path === '/chat/recap' && recapUnreadCount > 0;
+
                     return (
                       <Link
                         to={item.path}
@@ -659,7 +672,14 @@ const MobileNavbar = ({
                         data-track-name='Mobile_Menu_Link'
                         data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                       >
-                        <Icon size={20} className={isActive ? 'text-white' : 'text-[#9ca3af]'} />
+                        <div className='relative'>
+                          <Icon size={20} className={isActive ? 'text-white' : 'text-[#9ca3af]'} />
+                          {showRecapBadge && (
+                            <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[14px] h-[14px] px-[3px] bg-blue-500 text-white text-[9px] font-semibold rounded-full'>
+                              {recapUnreadCount > 9 ? '9+' : recapUnreadCount}
+                            </span>
+                          )}
+                        </div>
                         <span
                           className={`text-[14px] font-medium ${isActive ? 'text-white' : 'text-[#d1d5db]'}`}
                         >
