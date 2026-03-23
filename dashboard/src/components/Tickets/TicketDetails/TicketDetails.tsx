@@ -340,6 +340,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
   const prevStatusV2Ref = useRef<TicketStatusV2 | null>(null);
   const hasAutoTriggeredReleaseNotesRef = useRef(false);
+  const [boardDropdownOpen, setBoardDropdownOpen] = useState(false);
+  const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
 
   // Query ticket data
   const [ticket] = useCachedQuery(queries.ticketDetailsById({ ticketId: ticketId }));
@@ -473,9 +475,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     { enabled: !!ticket?.projectId },
   );
 
-  const [boards] = useCachedQuery(queries.boardsByProject({ projectId: ticket?.projectId || '' }), {
-    enabled: !!ticket?.projectId,
-  });
+  const [boards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
+    {
+      enabled: !!ticket?.projectId && hasBoardDropdownOpened,
+    },
+  );
 
   // Get current active stage entry (where stageLeftAt is null)
   const currentStageEntry = useMemo(() => {
@@ -1905,9 +1910,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   onSelect={handleBoardChange}
                   placeholder='Select board'
                   searchPlaceholder='Search boards...'
-                  isLoading={!boards}
+                  isLoading={hasBoardDropdownOpened && !boards}
                   width='auto'
                   noBorder={true}
+                  isOpen={boardDropdownOpen}
+                  onOpenChange={open => {
+                    setBoardDropdownOpen(open);
+                    if (open && !hasBoardDropdownOpened) {
+                      setHasBoardDropdownOpened(true);
+                    }
+                  }}
                 />
               }
             />

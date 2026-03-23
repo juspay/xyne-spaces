@@ -52,19 +52,16 @@ const BoardStageConfigScreen = ({
   const zero = useZero();
 
   // ── Data fetching ──────────────────────────────────────────────────────────
-  // Use boardsByProject query which includes stages with related data
-  const [boards] = useCachedQuery(queries.boardsByProject({ projectId: projectId || '' }), {
-    enabled: !!projectId,
+  // Fetch only the specific board with full details (stages, prStatusMappings, etc.)
+  const [boardFromQuery] = useCachedQuery(queries.boardFullDetailById({ boardId: boardId || '' }), {
+    enabled: !!boardId && !initialBoard,
   });
 
-  // Find the specific board from the boards list, or use initialBoard if provided
+  // Use initialBoard if provided (for newly created boards), otherwise use query result
   const board = useMemo(() => {
-    // If initialBoard is provided (for newly created boards), use it immediately
     if (initialBoard) return initialBoard;
-
-    if (!boards || !boardId) return undefined;
-    return boards.find(b => b.id === boardId);
-  }, [boards, boardId, initialBoard]);
+    return boardFromQuery;
+  }, [initialBoard, boardFromQuery]);
 
   const [project] = useCachedQuery(queries.projectById({ projectId: projectId || '' }), {
     enabled: !!projectId,
@@ -104,8 +101,8 @@ const BoardStageConfigScreen = ({
   const allUsers = useUsers();
   const userMap = useMemo(() => new Map(allUsers.map(u => [u.id, u.name])), [allUsers]);
 
-  // Fetch all forms to get form names
-  const [allForms] = useCachedQuery(queries.getAllForms());
+  // Fetch forms list (lightweight - only scalar fields for name lookup)
+  const [allForms] = useCachedQuery(queries.getAllFormsList());
   const formMap = useMemo(() => new Map(allForms?.map(f => [f.id, f.formName]) || []), [allForms]);
 
   // Track if we've initialized stages to prevent re-syncing

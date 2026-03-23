@@ -1660,14 +1660,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       ticketTags={tagsByTicketId}
                       projectId={effectiveProjectId || ''}
                       visibleColumns={visibleColumns}
-                      selectedBoardIds={filters.boards || []}
                       isComfortView={isComfortView}
-                      onBoardFilterChange={newBoardIds => {
-                        setFilters({
-                          ...filters,
-                          boards: newBoardIds,
-                        });
-                      }}
                     />
                   </div>
                 )}

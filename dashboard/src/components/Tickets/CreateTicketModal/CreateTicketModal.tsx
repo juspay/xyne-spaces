@@ -367,7 +367,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     (isFromSubTicket || isFromAI) && selectedChannel?.projectId
       ? selectedChannel.projectId
       : projectId;
-  const [boards] = useCachedQuery(queries.boardsByProject({ projectId: selectedProjectId }));
+  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: selectedProjectId }));
 
   // Get selected board's metadata for ticket form configuration
   const selectedBoard = useMemo(

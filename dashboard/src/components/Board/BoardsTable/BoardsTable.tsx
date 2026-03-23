@@ -3,7 +3,6 @@ import { Edit2, Trash2 } from 'lucide-react';
 import { EmptyState } from '../EmptyState';
 import { Button } from '../../ui/Button';
 import type { BoardWithStages } from '../BoardCard';
-import type { Stage } from '@xyne/shared';
 
 interface BoardsTableProps {
   boards: readonly BoardWithStages[] | undefined;
@@ -30,9 +29,7 @@ export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): Rea
             <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Board Name
             </th>
-            <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-              Stages
-            </th>
+
             <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Created Date
             </th>
@@ -43,19 +40,10 @@ export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): Rea
         </thead>
         <tbody className='bg-background divide-y divide-border'>
           {boards?.map(board => {
-            const stages = (
-              board.stages && Array.isArray(board.stages) ? board.stages : []
-            ) as readonly Stage[];
-
             return (
               <tr key={board.id} className='hover:bg-muted transition-colors cursor-pointer'>
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <span className='text-sm font-medium text-muted-foreground'>{board.name}</span>
-                </td>
-                <td className='px-6 py-4 whitespace-nowrap'>
-                  <div className='text-sm text-muted-foreground'>
-                    {stages.length} {stages.length === 1 ? 'stage' : 'stages'}
-                  </div>
                 </td>
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <div className='text-sm text-muted-foreground'>

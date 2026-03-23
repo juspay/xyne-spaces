@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import {
   AllCommunityModule,
@@ -6,7 +6,6 @@ import {
   themeQuartz,
   ICellRendererParams,
   ColDef,
-  RowDataUpdatedEvent,
   GridApi,
   IHeaderParams,
   RowClickedEvent,
@@ -19,7 +18,6 @@ import { useUser, useUsers } from '../../../hooks/useUsers';
 import { Calendar, Check, User } from 'lucide-react';
 import Tooltip from '../../ui/Tooltip';
 import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
-import { BoardFilterBar } from './BoardFilterBar';
 import { mutators } from '../../../zero/mutators';
 import {
   AssigneeCellEditor,
@@ -45,8 +43,6 @@ interface TicketTableProps {
   ticketTags?: Map<string, TicketTag[]>;
   onRowClick?: (ticket: Ticket) => void;
   projectId?: string;
-  selectedBoardIds?: string[];
-  onBoardFilterChange?: (boardIds: string[]) => void;
   visibleColumns?: Set<string>;
   isComfortView?: boolean;
 }
@@ -151,8 +147,6 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   ticketTags,
   onRowClick,
   projectId,
-  selectedBoardIds = [],
-  onBoardFilterChange,
   isComfortView = false,
   visibleColumns = new Set(['assignee', 'dueDate', 'status', 'priority', 'stage', 'tags']),
 }) => {
@@ -164,7 +158,6 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 
   const [gridApi, setGridApi] = useState<GridApi | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
-  const lastBoardStateRef = useRef<string[]>([]);
 
   const [userGroups] = useCachedQuery(queries.getAllUserGroups());
   const [projectTickets] = useCachedQuery(
@@ -558,18 +551,6 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     );
   }, [ticketTags, zero, visibleColumns, users, availableTags]);
 
-  const onRowDataUpdated = (params: RowDataUpdatedEvent) => {
-    const boardChanged =
-      JSON.stringify(lastBoardStateRef.current) !== JSON.stringify(selectedBoardIds);
-    if (boardChanged) {
-      const firstRow = params.api.getDisplayedRowAtIndex(0);
-      if (firstRow) {
-        params.api.setFocusedCell(0, 'title');
-      }
-      lastBoardStateRef.current = selectedBoardIds;
-    }
-  };
-
   const handleBulkUpdate = useCallback(
     (updates: Partial<Ticket> = {}) => {
       if (!gridApi) return;
@@ -641,7 +622,6 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                 params.api.setFocusedCell(params.node.rowIndex, params.column.getId());
               }
             }}
-            onRowDataUpdated={onRowDataUpdated}
             onSelectionChanged={params => {
               const count = params.api.getSelectedRows().length;
               setSelectedCount(count);
@@ -687,13 +667,6 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             />
           )}
         </div>
-        {projectId && !isComfortView && (
-          <BoardFilterBar
-            projectId={projectId}
-            selectedBoardIds={selectedBoardIds}
-            onChange={onBoardFilterChange ?? (() => {})}
-          />
-        )}
       </div>
     </>
   );

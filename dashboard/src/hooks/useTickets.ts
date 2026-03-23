@@ -3,7 +3,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
 import { useCachedQuery } from './useCachedQuery';
 
-export type Ticket = QueryResultType<typeof queries.allTickets>[number];
+export type Ticket = NonNullable<QueryResultType<typeof queries.ticketById>>;
 
 export interface UseTicketsResult {
   tickets: Ticket[];
@@ -12,8 +12,13 @@ export interface UseTicketsResult {
   totalCount: number;
 }
 
-export function useTickets(): UseTicketsResult {
-  const [ticketsData, queryDetails] = useCachedQuery(queries.allTickets());
+/**
+ * Hook to fetch a single ticket by ID
+ * @param ticketId - The ID of the ticket to fetch
+ * @returns Array containing the ticket (for backward compatibility)
+ */
+export function useTickets(ticketId: string): UseTicketsResult {
+  const [ticketData, queryDetails] = useCachedQuery(queries.ticketById({ ticketId }));
 
   const processed = useMemo(() => {
     // Loading
@@ -36,8 +41,8 @@ export function useTickets(): UseTicketsResult {
       };
     }
 
-    // Success
-    const rows = ticketsData ?? [];
+    // Success - wrap single ticket in array for backward compatibility
+    const rows = ticketData ? [ticketData] : [];
 
     return {
       tickets: rows,
@@ -45,7 +50,7 @@ export function useTickets(): UseTicketsResult {
       error: null,
       totalCount: rows.length,
     };
-  }, [ticketsData, queryDetails]);
+  }, [ticketData, queryDetails]);
 
   return processed;
 }

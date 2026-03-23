@@ -173,14 +173,6 @@ export const queries = defineQueries({
         .one();
     },
   ),
-  allTickets: defineQuery(() => {
-    return zql.tickets
-      .where('isArchived', false)
-      .orderBy('createdAt', 'desc')
-      .related('project')
-      .related('assignments')
-      .related('stageEtaEntries');
-  }),
   // ============================================================================
   // CENTRALIZED TICKET QUERY SYSTEM
   // ============================================================================
@@ -824,17 +816,11 @@ export const queries = defineQueries({
       return zql.boards.where('projectId', projectId).orderBy('createdAt', 'asc');
     },
   ),
-
-  getAllBoards: defineQuery(() => {
-    return zql.boards
-      .orderBy('createdAt', 'desc')
-      .related('project')
-      .related('stages', stagesQuery =>
-        stagesQuery
-          .orderBy('sequenceNumber', 'asc')
-          .related('approvers')
-          .related('formContextMappings'),
-      );
+  // Lightweight global board list — only scalar fields, no related data.
+  // Use this for dropdowns and pickers that only need board id/name.
+  // For full board detail (editing), use boardFullDetailById.
+  getAllBoardsList: defineQuery(() => {
+    return zql.boards.orderBy('createdAt', 'desc');
   }),
   projectById: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
     return zql.projects.where('id', projectId).one();
@@ -845,19 +831,6 @@ export const queries = defineQueries({
       .where('isArchived', false)
       .related('tags')
       .orderBy('createdAt', 'desc');
-  }),
-  boardsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
-    return zql.boards
-      .where('projectId', projectId)
-      .orderBy('createdAt', 'asc')
-      .related('stages', stagesQuery =>
-        stagesQuery
-          .orderBy('sequenceNumber', 'asc')
-          .related('prStatusMappings')
-          .related('formContextMappings')
-          .related('approvers'),
-      )
-      .related('formContextMappings', mappingQuery => mappingQuery.related('formFields'));
   }),
   stagesByBoard: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
     return zql.stages
@@ -1265,6 +1238,21 @@ export const queries = defineQueries({
       .related('formContextMappings', mappingQuery => mappingQuery.related('formFields'))
       .one();
   }),
+  // Full board detail for editing - includes prStatusMappings for stage PR status config.
+  // Used by ProjectDetailScreen when editing a board.
+  boardFullDetailById: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
+    return zql.boards
+      .where('id', boardId)
+      .related('stages', stagesQuery =>
+        stagesQuery
+          .orderBy('sequenceNumber', 'asc')
+          .related('approvers')
+          .related('prStatusMappings')
+          .related('formContextMappings', fcm => fcm.related('form')),
+      )
+      .related('formContextMappings', mappingQuery => mappingQuery.related('formFields'))
+      .one();
+  }),
   // Query for all ticket entity mappings
   getAllTicketEntityMappings: defineQuery(() => {
     return zql.ticket_entity_mappings;
@@ -1329,6 +1317,10 @@ export const queries = defineQueries({
       .related('formFields')
       .related('formContextMappings')
       .orderBy('createdAt', 'desc');
+  }),
+  // Lightweight forms query - only scalar fields (id, formName, etc.), no related data
+  getAllFormsList: defineQuery(() => {
+    return zql.forms.orderBy('createdAt', 'desc');
   }),
   // Query for form fields by form ID
   getFormFieldsByFormId: defineQuery(z.object({ formId: z.string() }), ({ args: { formId } }) => {

@@ -107,7 +107,7 @@ const Info = ({
   const navigate = useNavigate();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
   const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId }));
-  const [boards] = useCachedQuery(queries.boardsByProject({ projectId: channel.projectId }));
+  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: channel.projectId }));
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = useMemo(
