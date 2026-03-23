@@ -127,7 +127,6 @@ export const installXyneSpacesDependencies = async (repoPath: string, repoName: 
  */
 export const createXyneSpacesAgentConfig = (
   _name: string,
-  instructions: string,
   initialMessage: string,
   repoUrl: string,
   imageAttachments?: ImageAttachment[],
@@ -172,7 +171,6 @@ export const createXyneSpacesAgentConfig = (
     executorType,
     useQuestioningMode,
     conversationContext: {
-      systemPrompt: instructions,
       messages: [
         createUserMessage(initialMessage, imageAttachments ? { attachments: imageAttachments } : undefined)
       ]
@@ -714,7 +712,6 @@ export const getPlanningConfig = (
   coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-planner',
-  SYSTEM_PROMPTS.PLANNER,
   `You are creating an implementation plan for the Xyne Spaces platform.
 
 # Task Type: ${taskType || 'feature'}
@@ -806,7 +803,6 @@ export const getImplementationConfig = (
   coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-implementer',
-  SYSTEM_PROMPTS.IMPLEMENTER,
   `You are implementing a feature for the Xyne Spaces platform.
 
 # Task Type: ${taskType || 'feature'}
@@ -877,7 +873,6 @@ export const getValidationConfig = (
   coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-validator',
-  SYSTEM_PROMPTS.VALIDATOR,
   `You are fixing ONLY validation ERRORS (not warnings) for the Xyne Spaces platform.
 
 # Project Guidelines
@@ -937,7 +932,6 @@ export const getReviewConfig = (
   diffOutput?: string
 ) => createXyneSpacesAgentConfig(
   'xyne-reviewer',
-  SYSTEM_PROMPTS.REVIEWER,
   `First read the guidelines from xyne.md, then review the code changes below and return a JSON array of review comments.
 # Changed Files (${changedFiles?.length || 0} files)
 ${changedFiles && changedFiles.length > 0 ? changedFiles.map(f => `- ${f}`).join('\n') : 'No files provided'}
@@ -1013,7 +1007,6 @@ export const getTestFixConfig = (
   coAuthor?: { name: string; email: string }
 ) => createXyneSpacesAgentConfig(
   'xyne-test-fixer',
-  SYSTEM_PROMPTS.TEST_FIXER,
   `# Project Guidelines
 
 ${guidelines || 'No specific guidelines provided.'}

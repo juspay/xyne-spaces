@@ -19,7 +19,6 @@ import {
   createXyneSpacesAgentConfig,
   extractLastMessageContent,
 } from '../xyne-spaces-workflows/utils'
-import { getAgentConfig } from '../../config'
 
 import { QUALITY_GATES, type TaskType } from './constants';
 export { QUALITY_GATES, type TaskType } from './constants';
@@ -77,19 +76,6 @@ export interface ReviewMetrics {
     approvedAt: string;
   };
 }
-
-// =============================================================================
-// REVIEW SYSTEM PROMPTS - sourced from config.ts (single source of truth)
-// =============================================================================
-
-const REVIEW_SYSTEM_PROMPTS = {
-  get PLAN_REVIEWER() {
-    return getAgentConfig('xyne-plan-reviewer')?.systemPrompt ?? ''
-  },
-  get IMPLEMENTATION_REVIEWER() {
-    return getAgentConfig('xyne-implementation-reviewer')?.systemPrompt ?? ''
-  },
-} as const
 
 // =============================================================================
 // QUALITY GATE HELPERS
@@ -317,7 +303,6 @@ export const getPlanReviewConfig = (
   previousReviewFeedback?: string
 ) => createXyneSpacesAgentConfig(
   'xyne-plan-reviewer',
-  REVIEW_SYSTEM_PROMPTS.PLAN_REVIEWER,
   `Review the following implementation plan against the requirements.
 
 # Task Type: ${taskType || 'feature'}
@@ -402,7 +387,6 @@ export const getImplementationReviewConfig = (
   earlyValidationErrors?: string
 ) => createXyneSpacesAgentConfig(
   'xyne-implementation-reviewer',
-  REVIEW_SYSTEM_PROMPTS.IMPLEMENTATION_REVIEWER,
   `Review the following implementation against the plan.
 
 # Task Type: ${taskType || 'feature'}
