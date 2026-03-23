@@ -20,6 +20,7 @@ import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel'
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
 import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
+import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
 
 config()
 
@@ -107,10 +108,20 @@ class WorkerService {
         await callValidationWorker.start();
       }
 
-      // Initialize workflow step GCS sync queue
       if (appConfig.enableWorkflowStepGcsSync) {
         logger.info('Initializing workflow step GCS sync queue...');
         await workflowStepGcsSyncQueue.initialize();
+      }
+
+      if (appConfig.enableConversationIngestionQueue) {
+        logger.info('Initializing conversation ingest queue...');
+        const { conversationIngestQueue } = await import('@/queues/conversationIngestQueue');
+        await conversationIngestQueue.initialize();
+      }
+
+      if (appConfig.enableConversationIngestionWorker) {
+        logger.info('Starting conversation ingestion worker...');
+        await conversationIngestionWorker.start();
       }
 
       process.on('SIGINT', () => this.shutdown())
@@ -177,10 +188,13 @@ class WorkerService {
         await callValidationWorker.stop();
       }
 
-      // Close workflow step GCS sync queue
       if (appConfig.enableWorkflowStepGcsSync) {
         logger.info('Closing workflow step GCS sync queue...');
         await workflowStepGcsSyncQueue.close();
+      }
+
+      if (appConfig.enableConversationIngestionWorker) {
+        await conversationIngestionWorker.shutdown();
       }
 
       await DatabaseClient.disconnect()
