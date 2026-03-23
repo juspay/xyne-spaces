@@ -216,6 +216,7 @@ const ConversationHeader = ({
             channelName={displayName}
             participantCount={channel.participantCount}
             callDisplayName={displayName}
+            isMember={!!channelUserStatus}
           />
         </div>
       </div>
