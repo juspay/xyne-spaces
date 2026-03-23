@@ -14,6 +14,7 @@ import {
   Repeat,
   Zap,
   Layers,
+  User,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useWorkflowControl } from '../../../services/Workflow/workflowGraphService';
@@ -37,15 +38,17 @@ import {
   formatStepName,
   formatTime,
   extractEditSteps,
-  extractAllSubMessages,
-  getNodeCreatedAt,
   parseIteration,
   parseLLMResponse,
+  extractUserMessages,
+  extractAllSubMessages,
+  getNodeCreatedAt,
 } from './AgentChatView.utils';
 import { ResponseModal } from './ResponseModal';
 import LiveEditsPanel from '../LiveEditsPanel';
 import { useUser } from '../../../hooks/useUsers';
 import Avatar from '../../ui/Avatar/Avatar';
+import { Dialog } from '../../ui/Dialog/Dialog';
 import Tooltip from '../../ui/Tooltip/Tooltip';
 
 const StatusIcon: React.FC<{ status: string; size?: number }> = ({ status, size = 12 }) => {
@@ -372,69 +375,96 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
   const agentMessages = useMemo((): AgentMessage[] => {
     if (!combinedStepsData || graphNodes.length === 0) return [];
 
-    return graphNodes.map((node): AgentMessage => {
-      const agentInfo = getAgentInfo(node.stepName);
-      const subMessages = extractAllSubMessages(node.stepIds, combinedStepsData);
-      const editSteps = extractEditSteps(node.stepIds, combinedStepsData);
+    return graphNodes
+      .map((node): AgentMessage => {
+        const agentInfo = getAgentInfo(node.stepName);
+        const subMessages = extractAllSubMessages(node.stepIds, combinedStepsData);
+        const editSteps = extractEditSteps(node.stepIds, combinedStepsData);
 
-      const summary =
-        subMessages.length > 0
-          ? subMessages[subMessages.length - 1]!.content
-          : ((): string => {
-              const stepIdSet = new Set(node.stepIds);
-              for (const workflow of combinedStepsData.workflows) {
-                for (const step of workflow.steps) {
-                  if (!stepIdSet.has(step.id)) continue;
-                  try {
-                    const record: SafeRecord =
-                      typeof step.data === 'string'
-                        ? (JSON.parse(step.data) as SafeRecord)
-                        : (step.data as SafeRecord);
+        // Extract user messages injected during reruns for "reply context"
+        const userMessageSteps = extractUserMessages(node.stepIds, combinedStepsData);
+        let replyContext: string | undefined = undefined;
+        if (userMessageSteps.length > 0) {
+          const uStep = userMessageSteps[userMessageSteps.length - 1]!;
+          try {
+            const record: SafeRecord =
+              typeof uStep.data === 'string'
+                ? (JSON.parse(uStep.data) as SafeRecord)
+                : (uStep.data as SafeRecord);
+            const content = record['content'];
+            if (typeof content === 'string') {
+              replyContext = content;
+            }
+          } catch {
+            // Ignore
+          }
+        }
 
-                    const content = parseLLMResponse(record);
+        const summary =
+          subMessages.length > 0
+            ? subMessages[subMessages.length - 1]!.content
+            : ((): string => {
+                const stepIdSet = new Set(node.stepIds);
+                for (const workflow of combinedStepsData.workflows) {
+                  for (const step of workflow.steps) {
+                    if (!stepIdSet.has(step.id)) continue;
+                    try {
+                      const record: SafeRecord =
+                        typeof step.data === 'string'
+                          ? (JSON.parse(step.data) as SafeRecord)
+                          : (step.data as SafeRecord);
 
-                    if (step.stepExecutorType === 'deterministic') {
-                      const success = record['success'];
-                      const error = record['error'];
-                      const output = record['output'];
-
-                      const displayContent =
-                        typeof error === 'string' && error
-                          ? error
-                          : typeof output === 'string' && output
-                            ? output
-                            : content;
-
-                      if (displayContent) {
-                        const isError = success === false || !!error;
-                        const prefix = isError ? '**Failed**\\n' : '**Success**\\n';
-                        return `${prefix}\`\`\`bash\\n${displayContent.trim()}\\n\`\`\``;
+                      // Optional fallback in case user_message is a top level step
+                      if (step.stepName === 'user_message') {
+                        return (record['content'] as string) || '';
                       }
-                    } else if (content) {
-                      return content;
+
+                      const content = parseLLMResponse(record);
+
+                      if (step.stepExecutorType === 'deterministic') {
+                        const success = record['success'];
+                        const error = record['error'];
+                        const output = record['output'];
+
+                        const displayContent =
+                          typeof error === 'string' && error
+                            ? error
+                            : typeof output === 'string' && output
+                              ? output
+                              : content;
+
+                        if (displayContent) {
+                          const isError = success === false || !!error;
+                          const prefix = isError ? '**Failed**\\n' : '**Success**\\n';
+                          return `${prefix}\`\`\`bash\\n${displayContent.trim()}\\n\`\`\``;
+                        }
+                      } else if (content) {
+                        return content;
+                      }
+                    } catch {
+                      // Ignore parse errors
                     }
-                  } catch {
-                    // Ignore parse errors
                   }
                 }
-              }
-              return '';
-            })();
-      const createdAt = getNodeCreatedAt(node.stepIds, combinedStepsData);
-      const iteration = parseIteration(node.stepName);
+                return '';
+              })();
+        const createdAt = getNodeCreatedAt(node.stepIds, combinedStepsData);
+        const iteration = parseIteration(node.stepName);
 
-      return {
-        nodeIndex: node.index,
-        stepName: node.stepName,
-        status: node.status,
-        agentInfo,
-        summary,
-        subMessages,
-        editSteps,
-        createdAt: createdAt ?? undefined,
-        ...(iteration ? { iteration } : {}),
-      };
-    });
+        return {
+          nodeIndex: node.index,
+          stepName: node.stepName,
+          status: node.status,
+          agentInfo,
+          summary,
+          subMessages,
+          editSteps,
+          createdAt: createdAt ?? undefined,
+          ...(iteration ? { iteration } : {}),
+          ...(replyContext !== undefined ? { replyContext } : {}),
+        };
+      })
+      .filter((msg): msg is AgentMessage => msg !== null);
   }, [combinedStepsData, graphNodes]);
 
   const visibleMessages = agentMessages;
@@ -773,6 +803,7 @@ const AgentMessageBubble: React.FC<{
 }) => {
   const [isTurnsExpanded, setIsTurnsExpanded] = useState(false);
   const [isSummaryFullyVisible, setIsSummaryFullyVisible] = useState(true);
+  const [isReplyModalOpen, setIsReplyModalOpen] = useState(false);
   const { agentInfo, stepName, status, summary, createdAt, subMessages, editSteps } = message;
   const isRunning = status === 'running';
 
@@ -786,151 +817,216 @@ const AgentMessageBubble: React.FC<{
     }
   };
 
+  const replyThreshold = 80;
+  const isReplyLong = message.replyContext && message.replyContext.length > replyThreshold;
+  const displayReply = isReplyLong
+    ? message.replyContext!.slice(0, replyThreshold) + '...'
+    : message.replyContext;
+
   return (
-    <div
-      className={`flex items-start gap-2 md:gap-3 py-1 ${isRunning ? 'animate-pulse-subtle' : ''}`}
-    >
-      <div className='flex-shrink-0 group relative'>
-        <AgentAvatar agentInfo={agentInfo} />
-      </div>
+    <div className='flex flex-col w-full relative group/message'>
+      {message.replyContext && (
+        <>
+          <div className='flex items-end gap-2 md:gap-3 mb-0.5'>
+            <div className='flex-shrink-0 w-[31px] flex justify-end h-5'>
+              <div className='w-4 h-full border-l-2 border-t-2 border-slate-300 rounded-tl-[6px]' />
+            </div>
 
-      <div className='flex-1 min-w-0 w-full'>
-        <div className='flex items-center gap-1.5 md:gap-2 mb-1.5 flex-wrap'>
-          <span className={`text-xs font-semibold ${agentInfo.labelColor}`}>{agentInfo.name}</span>
-
-          {hasMultipleTurns && (
-            <span className='flex items-center gap-1 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-              <MessageSquare size={9} />
-              {subMessages.length} turns
-            </span>
-          )}
-
-          {hasEdits && (
-            <span className='flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded'>
-              <FileEdit size={9} />
-              {editSteps.length} edit{editSteps.length !== 1 ? 's' : ''}
-            </span>
-          )}
-
-          <div className='flex items-center gap-1 text-[10px] text-muted-foreground ml-auto'>
-            <Tooltip content={status.charAt(0).toUpperCase() + status.slice(1)}>
-              <div className='flex'>
-                <StatusIcon
-                  status={
-                    isRunning &&
-                    executionMode === 'MANUAL' &&
-                    executionStatus === 'WAIT_FOR_EVENT' &&
-                    isLatest
-                      ? 'pending'
-                      : status
-                  }
-                  size={13}
-                />
+            {/* Reply content — column-aligned with the message content below */}
+            <div className='flex items-center gap-1.5 flex-1 min-w-0 text-[11px] text-muted-foreground/80 pb-2 overflow-hidden'>
+              <div className='w-4 h-4 rounded-full bg-slate-600 flex items-center justify-center text-white flex-shrink-0 shadow-sm'>
+                <User size={9} strokeWidth={2.5} />
               </div>
-            </Tooltip>
-            {onNavigateToStep && (
-              <Tooltip content='Jump to chat view'>
-                <button
-                  onClick={() => onNavigateToStep(message.nodeIndex)}
-                  className='p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
-                  data-track-category='Workflows'
-                  data-track-name='NavigateToAdvancedStep'
-                  data-track-metadata={JSON.stringify({ nodeIndex: message.nodeIndex })}
-                >
-                  <Layers size={14} className='text-muted-foreground' />
-                </button>
-              </Tooltip>
-            )}
-            {/* Rerun button */}
-            {executionId &&
-              combinedStepsData &&
-              graphNodes &&
-              message.nodeIndex < graphNodes.length && (
-                <StepRerunButton
-                  executionId={executionId}
-                  stepIds={graphNodes[message.nodeIndex]?.stepIds || []}
-                  combinedStepsData={combinedStepsData}
-                  {...(onExecutionChange ? { onRerun: onExecutionChange } : {})}
-                  size={13}
-                />
-              )}
-          </div>
-          {/* Validation/Status metadata row ending */}
-        </div>
-
-        {(summary || isRunning || canShowTurns) && (
-          <div
-            className={`rounded-xl md:rounded-2xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 ${agentInfo.bubbleBg} transition-shadow ${isLatest && isRunning ? 'shadow-sm ring-1 ring-sky-100' : ''}`}
-          >
-            {summary ? (
-              parseReviewerFeedback(summary) ? (
-                <ReviewerFeedback
-                  issues={parseReviewerFeedback(summary)!}
-                  onViewMore={handleViewMore}
-                />
-              ) : (
-                <TruncatableMarkdownContent
-                  content={summary}
-                  onExpandChange={setIsSummaryFullyVisible}
-                  onViewMore={handleViewMore}
-                />
-              )
-            ) : isRunning ? (
-              <div className='flex items-center gap-2 text-sm text-muted-foreground py-0.5'>
-                {executionMode === 'MANUAL' && executionStatus === 'WAIT_FOR_EVENT' && isLatest ? (
-                  <>
-                    <Clock size={14} className='text-amber-500' />
-                    <span>Waiting for input…</span>
-                  </>
-                ) : (
-                  <>
-                    <Loader2 size={14} className='animate-spin text-sky-400' />
-                    <span>Running…</span>
-                  </>
+              <span className='font-semibold flex-shrink-0 text-foreground/60'>User</span>
+              <div className='flex items-center gap-1 min-w-0 flex-1 overflow-hidden'>
+                <span className='text-muted-foreground/90 truncate'>{displayReply}</span>
+                {isReplyLong && (
+                  <button
+                    onClick={() => setIsReplyModalOpen(true)}
+                    className='text-[10px] font-bold text-sky-600 hover:text-sky-700 flex-shrink-0 transition-colors px-1.5 py-0.5 rounded hover:bg-sky-50 cursor-pointer pointer-events-auto bg-transparent border-none'
+                    data-track-category='Workflows'
+                    data-track-name='ExpandReply'
+                  >
+                    show more
+                  </button>
                 )}
               </div>
-            ) : (
-              <span className='text-sm text-muted-foreground italic'>No output available</span>
+            </div>
+          </div>
+
+          {isReplyLong && (
+            <Dialog
+              open={isReplyModalOpen}
+              onOpenChange={setIsReplyModalOpen}
+              title='User message'
+              description='Full user message that triggered this agent response'
+            >
+              <div className='p-4 space-y-2'>
+                <p className='text-xs font-semibold text-foreground/60 uppercase tracking-wide'>
+                  User message
+                </p>
+                <p className='text-sm text-foreground whitespace-pre-wrap break-words'>
+                  {message.replyContext}
+                </p>
+              </div>
+            </Dialog>
+          )}
+        </>
+      )}
+      <div
+        className={`flex items-start gap-2 md:gap-3 py-1 ${isRunning ? 'animate-pulse-subtle' : ''}`}
+      >
+        <div className='flex-shrink-0 group relative'>
+          <AgentAvatar agentInfo={agentInfo} />
+        </div>
+
+        <div className='flex-1 min-w-0 w-full'>
+          <div className='flex items-center gap-1.5 md:gap-2 mb-1.5 flex-wrap'>
+            <span className={`text-xs font-semibold ${agentInfo.labelColor}`}>
+              {agentInfo.name}
+            </span>
+
+            {hasMultipleTurns && (
+              <span className='flex items-center gap-1 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+                <MessageSquare size={9} />
+                {subMessages.length} turns
+              </span>
             )}
 
-            {canShowTurns && (
-              <div className='mt-3 pt-2 border-t border-black/5'>
-                <button
-                  onClick={() => setIsTurnsExpanded(v => !v)}
-                  className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors ${agentInfo.labelColor} hover:opacity-80`}
-                  data-track-category='Workflows'
-                  data-track-name='ToggleTurnsExpansion'
-                >
-                  {isTurnsExpanded ? (
+            {hasEdits && (
+              <span className='flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded'>
+                <FileEdit size={9} />
+                {editSteps.length} edit{editSteps.length !== 1 ? 's' : ''}
+              </span>
+            )}
+
+            <div className='flex items-center gap-1 text-[10px] text-muted-foreground ml-auto'>
+              <Tooltip content={status.charAt(0).toUpperCase() + status.slice(1)}>
+                <div className='flex'>
+                  <StatusIcon
+                    status={
+                      isRunning &&
+                      executionMode === 'MANUAL' &&
+                      executionStatus === 'WAIT_FOR_EVENT' &&
+                      isLatest
+                        ? 'pending'
+                        : status
+                    }
+                    size={13}
+                  />
+                </div>
+              </Tooltip>
+              {onNavigateToStep && (
+                <Tooltip content='Jump to chat view'>
+                  <button
+                    onClick={() => onNavigateToStep(message.nodeIndex)}
+                    className='p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors'
+                    data-track-category='Workflows'
+                    data-track-name='NavigateToAdvancedStep'
+                    data-track-metadata={JSON.stringify({ nodeIndex: message.nodeIndex })}
+                  >
+                    <Layers size={14} className='text-muted-foreground' />
+                  </button>
+                </Tooltip>
+              )}
+              {/* Rerun button */}
+              {executionId &&
+                combinedStepsData &&
+                graphNodes &&
+                message.nodeIndex < graphNodes.length && (
+                  <StepRerunButton
+                    executionId={executionId}
+                    stepIds={graphNodes[message.nodeIndex]?.stepIds || []}
+                    combinedStepsData={combinedStepsData}
+                    {...(onExecutionChange ? { onRerun: onExecutionChange } : {})}
+                    size={13}
+                  />
+                )}
+            </div>
+            {/* Validation/Status metadata row ending */}
+          </div>
+
+          {(summary || isRunning || canShowTurns) && (
+            <div
+              className={`rounded-xl md:rounded-2xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 ${agentInfo.bubbleBg} transition-shadow ${isLatest && isRunning ? 'shadow-sm ring-1 ring-sky-100' : ''}`}
+            >
+              {summary ? (
+                parseReviewerFeedback(summary) ? (
+                  <ReviewerFeedback
+                    issues={parseReviewerFeedback(summary)!}
+                    onViewMore={handleViewMore}
+                  />
+                ) : (
+                  <TruncatableMarkdownContent
+                    content={summary}
+                    onExpandChange={setIsSummaryFullyVisible}
+                    onViewMore={handleViewMore}
+                  />
+                )
+              ) : isRunning ? (
+                <div className='flex items-center gap-2 text-sm text-muted-foreground py-0.5'>
+                  {executionMode === 'MANUAL' &&
+                  executionStatus === 'WAIT_FOR_EVENT' &&
+                  isLatest ? (
                     <>
-                      <ChevronUp size={12} />
-                      Hide {subMessages.length} turns
+                      <Clock size={14} className='text-amber-500' />
+                      <span>Waiting for input…</span>
                     </>
                   ) : (
                     <>
-                      <ChevronDown size={12} />
-                      Show all {subMessages.length} turns
+                      <Loader2 size={14} className='animate-spin text-sky-400' />
+                      <span>Running…</span>
                     </>
                   )}
-                </button>
+                </div>
+              ) : (
+                <span className='text-sm text-muted-foreground italic'>No output available</span>
+              )}
 
-                {isTurnsExpanded && (
-                  <div className='mt-3 space-y-0 divide-y divide-border rounded-xl border border-border bg-muted/60 p-3'>
-                    {subMessages.map((sub: SubMessage, idx: number) => (
-                      <SubMessageRow key={sub.id} subMsg={sub} index={idx} agentInfo={agentInfo} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+              {canShowTurns && (
+                <div className='mt-3 pt-2 border-t border-black/5'>
+                  <button
+                    onClick={() => setIsTurnsExpanded(v => !v)}
+                    className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors ${agentInfo.labelColor} hover:opacity-80`}
+                    data-track-category='Workflows'
+                    data-track-name='ToggleTurnsExpansion'
+                  >
+                    {isTurnsExpanded ? (
+                      <>
+                        <ChevronUp size={12} />
+                        Hide {subMessages.length} turns
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown size={12} />
+                        Show all {subMessages.length} turns
+                      </>
+                    )}
+                  </button>
 
-        {createdAt && (
-          <span className='text-[10px] text-muted-foreground mt-1 block'>
-            {formatTime(createdAt)}
-          </span>
-        )}
+                  {isTurnsExpanded && (
+                    <div className='mt-3 space-y-0 divide-y divide-border rounded-xl border border-border bg-muted/60 p-3'>
+                      {subMessages.map((sub: SubMessage, idx: number) => (
+                        <SubMessageRow
+                          key={sub.id}
+                          subMsg={sub}
+                          index={idx}
+                          agentInfo={agentInfo}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {createdAt && (
+            <span className='text-[10px] text-muted-foreground mt-1 block'>
+              {formatTime(createdAt)}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

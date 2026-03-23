@@ -1,8 +1,5 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
-  ButtonType,
-  Modal,
-  Button,
   MultiSelect,
   TextInput,
   DateRangePicker,
@@ -10,11 +7,9 @@ import {
   DateRange,
 } from '@juspay/blend-design-system';
 import { Search } from 'lucide-react';
-import CreateTicket from './CreateTicket';
 import { SearchUser } from '../ui/SearchUser/SearchUser';
-import { TicketCategory } from '@xyne/shared';
 import { User } from '@xyne/shared';
-import { useCanCreateTicket } from '../../hooks/usePermissions';
+import { useWorkflowTypes } from '../../hooks/useWorkflowTypes';
 
 export interface TicketFilters {
   searchQuery: string;
@@ -32,8 +27,7 @@ interface TicketHeaderProps {
 }
 
 const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const canCreateTicket = useCanCreateTicket();
+  const { workflowTypes, isLoading, error } = useWorkflowTypes();
 
   const handleMultiSelectChange =
     (filterKey: keyof TicketFilters) =>
@@ -86,7 +80,10 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange })
   };
 
   const statusOptions = ['NEW', 'PENDING', 'SCHEDULED', 'SUCCESS', 'FAILURE', 'PAUSED'];
-  const workflowTypeOptions = Object.values(TicketCategory);
+  const workflowTypeOptions = workflowTypes.map(wf => ({
+    label: wf.label,
+    value: wf.id,
+  }));
 
   return (
     <div className='space-y-6 mb-8'>
@@ -94,15 +91,6 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange })
         <h1 className='font-semibold text-xl leading-[32px] tracking-normal text-foreground whitespace-nowrap'>
           Tickets Workflows
         </h1>
-        {canCreateTicket && (
-          <Button
-            buttonType={ButtonType.PRIMARY}
-            onClick={() => setIsModalOpen(true)}
-            text='Create Automation Run'
-            data-track-category='Tickets'
-            data-track-name='CreateAutomationRun'
-          />
-        )}
       </div>
 
       <div className='flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4'>
@@ -162,17 +150,15 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange })
             label=''
             items={[
               {
-                items: workflowTypeOptions.map(option => ({
-                  label: option.replace(/_/g, ' '),
-                  value: option,
-                })),
+                items: workflowTypeOptions,
               },
             ]}
             selectedValues={filters.workflowTypeFilter}
             onChange={handleMultiSelectChange('workflowTypeFilter')}
-            placeholder='Workflow Type'
+            placeholder={isLoading ? 'Loading...' : error ? 'Error loading types' : 'Workflow Type'}
             enableSearch={true}
             enableSelectAll={true}
+            disabled={isLoading}
           />
 
           <div className='w-[200px]'>
@@ -217,17 +203,6 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange })
           />
         </div>
       </div>
-
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title={'Create Automation Run'}
-        showCloseButton={true}
-        closeOnBackdropClick={true}
-        showDivider={true}
-      >
-        <CreateTicket isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
-      </Modal>
     </div>
   );
 };

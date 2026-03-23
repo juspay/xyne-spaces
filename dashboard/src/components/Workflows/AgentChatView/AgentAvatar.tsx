@@ -12,6 +12,7 @@ import {
   Laugh,
   Skull,
   UserRoundCog,
+  User,
 } from 'lucide-react';
 import { AgentInfo } from './AgentChatView.utils';
 
@@ -48,6 +49,8 @@ export const AgentAvatar: React.FC<AgentAvatarProps> = ({ agentInfo, size = 'md'
         return <Bug size={iconSize} strokeWidth={2.5} />;
       case 'user-round-cog':
         return <UserRoundCog size={iconSize} strokeWidth={2.5} />;
+      case 'user':
+        return <User size={iconSize} strokeWidth={2.5} />;
       case 'bot':
       default:
         return <Bot size={iconSize} strokeWidth={2.5} />;
