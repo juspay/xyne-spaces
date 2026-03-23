@@ -1239,27 +1239,6 @@ export const activityTable = table('activities')
   })
   .primaryKey('id');
 
-export const notificationTable = table('notifications')
-  .columns({
-    id: string(),
-    userId: string(),
-    type: enumeration<NotificationType>(),
-    title: string(),
-    message: string(),
-    status: enumeration<NotificationStatus>(),
-    deliveryMethods: json<NotificationDeliveryMethod[]>(),
-    metadata: json().optional(),
-    relatedEntityType: string().optional(),
-    relatedEntityId: string().optional(),
-    actionUrl: string().optional(),
-    expiresAt: number().optional(),
-    readAt: number().optional(),
-    dismissedAt: number().optional(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey('id');
-
 export const notificationPreferenceTable = table('notification_preferences')
   .columns({
     id: string(),
@@ -3139,7 +3118,6 @@ export const schema = createSchema({
     reactionCountTable,
     customEmojiTable,
     activityTable,
-    notificationTable,
     notificationPreferenceTable,
     proactiveNudgeTable,
     surfaceNudgeTable,
@@ -3311,7 +3289,6 @@ export type Reaction = Row<typeof schema.tables.reactions>;
 export type ReactionCount = Row<typeof schema.tables.reaction_counts>;
 export type CustomEmoji = Row<typeof schema.tables.custom_emojis>;
 export type Activity = Row<typeof schema.tables.activities>;
-export type Notification = Row<typeof schema.tables.notifications>;
 export type NotificationPreference = Row<typeof schema.tables.notification_preferences>;
 export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
 export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;

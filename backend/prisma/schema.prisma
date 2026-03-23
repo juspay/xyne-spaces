@@ -633,7 +633,7 @@ model WorkflowExecutionUsers {
   @@index([userId])
   @@index([workflowExecutionId])
   @@map("workflow_execution_users")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 model WorkflowStep {
@@ -673,7 +673,7 @@ model WorkflowKnowledge {
   createdAt           DateTime @default(now())
 
   @@map("workflow_knowledge")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 // Knowledge Documents - approved learnings as simple docs for AI and users
@@ -721,7 +721,7 @@ model AgentStep {
 
   @@index([agentId])
   @@map("agent_steps")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 
@@ -741,7 +741,7 @@ model ExternalStepResponse {
 
   @@index([workflowExecutionId])
   @@map("external_step_responses")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 // Enums for User Management
@@ -797,7 +797,7 @@ model ApiKey {
 
   @@index([userId])
   @@map("api_keys")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 // User Management Models
@@ -854,7 +854,7 @@ model UserSession {
   @@index([status])
   @@index([refreshTokenExpiry])
   @@map("user_sessions")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 model User {
@@ -1152,7 +1152,7 @@ model ACLAuditLog {
   @@index([targetType, targetId])
   @@index([actorUserId])
   @@map("acl_audit_logs")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 enum PRStatus {
@@ -1547,7 +1547,7 @@ model MessageSearch {
   message          Message     @relation(fields: [messageId], references: [messageId], onDelete: Cascade)
 
   @@map("message_search")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 
@@ -1691,7 +1691,7 @@ model ExternalSource {
 
   @@index([boardId])
   @@map("external_sources")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 enum ExternalEntityType {
@@ -1717,7 +1717,7 @@ model ExternalMessage {
   @@index([externalSourceId, externalThreadId])  // Fast lookup by thread
   @@index([messageId])                           // Fast lookup by message
   @@map("external_messages")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 enum MessageDirection {
@@ -1885,7 +1885,7 @@ model Notification {
   @@index([relatedEntityType, relatedEntityId])
   @@index([createdAt])
   @@map("notifications")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 model NotificationPreference {
@@ -1917,7 +1917,7 @@ model BrowserNotificationSubscription {
 
   @@index([userId])
   @@map("browser_notification_subscriptions")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 // Call Models
@@ -2176,7 +2176,7 @@ model VespaInsertionLogs {
   @@index([type])
   @@index([entityId, entityType])
   @@map("vespa_insertion_logs")
-  @@schema("public")
+  @@schema("workflow")
 }
 
 // Repository Configuration for IDE Integration

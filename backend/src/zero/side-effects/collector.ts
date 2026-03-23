@@ -127,7 +127,6 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'conversation_participants':
     case 'message_attachments':
     case 'activities':
-    case 'notifications':
     case 'notification_preferences':
     case 'call_participants':
     case 'canvas_participants':

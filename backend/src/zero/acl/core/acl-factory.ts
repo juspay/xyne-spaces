@@ -12,7 +12,6 @@ import { ConversationsACL } from '../tables/conversations-acl';
 import { MessageAttachmentsACL } from '../tables/message-attachments-acl';
 import { MessagesACL } from '../tables/messages-acl';
 import { NotificationPreferencesACL } from '../tables/notification-preferences-acl';
-import { NotificationsACL } from '../tables/notifications-acl';
 import { OrgMembersACL } from '../tables/org-members-acl';
 import { OrganizationsACL } from '../tables/organizations-acl';
 import { ReactionCountsACL } from '../tables/reaction-counts-acl';
@@ -97,8 +96,6 @@ export class ACLFactory {
         return new NoAcl<'models'>(ctx);
       case 'notification_preferences':
         return new NotificationPreferencesACL(ctx);
-      case 'notifications':
-        return new NotificationsACL(ctx);
       case 'org_members':
         return new OrgMembersACL(ctx);
       case 'organizations':

@@ -19,7 +19,6 @@ export {
   MessageAttachmentsACL,
   MessagesACL,
   NotificationPreferencesACL,
-  NotificationsACL,
   OrgMembersACL,
   OrganizationsACL,
   ProjectsACL,
