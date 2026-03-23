@@ -362,69 +362,74 @@ async function ingestTicket(
 
    // Generate xyneId and create ticket
    const { TicketIdService } = await import('../../services/ticketIdService');
-   const xyneId = await TicketIdService.generateTicketId(db, projectId);
+   const createdTicket = await db.$transaction(async (tx) => {
+      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
-   const createdTicket = await db.ticket.create({
-      data: {
-         title: titleText,
-         description: description,
-         createdBy: userId,
-         updatedBy: userId,
-         conversationId: conversation.conversation.conversationId,
-         channelId: channelId,
-         projectId: projectId,
-         boardId: boardId,
-         ...(resolvedUserGroupId && { userGroupId: resolvedUserGroupId }),
-         stageName: ticket.stage?.replace(/_/g, ' ').toUpperCase() || 'TO BE PICKED',
-         xyneId: xyneId,
-         ...(assignedToUserId && { assignedTo: assignedToUserId }),
-         ...(ticket.eta && { eta: new Date(ticket.eta) }),
-         createdAt: new Date(ticket.created_at),
-      },
-   });
-
-   pushVespaJobForTicket(ticket.id, userId).catch(error => {
-      logger.error(`[Slack Jiraffe] Error pushing Vespa job for ticket ${ticket.id}:`, error);
-    });
-
-   // Update conversation to link it to the ticket
-   await db.conversation.update({
-      where: { conversationId: conversation.conversation.conversationId },
-      data: { ticketId: createdTicket.id },
-   });
-
-   await db.message.update({
-      where: { messageId: conversation.message.messageId },
-      data: {
-        metadata: {
-          ticketId: createdTicket.id,
-        },
-      },
-   });
-
-   // Create external message tracking record
-   await db.externalMessage.createMany({
-      data: [
-         {
-            externalSourceId: externalSource.id,
-            externalId: ticket.id,
-            externalThreadId: ticket.slack_thread_ts,
-            messageId: "", 
-            entityId: createdTicket.id, 
-            direction: MessageDirection.INCOMING,
-            entityType: 'TICKET' as ExternalEntityType,
+      const newTicket = await tx.ticket.create({
+         data: {
+            title: titleText,
+            description: description,
+            createdBy: userId,
+            updatedBy: userId,
+            conversationId: conversation.conversation.conversationId,
+            channelId: channelId,
+            projectId: projectId,
+            boardId: boardId,
+            ...(resolvedUserGroupId && { userGroupId: resolvedUserGroupId }),
+            stageName: ticket.stage?.replace(/_/g, ' ').toUpperCase() || 'TO BE PICKED',
+            xyneId: xyneId,
+            ...(assignedToUserId && { assignedTo: assignedToUserId }),
+            ...(ticket.eta && { eta: new Date(ticket.eta) }),
+            createdAt: new Date(ticket.created_at),
          },
-         {
-            externalSourceId: externalSource.id,
-            externalId: ticket.slack_thread_ts,
-            externalThreadId: ticket.slack_thread_ts,
-            messageId: "", 
-            entityId: conversation.message.messageId, 
-            direction: MessageDirection.INCOMING,
-            entityType: 'MESSAGE' as ExternalEntityType,
+      });
+
+      // Update conversation to link it to the ticket
+      await tx.conversation.update({
+         where: { conversationId: conversation.conversation.conversationId },
+         data: { ticketId: newTicket.id },
+      });
+
+      await tx.message.update({
+         where: { messageId: conversation.message.messageId },
+         data: {
+           metadata: {
+             ticketId: newTicket.id,
+           },
          },
-      ],
+      });
+
+      // Create external message tracking record
+      await tx.externalMessage.createMany({
+         data: [
+            {
+               externalSourceId: externalSource.id,
+               externalId: ticket.id,
+               externalThreadId: ticket.slack_thread_ts,
+               messageId: "", 
+               entityId: newTicket.id, 
+               direction: MessageDirection.INCOMING,
+               entityType: 'TICKET' as ExternalEntityType,
+            },
+            {
+               externalSourceId: externalSource.id,
+               externalId: ticket.slack_thread_ts,
+               externalThreadId: ticket.slack_thread_ts,
+               messageId: "", 
+               entityId: conversation.message.messageId, 
+               direction: MessageDirection.INCOMING,
+               entityType: 'MESSAGE' as ExternalEntityType,
+            },
+         ],
+      });
+
+      return newTicket;
    });
+
+   pushVespaJobForTicket(createdTicket.id, userId).catch(error => {
+      logger.error(`[Slack Jiraffe] Error pushing Vespa job for ticket ${createdTicket.id}:`, error);
+   });
+
    return threadReplies;
 }
 
