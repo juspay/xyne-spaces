@@ -55,12 +55,18 @@ interface UseCallHistoryReturn {
   handleCancelCall: (callId: string) => void;
   hasMoreCalls: boolean;
   loadMoreCalls: () => void;
+  onVisibleRangeChanged: (startIndex: number) => void;
 }
 
 export function useCallHistory(userId: string | undefined): UseCallHistoryReturn {
   const zero = useZero();
 
-  const { calls: accumulatedCalls, hasMoreCalls, loadMoreCalls } = usePaginatedCalls();
+  const {
+    calls: accumulatedCalls,
+    hasMoreCalls,
+    loadMoreCalls,
+    onVisibleRangeChanged,
+  } = usePaginatedCalls();
 
   const [allScheduledCalls] = useCachedQuery(queries.userScheduledCalls());
 
@@ -551,5 +557,6 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     handleCancelCall,
     hasMoreCalls,
     loadMoreCalls,
+    onVisibleRangeChanged,
   };
 }

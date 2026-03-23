@@ -1,11 +1,12 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
 import { useCachedQuery } from './useCachedQuery';
 
 type CallHistoryResult = QueryResultType<typeof queries.userCallHistory>;
 
-const PAGE_SIZE = 25;
+const FETCH_LIMIT = 35;
+const TRIGGER_THRESHOLD = 20;
 
 interface UsePaginatedCallsOptions {
   enabled?: boolean;
@@ -15,6 +16,7 @@ interface UsePaginatedCallsReturn {
   calls: CallHistoryResult;
   hasMoreCalls: boolean;
   loadMoreCalls: () => void;
+  onVisibleRangeChanged: (startIndex: number) => void;
   isLoading: boolean;
 }
 
@@ -23,42 +25,85 @@ export function usePaginatedCalls(options: UsePaginatedCallsOptions = {}): UsePa
 
   const [cursor, setCursor] = useState<{ id: string; startedAt: number } | null>(null);
   const [accumulatedCalls, setAccumulatedCalls] = useState<CallHistoryResult>([]);
-  const [hasMoreCalls, setHasMoreCalls] = useState(false);
+  const [hasMoreCalls, setHasMoreCalls] = useState(true);
+  const cursorIndexRef = useRef(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [newPage, queryDetails] = useCachedQuery(
-    queries.userCallHistory({ limit: PAGE_SIZE, start: cursor }),
+  const [page, queryDetails] = useCachedQuery(
+    queries.userCallHistory({ limit: FETCH_LIMIT, start: cursor }),
     { enabled },
   );
 
-  // Track cursor changes to accumulate calls
-  const prevCursorRef = useRef<string | null>('__unset__');
-  const cursorKey = cursor ? `${cursor.id}:${cursor.startedAt}` : null;
-
   useEffect(() => {
-    if (!newPage) return;
-    if (prevCursorRef.current === cursorKey) return;
-    prevCursorRef.current = cursorKey;
+    if (!page) return;
+    if (page.length === 0) {
+      setHasMoreCalls(false);
+      return;
+    }
 
-    setHasMoreCalls(newPage.length === PAGE_SIZE);
     setAccumulatedCalls(prev => {
-      return cursorKey === null ? newPage : [...prev, ...newPage];
+      const map = new Map(prev.map(c => [c.id, c]));
+      for (const call of page) map.set(call.id, call);
+      return [...map.values()].sort(
+        (a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id),
+      );
     });
-  }, [cursorKey, newPage]);
 
-  const loadMoreCalls = () => {
+    setHasMoreCalls(page.length === FETCH_LIMIT);
+  }, [page]);
+
+  const onVisibleRangeChanged = useCallback(
+    (startIndex: number) => {
+      if (accumulatedCalls.length === 0) return;
+
+      const windowStart = cursorIndexRef.current;
+      const windowEnd = windowStart + FETCH_LIMIT;
+      let nextIdx: number | undefined;
+      let nextCursor: { id: string; startedAt: number } | null | undefined;
+
+      if (startIndex + TRIGGER_THRESHOLD >= windowEnd && windowEnd < accumulatedCalls.length) {
+        nextIdx = Math.min(windowStart + TRIGGER_THRESHOLD, accumulatedCalls.length - 1);
+        const call = accumulatedCalls[nextIdx];
+        if (call) nextCursor = { id: call.id, startedAt: call.startedAt };
+      } else if (startIndex < windowStart + TRIGGER_THRESHOLD && windowStart > 0) {
+        nextIdx = Math.max(windowStart - TRIGGER_THRESHOLD, 0);
+        if (nextIdx === 0) {
+          nextCursor = null;
+        } else {
+          const call = accumulatedCalls[nextIdx];
+          if (call) nextCursor = { id: call.id, startedAt: call.startedAt };
+        }
+      }
+
+      if (nextCursor === undefined && nextIdx === undefined) return;
+
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        cursorIndexRef.current = nextIdx!;
+        setCursor(nextCursor!);
+      }, 150);
+    },
+    [accumulatedCalls],
+  );
+
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
+
+  const loadMoreCalls = useCallback(() => {
     if (!hasMoreCalls || accumulatedCalls.length === 0) return;
     const lastCall = accumulatedCalls[accumulatedCalls.length - 1];
     if (lastCall) {
+      cursorIndexRef.current = accumulatedCalls.length;
       setCursor({ id: lastCall.id, startedAt: lastCall.startedAt });
     }
-  };
+  }, [hasMoreCalls, accumulatedCalls]);
 
   const isLoading = queryDetails.type !== 'complete' && accumulatedCalls.length === 0;
 
-  return {
-    calls: accumulatedCalls,
-    hasMoreCalls,
-    loadMoreCalls,
-    isLoading,
-  };
+  return { calls: accumulatedCalls, hasMoreCalls, loadMoreCalls, onVisibleRangeChanged, isLoading };
 }
