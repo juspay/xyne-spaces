@@ -352,10 +352,8 @@ export class PRTicketStatusSyncService {
    * Find PR record from database
    */
   private async findPR(prId: number, prUrl: string): Promise<PRInfo | null> {
-    return await prisma.pullRequests.findUnique({
-      where: {
-        prId_prUrl: { prId, prUrl },
-      },
+    return await prisma.pullRequests.findFirst({
+      where: { prId, prUrl },
       select: {
         id: true,
         prId: true,

@@ -4,7 +4,7 @@ import { BitbucketService } from '@/services/bitbucketService';
 import { CommentData } from '@/types/bitbucket';
 import { config } from '@/config/env';
 import { workflowManager } from '@/workflows/services/workflowManager';
-import { WorkflowType } from '@/workflows/types/workflow-enums';
+import { WorkflowType, WorkflowExecutionStatus, isActiveStatus } from '@/workflows/types/workflow-enums';
 import { buildPRWorkflowContext } from './prWorkflowContextBuilder';
 import { randomUUID } from 'crypto';
 
@@ -20,6 +20,15 @@ export class XyneCommentService {
   ): Promise<void> {
     const { prId, projectName, repoName, prUrl } = context;
     
+    // Check if there's already an active workflow execution for this PR
+    const hasActiveExecution = await this.hasActiveExecutionForPR(prId);
+    if (hasActiveExecution) {
+      logger.info(`[Xyne-Comment] Skipping - active workflow already running for PR #${prId}`, {
+        version: '1.0',
+      });
+      return;
+    }
+
     logger.info(`[Xyne-Comment] @xyne.spaces mentioned in PR #${prId}, fetching tasks...`, {
       version: '1.0',
     });
@@ -93,6 +102,33 @@ export class XyneCommentService {
     logger.info(`[Xyne-Comment] Triggered workflow continuation with ${filteredComments.length} PR comments`, {
       version: '1.0',
     });
+  }
+
+  private async hasActiveExecutionForPR(prId: number): Promise<boolean> {
+    try {
+      const prEntries = await this.db.pullRequests.findMany({
+        where: { prId },
+        select: { workflowExecutionId: true }
+      });
+
+      const executionIds = prEntries
+        .map(pr => pr.workflowExecutionId)
+        .filter((id): id is string => id !== null);
+
+      if (executionIds.length === 0) {
+        return false;
+      }
+
+      const executions = await this.db.workflowExecution.findMany({
+        where: { id: { in: executionIds } },
+        select: { status: true }
+      });
+
+      return executions.some(exec => isActiveStatus(exec.status as WorkflowExecutionStatus));
+    } catch (error) {
+      logger.error(`[Xyne-Comment] Error checking active execution for PR #${prId}:`, error);
+      return false;
+    }
   }
 
   /**
@@ -181,7 +217,13 @@ export class XyneCommentService {
 
     const pr = await this.db.pullRequests.findFirst({
       where: { prId: prId },
-      select: { workflowExecutionId: true, sourceBranchName: true, repositoryUrl: true },
+      select: {
+        workflowExecutionId: true,
+        sourceBranchName: true,
+        destinationBranchName: true,
+        repositoryUrl: true,
+        repoName: true
+      },
     });
 
     if (!pr?.workflowExecutionId) {
@@ -274,6 +316,27 @@ export class XyneCommentService {
             description: prCommentsDescription,
           },
         },
+      });
+
+      // Immediately create PR entry to prevent duplicate entries when workflow later calls insertPRIfNotPresent
+      await this.db.pullRequests.create({
+        data: {
+          prId: prId,
+          prUrl: prUrl,
+          workflowExecutionId: result.executionId,
+          repoName: pr.repoName || '',
+          sourceBranchName: pr.sourceBranchName || workflowBranch,
+          destinationBranchName: pr.destinationBranchName || '',
+          repositoryUrl: pr.repositoryUrl || '',
+          status: 'OPEN',
+          ticketId: ticketId,
+          date: new Date(),
+        },
+      });
+      logger.info(`[Xyne-Comment] Created PR entry immediately for execution ${result.executionId}`, {
+        version: '1.0',
+        prId,
+        executionId: result.executionId,
       });
 
       // Step 5: Create SYSTEM message in conversation so workflow appears in ticket thread

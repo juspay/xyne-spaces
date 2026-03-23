@@ -1190,7 +1190,6 @@ model PullRequests {
   // Relations
   workflowExecution WorkflowExecution? @relation(fields: [workflowExecutionId], references: [id])
 
-  @@unique([prId, prUrl])
   @@index([workflowExecutionId])
   @@index([date])
   @@map("pull_requests")
