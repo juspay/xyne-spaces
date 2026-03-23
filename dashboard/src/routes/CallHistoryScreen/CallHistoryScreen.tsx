@@ -83,6 +83,7 @@ const CallHistoryScreen = (): ReactElement => {
     handleCancelCall,
     hasMoreCalls,
     loadMoreCalls,
+    onVisibleRangeChanged,
   } = useCallHistory(user?.id);
 
   const zero = useZero();
@@ -437,17 +438,10 @@ const CallHistoryScreen = (): ReactElement => {
                     recents
                   </span>
                   <div className='border border-border rounded-xl overflow-hidden'>
-                    <Virtuoso
-                      {...(scrollContainerRef.current
-                        ? { customScrollParent: scrollContainerRef.current }
-                        : {})}
-                      data={filteredRecentCalls}
-                      endReached={() => {
-                        if (!searchQuery.trim() && hasMoreCalls) loadMoreCalls();
-                      }}
-                      computeItemKey={(_, call) => call.id}
-                      itemContent={(i, call) => (
+                    {searchQuery.trim() ? (
+                      filteredRecentCalls.map((call, i) => (
                         <CallCard
+                          key={call.id}
                           call={call}
                           currentUserId={user?.id}
                           isLastItem={i === filteredRecentCalls.length - 1}
@@ -456,8 +450,34 @@ const CallHistoryScreen = (): ReactElement => {
                           handleGotoTranscript={() => handleGotoTranscript(call)}
                           handleDownloadTranscript={() => handleDownloadTranscript(call)}
                         />
-                      )}
-                    />
+                      ))
+                    ) : (
+                      <Virtuoso
+                        {...(scrollContainerRef.current
+                          ? { customScrollParent: scrollContainerRef.current }
+                          : {})}
+                        data={filteredRecentCalls}
+                        initialItemCount={Math.min(filteredRecentCalls.length, 20)}
+                        endReached={() => {
+                          if (hasMoreCalls) loadMoreCalls();
+                        }}
+                        rangeChanged={range => {
+                          onVisibleRangeChanged(range.startIndex);
+                        }}
+                        computeItemKey={(_, call) => call.id}
+                        itemContent={(i, call) => (
+                          <CallCard
+                            call={call}
+                            currentUserId={user?.id}
+                            isLastItem={i === filteredRecentCalls.length - 1}
+                            onCallClick={() => handleCallRowClick(call)}
+                            onParticipantsClick={() => handleParticipantsClick(call)}
+                            handleGotoTranscript={() => handleGotoTranscript(call)}
+                            handleDownloadTranscript={() => handleDownloadTranscript(call)}
+                          />
+                        )}
+                      />
+                    )}
                   </div>
                 </div>
               )}

@@ -61,7 +61,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
   onSelectCallForContext,
   onClose,
 }) => {
-  const { calls, hasMoreCalls, loadMoreCalls } = usePaginatedCalls();
+  const { calls, hasMoreCalls, loadMoreCalls, onVisibleRangeChanged } = usePaginatedCalls();
   const allUsers = useUsers();
   const { user } = useAuth();
   const currentUserId = user?.id;
@@ -164,6 +164,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
               endReached={() => {
                 if (hasMoreCalls) loadMoreCalls();
               }}
+              rangeChanged={range => onVisibleRangeChanged(range.startIndex)}
               computeItemKey={(_, call) => call.id}
               itemContent={(_, call) => {
                 const isActive = selectedCallId === call.id;
