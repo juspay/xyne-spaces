@@ -129,14 +129,8 @@ export class PRMetricsRepository {
   }: PRCrudProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
     try {
       // Get the current PR to check if status is changing
-      const currentPr = await this.prisma.pullRequests.findUnique({
-        where: {
-          prId_prUrl: {
-            prId,
-            prUrl
-          }
-        },
-        select: { status: true }
+      const currentPr = await this.prisma.pullRequests.findFirst({
+        where: { prId, prUrl }
       });
 
       if (!currentPr) {
@@ -147,13 +141,8 @@ export class PRMetricsRepository {
       const previousStatus = currentPr.status;
       const statusChanged = previousStatus !== 'MERGED';
 
-      const pr = await this.prisma.pullRequests.update({
-        where: {
-          prId_prUrl: {
-            prId,
-            prUrl
-          }
-        },
+      await this.prisma.pullRequests.updateMany({
+        where: { prId, prUrl },
         data: {
           status: 'MERGED',
           numberOfComments,
@@ -161,9 +150,8 @@ export class PRMetricsRepository {
         }
       });
 
-      return { pr, statusChanged, previousStatus };
+      return { pr: currentPr, statusChanged, previousStatus };
     } catch (err) {
-      // PR doesn't exist in our DB (manual PR), ignore it
       logger.info(`Ignoring webhook for manual PR: ${prUrl} (not created by Xyne)`);
       return null;
     }
@@ -178,52 +166,50 @@ export class PRMetricsRepository {
     prUrl,
     numberOfComments,
     ticketId
-  }: PRCrudProps & { ticketId?: string }): Promise<{ pr: PullRequests; isNew: boolean; statusChanged: boolean; previousStatus: string | null }> {
+  }: PRCrudProps & { ticketId?: string }): Promise<{isNew: boolean; statusChanged: boolean; previousStatus: string | null }> {
     const today = new Date();
     // today.setHours(0, 0, 0, 0);
 
     // Check if PR exists to determine if this is a create or update
-    const existingPr = await this.prisma.pullRequests.findUnique({
-      where: {
-        prId_prUrl: {
-          prId,
-          prUrl
-        }
-      },
-      select: { status: true }
+    const existingPr = await this.prisma.pullRequests.findFirst({
+      where: { prId, prUrl }
     });
 
     const isNew = !existingPr;
     const previousStatus = existingPr?.status ?? null;
     const statusChanged = existingPr ? existingPr.status !== 'OPEN' : false;
 
-    const pr = await this.prisma.pullRequests.upsert({
-      where: {
-        prId_prUrl: {
-          prId,
-          prUrl
+    if (existingPr) {
+      await this.prisma.pullRequests.updateMany({
+        where: { prId, prUrl },
+        data: {
+          status: 'OPEN',
+          numberOfComments,
+          ...(ticketId ? { ticketId } : {})
         }
-      },
-      create: {
-        date: today,
-        sourceBranchName,
-        destinationBranchName,
-        prUrl,
-        repoName,
-        status: 'OPEN',
-        prId,
-        repositoryUrl: repoUrl,
-        numberOfComments,
-        ticketId
-      },
-      update: {
-        status: 'OPEN',
-        numberOfComments,
-        ...(ticketId ? { ticketId } : {})
-      }
-    });
-
-    return { pr, isNew, statusChanged, previousStatus };
+      });
+      return {
+        isNew,
+        statusChanged,
+        previousStatus
+      };
+    } else {
+      await this.prisma.pullRequests.create({
+        data: {
+          date: today,
+          sourceBranchName,
+          destinationBranchName,
+          prUrl,
+          repoName,
+          status: 'OPEN',
+          prId,
+          repositoryUrl: repoUrl,
+          numberOfComments,
+          ticketId
+        }
+      });
+      return { isNew, statusChanged, previousStatus };
+    }
   }
 
   async markDeclinedPr({
@@ -231,17 +217,11 @@ export class PRMetricsRepository {
     repoUrl,
     numberOfComments,
     prUrl
-  }: PRCrudProps): Promise<{ pr: PullRequests; statusChanged: boolean; previousStatus: string } | null> {
+  }: PRCrudProps): Promise<{ statusChanged: boolean; previousStatus: string } | null> {
     try {
       // Get the current PR to check if status is changing
-      const currentPr = await this.prisma.pullRequests.findUnique({
-        where: {
-          prId_prUrl: {
-            prId,
-            prUrl
-          }
-        },
-        select: { status: true }
+      const currentPr = await this.prisma.pullRequests.findFirst({
+        where: { prId, prUrl }
       });
 
       if (!currentPr) {
@@ -252,13 +232,8 @@ export class PRMetricsRepository {
       const previousStatus = currentPr.status;
       const statusChanged = previousStatus !== 'DECLINED';
 
-      const pr = await this.prisma.pullRequests.update({
-        where: {
-          prId_prUrl: {
-            prId,
-            prUrl
-          }
-        },
+      await this.prisma.pullRequests.updateMany({
+        where: { prId, prUrl },
         data: {
           status: 'DECLINED',
           repositoryUrl: repoUrl,
@@ -266,7 +241,7 @@ export class PRMetricsRepository {
         }
       });
 
-      return { pr, statusChanged, previousStatus };
+      return { statusChanged, previousStatus };
     } catch (err) {
       // PR doesn't exist in our DB (manual PR), ignore it
       logger.info(`Ignoring webhook for manual PR: ${prUrl} (not created by Xyne)`);
@@ -300,7 +275,7 @@ export class PRMetricsRepository {
 
   /**
    * Count all OPEN PRs for a ticket, excluding the current PR being merged
-   * Checks both direct ticketId links and PRs linked via workflowExecutionId chain
+   * Uses groupBy to count unique PRs by prId + prUrl (since multiple entries can exist)
    */
   async countOpenPRsForTicket(
     ticketId: string,
@@ -308,7 +283,8 @@ export class PRMetricsRepository {
     excludePrUrl: string
   ): Promise<number> {
     // Count PRs with direct ticketId link
-    const directCount = await this.prisma.pullRequests.count({
+    const directPRs = await this.prisma.pullRequests.groupBy({
+      by: ['prId', 'prUrl'],
       where: {
         ticketId,
         status: 'OPEN',
@@ -340,7 +316,8 @@ export class PRMetricsRepository {
 
     // Count PRs linked via workflowExecutionId that don't have direct ticketId
     // (to avoid double counting)
-    const chainedCount = await this.prisma.pullRequests.count({
+    const chainedPRs = await this.prisma.pullRequests.groupBy({
+      by: ['prId', 'prUrl'],
       where: {
         workflowExecutionId: { in: workflowExecutionIds },
         ticketId: null, // Only count if not already linked directly
@@ -354,9 +331,12 @@ export class PRMetricsRepository {
       }
     });
 
-    const totalCount = directCount + chainedCount;
-    console.log(`[PR-Repository] Found ${totalCount} remaining open PRs for ticket ${ticketId} ` +
-      `(direct: ${directCount}, chained: ${chainedCount}), excluding PR ${excludePrId}`);
+    const allPRs = [...directPRs, ...chainedPRs];
+    const uniquePRs = new Set(allPRs.map(p => `${p.prId}:${p.prUrl}`));
+
+    const totalCount = uniquePRs.size;
+    console.log(`[PR-Repository] Found ${totalCount} unique open PRs for ticket ${ticketId} ` +
+      `(direct: ${directPRs.length}, chained: ${chainedPRs.length}), excluding PR ${excludePrId}`);
 
     return totalCount;
   }
@@ -379,16 +359,27 @@ export class PRMetricsRepository {
     destinationBranchName: string;
     numberOfComments: number;
     ticketId: string;
-  }): Promise<PullRequests> {
+  }): Promise<void> {
     const today = new Date();
-    return await this.prisma.pullRequests.upsert({
-      where: {
-        prId_prUrl: {
-          prId,
-          prUrl
+    
+    const existingPr = await this.prisma.pullRequests.findFirst({
+      where: { prId, prUrl }
+    });
+
+    if (existingPr) {
+      await this.prisma.pullRequests.updateMany({
+        where: { prId, prUrl },
+        data: {
+          numberOfComments,
+          ticketId,
+          updatedAt: today
         }
-      },
-      create: {
+      });
+      return;
+    }
+
+    await this.prisma.pullRequests.create({
+      data: {
         date: today,
         sourceBranchName,
         destinationBranchName,
@@ -399,11 +390,6 @@ export class PRMetricsRepository {
         repoName,
         numberOfComments,
         ticketId
-      },
-      update: {
-        numberOfComments,
-        ticketId,
-        updatedAt: today
       }
     });
   }

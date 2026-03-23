@@ -44,12 +44,10 @@ export class PullRequestDbService {
 
     for (const pr of pullRequests) {
       try {
-        const existingPR = await this.prisma.pullRequests.findUnique({
+        const existingPR = await this.prisma.pullRequests.findFirst({
           where: {
-            prId_prUrl: {
-              prId: pr.pr_id,
-              prUrl: pr.prUrl
-            }
+            prId: pr.pr_id,
+            prUrl: pr.prUrl
           }
         });
 
@@ -67,12 +65,10 @@ export class PullRequestDbService {
 
         if (existingPR) {
           // Update existing record
-          await this.prisma.pullRequests.update({
-            where: {
-              prId_prUrl: {
-                prId: pr.pr_id,
-                prUrl: pr.prUrl
-              }
+          await this.prisma.pullRequests.updateMany({
+            where: { 
+              prId: existingPR.prId,
+              prUrl: existingPR.prUrl
             },
             data: {
               numberOfComments: prData.numberOfComments,
