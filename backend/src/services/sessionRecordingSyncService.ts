@@ -3,7 +3,8 @@ import { redisService } from '@/services/redisService';
 import GCSServiceFactory from '@/services/gcsServiceFactory';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
-import { SessionRecordingProcessStatus } from '@prisma/client';
+import {  SessionRecordingProcessStatus  } from '@prisma/client';
+import { conversationIngestQueue } from '@/queues/conversationIngestQueue';;
 import { SESSION_RECORDING_KEYS_SET, parseSessionRecordingKey } from '@/utils/sessionRecordingKeys';
 
 interface SessionBatch {
@@ -136,12 +137,23 @@ class SessionRecordingSyncService {
     // Upload to GCS
     await this.uploadToGcs(gcsPath, mergedRecording);
 
+    const gcsUri = `gs://${config.gcs.sessionRecordingBucketName}/${gcsPath}`;
+
     // Track in database for SOP/fact extraction workflow
     await this.trackSessionRecordingFile(
       sessionId,
       firstBatch.userId,
+      gcsUri,
       mergedRecording.messages.length
     );
+
+      conversationIngestQueue.addJob({
+        gcsUri,
+        source: 'xyne-cli',
+        sourceId: `${sessionId}`,
+      }).catch((queueErr) => {
+        logger.error(`[SESSION-RECORDING-SYNC] Failed to enqueue ingest job for session ${sessionId}:`, queueErr);
+      });
 
     logger.info(`[SESSION-RECORDING-SYNC] Synced ${batches.length} batches for ${redisKey} to GCS: ${gcsPath}`, {
       messageCount: messages.length,
@@ -156,6 +168,7 @@ class SessionRecordingSyncService {
   private async trackSessionRecordingFile(
     sessionId: string,
     userId: string,
+    url: string,
     totalMessages: number
   ): Promise<void> {
     try {
@@ -165,10 +178,12 @@ class SessionRecordingSyncService {
         where: { sessionId },
         update: {
           status: SessionRecordingProcessStatus.PENDING,
+          url,
         },
         create: {
           sessionId,
           userId,
+          url,
           status: SessionRecordingProcessStatus.PENDING,
           lastProcessedTurn: null,
         },

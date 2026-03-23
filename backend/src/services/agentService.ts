@@ -1,7 +1,8 @@
 import { AgentConfig, createDefaultAgentConfig, Agent, validateAndThrow } from 'agentic-framework';
+import type { ProviderConfiguration } from 'agentic-framework';
 import { repositories } from '../database/repositories/index.js';
 import type { FullAgent } from '../types/database.js';
-
+import { config as appConfig } from '@/config/env'
 /**
  * Agent Service - Bridge between Database and Framework
  *
@@ -74,6 +75,19 @@ export class AgentService {
     return this.convertDbToAgentConfig(dbAgent);
   }
 
+  async getAgentConfigWithSystemPrompt(
+    agentName: string,
+  ): Promise<{ config: AgentConfig; systemPrompt: string }> {
+    const dbAgent = await this.getAgentFromDatabase(agentName);
+    if (!dbAgent) {
+      throw new Error(`Agent '${agentName}' not found in database`);
+    }
+    return {
+      config: this.convertDbToAgentConfig(dbAgent, 300000),
+      systemPrompt: dbAgent.systemPrompt ?? '',
+    };
+  }
+
   /**
    * Clear cache
    */
@@ -113,26 +127,24 @@ export class AgentService {
   /**
    * Private: Convert DB agent to framework AgentConfig
    */
-  private convertDbToAgentConfig(dbAgent: FullAgent): AgentConfig {
+  private convertDbToAgentConfig(dbAgent: FullAgent, timeout?: number): AgentConfig {
     // Start with framework defaults
     const defaultConfig = createDefaultAgentConfig();
 
-    // Parse model credentials
-    let modelCredentials;
-    try {
-      modelCredentials = JSON.parse(dbAgent.model.credentials);
-    } catch (error) {
-      throw new Error(`Invalid model credentials for agent '${dbAgent.name}': ${error}`);
-    }
-
     // Build AgentConfig using defaults + DB overrides
+    const provider: ProviderConfiguration = {
+      type: 'litellm' as const,
+      config: {
+        baseUrl: appConfig.litellm.baseUrl,
+        apiKey: appConfig.litellm.apiKey ?? '',
+        ...(timeout !== undefined && { timeout }),
+      },
+    };
+
     const agentConfig: AgentConfig = {
       // Model config - merge DB data with defaults
       model: {
-        provider: {
-          type: dbAgent.model.provider as 'vertex' | 'litellm',
-          config: modelCredentials,
-        },
+        provider,
         defaultModel: dbAgent.model.name,
         features: defaultConfig.model.features,
         ...(dbAgent.temp !== null && { temperature: dbAgent.temp }),

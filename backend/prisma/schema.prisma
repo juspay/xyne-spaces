@@ -2750,7 +2750,7 @@ model SessionRecordingFile {
   id                String   @id @default(cuid())
   sessionId         String   @unique
   userId            String
-  
+  url               String?  // Full GCS URI: gs://bucket/path/to/file.json
   status            SessionRecordingProcessStatus @default(PENDING)
   lastProcessedTurn Int?     // Last turn ID that was processed for SOP/fact extraction
 

@@ -1,8 +1,12 @@
 import GCSServiceFactory from './gcsServiceFactory';
 import { redisService } from './redisService';
+import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { WORKFLOW_KEYS_SET, parseWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
+import { db } from '@/database/client';
+import { DatabaseClient } from '@/database/client';
+import { SessionRecordingProcessStatus } from '@prisma/client';
 
 export interface WorkflowStepData {
   stepId: string;
@@ -104,6 +108,59 @@ export class WorkflowStepGcsSyncService {
     });
 
     logger.info(`[GCS-SYNC] Synced ${steps.length} steps for ${redisKey} to GCS: ${gcsPath}`);
+
+    const gcsUri = `gs://${config.gcs.workflowStepsBucketName}/${gcsPath}`;
+
+    let sourceId = workflowExecutionId;
+    if (stepName) {
+      try {
+        const step = await db.workflowStep.findFirst({
+          where: { workflowExecutionId, stepName },
+          select: { id: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (step) {
+          sourceId = step.id;
+          logger.info(`[GCS-SYNC] Resolved sourceId=${sourceId} (WorkflowStep.id) for stepName=${stepName} executionId=${workflowExecutionId}`);
+        } else {
+          logger.warn(`[GCS-SYNC] WorkflowStep not found for executionId=${workflowExecutionId} stepName=${stepName}, falling back to executionId as sourceId`);
+        }
+      } catch (err) {
+        logger.error(`[GCS-SYNC] Failed to resolve WorkflowStep.id for ${workflowExecutionId}/${stepName}:`, err);
+      }
+    }
+
+    try {
+      const execution = await db.workflowExecution.findUnique({
+        where: { id: workflowExecutionId },
+        select: { createdBy: true },
+      });
+      const userId = execution?.createdBy ?? '';
+      const prisma = DatabaseClient.getInstance();
+      await prisma.sessionRecordingFile.upsert({
+        where: { sessionId: sourceId },
+        create: {
+          sessionId: sourceId,
+          userId,
+          url: gcsUri,
+          status: SessionRecordingProcessStatus.PENDING,
+        },
+        update: {
+          status: SessionRecordingProcessStatus.PENDING,
+          url: gcsUri,
+        },
+      });
+    } catch (err) {
+      logger.warn(`[GCS-SYNC] Failed to upsert SessionRecordingFile for sourceId=${sourceId}:`, err);
+    }
+
+    conversationIngestQueue.addJob({
+      gcsUri,
+      source: 'workflowSteps',
+      sourceId,
+    }).catch((queueErr) => {
+      logger.error(`[GCS-SYNC] Failed to enqueue ingest job for sourceId=${sourceId}:`, queueErr);
+    });
   }
 }
 
