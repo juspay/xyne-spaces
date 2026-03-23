@@ -13,7 +13,6 @@ export { ConversationsACL } from './conversations-acl';
 export { MessageAttachmentsACL } from './message-attachments-acl';
 export { MessagesACL } from './messages-acl';
 export { NotificationPreferencesACL } from './notification-preferences-acl';
-export { NotificationsACL } from './notifications-acl';
 export { OrgMembersACL } from './org-members-acl';
 export { OrganizationsACL } from './organizations-acl';
 export { ProjectsACL } from './projects-acl';

@@ -19,7 +19,6 @@ import {
   MessageAttachmentsACL,
   MessagesACL,
   NotificationPreferencesACL,
-  NotificationsACL,
   OrgMembersACL,
   OrganizationsACL,
   ProjectsACL,
@@ -92,8 +91,6 @@ export class QueryACLFactory {
         return new MessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'notification_preferences':
         return new NotificationPreferencesACL(ctx) as BaseQueryACL<TTable>;
-      case 'notifications':
-        return new NotificationsACL(ctx) as BaseQueryACL<TTable>;
       case 'org_members':
         return new OrgMembersACL(ctx) as BaseQueryACL<TTable>;
       case 'organizations':
