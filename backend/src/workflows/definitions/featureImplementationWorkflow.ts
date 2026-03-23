@@ -38,13 +38,11 @@ export interface FeatureImplementationOutput {
 // Agent configuration helper - properly typed with complete AgentConfig
 const createAgentConfig = (
   _name: string,
-  instructions: string,
   initialMessage: string,
   _toolNames?: string[]
 ): AgenticCheckpointConfig => {
   return {
     conversationContext: {
-      systemPrompt: instructions,
       initialUserMessage: initialMessage
     },
     repoInfo: {
@@ -57,11 +55,6 @@ const createAgentConfig = (
 const getContextExtractionConfig = (title: string, description: string, requirements: string) =>
   createAgentConfig(
     'context_extractor',
-    `Analyze the feature request and extract all necessary technical context including:
-- Affected modules/components
-- Dependencies
-- Technical constraints
-- Implementation scope`,
     `Feature Request:
 Title: ${title}
 Description: ${description}
@@ -73,14 +66,6 @@ Please analyze and extract technical context.`
 const getPlanSelectionConfig = (plan1: any, plan2: any) =>
   createAgentConfig(
     'plan_selector',
-    `You are a senior technical architect. Review both implementation plans and select the optimal one based on:
-- Code quality and maintainability
-- Performance implications
-- Risk level
-- Implementation complexity
-- Alignment with requirements
-
-Return your selection as: "Plan 1" or "Plan 2" with reasoning.`,
     `Plan 1:
 ${JSON.stringify(plan1, null, 2)}
 
@@ -108,8 +93,6 @@ Please address the feedback and make necessary corrections.`
 
   return createAgentConfig(
     'feature_developer',
-    `You are a senior software engineer. Implement the feature changes using the available tools.
-Write clean, maintainable code following best practices.`,
     prompt
   )
 }
@@ -117,20 +100,6 @@ Write clean, maintainable code following best practices.`,
 const getVerificationConfig = () =>
   createAgentConfig(
     'code_reviewer',
-    `You are a code reviewer. Verify the implementation by:
-- Checking code quality
-- Validating requirements are met
-- Identifying bugs or issues
-- Suggesting improvements
-
-DO NOT make any changes. Only provide feedback.
-
-Return a JSON object with:
-{
-  "passed": boolean,
-  "issues": string[],
-  "suggestions": string[]
-}`,
     `Review the changes made in this iteration. Provide verification feedback.`,
      ['read', 'grep', 'bash', 'ls'] // Read-only tools
   )
@@ -138,17 +107,6 @@ Return a JSON object with:
 const getFinalizationConfig = (ticketId: string) =>
   createAgentConfig(
     'implementation_summarizer',
-    `Create a summary of the implementation including:
-- Files changed
-- Key changes made
-- Commit message
-
-Return as JSON:
-{
-  "filesChanged": string[],
-  "commitHash": string,
-  "summary": string
-}`,
     `Summarize the completed implementation for ticket ${ticketId}.`
   )
 

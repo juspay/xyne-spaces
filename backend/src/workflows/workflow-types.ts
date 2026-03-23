@@ -144,7 +144,6 @@ export type AgenticCheckpointConfig = {
   conversationContext?: {
     messages?: readonly Message[]  // Framework Message type
     initialUserMessage?: string
-    systemPrompt?: string
   }
   repoInfo: {
     repoUrl: string
