@@ -49,7 +49,7 @@ export class ZohoService {
   /**
    * Exchange refresh token for access token
    */
-  private async getAccessToken(): Promise<string> {
+  private async getAccessToken(scope: string = 'Desk.tickets.UPDATE'): Promise<string> {
     try {
       logger.info('[ZohoService] Exchanging refresh token for access token');
       
@@ -58,7 +58,7 @@ export class ZohoService {
       params.append('client_id', this.credentials.clientId);
       params.append('client_secret', this.credentials.clientSecret);
       params.append('grant_type', 'refresh_token');
-      params.append('scope', 'Desk.tickets.UPDATE');
+      params.append('scope', scope);
 
       const response = await axios.post(
         'https://accounts.zoho.com/oauth/v2/token',
@@ -128,5 +128,27 @@ export class ZohoService {
     return {
       threadId: response.data.id,
     };
+  }
+
+  /**
+   * Get thread details from Zoho API
+   */
+  async getThreadDetails(ticketId: string, threadId: string): Promise<any> {
+    logger.info(`[ZohoService] Fetching thread details for ticket ${ticketId}, thread ${threadId}`);
+
+    // Get fresh access token with READ scope
+    const accessToken = await this.getAccessToken('Desk.tickets.READ');
+
+    const response = await this.client.get(`/tickets/${ticketId}/threads/${threadId}`, {
+      headers: {
+        'Authorization': `Zoho-oauthtoken ${accessToken}`,
+      },
+      params: {
+        include: 'plainText',
+      },
+    });
+
+    logger.info(`[ZohoService] Thread details fetched successfully`);
+    return response.data;
   }
 }
