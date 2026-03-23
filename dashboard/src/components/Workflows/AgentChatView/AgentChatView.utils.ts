@@ -32,6 +32,7 @@ export interface AgentMessage {
     baseName: string;
     index: number;
   };
+  replyContext?: string;
 }
 
 export interface GraphNodeInfo {
@@ -61,6 +62,7 @@ export interface AgentInfo {
     | 'ghost'
     | 'laugh'
     | 'skull'
+    | 'user'
     | 'user-round-cog';
 }
 
@@ -73,6 +75,18 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
   }
 
   const lower = nameToCheck.toLowerCase();
+
+  if (lower === 'user_message' || lower === 'user_input' || lower === 'user') {
+    return {
+      name: 'User',
+      avatarBg: 'bg-slate-800 border-2 border-slate-700',
+      avatarText: 'text-slate-100',
+      initials: 'US',
+      labelColor: 'text-foreground',
+      bubbleBg: 'bg-muted/50 border border-border/50',
+      icon: 'user',
+    };
+  }
 
   if (lower.includes('review') || lower.includes('audit')) {
     return {
@@ -403,6 +417,40 @@ export const extractAllSubMessages = (
       }
     }
 
+    subStep.expandedSteps?.forEach(processSubStep);
+  };
+
+  combinedStepsData.workflows.forEach(workflow => {
+    workflow.steps.forEach(step => {
+      if (!stepIdSet.has(step.id)) return;
+
+      step.expandedExecutions?.forEach(exec => {
+        exec.steps.forEach(processSubStep);
+      });
+      step.expandedWorkflows?.forEach(exec => {
+        exec.steps.forEach(processSubStep);
+      });
+      step.expandedSteps?.forEach(processSubStep);
+    });
+  });
+
+  return collected;
+};
+
+/**
+ * Collect all user_message steps from expanded executions.
+ */
+export const extractUserMessages = (
+  nodeStepIds: string[],
+  combinedStepsData: CombinedWorkflowData,
+): WorkflowStep[] => {
+  const stepIdSet = new Set(nodeStepIds);
+  const collected: WorkflowStep[] = [];
+
+  const processSubStep = (subStep: WorkflowStep): void => {
+    if (subStep.stepName === 'user_message') {
+      collected.push(subStep);
+    }
     subStep.expandedSteps?.forEach(processSubStep);
   };
 
