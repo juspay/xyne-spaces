@@ -11,6 +11,8 @@ import {
   Package,
   Search,
   File,
+  Phone,
+  Paperclip,
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -29,6 +31,14 @@ import { useResearchOptions, type ResearchContext } from '../../../../hooks/useR
 import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
+import { Popover } from '../../../ui/Popover/Popover';
+import { TicketIcon } from '../../../../assets/icons';
+import { Dialog } from '../../../ui/Dialog';
+import { CanvasAttachmentModal } from '../../../Canvas/CanvasAttachmentModal/CanvasAttachmentModal';
+import { TicketAttachmentModal } from '../../../Tickets/TicketAttachmentModal/TicketAttachmentModal';
+import { CallTranscriptSelector } from '../../CallTranscriptSelector';
+import type { Canvas } from '../../../Canvas';
+import type { Ticket } from '../../../../hooks/useTickets';
 
 // Hash icon component
 const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
@@ -47,6 +57,9 @@ interface BrowserContext {
   timestamp: number;
 }
 
+// Maximum number of context items (canvas + tickets + calls combined)
+const MAX_CONTEXT_ITEMS = 5;
+
 interface XyneAIInputBoxProps {
   channelId?: string | null;
   channelName?: string;
@@ -60,6 +73,9 @@ interface XyneAIInputBoxProps {
   onInputChange: (value: string) => void;
   onSubmit: () => void;
   onSelectedChannelsChange?: (channelIds: string[]) => void;
+  onSelectedCanvasesChange?: (canvasIds: string[]) => void;
+  onSelectedTicketsChange?: (ticketIds: string[]) => void;
+  onSelectedCallsChange?: (callIds: string[]) => void;
   onResearchContextChange?: (context: ResearchContext | null) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
@@ -74,12 +90,31 @@ interface XyneAIInputBoxProps {
   onWebSearchToggle?: () => void;
   createCanvasEnabled?: boolean;
   onCreateCanvasToggle?: () => void;
+  onCreateCanvasRequest?: () => void;
+  onCreateTicketRequest?: () => void;
 }
 
 interface SelectedChannel {
   id: string;
   name: string;
   isPrivate: boolean;
+}
+
+interface SelectedCanvas {
+  id: string;
+  title: string;
+  viewAccessId?: string;
+}
+
+interface SelectedTicket {
+  id: string;
+  title: string;
+  xyneId?: string | null;
+}
+
+interface SelectedCall {
+  id: string;
+  title: string | null;
 }
 
 export interface Attachment {
@@ -104,6 +139,9 @@ export const XyneAIInputBox = ({
   onInputChange,
   onSubmit,
   onSelectedChannelsChange,
+  onSelectedCanvasesChange,
+  onSelectedTicketsChange,
+  onSelectedCallsChange,
   onResearchContextChange,
   onThreadInfoChange,
   onSelectionInfosChange,
@@ -118,6 +156,8 @@ export const XyneAIInputBox = ({
   onWebSearchToggle,
   createCanvasEnabled = false,
   onCreateCanvasToggle,
+  onCreateCanvasRequest,
+  onCreateTicketRequest,
 }: XyneAIInputBoxProps): ReactElement => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const researchDropdownRef = useRef<HTMLDivElement>(null);
@@ -167,6 +207,13 @@ export const XyneAIInputBox = ({
   });
 
   const [selectedAttachments, setSelectedAttachments] = useState<Attachment[]>([]);
+  const [selectedCanvases, setSelectedCanvases] = useState<SelectedCanvas[]>([]);
+  const [selectedTickets, setSelectedTickets] = useState<SelectedTicket[]>([]);
+  const [selectedCalls, setSelectedCalls] = useState<SelectedCall[]>([]);
+  const [isAttachmentPopoverOpen, setIsAttachmentPopoverOpen] = useState(false);
+  const [isCanvasModalOpen, setIsCanvasModalOpen] = useState(false);
+  const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
+  const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
   const [showChannelDropdown, setShowChannelDropdown] = useState(false);
   const [channelSearchQuery, setChannelSearchQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -493,6 +540,24 @@ export const XyneAIInputBox = ({
     onAttachmentsChange?.(selectedAttachments);
   }, [selectedAttachments, onAttachmentsChange]);
 
+  // Notify parent component when selected canvases change
+  useEffect(() => {
+    const canvasIds = selectedCanvases.map(c => c.id);
+    onSelectedCanvasesChange?.(canvasIds);
+  }, [selectedCanvases, onSelectedCanvasesChange]);
+
+  // Notify parent component when selected tickets change
+  useEffect(() => {
+    const ticketIds = selectedTickets.map(t => t.id);
+    onSelectedTicketsChange?.(ticketIds);
+  }, [selectedTickets, onSelectedTicketsChange]);
+
+  // Notify parent component when selected calls change
+  useEffect(() => {
+    const callIds = selectedCalls.map(c => c.id);
+    onSelectedCallsChange?.(callIds);
+  }, [selectedCalls, onSelectedCallsChange]);
+
   // Sync inputValue changes from parent to editor
   useEffect(() => {
     if (editor && !editor.isFocused) {
@@ -561,9 +626,116 @@ export const XyneAIInputBox = ({
     setSelectedChannels(selectedChannels.filter(ch => ch.id !== channelIdToRemove));
   };
 
-  // Handle attachment button click
-  const handleAttachmentClick = (): void => {
-    fileInputRef.current?.click();
+  // Handle canvas selection
+  const handleCanvasSelect = (canvas: Canvas): void => {
+    setIsCanvasModalOpen(false);
+
+    // Check if canvas is already selected
+    if (selectedCanvases.some(c => c.id === canvas.id)) {
+      return;
+    }
+
+    // Check if maximum limit of 5 context items (canvas + tickets + calls) is reached
+    const totalContextItems =
+      selectedCanvases.length + selectedTickets.length + selectedCalls.length;
+    if (totalContextItems >= MAX_CONTEXT_ITEMS) {
+      toast.error('Maximum 5 context items can be added', { duration: 2000 });
+      return;
+    }
+
+    // Add canvas to selected canvases
+    const newCanvas: SelectedCanvas = {
+      id: canvas.id,
+      title: canvas.title || 'Untitled',
+      ...(canvas.viewAccessId && { viewAccessId: canvas.viewAccessId }),
+    };
+    setSelectedCanvases([...selectedCanvases, newCanvas]);
+  };
+
+  // Handle create new canvas
+  const handleCreateNewCanvas = (): void => {
+    setIsCanvasModalOpen(false);
+    onCreateCanvasRequest?.();
+  };
+
+  // Handle removing a canvas
+  const handleRemoveCanvas = (canvasId: string): void => {
+    setSelectedCanvases(selectedCanvases.filter(c => c.id !== canvasId));
+  };
+
+  // Handle ticket selection
+  const handleTicketSelect = (ticket: Ticket): void => {
+    setIsTicketModalOpen(false);
+
+    // Check if ticket is already selected
+    if (selectedTickets.some(t => t.id === ticket.id)) {
+      return;
+    }
+
+    // Check if maximum limit of 5 context items (canvas + tickets + calls) is reached
+    const totalContextItems =
+      selectedCanvases.length + selectedTickets.length + selectedCalls.length;
+    if (totalContextItems >= MAX_CONTEXT_ITEMS) {
+      toast.error('Maximum 5 context items can be added', { duration: 2000 });
+      return;
+    }
+
+    // Add ticket to selected tickets
+    const newTicket: SelectedTicket = {
+      id: ticket.id,
+      title: ticket.title,
+      xyneId: ticket.xyneId,
+    };
+    setSelectedTickets([...selectedTickets, newTicket]);
+  };
+
+  // Handle create new ticket
+  const handleCreateNewTicket = (): void => {
+    setIsTicketModalOpen(false);
+    onCreateTicketRequest?.();
+  };
+
+  // Handle removing a ticket
+  const handleRemoveTicket = (ticketId: string): void => {
+    setSelectedTickets(selectedTickets.filter(t => t.id !== ticketId));
+  };
+
+  // Handle call/transcript selection (attach as context)
+  const handleCallSelect = (call: { id: string; title: string | null }): void => {
+    setIsTranscriptSelectorOpen(false);
+
+    // Check if call is already selected
+    if (selectedCalls.some(c => c.id === call.id)) {
+      return;
+    }
+
+    // Check if maximum limit of 5 context items (canvas + tickets + calls) is reached
+    const totalContextItems =
+      selectedCanvases.length + selectedTickets.length + selectedCalls.length;
+    if (totalContextItems >= MAX_CONTEXT_ITEMS) {
+      toast.error('Maximum 5 context items can be added', { duration: 2000 });
+      return;
+    }
+
+    // Add call to selected calls
+    const newCall: SelectedCall = {
+      id: call.id,
+      title: call.title,
+    };
+    setSelectedCalls([...selectedCalls, newCall]);
+  };
+
+  // Handle removing a call
+  const handleRemoveCall = (callId: string): void => {
+    setSelectedCalls(selectedCalls.filter(c => c.id !== callId));
+  };
+
+  // Handle transcript selection (insert as text) - legacy method
+  const handleTranscriptSelect = (transcript: string): void => {
+    setIsTranscriptSelectorOpen(false);
+    // Insert transcript into editor
+    editor?.commands.insertContent(transcript);
+    toast.success('Transcript added', { duration: 2000 });
   };
 
   // File size limits
@@ -1185,6 +1357,87 @@ export const XyneAIInputBox = ({
             </div>
           )}
 
+          {/* Canvas Pills */}
+          {selectedCanvases.map(canvas => (
+            <div
+              key={canvas.id}
+              className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+            >
+              <div className='flex items-center gap-1'>
+                <div className='flex-shrink-0'>
+                  <FileText className='w-3.5 h-3.5 text-muted-foreground' />
+                </div>
+                <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                  {canvas.title}
+                </span>
+              </div>
+              <button
+                onClick={() => handleRemoveCanvas(canvas.id)}
+                className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                aria-label={`Remove ${canvas.title}`}
+                data-track-category='XyneAI'
+                data-track-name='REMOVE_CANVAS'
+                data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+              >
+                <X className='w-3 h-3' />
+              </button>
+            </div>
+          ))}
+
+          {/* Ticket Pills */}
+          {selectedTickets.map(ticket => (
+            <div
+              key={ticket.id}
+              className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+            >
+              <div className='flex items-center gap-1'>
+                <div className='flex-shrink-0'>
+                  <TicketIcon className='w-3.5 h-3.5' />
+                </div>
+                <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                  {ticket.xyneId ? `${ticket.xyneId}: ${ticket.title}` : ticket.title}
+                </span>
+              </div>
+              <button
+                onClick={() => handleRemoveTicket(ticket.id)}
+                className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                aria-label={`Remove ${ticket.title}`}
+                data-track-category='XyneAI'
+                data-track-name='REMOVE_TICKET'
+                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+              >
+                <X className='w-3 h-3' />
+              </button>
+            </div>
+          ))}
+
+          {/* Call Pills */}
+          {selectedCalls.map(call => (
+            <div
+              key={call.id}
+              className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+            >
+              <div className='flex items-center gap-1'>
+                <div className='flex-shrink-0'>
+                  <Phone className='w-3.5 h-3.5 text-muted-foreground' />
+                </div>
+                <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                  {call.title || 'Untitled Call'}
+                </span>
+              </div>
+              <button
+                onClick={() => handleRemoveCall(call.id)}
+                className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                aria-label={`Remove ${call.title || 'Untitled Call'}`}
+                data-track-category='XyneAI'
+                data-track-name='REMOVE_CALL'
+                data-track-metadata={JSON.stringify({ callId: call.id })}
+              >
+                <X className='w-3 h-3' />
+              </button>
+            </div>
+          ))}
+
           {/* Attachment Pills */}
           {selectedAttachments.map(attachment => (
             <div
@@ -1256,21 +1509,95 @@ export const XyneAIInputBox = ({
               className='hidden'
               aria-label='Upload files'
             />
-            {/* Attachment button */}
-            <button
-              type='button'
-              onClick={handleAttachmentClick}
-              className='p-1.5 -ml-1.5 rounded-lg hover:bg-accent transition-colors'
-              aria-label='Attach files'
-              title='Attach files'
-              data-track-category='XyneAI'
-              data-track-name='ATTACH_FILES'
+            {/* Attachment button with popover */}
+            <Popover
+              trigger={
+                <button
+                  type='button'
+                  className='p-1.5 -ml-1.5 rounded-lg hover:bg-accent transition-colors'
+                  aria-label='Add Context'
+                  title='Add Context'
+                  data-track-category='XyneAI'
+                  data-track-name='ATTACH_FILES'
+                >
+                  <Plus className='w-4 h-4 text-muted-foreground' />
+                </button>
+              }
+              open={isAttachmentPopoverOpen}
+              onOpenChange={setIsAttachmentPopoverOpen}
+              side='top'
+              align='start'
+              sideOffset={8}
+              className='p-0 min-w-[180px]'
             >
-              <Plus className='w-4 h-4 text-muted-foreground' />
-            </button>
+              <div className='flex flex-col'>
+                {/* Add Context */}
+                <button
+                  type='button'
+                  onClick={() => {
+                    fileInputRef.current?.click();
+                    setIsAttachmentPopoverOpen(false);
+                  }}
+                  className='flex items-center gap-3 px-4 py-2.5 hover:bg-accent transition-colors text-left'
+                  data-track-category='XyneAI'
+                  data-track-name='ATTACH_FILES'
+                >
+                  <Paperclip className='w-4 h-4 text-muted-foreground' />
+                  <span className='text-sm'>Attach Files</span>
+                </button>
+
+                {/* Separator */}
+                <div className='border-t border-border my-1' />
+
+                {/* Add Canvas */}
+                <button
+                  type='button'
+                  onClick={() => {
+                    setIsAttachmentPopoverOpen(false);
+                    setIsCanvasModalOpen(true);
+                  }}
+                  className='flex items-center gap-3 px-4 py-2.5 hover:bg-accent transition-colors text-left'
+                  data-track-category='XyneAI'
+                  data-track-name='ADD_CANVAS'
+                >
+                  <FileText className='w-4 h-4 text-muted-foreground' />
+                  <span className='text-sm'>Add Canvas</span>
+                </button>
+
+                {/* Add Ticket */}
+                <button
+                  type='button'
+                  onClick={() => {
+                    setIsAttachmentPopoverOpen(false);
+                    setIsTicketModalOpen(true);
+                  }}
+                  className='flex items-center gap-3 px-4 py-2.5 hover:bg-accent transition-colors text-left'
+                  data-track-category='XyneAI'
+                  data-track-name='ADD_TICKET'
+                >
+                  <TicketIcon className='w-4 h-4 text-muted-foreground' />
+                  <span className='text-sm'>Add Ticket</span>
+                </button>
+
+                {/* Add Transcript */}
+                <button
+                  type='button'
+                  onClick={() => {
+                    setIsAttachmentPopoverOpen(false);
+                    setIsTranscriptSelectorOpen(true);
+                  }}
+                  className='flex items-center gap-3 px-4 py-2.5 hover:bg-accent transition-colors text-left'
+                  data-track-category='XyneAI'
+                  data-track-name='ADD_TRANSCRIPT'
+                >
+                  <Phone className='w-4 h-4 text-muted-foreground' />
+                  <span className='text-sm'>Add Transcript</span>
+                </button>
+              </div>
+            </Popover>
 
             {/* Divider line */}
-            {onWebSearchToggle && <div className='h-4 w-px bg-muted' />}
+            {onWebSearchToggle && <div className='h-4 w-px bg-gray-300' />}
 
             {/* Web Search Toggle Button */}
             {onWebSearchToggle && (
@@ -1523,6 +1850,35 @@ export const XyneAIInputBox = ({
           </div>
         </div>
       )}
+
+      {/* Canvas Attachment Modal */}
+      <CanvasAttachmentModal
+        isOpen={isCanvasModalOpen}
+        onClose={() => setIsCanvasModalOpen(false)}
+        onSelectCanvas={handleCanvasSelect}
+        onCreateNewCanvas={handleCreateNewCanvas}
+      />
+
+      {/* Ticket Attachment Modal */}
+      <TicketAttachmentModal
+        isOpen={isTicketModalOpen}
+        onClose={() => setIsTicketModalOpen(false)}
+        onSelectTicket={handleTicketSelect}
+        onCreateNewTicket={handleCreateNewTicket}
+      />
+
+      {/* Call Transcript Selector */}
+      <Dialog
+        open={isTranscriptSelectorOpen}
+        onOpenChange={setIsTranscriptSelectorOpen}
+        className='max-w-[900px] w-full !p-0 border-none bg-transparent shadow-none overflow-visible'
+      >
+        <CallTranscriptSelector
+          onSelect={handleTranscriptSelect}
+          onSelectCallForContext={handleCallSelect}
+          onClose={() => setIsTranscriptSelectorOpen(false)}
+        />
+      </Dialog>
     </div>
   );
 };

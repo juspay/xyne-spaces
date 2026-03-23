@@ -30,6 +30,7 @@ CHANNEL CONTEXT - {{channel_context}}
 CURRENT USER - {{user_info}}
 RESEARCH CONTEXT - {{research_context}}
 THREAD CONTEXT - {{thread_context}}
+PROVIDED CONTEXT - {{provided_context}}
 </context>
 
 <tools_definition>

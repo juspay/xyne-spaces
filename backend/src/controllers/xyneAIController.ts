@@ -60,6 +60,9 @@ const XyneAIRequestSchema = z.object({
     filename: z.string().optional(),
   })).optional(),
   message_attachment_ids: z.array(z.string().min(1)).optional(), // Attachment IDs to fetch from GCS
+  canvas_ids: z.array(z.string().min(1)).optional(), // Canvas IDs to fetch and inject as context
+  ticket_ids: z.array(z.string().min(1)).optional(), // Ticket IDs to fetch and inject as context
+  call_ids: z.array(z.string().min(1)).optional(), // Call IDs to fetch and inject as context
 });
 
 // Feedback request validation schema
@@ -93,7 +96,7 @@ export class XyneAIController {
       return;
     }
 
-    const { query, session_id, channel_ids, conversation_id, canvas_view_access_id, selection_contexts, create_canvas_enabled, web_search_enabled, research_context, attachments, message_attachment_ids } = parseResult.data;
+    const { query, session_id, channel_ids, conversation_id, canvas_view_access_id, selection_contexts, create_canvas_enabled, web_search_enabled, research_context, attachments, message_attachment_ids, canvas_ids, ticket_ids, call_ids } = parseResult.data;
 
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -167,6 +170,9 @@ export class XyneAIController {
         webSearchEnabled: web_search_enabled,
         researchContext: research_context || undefined,
         messageAttachmentIds: message_attachment_ids,
+        canvasIds: canvas_ids || [],
+        ticketIds: ticket_ids || [],
+        callIds: call_ids || [],
         agentsConfig,  // Pass CAC config to stream
       };
 

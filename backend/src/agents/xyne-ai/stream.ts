@@ -16,8 +16,8 @@ import {
   type SessionContext,
 } from './storage/index.js';
 
-import { getAndClearSessionMappings, type EnhancedCitationMappings, type StreamProvider, type StreamEventCallback } from './tools/index.js';
-import { createOnEventHandler } from './langfuse/index.js';
+import { getAndClearSessionMappings, appendEnhancedSessionMappings, type EnhancedCitationMappings, type StreamProvider, type StreamEventCallback } from './tools/index.js';
+import { createOnEventHandler, buildProvidedContextCitationRefs } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
 import { AgentsConfig } from '../config.js';
 import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
@@ -31,6 +31,7 @@ import type {
   AttachmentData,
   UserTag,
 } from './types.js';
+import { fetchProvidedContexts, type ProvidedContexts } from './utils/contextFetcher.js';
 
 type InMemoryStreamProvider = ReturnType<typeof Streaming.createInMemoryStreamProvider>;
 
@@ -205,7 +206,7 @@ export interface XyneAIStreamRequest extends XyneAIRequest {
 export async function* xyneAIStream(
   request: XyneAIStreamRequest
 ): AsyncGenerator<XyneAIStreamChunk, void, unknown> {
-  const { query, sessionId, channelIds, conversationId, canvasViewAccessId, selectionContexts, createCanvasEnabled, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds, agentsConfig } = request;
+  const { query, sessionId, channelIds, conversationId, canvasViewAccessId, selectionContexts, createCanvasEnabled, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds, agentsConfig, canvasIds, ticketIds, callIds } = request;
 
   // Use provided config or fetch defaults
   const cacConfig = agentsConfig ?? AgentsConfig.defaults();
@@ -254,6 +255,76 @@ export async function* xyneAIStream(
     ...(attachments || []),
     ...fetchedAttachments,
   ];
+
+  // Fetch provided contexts (canvas, ticket, call) if IDs are provided
+  let providedContexts: ProvidedContexts | undefined;
+  const PROVIDED_CONTEXT_PREFIX = 'P'; // Prefix for provided context citations
+  
+  if (canvasIds?.length || ticketIds?.length || callIds?.length) {
+    try {
+      logger.info(`[XyneAI] [${session.sessionId}] Fetching provided contexts - Canvases: ${canvasIds?.length || 0}, Tickets: ${ticketIds?.length || 0}, Calls: ${callIds?.length || 0}`);
+      providedContexts = await fetchProvidedContexts(userId, canvasIds, ticketIds, callIds);
+      logger.info(`[XyneAI] [${session.sessionId}] Successfully fetched provided contexts`);
+      
+      // Store provided context citation mappings in Redis for later retrieval
+      if (providedContexts && (providedContexts.canvases.length > 0 || providedContexts.tickets.length > 0 || providedContexts.calls.length > 0)) {
+        try {
+          const citationRefs = buildProvidedContextCitationRefs(providedContexts, PROVIDED_CONTEXT_PREFIX);
+          
+          if (citationRefs.length > 0) {
+            // Convert citation refs to EnhancedCitationMappings format
+            const mappings: EnhancedCitationMappings = {
+              entityIdMapping: {},
+              entityTypeMapping: {},
+              conversationIdMapping: {},
+              messageIdMapping: {},
+              canvasIdMapping: {},
+              channelIdMapping: {},
+              externalUrlMapping: {},
+              isExternalMapping: {},
+            };
+            
+            for (const ref of citationRefs) {
+              const idx = ref.entityIndex;
+              mappings.entityIdMapping[idx] = ref.entityId;
+              mappings.entityTypeMapping[idx] = ref.entityType;
+              mappings.isExternalMapping[idx] = false;
+              
+              // Set entity-specific IDs for proper citation URL construction
+              if (ref.entityType === 'canvas') {
+                mappings.canvasIdMapping[idx] = ref.entityId;
+              } else if (ref.entityType === 'ticket') {
+                // Tickets need channelId and conversationId for citation URLs
+                if (ref.channelId) {
+                  mappings.channelIdMapping[idx] = ref.channelId;
+                }
+                if (ref.conversationId) {
+                  mappings.conversationIdMapping[idx] = ref.conversationId;
+                }
+              } else if (ref.entityType === 'call') {
+                // Calls need channelId and conversationId for citation URLs
+                if (ref.channelId) {
+                  mappings.channelIdMapping[idx] = ref.channelId;
+                }
+                if (ref.conversationId) {
+                  mappings.conversationIdMapping[idx] = ref.conversationId;
+                }
+              }
+            }
+            
+            await appendEnhancedSessionMappings(session.sessionId, mappings, PROVIDED_CONTEXT_PREFIX);
+            logger.info(`[XyneAI] [${session.sessionId}] Stored ${citationRefs.length} provided context citation mappings in Redis with prefix '${PROVIDED_CONTEXT_PREFIX}'`);
+          }
+        } catch (mappingError) {
+          logger.error(`[XyneAI] [${session.sessionId}] Failed to store provided context citation mappings:`, mappingError);
+          // Continue - this shouldn't fail the whole request
+        }
+      }
+    } catch (error) {
+      logger.error(`[XyneAI] [${session.sessionId}] Failed to fetch provided contexts:`, error);
+      // Continue without contexts - don't fail the whole request
+    }
+  }
 
   // Store user message with attachments
   const updatedSessionAfterUser = await sessionStore.addUserMessage(session.sessionId, query, timestamp, allAttachments.length > 0 ? allAttachments : undefined);
@@ -358,7 +429,7 @@ export async function* xyneAIStream(
   logger.info(`[XyneAI] [${session.sessionId}] Using model: ${modelName} (hasImageAttachment: ${hasImageAttachment}, tracingEnabled: ${cacConfig.xyneAiTracingEnabled}, maskingEnabled: ${cacConfig.xyneAiMaskingEnabled})`);
 
   const onEventHandler = createOnEventHandler(cacConfig);
-  const runStream = await createAgentRunner(source, agentContext, messages, modelName, apiKey, onEventHandler);
+  const runStream = await createAgentRunner(source, agentContext, messages, modelName, apiKey, onEventHandler, providedContexts);
   
   let accumulatedContent = '';
   let currentTraceId: string | undefined;
