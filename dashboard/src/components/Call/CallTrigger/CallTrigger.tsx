@@ -20,6 +20,7 @@ interface CallTriggerProps {
   participantCount?: number | undefined;
   callDisplayName?: string; // Display name for CallKit (DM: participant name, Channel: channel name)
   conversationId?: string; // Optional: for thread-initiated calls
+  isMember: boolean; // Whether the current user is a member of the channel
 }
 
 /**
@@ -43,6 +44,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   participantCount,
   callDisplayName,
   conversationId,
+  isMember,
 }) => {
   const { handleCallClick, hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } =
     useCallActions({
@@ -74,16 +76,21 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   // Check if user is alone in the channel
   const isAlone = participantCount === 1;
 
+  // Check if user is not a member of the channel
+  const isNotMember = !isMember;
+
   // Determine tooltip content based on call state
-  const tooltipContent = isAlone
-    ? 'You are the only one here'
-    : hasActiveCallInChannel
-      ? isUserInCurrentChannelCall
-        ? 'Leave call'
-        : 'Join ongoing call'
-      : isInCall
-        ? 'End current call and start new one'
-        : 'Start audio call';
+  const tooltipContent = isNotMember
+    ? 'You need to be a part of the channel to start a call'
+    : isAlone
+      ? 'You are the only one here'
+      : hasActiveCallInChannel
+        ? isUserInCurrentChannelCall
+          ? 'Leave call'
+          : 'Join ongoing call'
+        : isInCall
+          ? 'End current call and start new one'
+          : 'Start audio call';
 
   // Default Button trigger
   return (
@@ -91,7 +98,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
       <Tooltip content={tooltipContent} side='left'>
         <button
           onClick={handleButtonClick}
-          disabled={isAlone}
+          disabled={isAlone || isNotMember}
           data-testid='start-call-button'
           data-track-category='CALLS'
           data-track-name='Call_Trigger'
@@ -107,7 +114,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             hasActiveCallInChannel && !isUserInCurrentChannelCall && !isMobile
               ? '!bg-green-500 !hover:bg-green-600 !border-green-500'
               : '',
-            isAlone ? 'opacity-50 cursor-not-allowed' : '',
+            isAlone || isNotMember ? 'opacity-50 cursor-not-allowed' : '',
             isMobile
               ? 'p-3 rounded-full border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
               : 'rounded-lg bg-background border-border hover:bg-muted',

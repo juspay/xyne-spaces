@@ -41,6 +41,7 @@ interface CallTriggerModalProps {
   callDisplayName?: string;
   className?: string;
   disabled?: boolean;
+  isMember: boolean;
 }
 
 export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
@@ -52,6 +53,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
   callDisplayName,
   className,
   disabled = false,
+  isMember,
 }) => {
   const { isMobile } = usePlatform();
 
@@ -140,6 +142,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
         scopeType={scopeType}
         channelName={channelName}
         participantCount={participantCount}
+        isMember={isMember}
         {...(callDisplayName && { callDisplayName })}
       />
     );

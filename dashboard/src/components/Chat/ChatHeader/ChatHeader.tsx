@@ -130,6 +130,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ channelId }) => {
             channelName={channel?.name}
             participantCount={channel?.participantCount}
             callDisplayName={channelDisplayName}
+            isMember={!!channelUserStatus}
           />
         </div>
       </div>
