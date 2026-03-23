@@ -3,6 +3,7 @@
  */
 
 import type { UserInfo, ResearchContext } from '../tools/index.js';
+import type { ProvidedContexts } from '../utils/contextFetcher.js';
 
 export type SourceType = 'thread' | 'channel';
 
@@ -157,6 +158,126 @@ function formatFetchThreadMessagesFewShotExample(hasThreadContext: boolean): str
 }`;
 }
 
+/**
+ * Citation reference info for provided contexts
+ */
+export interface ProvidedContextCitationRef {
+  prefix: string;       // e.g., "P" for provided contexts
+  entityType: 'canvas' | 'ticket' | 'call';
+  entityId: string;
+  entityIndex: number;
+  citationRef: string;  // e.g., "P1", "P2", etc.
+  channelId?: string;
+  conversationId?: string;
+}
+
+/**
+ * Format provided contexts (canvas, ticket, call) for agent prompt
+ * This content is directly injected - NOT fetched by tools
+ */
+function formatProvidedContexts(providedContexts?: ProvidedContexts, prefix: string = 'P'): string {
+  if (!providedContexts) {
+    return '';
+  }
+
+  const { canvases, tickets, calls } = providedContexts;
+  const parts: string[] = [];
+  let globalIndex = 1; // Global citation index across all provided contexts
+
+  // Add canvases with citation refs
+  if (canvases.length > 0) {
+    const formattedCanvases = canvases.map((canvas) => {
+      const citationRef = `[${prefix}${globalIndex}]`;
+      globalIndex++;
+      return `${citationRef} --- Canvas ---\n${canvas.content}`;
+    }).join('\n\n');
+    parts.push(`**CANVASES** (${canvases.length} provided):\n\n${formattedCanvases}`);
+  }
+
+  // Add tickets with citation refs
+  if (tickets.length > 0) {
+    const formattedTickets = tickets.map((ticket) => {
+      const citationRef = `[${prefix}${globalIndex}]`;
+      globalIndex++;
+      return `${citationRef} --- Ticket ---\n${ticket.content}`;
+    }).join('\n\n');
+    parts.push(`**TICKETS** (${tickets.length} provided):\n\n${formattedTickets}`);
+  }
+
+  // Add calls with citation refs
+  if (calls.length > 0) {
+    const formattedCalls = calls.map((call) => {
+      const citationRef = `[${prefix}${globalIndex}]`;
+      globalIndex++;
+      return `${citationRef} --- Call ---\n${call.content}`;
+    }).join('\n\n');
+    parts.push(`**CALLS** (${calls.length} provided):\n\n${formattedCalls}`);
+  }
+
+  if (parts.length === 0) {
+    return '';
+  }
+
+  return `## PROVIDED CONTEXT (Use these citation refs: [${prefix}1], [${prefix}2], etc.)
+When citing from this provided context, use the citation reference shown at the start of each item.
+
+${parts.join('\n\n---\n\n')}`;
+}
+
+/**
+ * Build citation mappings for provided contexts
+ * Returns array of citation refs that can be stored in Redis
+ */
+export function buildProvidedContextCitationRefs(
+  providedContexts: ProvidedContexts,
+  prefix: string = 'P'
+): ProvidedContextCitationRef[] {
+  const refs: ProvidedContextCitationRef[] = [];
+  let globalIndex = 1;
+
+  // Canvases - don't need channelId/conversationId as canvas has its own URL pattern
+  for (const canvas of providedContexts.canvases) {
+    refs.push({
+      prefix,
+      entityType: 'canvas',
+      entityId: canvas.id,
+      entityIndex: globalIndex,
+      citationRef: `${prefix}${globalIndex}`,
+    });
+    globalIndex++;
+  }
+
+  // Tickets - include channelId and conversationId for citation URLs
+  for (const ticket of providedContexts.tickets) {
+    refs.push({
+      prefix,
+      entityType: 'ticket',
+      entityId: ticket.id,
+      entityIndex: globalIndex,
+      citationRef: `${prefix}${globalIndex}`,
+      channelId: ticket.channelId,
+      conversationId: ticket.conversationId,
+    });
+    globalIndex++;
+  }
+
+  // Calls - include channelId and conversationId for citation URLs
+  for (const call of providedContexts.calls) {
+    refs.push({
+      prefix,
+      entityType: 'call',
+      entityId: call.id,
+      entityIndex: globalIndex,
+      citationRef: `${prefix}${globalIndex}`,
+      channelId: call.channelId,
+      conversationId: call.conversationId,
+    });
+    globalIndex++;
+  }
+
+  return refs;
+}
+
 export function buildAgentTemplateVariables(
   _source: SourceType,
   currentTimestamp?: string,
@@ -166,7 +287,8 @@ export function buildAgentTemplateVariables(
   researchContext?: ResearchContext,
   researchOptions?: AvailableResearchOptions,
   customInstruction?: string,
-  hasThreadContext?: boolean
+  hasThreadContext?: boolean,
+  providedContexts?: ProvidedContexts
 ): Record<string, string> {
   const variables = {
     current_timestamp: currentTimestamp || getCurrentTimestamp(),
@@ -199,6 +321,7 @@ export function buildAgentTemplateVariables(
 - **Single URL Per Keypoint:** When citing web_search results, provide ONLY ONE URL per keypoint. Each keypoint should cite exactly ONE search result with its URL. The system will automatically attach the corresponding URL to your citation.`
       : '',
     research_context: formatFullResearchContext(researchContext, researchOptions),
+    provided_context: formatProvidedContexts(providedContexts),
   };
   
   return variables;

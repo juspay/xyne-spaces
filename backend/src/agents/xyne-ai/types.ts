@@ -44,6 +44,10 @@ export interface XyneAIRequest {
   webSearchEnabled?: boolean;  // Enable/disable web search tool
   researchContext?: ResearchContext;
   messageAttachmentIds?: string[]; // Attachment IDs to fetch from GCS on backend
+  // Provided contexts - direct content injection
+  canvasIds?: string[];  // Canvas IDs to fetch and inject as context
+  ticketIds?: string[];  // Ticket IDs to fetch and inject as context
+  callIds?: string[];    // Call IDs to fetch and inject as context
 }
 
 // ============================================================================
