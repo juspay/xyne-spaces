@@ -36,9 +36,9 @@ const BoardCreateScreen = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [previewBoard, setPreviewBoard] = useState<BoardRow | null>(null);
 
-  // Fetch all boards in project
+  // Fetch boards in project (lightweight - no stages/relations)
   const [boardsInProject] = useCachedQuery(
-    queries.boardsByProject({ projectId: projectId || '' }),
+    queries.boardsListByProject({ projectId: projectId || '' }),
     { enabled: !!projectId },
   );
 
@@ -95,7 +95,6 @@ const BoardCreateScreen = ({
         automations: 0,
         customFields: customFieldNames.length,
         projectId: board.projectId,
-        stages: board.stages?.length || 0,
         customFieldNames: customFieldNames.slice(0, 10), // Limit to 10 for display
       };
     });

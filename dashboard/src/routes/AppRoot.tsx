@@ -10,7 +10,6 @@ import ThreadMessages from '../components/Chat/ThreadPannel';
 import TicketsScreen from './TicketsScreen/TicketScreen';
 import TicketView from '../components/Tickets/TicketView/TicketView';
 import WorkflowScreen from './WorkflowScreen/WorkflowScreen';
-import TicketIDEScreen from './TicketIDEScreen/TicketIDEScreen';
 import VSCodeWorkspaceScreen from './VSCodeWorkspaceScreen/VSCodeWorkspaceScreen';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import AgentsScreen from './AgentsScreen/AgentScreen';
@@ -666,10 +665,6 @@ export const router = createBrowserRouter([
               {
                 path: '/tickets/:ticketId/workflow',
                 element: <WorkflowScreen />,
-              },
-              {
-                path: '/tickets/:ticketId/ide',
-                element: <TicketIDEScreen />,
               },
               {
                 path: '/agents',

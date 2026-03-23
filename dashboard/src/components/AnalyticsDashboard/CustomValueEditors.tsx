@@ -290,7 +290,7 @@ export const BoardSearchValueEditor: React.FC<{
   multi?: boolean;
 }> = ({ value, onChange, multi = false }) => {
   const [searchQuery, setSearchQuery] = React.useState('');
-  const [allBoards] = useCachedQuery(queries.getAllBoards());
+  const [allBoards] = useCachedQuery(queries.getAllBoardsList());
   const selectedItems = getSelectedItems(value);
 
   const handleRemove = (boardId: string): void => {

@@ -1,4 +1,4 @@
-import { ReactElement, useState } from 'react';
+import { ReactElement, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
@@ -36,16 +36,30 @@ const ProjectDetailScreen = (): ReactElement => {
   const [editingBoard, setEditingBoard] = useState<BoardWithStages | null>(null);
   const [configuringStagesForBoard, setConfiguringStagesForBoard] =
     useState<BoardWithStages | null>(null);
+  const [boardIdToEdit, setBoardIdToEdit] = useState<string | null>(null);
 
   // Fetch project details
   const [project] = useCachedQuery(queries.projectById({ projectId: projectId || '' }), {
     enabled: !!projectId,
   });
 
-  // Fetch boards for this project
-  const [boards] = useCachedQuery(queries.boardsByProject({ projectId: projectId || '' }), {
+  // Fetch boards for this project (lightweight list without stages)
+  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: projectId || '' }), {
     enabled: !!projectId,
   });
+
+  // Lazy load full board details (with prStatusMappings) when user clicks edit
+  const [fullBoardDetails, fullBoardDetailsStatus] = useCachedQuery(
+    queries.boardFullDetailById({ boardId: boardIdToEdit || '' }),
+    { enabled: !!boardIdToEdit },
+  );
+
+  // When full board details are loaded (fresh from Zero, not stale cache), set as editing board
+  useEffect(() => {
+    if (fullBoardDetails && boardIdToEdit && fullBoardDetailsStatus.type === 'complete') {
+      setEditingBoard(fullBoardDetails as BoardWithStages);
+    }
+  }, [fullBoardDetails, boardIdToEdit, fullBoardDetailsStatus.type]);
 
   const loading = project === undefined || boards === undefined;
 
@@ -79,8 +93,9 @@ const ProjectDetailScreen = (): ReactElement => {
     }
   };
 
+  // Lazy load full board details when user clicks edit
   const handleEditBoard = (board: BoardWithStages): void => {
-    setEditingBoard(board);
+    setBoardIdToEdit(board.id);
   };
 
   const handleUpdateProject = async (
@@ -304,9 +319,13 @@ const ProjectDetailScreen = (): ReactElement => {
           boardId={editingBoard.id}
           projectId={projectId}
           isOpen={true}
-          onClose={() => setEditingBoard(null)}
+          onClose={() => {
+            setEditingBoard(null);
+            setBoardIdToEdit(null);
+          }}
           onSave={() => {
             setEditingBoard(null);
+            setBoardIdToEdit(null);
           }}
           onNext={() => {
             setConfiguringStagesForBoard(editingBoard);
@@ -321,13 +340,17 @@ const ProjectDetailScreen = (): ReactElement => {
           boardId={configuringStagesForBoard.id}
           projectId={projectId}
           isOpen={true}
-          onClose={() => setConfiguringStagesForBoard(null)}
+          onClose={() => {
+            setConfiguringStagesForBoard(null);
+            setBoardIdToEdit(null);
+          }}
           onBack={() => {
             setEditingBoard(configuringStagesForBoard);
             setConfiguringStagesForBoard(null);
           }}
           onSave={() => {
             setConfiguringStagesForBoard(null);
+            setBoardIdToEdit(null);
           }}
         />
       )}

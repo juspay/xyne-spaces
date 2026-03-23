@@ -758,6 +758,24 @@ export const queries = defineQueries({
       .one();
   }),
 
+  // Full board detail for editing - includes prStatusMappings for stage PR status config.
+  // Used by ProjectDetailScreen when editing a board.
+  boardFullDetailById: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
+    return zql.boards
+      .where('id', boardId)
+      .related('stages', stagesQuery =>
+        stagesQuery
+          .orderBy('sequenceNumber', 'asc')
+          .related('approvers')
+          .related('prStatusMappings')
+          .related('formContextMappings', fcm => fcm.related('form')),
+      )
+      .related('formContextMappings', mappingQuery =>
+        mappingQuery.related('formFields'),
+      )
+      .one();
+  }),
+
 
   stagesByBoard: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) =>
     zql.stages
@@ -884,7 +902,6 @@ export const queries = defineQueries({
         .orderBy('createdAt', 'asc');
     },
   ),
-
   getAllBoards: defineQuery(() => {
     return zql.boards
       .orderBy('createdAt', 'desc')
@@ -896,6 +913,12 @@ export const queries = defineQueries({
           .related('formContextMappings'),
       );
   }),
+    // Lightweight global board list — only scalar fields, no related data.
+    // Use this for dropdowns and pickers that only need board id/name.
+    // For full board detail (editing), use boardFullDetailById.
+    getAllBoardsList: defineQuery(() => {
+      return zql.boards.orderBy('createdAt', 'desc');
+    }),
 
   searchChannelParticipants: defineQuery(
     z.object({ channelId: z.string(), searchQuery: z.string() }),

@@ -46,7 +46,7 @@ export const AssignmentConfigScreen = ({
 
   const [userGroupMembers] = useCachedQuery(queries.getUserGroupMembers({ userGroupId }));
 
-  const [allBoards] = useCachedQuery(queries.getAllBoards());
+  const [allBoards] = useCachedQuery(queries.getAllBoardsList());
 
   const [userAssignmentStates] = useCachedQuery(queries.getUserAssignmentStates({ userGroupId }));
 
