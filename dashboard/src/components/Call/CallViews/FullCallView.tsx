@@ -152,7 +152,18 @@ export function FullCallView({
       )}
     >
       {/* Connection Status Indicators Bar */}
-      <div className='flex justify-end items-center px-4 py-3'>
+      <div className='flex justify-between items-center px-4 py-3'>
+        <div className='flex items-center gap-2'>
+          <div className='relative visual-regression-hide'>
+            <div className='w-2 h-2 bg-green-500 rounded-full'></div>
+            <div className='absolute inset-0 w-2 h-2 bg-green-500 rounded-full animate-ping'></div>
+          </div>
+          <span className='text-white text-xs font-semibold'>Call Active</span>
+          <span className='text-muted-foreground text-xs'>·</span>
+          <span className='text-muted-foreground text-xs' data-testid='participant-count'>
+            {participants.length} participant{participants.length !== 1 ? 's' : ''}
+          </span>
+        </div>
         <ConnectionStatusIndicators room={room} />
       </div>
 
