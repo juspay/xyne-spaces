@@ -95,7 +95,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
   };
 
   return (
-    <div className='h-full bg-muted flex flex-col rounded-lg shadow-[0_0_8px_0_rgba(0,0,0,0.15)] overflow-clip'>
+    <div className='h-full bg-background flex flex-col md:rounded-2xl shadow-md overflow-hidden'>
       {/* Header */}
       <div className='bg-background border-b px-6 py-4'>
         <div className='flex items-center justify-between'>

@@ -88,6 +88,7 @@ export default {
         appSidebar: {
           active: 'var(--app-sidebar-active)',
           activeForeground: 'var(--app-sidebar-active-foreground)',
+          activeIcon: 'var(--nav-active-icon)',
         },
         stage: {
           todo: {

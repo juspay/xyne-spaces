@@ -339,7 +339,7 @@ const SupportScreen = (): ReactElement => {
   );
 
   return (
-    <div className='h-full flex flex-col relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] bg-background'>
+    <div className='h-full flex flex-col relative bg-background md:rounded-2xl overflow-hidden shadow-md'>
       <PanelGroup
         key={`support-panel-${viewMode}-${ticketId ? 'detail' : 'list'}`}
         direction='horizontal'

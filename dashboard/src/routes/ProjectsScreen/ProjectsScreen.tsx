@@ -21,7 +21,7 @@ const ProjectsScreen = (): ReactElement => {
   return (
     <div
       ref={containerRef}
-      className='h-full relative bg-background md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)]'
+      className='h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'
       data-component='ProjectsScreen'
     >
       {isWideScreen ? (

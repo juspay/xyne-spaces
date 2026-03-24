@@ -63,10 +63,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
   if (isFullScreenPage) {
     return (
       <main
-        className={cn(
-          'h-full relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)]',
-          isMobile ? 'border-none' : 'border-root-border border',
-        )}
+        className={cn('h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md')}
       >
         <Outlet />
       </main>
@@ -78,7 +75,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
       <ConversationPrefetcher />
       <div
         ref={containerRef}
-        className='h-full relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)]'
+        className='h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'
         data-component='ChatScreen'
       >
         {isWideScreen ? (

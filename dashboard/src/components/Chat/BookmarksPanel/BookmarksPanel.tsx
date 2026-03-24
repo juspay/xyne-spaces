@@ -102,7 +102,7 @@ const BookmarksPanel = (): ReactElement => {
 
   // Desktop view - two-panel layout with resizable panels
   return (
-    <div className='flex h-full w-full md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)]'>
+    <div className='flex h-full w-full md:rounded-2xl overflow-hidden shadow-md'>
       <PanelGroup
         direction='horizontal'
         className='flex align-top h-full'

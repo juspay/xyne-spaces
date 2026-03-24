@@ -32,7 +32,7 @@ const DocsScreen = (): ReactElement => {
 
   if (!repoName || !branchName) {
     return (
-      <div className='h-full relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border bg-background flex items-center justify-center'>
+      <div className='h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md flex items-center justify-center'>
         <div className='text-center'>
           <h2 className='text-lg font-semibold text-foreground'>Documentation not found</h2>
           <p className='text-sm text-muted-foreground mt-2'>
@@ -44,7 +44,7 @@ const DocsScreen = (): ReactElement => {
   }
 
   return (
-    <div className='h-full relative md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'>
+    <div className='h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'>
       <DocsViewer repoName={repoName} branchName={branchName} onClose={handleClose} />
     </div>
   );

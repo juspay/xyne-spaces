@@ -278,7 +278,7 @@ const CallHistoryScreen = (): ReactElement => {
   return (
     <div
       ref={scrollContainerRef}
-      className='bg-background dark:bg-background flex flex-col w-full h-full md:rounded-2xl overflow-y-auto shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border border-border relative '
+      className='bg-background flex flex-col w-full h-full md:rounded-2xl overflow-y-auto shadow-md relative'
     >
       <div className='w-full flex flex-col items-center px-4'>
         <div className='max-w-[810px] w-full sticky top-0 bg-background z-50 '>
