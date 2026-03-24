@@ -9,7 +9,7 @@ import { logger } from '../../../utils/logger.js';
 import { config } from '../../../config/env.js';
 import type { XyneAIAgentContext } from './types.js';
 import { getDescription, getISTTimestampForGenius } from './helpers.js';
-import { askAIGeniusUsedTotal } from '@/services/otel';
+import { getAskAIGeniusUsedTotal } from '@/services/otel';
 
 // ============================================================================
 // Tool Factory
@@ -158,7 +158,7 @@ export function createGeniusTool(): Tool<{ query: string }, XyneAIAgentContext> 
         
         // Track Genius tool usage
         try {
-          askAIGeniusUsedTotal.add(1);
+          getAskAIGeniusUsedTotal().add(1);
         } catch (metricsError) {
           logger.error('[Tool] genius: Error recording metrics:', metricsError);
         }

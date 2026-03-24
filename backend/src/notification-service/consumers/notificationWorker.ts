@@ -7,12 +7,12 @@ import { MobilePushChannel } from '../channels/mobilePush';
 
 import { logger } from '@/utils/logger';
 import {
-  notificationJobCreated,
-  notificationJobsWaiting,
-  notificationJobStatus,
-  notificationJobDuration,
-  notificationJobQueueTime,
-  callJobs
+  getNotificationJobCreated,
+  getNotificationJobsWaiting,
+  getNotificationJobStatus,
+  getNotificationJobDuration,
+  getNotificationJobQueueTime,
+  getCallJobs
 } from '@/services/otel';
 import { repositories } from '@/database/repositories';
 import { NotificationStatus } from '@prisma/client';
@@ -161,7 +161,7 @@ export class NotificationWorker {
       const userId = data.userId;
 
       if (jobName === 'incoming_call') {
-        callJobs.add(1, { platform: data.platform, status: 'completed' });
+        getCallJobs().add(1, { platform: data.platform, status: 'completed' });
       }
 
       this.logger.info(`${jobName} job completed`, { 
@@ -172,17 +172,17 @@ export class NotificationWorker {
 
       const platform = 'mobile';
       const messageType = getMessageTypeFromEvent(data.payload?.type);
-      notificationJobsWaiting.add(-1, { platform, message_type: messageType });
+      getNotificationJobsWaiting().add(-1, { platform, message_type: messageType });
 
       if (job.processedOn && job.finishedOn && job.timestamp) {
         const duration = job.finishedOn - job.processedOn;
         const queueTime = job.processedOn - job.timestamp;
 
-        notificationJobDuration.record(duration, { platform, message_type: messageType, status: 'success' });
-        notificationJobQueueTime.record(queueTime, { platform, message_type: messageType });
+        getNotificationJobDuration().record(duration, { platform, message_type: messageType, status: 'success' });
+        getNotificationJobQueueTime().record(queueTime, { platform, message_type: messageType });
       }
 
-      notificationJobStatus.add(1, {
+      getNotificationJobStatus().add(1, {
         status: 'success',
         platform,
         message_type: messageType,
@@ -196,7 +196,7 @@ export class NotificationWorker {
       const userId = data.userId;
 
        if (jobName === 'incoming_call') {
-        callJobs.add(1, { platform: data.platform, status: 'failed' });
+        getCallJobs().add(1, { platform: data.platform, status: 'failed' });
       }
 
       this.logger.error(`${jobName} job failed`, { 
@@ -208,17 +208,17 @@ export class NotificationWorker {
 
       const platform = 'mobile';
       const messageType = getMessageTypeFromEvent(data.payload?.type);
-      notificationJobsWaiting.add(-1, { platform, message_type: messageType });
+      getNotificationJobsWaiting().add(-1, { platform, message_type: messageType });
 
       if (job.processedOn && job.finishedOn && job.timestamp) {
         const duration = job.finishedOn - job.processedOn;
         const queueTime = job.processedOn - job.timestamp;
 
-        notificationJobDuration.record(duration, { platform, message_type: messageType, status: 'failed' });
-        notificationJobQueueTime.record(queueTime, { platform, message_type: messageType });
+        getNotificationJobDuration().record(duration, { platform, message_type: messageType, status: 'failed' });
+        getNotificationJobQueueTime().record(queueTime, { platform, message_type: messageType });
       }
 
-      notificationJobStatus.add(1, {
+      getNotificationJobStatus().add(1, {
         status: 'failed',
         platform,
         message_type: messageType,
@@ -294,8 +294,8 @@ export class NotificationWorker {
 
       const platform = 'mobile';
       const messageType = getMessageTypeFromEvent(data.payload?.type);
-      notificationJobCreated.add(1, { platform, message_type: messageType });
-      notificationJobsWaiting.add(1, { platform, message_type: messageType });
+      getNotificationJobCreated().add(1, { platform, message_type: messageType });
+      getNotificationJobsWaiting().add(1, { platform, message_type: messageType });
     } catch (error) {
       this.logger.error('Failed to queue mobile push', {
         error,
@@ -329,7 +329,7 @@ export class NotificationWorker {
         notificationId: data.payload?.notificationId,
       });
       // Metrics for call job created (with platform)
-      callJobs.add(1, { platform: data.platform, status: 'created' });
+      getCallJobs().add(1, { platform: data.platform, status: 'created' });
       // Metrics ...
     } catch (error) {
       this.logger.error('Failed to queue incoming call push', { error });

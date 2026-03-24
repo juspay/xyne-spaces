@@ -15,7 +15,7 @@ import { notificationService as realTimeNotificationService } from '@/notificati
 import { ticketService } from './ticketService';
 import { AI_STAGES } from '@/workflows/types/workflow-enums';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
-import {  notificationJobsExpected } from '@/services/otel';
+import {  getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
 import * as notificationFilterService from './notificationFilterService';
 
@@ -791,7 +791,7 @@ class NotificationService {
 
     const recipientIds = userIds.filter(id => id !== senderId);
 
-    notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
+    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
     // Filter users based on device preferences, pause settings and notification level.
     // For DM channels, only device filter is applied (skips notification level checks).
     // context='thread_mention': passes for ALL, MENTIONS_ONLY, and THREADS_ONLY — a direct
@@ -833,7 +833,7 @@ class NotificationService {
     };
 
     // Send desktop-only notifications (pauseFilter already determined these users should get desktop)
-    notificationJobsExpected.add(desktopUsers.length, { platform: 'desktop', message_type: 'channel' });
+    getNotificationJobsExpected().add(desktopUsers.length, { platform: 'desktop', message_type: 'channel' });
     await Promise.allSettled(
       desktopUsers.map(userId =>
         this.createNotification(userId, notificationData, { sendDesktop: true, sendMobile: false })
@@ -841,7 +841,7 @@ class NotificationService {
     );
 
     // Send mobile-only notifications (pauseFilter already determined these users should get mobile)
-    notificationJobsExpected.add(mobileUsers.length, { platform: 'mobile', message_type: 'channel' });
+    getNotificationJobsExpected().add(mobileUsers.length, { platform: 'mobile', message_type: 'channel' });
     await Promise.allSettled(
       mobileUsers.map(userId =>
         this.createNotification(userId, notificationData, { sendDesktop: false, sendMobile: true })
@@ -884,7 +884,7 @@ class NotificationService {
       return;
     }
 
-    notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
+    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
 
     // Mirror message mentions: "You were mentioned in #channelName" when canvas is in a channel
     const title = channelName
@@ -948,7 +948,7 @@ class NotificationService {
   ): Promise<void> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
-    notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
+    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
     // Filter users based on device preferences, pause settings and notification level.
     // For DM channels, only device filter is applied (skips notification level checks).
     // context='thread_reply': ALL or THREADS_ONLY passes; MENTIONS_ONLY blocks (even for subscribed threads).
@@ -985,7 +985,7 @@ class NotificationService {
     };
 
     // Send desktop-only notifications (pauseFilter already determined these users should get desktop)
-    notificationJobsExpected.add(desktopUsers.length, { platform: 'desktop', message_type: 'channel' });
+    getNotificationJobsExpected().add(desktopUsers.length, { platform: 'desktop', message_type: 'channel' });
     await Promise.allSettled(
       desktopUsers.map(userId =>
         this.createNotification(userId, notificationData, { sendDesktop: true, sendMobile: false })
@@ -993,7 +993,7 @@ class NotificationService {
     );
 
     // Send mobile-only notifications (pauseFilter already determined these users should get mobile)
-    notificationJobsExpected.add(mobileUsers.length, { platform: 'mobile', message_type: 'channel' });
+    getNotificationJobsExpected().add(mobileUsers.length, { platform: 'mobile', message_type: 'channel' });
     await Promise.allSettled(
       mobileUsers.map(userId =>
         this.createNotification(userId, notificationData, { sendDesktop: false, sendMobile: true })
@@ -1013,7 +1013,7 @@ class NotificationService {
   ): Promise<void> {
     if (recipientIds.length === 0) return;
 
-    notificationJobsExpected.add(recipientIds.length, { platform: 'desktop', message_type: 'dm' });
+    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'dm' });
     // For DM channels, only apply device filter (skips pause and notification level checks)
     const { desktopUsers, mobileUsers } = await notificationFilterService.filterUsers(
       recipientIds,
@@ -1045,7 +1045,7 @@ class NotificationService {
     };
 
     // Send desktop-only notifications (pauseFilter already determined these users should get desktop)
-    notificationJobsExpected.add(desktopUsers.length, { platform: 'desktop', message_type: 'dm' });
+    getNotificationJobsExpected().add(desktopUsers.length, { platform: 'desktop', message_type: 'dm' });
     await Promise.allSettled(
       desktopUsers.map(recipientId =>
         this.createNotification(recipientId, notificationData, { sendDesktop: true, sendMobile: false })
@@ -1053,7 +1053,7 @@ class NotificationService {
     );
 
     // Send mobile-only notifications (pauseFilter already determined these users should get mobile)
-    notificationJobsExpected.add(mobileUsers.length, { platform: 'mobile', message_type: 'dm' });
+    getNotificationJobsExpected().add(mobileUsers.length, { platform: 'mobile', message_type: 'dm' });
     await Promise.allSettled(
       mobileUsers.map(recipientId =>
         this.createNotification(recipientId, notificationData, { sendDesktop: false, sendMobile: true })
