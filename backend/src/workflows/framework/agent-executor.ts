@@ -662,7 +662,86 @@ export class AgentExecutor {
           }
         }
 
-        // Normal completion - exit loop
+        
+
+        // Only wait for continuation requests in MANUAL mode
+        const executionModeForCooldown = await this.storage.getExecutionMode(parentExecutionId);
+        if (executionModeForCooldown === 'MANUAL') {
+          // Wait for 2 minutes for any continuation requests before exiting
+          logger.info(`[AGENT-EXECUTOR] Waiting 2 minutes for continuation requests...`);
+
+          // Re-setup continuation listener for cooldown period to ensure fresh listener
+          await cleanupContinuationListener();
+
+          // Create a promise that resolves when continuation message arrives
+          let resolveContinuation: (msg: string | null) => void;
+          const continuationPromise = new Promise<string | null>((resolve) => {
+            resolveContinuation = resolve;
+          });
+
+          cleanupContinuationListener = await this.setupContinuationListener(
+            parentExecutionId,
+            _checkpointId,
+            abortController,
+            (event) => {
+              logger.info(`[AGENT-EXECUTOR] Continuation message received: "${event.message?.substring(0, 100)}..."`);
+              resolveContinuation(event.message);
+            }
+          );
+
+          const waitDurationMs = 1 * 60 * 1000;
+          let cooldownContinuationResult = false;
+
+          // Race between continuation message and timeout
+          const timeoutPromise = new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), waitDurationMs)
+          );
+
+          const messageToProcess = await Promise.race([
+            continuationPromise,
+            timeoutPromise,
+          ]);
+
+          await cleanupContinuationListener();
+
+          if (messageToProcess) {
+            logger.info(`[AGENT-EXECUTOR] Continuation message received during cooldown, restarting agent...`);
+
+            try {
+              // Handle continuation and restart agent execution
+              const continuationResult = await this.handleContinuationAndRestart(
+                parentExecutionId,
+                _checkpointId,
+                inputStepDbId,
+                conversationRequest,
+                messageToProcess,
+                abortController,
+                cleanupContinuationListener,
+                (newRequest, newController, newCleanup) => {
+                  conversationRequest = newRequest;
+                  abortController = newController;
+                  cleanupContinuationListener = newCleanup;
+                }
+              );
+
+              if (continuationResult) {
+                cooldownContinuationResult = true;
+              }
+            } catch (error) {
+              logger.error(`[AGENT-EXECUTOR] Error handling continuation during cooldown:`, error);
+            }
+          }
+
+          // If continuation was handled successfully, continue the main loop
+          if (cooldownContinuationResult) {
+            continue;
+          }
+
+          // No continuation message received during cooldown - exit loop
+          logger.info(`[AGENT-EXECUTOR] No continuation requests received during cooldown, exiting...`);
+        } else {
+          logger.info(`[AGENT-EXECUTOR] AUTOMATIC mode - skipping cooldown wait, exiting...`);
+        }
         isRunning = false;
 
       } catch (agentError) {
@@ -1363,6 +1442,7 @@ export class AgentExecutor {
       newAbortController,
       (event) => {
         // This callback will be used by the caller to set continuationMessage
+        continuationMessage = event.message;
         logger.info(`[AGENT-EXECUTOR] Continuation message received: "${event.message?.substring(0, 100)}..."`);
       }
     );
