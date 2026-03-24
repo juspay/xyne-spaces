@@ -14,6 +14,7 @@ export interface LiveKitTokenOptions {
   roomName: string;
   userName?: string;
   ttl?: string;
+  metadata?: string;
 }
 
 export class LiveKitService {
@@ -82,6 +83,7 @@ export class LiveKitService {
         identity: options.userIdentity,
         name: options.userName,
         ttl: options.ttl || '10m',
+        metadata: options.metadata,
       });
 
       at.addGrant({
