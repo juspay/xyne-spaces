@@ -1,3 +1,21 @@
+## [1.99.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.98.0...v1.99.0) (2026-03-24)
+
+
+### Features
+
+* Add otel logs in ysweet ([95391fd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/95391fd4de995aafe769066256a5b9ffbf61c36b)), closes [#4371](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4371)
+* added live participant count in full call view ([1372a7b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1372a7b5f87fcaddc22c4dd9490a290aeb8891c4)), closes [#4262](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4262)
+* added-delay-before-go-to-wait-for-event ([b79d363](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b79d3638416c39252ef4805e99cf07fc9e15deaf)), closes [#4215](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4215)
+* MERCHANTTI-0731 add MCP server config for metrics, logs, and RCA ([c76ddeb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c76ddeb1d007c89415c6f577b57c9a4be9a8c3af)), closes [#4378](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4378)
+
+
+### Bug Fixes
+
+* denormalisation of activities and tickets ([aec4b73](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aec4b73e2be2ac623d86616f95532f44ebf698d2)), closes [#4373](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4373)
+* MERCHANTTI-0730 replace proxy pattern with getter functions for OTEL push metrics ([53b3b1a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/53b3b1ae26ac5525c866c06ad4c939007e9dc4b7)), closes [#4285](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4285)
+* Summer breeze theme call action items Generate-PRD and Chat with AI are in white colour making them invisible ([eadfae3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/eadfae3ddb3ea8b744d60f17770fc29f4fd7a546)), closes [#4320](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4320)
+* Xyne Apps Ticket Bugs ([c520de1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c520de166cbe82a889dfa25efdc41a27aa93852e)), closes [#4334](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4334)
+
 ## [1.98.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.97.0...v1.98.0) (2026-03-24)
 
 
