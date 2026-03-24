@@ -153,10 +153,10 @@ export async function createTicketWithConversation(
         boardId,
         priority: priority || TicketPriority.LOW,
         xyneId,
-      });
+      }, tx);
 
-      pushVespaJobForTicket(ticket.id, userId).catch(error => {
-        logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${ticket.id}:`, error);
+      pushVespaJobForTicket(createdTicket.id, userId).catch(error => {
+        logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${createdTicket.id}:`, error);
       });
 
        const ticketMd = serializeTicketMd({
