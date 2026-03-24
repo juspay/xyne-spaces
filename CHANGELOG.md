@@ -1,3 +1,40 @@
+## [1.97.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.96.0...v1.97.0) (2026-03-24)
+
+
+### Features
+
+* : Implemented direct context addition through input box ([74d506a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/74d506a659ad3f50b7ff7fcc01e6163ffc910212)), closes [#4203](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4203)
+* Framework Questioning. ([d3b4be3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d3b4be37ca6634b94367feb2c0e25a0ee52dacba)), closes [#3776](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3776)
+* ingest agent data to vespa ([4229276](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/42292767d7a3b42d8a8dff9bd19431b6b8129df5)), closes [#4166](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4166)
+* move workflow execution lock to workflow schema ([1c01bc9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1c01bc91b18aa610f5c6059aa90ccce7c3ec0272)), closes [#4281](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4281)
+* non zero tables to workflow scchema ([88df87f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/88df87fe79bef04d347629caac30b4754641273c)), closes [#4316](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4316) [#4299](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4299)
+* showing participant profile Picture in call tile. ([be3cf1c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/be3cf1c2db65240ba6d9dbd132e482e1ff27006f)), closes [#3889](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3889)
+* split getAllUsers and getAllChannels query ([2bb6844](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2bb6844b880742ceb2dd98479d6d70bb860d6b7c)), closes [#4186](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4186)
+* update Y-Sweet image reference in docker-compose.yml to support metrics ([3a39639](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3a3963900a6cf206e8c5ad72bec9e6f139e26fdf)), closes [#4319](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4319)
+* updated zero version ([9f25599](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9f255996f27f71c7fbd9ebc738264e2da1ce61e8)), closes [#4145](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4145)
+* workflow rerun reply & create automation run remove ([75dc613](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75dc613ef418af3b176133a2e190580a3a277979)), closes [#4251](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4251)
+
+
+### Bug Fixes
+
+* : revert of direct context addition through input box" ([180a13e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/180a13e15c7f73595e22ab600540962bd591cbc4)), closes [#4347](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4347) [#4203](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4203)
+* Add markdown preview in memory search result ([1bedd1c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1bedd1c769918df2d55be81a2e02a02b835b2ed8)), closes [#4195](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4195)
+* added recap channel status ([5eb10ca](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5eb10cadb52cd3a01aa7c45a136e5d0a90cb813e)), closes [#4267](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4267)
+* automation updates ([c9c9d9b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c9c9d9bbd5d8b7f58339ab6ebe09fc534436b0fa)), closes [#4283](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4283)
+* changed splash screen ([71fd9cf](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/71fd9cfdd4f77bd384c5b8944efd1f06bbc37c15)), closes [#4266](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4266)
+* fetch missing email fields from Zoho API in webhook processing ([ba7c246](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ba7c246e82079ac314b8620cda6741ae9530997f)), closes [#4211](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4211)
+* fix channelDailyRecaps query ([e860254](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e860254801c77b7a6d75b12403cff64df2a9cb4b))
+* fix pagination of calls page ([7e9229f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7e9229f49b83d163e9b55948430c04539372826a))
+* fixed  automation ([f5cd8af](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f5cd8af51ba06e54a4750e3ea740665028471dd4))
+* fixed bug where reloading after dm causes the screen to be stuck ([7c5958b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7c5958bf38f317a087eea0ace908d35a6e8e0220))
+* Jiraffe migration bug ([6cd5086](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6cd5086dfc70e185a09886236df4869b72cb15db)), closes [#4340](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4340)
+* linter formatting fixes for sidebar and surface changesService ([a51590f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a51590f4d55ec1607cb983d0750e79e8f91ae6c4))
+* remove unwanted system prompt in workflows ([196f61a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/196f61a02e10ce399beb7bdfa409a9ada855f17e)), closes [#4132](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4132)
+* replace heavy queries with light ones ([bde0655](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bde06556b807e94a1144bd2e948d637a91010524)), closes [#4206](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4206)
+* Skip workflow rerun if already running for pr comments. ([4e55986](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4e55986a3c329aee684417b1c286eff32f989471)), closes [#4165](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4165)
+* update baseUrl handling to resolve 403 Forbidden errors in Y-Sweet integration ([439a595](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/439a595f2ba85db5c5af9598014a27ab7182a471))
+* User can create a call in an open channel which they are not a part of. ([e0f228e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e0f228e7a37449850242e168a5a6f2a9805982b1)), closes [#4282](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4282)
+
 ## [1.96.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.95.0...v1.96.0) (2026-03-18)
 
 
