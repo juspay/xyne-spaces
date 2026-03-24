@@ -244,7 +244,7 @@ Then('I should see the element {string}', async function (this: CustomWorld, sel
   uiLogger.info(`[UI] Verifying element is visible: ${selector}`);
 
   const element = this.page.locator(selector).first();
-  await element.waitFor({ state: 'visible', timeout: 10000 });
+  await element.waitFor({ state: 'visible' });
 
   const isVisible = await element.isVisible();
   expect(isVisible).to.be.true;

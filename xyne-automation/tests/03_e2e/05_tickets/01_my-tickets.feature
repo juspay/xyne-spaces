@@ -3,10 +3,13 @@ Feature: My Tickets - Filter and View Options
 
   Background:
     Given using browser "admin-browser"
+    When I open the Xyne-Space at "/chat/dir"
+    And I wait for "[data-testid='chat-list-loading']" to disappear
 
   Scenario: User can apply and clear filters, switch views, and change group-by options
-    When I open the Xyne-Space at "/chat/dir"
+  
     And I click on "[data-testid='my-tickets-btn']"
+    And I should see the element "[data-testid='more-filters-btn']"
     And I click on "[data-testid='more-filters-btn']"
     And I click on "[data-testid='filter-menu-priority']"
     And I click on "[data-testid='priority-filter-low']"
