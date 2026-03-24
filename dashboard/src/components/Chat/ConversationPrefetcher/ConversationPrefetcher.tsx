@@ -5,6 +5,7 @@ import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { stateMachineActor, Conversation } from '../../../machines/stateMachine';
 import { queryCacheActor } from '../../../machines/queryCacheMachine';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
 
 const PAGE_SIZE = 50;
 const MAX_QUEUE_SIZE = 5;
@@ -53,7 +54,7 @@ const ConversationPrefetcher = (): null => {
     state => state.context.userChannelStatuses,
   );
 
-  const allChannels = useSelector(stateMachineActor, state => state.context.allChannels);
+  const allChannels = useAllVisibleChannels();
 
   // Track prefetch state
   const stateRef = useRef<PrefetchState>({
@@ -243,7 +244,10 @@ const ConversationPrefetcher = (): null => {
       const channel = allChannels.find(c => c.id === status.channelId);
       if (!channel) continue;
 
-      const channelItem = buildChannelItem(status, channel);
+      const channelItem = buildChannelItem(status, {
+        id: channel.id,
+        lastActivityAt: channel.channelStats?.lastActivityAt || 0,
+      });
 
       if (status.unreadCount && status.unreadCount > 0) {
         channelsWithUnread.push(channelItem);
@@ -305,7 +309,10 @@ const ConversationPrefetcher = (): null => {
       const channel = allChannels.find(c => c.id === status.channelId);
       if (!channel) continue;
 
-      const channelItem = buildChannelItem(status, channel);
+      const channelItem = buildChannelItem(status, {
+        id: channel.id,
+        lastActivityAt: channel.channelStats?.lastActivityAt || 0,
+      });
 
       if (status.unreadCount && status.unreadCount > 0) {
         channelsWithUnread.push(channelItem);

@@ -51,7 +51,6 @@ export function CallMessageOverlay({
     useCallConfirmation({
       scopeType: channel?.scopeType,
       channelName: displayName,
-      participantCount: channel?.participantCount,
       hasActiveCallInChannel: true,
       isUserInCurrentChannelCall: currentCallId === callId,
       isInCall,

@@ -793,10 +793,11 @@ export class CallRepository {
         });
       }
 
-      // Update channel last activity
-      await tx.channel.update({
-        where: { id: channelId },
-        data: { lastActivityAt: now },
+      // Update channel last activity in channel_stats
+      await tx.channelStats.upsert({
+        where: { channelId },
+        update: { lastActivityAt: now },
+        create: { channelId, lastActivityAt: now },
       });
 
       return { call, invitedParticipantIds };

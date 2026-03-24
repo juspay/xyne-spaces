@@ -83,7 +83,8 @@ const MobileChatDirectory = ({
     const sortByActivity = (list: typeof channelData) =>
       [...list].sort(
         (a, b) =>
-          new Date(b.lastActivityAt ?? 0).getTime() - new Date(a.lastActivityAt ?? 0).getTime(),
+          new Date(b.channelStats?.lastActivityAt ?? 0).getTime() -
+          new Date(a.channelStats?.lastActivityAt ?? 0).getTime(),
       );
 
     return {

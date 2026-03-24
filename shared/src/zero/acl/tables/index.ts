@@ -7,6 +7,7 @@ export { CallsACL } from './calls-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';
 export { CanvasesACL } from './canvases-acl';
 export { ChannelParticipantsACL } from './channel-participants-acl';
+export { ChannelStatsACL } from './channel-stats-acl';
 export { ChannelsACL } from './channels-acl';
 export { ConversationParticipantsACL } from './conversation-participants-acl';
 export { ConversationsACL } from './conversations-acl';

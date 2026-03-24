@@ -1,10 +1,15 @@
 import { ReactElement, useState, useMemo } from 'react';
 import { useAuthContextValues } from '../../hooks/useAuth';
-import { useAllChannels, useUserChannelStatuses } from '../../hooks/useChannels';
+import {
+  useAllChannels,
+  useAllVisibleChannels,
+  useUserChannelStatuses,
+} from '../../hooks/useChannels';
 import { groupChannelsByScope } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
+import { VisibleChannel } from '../../machines/stateMachine';
 
 interface GlobalCommandMenuProps {
   open?: boolean;
@@ -25,6 +30,7 @@ const GlobalCommandMenu = ({
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
+  const visibleAllChannels = useAllVisibleChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
   const [internalOpen, setInternalOpen] = useState(false);
 
@@ -38,12 +44,22 @@ const GlobalCommandMenu = ({
   const { starred, channels, directMessages } = useMemo(() => {
     if (!channelData.length) return { starred: [], channels: [], directMessages: [] };
 
-    const grouped = groupChannelsByScope(channelData, allChannelsUserStatus);
+    const visibleChannels = channelData.map(channel => {
+      const vc = visibleAllChannels.find(vc => vc.id === channel.id);
+      if (vc) {
+        return vc;
+      }
+      return {
+        ...channel,
+      };
+    }) as VisibleChannel[];
+    const grouped = groupChannelsByScope(visibleChannels, allChannelsUserStatus);
 
-    const sortByActivity = (list: typeof channelData) =>
+    const sortByActivity = (list: typeof visibleChannels) =>
       [...list].sort(
         (a, b) =>
-          new Date(b.lastActivityAt ?? 0).getTime() - new Date(a.lastActivityAt ?? 0).getTime(),
+          new Date(b.channelStats?.lastActivityAt ?? 0).getTime() -
+          new Date(a.channelStats?.lastActivityAt ?? 0).getTime(),
       );
 
     return {

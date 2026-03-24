@@ -240,6 +240,8 @@ export const mapChannel = async (
   }
 
   const channelName = await resolveChannelName(args.name, args.scopeType);
+  const channelStats = await db.channelStats.findUnique({ where: { channelId: args.id } });
+  const lastActivityAt = channelStats?.lastActivityAt ?? ('createdAt' in args ? args.createdAt : new Date());
   return {
     docType: VespaDocType.CHANNEL,
     docId: args.id,
@@ -257,8 +259,8 @@ export const mapChannel = async (
     isMpim: args.scopeType === ChannelScopeType.GROUP_DM,
     scopeType: args.scopeType,
     metadata: JSON.stringify(args.metadata) || '',
-    lastActivityAt: toTimestamp(args.lastActivityAt),
-    lastSyncedAt: toTimestamp(args.lastActivityAt),
+    lastActivityAt: toTimestamp(lastActivityAt),
+    lastSyncedAt: toTimestamp(lastActivityAt),
     topic: "",// TODO: handle topic,
     memberCount: channelParticipants.length,
     isArchived: false, // TODO: handle archived state

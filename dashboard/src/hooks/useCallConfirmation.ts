@@ -55,7 +55,6 @@ interface UseCallConfirmationReturn {
 export const useCallConfirmation = ({
   scopeType,
   channelName,
-  participantCount,
   hasActiveCallInChannel,
   isUserInCurrentChannelCall,
   isInCall,
@@ -97,7 +96,7 @@ export const useCallConfirmation = ({
     if (isChannel && !isUserInAnyCall && !onlyShowSwitchModal) {
       setModalContent({
         title: `Start a call in this channel?`,
-        subtitle: `You'll be starting a call that all ${participantCount || 0} members of # ${channelName || 'this channel'} can join.`,
+        subtitle: `You'll be starting a call that all members of # ${channelName || 'this channel'} can join.`,
       });
       setShowConfirmModal(true);
       return;

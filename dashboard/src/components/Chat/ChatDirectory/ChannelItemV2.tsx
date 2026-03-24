@@ -1,7 +1,8 @@
 import { ReactElement, useRef, useState, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Hash, Pencil, Headphones, X } from 'lucide-react';
-import { ChannelVisibility, Channel, ChannelScopeType } from '@xyne/shared';
+import { ChannelVisibility, ChannelScopeType } from '@xyne/shared';
+import { VisibleChannel } from '../../../machines/stateMachine';
 import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
 import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -23,7 +24,7 @@ import { StatusIndicator } from '../../ui/StatusIndicator';
 import { standaloneNavigate } from '../../../utils/electronApp';
 
 interface ChannelItemV2Props {
-  channel: Channel;
+  channel: VisibleChannel;
   unreadCount?: number;
 }
 
@@ -69,8 +70,8 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
     ? hasUnreadCount
     : hasUnreadCount ||
       (!!status?.lastViewedAt &&
-        !!channel.lastActivityAt &&
-        channel.lastActivityAt > status.lastViewedAt);
+        !!channel.channelStats?.lastActivityAt &&
+        channel.channelStats.lastActivityAt > status.lastViewedAt);
 
   const shouldShowCloseButton = isDM && !isActive && unreadCount === 0 && !isMobile;
 

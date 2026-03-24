@@ -119,7 +119,7 @@ const ChatDirectory = ({
           s => s.channelId === channel.id && s.userId === context.userID,
         );
         const unreadCount = status?.unreadCount ?? 0;
-        const lastActivityAt = channel.lastActivityAt ?? 0;
+        const lastActivityAt = channel.channelStats?.lastActivityAt ?? 0;
         const lastViewedAt = status?.lastViewedAt ?? 0;
 
         if (unreadCount > 0) {
@@ -132,7 +132,9 @@ const ChatDirectory = ({
       }
 
       const sortByActivity = (channels: typeof channelData) =>
-        [...channels].sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
+        [...channels].sort(
+          (a, b) => (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0),
+        );
 
       return [
         ...sortByActivity(withUnread),

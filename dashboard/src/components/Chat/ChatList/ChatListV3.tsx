@@ -1,7 +1,7 @@
 import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
+import { useGetChannelUserStatus, useVisibleChannel } from '../../../hooks/useChannels';
 //eslint-disable-next-line local-rules/no-rocicorp-use-zero
 import { useZero } from '@rocicorp/zero/react';
 import { queries } from '../../../zero/queries';
@@ -155,18 +155,20 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const { baseRoute } = useRouteContext();
   const { editingMessageId, requestEdit } = useEditContext();
   const channelParticipation = useGetChannelUserStatus(channelId);
-  const channel = useChannel(channelId);
+  const channel = useVisibleChannel(channelId);
 
   const [newConversationsAnchor, setNewConversationsAnchor] = useState<Anchor | null>(
     linkedItemCreatedAt ||
       (channelParticipation?.lastViewedAt &&
-      (!channel?.lastActivityAt || channelParticipation.lastViewedAt < channel?.lastActivityAt)
+      (!channel?.channelStats?.lastActivityAt ||
+        channelParticipation.lastViewedAt < channel?.channelStats?.lastActivityAt)
         ? { createdAt: channelParticipation?.lastViewedAt }
         : null),
   );
   const [oldConversationsAnchor, setOldestConversationsAnchor] = useState<Anchor>(
     linkedItemCreatedAt || {
-      createdAt: channelParticipation?.lastViewedAt || channel?.lastActivityAt || Date.now(),
+      createdAt:
+        channelParticipation?.lastViewedAt || channel?.channelStats?.lastActivityAt || Date.now(),
     },
   );
   const [inViewAnchor, setInViewAnchor] = useState<UpdatedConveresationsAnchor | null>(null);

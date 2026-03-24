@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Select } from '@base-ui/react/select';
 import { Check, ChevronDown, Hash } from 'lucide-react';
 import { toast } from 'sonner';
-import { Channel, ChannelAddUserPolicy, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import { ChannelAddUserPolicy, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { useClipboard } from '../../../hooks/useClipboard';
 import { useUsers } from '../../../hooks/useUsers';
+import { VisibleChannel } from '../../../machines/stateMachine';
 
 const POLICY_OPTIONS = [
   { value: ChannelAddUserPolicy.EVERYONE, label: 'Everyone' },
@@ -15,7 +16,7 @@ const POLICY_OPTIONS = [
 ];
 
 interface ChannelSettingsProps {
-  channel: Channel;
+  channel: VisibleChannel;
   isAdmin: boolean;
 }
 
@@ -70,7 +71,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
   const allUsers = useUsers();
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
 
-  const currentPolicy = channel.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+  const currentPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const [selectedPolicy, setSelectedPolicy] = useState<ChannelAddUserPolicy>(currentPolicy);
 
   useEffect(() => {

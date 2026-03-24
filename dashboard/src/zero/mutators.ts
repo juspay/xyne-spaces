@@ -221,16 +221,6 @@ export const mutators = defineMutators({
           throw new Error('You are not allowed to add someone');
         }
 
-        if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
-          const addUserPolicy = channel.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
-          if (
-            addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY &&
-            participationOfRequestingUser.role === ChannelRole.MEMBER
-          ) {
-            throw new Error('Only admins can add users to this channel');
-          }
-        }
-
         const users = await Promise.all(userIds.map(id => tx.run(zql.users.where('id', id).one())));
         const validUsers = users.filter(user => user !== undefined);
 
@@ -404,8 +394,8 @@ export const mutators = defineMutators({
           throw new Error('Only channel admins can update the add-user policy');
         }
 
-        await tx.mutate.channels.update({
-          id: channelId,
+        await tx.mutate.channel_stats.update({
+          channelId,
           addUserPolicy: policy,
         });
       },

@@ -291,7 +291,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       setIsJoiningCall(false);
       setConfirmModalConfig({
         title: 'Start a call in this channel?',
-        subtitle: `You'll be starting a call that all ${channel?.participantCount || 0} members of # ${channel?.name || 'this channel'} can join.`,
+        subtitle: `You'll be starting a call that all members of # ${channel?.name || 'this channel'} can join.`,
       });
       setShowConfirmModal(true);
       return;

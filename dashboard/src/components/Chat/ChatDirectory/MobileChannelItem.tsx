@@ -1,7 +1,7 @@
 import { ReactElement, useRef, useState, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Hash, Pencil, Headphones } from 'lucide-react';
-import { ChannelVisibility, Channel } from '@xyne/shared';
+import { ChannelVisibility } from '@xyne/shared';
 import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
 import { useDraft } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -17,9 +17,10 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { ChannelScopeType } from '@xyne/shared';
+import { VisibleChannel } from '../../../machines/stateMachine';
 
 interface MobileChannelItemProps {
-  channel: Channel;
+  channel: VisibleChannel;
   unreadCount?: number;
 }
 
@@ -55,8 +56,8 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
     ? hasUnreadCount
     : hasUnreadCount ||
       (!!status?.lastViewedAt &&
-        !!channel.lastActivityAt &&
-        channel.lastActivityAt > status.lastViewedAt);
+        !!channel.channelStats?.lastActivityAt &&
+        channel.channelStats?.lastActivityAt > status.lastViewedAt);
 
   /**
    * Returns the icon for the channel type:

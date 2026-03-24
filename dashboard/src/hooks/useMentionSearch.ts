@@ -61,7 +61,9 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
       .filter(
         ch => ch.scopeType === ChannelScopeType.DM || ch.scopeType === ChannelScopeType.GROUP_DM,
       )
-      .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0));
+      .sort(
+        (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
+      );
 
     const dmUserIds: string[] = [];
 

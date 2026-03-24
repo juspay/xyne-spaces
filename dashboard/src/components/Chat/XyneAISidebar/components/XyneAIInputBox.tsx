@@ -20,7 +20,7 @@ import { toast } from 'sonner';
 import { ChannelScopeType } from '@xyne/shared';
 import { StopIcon } from './StopIcon';
 import { useAllVisibleChannels, searchChannels } from '../../../../hooks/useChannels';
-import type { Channel } from '../../../../machines/stateMachine';
+import type { Channel } from '@xyne/shared';
 import { ChannelMentionExtension, channelMentionPluginKey } from '../../../ui/TipTapExtensions';
 import { MentionSelector } from '../../../ui/Selectors';
 import type { MentionResult } from '../../../ui/Selectors/Selectors.types';

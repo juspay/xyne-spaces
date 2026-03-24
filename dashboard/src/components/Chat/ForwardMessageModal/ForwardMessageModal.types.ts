@@ -1,6 +1,6 @@
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
-import { Channel } from '../../../machines/stateMachine';
+import { VisibleChannel } from '../../../machines/stateMachine';
 import { User } from '@xyne/shared';
 
 export type MessageType = QueryResultType<typeof queries.conversationMessages>[number];
@@ -23,7 +23,7 @@ export interface SearchResultItem {
   id: string;
   name: string;
   description?: string | null;
-  channel?: Channel;
+  channel?: VisibleChannel;
   user?: User;
 }
 

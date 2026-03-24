@@ -1,7 +1,7 @@
 import { useState, JSX, cloneElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
-import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
+import { useVisibleChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import useMeasure from '../../../hooks/useMeasure';
 import { Star, Users2, Bell, ExternalLink } from 'lucide-react';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
@@ -45,7 +45,7 @@ const ConversationHeader = ({
 }: ConversationHeaderProps): JSX.Element | null => {
   const context = useAuthContextValues();
   const zero = useZero();
-  const channel = useChannel(channelId);
+  const channel = useVisibleChannel(channelId);
   const channelUserStatus = useGetChannelUserStatus(channelId);
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
@@ -143,27 +143,28 @@ const ConversationHeader = ({
               />
             </Button>
           </Tooltip>
-          {channel.participantCount > 1 && !isOneToOneDMChannel(channel.scopeType) && (
-            <Tooltip content='View members'>
-              <Button
-                variant='outline'
-                onClick={() => {
-                  setInfoDefaultTab('members');
-                  setIsInfoOpen(true);
-                }}
-                className='flex items-center justify-between gap-2 border border-border rounded-lg p-2 text-primary'
-                data-track-category='CHANNELS'
-                data-track-name='VIEW_MEMBERS'
-                data-track-metadata={JSON.stringify({ channelId })}
-              >
-                <span className='shrink-0'>
-                  <Users2 className='w-4 h-4' />
-                </span>
-                <span className='h-4 w-[1px] bg-muted-foreground/30 rounded-full'></span>
-                <span className='shrink-0'>{channel.participantCount}</span>
-              </Button>
-            </Tooltip>
-          )}
+          {(channel.channelStats?.participantCount ?? 0) > 1 &&
+            !isOneToOneDMChannel(channel.scopeType) && (
+              <Tooltip content='View members'>
+                <Button
+                  variant='outline'
+                  onClick={() => {
+                    setInfoDefaultTab('members');
+                    setIsInfoOpen(true);
+                  }}
+                  className='flex items-center justify-between gap-2 border border-border rounded-lg p-2 text-primary'
+                  data-track-category='CHANNELS'
+                  data-track-name='VIEW_MEMBERS'
+                  data-track-metadata={JSON.stringify({ channelId })}
+                >
+                  <span className='shrink-0'>
+                    <Users2 className='w-4 h-4' />
+                  </span>
+                  <span className='h-4 w-[1px] bg-muted-foreground/30 rounded-full'></span>
+                  <span className='shrink-0'>{channel.channelStats?.participantCount ?? 0}</span>
+                </Button>
+              </Tooltip>
+            )}
           {channelUserStatus && (
             <Tooltip content='Notifications'>
               <Button
@@ -214,7 +215,7 @@ const ConversationHeader = ({
             targetUserIds={targetUserId ? [targetUserId] : []}
             scopeType={channel.scopeType}
             channelName={displayName}
-            participantCount={channel.participantCount}
+            participantCount={channel.channelStats?.participantCount ?? 0}
             callDisplayName={displayName}
             isMember={!!channelUserStatus}
           />

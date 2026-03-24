@@ -62,13 +62,12 @@ export async function addChannelParticipant(
     mobileNotificationLevel: 'ALL',
   });
 
-  // Increment participantCount and bump updatedAt so delta subscriptions pick up the change
-  const channel = await tx.run(zql.channels.where('id', channelId).one());
-  if (channel) {
-    await tx.mutate.channels.update({
-      id: channelId,
-      participantCount: (channel.participantCount || 0) + 1,
-      updatedAt: now,
+  // Increment participantCount in channel_stats
+  const channelStats = await tx.run(zql.channel_stats.where('channelId', channelId).one());
+  if (channelStats) {
+    await tx.mutate.channel_stats.update({
+      channelId,
+      participantCount: (channelStats.participantCount || 0) + 1,
     });
   }
 
@@ -136,13 +135,12 @@ export async function addChannelParticipants(
     });
   }
 
-  // Increment participantCount and bump updatedAt so delta subscriptions pick up the change
-  const channel = await tx.run(zql.channels.where('id', channelId).one());
-  if (channel) {
-    await tx.mutate.channels.update({
-      id: channelId,
-      participantCount: (channel.participantCount || 0) + newUserIds.length,
-      updatedAt: Date.now(),
+  // Increment participantCount by the number of actually added participants in channel_stats
+  const channelStats = await tx.run(zql.channel_stats.where('channelId', channelId).one());
+  if (channelStats) {
+    await tx.mutate.channel_stats.update({
+      channelId,
+      participantCount: (channelStats.participantCount || 0) + newUserIds.length,
     });
   }
 
@@ -171,14 +169,13 @@ export async function removeChannelParticipant(
     return { removed: false, participantId: null };
   }
 
-  // Update channel participantCount and bump updatedAt BEFORE deleting participant
+  // Update channel_stats participantCount BEFORE deleting participant
   // This ensures the user is still a participant when the ACL check runs
-  const channel = await tx.run(zql.channels.where('id', channelId).one());
-  if (channel) {
-    await tx.mutate.channels.update({
-      id: channelId,
-      participantCount: Math.max((channel.participantCount || 0) - 1, 0),
-      updatedAt: Date.now(),
+  const channelStats = await tx.run(zql.channel_stats.where('channelId', channelId).one());
+  if (channelStats) {
+    await tx.mutate.channel_stats.update({
+      channelId,
+      participantCount: Math.max((channelStats.participantCount || 0) - 1, 0),
     });
   }
 

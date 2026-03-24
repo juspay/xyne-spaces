@@ -1,8 +1,8 @@
-import type { Channel } from '@xyne/shared';
+import type { VisibleChannel } from '../../../machines/stateMachine';
 import { ChannelUserStatus } from '@xyne/shared';
 
 export interface ChatDirectoryProps {
-  channelData: Channel[] | undefined;
+  channelData: VisibleChannel[] | undefined;
   allChannelsUserStatus: ChannelUserStatus[];
 }
 

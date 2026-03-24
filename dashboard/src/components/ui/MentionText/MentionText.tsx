@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Lock, Users, Clock, Hash } from 'lucide-react';
 import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
@@ -9,6 +9,8 @@ import type { MentionTextProps } from './MentionText.types';
 import { useUser } from '../../../hooks/useUsers';
 import { useChannel } from '../../../hooks/useChannels';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { useZero } from '../../../hooks/useZero';
+import { queries } from '../../../zero/queries';
 
 export const MentionText: React.FC<MentionTextProps> = props => {
   const context = useAuthContextValues();
@@ -18,6 +20,23 @@ export const MentionText: React.FC<MentionTextProps> = props => {
   const user = useUser(props.type === 'user' ? props.userId : '');
   const channel = useChannel(props.type === 'channel' ? props.channelId : '');
   const isCurrentUser = context.userID === user?.id;
+  const [lastActivityAt, setLastActivity] = useState<number | undefined>(undefined);
+  const [participantCount, setParticipantCount] = useState<number | undefined>(undefined);
+  const zero = useZero();
+
+  useEffect(() => {
+    if (props.type !== 'channel') return;
+    zero
+      .run(queries.channelStats({ channelId: props.channelId }), { type: 'complete' })
+      .then(stats => {
+        if (!stats) return;
+        setLastActivity(stats.lastActivityAt);
+        setParticipantCount(stats.participantCount);
+      })
+      .catch(() => {
+        // { Handle error silently, stats will just not show in popover }
+      });
+  }, [props.type, zero]);
 
   if (props.type === 'channel') {
     const handleChannelClick = (): void => {
@@ -37,21 +56,21 @@ export const MentionText: React.FC<MentionTextProps> = props => {
     const metadata: React.ReactNode[] = [];
 
     if (channel && hasAccess) {
-      if (channel.participantCount > 0) {
+      if (participantCount && participantCount > 0) {
         metadata.push(
           <div
             key='members'
             className='flex items-center gap-2 text-xs font-base text-muted-foreground'
           >
             <Users className='h-3.5 w-3.5' />
-            <span>{channel.participantCount} people in this channel</span>
+            <span>{participantCount} people in this channel</span>
           </div>,
         );
       }
 
       // Show last activity time
-      if (channel.lastActivityAt) {
-        const lastActivityDate = new Date(channel.lastActivityAt);
+      if (lastActivityAt) {
+        const lastActivityDate = new Date(lastActivityAt);
         const now = new Date();
         const diffMs = now.getTime() - lastActivityDate.getTime();
         const diffMins = Math.floor(diffMs / 60000);

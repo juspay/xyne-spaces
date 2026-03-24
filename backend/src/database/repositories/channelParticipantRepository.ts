@@ -51,14 +51,11 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         }
       });
 
-      // Increment participantCount
-      await tx.channel.update({
-        where: { id: data.channelId },
-        data: {
-          participantCount: {
-            increment: 1
-          }
-        }
+      // Increment participantCount in channel_stats
+      await tx.channelStats.upsert({
+        where: { channelId: data.channelId },
+        update: { participantCount: { increment: 1 } },
+        create: { channelId: data.channelId, participantCount: 1, lastActivityAt: new Date()},
       });
 
       return participant;
@@ -150,14 +147,11 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         }
       });
 
-      // Increment participantCount
-      await tx.channel.update({
-        where: { id: channelId },
-        data: {
-          participantCount: {
-            increment: 1
-          }
-        }
+      // Increment participantCount in channel_stats
+      await tx.channelStats.upsert({
+        where: { channelId },
+        update: { participantCount: { increment: 1 } },
+        create: { channelId, participantCount: 1, lastActivityAt: new Date() },
       });
 
       return participant;
@@ -181,14 +175,10 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
         where: { channelId, userId }
       });
 
-      // Decrement participantCount
-      await tx.channel.update({
-        where: { id: channelId },
-        data: {
-          participantCount: {
-            decrement: 1
-          }
-        }
+      // Decrement participantCount in channel_stats
+      await tx.channelStats.update({
+        where: { channelId },
+        data: { participantCount: { decrement: 1 } },
       });
     });
   }

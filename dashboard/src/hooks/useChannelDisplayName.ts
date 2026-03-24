@@ -1,11 +1,5 @@
 import { useMemo } from 'react';
-import {
-  Channel,
-  ChannelAddUserPolicy,
-  ChannelScopeType,
-  ChannelType,
-  ChannelVisibility,
-} from '@xyne/shared';
+import { Channel, ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
 import {
   isDMChannel,
   getDMParticipantIdsToFetch,
@@ -29,12 +23,12 @@ const DEFAULT_CHANNEL: Channel = {
   createdAt: 0,
   createdBy: '',
   updatedAt: 0,
-  lastActivityAt: 0,
   metadata: null,
   projectId: '',
-  participantCount: 0,
   isMigrated: null,
-  addUserPolicy: ChannelAddUserPolicy.EVERYONE,
+  lastActivityAt: 0,
+  participantCount: 0,
+  addUserPolicy: null,
 };
 
 export const useChannelDisplayName = (

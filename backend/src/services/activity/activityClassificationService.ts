@@ -623,6 +623,10 @@ export class ActivityClassificationService {
       contentText
     );
 
+    const channelStatsRecord = channel
+      ? await db.channelStats.findUnique({ where: { channelId: channel.id } })
+      : null;
+
     return {
       actorAction: activity.actorAction,
       actionSource: activity.actionSource,
@@ -639,7 +643,7 @@ export class ActivityClassificationService {
             scopeType: channel.scopeType,
             visibility: channel.visibility,
             userRole: channelParticipant?.role || null,
-            participantCount: channel.participantCount ?? null,
+            participantCount: channelStatsRecord?.participantCount ?? null,
           }
         : null,
       message: {
@@ -822,6 +826,10 @@ export class ActivityClassificationService {
 
     const attachments = await this.getMessageAttachmentSummary(message, contentHtml, contentText);
 
+    const audienceChannelStats = channel
+      ? await db.channelStats.findUnique({ where: { channelId: channel.id } })
+      : null;
+
     return {
       actorAction: 'group_mention',
       actionSource: 'message',
@@ -831,7 +839,7 @@ export class ActivityClassificationService {
             name: channel.name,
             scopeType: channel.scopeType,
             visibility: channel.visibility,
-            participantCount: channel.participantCount ?? null,
+            participantCount: audienceChannelStats?.participantCount ?? null,
           }
         : null,
       message: {

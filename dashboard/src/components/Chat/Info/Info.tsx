@@ -59,10 +59,11 @@ import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { mutators } from '../../../zero/mutators';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { v4 as uuidv4 } from 'uuid';
+import { VisibleChannel } from '../../../machines/stateMachine';
 
 export type ChannelTab = 'about' | 'members' | 'notifications' | 'settings';
 interface InfoProps {
-  channel: Channel;
+  channel: VisibleChannel;
   previousChannelId?: string | null;
   defaultTab?: ChannelTab;
   onClose?: () => void;
@@ -95,7 +96,7 @@ const Info = ({
   const isParticipant = participants.some(p => p.userId === context.userID);
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
 
-  const addUserPolicy = channel.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+  const addUserPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const showAddPeopleButton =
     isParticipant &&
     !isDM &&
@@ -210,7 +211,7 @@ const Info = ({
     useCallConfirmation({
       scopeType: channel.scopeType,
       channelName: channelDisplayName,
-      participantCount: channel.participantCount,
+      participantCount: channel.channelStats?.participantCount,
       hasActiveCallInChannel,
       isUserInCurrentChannelCall,
       isInCall,
@@ -377,7 +378,7 @@ const Info = ({
                   : 'border-transparent text-muted-foreground hover:text-foreground',
               )}
             >
-              Members {channel.participantCount || 0}
+              Members {channel.channelStats?.participantCount || 0}
             </Tabs.Trigger>
           )}
           {isParticipant && (

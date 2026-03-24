@@ -6,7 +6,7 @@ import { useQuery as useTanStackQuery } from '@tanstack/react-query';
 import { queries } from '../zero/queries';
 import { useAuthContextValues } from '../hooks/useAuth';
 import AppLoader from '../components/AppLoader/AppLoader';
-import { stateMachineActor, User, Channel } from '../machines/stateMachine';
+import { stateMachineActor, User } from '../machines/stateMachine';
 import {
   setupQueryCachePersistence,
   hydrateQueryCacheFromIndexedDB,
@@ -29,6 +29,7 @@ import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
+import { Channel } from '@xyne/shared/index';
 
 interface InitialStateLoaderProps {
   children: ReactNode;
