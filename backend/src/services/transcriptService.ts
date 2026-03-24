@@ -1116,59 +1116,34 @@ Output ONLY the processed transcript, nothing else.`;
       `[postSummaryAsReply] Bot found: ${xyneAutomaticBot.id} (${xyneAutomaticBot.email})`
     );
 
-    // Build markdown content with ticket suggestions in YAML frontmatter
-    let fullMarkdownContent = '';
-
-    if (ticketSuggestions && ticketSuggestions.length > 0) {
-      const frontmatterData = {
-        suggestions: ticketSuggestions.map((suggestion) => ({
-          suggestionId: randomUUID(),
-          title: suggestion.title,
-          priority: suggestion.priority,
-          description: suggestion.description,
-          assignee: suggestion.suggestedAssignee,
-        })),
-      };
-
-      fullMarkdownContent = '---\n' + yaml.dump(frontmatterData) + '---\n\n';
-      logger.info(`Added ${ticketSuggestions.length} ticket suggestions in YAML frontmatter`);
-    }
-
-    // Append the markdown summary after frontmatter
-    fullMarkdownContent += markdownSummary;
-
-    if (ticketSuggestions && ticketSuggestions.length > 0) {
-      fullMarkdownContent += '\n\n## Suggested Tickets:\n\n';
-    }
-
-    // Check if a summary already exists for this call
+    // ── 1. Post / update the AI summary as its own standalone message ──────────
     const existingSummary = await repositories.messages.findSummaryByCallId(conversationId, callId);
 
     if (existingSummary) {
-      // Update existing summary
       const existingMetadata = existingSummary.metadata as any;
       const currentVersion = existingMetadata?.version || 1;
 
       await repositories.messages.update(existingSummary.messageId, {
-        content: fullMarkdownContent,
+        content: markdownSummary,
         metadata: {
           messageSubtype: 'call_summary',
           callId,
           isAiGenerated: true,
           contentFormat: 'markdown',
-          hasSuggestedTickets: ticketSuggestions && ticketSuggestions.length > 0,
-          suggestedTicketsCount: ticketSuggestions?.length || 0,
+          hasSuggestedTickets: false,
+          suggestedTicketsCount: 0,
           version: currentVersion + 1,
           lastUpdatedAt: new Date().toISOString(),
         },
       });
-      logger.info(`[postSummaryAsReply] Updated existing summary message ${existingSummary.messageId} to version ${currentVersion + 1}`);
+      logger.info(
+        `[postSummaryAsReply] Updated existing summary message ${existingSummary.messageId} to version ${currentVersion + 1}`
+      );
     } else {
-      // Create new summary
-      const message = await repositories.messages.create({
+      const summaryMessage = await repositories.messages.create({
         conversationId,
         senderId: xyneAutomaticBot.id,
-        content: fullMarkdownContent,
+        content: markdownSummary,
         msgType: MessageType.BOT,
         showInChannel: false,
         metadata: {
@@ -1176,19 +1151,116 @@ Output ONLY the processed transcript, nothing else.`;
           callId,
           isAiGenerated: true,
           contentFormat: 'markdown',
-          hasSuggestedTickets: ticketSuggestions && ticketSuggestions.length > 0,
-          suggestedTicketsCount: ticketSuggestions?.length || 0,
+          hasSuggestedTickets: false,
+          suggestedTicketsCount: 0,
           version: 1,
           createdAt: new Date().toISOString(),
         },
       });
       await repositories.conversations.incrementReplyCount(conversationId);
       logger.info(
-        `[postSummaryAsReply] Message created: ${message.messageId} in conversation ${conversationId}`
+        `[postSummaryAsReply] Summary message created: ${summaryMessage.messageId} in conversation ${conversationId}`
       );
     }
 
-    logger.info(`[postSummaryAsReply] Reply count incremented for conversation ${conversationId}`);
+    // ── 2. Post ticket suggestions as batched separate messages ──────────────
+    // Update existing ticket messages in place (preserves chat position).
+    // Delete extras if batch count shrinks. Create new ones if it grows.
+    if (ticketSuggestions && ticketSuggestions.length > 0) {
+      const BATCH_SIZE = 10;
+
+      const batches: TicketSuggestion[][] = [];
+      for (let i = 0; i < ticketSuggestions.length; i += BATCH_SIZE) {
+        batches.push(ticketSuggestions.slice(i, i + BATCH_SIZE));
+      }
+
+      logger.info(
+        `[postSummaryAsReply] Posting ${ticketSuggestions.length} tickets in ${batches.length} batch(es) of up to ${BATCH_SIZE}`
+      );
+
+      const existingTicketMessages = await repositories.messages.findTicketsByCallId(conversationId, callId);
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+
+        const frontmatterData = {
+          suggestions: batch.map((suggestion) => ({
+            suggestionId: randomUUID(),
+            title: suggestion.title,
+            priority: suggestion.priority,
+            description: suggestion.description,
+            assignee: suggestion.suggestedAssignee,
+          })),
+        };
+
+        const batchContent =
+          '---\n' + yaml.dump(frontmatterData) + '---\n' + (batchIndex === 0 ? '\n## Suggested Tickets:\n' : '');
+
+        const existing = existingTicketMessages[batchIndex];
+
+        if (existing) {
+          // Update in place — preserves the message's position in the chat thread
+          const existingMetadata = existing.metadata as any;
+          const currentVersion = existingMetadata?.version || 1;
+          await repositories.messages.update(existing.messageId, {
+            content: batchContent,
+            metadata: {
+              messageSubtype: 'call_suggested_tickets',
+              callId,
+              isAiGenerated: true,
+              contentFormat: 'markdown',
+              hasSuggestedTickets: true,
+              suggestedTicketsCount: batch.length,
+              batchIndex,
+              totalBatches: batches.length,
+              version: currentVersion + 1,
+              lastUpdatedAt: new Date().toISOString(),
+            },
+          });
+          logger.info(
+            `[postSummaryAsReply] Updated ticket batch message ${existing.messageId} (batch ${batchIndex + 1}/${batches.length})`
+          );
+        } else {
+          // More batches than before — create the new ones
+          const batchMessage = await repositories.messages.create({
+            conversationId,
+            senderId: xyneAutomaticBot.id,
+            content: batchContent,
+            msgType: MessageType.BOT,
+            showInChannel: false,
+            metadata: {
+              messageSubtype: 'call_suggested_tickets',
+              callId,
+              isAiGenerated: true,
+              contentFormat: 'markdown',
+              hasSuggestedTickets: true,
+              suggestedTicketsCount: batch.length,
+              batchIndex,
+              totalBatches: batches.length,
+              version: 1,
+              createdAt: new Date().toISOString(),
+            },
+          });
+          await repositories.conversations.incrementReplyCount(conversationId);
+          logger.info(
+            `[postSummaryAsReply] Ticket batch message created: ${batchMessage.messageId} (batch ${batchIndex + 1}/${batches.length})`
+          );
+        }
+      }
+
+      // Fewer batches than before — delete the now-unused extra messages
+      if (existingTicketMessages.length > batches.length) {
+        const extras = existingTicketMessages.slice(batches.length);
+        for (const extra of extras) {
+          await repositories.messages.delete(extra.messageId);
+          logger.info(
+            `[postSummaryAsReply] Deleted surplus ticket batch message ${extra.messageId}`
+          );
+        }
+      }
+    }
+
+    logger.info(`[postSummaryAsReply] Done for callId: ${callId}`);
   }
 
   /**
