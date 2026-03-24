@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "xyne-genius-rca": {
+      "type": "http",
+      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/genius/mcp"
+    },
+    "xyne-grafana-logs": {
+      "type": "http",
+      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/logs/mcp"
+    },
+    "xyne-victoria-metrics": {
+      "type": "http",
+      "url": "https://grafana.spaces.xyne.juspay.net/xyne-mcp/metrics/mcp"
+    }
+  }
+}
