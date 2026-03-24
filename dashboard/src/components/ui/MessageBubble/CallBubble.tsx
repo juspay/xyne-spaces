@@ -55,7 +55,7 @@ export const GeneratePRDButton: React.FC<{
         onClick={() => setIsModalOpen(true)}
         disabled={isLoading}
         className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
-        style={{ color: 'var(--nav-active-icon, #0077FF)' }}
+        style={{ color: 'var(--call-action-button-color, #0077FF)' }}
       >
         {isLoading ? (
           <>
@@ -122,7 +122,7 @@ const ChatWithAskAIButton: React.FC<{
       type='button'
       onClick={handleClick}
       className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all'
-      style={{ color: 'var(--nav-active-icon, #0077FF)' }}
+      style={{ color: 'var(--call-action-button-color, #0077FF)' }}
     >
       <span>Chat with Transcript</span>
     </button>

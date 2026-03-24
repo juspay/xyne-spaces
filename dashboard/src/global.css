@@ -49,6 +49,7 @@
     --metrics-bar-divider: rgba(0, 0, 0, 0.5);
     --nav-active-icon: #27699d;
     --nav-disabled-icon: #a1bcd1;
+    --call-action-button-color: #27699d;
     --nav-icon-seperator: #bcd4e7;
     --nav-search-btn-bg: #c5dbf0;
     --nav-search-btn-text: #445e7e;
@@ -125,6 +126,7 @@
     --metrics-bar-divider: rgba(255, 255, 255, 0.5);
     --nav-active-icon: #ffffff;
     --nav-disabled-icon: #c9cccf;
+    --call-action-button-color: #27699d;
     --nav-icon-seperator: #acc6da;
     --nav-search-btn-bg: #5382a6;
     --nav-search-btn-text: #e1e8f0;
@@ -186,6 +188,7 @@
     --metrics-bar-divider: rgba(255, 255, 255, 0.2);
     --nav-active-icon: #60a5fa;
     --nav-disabled-icon: #4b5563;
+    --call-action-button-color: #60a5fa;
     --nav-icon-seperator: #374151;
     --nav-search-btn-bg: #1e3a5f;
     --nav-search-btn-text: #93c5fd;
