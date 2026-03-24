@@ -7,11 +7,11 @@ export async function handleUnreadCount(
     senderId?: string
   ): Promise<void> {
     const recipientIds = senderId ? channelParticipants.map(p => p.userId).filter(id => id !== senderId) : channelParticipants.map(p => p.userId);
-    const channel = await db.channel.findUnique({
-      where: { id: channelId },
+    const channelStats = await db.channelStats.findUnique({
+      where: { channelId },
       select: { lastActivityAt: true }
     });
-    if (recipientIds.length === 0 || !channel?.lastActivityAt) return;
+    if (recipientIds.length === 0 || !channelStats?.lastActivityAt) return;
 
     const statuses = await db.channelUserStatus.findMany({
       where: { channelId, userId: { in: recipientIds } },
@@ -21,7 +21,7 @@ export async function handleUnreadCount(
     if (isDMChannel) {
       await Promise.all(
         statuses.map(async (status) => {
-          if (!status.lastViewedAt || channel?.lastActivityAt > status.lastViewedAt) {
+          if (!status.lastViewedAt || channelStats?.lastActivityAt > status.lastViewedAt) {
             const whereClause: { channelId: string; createdAt?: { gt: Date } } = {
               channelId
             };

@@ -6,6 +6,7 @@ import { CallsACL } from '../tables/calls-acl';
 import { CanvasParticipantsACL } from '../tables/canvas-participants-acl';
 import { CanvasesACL } from '../tables/canvases-acl';
 import { ChannelParticipantsACL } from '../tables/channel-participants-acl';
+import { ChannelStatsACL } from '../tables/channel-stats-acl';
 import { ChannelsACL } from '../tables/channels-acl';
 import { ConversationParticipantsACL } from '../tables/conversation-participants-acl';
 import { ConversationsACL } from '../tables/conversations-acl';
@@ -82,6 +83,8 @@ export class ACLFactory {
         return new CanvasesACL(ctx);
       case 'channel_participants':
         return new ChannelParticipantsACL(ctx);
+      case 'channel_stats':
+        return new ChannelStatsACL(ctx);
       case 'channels':
         return new ChannelsACL(ctx);
       case 'conversation_participants':

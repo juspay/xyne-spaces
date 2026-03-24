@@ -17,7 +17,6 @@ export interface CreateChannelInput {
 export interface UpdateChannelInput {
   name?: string;
   description?: string;
-  lastActivityAt?: Date;
   isMigrated?: boolean;
   type?: ChannelType;
 }
@@ -146,7 +145,9 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     return await this.db.channel.findMany({
       where,
       orderBy: {
-        lastActivityAt: 'desc'
+        channelStats: {
+          lastActivityAt: 'desc'
+        }
       }
     });
   }
@@ -191,11 +192,10 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
   // Channel-specific methods
   async updateLastActivity(id: string): Promise<void> {
-    await this.db.channel.update({
-      where: { id },
-      data: {
-        lastActivityAt: new Date(),
-      }
+    await this.db.channelStats.upsert({
+      where: { channelId: id },
+      update: { lastActivityAt: new Date() },
+      create: { channelId: id, lastActivityAt: new Date() },
     });
   }
 
@@ -248,7 +248,9 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     return await this.db.channel.findMany({
       where,
       orderBy: {
-        lastActivityAt: 'desc'
+        channelStats: {
+          lastActivityAt: 'desc'
+        }
       }
     });
   }

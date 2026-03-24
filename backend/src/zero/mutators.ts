@@ -240,7 +240,8 @@ async function createNonParticipantSystemMessages(
       `<span data-mention="true" data-mention-type="user" data-user-id="${np.userId}" data-username="${np.userName}" class="mention-text">${np.userName}</span>`
     ).join(', ');
 
-    const effectiveAddUserPolicy = channel?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+    const channelStatsForPolicy = channel ? await tx.run(zql.channel_stats.where('channelId', channel.id).one()) : null;
+    const effectiveAddUserPolicy = channelStatsForPolicy?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
     const cannotAddUsers =
       channel?.scopeType !== ChannelScopeType.GROUP_DM &&
       senderParticipation?.role === ChannelRole.MEMBER &&
@@ -470,6 +471,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             visibility: visibility,
             projectId: projectId,
             updatedAt: timestamp,
+          });
+
+          await tx.mutate.channel_stats.update({
+            channelId,
             lastActivityAt: timestamp,
           });
 
@@ -543,7 +548,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
-            const addUserPolicy = channel.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+            const channelStatsData = await tx.run(zql.channel_stats.where('channelId', channelId).one());
+            const addUserPolicy = channelStatsData?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
             if (
               addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY &&
               participationOfRequestingUser.role === ChannelRole.MEMBER
@@ -736,8 +742,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Only channel admins can update the add-user policy');
           }
 
-          await tx.mutate.channels.update({
-            id: channelId,
+          await tx.mutate.channel_stats.update({
+            channelId,
             addUserPolicy: policy,
           });
         },
@@ -1423,8 +1429,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
 
-          await tx.mutate.channels.update({
-            id: channel.id,
+          await tx.mutate.channel_stats.update({
+            channelId: channel.id,
             lastActivityAt: now,
           });
 
@@ -1853,9 +1859,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             });
           }
 
-          // Update channel last activity
-          await tx.mutate.channels.update({
-            id: targetChannelId,
+          // Update channel last activity in channel_stats
+          await tx.mutate.channel_stats.update({
+            channelId: targetChannelId,
             lastActivityAt: now,
           });
 
@@ -2700,7 +2706,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             if (!channel) throw new Error('Channel not found');
 
             if (channel.scopeType !== ChannelScopeType.GROUP_DM) {
-              const addUserPolicy = channel.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+              const actionChannelStats = await tx.run(zql.channel_stats.where('channelId', channelId).one());
+              const addUserPolicy = actionChannelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
               if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY) {
                 const senderParticipation = await tx.run(
                   zql.channel_participants

@@ -1,18 +1,18 @@
-import { ChannelScopeType, Channel, ChannelUserStatus } from '@xyne/shared';
+import { ChannelScopeType, ChannelUserStatus } from '@xyne/shared';
+import { VisibleChannel } from '../../../machines/stateMachine';
 
 // Optimized function to group channels by scope type (single pass)
 export const groupChannelsByScope = (
-  channelData: Channel[],
+  channelData: VisibleChannel[],
   allChannelsUserStatus: ChannelUserStatus[],
 ): {
-  starred: Channel[];
-  channels: Channel[];
-  directMessages: Channel[];
+  starred: VisibleChannel[];
+  channels: VisibleChannel[];
+  directMessages: VisibleChannel[];
 } => {
-  const starred: Channel[] = [];
-  const channels: Channel[] = [];
-  const directMessages: Channel[] = [];
-
+  const starred: VisibleChannel[] = [];
+  const channels: VisibleChannel[] = [];
+  const directMessages: VisibleChannel[] = [];
   for (const channel of channelData) {
     const currentUserParticipation = allChannelsUserStatus.find(p => p.channelId === channel.id);
 

@@ -37,6 +37,11 @@ export enum WorkflowCategory {
   STAGE_APPROVAL_WORKFLOW = "STAGE_APPROVAL_WORKFLOW",
 }
 
+export enum WorkflowExecutionMode {
+  AUTOMATIC = "AUTOMATIC",
+  MANUAL = "MANUAL",
+}
+
 export enum TicketStatus {
   NEW = "NEW",
   IN_PROGRESS = "IN_PROGRESS",
@@ -103,6 +108,7 @@ export enum ActivityType {
   STAGE_CHANGE_REQUEST = "STAGE_CHANGE_REQUEST",
   STAGE_CHANGE_APPROVED = "STAGE_CHANGE_APPROVED",
   STAGE_CHANGE_REJECTED = "STAGE_CHANGE_REJECTED",
+  IS_ARCHIVED = "IS_ARCHIVED",
 }
 
 export enum AttachmentEntityType {
@@ -111,6 +117,7 @@ export enum AttachmentEntityType {
   CANVAS = "CANVAS",
   EMAIL = "EMAIL",
   DRAFT = "DRAFT",
+  WORKFLOW_STEPS = "WORKFLOW_STEPS",
   IMPACT = "IMPACT",
 }
 
@@ -212,6 +219,7 @@ export enum UserStatus {
 export enum UserType {
   USER = "USER",
   BOT = "BOT",
+  APP = "APP",
 }
 
 export enum UserPresenceStatus {
@@ -273,6 +281,7 @@ export enum EmailType {
 export enum ExternalEntityType {
   MESSAGE = "MESSAGE",
   EMAIL = "EMAIL",
+  TICKET = "TICKET",
 }
 
 export enum MessageDirection {
@@ -351,6 +360,13 @@ export enum NotificationDeliveryMethod {
   MOBILE = "MOBILE",
   IOS = "IOS",
   ANDROID = "ANDROID",
+}
+
+export enum NotificationLevel {
+  ALL = "ALL",
+  MENTIONS_ONLY = "MENTIONS_ONLY",
+  THREADS_ONLY = "THREADS_ONLY",
+  NONE = "NONE",
 }
 
 export enum CanvasVisibility {
@@ -510,6 +526,13 @@ export enum SurfaceLinkKind {
   RELATES_TO = "RELATES_TO",
 }
 
+export enum SessionRecordingProcessStatus {
+  PENDING = "PENDING",
+  PROCESSING = "PROCESSING",
+  COMPLETED = "COMPLETED",
+  FAILED = "FAILED",
+}
+
 // Define tables
 
 export const agentTable = table("agents")
@@ -592,6 +615,7 @@ export const ticketTable = table("tickets")
     boardId: string(),
     stageName: string(),
     ticketType: string().optional(),
+    isArchived: boolean(),
   })
   .primaryKey("id");
 
@@ -715,6 +739,7 @@ export const workflowExecutionTable = table("workflow_executions")
     createdAt: number(),
     updatedAt: number(),
     ignoreDuration: number(),
+    mode: enumeration<WorkflowExecutionMode>(),
     createdBy: string().optional(),
   })
   .primaryKey("id");
@@ -979,6 +1004,7 @@ export const userPresenceTable = table("user_presence")
     statusContent: string().optional(),
     statusExpiryAt: number().optional(),
     assignmentUnavailableUntil: number().optional(),
+    notificationsPausedUntil: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1081,6 +1107,8 @@ export const projectTable = table("projects")
   .columns({
     id: string(),
     name: string(),
+    code: string(),
+    ticketSequence: number(),
     description: string().optional(),
     createdBy: string(),
     updatedBy: string().optional(),
@@ -1149,6 +1177,15 @@ export const channelTable = table("channels")
   })
   .primaryKey("id");
 
+export const channelStatsTable = table("channel_stats")
+  .columns({
+    channelId: string(),
+    lastActivityAt: number(),
+    participantCount: number(),
+    addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
+  })
+  .primaryKey("channelId");
+
 export const channelParticipantTable = table("channel_participants")
   .columns({
     id: string(),
@@ -1174,6 +1211,10 @@ export const channelUserStatusTable = table("channel_user_status")
     isClosed: boolean(),
     unreadCount: number(),
     selectedBoardId: string().optional(),
+    isRecapSubscribed: boolean(),
+    lastSeenRecapDate: number().optional(),
+    desktopNotificationLevel: enumeration<NotificationLevel>(),
+    mobileNotificationLevel: enumeration<NotificationLevel>(),
   })
   .primaryKey("id");
 
@@ -1888,6 +1929,24 @@ export const releaseAttributionTable = table("release_attributions")
   })
   .primaryKey("id");
 
+export const channelDailyRecapTable = table("channel_daily_recaps")
+  .columns({
+    channelId: string(),
+    recapDate: number(),
+    summary: string(),
+  })
+  .primaryKey("channelId", "recapDate");
+
+export const sessionRecordingFileTable = table("session_recording_files")
+  .columns({
+    id: string(),
+    sessionId: string(),
+    userId: string(),
+    status: enumeration<SessionRecordingProcessStatus>(),
+    lastProcessedTurn: number().optional(),
+  })
+  .primaryKey("id");
+
 export const surfaceLinkTable = table("surface_links")
   .columns({
     id: string(),
@@ -1899,6 +1958,29 @@ export const surfaceLinkTable = table("surface_links")
     createdBy: string(),
     projectId: string(),
     createdAt: number(),
+  })
+  .primaryKey("id");
+
+export const appsTable = table("apps")
+  .columns({
+    id: string(),
+    name: string(),
+    description: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const installedAppsTable = table("installed_apps")
+  .columns({
+    id: string(),
+    appId: string(),
+    userId: string(),
+    webhookUrl: string().optional(),
+    signingSecret: string(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -2401,6 +2483,16 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["userId"],
     destSchema: userExpertiseMappingTable,
+  }),
+  appsCreated: many({
+    sourceField: ["id"],
+    destField: ["createdBy"],
+    destSchema: appsTable,
+  }),
+  installedAppsFor: many({
+    sourceField: ["id"],
+    destField: ["userId"],
+    destSchema: installedAppsTable,
   })
 }));
 
@@ -2644,6 +2736,19 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: callTable,
+  }),
+  channelStats: one({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: channelStatsTable,
+  })
+}));
+
+export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
   })
 }));
 
@@ -2798,6 +2903,32 @@ export const canvasParticipantTableRelationships = relationships(canvasParticipa
   })
 }));
 
+export const appsTableRelationships = relationships(appsTable, ({ one, many }) => ({
+  createdByUser: one({
+    sourceField: ["createdBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  installations: many({
+    sourceField: ["id"],
+    destField: ["appId"],
+    destSchema: installedAppsTable,
+  })
+}));
+
+export const installedAppsTableRelationships = relationships(installedAppsTable, ({ one }) => ({
+  app: one({
+    sourceField: ["appId"],
+    destField: ["id"],
+    destSchema: appsTable,
+  }),
+  user: one({
+    sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  })
+}));
+
 // Define schema
 
 export const schema = createSchema(
@@ -2849,6 +2980,7 @@ export const schema = createSchema(
       stageTable,
       stagePrStatusMappingTable,
       channelTable,
+      channelStatsTable,
       channelParticipantTable,
       channelUserStatusTable,
       conversationTable,
@@ -2901,7 +3033,11 @@ export const schema = createSchema(
       impactTable,
       coeTable,
       releaseAttributionTable,
+      channelDailyRecapTable,
+      sessionRecordingFileTable,
       surfaceLinkTable,
+      appsTable,
+      installedAppsTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -2943,6 +3079,7 @@ export const schema = createSchema(
       boardTableRelationships,
       stageTableRelationships,
       channelTableRelationships,
+      channelStatsTableRelationships,
       channelParticipantTableRelationships,
       channelUserStatusTableRelationships,
       conversationTableRelationships,
@@ -2955,6 +3092,8 @@ export const schema = createSchema(
       callParticipantTableRelationships,
       canvasTableRelationships,
       canvasParticipantTableRelationships,
+      appsTableRelationships,
+      installedAppsTableRelationships,
     ],
   }
 );
@@ -3007,6 +3146,7 @@ export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
 export type Conversation = Row<typeof schema.tables.conversations>;
@@ -3059,4 +3199,8 @@ export type RCA = Row<typeof schema.tables.rcas>;
 export type Impact = Row<typeof schema.tables.impacts>;
 export type COE = Row<typeof schema.tables.coes>;
 export type ReleaseAttribution = Row<typeof schema.tables.release_attributions>;
+export type ChannelDailyRecap = Row<typeof schema.tables.channel_daily_recaps>;
+export type SessionRecordingFile = Row<typeof schema.tables.session_recording_files>;
 export type SurfaceLink = Row<typeof schema.tables.surface_links>;
+export type Apps = Row<typeof schema.tables.apps>;
+export type InstalledApps = Row<typeof schema.tables.installed_apps>;

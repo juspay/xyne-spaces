@@ -9,7 +9,7 @@ import {
   useEffect,
 } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
-import { ChannelScopeType, Channel, ChannelUserStatus } from '@xyne/shared';
+import { ChannelScopeType, ChannelUserStatus } from '@xyne/shared';
 import { ChevronRight, Search, Settings, Star, UserRoundPlus, Users } from 'lucide-react';
 import { ConversationTabListType } from '../ConversationPannel/ConversationPannel.utils';
 import { useClickOutside } from '../../../hooks/useClickOutside';
@@ -27,11 +27,12 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { cn } from '../../../utils/classNames';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
+import { VisibleChannel } from '../../../machines/stateMachine';
 
 interface ConversationHeaderMobileProps {
   channelId: string;
   previousChannelId?: string | null;
-  channel: Channel;
+  channel: VisibleChannel;
   channelUserStatus: ChannelUserStatus;
   channelTabs?: ConversationTabListType[] | undefined;
   activeTab?: string | undefined;
@@ -145,7 +146,7 @@ const ConversationHeaderMobile = ({
                 {displayName}
               </p>
               <small className='text-muted-foreground text-xs'>
-                {channel.participantCount} members
+                {channel.channelStats?.participantCount} members
               </small>
             </div>
           </motion.div>
@@ -238,7 +239,7 @@ const ConversationHeaderMobile = ({
                   {channelScopeType === ChannelScopeType.DM ? 'Profile' : 'Members'}
                 </span>
                 <span className='text-sm font-medium text-foreground ml-auto'>
-                  {channel.participantCount}
+                  {channel.channelStats?.participantCount}
                 </span>
                 <span>
                   <ChevronRight className='size-4' />
@@ -272,8 +273,8 @@ const ConversationHeaderMobile = ({
               {...(targetUserId && { targetUserIds: [targetUserId] })}
               {...(channel.scopeType && { scopeType: channel.scopeType })}
               {...(displayName && { channelName: displayName })}
-              {...(channel.participantCount !== undefined && {
-                participantCount: channel.participantCount,
+              {...(channel.channelStats?.participantCount !== undefined && {
+                participantCount: channel.channelStats?.participantCount,
               })}
               callDisplayName={displayName}
               isMember={!!channelUserStatus}

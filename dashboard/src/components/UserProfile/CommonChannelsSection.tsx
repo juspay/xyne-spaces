@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ChannelScopeType, Channel } from '@xyne/shared';
+import { Channel, ChannelScopeType } from '@xyne/shared';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useUser } from '../../hooks/useUsers';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
@@ -35,7 +35,7 @@ const CommonChannelItem: React.FC<CommonChannelItemProps> = ({ channel, currentU
   const finalAvatarUserId = avatarUserId || firstParticipant?.id || null;
 
   const isDM = channel.scopeType === ChannelScopeType.DM;
-  const memberCount = channel.participantCount || 0;
+  const memberCount = channel.name.split(',').length || 0;
 
   return (
     <a
@@ -81,8 +81,8 @@ export const CommonChannelsSection: React.FC<CommonChannelsSectionProps> = ({
     }
 
     const sortedChannels = [...groupDm].sort((a, b) => {
-      const aActivity = a.lastActivityAt || 0;
-      const bActivity = b.lastActivityAt || 0;
+      const aActivity = a.createdAt || 0;
+      const bActivity = b.createdAt || 0;
       return bActivity - aActivity;
     });
 

@@ -1342,11 +1342,26 @@ model Channel {
   project            Project              @relation(fields: [projectId], references: [id])
   tickets            Ticket[]             @relation("TicketChannel")
   calls              Call[]
+  channelStats       ChannelStats?
 
   @@index([projectId])
   @@index([createdBy])
   @@index([visibility, id]) // for userAllChannels
   @@map("channels")
+  @@schema("public")
+}
+
+model ChannelStats {
+  channelId        String                @id
+  lastActivityAt   DateTime              
+  participantCount Int                   @default(0)
+  addUserPolicy    ChannelAddUserPolicy? @default(EVERYONE)
+
+  // Relations
+  channel          Channel               @relation(fields: [channelId], references: [id])
+
+  @@index([channelId])
+  @@map("channel_stats")
   @@schema("public")
 }
 

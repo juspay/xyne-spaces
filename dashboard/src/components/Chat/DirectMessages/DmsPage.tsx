@@ -1,6 +1,6 @@
 import { ReactElement, useMemo, useState, useRef } from 'react';
 import { Search, PenBox, ArrowLeft, X } from 'lucide-react';
-import { useAllChannels } from '../../../hooks/useChannels';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { DmListItem } from './DmListItem';
@@ -34,7 +34,7 @@ const DmsPage = (): ReactElement => {
 
   // All hooks must be called before any conditional returns
   const { channelId } = useParams<{ channelId: string }>();
-  const channelData = useAllChannels();
+  const channelData = useAllVisibleChannels();
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const context = useAuthContextValues();
@@ -67,7 +67,8 @@ const DmsPage = (): ReactElement => {
       )
       .sort(
         (a, b) =>
-          new Date(b.lastActivityAt ?? 0).getTime() - new Date(a.lastActivityAt ?? 0).getTime(),
+          new Date(b.channelStats?.lastActivityAt ?? 0).getTime() -
+          new Date(a.channelStats?.lastActivityAt ?? 0).getTime(),
       );
   }, [channelData]);
 

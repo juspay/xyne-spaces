@@ -1068,6 +1068,15 @@ export const channelTable = table('channels')
   })
   .primaryKey('id');
 
+export const channelStatsTable = table('channel_stats')
+  .columns({
+    channelId: string(),
+    lastActivityAt: number(),
+    participantCount: number(),
+    addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
+  })
+  .primaryKey('channelId');
+
 export const channelParticipantTable = table('channel_participants')
   .columns({
     id: string(),
@@ -2494,6 +2503,19 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: ticketTable,
   }),
+  channelStats: one({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: channelStatsTable,
+  }),
+}));
+
+export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 
@@ -3107,6 +3129,7 @@ export const schema = createSchema({
     organizationTable,
     orgMemberTable,
     channelTable,
+    channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
     conversationTable,
@@ -3194,6 +3217,7 @@ export const schema = createSchema({
     conversationTableRelationships,
     conversationParticipantTableRelationships,
     channelTableRelationships,
+    channelStatsTableRelationships,
     messageTableRelationships,
     draftMessageTableRelationships,
     channelParticipantTableRelationships,
@@ -3279,6 +3303,7 @@ export type PullRequests = Row<typeof schema.tables.pull_requests>;
 export type Organization = Row<typeof schema.tables.organizations>;
 export type OrgMember = Row<typeof schema.tables.org_members>;
 export type Channel = Row<typeof schema.tables.channels>;
+export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
 export type Conversation = Row<typeof schema.tables.conversations>;

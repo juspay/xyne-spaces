@@ -3,6 +3,7 @@ import { useSelector } from '@xstate/react';
 import { useEffect } from 'react';
 import { queries } from '../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
+import { Channel } from '@xyne/shared';
 
 // Draft message types
 export interface DraftMessage {
@@ -19,7 +20,7 @@ const DRAFT_STORAGE_KEY = 'channel-draft-message';
 
 export type User = QueryResultType<typeof queries.getUsers>[number];
 export type Bookmarks = QueryResultType<typeof queries.userBookmarks>[number];
-export type Channel = QueryResultType<typeof queries.userVisibleChannels>[number];
+export type VisibleChannel = QueryResultType<typeof queries.userVisibleChannels>[number];
 export type UserGroup = QueryResultType<typeof queries.getAllUserGroups>[number];
 export type UserPermission = {
   resourceName: string;
@@ -91,7 +92,7 @@ interface StateMachineContext {
     allChannelsUpdatedAt: number;
   };
   bookmarks: Bookmarks[];
-  visibleChannels: Channel[];
+  visibleChannels: VisibleChannel[];
   allChannels: Channel[];
   permissions: UserPermission[];
   userChannelStatuses: UserChannelStatus[];
@@ -112,7 +113,7 @@ type StateMachineEvent =
   | { type: 'ADD_USERS'; users: User[]; usersUpdatedAt?: number }
   | { type: 'MERGE_USERS'; users: User[]; usersUpdatedAt: number }
   | { type: 'ADD_USER_BOOKMARKS'; bookmarks: Bookmarks[] }
-  | { type: 'ADD_VISIBLE_CHANNELS'; channels: Channel[] }
+  | { type: 'ADD_VISIBLE_CHANNELS'; channels: VisibleChannel[] }
   | { type: 'ADD_ALL_CHANNELS'; channels: Channel[]; allChannelsUpdatedAt?: number }
   | { type: 'MERGE_ALL_CHANNELS'; channels: Channel[]; allChannelsUpdatedAt: number }
   | { type: 'SET_USER_PERMISSIONS'; permissions: UserPermission[] }

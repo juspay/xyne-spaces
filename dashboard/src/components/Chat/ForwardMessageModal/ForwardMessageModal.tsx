@@ -6,7 +6,11 @@ import { Badge } from '../../ui/Badge';
 import { X, Hash, Lock } from 'lucide-react';
 import { useUserSearch, useUser, useUsers } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
-import { useChannelSearch, useAllChannels } from '../../../hooks/useChannels';
+import {
+  useChannelSearch,
+  useAllChannels,
+  useAllVisibleChannels,
+} from '../../../hooks/useChannels';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
@@ -32,6 +36,7 @@ import { getDMParticipantIdsToFetch } from '../ChatDirectory/ChatDirectory.utils
 import { Combobox } from '../../ui/Combobox/Combobox';
 import { DropdownListItemType } from '../../ui/Combobox/Combobox.types';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { VisibleChannel } from '../../../machines/stateMachine';
 
 /**
  * ForwardMessageForm component allows users to forward a message to channels or users.
@@ -213,7 +218,10 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     return message.content;
   }, [useOptionalText, forwardedMessageData, message.content]);
 
-  const allChannels = useAllChannels();
+  const allVisibleChannels = useAllVisibleChannels();
+  const allChannels = useAllChannels().map(
+    c => allVisibleChannels.find(vc => vc.id === c.id) || ({ ...c } as VisibleChannel),
+  ); // Merge visible channel data with all channels
   const allUsers = useUsers();
 
   // Determine current selection mode based on selected targets
@@ -269,7 +277,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         // Recent 1:1 DMs sorted by lastActivityAt (up to 5)
         const recentDMs = [...allChannels]
           .filter(channel => channel.scopeType === ChannelScopeType.DM)
-          .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
+          .sort(
+            (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
+          )
           .slice(0, 5);
 
         recentDMs.forEach(channel => {
@@ -289,7 +299,9 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         // Recent DEFAULT channels sorted by lastActivityAt (up to 5)
         const recentChannels = [...allChannels]
           .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-          .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
+          .sort(
+            (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
+          )
           .slice(0, 5);
 
         recentChannels.forEach(channel => {

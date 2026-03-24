@@ -56,6 +56,10 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     });
 
     setZero(zeroObj);
+
+    return () => {
+      void zeroObj.close();
+    };
   }, [user, refreshCount]);
 
   if (!zero) {

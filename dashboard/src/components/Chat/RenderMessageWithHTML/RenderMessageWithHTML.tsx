@@ -1,4 +1,4 @@
-import React, { JSX, useMemo, useState } from 'react';
+import React, { JSX, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { Lock, Users, Clock } from 'lucide-react';
@@ -14,6 +14,8 @@ import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopo
 import { ToolOutputRenderer, type ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import { cn } from '../../../utils/classNames';
 import { isElectronApp, isElectronStandaloneWindow } from '../../../utils/electronApp';
+import { useZero } from '../../../hooks/useZero';
+import { queries } from '../../../zero/queries';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -126,18 +128,34 @@ function ChannelMentionRenderer({
   navigate: ReturnType<typeof useNavigate>;
 }): JSX.Element {
   const channel = useChannel(channelId);
+  const [lastActivityAt, setLastActivity] = useState<number | undefined>(undefined);
+  const [participantCount, setParticipantCount] = useState<number | undefined>(undefined);
+  const zero = useZero();
 
   const handleChannelClick = (): void => {
     void navigate(`/chat/dir/${channelId}`);
   };
+
+  useEffect(() => {
+    zero
+      .run(queries.channelStats({ channelId }), { type: 'complete' })
+      .then(stats => {
+        if (!stats) return;
+        setLastActivity(stats.lastActivityAt);
+        setParticipantCount(stats.participantCount);
+      })
+      .catch(() => {
+        // { Handle error silently, stats will just not show in popover }
+      });
+  }, [channelId, zero]);
 
   let lastActivity: string | undefined;
   let metaContent: React.ReactNode | undefined;
 
   if (channel) {
     // Show last activity time
-    if (channel.lastActivityAt) {
-      const lastActivityDate = new Date(channel.lastActivityAt);
+    if (lastActivityAt) {
+      const lastActivityDate = new Date(lastActivityAt);
       const now = new Date();
       const diffMs = now.getTime() - lastActivityDate.getTime();
       const diffMins = Math.floor(diffMs / 60000);
@@ -158,11 +176,11 @@ function ChannelMentionRenderer({
     // Build meta content with member count, last activity, and button
     const metaParts: React.ReactNode[] = [];
 
-    if (channel.participantCount !== undefined) {
+    if (participantCount !== undefined) {
       metaParts.push(
         <div key='members' className='flex items-center gap-2'>
           <Users className='h-3.5 w-3.5' />
-          <span>{channel.participantCount} people in this channel</span>
+          <span>{participantCount} people in this channel</span>
         </div>,
       );
     }

@@ -1,9 +1,28 @@
 import { useSelector } from '@xstate/react';
 import { useMemo } from 'react';
-import { Conversation, stateMachineActor, type Channel } from '../machines/stateMachine';
+import { Conversation, stateMachineActor, type VisibleChannel } from '../machines/stateMachine';
 import Fuse from 'fuse.js';
-import { ChannelScopeType, ChannelType, ChannelUserStatus } from '@xyne/shared';
+import { Channel, ChannelScopeType, ChannelType, ChannelUserStatus } from '@xyne/shared';
 import { queryCacheActor } from '../machines/queryCacheMachine';
+import { queries } from '../zero/queries';
+import { useQuery } from './useQuery';
+
+const shallowEqualVisibleChannels = (a: VisibleChannel[], b: VisibleChannel[]): boolean => {
+  if (a.length !== b.length) return false;
+  return a.every((channel, index) => {
+    const otherChannel = b[index];
+    return (
+      otherChannel &&
+      channel.id === otherChannel.id &&
+      channel.name === otherChannel.name &&
+      channel.scopeType === otherChannel.scopeType &&
+      channel.visibility === otherChannel.visibility &&
+      channel.channelStats?.lastActivityAt === otherChannel.channelStats?.lastActivityAt &&
+      channel.channelStats?.participantCount === otherChannel.channelStats?.participantCount &&
+      channel.channelStats?.addUserPolicy === otherChannel.channelStats?.addUserPolicy
+    );
+  });
+};
 
 const shallowEqualChannels = (a: Channel[], b: Channel[]): boolean => {
   if (a.length !== b.length) return false;
@@ -14,8 +33,7 @@ const shallowEqualChannels = (a: Channel[], b: Channel[]): boolean => {
       channel.id === otherChannel.id &&
       channel.name === otherChannel.name &&
       channel.scopeType === otherChannel.scopeType &&
-      channel.visibility === otherChannel.visibility &&
-      channel.lastActivityAt === otherChannel.lastActivityAt
+      channel.visibility === otherChannel.visibility
     );
   });
 };
@@ -72,11 +90,11 @@ export const useAllChannels = (): Channel[] => {
   return useMemo(() => channels, [channels]);
 };
 
-export const useAllVisibleChannels = (): Channel[] => {
+export const useAllVisibleChannels = (): VisibleChannel[] => {
   const channels = useSelector(
     stateMachineActor,
     state => state.context.visibleChannels,
-    shallowEqualChannels,
+    shallowEqualVisibleChannels,
   );
   return useMemo(() => channels, [channels]);
 };
@@ -91,11 +109,28 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.scopeType === b?.scopeType &&
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
-      a?.createdAt === b?.createdAt &&
-      a?.participantCount === b?.participantCount,
+      a?.createdAt === b?.createdAt,
   );
 
   return channel;
+};
+
+export const useVisibleChannel = (channelId: string): VisibleChannel | undefined => {
+  const channel = useChannel(channelId);
+  const visibleChannels = useAllVisibleChannels();
+  const visibleChannel = visibleChannels.find(c => c.id === channelId);
+  const [stats] = useQuery(queries.channelStats({ channelId }), { enabled: !visibleChannel });
+
+  return useMemo(() => {
+    if (visibleChannel) return visibleChannel;
+    if (channel && stats) {
+      return {
+        ...channel,
+        channelStats: stats,
+      } as VisibleChannel;
+    }
+    return undefined;
+  }, [channel, stats, visibleChannel]);
 };
 
 export const useChannelByName = (channelName: string): Channel | undefined => {
@@ -109,8 +144,7 @@ export const useChannelByName = (channelName: string): Channel | undefined => {
       a?.scopeType === b?.scopeType &&
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
-      a?.createdAt === b?.createdAt &&
-      a?.participantCount === b?.participantCount,
+      a?.createdAt === b?.createdAt,
   );
 
   return channel;
@@ -172,30 +206,6 @@ export const useGetChannelUserStatus = (channelId: string): ChannelUserStatus | 
     state.context.userChannelStatuses.find(c => c.channelId === channelId),
   );
   return channelUserStatus;
-};
-
-// Hook to calculate unread counts for channels
-export const useUnreadChannelCounts = (channels: Channel[] | undefined): Record<string, number> => {
-  const userChannelStatuses = useUserChannelStatuses();
-
-  return useMemo(() => {
-    const counts: Record<string, number> = {};
-    if (!channels || !userChannelStatuses) return counts;
-
-    const statusMap = new Map(userChannelStatuses.map(s => [s.channelId, s]));
-
-    channels.forEach(channel => {
-      const status = statusMap.get(channel.id);
-
-      if (status && channel.lastActivityAt && channel.lastActivityAt > status.lastViewedAt) {
-        counts[channel.id] = 1; // Return 1 for unread (for bold styling)
-      } else {
-        counts[channel.id] = 0;
-      }
-    });
-
-    return counts;
-  }, [channels, userChannelStatuses]);
 };
 
 export const useGetChannelConversations = (channelId: string): Conversation[] => {

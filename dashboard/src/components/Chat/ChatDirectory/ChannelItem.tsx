@@ -1,7 +1,8 @@
 import { ReactElement, useRef, useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Hash, Pencil, Headphones, X } from 'lucide-react';
-import { ChannelVisibility, Channel } from '@xyne/shared';
+import { ChannelVisibility } from '@xyne/shared';
+import { VisibleChannel } from '../../../machines/stateMachine';
 import { isDMChannel } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
@@ -17,7 +18,7 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 
 interface ChannelItemProps {
-  channel: Channel;
+  channel: VisibleChannel;
   activeChannelId?: string | undefined;
   currentUserID: string;
   draftMessage?: string | undefined;
@@ -51,8 +52,8 @@ const ChannelItem = ({
     ? hasUnreadCount
     : hasUnreadCount ||
       (!!status?.lastViewedAt &&
-        !!channel.lastActivityAt &&
-        channel.lastActivityAt > status.lastViewedAt);
+        !!channel.channelStats?.lastActivityAt &&
+        channel.channelStats?.lastActivityAt > status.lastViewedAt);
 
   const handleCloseDm = (e: React.MouseEvent): void => {
     e.preventDefault();

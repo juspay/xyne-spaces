@@ -526,10 +526,11 @@ export class ChannelController {
           },
         });
 
-        // Update channel last activity
-        await tx.channel.update({
-          where: { id: channelId },
-          data: { lastActivityAt: new Date() },
+        // Update channel last activity in channel_stats
+        await tx.channelStats.upsert({
+          where: { channelId },
+          update: { lastActivityAt: new Date() },
+          create: { channelId, lastActivityAt: new Date() },
         });
 
         // Reopen DM for all participants so they can see the message
@@ -1120,7 +1121,7 @@ export class ChannelController {
       const channelIds = dmChannels.map(c => c.id);
 
       // Batch fetch all related data to avoid N+1 queries
-      const [allConversations, allParticipants, allUnreadCounts] = await Promise.all([
+      const [allConversations, allParticipants, allUnreadCounts, allChannelStats] = await Promise.all([
         // Fetch all conversations for all channels in one query
         this.conversationRepository.findMany({
           where: { channelId: { in: channelIds } }
@@ -1132,7 +1133,11 @@ export class ChannelController {
         // Fetch all unread counts for all channels
         Promise.all(channelIds.map(channelId =>
           unreadService.getUnreadCountForChannel(channelId, userId)
-        ))
+        )),
+        // Fetch all channel stats for lastActivityAt
+        db.channelStats.findMany({
+          where: { channelId: { in: channelIds } }
+        }),
       ]);
 
       // Create maps for efficient lookup
@@ -1153,6 +1158,7 @@ export class ChannelController {
       });
 
       const unreadCountMap = new Map(channelIds.map((id, index) => [id, allUnreadCounts[index]]));
+      const channelStatsMap = new Map(allChannelStats.map(s => [s.channelId, s]));
 
       // Collect all unique user IDs for batch user fetch
       const userIds = new Set<string>();
@@ -1207,7 +1213,7 @@ export class ChannelController {
           conversationCount: conversations.length,
           participantCount: participants.length,
           unreadCount,
-          lastActivityAt: channel.lastActivityAt,
+          lastActivityAt: channelStatsMap.get(channel.id)?.lastActivityAt ?? channel.createdAt,
           createdAt: channel.createdAt,
           userRole: participation?.role,
           isMember: true, // Always true for DMs
@@ -1321,6 +1327,7 @@ export class ChannelController {
           }
 
           const currentUserInfo = await this.getUserInfo(currentUserId);
+          const selfDmStats = await db.channelStats.findUnique({ where: { channelId: existingSelfDm.id } });
 
           res.status(200).json({
             message: 'Self-DM channel already exists',
@@ -1333,7 +1340,7 @@ export class ChannelController {
             conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
             participantCount: participants.length,
             unreadCount,
-            lastActivityAt: existingSelfDm.lastActivityAt,
+            lastActivityAt: selfDmStats?.lastActivityAt ?? existingSelfDm.createdAt,
             createdAt: existingSelfDm.createdAt,
             isExisting: true,
             isSelfDm: true,
@@ -1384,7 +1391,7 @@ export class ChannelController {
           conversationCount: initialConversation ? 1 : 0,
           participantCount: 1,
           unreadCount: 0,
-          lastActivityAt: channel.lastActivityAt,
+          lastActivityAt: channel.createdAt,
           createdAt: channel.createdAt,
           isSelfDm: true,
           targetUser: {
@@ -1434,6 +1441,8 @@ export class ChannelController {
             initialConversation = await this.sendInitialMessage(existingDM.id, currentUserId, message);
           }
 
+          const existingDMStats = await db.channelStats.findUnique({ where: { channelId: existingDM.id } });
+
           res.status(200).json({
             message: 'DM channel already exists',
             id: existingDM.id,
@@ -1445,7 +1454,7 @@ export class ChannelController {
             conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
             participantCount: participants.length,
             unreadCount,
-            lastActivityAt: existingDM.lastActivityAt,
+            lastActivityAt: existingDMStats?.lastActivityAt ?? existingDM.createdAt,
             createdAt: existingDM.createdAt,
             isExisting: true,
             targetUser: {
@@ -1496,7 +1505,7 @@ export class ChannelController {
           conversationCount: initialConversation ? 1 : 0,
           participantCount: 2,
           unreadCount: 0,
-          lastActivityAt: channel.lastActivityAt,
+          lastActivityAt: channel.createdAt,
           createdAt: channel.createdAt,
           targetUser: {
             id: targetUser.id,
@@ -1548,6 +1557,8 @@ export class ChannelController {
             initialConversation = await this.sendInitialMessage(existingGroupDM.id, currentUserId, message);
           }
 
+          const existingGroupDMStats = await db.channelStats.findUnique({ where: { channelId: existingGroupDM.id } });
+
           res.status(200).json({
             message: 'Group DM already exists',
             id: existingGroupDM.id,
@@ -1559,7 +1570,7 @@ export class ChannelController {
             conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
             participantCount: participants.length,
             unreadCount,
-            lastActivityAt: existingGroupDM.lastActivityAt,
+            lastActivityAt: existingGroupDMStats?.lastActivityAt ?? existingGroupDM.createdAt,
             createdAt: existingGroupDM.createdAt,
             participants: participantDetails,
             isExisting: true,
@@ -1623,7 +1634,7 @@ export class ChannelController {
           conversationCount: initialConversation ? 1 : 0,
           participantCount: allMemberIds.length,
           unreadCount: 0,
-          lastActivityAt: channel.lastActivityAt,
+          lastActivityAt: channel.createdAt,
           createdAt: channel.createdAt,
           participants: allParticipantDetails,
           isExisting: false,

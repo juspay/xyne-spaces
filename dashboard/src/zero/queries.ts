@@ -479,10 +479,23 @@ export const queries = defineQueries({
     },
   ),
   userVisibleChannels: defineQuery(({ ctx }) => {
-    return zql.channels.whereExists('participantsStatus', p =>
-      p.where('isClosed', false).where('userId', ctx.userID),
-    );
+    return zql.channels
+      .whereExists('participantsStatus', p =>
+        p.where('isClosed', false).where('userId', ctx.userID),
+      )
+      .related('channelStats');
   }),
+  channelStats: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) => {
+    return zql.channel_stats.where('channelId', channelId).one();
+  }),
+  channelStatsByIds: defineQuery(
+    z.object({ channelIds: z.array(z.string()) }),
+    ({ args: { channelIds } }) => {
+      return zql.channel_stats.where(helpers =>
+        helpers.or(...channelIds.map(id => helpers.cmp('channelId', '=', id))),
+      );
+    },
+  ),
   channelParticipants: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {
