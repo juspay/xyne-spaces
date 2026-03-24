@@ -694,7 +694,7 @@ const WorkflowScreen: React.FC = () => {
 
   return (
     <div
-      className='h-full bg-background flex flex-col overflow-hidden rounded-lg shadow-[0_0_8px_0_rgba(0,0,0,0.15)] relative'
+      className='h-full bg-background flex flex-col overflow-hidden rounded-lg shadow-md relative'
       data-component='WorkflowScreen'
     >
       {/* Minimal Header */}

@@ -171,7 +171,7 @@ export default function RecordingsScreen(): ReactElement {
 
   // ─── Main Layout ─────────────────────────────────────────────────
   return (
-    <div className='flex flex-col h-full relative overflow-hidden'>
+    <div className='flex flex-col h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'>
       {/* ─── List View (slides out when recording is active) ───── */}
       <div
         className='flex-1 overflow-auto transition-transform duration-500 ease-in-out'

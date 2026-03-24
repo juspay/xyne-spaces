@@ -66,11 +66,11 @@ const TicketsScreen = (): ReactElement => {
   }, [searchParams, navigate]);
 
   if (shouldRedirect) {
-    return <div className='h-full bg-muted' />;
+    return <div className='h-full bg-background' />;
   }
 
   return (
-    <div className='h-full bg-muted rounded-lg shadow-[0_0_8px_0_rgba(0,0,0,0.15)]'>
+    <div className='h-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
       <main className='mx-auto py-6 sm:px-6 lg:px-8'>
         <div className='px-4 py-6 sm:px-0'>
           <div className='bg-background rounded-lg shadow'>

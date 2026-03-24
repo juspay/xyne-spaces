@@ -487,7 +487,7 @@ const ProductInsightsScreen = (): ReactElement => {
 
   if (projects === undefined || !projectId || loading) {
     return (
-      <div className='flex-1 bg-muted dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+      <div className='flex-1 bg-background flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-md'>
         <div className='flex flex-col items-center gap-3'>
           <Loader2 size={32} className='animate-spin text-blue-500' />
           <p className='text-sm text-muted-foreground'>Loading insights...</p>
@@ -498,7 +498,7 @@ const ProductInsightsScreen = (): ReactElement => {
 
   if (!projects || projects.length === 0) {
     return (
-      <div className='flex-1 bg-muted dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+      <div className='flex-1 bg-background flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-md'>
         <div className='flex flex-col items-center gap-3 max-w-md text-center p-6'>
           <AlertCircle size={32} className='text-red-500' />
           <p className='text-sm text-foreground dark:text-gray-100 font-medium'>
@@ -512,7 +512,7 @@ const ProductInsightsScreen = (): ReactElement => {
 
   if ((error && !isNotFoundError) || (!data && !isNotFoundError)) {
     return (
-      <div className='flex-1 bg-muted dark:bg-[#1E1E1E] flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+      <div className='flex-1 bg-background flex items-center justify-center h-full md:rounded-2xl overflow-hidden shadow-md'>
         <div className='flex flex-col items-center gap-3 max-w-md text-center p-6'>
           <AlertCircle size={32} className='text-red-500' />
           <p className='text-sm text-foreground dark:text-gray-100 font-medium'>
@@ -525,7 +525,7 @@ const ProductInsightsScreen = (): ReactElement => {
   }
 
   return (
-    <div className='flex-1 bg-muted dark:bg-[#1E1E1E] flex flex-col h-full md:rounded-2xl overflow-hidden shadow-sm border-root-border border'>
+    <div className='flex-1 bg-background flex flex-col h-full md:rounded-2xl overflow-hidden shadow-md'>
       {/* Header */}
       <div className='px-6 py-5 bg-background dark:bg-[#1E1E1E] border-b border-border dark:border-gray-800'>
         <div className='flex justify-between items-center mb-4'>

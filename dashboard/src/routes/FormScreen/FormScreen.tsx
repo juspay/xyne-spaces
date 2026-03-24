@@ -32,14 +32,14 @@ const FormScreen = (): ReactElement => {
 
   if (loading) {
     return (
-      <div className='h-full bg-muted flex items-center justify-center'>
+      <div className='h-full bg-background flex items-center justify-center'>
         <p className='text-muted-foreground'>Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className='h-full w-full overflow-hidden bg-muted'>
+    <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
       <div className='h-full overflow-hidden'>
         <div className='flex flex-col h-full'>
           <div className='flex items-center justify-between p-6 border-b border-border bg-background'>

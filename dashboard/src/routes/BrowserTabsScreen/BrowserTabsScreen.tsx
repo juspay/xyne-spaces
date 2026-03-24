@@ -402,7 +402,7 @@ export function BrowserTabsScreen({
 
   if (!isElectronApp()) {
     return (
-      <div className='flex items-center justify-center h-full bg-muted'>
+      <div className='flex items-center justify-center h-full bg-background'>
         <div className='text-center text-muted-foreground'>
           <Globe size={48} className='mx-auto mb-4 opacity-50' />
           <p>Browser tabs are only available in the desktop app.</p>
@@ -412,11 +412,7 @@ export function BrowserTabsScreen({
   }
 
   return (
-    <div
-      className={`flex flex-col h-full bg-background overflow-hidden ${
-        isPanel ? 'rounded-xl shadow-sm border border-border' : 'rounded-lg'
-      }`}
-    >
+    <div className='flex flex-col h-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
       {/* Header with close button (panel mode only) */}
       {isPanel ? (
         <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>

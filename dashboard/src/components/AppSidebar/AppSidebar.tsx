@@ -39,6 +39,7 @@ import {
   ShieldUser,
   Brain,
   Sparkles,
+  type LucideIcon,
 } from 'lucide-react';
 
 import Avatar from '../ui/Avatar/Avatar';
@@ -55,93 +56,22 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { useKeyboard } from '../../contexts/KeyboardContext';
 
-const navigationItems = [
-  {
-    path: '/chat/dir',
-    label: 'Chat',
-    icon: <Inbox size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/calls',
-    label: 'Calls',
-    icon: <Phone size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/recordings',
-    label: 'Recordings',
-    icon: <Mic size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/tickets',
-    label: 'Tickets',
-    icon: <Ticket size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/product-insights',
-    label: 'Insights',
-    icon: <PieChart size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-
-  {
-    path: '/knowledge-base',
-    label: 'Knowledge Base',
-    icon: <BookOpen size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/memory',
-    label: 'Context',
-    icon: <Brain size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/analytics',
-    label: 'Analytics',
-    icon: <ChartSpline size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/projects',
-    label: 'Projects Board',
-    icon: <FolderKanban size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/user-groups',
-    label: 'User Groups',
-    icon: <UsersIcon size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/listProjects',
-    label: 'List Projects',
-    icon: <Folder size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/resource-access',
-    label: 'User Management',
-    icon: <ShieldUser size={18} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/support',
-    label: 'Support',
-    icon: <LifeBuoy size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  // {
-  //   path: '/vscode',
-  //   label: 'VS Code',
-  //   icon: <Code2 size={16} color='var(--app-sidebar-active-foreground)' />,
-  // },
-  {
-    path: '/browser',
-    label: 'Browser',
-    icon: <Globe size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  {
-    path: '/forms',
-    label: 'Forms',
-    icon: <Clipboard size={16} color='var(--app-sidebar-active-foreground)' />,
-  },
-  // {
-  //   path: '/rca',
-  //   label: 'RCA',
-  //   icon: <ClipboardCheck size={16} color='var(--app-sidebar-active-foreground)' />,
-  // },
+const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize?: number }[] = [
+  { path: '/chat/dir', label: 'Chat', icon: Inbox },
+  { path: '/calls', label: 'Calls', icon: Phone },
+  { path: '/recordings', label: 'Recordings', icon: Mic },
+  { path: '/tickets', label: 'Tickets', icon: Ticket },
+  { path: '/product-insights', label: 'Insights', icon: PieChart },
+  { path: '/knowledge-base', label: 'Knowledge Base', icon: BookOpen },
+  { path: '/memory', label: 'Context', icon: Brain },
+  { path: '/analytics', label: 'Analytics', icon: ChartSpline },
+  { path: '/projects', label: 'Projects Board', icon: FolderKanban },
+  { path: '/user-groups', label: 'User Groups', icon: UsersIcon },
+  { path: '/listProjects', label: 'List Projects', icon: Folder },
+  { path: '/resource-access', label: 'User Management', icon: ShieldUser, iconSize: 18 },
+  { path: '/support', label: 'Support', icon: LifeBuoy },
+  { path: '/browser', label: 'Browser', icon: Globe },
+  { path: '/forms', label: 'Forms', icon: Clipboard },
 ];
 
 const mobileNavigationItems = [
@@ -328,7 +258,7 @@ const AppSidebar = (): ReactElement => {
     <aside className='h-full px-3 pt-5 pb-6 flex flex-col items-center justify-between'>
       <div className='space-y-8'>
         <nav>
-          <ul ref={navListRef} className='relative space-y-4'>
+          <ul ref={navListRef} className='relative flex flex-col gap-4'>
             {activeMarkerY !== null && (
               <div
                 aria-hidden='true'
@@ -339,6 +269,7 @@ const AppSidebar = (): ReactElement => {
             {filteredNavigationItems.map(item => {
               const isActive = activeRoute === item.path;
               const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;
+              const Icon = item.icon;
 
               const testId = `nav-${item.label.toLowerCase().replace(/\s+/g, '-')}`;
 
@@ -359,10 +290,12 @@ const AppSidebar = (): ReactElement => {
                       data-track-name='Sidebar_Nav_Item'
                       data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                       className={`size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors ${
-                        isActive ? 'text-white' : 'bg-transparent text-foreground'
+                        isActive
+                          ? 'text-appSidebar-activeIcon'
+                          : 'bg-transparent text-appSidebar-activeForeground'
                       }`}
                     >
-                      {item.icon}
+                      <Icon size={item.iconSize ?? 16} />
                       {showMissedCallBadge && (
                         <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] bg-red-500 text-white text-[11px] font-semibold rounded-full'>
                           {missedCallCount > 99 ? '99+' : missedCallCount}
@@ -417,7 +350,7 @@ const AppSidebar = (): ReactElement => {
                     <Avatar userId={user.id} size='md' className='rounded-lg' />
                   ) : (
                     <div className='size-9 rounded-xl flex items-center justify-center bg-border'>
-                      <Settings size={14} color='var(--app-sidebar-active-foreground)' />
+                      <Settings size={14} className='text-appSidebar-activeForeground' />
                     </div>
                   )}
                 </div>
@@ -433,7 +366,7 @@ const AppSidebar = (): ReactElement => {
                     <Avatar userId={user.id} size='md' className='rounded-md' />
                   ) : (
                     <div className='size-9 rounded-xl flex items-center justify-center bg-border'>
-                      <Settings size={14} color='var(--app-sidebar-active-foreground)' />
+                      <Settings size={14} className='text-appSidebar-activeForeground' />
                     </div>
                   )}
                 </div>

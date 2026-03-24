@@ -208,7 +208,7 @@ const AnalyticsScreen = (): ReactElement => {
     <div
       id='analytics-screen'
       data-component='AnalyticsScreen'
-      className='flex overflow-y-auto no-scrollbar flex-col gap-4 md:gap-6 p-4 md:p-6 h-full bg-background rounded-2xl'
+      className='flex overflow-y-auto no-scrollbar flex-col gap-4 md:gap-6 p-4 md:p-6 h-full bg-background md:rounded-2xl overflow-hidden shadow-md'
     >
       {/* Header Section */}
       <div

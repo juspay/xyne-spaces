@@ -32,7 +32,7 @@ export const ResourceAccessScreen = (): ReactElement => {
   const loading = users === undefined;
 
   return (
-    <div className='h-full bg-muted flex flex-col md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'>
+    <div className='h-full bg-background flex flex-col md:rounded-2xl overflow-hidden shadow-md'>
       <div className='flex-1 overflow-y-auto p-4'>
         {/* Header */}
         <div className='mb-6'>
