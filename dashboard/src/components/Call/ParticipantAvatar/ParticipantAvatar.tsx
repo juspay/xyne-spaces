@@ -1,4 +1,5 @@
 import { cn } from '../../../utils/classNames';
+import { useState } from 'react';
 
 interface ParticipantAvatarProps {
   name: string;
@@ -7,6 +8,8 @@ interface ParticipantAvatarProps {
   showBorder?: boolean | undefined;
   gradientFrom?: string | undefined;
   gradientTo?: string | undefined;
+  pictureUrl?: string | null | undefined;
+  backgroundColor?: string | undefined;
 }
 
 export function ParticipantAvatar({
@@ -16,7 +19,11 @@ export function ParticipantAvatar({
   showBorder = false,
   gradientFrom = 'from-blue-500',
   gradientTo = 'to-purple-600',
+  pictureUrl,
+  backgroundColor,
 }: ParticipantAvatarProps): React.ReactElement {
+  const [imageError, setImageError] = useState(false);
+
   const sizeClasses = {
     xs: 'w-6 h-6 text-[10px]',
     small: 'w-8 h-8 text-xs',
@@ -26,21 +33,33 @@ export function ParticipantAvatar({
   };
 
   const initial = name?.charAt(0).toUpperCase() || '?';
+  const showPicture = pictureUrl && !imageError;
 
   return (
     <div
       className={cn(
-        'rounded-full bg-gradient-to-br flex items-center justify-center text-white font-bold shadow-lg visual-regression-hide',
-        gradientFrom,
-        gradientTo,
+        'rounded-full flex items-center justify-center text-white font-bold shadow-lg visual-regression-hide overflow-hidden',
+        !backgroundColor && 'bg-gradient-to-br',
+        !backgroundColor && gradientFrom,
+        !backgroundColor && gradientTo,
         showBorder && 'ring-2 ring-white/20',
         sizeClasses[size],
         className,
       )}
+      style={backgroundColor ? { backgroundColor } : undefined}
       role='img'
       aria-label={`${name} avatar`}
     >
-      {initial}
+      {showPicture ? (
+        <img
+          src={pictureUrl}
+          alt={`${name} avatar`}
+          className='w-full h-full object-cover'
+          onError={() => setImageError(true)}
+        />
+      ) : (
+        initial
+      )}
     </div>
   );
 }

@@ -108,10 +108,12 @@ export class CallController {
 
         if (roomInfo) {
           // Room exists, generate token to join the existing call
+          const user = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
           const token = await livekitService.generateAccessToken({
             userIdentity: userId,
             roomName: existingCall.externalId,
             userName: userName || userEmail || 'Unknown',
+            metadata: JSON.stringify({ picture: user?.picture || null }),
           });
 
           logger.info(`[${existingCall.externalId}] joining_existing_call | user_id=${userId}, channel_id=${finalChannelId}, correlation_id=${correlationId}`);
@@ -183,10 +185,12 @@ export class CallController {
       logger.info(`[${callExternalId}] livekit_room_created | user_id=${userId}`);
 
       // Generate access token for initiator
+      const initiator = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
       const token = await livekitService.generateAccessToken({
         userIdentity: userId,
         roomName: callExternalId,
         userName: userName || userEmail || 'Unknown',
+        metadata: JSON.stringify({ picture: initiator?.picture || null }),
       });
 
       void userActivityTrackingService.trackCallInitiated(userId, {
@@ -286,10 +290,12 @@ export class CallController {
 
       // Generate access token
       // Participant record will be created/updated by webhook when user actually joins
+      const joiner = await db.user.findUnique({ where: { id: user.id }, select: { picture: true } });
       const token = await livekitService.generateAccessToken({
         userIdentity: user.id,
         roomName: callId,
         userName: user.name || user.email || 'Unknown',
+        metadata: JSON.stringify({ picture: joiner?.picture || null }),
       });
 
       logger.info(`LiveKit credentials generated for user ${user.id} to join call ${callId}`);

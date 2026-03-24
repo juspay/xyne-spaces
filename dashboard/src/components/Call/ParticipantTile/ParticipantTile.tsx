@@ -2,6 +2,7 @@ import { Track } from 'livekit-client';
 import { MicOff, Monitor } from 'lucide-react';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { ParticipantAvatar } from '../ParticipantAvatar/ParticipantAvatar';
+import { getAvatarColors } from '../ParticipantAvatar/avatarColors';
 import { cn } from '../../../utils/classNames';
 
 // Import LiveKit's built-in hooks that handle track management with observables
@@ -58,6 +59,9 @@ export function ParticipantTile({
 
   // Use LiveKit's built-in hook for speaking detection - uses observables internally
   const isSpeaking = useIsSpeaking(participant.participant);
+
+  // Determine avatar and background colors
+  const colors = getAvatarColors(participant.identity);
 
   // Create track references for LiveKit components only if publication exists
   const videoTrackRef =
@@ -129,7 +133,10 @@ export function ParticipantTile({
           )}
         />
       ) : (
-        <div className='flex items-center justify-center w-full h-full bg-gradient-to-br from-gray-700 to-gray-800'>
+        <div
+          className='flex items-center justify-center w-full h-full'
+          style={{ backgroundColor: colors.background }}
+        >
           {isAIAgent ? (
             <img
               src='/images/xyne_logo.png'
@@ -144,7 +151,23 @@ export function ParticipantTile({
               )}
             />
           ) : (
-            <ParticipantAvatar name={participant.name || 'Unknown'} size={avatarSize} />
+            <ParticipantAvatar
+              name={participant.name || 'Unknown'}
+              size={avatarSize}
+              backgroundColor={colors.avatar}
+              pictureUrl={(() => {
+                try {
+                  const meta = participant.participant?.metadata;
+                  if (meta) {
+                    const parsed: { picture?: string } = JSON.parse(meta) as { picture?: string };
+                    return parsed.picture || null;
+                  }
+                } catch {
+                  // ignore parse errors
+                }
+                return null;
+              })()}
+            />
           )}
         </div>
       )}

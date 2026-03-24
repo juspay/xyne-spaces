@@ -170,13 +170,14 @@ class CallSideEffectService {
             const callerName = caller?.name || 'Someone';
             const recipient = await db.user.findUnique({
                 where: { id: recipientId },
-                select: { name: true }
+                select: { name: true, picture: true }
             });
 
             const token = await livekitService.generateAccessToken({
                 userIdentity: recipientId,
                 roomName: call.externalId,
                 userName: recipient?.name || 'User',
+                metadata: JSON.stringify({ picture: recipient?.picture || null }),
             });
 
             const liveKitUrl = livekitService.getServerUrl();
