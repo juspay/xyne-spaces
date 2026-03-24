@@ -1,9 +1,6 @@
 import { ReactElement, useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { v4 as uuidv4 } from 'uuid';
-import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { useChannel } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
@@ -31,11 +28,6 @@ import {
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
 import type { ResearchContext } from '../../../hooks/useResearchAgent';
-import { canvasService } from '../../../services/Canvas/canvasService';
-import type { Canvas } from '../../Canvas';
-import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
-import { useAuth } from '../../../hooks/useAuth';
-import { useRouteContext } from '../../../hooks/useRouteContext';
 
 interface XyneAIConfigResponse {
   webSearchAccessible: boolean;
@@ -65,9 +57,6 @@ const XyneAISidebar = ({
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
   const [isLoadingConversation, setIsLoadingConversation] = useState(true);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
-  const [selectedCanvasIds, setSelectedCanvasIds] = useState<string[]>([]);
-  const [selectedTicketIds, setSelectedTicketIds] = useState<string[]>([]);
-  const [selectedCallIds, setSelectedCallIds] = useState<string[]>([]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
   const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
@@ -85,12 +74,9 @@ const XyneAISidebar = ({
     timestamp: number;
   } | null>(null);
   const [activeSelectionInfos, setActiveSelectionInfos] = useState<SelectionInfo[]>([]);
-  const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
-  const { user } = useAuth();
-  const { baseRoute } = useRouteContext();
   const hasLoadedInitialConversationRef = useRef(false);
 
   // Update activeThreadInfo when threadInfo prop changes
@@ -191,9 +177,6 @@ const XyneAISidebar = ({
   // Use the streaming hook with selected channel IDs, research context, and active thread info
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: selectedChannelIds,
-    canvasIds: selectedCanvasIds,
-    ticketIds: selectedTicketIds,
-    callIds: selectedCallIds,
     conversationId,
     threadConversationId: activeThreadInfo?.conversationId,
     attachmentIds: activeThreadInfo?.attachmentIds,
@@ -555,58 +538,6 @@ const XyneAISidebar = ({
     abortCurrentRequest();
   };
 
-  const handleCreateCanvas = async (): Promise<void> => {
-    if (!channelId) {
-      toast.error('Cannot create canvas without a channel context');
-      return;
-    }
-
-    try {
-      const newCanvasId = uuidv4();
-      const viewAccessId = uuidv4();
-
-      await canvasService.createCollaborativeCanvas({
-        id: newCanvasId,
-        title: 'Untitled Canvas',
-        channelId,
-        viewAccessId,
-      });
-
-      // Optimistic update
-      const now = Date.now();
-      const newCanvas: Canvas = {
-        id: newCanvasId,
-        title: 'Untitled Canvas',
-        channelId,
-        createdBy: user?.id || '',
-        viewAccessId,
-        visibility: CanvasVisibility.PRIVATE,
-        isTemplate: false,
-        isCollaborative: true,
-        createdAt: now,
-        updatedAt: now,
-        accessLevel: CanvasRole.OWNER,
-      };
-
-      // On mobile, always navigate to /chat/canvas/:canvasId
-      // On desktop, use baseRoute-based navigation
-      const canvasPath = isMobile
-        ? `/chat/canvas/${newCanvasId}`
-        : `${baseRoute}/canvas/${newCanvasId}`;
-
-      void navigate(canvasPath, {
-        state: { canvas: newCanvas },
-      });
-    } catch (error) {
-      console.error('[XyneAISidebar] Failed to create canvas:', error);
-      toast.error('Failed to create canvas');
-    }
-  };
-
-  const handleCreateTicket = (): void => {
-    setIsCreateTicketModalOpen(true);
-  };
-
   const handleAddActivities = useCallback((activities: UserActivity[]): void => {
     if (activities.length === 0) return;
     setSelectedActivities(prev => {
@@ -925,9 +856,6 @@ const XyneAISidebar = ({
             onInputChange={setInputValue}
             onSubmit={() => void handleSubmit()}
             onSelectedChannelsChange={setSelectedChannelIds}
-            onSelectedCanvasesChange={setSelectedCanvasIds}
-            onSelectedTicketsChange={setSelectedTicketIds}
-            onSelectedCallsChange={setSelectedCallIds}
             onResearchContextChange={setSelectedResearchContext}
             onThreadInfoChange={setActiveThreadInfo}
             onSelectionInfosChange={setActiveSelectionInfos}
@@ -942,20 +870,8 @@ const XyneAISidebar = ({
             onWebSearchToggle={() => setWebSearchEnabled(!webSearchEnabled)}
             createCanvasEnabled={createCanvasEnabled}
             onCreateCanvasToggle={() => setCreateCanvasEnabled(!createCanvasEnabled)}
-            onCreateCanvasRequest={() => void handleCreateCanvas()}
-            onCreateTicketRequest={handleCreateTicket}
           />
         </>
-      )}
-
-      {/* Create Ticket Modal */}
-      {channel?.projectId && isCreateTicketModalOpen && (
-        <CreateTicketModal
-          isOpen={isCreateTicketModalOpen}
-          onClose={() => setIsCreateTicketModalOpen(false)}
-          channelId={channel.id}
-          projectId={channel.projectId}
-        />
       )}
     </div>
   );

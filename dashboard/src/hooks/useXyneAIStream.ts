@@ -35,9 +35,6 @@ function convertUserTagsToParticipants(userTags?: Record<string, UserTag>): Part
 
 interface UseXyneAIStreamParams {
   channelIds: string[];
-  canvasIds?: string[];
-  ticketIds?: string[];
-  callIds?: string[];
   conversationId: string;
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined; // Attachment IDs to fetch from GCS on backend
@@ -77,9 +74,6 @@ This is MANDATORY - the user requires the output in a canvas document with a cli
 
 export const useXyneAIStream = ({
   channelIds,
-  canvasIds = [],
-  ticketIds = [],
-  callIds = [],
   conversationId,
   threadConversationId,
   attachmentIds,
@@ -202,12 +196,6 @@ export const useXyneAIStream = ({
             // eslint-disable-next-line @typescript-eslint/naming-convention
             channel_ids: channelIds,
             // eslint-disable-next-line @typescript-eslint/naming-convention
-            canvas_ids: canvasIds,
-            // eslint-disable-next-line @typescript-eslint/naming-convention
-            ticket_ids: ticketIds,
-            // eslint-disable-next-line @typescript-eslint/naming-convention
-            call_ids: callIds,
-            // eslint-disable-next-line @typescript-eslint/naming-convention
             conversation_id: threadConversationId || '',
             // eslint-disable-next-line @typescript-eslint/naming-convention
             session_id: conversationId,
@@ -304,9 +292,6 @@ export const useXyneAIStream = ({
     },
     [
       channelIds,
-      canvasIds,
-      ticketIds,
-      callIds,
       conversationId,
       threadConversationId,
       attachmentIds,

@@ -19,7 +19,6 @@ import { db } from '../../database/client.js';
 
 import { getXyneAITools, type XyneAIAgentContext, type UserInfo, type ResearchContext } from './tools/index.js';
 import { researchAgentService } from '../../services/researchAgentService.js';
-import type { ProvidedContexts } from './utils/contextFetcher.js';
 
 import {
   getPromptFromLangfuse,
@@ -67,11 +66,10 @@ async function buildAgentPrompt(
   researchContext?: ResearchContext,
   researchOptions?: AvailableResearchOptions,
   customInstruction?: string,
-  hasThreadContext?: boolean,
-  providedContexts?: ProvidedContexts
+  hasThreadContext?: boolean
 ): Promise<string> {
-  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions, customInstruction, hasThreadContext, providedContexts);
-
+  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions, customInstruction, hasThreadContext);
+  
   const prompt = await getPromptFromLangfuse(PROMPT_NAMES.XYNE_AI_SYSTEM, {
     templateVariables,
   });
@@ -194,8 +192,7 @@ export async function createAgentRunner(
   messages: Message[],
   modelName: string,
   apiKey: string,
-  onEvent?: (event: TraceEvent) => void,
-  providedContexts?: ProvidedContexts
+  onEvent?: (event: TraceEvent) => void
 ) {
   // Fetch channel info and research data in parallel (single API call for research)
   const [channelInfo, researchData] = await Promise.all([
@@ -219,16 +216,15 @@ export async function createAgentRunner(
   const hasThreadContext = !!context.conversationId;
   
   const systemPrompt = await buildAgentPrompt(
-    source,
-    context.timestamp,
-    context.userInfo,
-    channelNames,
+    source, 
+    context.timestamp, 
+    context.userInfo, 
+    channelNames, 
     context.webSearchEnabled,
     context.researchContext,
     researchOptions,
     context.customInstruction,
-    hasThreadContext,
-    providedContexts
+    hasThreadContext
   );
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, hasThreadContext);
   const agentRegistry = createAgentRegistry(agent);

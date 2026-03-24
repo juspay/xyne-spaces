@@ -38,10 +38,8 @@ export {
 
 export {
   buildAgentTemplateVariables,
-  buildProvidedContextCitationRefs,
   type SourceType,
   type AvailableResearchOptions,
-  type ProvidedContextCitationRef,
 } from './template-variables.js';
 
 export {

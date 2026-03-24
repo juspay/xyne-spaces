@@ -1,63 +1,6 @@
 import React from 'react';
 import { TicketPriority, TicketStatusV2, Ticket } from '@xyne/shared';
 
-// ========================
-// Status Configuration
-// ========================
-
-export interface StatusConfig {
-  color: string;
-  bg: string;
-  icon: string;
-}
-
-/**
- * Centralized status configuration for ticket status badges
- * Used across TicketList, TicketCard, and other components
- */
-export const STATUS_CONFIG: Record<TicketStatusV2, StatusConfig> = {
-  [TicketStatusV2.TODO]: {
-    color: 'text-orange-600',
-    bg: 'bg-orange-50',
-    icon: '○',
-  },
-  [TicketStatusV2.STARTED]: {
-    color: 'text-blue-600',
-    bg: 'bg-blue-50',
-    icon: '◐',
-  },
-  [TicketStatusV2.PAUSED]: {
-    color: 'text-yellow-600',
-    bg: 'bg-yellow-50',
-    icon: '⏸',
-  },
-  [TicketStatusV2.COMPLETED]: {
-    color: 'text-green-600',
-    bg: 'bg-green-50',
-    icon: '✓',
-  },
-  [TicketStatusV2.CANCELLED]: {
-    color: 'text-red-600',
-    bg: 'bg-red-50',
-    icon: '✕',
-  },
-};
-
-// ========================
-// Priority Configuration
-// ========================
-
-export const PRIORITY_LABELS: Record<TicketPriority, string> = {
-  [TicketPriority.LOW]: 'Low',
-  [TicketPriority.MEDIUM]: 'Medium',
-  [TicketPriority.HIGH]: 'High',
-  [TicketPriority.CRITICAL]: 'Critical',
-};
-
-// ========================
-// Priority Icon
-// ========================
-
 export const getPriorityIcon = (priority: TicketPriority): React.ReactNode => {
   if (priority === TicketPriority.CRITICAL) {
     return (
