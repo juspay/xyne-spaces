@@ -1,8 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { Button } from '../../ui/Button';
-import { Dialog } from '../../ui/Dialog';
 import type { Canvas } from '../Canvas.types';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -70,19 +69,33 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
     onClose();
   }, [onClose]);
 
+  if (!isOpen) {
+    return null;
+  }
+
   return (
-    <Dialog
-      open={isOpen}
-      onOpenChange={open => {
-        if (!open) handleClose();
-      }}
-      title='Attach Canvas'
-      className='max-w-2xl w-full max-h-[80vh] bg-white m-4 p-0 overflow-hidden'
-    >
-      <div className='flex flex-col h-full max-h-[80vh]'>
+    <div className='fixed inset-0 z-50 flex items-center justify-center'>
+      {/* Backdrop */}
+      <button
+        type='button'
+        className='absolute inset-0 bg-black/50 backdrop-blur-sm cursor-default'
+        onClick={handleClose}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            handleClose();
+          }
+        }}
+        aria-label='Close modal'
+        data-testid='canvas-attachment-backdrop'
+        data-track-category='CANVAS'
+        data-track-name='Close_Attachment_Modal_Backdrop'
+      />
+
+      {/* Modal */}
+      <div className='relative z-10 w-full max-w-2xl max-h-[80vh] bg-white rounded-lg shadow-lg flex flex-col m-4'>
         {/* Header */}
-        <div className='flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0'>
-          <h2 className='text-lg font-semibold text-gray-900'>Attach Canvas</h2>
+        <div className='flex items-center justify-between px-6 py-4 border-b border-gray-200'>
+          <h2 className='text-lg font-semibold text-gray-900'>Attach a canvas</h2>
           <button
             onClick={handleClose}
             className='text-gray-400 hover:text-gray-600 transition-colors'
@@ -91,7 +104,20 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
             data-track-category='CANVAS'
             data-track-name='Close_Attachment_Modal'
           >
-            <X className='w-5 h-5' />
+            <svg
+              xmlns='http://www.w3.org/2000/svg'
+              width='20'
+              height='20'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <line x1='18' y1='6' x2='6' y2='18'></line>
+              <line x1='6' y1='6' x2='18' y2='18'></line>
+            </svg>
           </button>
         </div>
 
@@ -101,7 +127,7 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
             canvases={canvases}
             onSelect={handleSelectCanvas}
             loading={!allCanvases}
-            {...(user?.id && { currentUserId: user.id })}
+            currentUserId={user?.id}
             quartoDocs={quartoDocs}
             showQuartoDocsFilter={true}
             activeFilter={activeFilter}
@@ -111,7 +137,7 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className='flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg flex-shrink-0'>
+        <div className='flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg'>
           <Button
             variant='outline'
             onClick={handleCreateNew}
@@ -144,7 +170,7 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
           </div>
         </div>
       </div>
-    </Dialog>
+    </div>
   );
 };
 

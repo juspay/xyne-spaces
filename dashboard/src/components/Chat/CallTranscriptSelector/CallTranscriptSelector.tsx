@@ -33,32 +33,14 @@ type Call = QueryResultType<typeof queries.userCallHistory>[number];
 // }
 
 interface CallTranscriptSelectorProps {
-  /** Callback when "Message" button is clicked - inserts transcript text into editor */
   onSelect: (content: string) => void;
-
-  /**
-   * [NORMAL CHAT MODE] Callback when "Attachment" button is clicked
-   * Creates a file attachment from the call transcript
-   * Used in regular chat conversations
-   */
   onAttach?: (file: File) => void;
-
-  /**
-   * [XYNE AI MODE] Callback when "Attachment" button is clicked
-   * Adds the call as a context pill (like canvas/ticket pills)
-   * Used in XyneAI conversations for context awareness
-   * Takes precedence over onAttach if both are provided
-   */
-  onSelectCallForContext?: (call: { id: string; title: string | null }) => void;
-
-  /** Callback when modal is closed */
   onClose: () => void;
 }
 
 export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
   onSelect,
   onAttach,
-  onSelectCallForContext,
   onClose,
 }) => {
   const { calls, hasMoreCalls, loadMoreCalls, onVisibleRangeChanged } = usePaginatedCalls();
@@ -141,10 +123,10 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
   };
 
   return (
-    <div className='flex flex-col md:flex-row h-[90vh] md:h-[600px] w-full max-w-[900px] bg-card rounded-xl border border-border overflow-hidden'>
+    <div className='flex h-[600px] w-[900px] bg-card rounded-xl border border-border overflow-hidden'>
       {/* Left Panel: Call List */}
-      <div className='w-full md:w-[320px] h-[35vh] md:h-auto md:border-r border-b md:border-b-0 border-border flex flex-col bg-muted/50 md:shrink-0'>
-        <div className='p-4 md:p-6 border-b border-border bg-card flex-shrink-0'>
+      <div className='w-[320px] border-r border-border flex flex-col bg-muted/50 shrink-0'>
+        <div className='p-6 border-b border-border bg-card'>
           <h3 className='font-bold text-foreground flex items-center gap-2 text-base'>
             <FileText size={18} className='text-muted-foreground' />
             Call History
@@ -152,7 +134,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
           <p className='text-[11px] text-muted-foreground mt-0.5'>Select a recording to preview</p>
         </div>
 
-        <div className='flex-1 overflow-auto p-2 custom-scrollbar min-h-0'>
+        <div className='flex-1 overflow-hidden p-2 custom-scrollbar'>
           {!calls || calls.length === 0 ? (
             <div className='h-full flex flex-col items-center justify-center text-muted-foreground/50 p-8 text-center'>
               <Phone size={24} className='mb-2 opacity-20' />
@@ -213,24 +195,22 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
       </div>
 
       {/* Right Panel: Preview */}
-      <div className='flex-1 flex flex-col bg-card relative min-w-0 min-h-0 overflow-hidden'>
+      <div className='flex-1 flex flex-col bg-card relative min-w-0'>
         {!selectedCall ? (
-          <div className='flex-1 flex flex-col items-center justify-center p-6 md:p-12 text-center min-h-0'>
-            <div className='w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mb-4 md:mb-6'>
-              <FileText size={32} className='md:w-10 md:h-10 text-muted-foreground/50' />
+          <div className='flex-1 flex flex-col items-center justify-center p-12 text-center'>
+            <div className='w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-6'>
+              <FileText size={40} className='text-muted-foreground/50' />
             </div>
-            <h4 className='text-base md:text-lg font-bold text-foreground mb-2'>
-              No Call Selected
-            </h4>
-            <p className='text-muted-foreground max-w-[280px] leading-relaxed text-xs md:text-sm'>
+            <h4 className='text-lg font-bold text-foreground mb-2'>No Call Selected</h4>
+            <p className='text-muted-foreground max-w-[280px] leading-relaxed text-sm'>
               Select a call from the history to preview its summary and transcription bubbles.
             </p>
           </div>
         ) : (
           <>
             {/* Header */}
-            <div className='px-4 md:px-8 py-4 md:py-6 border-b border-border flex flex-col md:flex-row md:items-center justify-between bg-card sticky top-0 z-10 w-full gap-3'>
-              <div className='min-w-0 md:pr-6'>
+            <div className='px-8 py-6 border-b border-border flex items-center justify-between bg-card sticky top-0 z-10 w-full'>
+              <div className='min-w-0 pr-6'>
                 <h4 className='font-bold text-foreground text-lg truncate mb-1'>
                   {getCallTitle(selectedCall)}
                 </h4>
@@ -255,33 +235,18 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
                       onClose();
                     }
                   }}
-                  className='flex items-center gap-2 border border-border bg-card hover:bg-accent text-foreground px-3 md:px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95'
+                  className='flex items-center gap-2 border border-border bg-card hover:bg-accent text-foreground px-4 py-2 rounded-lg text-sm font-medium transition-all active:scale-95'
                   data-track-category='CALLS'
                   data-track-name='SEND_CALL_AS_MESSAGE'
                   data-track-metadata={JSON.stringify({ callId: selectedCall?.id })}
                 >
                   <MessageSquare size={14} />
-                  <span className='hidden sm:inline'>Message</span>
+                  <span>Message</span>
                 </button>
                 {/* Attachment Button */}
                 <button
                   onClick={() => {
-                    if (!selectedCall) return;
-
-                    // XyneAI Mode: Add call as context pill
-                    // This takes precedence - used when selecting calls for AI context awareness
-                    if (onSelectCallForContext) {
-                      onSelectCallForContext({
-                        id: selectedCall.id,
-                        title: selectedCall.title,
-                      });
-                      onClose();
-                      return;
-                    }
-
-                    // Normal Chat Mode: Create file attachment
-                    // Used in regular chat conversations to attach transcript as a file
-                    if (!onAttach) return;
+                    if (!onAttach || !selectedCall) return;
                     const content = getCallContent();
                     const callTitle = getCallTitle(selectedCall);
                     const fileName = `call-summary-${callTitle.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()}-${format(new Date(selectedCall.startedAt), 'yyyy-MM-dd')}.txt`;
@@ -290,19 +255,19 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
                     onAttach(file);
                     onClose();
                   }}
-                  disabled={!onAttach && !onSelectCallForContext}
-                  className={`flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-3 md:px-4 py-2 rounded-lg text-sm font-semibold transition-all active:scale-95 ${!onAttach && !onSelectCallForContext ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  disabled={!onAttach}
+                  className={`flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold transition-all active:scale-95 ${!onAttach ? 'opacity-50 cursor-not-allowed' : ''}`}
                   data-track-category='CALLS'
                   data-track-name='ATTACH_CALL_SUMMARY'
                   data-track-metadata={JSON.stringify({ callId: selectedCall?.id })}
                 >
                   <Paperclip size={14} />
-                  <span className='hidden sm:inline'>Attachment</span>
+                  <span>Attachment</span>
                 </button>
               </div>
             </div>
 
-            <div className='flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-10 custom-scrollbar min-h-0'>
+            <div className='flex-1 overflow-y-auto p-8 space-y-10 custom-scrollbar'>
               {selectedCall.aiSummary && (
                 <div className='space-y-4'>
                   <h5 className='text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-1'>
