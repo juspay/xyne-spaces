@@ -1,5 +1,4 @@
 import { useQuery } from '../../../hooks/useQuery';
-import { QueryResultType } from '@rocicorp/zero';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { queries } from '../../../zero/queries';
 import { useAuth } from '../../../hooks/useAuth';
@@ -60,10 +59,10 @@ const ChatListV2: React.FC<ChatListProps> = ({
   const { user } = useAuth();
   const { editingMessageId, requestEdit } = useEditContext();
   const [oldConversations, oldConversationsDetails] = useQuery(
-    queries.channelConversationsPaginated({
+    queries.channelConversationsPaginatedV2({
       channelId,
       limit: PAGE_SIZE,
-      start: oldestConversation,
+      start: oldestConversation ? { createdAt: oldestConversation.createdAt } : null,
       direction: 'forward', // (get NEWER messages)
     }),
   );
@@ -83,18 +82,18 @@ const ChatListV2: React.FC<ChatListProps> = ({
 
   const [inViewAnchor, setInviewAnchor] = useState<Anchor | null>(initialItem);
   const [updatedConveresations, updatedConveresationsDetails] = useQuery(
-    queries.channelConversationsPaginated({
+    queries.channelConversationsPaginatedV2({
       channelId,
       limit: PAGE_SIZE,
-      start: inViewAnchor,
+      start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
       direction: 'forward',
     }),
   );
   const [newConversations, newConversationsDetails] = useQuery(
-    queries.channelConversationsPaginated({
+    queries.channelConversationsPaginatedV2({
       channelId,
       limit: 0,
-      start: newestConversation,
+      start: newestConversation ? { createdAt: newestConversation.createdAt } : null,
       direction: 'backward',
     }),
   );
@@ -233,7 +232,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
     if (updatedConveresationsDetails.type === 'complete') {
       const currentConversations =
         queryCacheActor.getSnapshot().context.channelConversations[channelId] ?? [];
-      const itemsToDelete: QueryResultType<typeof queries.channelConversationsPaginated> = [];
+      const itemsToDelete: Conversation[] = [];
       // set the oldest message in till message and set the fromMessage to the newset message in side the updatedMessage and use createdAt for it
       let fromMessage = updatedConveresations[0];
       let tillMessage = updatedConveresations[updatedConveresations.length - 1];

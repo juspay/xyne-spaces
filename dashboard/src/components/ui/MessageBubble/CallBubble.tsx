@@ -11,7 +11,7 @@ import { queries } from '../../../zero/queries';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 
 type AttachmentType = QueryResultType<
-  typeof queries.conversationMessages
+  typeof queries.conversationMessagesV2
 >[number]['attachments'][number];
 
 interface CallBubbleProps {

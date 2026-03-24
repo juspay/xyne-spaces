@@ -79,11 +79,10 @@ function mergeWithCached(
       // Fetched has newer items, trim end of cached (keep items before overlap)
       const trimmed = sorted.slice(0, overlapIndex);
       return dedupeAndSort(trimmed, sortedFetched);
-    } else {
-      // Fetched has older items, trim start of cached (keep items after overlap)
-      const trimmed = sorted.slice(overlapIndex + 1);
-      return dedupeAndSort(sortedFetched, trimmed);
     }
+    // Fetched has older items, trim start of cached (keep items after overlap)
+    const trimmed = sorted.slice(overlapIndex + 1);
+    return dedupeAndSort(sortedFetched, trimmed);
   }
 
   return sortedFetched;
@@ -226,7 +225,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 
   const [latestConversations, latestConversationsDetails] = useQuery(
-    queries.channelLatestMultipleConversations({
+    queries.channelLatestMultipleConversationsV2({
       channelId,
       limit: PAGE_SIZE / 2,
     }),

@@ -26,7 +26,7 @@ import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
 
-type MessageWithRelations = QueryResultType<typeof queries.conversationMessages>[number];
+type MessageWithRelations = QueryResultType<typeof queries.conversationMessagesV2>[number];
 
 export interface MobileMessageMyBubbleProps {
   message: MessageWithRelations;
@@ -73,7 +73,6 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   workflowNumber,
 }) => {
   const { toggleReaction } = useReactions();
-  const reactions = message.reactions || [];
   const attachments = message.attachments || [];
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
@@ -252,9 +251,8 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               )
             )}
 
-            {conversation?.ticket && !isWorkflowMessage && (
+            {conversation && conversation.ticket_md && !isWorkflowMessage && (
               <BotBubble
-                ticket={conversation.ticket}
                 context={context}
                 messageId={message.messageId}
                 {...(channelId && { channelId: channelId })}
@@ -297,7 +295,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
           {/* Reaction View - Outside Bubble */}
           <div className='mt-1 self-end'>
             <ReactionView
-              reactions={reactions}
+              reactionsMd={message.reactions_md}
               toggleReaction={toggleReaction}
               messageId={message.messageId}
             />

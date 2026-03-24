@@ -72,7 +72,7 @@ export interface ThreadData {
 }
 
 interface ChatBubbleProps {
-  message: QueryResultType<typeof queries.conversationMessages>[number];
+  message: QueryResultType<typeof queries.conversationMessagesV2>[number];
   channelId: string;
   projectId?: string | undefined;
   channelScopeType?: ChannelScopeType | undefined;
@@ -759,7 +759,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...(conversation?.initialMessageId && {
                 initialMessageId: conversation.initialMessageId,
               })}
-              reactions={isMessageDeleted ? [] : (message.reactions ?? [])}
+              reactionsMd={message.reactions_md}
               onCopyLink={onCopyLink}
               {...(!isMessageDeleted &&
                 shouldShowCopyButton && { onCopyMessage: handleCopyMessage })}
@@ -824,7 +824,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 initialMessageId: conversation.initialMessageId,
               })}
               {...(conversation && { conversation })}
-              reactions={isMessageDeleted ? [] : (message.reactions ?? [])}
+              reactionsMd={message.reactions_md}
               showEditAction={canEditMessage}
               isBookmarked={isBookmarked}
               isPinned={conversation?.pinned || false}
@@ -930,6 +930,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           context={context}
           conversation={conversation}
           isModalOpen={isCreateTicketModalOpen}
+          renderTicketCard={false}
           onModalOpenChange={setIsCreateTicketModalOpen}
           onTicketCreated={handleTicketCreated}
         />

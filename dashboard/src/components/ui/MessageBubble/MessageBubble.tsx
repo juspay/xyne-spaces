@@ -2,7 +2,13 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AvatarSize, Tooltip, TooltipSide } from '@juspay/blend-design-system';
 import * as Popover from '@radix-ui/react-popover';
-import { MessageType, parseForwardedMessageXml, isForwardedMessageXml } from '@xyne/shared';
+import {
+  MessageType,
+  parseForwardedMessageXml,
+  isForwardedMessageXml,
+  parseReactionsMd,
+  ReactionsData,
+} from '@xyne/shared';
 import {
   formatFullTimestamp,
   formatTimeAmPm,
@@ -59,7 +65,7 @@ import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
-  typeof queries.conversationMessages
+  typeof queries.conversationMessagesV2
 >[number]['attachments'][number];
 
 interface AttachmentsBlockProps {
@@ -286,7 +292,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 }) => {
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
-  const reactions = message.reactions || [];
   const attachments = message.attachments || [];
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
@@ -867,9 +872,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </>
               )}
 
-              {conversation?.ticket && !isWorkflowMessage && (
+              {conversation && conversation.ticket_md && !isWorkflowMessage && (
                 <BotBubble
-                  ticket={conversation.ticket}
                   context={context}
                   messageId={message.messageId}
                   {...(channelId && { channelId: channelId })}
@@ -923,7 +927,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               )}
               {!contentOnly && (
                 <ReactionView
-                  reactions={reactions}
+                  reactionsMd={message.reactions_md}
                   toggleReaction={toggleReaction}
                   messageId={message.messageId}
                 />
@@ -942,16 +946,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   );
 };
 
-export type ReactionWithUser = QueryResultType<
-  typeof queries.conversationMessages
->[number]['reactions'][number];
-
 export interface GroupedReaction {
   emojiName: string;
   count: number;
   users: Array<{ userId: string; name: string }>;
   userHasReacted: boolean;
-  earliestTimestamp: number;
+  orderIndex: number;
 }
 
 /**
@@ -967,11 +967,11 @@ export interface GroupedReaction {
  * @todo can we make this into a standalone component that can support reactions for other use cases like comments, tickets, etc.
  */
 export const ReactionView = ({
-  reactions,
+  reactionsMd,
   toggleReaction,
   messageId,
 }: {
-  reactions: readonly ReactionWithUser[];
+  reactionsMd: string | null | undefined;
   toggleReaction: (params: { messageId: string; emoji: string; hasReacted: boolean }) => void;
   messageId: string;
 }): React.ReactNode => {
@@ -994,45 +994,40 @@ export const ReactionView = ({
     return map;
   }, [users]);
 
-  if (reactions.length === 0) {
+  const reactionsData: ReactionsData = parseReactionsMd(reactionsMd);
+  const emojiOrder = Object.keys(reactionsData);
+
+  if (emojiOrder.length === 0) {
     return null;
   }
 
-  // Group reactions by emoji
-  const groupedReactions = reactions.reduce(
-    (acc, reaction) => {
-      const emoji = reaction.emojiName;
-      if (!acc[emoji]) {
-        acc[emoji] = {
-          emojiName: emoji,
-          count: 0,
-          users: [],
-          userHasReacted: false,
-          earliestTimestamp: reaction.createdAt,
-        };
-      }
-      acc[emoji].count += 1;
-      const reactionUser = usersById.get(reaction.userId);
-      acc[emoji].users.push({
-        userId: reaction.userId,
-        name: reactionUser?.name || 'Unknown User',
-      });
-      // Track the earliest timestamp for this emoji
-      if (reaction.createdAt < acc[emoji].earliestTimestamp) {
-        acc[emoji].earliestTimestamp = reaction.createdAt;
-      }
-      if (user && reaction.userId === user.id) {
-        acc[emoji].userHasReacted = true;
-      }
+  const groupedReactions = emojiOrder.reduce(
+    (acc, emoji, index) => {
+      const userIds = reactionsData[emoji] ?? [];
+      const usersForEmoji = userIds.map(userId => ({
+        userId,
+        name: usersById.get(userId)?.name || 'Unknown User',
+      }));
+
+      acc[emoji] = {
+        emojiName: emoji,
+        count: userIds.length,
+        users: usersForEmoji,
+        userHasReacted: !!user && userIds.includes(user.id),
+        orderIndex: index,
+      };
+
       return acc;
     },
     {} as Record<string, GroupedReaction>,
   );
 
-  // Sort reactions by earliest timestamp to preserve order of addition
-  const groupedReactionsArray = Object.values(groupedReactions).sort(
-    (a, b) => a.earliestTimestamp - b.earliestTimestamp,
-  );
+  const groupedReactionsArray = Object.values(groupedReactions).sort((a, b) => {
+    if (a.count !== b.count) {
+      return b.count - a.count;
+    }
+    return a.orderIndex - b.orderIndex;
+  });
 
   const handleReactionDrawerOpenChange = (open: boolean): void => {
     setIsReactionDrawerOpen(open);
@@ -1156,9 +1151,7 @@ export const ReactionView = ({
                       ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
                       : emoji.emoji;
                     // Check if the user has already reacted with this emoji
-                    const hasReacted =
-                      !!user &&
-                      reactions.some(r => r.emojiName === emojiName && r.userId === user.id);
+                    const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
 
                     toggleReaction({
                       messageId: messageId,
@@ -1180,7 +1173,7 @@ export const ReactionView = ({
         <MobileReactionDrawer
           isOpen={isReactionDrawerOpen}
           setIsOpen={handleReactionDrawerOpenChange}
-          reactions={reactions}
+          reactionsMd={reactionsMd}
         />
       )}
     </>

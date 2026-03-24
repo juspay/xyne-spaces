@@ -1,23 +1,23 @@
 import React, { ReactElement } from 'react';
-import { TicketCard } from '../../Tickets/TicketCard/TicketCard';
+import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { useChannel } from '../../../hooks/useChannels';
 import { createWorkflow, CreateWorkflowRequest } from '../../../services/Workflow/workflowService';
 import { usePlatform } from '../../../hooks/usePlatform';
 
-import { Ticket } from '@xyne/shared';
+import { parseTicketMd } from '@xyne/shared';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useNavigate } from 'react-router-dom';
 
 interface BotBubbleProps {
-  ticket?: Ticket;
   messageId?: string;
   messageContent?: string;
   channelId?: string;
   conversation?: ConversationWithTicket;
   isModalOpen?: boolean;
+  renderTicketCard?: boolean;
   context?: 'channel' | 'thread' | undefined;
   onModalOpenChange?: (isOpen: boolean) => void;
   onTicketCreated?: (ticket: {
@@ -36,8 +36,10 @@ const stripHtml = (html: string): string => {
   return tmp.textContent || tmp.innerText || '';
 };
 
-const TicketDisplayMode: React.FC<{
-  ticket: Ticket;
+type TicketCardSummaryFromMd = NonNullable<ReturnType<typeof parseTicketMd>>;
+
+const TicketDisplayModeV2: React.FC<{
+  ticket: TicketCardSummaryFromMd;
   channelId?: string;
   conversationContext?: 'channel' | 'thread' | undefined;
   conversationId?: string;
@@ -46,47 +48,40 @@ const TicketDisplayMode: React.FC<{
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
 
-  const handleClick = (e: React.MouseEvent | KeyboardEvent): void => {
-    // Check for Cmd/Ctrl+Click to open in new tab (desktop only)
-    const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
-    const ticketUrl = `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${ticket.conversationId}`;
+  const resolvedChannelId = ticket.channelId || channelId;
+  const resolvedConversationId = ticket.conversationId || conversationId;
 
-    // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
+  if (!resolvedChannelId || !resolvedConversationId) {
+    return null;
+  }
+
+  const handleClick = (e: React.MouseEvent | KeyboardEvent): void => {
+    const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
+    const ticketUrl = `/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
+
     if (!isMobile && isCmdClick) {
       window.open(ticketUrl, '_blank');
       return;
     }
 
-    // Only pass event if it's a MouseEvent (has clientX property)
     const event = 'clientX' in e ? e : undefined;
 
-    if (conversationContext === 'channel') {
+    if (conversationContext === 'channel' || conversationContext === 'thread') {
       standaloneNavigate(
         navigate,
-        `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
+        `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}/${ticket.id}?selectedTab=details`,
         { event },
       );
-    } else if (conversationContext === 'thread') {
-      standaloneNavigate(
-        navigate,
-        `${baseRoute}/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`,
-        { event },
-      );
-    } else if (channelId && conversationId) {
-      standaloneNavigate(navigate, `${baseRoute}/${channelId}/${conversationId}`, { event });
+    } else if (resolvedChannelId && resolvedConversationId) {
+      standaloneNavigate(navigate, `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}`, {
+        event,
+      });
     }
   };
 
   return (
     <div className='w-full mt-2'>
-      <TicketCard
-        ticket={ticket}
-        onClick={handleClick}
-        isConversation={true}
-        data-track-category='CHAT_TICKET'
-        data-track-name='OPEN_TICKET_FROM_MESSAGE'
-        data-track-metadata={JSON.stringify({ ticketId: ticket?.id, conversationId })}
-      />
+      <TicketCardV2 ticket={ticket} onClick={handleClick} isConversation={true} />
     </div>
   );
 };
@@ -177,27 +172,32 @@ const TicketCreateModeWithChannel: React.FC<{
 };
 
 export const BotBubble: React.FC<BotBubbleProps> = ({
-  ticket,
   messageId,
   messageContent = '',
   channelId,
   conversation,
   context,
   isModalOpen = false,
+  renderTicketCard = true,
   onModalOpenChange,
   onTicketCreated,
 }): ReactElement | null => {
-  // Display existing ticket
-  if (ticket && conversation?.initialMessageId === messageId) {
+  const ticketMd = (conversation as { ticket_md?: string | null } | undefined)?.ticket_md;
+  const ticketSummary = ticketMd ? parseTicketMd(ticketMd) : null;
+
+  // Display existing ticket (md-only)
+  if (renderTicketCard && ticketSummary && conversation?.initialMessageId === messageId) {
     return (
-      <TicketDisplayMode
-        ticket={ticket}
+      <TicketDisplayModeV2
+        ticket={ticketSummary}
         conversationContext={context}
         {...(channelId && { channelId: channelId })}
         {...(conversation && { conversationId: conversation.conversationId })}
       />
     );
   }
+
+  if (!isModalOpen) return null;
 
   // Show create ticket modal
   if (messageId && messageContent && channelId && onModalOpenChange && conversation) {

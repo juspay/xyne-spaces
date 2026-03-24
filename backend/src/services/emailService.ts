@@ -46,6 +46,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
 import { TicketIdService } from './ticketIdService';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 interface UserInfo {
   id: string;
@@ -363,7 +364,7 @@ export class EmailService {
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
       // Create ticket using transaction client
-      return await tx.ticket.create({
+      const createdTicket = await tx.ticket.create({
         data: {
           title: emailSubject,
           description: emailBody,
@@ -379,6 +380,9 @@ export class EmailService {
           ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
         }
       });
+
+      await syncConversationTicketMdFromPrismaTicket(tx, createdTicket);
+      return createdTicket;
     });
 
     this.pushVespaJobForTicket(ticket.id, userId).catch(error => {
@@ -778,4 +782,3 @@ export class EmailService {
 
 // Export singleton instance
 export const emailService = new EmailService();
-

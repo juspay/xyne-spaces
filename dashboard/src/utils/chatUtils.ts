@@ -29,7 +29,7 @@ export type ChatListItemWithSeparator = CombinedMessageItem | DateSeparator;
  */
 export interface ThreadMessageItem {
   type: 'message';
-  data: QueryResultType<typeof queries.conversationMessages>[number];
+  data: QueryResultType<typeof queries.conversationMessagesV2>[number];
   createdAt: Date;
 }
 
@@ -87,7 +87,7 @@ export const insertDateSeparatorsForCombinedMessages = (
  * @returns Array with date separators inserted
  */
 export const insertDateSeparatorsForThreadMessages = (
-  messages: QueryResultType<typeof queries.conversationMessages> | undefined,
+  messages: QueryResultType<typeof queries.conversationMessagesV2> | undefined,
 ): ThreadListItemWithSeparator[] => {
   if (!messages || messages.length === 0) {
     return [];

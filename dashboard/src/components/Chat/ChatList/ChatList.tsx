@@ -18,7 +18,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 type ChatListProps = {
   channelId: string;
-  messages: QueryResultType<typeof queries.channelConversations> | undefined;
+  messages: QueryResultType<typeof queries.channelConversationsV2> | undefined;
   projectId?: string | undefined;
   channelScopeType?: ChannelScopeType | undefined;
 };
@@ -50,7 +50,7 @@ const ChatList = ({
   };
 
   const [replyToChannelThreadMessages] = useCachedQuery(
-    queries.channelAndThreadMessages({ channelId }),
+    queries.channelAndThreadMessagesV2({ channelId }),
   );
   const combinedMessages = useMemo((): CombinedMessageItem[] => {
     return combineMessages(messages, replyToChannelThreadMessages);

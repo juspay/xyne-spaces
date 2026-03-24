@@ -15,7 +15,7 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
   const { baseRoute } = useRouteContext();
   const { setActiveTab } = useContext(ConversationTabContext);
 
-  const [pinned] = useCachedQuery(queries.getPinnedMesseges({ channelId: channelId }));
+  const [pinned] = useCachedQuery(queries.getPinnedMessegesV2({ channelId: channelId }));
 
   if (pinned.length === 0) {
     return (

@@ -29,6 +29,28 @@ export async function collectSideEffectJobs(
   }
 
   let previousValue: any = null;
+  if (operation === 'delete' && table === 'reactions') {
+    const reaction = await tx.run(zql.reactions.where('reactionId', entityId).one());
+    if (reaction) {
+      previousValue = {
+        messageId: reaction.messageId,
+        emojiName: reaction.emojiName,
+        userId: reaction.userId,
+      };
+    }
+  }
+
+  if (operation === 'delete' && table === 'messages') {
+    const message = await tx.run(zql.messages.where('messageId', entityId).one());
+    if (message) {
+      previousValue = {
+        messageId: message.messageId,
+        conversationId: message.conversationId,
+        senderId: message.senderId,
+        msgType: message.msgType,
+      };
+    }
+  }
   if (operation === 'delete' && table === 'conversations') {
     const entity = await tx.run(zql.conversations.where('conversationId', entityId).one());
     if (entity) {

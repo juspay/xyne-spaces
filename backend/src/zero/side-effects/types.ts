@@ -23,7 +23,25 @@ export interface TicketStageEtaPreviousValue {
   updatedBy: string | null;
 }
 
-export type PreviousValue = ConversationPreviousValue | TicketPreviousValue | TicketStageEtaPreviousValue;
+export interface ReactionPreviousValue {
+  messageId: string;
+  emojiName: string;
+  userId: string;
+}
+
+export interface MessagePreviousValue {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  msgType: string;
+}
+
+export type PreviousValue =
+  | ConversationPreviousValue
+  | TicketPreviousValue
+  | TicketStageEtaPreviousValue
+  | ReactionPreviousValue
+  | MessagePreviousValue;
 
 export interface SideEffectJobConfig {
   entityType: TableName;
@@ -40,8 +58,8 @@ export type SideEffectOperationConfigMap = {
 };
 
 export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
-  messages: ['insert', 'delete'],
   reactions: ['insert', 'delete'],
+  messages: ['insert', 'delete'],
   call_participants: ["insert", "update"],
   conversations: ['insert', 'delete'],
   calls: ['update'],

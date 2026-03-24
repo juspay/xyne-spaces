@@ -51,6 +51,28 @@ export const queries = defineQueries({
         .related('ticket');
     }
   ),
+  channelConversationsV2: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.conversations
+        .where('channelId', channelId)
+        .orderBy('createdAt', 'asc')
+        .related('initialMessage', (initialMessageQuery) =>
+          initialMessageQuery
+            .where(({ or, cmp }) =>
+              or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
+            )
+            .related('attachments')
+        )
+        .related('parentMessage')
+        .related('participants', (participantQuery) =>
+          participantQuery
+            .where('participationType', ConversationParticipation.AUTHOR)
+            .orderBy('joinedAt', 'asc')
+        )
+        .related('ticket');
+    }
+  ),
 
   conversationMessages: defineQuery(
     z.object({ conversationId: z.string() }),
@@ -62,6 +84,16 @@ export const queries = defineQueries({
         .related('attachments')
         .related('reactionCounts')
         .related('reactions');
+    }
+  ),
+  conversationMessagesV2: defineQuery(
+    z.object({ conversationId: z.string() }),
+    ({ ctx, args: { conversationId } }) => {
+      return zql.messages
+        .where('conversationId', conversationId)
+        .where(({ or, cmp }) => or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID)))
+        .orderBy('createdAt', 'asc')
+        .related('attachments');
     }
   ),
 
@@ -636,7 +668,7 @@ export const queries = defineQueries({
 
   userActivities: defineQuery(() => {
     return zql.activities
-      .orderBy('createdAt', 'desc')
+      .orderBy('updatedAt', 'desc')
       .related('message', (m) =>
         m
           .related('conversation')
@@ -644,6 +676,14 @@ export const queries = defineQueries({
           .related('reactionCounts')
           .related('attachments')
       )
+      .related('reaction')
+      .related('canvas')
+      .related('ticket');
+  }),
+  userActivitiesV2: defineQuery(() => {
+    return zql.activities
+      .orderBy('updatedAt', 'desc')
+      .related('message', (m) => m.related('conversation').related('attachments'))
       .related('reaction')
       .related('canvas')
       .related('ticket');
@@ -657,7 +697,7 @@ export const queries = defineQueries({
   }),
 
   userUnreadActivities: defineQuery(() => {
-    return zql.activities.where('isRead', false).orderBy('createdAt', 'desc').related('channel');
+    return zql.activities.where('isRead', false).orderBy('updatedAt', 'desc').related('channel');
   }),
 
   userDrafts: defineQuery(({ ctx }) => {
@@ -667,7 +707,7 @@ export const queries = defineQueries({
   userActivitiesPaginated: defineQuery(
     z.object({
       limit: z.number(),
-      start: z.object({ id: z.string(), createdAt: z.number() }).nullable(),
+      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
       types: z.array(z.string()),
       classification: z.array(z.nativeEnum(ActivityClassification)).optional(),
     }),
@@ -686,10 +726,10 @@ export const queries = defineQueries({
         );
       }
 
-      query = query.orderBy('createdAt', 'desc').orderBy('id', 'desc');
+      query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
 
       if (start) {
-        query = query.start({ id: start.id, createdAt: start.createdAt }, { inclusive: false });
+        query = query.start({ id: start.id, updatedAt: start.updatedAt }, { inclusive: false });
       }
 
       return query
@@ -701,6 +741,42 @@ export const queries = defineQueries({
             .related('reactionCounts')
             .related('attachments')
         )
+        .related('reaction')
+        .related('canvas')
+        .related('ticket');
+    }
+  ),
+  userActivitiesPaginatedV2: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+      types: z.array(z.string()),
+      classification: z.array(z.nativeEnum(ActivityClassification)).optional(),
+    }),
+    ({ args: { limit, start, types, classification } }) => {
+      let query = zql.activities;
+
+      if (types.length > 0) {
+        query = query.where(helpers =>
+          helpers.or(...types.map(type => helpers.cmp('actorAction', '=', type)))
+        );
+      }
+
+      if (classification && classification.length > 0) {
+        query = query.where(helpers =>
+          helpers.or(...classification.map(c => helpers.cmp('classification', '=', c)))
+        );
+      }
+
+      query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, updatedAt: start.updatedAt }, { inclusive: false });
+      }
+
+      return query
+        .limit(limit)
+        .related('message', (m) => m.related('conversation').related('attachments'))
         .related('reaction')
         .related('canvas')
         .related('ticket');
@@ -725,6 +801,16 @@ export const queries = defineQueries({
         .related('conversation')
         .related('reactions')
         .related('reactionCounts')
+        .related('attachments')
+        .one();
+    }
+  ),
+  getMessageForActivityV2: defineQuery(
+    z.object({ messageId: z.string() }),
+    ({ args: { messageId } }) => {
+      return zql.messages
+        .where('messageId', messageId)
+        .related('conversation')
         .related('attachments')
         .one();
     }
@@ -884,9 +970,26 @@ export const queries = defineQueries({
             )
           )
         )
-        .related('attachments')
         .related('reactionCounts')
-        .related('reactions');
+        .related('reactions')
+        .related('attachments');
+    }
+  ),
+  channelAndThreadMessagesV2: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.messages
+        .where('showInChannel', true)
+        .whereExists('conversation', (c) => c.where('channelId', channelId))
+        .orderBy('createdAt', 'asc')
+        .related('conversation', (c) =>
+          c.related('initialMessage', (im) =>
+            im.where(({ or, cmp }) =>
+              or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
+            )
+          )
+        )
+        .related('attachments');
     }
   ),
 
@@ -1096,8 +1199,6 @@ export const queries = defineQueries({
                 helpers.cmp('visibleTo', '=', ctx.userID),
               );
             })
-            .related('reactions')
-            .related('reactionCounts')
             .related('attachments'),
         )
         .related('parentMessage')
@@ -1110,8 +1211,7 @@ export const queries = defineQueries({
               ),
             )
             .orderBy('joinedAt', 'asc')
-        )
-        .related('ticket');
+        );
 
       // Apply ordering based on direction
       const orderDirection = direction === 'forward' ? 'desc' : 'asc';
@@ -1141,6 +1241,32 @@ export const queries = defineQueries({
             })
             .related('reactions')
             .related('reactionCounts')
+            .related('attachments'),
+        )
+        .related('parentMessage')
+        .related('participants', participantQuery =>
+          participantQuery
+            .where('participationType', ConversationParticipation.AUTHOR)
+            .orderBy('joinedAt', 'asc'),
+        )
+        .related('ticket')
+        .orderBy('createdAt', 'desc')
+        .limit(limit);
+    },
+  ),
+  channelLatestMultipleConversationsV2: defineQuery(
+    z.object({ channelId: z.string(), limit: z.number() }),
+    ({ ctx, args: { channelId, limit } }) => {
+      return zql.conversations
+        .where('channelId', channelId)
+        .related('initialMessage', initialMessageQuery =>
+          initialMessageQuery
+            .where(helpers => {
+              return helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', '=', ctx.userID),
+              );
+            })
             .related('attachments'),
         )
         .related('parentMessage')
@@ -1239,6 +1365,28 @@ export const queries = defineQueries({
         );
     }
   ),
+  getPinnedMessegesV2: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.conversations
+        .where('channelId', channelId)
+        .where('pinned', true)
+        .related('initialMessage', (initialMessageQuery) =>
+          initialMessageQuery
+            .where(({ or, cmp }) =>
+              or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
+            )
+            .related('attachments')
+        )
+        .related('parentMessage')
+        .related('ticket')
+        .related('participants', (participantQuery) =>
+          participantQuery
+            .where('participationType', ConversationParticipation.AUTHOR)
+            .orderBy('joinedAt', 'asc')
+        );
+    }
+  ),
 
   channelLatestMessage: defineQuery(
     z.object({ channelId: z.string() }),
@@ -1255,6 +1403,25 @@ export const queries = defineQueries({
             })
             .related('reactions')
             .related('reactionCounts')
+            .related('attachments')
+        )
+        .orderBy('createdAt', 'desc')
+        .one();
+    }
+  ),
+  channelLatestMessageV2: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) => {
+      return zql.conversations
+        .where('channelId', channelId)
+        .related('initialMessage', (initialMessageQuery) =>
+          initialMessageQuery
+            .where((helpers) => {
+              return helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', '=', ctx.userID)
+              );
+            })
             .related('attachments')
         )
         .orderBy('createdAt', 'desc')

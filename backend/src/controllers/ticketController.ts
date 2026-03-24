@@ -32,7 +32,8 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
-import { BaseTicketType, FormContextType, FormEntityType } from '@xyne/shared';
+import { BaseTicketType, FormContextType, FormEntityType, serializeTicketMd } from '@xyne/shared';
+import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
@@ -393,10 +394,27 @@ export class TicketController {
             dynamicFields: dynamicFields as Record<string, string>,
           });
 
-          // Update conversation with ticketId
+          const ticketMd = serializeTicketMd({
+            id: ticket.id,
+            title: ticket.title,
+            description: ticket.description,
+            statusV2: ticket.statusV2 as TicketCardSummary['statusV2'],
+            priority: ticket.priority as TicketCardSummary['priority'],
+            assignedTo: ticket.assignedTo ?? null,
+            createdBy: ticket.createdBy,
+            createdAt: ticket.createdAt.getTime(),
+            eta: ticket.eta ? ticket.eta.getTime() : null,
+            xyneId: ticket.xyneId,
+            stageName: ticket.stageName,
+            ticketType: ticket.ticketType ?? null,
+            channelId: ticket.channelId,
+            conversationId: ticket.conversationId,
+          });
+
+          // Update conversation with ticketId and ticket_md
           await tx.conversation.update({
             where: { conversationId: existingConversation.conversationId },
-            data: { ticketId: ticket.id },
+            data: { ticketId: ticket.id, ticket_md: ticketMd },
           });
 
 
@@ -503,10 +521,27 @@ export class TicketController {
             metadata: { ticketId: ticket.id },
           }, initialMessageId);
 
-          // Update conversation with ticketId
+          const ticketMd = serializeTicketMd({
+            id: ticket.id,
+            title: ticket.title,
+            description: ticket.description,
+            statusV2: ticket.statusV2 as TicketCardSummary['statusV2'],
+            priority: ticket.priority as TicketCardSummary['priority'],
+            assignedTo: ticket.assignedTo ?? null,
+            createdBy: ticket.createdBy,
+            createdAt: ticket.createdAt.getTime(),
+            eta: ticket.eta ? ticket.eta.getTime() : null,
+            xyneId: ticket.xyneId,
+            stageName: ticket.stageName,
+            ticketType: ticket.ticketType ?? null,
+            channelId: ticket.channelId,
+            conversationId: ticket.conversationId,
+          });
+
+          // Update conversation with ticketId and ticket_md
           await tx.conversation.update({
             where: { conversationId },
-            data: { ticketId: ticket.id },
+            data: { ticketId: ticket.id, ticket_md: ticketMd },
           });
 
           // Add ticket creator as MENTIONED participant (subscribed by default)

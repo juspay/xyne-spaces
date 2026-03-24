@@ -8,7 +8,7 @@ import { isImageFile, isVideoFile } from '../../Chat/MessageAttachment/utils';
 import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 
 type Attachment = QueryResultType<
-  typeof queries.conversationMessages
+  typeof queries.conversationMessagesV2
 >[number]['attachments'][number];
 
 interface MobileAttachmentsGridProps {

@@ -313,7 +313,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
     channelId || (projectChannels && projectChannels.length > 0 ? projectChannels[0]?.id : '');
 
   const [messages] = useCachedQuery(
-    queries.conversationMessages({
+    queries.conversationMessagesV2({
       conversationId: ticket?.conversationId || '',
     }),
     { enabled: !!ticket?.conversationId },

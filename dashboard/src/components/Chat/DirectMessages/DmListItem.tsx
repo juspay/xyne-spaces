@@ -45,7 +45,7 @@ export const DmListItem = ({
 
   // Fetch latest message using the query from queries.ts
   const [latestConversation] = useCachedQuery(
-    queries.channelLatestMessage({ channelId: channel.id }),
+    queries.channelLatestMessageV2({ channelId: channel.id }),
   );
   const lastMessage = latestConversation?.initialMessage;
 

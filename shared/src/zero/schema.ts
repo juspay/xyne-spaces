@@ -1125,6 +1125,8 @@ export const conversationTable = table("conversations")
     ticketId: string().optional(),
     metadata: json().optional(),
     callId: string().optional(),
+    replies_md: string().optional(), // Markdown format replies data
+    ticket_md: string().optional(), // Markdown format ticket card data
     createdAt: number(),
   })
   .primaryKey("conversationId");
@@ -1157,6 +1159,7 @@ export const messageTable = table('messages')
     metadata: json().optional(),
     nudgeCount: number().optional(),
     isSent: boolean(),
+    reactions_md: string().optional(), // Markdown format reactions data
   })
   .primaryKey('messageId');
 
@@ -1236,6 +1239,7 @@ export const activityTable = table('activities')
     reactionId: string().optional(),
     callId: string().optional(),
     ticketId: string().optional(),
+    conversationId: string().optional(),
     channelId: string().optional(),
     canvasId: string().optional(),
     blockId: string().optional(),
@@ -1245,6 +1249,7 @@ export const activityTable = table('activities')
     classificationJobType: enumeration<ActivityClassificationJobType>().optional(),
     isRead: boolean(),
     createdAt: number(),
+    updatedAt: number().optional(),  // For batched reaction activity updates
   })
   .primaryKey('id');
 
@@ -2645,11 +2650,16 @@ export const activityTableRelationships = relationships(activityTable, ({ one })
     destField: ['id'],
     destSchema: channelTable,
   }),
-  message: one({
-    sourceField: ['messageId'],
-    destField: ['messageId'],
-    destSchema: messageTable,
-  }),
+    message: one({
+      sourceField: ['messageId'],
+      destField: ['messageId'],
+      destSchema: messageTable,
+    }),
+    conversation: one({
+      sourceField: ['conversationId'],
+      destField: ['conversationId'],
+      destSchema: conversationTable,
+    }),
   reaction: one({
     sourceField: ['reactionId'],
     destField: ['reactionId'],

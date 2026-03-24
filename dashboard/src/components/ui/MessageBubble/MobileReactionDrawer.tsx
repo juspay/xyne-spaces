@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { Drawer } from 'vaul';
-import { ReactionWithUser } from './MessageBubble';
+import { parseReactionsMd, ReactionsData } from '@xyne/shared';
 import { Tabs } from '@base-ui/react/tabs';
 import { useAuth } from '../../../hooks/useAuth';
 import { useUsers } from '../../../hooks/useUsers';
@@ -31,48 +31,46 @@ interface GroupedReaction {
   emojiName: string;
   count: number;
   users: Array<{ userId: string; name: string }>;
-  earliestTimestamp: number;
+  orderIndex: number;
 }
 
 // Helper: Group reactions by emoji
 const groupReactionsByEmoji = (
-  reactions: readonly ReactionWithUser[],
+  reactionsData: ReactionsData,
   usersById: Map<string, { name: string }>,
 ): GroupedReaction[] => {
-  const grouped = reactions.reduce(
-    (acc, reaction) => {
-      const emoji = reaction.emojiName;
-      if (!acc[emoji]) {
-        acc[emoji] = {
-          emojiName: emoji,
-          count: 0,
-          users: [],
-          earliestTimestamp: reaction.createdAt,
-        };
-      }
-      acc[emoji].count += 1;
-      const user = usersById.get(reaction.userId);
-      acc[emoji].users.push({
-        userId: reaction.userId,
-        name: user?.name || 'Unknown User',
-      });
-      if (reaction.createdAt < acc[emoji].earliestTimestamp) {
-        acc[emoji].earliestTimestamp = reaction.createdAt;
-      }
+  const emojiOrder = Object.keys(reactionsData);
+  const grouped = emojiOrder.reduce(
+    (acc, emoji, index) => {
+      const userIds = reactionsData[emoji] ?? [];
+      acc[emoji] = {
+        emojiName: emoji,
+        count: userIds.length,
+        users: userIds.map(userId => ({
+          userId,
+          name: usersById.get(userId)?.name || 'Unknown User',
+        })),
+        orderIndex: index,
+      };
       return acc;
     },
     {} as Record<string, GroupedReaction>,
   );
 
-  return Object.values(grouped).sort((a, b) => a.earliestTimestamp - b.earliestTimestamp);
+  return Object.values(grouped).sort((a, b) => {
+    if (a.count !== b.count) {
+      return b.count - a.count;
+    }
+    return a.orderIndex - b.orderIndex;
+  });
 };
 
 export default function MobileReactionDrawer({
   isOpen,
   setIsOpen,
-  reactions,
+  reactionsMd,
 }: {
-  reactions: readonly ReactionWithUser[];
+  reactionsMd: string | null | undefined;
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
 }) {
@@ -88,9 +86,10 @@ export default function MobileReactionDrawer({
     return map;
   }, [users]);
 
+  const reactionsData = useMemo(() => parseReactionsMd(reactionsMd), [reactionsMd]);
   const groupedReactions = useMemo(
-    () => groupReactionsByEmoji(reactions, usersById),
-    [reactions, usersById],
+    () => groupReactionsByEmoji(reactionsData, usersById),
+    [reactionsData, usersById],
   );
 
   // For "All" panel: group by emoji and show comma-separated names
@@ -204,7 +203,9 @@ export default function MobileReactionDrawer({
                   onClick={() => handleTabClick('all')}
                 >
                   <span>All</span>
-                  <span className='text-xs text-muted-foreground'>{reactions.length}</span>
+                  <span className='text-xs ttext-muted-foreground'>
+                    {Object.values(reactionsData).reduce((sum, ids) => sum + ids.length, 0)}
+                  </span>
                 </Tabs.Tab>
                 {groupedReactions.map(({ emojiName, count }) => (
                   <Tabs.Tab

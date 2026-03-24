@@ -151,6 +151,214 @@ export class ActivityService {
       },
     });
   }
+
+
+  /**
+   * Upsert a reaction activity (V2)
+   * For batched reaction activities (one activity per message)
+   */
+  async upsertReactionActivityV2(params: {
+    messageId: string;
+    channelId: string;
+    actorId: string;
+    messageAuthorId: string;
+  }): Promise<'created' | 'updated'> {
+    const { messageId, channelId, actorId, messageAuthorId } = params;
+
+    const existingActivity = await this.prisma.activity.findFirst({
+      where: {
+        userId: messageAuthorId,
+        messageId: messageId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+      },
+    });
+
+    if (existingActivity) {
+      await this.prisma.activity.update({
+        where: { id: existingActivity.id },
+        data: {
+          actorId: actorId,
+          isRead: false,
+        },
+      });
+
+      logger.info('[ActivityService] Updated existing reaction activity (v2)', {
+        activityId: existingActivity.id,
+        messageId,
+        newActorId: actorId,
+      });
+
+      return 'updated';
+    }
+
+    await this.prisma.activity.create({
+      data: {
+        userId: messageAuthorId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+        actionSourceId: messageId,
+        messageId: messageId,
+        channelId: channelId,
+        actorId: actorId,
+        isRead: false,
+        classification: ActivityClassification.FYI,
+      },
+    });
+
+    logger.info('[ActivityService] Created new reaction activity (v2)', {
+      messageId,
+      actorId,
+    });
+
+    return 'created';
+  }
+
+
+  async deleteReactionActivityV2(messageId: string, messageAuthorId: string): Promise<void> {
+    await this.prisma.activity.deleteMany({
+      where: {
+        userId: messageAuthorId,
+        messageId: messageId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+      },
+    });
+
+    logger.info('[ActivityService] Deleted reaction activity (v2)', { messageId });
+  }
+
+
+  async updateReactionActivityActorIdOnlyV2(params: {       //using only in case of reaction deletion where updateAt is not to be updated
+    messageId: string;
+    messageAuthorId: string;
+    actorId: string;
+  }): Promise<void> {
+    const { messageId, messageAuthorId, actorId } = params;
+
+    await this.prisma.$executeRaw`
+      UPDATE "activities"
+      SET "actorId" = ${actorId}
+      WHERE "userId" = ${messageAuthorId}
+        AND "messageId" = ${messageId}
+        AND "actorAction" = 'added_v2'
+        AND "actionSource" = 'message'
+    `;
+  }
+
+
+  /**
+   * Upsert a reply activity (V2)
+   * For batched thread reply activities (one activity per parent message)
+   */
+  async upsertReplyActivityV2(params: {
+    conversationId: string;
+    parentMessageId: string;
+    channelId: string;
+    actorId: string;
+    recipientUserId: string;
+    latestReplyMessageId: string;
+  }): Promise<'created' | 'updated'> {
+    const {
+      conversationId,
+      channelId,
+      actorId,
+      recipientUserId,
+      latestReplyMessageId,
+    } = params;
+
+    const existingActivity = await this.prisma.activity.findFirst({
+      where: {
+        userId: recipientUserId,
+        conversationId,
+        actorAction: 'replied_v2',
+        actionSource: 'message',
+      },
+    });
+
+    if (existingActivity) {
+      await this.prisma.activity.update({
+        where: { id: existingActivity.id },
+        data: {
+          actorId: actorId,
+          isRead: false,
+          messageId: latestReplyMessageId,
+          actionSourceId: latestReplyMessageId,
+        },
+      });
+
+      logger.info('[ActivityService] Updated existing reply activity (v2)', {
+        activityId: existingActivity.id,
+        conversationId,
+        newActorId: actorId,
+      });
+
+      return 'updated';
+    }
+
+    await this.prisma.activity.create({
+      data: {
+        userId: recipientUserId,
+        actorAction: 'replied_v2',
+        actionSource: 'message',
+        actionSourceId: latestReplyMessageId,
+        messageId: latestReplyMessageId,
+        conversationId,
+        channelId: channelId,
+        actorId: actorId,
+        isRead: false,
+        classification: ActivityClassification.FYI,
+      },
+    });
+
+    logger.info('[ActivityService] Created new reply activity (v2)', {
+      conversationId,
+      actorId,
+    });
+
+    return 'created';
+  }
+
+
+  async deleteReplyActivitiesV2(conversationId: string, recipientUserIds: string[]): Promise<void> {
+    if (recipientUserIds.length === 0) return;
+    await this.prisma.activity.deleteMany({
+      where: {
+        userId: { in: recipientUserIds },
+        conversationId,
+        actorAction: 'replied_v2',
+        actionSource: 'message',
+      },
+    });
+
+    logger.info('[ActivityService] Deleted reply activity (v2)', { conversationId });
+  }
+
+
+  async updateReplyActivitiesMetadataV2(params: {
+    conversationId: string;
+    recipientUserIds: string[];
+    actorId: string;
+    latestReplyMessageId: string;
+  }): Promise<void> {
+    const { conversationId, recipientUserIds, actorId, latestReplyMessageId } = params;
+
+    if (recipientUserIds.length === 0) return;
+
+    await this.prisma.activity.updateMany({
+      where: {
+        userId: { in: recipientUserIds },
+        conversationId,
+        actorAction: 'replied_v2',
+        actionSource: 'message',
+      },
+      data: {
+        actorId,
+        messageId: latestReplyMessageId,
+        actionSourceId: latestReplyMessageId,
+      },
+    });
+  }
 }
 
 // Singleton instance

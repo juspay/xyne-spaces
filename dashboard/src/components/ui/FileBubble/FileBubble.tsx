@@ -6,7 +6,7 @@ import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { formatFullTimestamp } from '../../../utils/dateUtils';
 import { useUser } from '../../../hooks/useUsers';
 
-type MessageType = QueryResultType<typeof queries.conversationMessages>[number];
+type MessageType = QueryResultType<typeof queries.conversationMessagesV2>[number];
 
 interface FileBubbleProps {
   attachment: MessageType['attachments'][number];

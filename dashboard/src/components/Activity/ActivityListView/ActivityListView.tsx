@@ -62,6 +62,8 @@ type TabConfig = {
   filter: (activity: ActivityWithRelated) => boolean;
 };
 
+type ActivityCursor = NonNullable<Parameters<typeof queries.userActivitiesPaginatedV2>[0]['start']>;
+
 const isAllVisibleActivity = (activity: ActivityWithRelated): boolean => {
   const classification = activity.classification ?? ActivityClassification.PENDING;
   if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') {
@@ -95,13 +97,18 @@ const TABS: TabConfig[] = [
     value: 'replies',
     label: 'Replies',
     Icon: MessageCircleMore,
-    filter: activity => activity.actorAction === 'replied',
+    // added to maintain backward compat for now, to be deprecated
+    filter: activity => activity.actorAction === 'replied' || activity.actorAction === 'replied_v2',
   },
   {
     value: 'reactions',
     label: 'Reactions',
     Icon: Smile,
-    filter: activity => activity.actorAction === 'added' || activity.actorAction === 'removed',
+    // added to maintain backward compat for now, to be deprecated
+    filter: activity =>
+      activity.actorAction === 'added' ||
+      activity.actorAction === 'added_v2' ||
+      activity.actorAction === 'removed',
   },
   {
     value: 'tickets',
@@ -246,9 +253,9 @@ const ActivityListView = (): ReactElement => {
       case 'your_mentions':
         return ['mentioned_user'];
       case 'replies':
-        return ['replied'];
+        return ['replied', 'replied_v2'];
       case 'reactions':
-        return ['added', 'removed'];
+        return ['added', 'added_v2', 'removed'];
       case 'group_mentions':
         return ['group_mention'];
       case 'tickets':
@@ -278,8 +285,8 @@ const ActivityListView = (): ReactElement => {
 
   // Accumulation-based state (Infinite Scroll)
   const [activities, setActivities] = useState<ActivityWithRelated[]>([]);
-  const [fetchCursor, setFetchCursor] = useState<{ id: string; createdAt: number } | null>(null);
-  const [nextCursor, setNextCursor] = useState<{ id: string; createdAt: number } | null>(null);
+  const [fetchCursor, setFetchCursor] = useState<ActivityCursor | null>(null);
+  const [nextCursor, setNextCursor] = useState<ActivityCursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const activityLoadStartTimeRef = useRef<number | null>(null);
@@ -310,7 +317,7 @@ const ActivityListView = (): ReactElement => {
 
   // Query with pagination - only fetches when fetchCursor changes
   const [activitiesPage, activitiesDetails] = useQuery(
-    queries.userActivitiesPaginated({
+    queries.userActivitiesPaginatedV2({
       limit: PAGE_SIZE,
       start: fetchCursor,
       types: currentTypes,
@@ -349,6 +356,10 @@ const ActivityListView = (): ReactElement => {
     }
 
     if (activitiesPage.length === 0) {
+      if (fetchCursor === null) {
+        setActivities([]);
+        setNextCursor(null);
+      }
       setHasMore(false);
       return;
     }
@@ -366,7 +377,10 @@ const ActivityListView = (): ReactElement => {
     // Store the next cursor but don't fetch yet - wait for handleEndReached
     const lastItemOfPage = activitiesPage[activitiesPage.length - 1];
     if (lastItemOfPage) {
-      setNextCursor({ id: lastItemOfPage.id, createdAt: lastItemOfPage.createdAt });
+      setNextCursor({
+        id: lastItemOfPage.id,
+        updatedAt: lastItemOfPage.updatedAt ?? lastItemOfPage.createdAt,
+      });
     }
   }, [activitiesPage, activitiesDetails.type, fetchCursor]);
 
@@ -405,7 +419,10 @@ const ActivityListView = (): ReactElement => {
     } else if (activeTab === 'group_mentions') {
       filters.actorAction = 'group_mention';
     } else if (activeTab === 'replies') {
-      filters.actorAction = 'replied';
+      // added to maintain backward compat for now, to be deprecated
+      void zero.mutate(mutators.activities.markAsReadByFilter({ actorAction: 'replied' }));
+      void zero.mutate(mutators.activities.markAsReadByFilter({ actorAction: 'replied_v2' }));
+      return;
     } else if (activeTab === 'actionable') {
       filters.classification = ActivityClassification.ACTIONABLE;
     } else if (activeTab === 'fyi') {
@@ -446,9 +463,18 @@ const ActivityListView = (): ReactElement => {
         counts.your_mentions++;
       } else if (activity.actorAction === 'group_mention') {
         counts.group_mentions++;
-      } else if (activity.actorAction === 'replied') {
+      } else if (
+        // added to maintain backward compat for now, to be deprecated
+        activity.actorAction === 'replied' ||
+        activity.actorAction === 'replied_v2'
+      ) {
         counts.replies++;
-      } else if (activity.actorAction === 'added' || activity.actorAction === 'removed') {
+      } else if (
+        // added to maintain backward compat for now, to be deprecated
+        activity.actorAction === 'added' ||
+        activity.actorAction === 'added_v2' ||
+        activity.actorAction === 'removed'
+      ) {
         counts.reactions++;
       }
 

@@ -11,5 +11,11 @@ export * from './types/workflowApproval';
 export * from './types/userActivity';
 export * from './utils/etaCalculation';
 export * from './utils/project';
+export * from './utils/activityMetadataParser';
+export {
+  parseTicketMd,
+  serializeTicketMd,
+  TicketCardSummary,
+} from './utils/activityMetadataParser';
 export * from './types/research';
 export * from './tickets';

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Popover } from '../../ui/Popover';
 import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
 import {
@@ -23,8 +23,7 @@ import { XyneAIStar } from '../../icons/xyne-ai';
 import { useReactions } from '../../../hooks/useReaction';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
-import { QueryResultType } from '@rocicorp/zero';
-import { queries } from '../../../zero/queries';
+import { parseReactionsMd } from '@xyne/shared';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Button from '../../ui/Button';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
@@ -38,10 +37,6 @@ import {
 } from '../../ui/dropdown-menu';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 
-type ReactionWithUser = QueryResultType<
-  typeof queries.conversationMessages
->[number]['reactions'][number];
-
 interface HoverActionsToolbarProps {
   isVisible: boolean;
   messageId: string;
@@ -49,7 +44,7 @@ interface HoverActionsToolbarProps {
   conversation?: ConversationWithTicket;
   initialMessageId?: string;
   showEditAction?: boolean;
-  reactions?: readonly ReactionWithUser[];
+  reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
   onCreateTicket?: () => void;
   onCreateSubTicket?: () => void;
@@ -78,7 +73,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   conversation,
   initialMessageId,
   showEditAction = false,
-  reactions = [],
+  reactionsMd,
   onReplyInThread,
   onCreateTicket,
   onCreateSubTicket,
@@ -106,6 +101,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const { data: customEmojis } = useCustomEmojis();
+  const reactionsData = useMemo(() => parseReactionsMd(reactionsMd), [reactionsMd]);
 
   const handleEmojiOpenChange = (open: boolean): void => {
     setEmojiOpen(open);
@@ -165,8 +161,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                 ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
                 : emoji.emoji;
               // Check if the user has already reacted with this emoji
-              const hasReacted =
-                !!user && reactions.some(r => r.emojiName === emojiName && r.userId === user.id);
+              const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
 
               toggleReaction({
                 messageId,

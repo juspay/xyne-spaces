@@ -1231,6 +1231,8 @@ export const conversationTable = table("conversations")
     ticketId: string().optional(),
     metadata: json().optional(),
     callId: string().optional(),
+    replies_md: string().optional(),
+    ticket_md: string().optional(),
     createdAt: number(),
   })
   .primaryKey("conversationId");
@@ -1291,6 +1293,7 @@ export const messageTable = table("messages")
     metadata: json().optional(),
     nudgeCount: number().optional(),
     isSent: boolean(),
+    reactions_md: string().optional(),
   })
   .primaryKey("messageId");
 
@@ -1365,6 +1368,7 @@ export const activityTable = table("activities")
     reactionId: string().optional(),
     callId: string().optional(),
     ticketId: string().optional(),
+    conversationId: string().optional(),
     channelId: string().optional(),
     pullRequestId: string().optional(),
     canvasId: string().optional(),
@@ -1375,6 +1379,7 @@ export const activityTable = table("activities")
     classificationJobType: enumeration<ActivityClassificationJobType>().optional(),
     isRead: boolean(),
     createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 

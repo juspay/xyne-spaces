@@ -344,11 +344,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     channelParticipantIds: Set<string>
   ): Promise<void> {
     const participants = await db.conversationParticipant.findMany({
-      where: { 
+      where: {
         conversationId,
-        isSubscribed: true, // Only notify subscribed participants
+        isSubscribed: true,
       },
-      select: { userId: true },
+      select: { userId: true }
     });
 
     const participantIds = participants
@@ -362,28 +362,24 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     if (validParticipantIds.length === 0) return;
 
-    const activities = validParticipantIds.map(userId => ({
-      id: uuidv4(),
-      userId,
-      actorId: senderUserId,
-      actorAction: 'replied' as const,
-      // Dual-write: populate both old and new columns
-      actionSource: 'message' as const,
-      actionSourceId: replyMessageId,
-      messageId: replyMessageId,
-      channelId,
-      classification: ActivityClassification.PENDING,
-    }));
-
-    await activityService.createActivities(activities);
-
-    const replyUsers = await Promise.all(
-      validParticipantIds.map(userId => db.user.findUnique({
-        where: { id: userId },
-        select: { email: true }
-      }))
+    await Promise.all(
+      validParticipantIds.map(userId =>
+        activityService.upsertReplyActivityV2({
+          conversationId,
+          parentMessageId: conversationId,
+          channelId,
+          actorId: senderUserId,
+          recipientUserId: userId,
+          latestReplyMessageId: replyMessageId,
+        })
+      )
     );
-    const replyEmails = replyUsers.filter(u => u?.email).map(u => u!.email);
+
+    const replyUsers = await db.user.findMany({
+      where: { id: { in: validParticipantIds } },
+      select: { email: true }
+    });
+    const replyEmails = replyUsers.filter(u => u.email).map(u => u.email);
 
     await Promise.all([
       notificationService.createThreadReplyNotifications(
@@ -554,7 +550,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
   async onDelete(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId } = job;
-
+    const previousValue = job.previousValue as
+      | { messageId?: string; conversationId?: string; senderId?: string; msgType?: string }
+      | undefined;
     // Emit MESSAGE.DELETED to trigger cleanup of surface links and nudges.
     // We need conversation/channel/project context; fetch what's still available.
     try {
@@ -595,7 +593,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-
     const reactions = await db.reaction.findMany({
       where: { messageId },
       select: { reactionId: true },
@@ -607,6 +604,86 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       activityService.deleteActivitiesBySourceIds('reaction', reactionIds),
       activityService.deleteActivitiesBySource('message', messageId),
     ]);
+
+    if (!previousValue?.conversationId || previousValue.msgType === 'SYSTEM') {
+      return;
+    }
+
+    const conversation = await db.conversation.findUnique({
+      where: { conversationId: previousValue.conversationId },
+      select: { initialMessageId: true, channelId: true },
+    });
+
+    if (!conversation?.initialMessageId || !conversation.channelId) {
+      return;
+    }
+
+    if (conversation.initialMessageId === previousValue.messageId) {
+      return;
+    }
+
+    const replies = await db.message.findMany({
+      where: {
+        conversationId: previousValue.conversationId,
+        isDeleted: false,
+        messageId: { not: conversation.initialMessageId },
+      },
+      select: { messageId: true, senderId: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    let repliers: string[] = [];
+    for (const reply of replies) {
+      repliers = repliers.filter(id => id !== reply.senderId);
+      repliers.push(reply.senderId);
+    }
+
+    const channelParticipants = await db.channelParticipant.findMany({
+      where: { channelId: conversation.channelId },
+      select: { userId: true },
+    });
+    const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
+
+    const participants = await db.conversationParticipant.findMany({
+      where: {
+        conversationId: previousValue.conversationId,
+        isSubscribed: true,
+      },
+      select: { userId: true },
+    });
+    const recipientUserIds = participants
+      .map(p => p.userId)
+      .filter(userId => channelParticipantIds.has(userId));
+
+    if (repliers.length === 0) {
+      await activityService.deleteReplyActivitiesV2(previousValue.conversationId, recipientUserIds);
+      return;
+    }
+
+    const latestReply = replies[replies.length - 1];
+    if (latestReply?.messageId && latestReply?.senderId) {
+      if (recipientUserIds.includes(latestReply.senderId)) {
+        await activityService.deleteReplyActivitiesV2(
+          previousValue.conversationId,
+          [latestReply.senderId]
+        );
+      }
+
+      const filteredRecipients = recipientUserIds.filter(
+        userId => userId !== latestReply.senderId
+      );
+
+      if (filteredRecipients.length === 0) {
+        return;
+      }
+
+      await activityService.updateReplyActivitiesMetadataV2({
+        conversationId: previousValue.conversationId,
+        recipientUserIds: filteredRecipients,
+        actorId: latestReply.senderId,
+        latestReplyMessageId: latestReply.messageId,
+      });
+    }
   }
 
   private async handlleMessageAppEvents(

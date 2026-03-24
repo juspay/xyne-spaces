@@ -8,7 +8,7 @@ import { Calendar, Tag, Archive } from 'lucide-react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 
 interface TicketActivityMessageProps {
-  message: QueryResultType<typeof queries.conversationMessages>[number];
+  message: QueryResultType<typeof queries.conversationMessagesV2>[number];
 }
 
 export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ message }) => {
