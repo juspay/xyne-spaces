@@ -1,3 +1,16 @@
+## [1.98.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.97.0...v1.98.0) (2026-03-24)
+
+
+### Features
+
+* Persist the query in Background on Closing using Seperate Worker Thread (XYNE AI) ([3d208d4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3d208d4a1c39e5cb6e7969b17ff1a55ff9505ec8))
+
+
+### Bug Fixes
+
+* separation of ticket message from summary message ([1ff6d05](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1ff6d056a8a1ee0c1f31424711e8cd2382fd1dbd)), closes [#4338](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4338)
+* spliting channel table into two table ([b524df8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b524df8d842b7b5c148d8fa492210e35400235ac)), closes [#4325](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4325)
+
 ## [1.97.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.96.0...v1.97.0) (2026-03-24)
 
 
