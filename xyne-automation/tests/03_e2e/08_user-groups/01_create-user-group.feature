@@ -3,10 +3,12 @@ Feature: User Group Creation
 
   Background:
     Given using browser "admin-browser"
+    When I open the Xyne-Space at "/chat/dir"
+    And I wait for "[data-testid='chat-list-loading']" to disappear
 
   Scenario: Create a user group with multiple members
-    When I open the Xyne-Space at "/chat/dir"
     And I click on "[data-testid='nav-user-groups']"
+    And I should see the element "[data-testid='create-user-group-btn']"
     And I click on "[data-testid='create-user-group-btn']"
     And I click on "[data-testid='user-group-name-input']"
     And I type "user:user2-browser.name" on the element "[data-testid='user-group-name-input']"

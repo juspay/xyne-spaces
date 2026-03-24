@@ -362,7 +362,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                       statusText: suggestion.text,
                       expiry: suggestion.expiry,
                     })}
-                    data-testid={`status-suggestion-${suggestion.text.toLowerCase().replace(/\s+/g, '-')}`}
+                    data-testid='status-suggestion'
                   >
                     <span className='text-lg'>{suggestion.emoji}</span>
                     <span className='text-sm text-foreground'>{suggestion.text}</span>

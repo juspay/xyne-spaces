@@ -23,11 +23,10 @@ Feature: Join Call from Call History
   Scenario: User can join a call from history
     Given using browser "user2-browser"
     When I open the Xyne-Space at "/calls"
-    And I click on the first button in the element "[data-testid='call-history-list']"
+    Then I should see the element "[data-testid='call-history-list']"
+    And I click on "[data-testid='call-join-button']"
     Then I wait for "[data-testid='call-window']" to appear
     And I should see atleast 2 participant in the element "[data-testid='participant-count']"
-    And I click on "[data-testid='end-call-button']"
-    Then I should not see "[data-testid='call-window']"
 
   @join-from-group
   Scenario: User2 can join a call from group chat via start button

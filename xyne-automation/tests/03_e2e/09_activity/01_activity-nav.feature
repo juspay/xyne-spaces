@@ -2,11 +2,12 @@
 Feature: Activity Navigation
 
   Background:
-    Given using browser "admin-browser"
+    Given using browser "user1-browser"
+    When I open the Xyne-Space at "/chat/dir"
+    And I wait for "[data-testid='chat-list-loading']" to disappear
 
   Scenario: Navigate activity page and interact with tabs and options
-    When I open the Xyne-Space at "/chat/dir"
-    And I click on "[data-testid='nav-activity']"
+    When I click on "[data-testid='nav-activity']"
     Then I should see the element "[data-testid='activity-heading']"
     And I should see the element "[data-testid='select-activity-heading']"
     When I click the button with text "Actionable"
