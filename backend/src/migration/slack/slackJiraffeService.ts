@@ -16,6 +16,7 @@ import { fetchThreadReplies, transformReply, type UserInfoCache, type SlackReply
 import { ticketSchema } from '@xyne/vespa-ts';
 import { NAMESPACE } from '../../vespa/vespaConfig';
 import { vespaQueue } from '../../queues/vespaQueue';
+import { syncConversationTicketMdFromPrismaTicket } from '../../utils/ticketMd';
 
 
 const ENABLE_NOTIFICATIONS = true;
@@ -383,6 +384,8 @@ async function ingestTicket(
             createdAt: new Date(ticket.created_at),
          },
       });
+
+      await syncConversationTicketMdFromPrismaTicket(tx, createdTicket);
 
       // Update conversation to link it to the ticket
       await tx.conversation.update({

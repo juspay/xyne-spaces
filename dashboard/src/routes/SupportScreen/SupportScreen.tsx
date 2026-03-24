@@ -549,7 +549,7 @@ const SupportTicketDetail = (): ReactElement => {
 
   // Fetch messages for the conversation
   const [messages] = useCachedQuery(
-    queries.conversationMessages({
+    queries.conversationMessagesV2({
       conversationId: conversationId || '',
     }),
     {

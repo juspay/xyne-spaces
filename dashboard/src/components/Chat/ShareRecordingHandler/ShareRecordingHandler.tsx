@@ -24,7 +24,7 @@ export const ShareRecordingHandler: React.FC = () => {
   const [messageId, setMessageId] = useState<string | null>(null);
 
   // Query the message from Zero — same pattern as BookmarkItem.tsx
-  const [message] = useCachedQuery(queries.getMessageForActivity({ messageId: messageId ?? '' }));
+  const [message] = useCachedQuery(queries.getMessageForActivityV2({ messageId: messageId ?? '' }));
 
   // Listen for SHARE_RECORDING bridge events
   useEffect(() => {

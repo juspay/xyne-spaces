@@ -214,12 +214,11 @@ const getActivityDescription = (
             </>
           ),
         };
-      } else {
-        return {
-          description: 'removed user group',
-          details: oldGroup ? <span className='font-semibold'>{oldGroup.name}</span> : <span />,
-        };
       }
+      return {
+        description: 'removed user group',
+        details: oldGroup ? <span className='font-semibold'>{oldGroup.name}</span> : <span />,
+      };
     }
 
     case ActivityType.METADATA:

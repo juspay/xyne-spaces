@@ -3,7 +3,7 @@ import { queries } from '../../../zero/queries';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { User } from '@xyne/shared';
 
-export type MessageType = QueryResultType<typeof queries.conversationMessages>[number];
+export type MessageType = QueryResultType<typeof queries.conversationMessagesV2>[number];
 
 export interface ForwardTarget {
   type: 'channel' | 'user';

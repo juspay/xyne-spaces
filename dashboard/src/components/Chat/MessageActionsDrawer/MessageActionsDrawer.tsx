@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Drawer } from '../../ui/Drawer/Drawer';
 import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
 import { Popover } from '../../ui/Popover';
@@ -23,15 +23,10 @@ import { XyneAIStar } from '../../icons/xyne-ai';
 import { useReactions } from '../../../hooks/useReaction';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
-import { QueryResultType } from '@rocicorp/zero';
-import { queries } from '../../../zero/queries';
+import { parseReactionsMd } from '@xyne/shared';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { ConversationSubscription } from '../ConversationSubscription';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
-
-type ReactionWithUser = QueryResultType<
-  typeof queries.conversationMessages
->[number]['reactions'][number];
 
 export interface MessageActionsDrawerProps {
   open: boolean;
@@ -41,7 +36,7 @@ export interface MessageActionsDrawerProps {
   conversation?: ConversationWithTicket;
   initialMessageId?: string;
   showEditAction?: boolean;
-  reactions?: readonly ReactionWithUser[];
+  reactionsMd?: string | null;
   onReplyInThread?: (e?: React.MouseEvent) => void;
   onCreateTicket?: () => void;
   onEditMessage?: () => void;
@@ -69,7 +64,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   conversation,
   initialMessageId,
   showEditAction = false,
-  reactions = [],
+  reactionsMd,
   onReplyInThread,
   onCreateTicket,
   onEditMessage,
@@ -94,6 +89,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   const [emojiOpen, setEmojiOpen] = useState(false);
 
   const { data: customEmojis } = useCustomEmojis();
+  const reactionsData = useMemo(() => parseReactionsMd(reactionsMd), [reactionsMd]);
 
   const handleActionClick = (action: () => void): void => {
     action();
@@ -111,8 +107,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
     const emojiName = emoji.isCustom
       ? `custom:${emoji.emoji}:${emoji.names?.[0] || 'custom'}`
       : emoji.emoji;
-    const hasReacted =
-      !!user && reactions.some(r => r.emojiName === emojiName && r.userId === user.id);
+    const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
 
     toggleReaction({
       messageId,

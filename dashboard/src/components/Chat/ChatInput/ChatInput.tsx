@@ -116,7 +116,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
     const [ticketDescription, setTicketDescription] = useState('');
     const [messagesData] = useCachedQuery(
-      queries.conversationMessages({ conversationId: conversationId || '' }),
+      queries.conversationMessagesV2({ conversationId: conversationId || '' }),
       { enabled: !!conversationId },
     );
     const channel = useChannel(channelId);

@@ -4,6 +4,8 @@ import { findOrCreateConversation } from './conversationUtils';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { DatabaseClient } from '@/database/client';
 import { TicketPriority, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
+import { serializeTicketMd } from '@xyne/shared';
+import type { TicketCardSummary } from '@xyne/shared';
 import { TicketActionResponse, TicketEventType } from '../types';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
@@ -157,11 +159,28 @@ export async function createTicketWithConversation(
         logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${ticket.id}:`, error);
       });
 
-      // Update conversation with ticketId
-      await tx.conversation.update({
-        where: { conversationId: finalConversationId },
-        data: { ticketId: createdTicket.id },
-      });
+       const ticketMd = serializeTicketMd({
+         id: createdTicket.id,
+         title: createdTicket.title,
+         description: createdTicket.description,
+         statusV2: createdTicket.statusV2 as TicketCardSummary['statusV2'],
+         priority: createdTicket.priority as TicketCardSummary['priority'],
+         assignedTo: createdTicket.assignedTo ?? null,
+         createdBy: createdTicket.createdBy,
+         createdAt: createdTicket.createdAt.getTime(),
+         eta: createdTicket.eta ? createdTicket.eta.getTime() : null,
+         xyneId: createdTicket.xyneId,
+         stageName: createdTicket.stageName,
+         ticketType: createdTicket.ticketType ?? null,
+         channelId: createdTicket.channelId,
+         conversationId: createdTicket.conversationId,
+       });
+
+       // Update conversation with ticketId and ticket_md
+       await tx.conversation.update({
+         where: { conversationId: finalConversationId },
+         data: { ticketId: createdTicket.id, ticket_md: ticketMd },
+       });
 
       return createdTicket;
     });

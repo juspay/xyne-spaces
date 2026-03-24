@@ -43,6 +43,12 @@ import {
 import { extractAllMentions } from '../utils/mentionParser';
 import { z } from 'zod';
 import { zql } from './queries';
+import {
+  buildRepliesMdFromMessages,
+  isChatMessageType,
+  updateReactionsMd,
+} from './messageMetadata';
+import { updateTicketMd } from './ticketMetadata';
 
 export type AuthData = {
   sub: string;
@@ -1545,6 +1551,23 @@ export const mutators = defineMutators({
 
         await tx.mutate.messages.insert(message);
 
+        if (type === MessageType.USER || type === MessageType.FORWARDED) {
+          const allMessages = await tx.run(
+            zql.messages.where('conversationId', conversation.conversationId),
+          );
+          const updatedRepliesMd = buildRepliesMdFromMessages(
+            allMessages,
+            conversation.initialMessageId,
+          );
+
+          if (updatedRepliesMd !== conversation.replies_md) {
+            await tx.mutate.conversations.update({
+              conversationId: conversation.conversationId,
+              replies_md: updatedRepliesMd,
+            });
+          }
+        }
+
         // If showInChannel is true, create a new conversation for this message in the channel
         if (showInChannel) {
           if (!childConversationId) {
@@ -1769,6 +1792,8 @@ export const mutators = defineMutators({
               updatedAt: timestamp,
             });
           }
+
+          await updateReactionsMd(tx, messageId, decodedEmoji, ctx.userID, 'add');
         } else if (action === 'remove') {
           const reactionRow = await tx.run(
             zql.reactions
@@ -1779,7 +1804,9 @@ export const mutators = defineMutators({
           );
 
           if (!reactionRow) {
-            throw new Error('Reaction not found');
+            await updateReactionsMd(tx, messageId, decodedEmoji, ctx.userID, 'remove');
+
+            return;
           }
 
           await tx.mutate.reactions.delete({ reactionId: reactionRow.reactionId });
@@ -1794,6 +1821,8 @@ export const mutators = defineMutators({
               await tx.mutate.reaction_counts.delete({ countId: reaction.countId });
             }
           }
+
+          await updateReactionsMd(tx, messageId, decodedEmoji, ctx.userID, 'remove');
         }
       },
     ),
@@ -1873,6 +1902,20 @@ export const mutators = defineMutators({
         );
 
         const otherMessages = allMessages.filter(m => m.messageId !== messageId);
+
+        if (isChatMessageType(message.msgType)) {
+          const updatedRepliesMd = buildRepliesMdFromMessages(
+            otherMessages,
+            conversation.initialMessageId,
+          );
+
+          if (updatedRepliesMd !== conversation.replies_md) {
+            await tx.mutate.conversations.update({
+              conversationId: conversation.conversationId,
+              replies_md: updatedRepliesMd,
+            });
+          }
+        }
 
         const isInitialMessage = conversation.initialMessageId === messageId;
         const hasReplies = otherMessages.length > 0;
@@ -2407,26 +2450,8 @@ export const mutators = defineMutators({
           }
         }
 
-        // Step 2: Get all reactions for this message
-        const reactions = await tx.run(zql.reactions.where('messageId', messageId));
-
-        // Step 3: Mark all reaction activities as read for these reactions
-        for (const reaction of reactions) {
-          const reactionActivities = await tx.run(
-            zql.activities
-              .where('actionSource', 'reaction')
-              .where('actionSourceId', reaction.reactionId),
-          );
-
-          for (const activity of reactionActivities) {
-            if (!activity.isRead) {
-              await tx.mutate.activities.update({
-                id: activity.id,
-                isRead: true,
-              });
-            }
-          }
-        }
+        // Reactions now use actionSource = 'message' with actionSourceId = messageId,
+        // so they're already covered by the messageActivities query above.
       },
     ),
     markThreadActivitiesAsRead: defineMutator(
@@ -2608,6 +2633,8 @@ export const mutators = defineMutators({
           id,
           ...updateData,
         });
+
+        await updateTicketMd(tx, id);
       },
     ),
     updateAssignment: defineMutator(
@@ -2619,6 +2646,8 @@ export const mutators = defineMutators({
           updatedBy: ctx.userID,
           updatedAt: timestamp,
         });
+
+        await updateTicketMd(tx, ticketId);
       },
     ),
   },
@@ -3474,6 +3503,8 @@ export const mutators = defineMutators({
             ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
             updatedAt,
           });
+
+          await updateTicketMd(tx, ticket.id);
 
           // Create message for approval
           const actorName = actor?.name || 'Someone';

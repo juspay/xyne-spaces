@@ -1437,6 +1437,8 @@ model Conversation {
   ticketId          String?  // Direct reference to ticket (no FK constraint)
   metadata          Json?
   callId            String?  
+  replies_md        String?
+  ticket_md         String?
   createdAt         DateTime @default(now())
 
   // Relations
@@ -1535,7 +1537,8 @@ model Message {
   metadata            Json?       // Future extensibility
   nudgeCount          Int?        @default(0) // Proactive nudge count for this message
   isSent              Boolean     @default(true) // Whether the message is sent
-  
+  reactions_md String?
+
   // Relations
   messageSearch  MessageSearch? // One-to-one relation with search index
   conversation   Conversation   @relation(fields: [conversationId], references: [conversationId])
@@ -1656,6 +1659,7 @@ model Activity {
   reactionId      String?  // FK to reactions.reactionId (no constraint)
   callId          String?  // FK to calls.id (no constraint)
   ticketId        String?  // FK to tickets.id (no constraint)
+  conversationId  String?  // FK to conversations.conversationId (no constraint)
   channelId       String?  // Channel where the activity occurred (optional, not present for ticket activities)
   pullRequestId   String?  // FK to pull_requests.id (optional, present only for PR-related ticket activities)
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
@@ -1666,6 +1670,7 @@ model Activity {
   classificationJobType ActivityClassificationJobType?
   isRead          Boolean  @default(false)
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt  // For tracking when batched activity was last updated
 
 
   @@index([userId, createdAt, id]) // for userActivitiesPaginated
@@ -1676,6 +1681,7 @@ model Activity {
   @@index([userId, isRead, createdAt]) // for userUnreadActivities
   @@index([userId, isRead, actionSource]) // for userUnreadThreadActivities
   @@index([userId, createdAt]) // Fast lookup of user activities sorted by time
+  @@index([userId, updatedAt]) // Fast lookup for batched activity updates
   @@index([userId, classification, createdAt]) // Fast lookup for classification tabs
   @@index([classification, classificationJobType, createdAt])
   @@index([classificationJobType, actionSourceId, channelId, classification])
@@ -1685,6 +1691,7 @@ model Activity {
   @@index([callId]) // Fast lookup by call
   @@index([ticketId]) // Fast lookup by ticket
   @@index([channelId]) // Fast lookup by channel
+  @@index([conversationId, userId]) // Fast lookup for reply batching
   @@index([actorId])
   
   @@map("activities")

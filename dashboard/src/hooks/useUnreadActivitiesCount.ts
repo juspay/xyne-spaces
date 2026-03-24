@@ -17,49 +17,23 @@ export const useUnreadActivitiesCount = (): number => {
       return 0;
     }
 
-    // Track cancelled reactions (where both added and removed exist)
-    const reactionGroups = new Map<string, { added: boolean; removed: boolean }>();
-
-    for (const activity of activities) {
-      if (activity.actionSource === 'reaction') {
-        const reactionId = activity.actionSourceId;
-        const current = reactionGroups.get(reactionId) || { added: false, removed: false };
-
-        if (activity.actorAction === 'added') {
-          current.added = true;
-        } else if (activity.actorAction === 'removed') {
-          current.removed = true;
-          current.added = true;
-        }
-
-        reactionGroups.set(reactionId, current);
+    const validCount = activities.filter(activity => {
+      if (activity.actorAction === 'removed') {
+        return false;
       }
-    }
-
-    // Count how many reactions are cancelled (both added and removed)
-    let cancelledCount = 0;
-    for (const [, group] of reactionGroups) {
-      if (group.added && group.removed) {
-        cancelledCount += 2; // Both added and removed activities should be excluded
+      if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') {
+        return false;
       }
-    }
-
-    // Calculate final count
-    const validCount =
-      activities.filter(activity => {
-        if (activity.actionSource === 'call' && activity.actorAction === 'missed_call') {
-          return false;
-        }
-        const classification = activity.classification ?? ActivityClassification.PENDING;
-        if (classification === ActivityClassification.SKIP) return false;
-        if (activity.actorAction === 'direct_message') {
-          return (
-            classification === ActivityClassification.ACTIONABLE ||
-            classification === ActivityClassification.FYI
-          );
-        }
-        return true;
-      }).length - cancelledCount;
+      const classification = activity.classification ?? ActivityClassification.PENDING;
+      if (classification === ActivityClassification.SKIP) return false;
+      if (activity.actorAction === 'direct_message') {
+        return (
+          classification === ActivityClassification.ACTIONABLE ||
+          classification === ActivityClassification.FYI
+        );
+      }
+      return true;
+    }).length;
 
     // Return count as number
     return validCount;

@@ -348,9 +348,8 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       return [...suggestedUsers, ...suggestedChannels];
     } else if (selectionMode === 'channel') {
       return suggestedChannels;
-    } else {
-      return suggestedUsers;
     }
+    return suggestedUsers;
   }, [
     inputValue,
     selectedUserIds,

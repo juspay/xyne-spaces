@@ -803,7 +803,7 @@ export const AttachmentGalleryModal: React.FC = () => {
     (currentAttachment.replyCount ?? 0) > 0;
 
   const [threadMessages] = useCachedQuery(
-    queries.conversationMessages({
+    queries.conversationMessagesV2({
       conversationId: currentAttachment?.conversationId ?? '',
     }),
     {

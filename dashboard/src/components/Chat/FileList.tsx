@@ -3,7 +3,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 
 interface FileListProps {
-  chatMessages: QueryResultType<typeof queries.channelConversations> | undefined;
+  chatMessages: QueryResultType<typeof queries.channelConversationsV2> | undefined;
 }
 
 const FileList: React.FC<FileListProps> = ({ chatMessages }) => {
@@ -12,7 +12,7 @@ const FileList: React.FC<FileListProps> = ({ chatMessages }) => {
     chatMessages
       ?.flatMap(conv => {
         const msg = conv.initialMessage as QueryResultType<
-          typeof queries.conversationMessages
+          typeof queries.conversationMessagesV2
         >[number];
 
         if (!msg) return [];

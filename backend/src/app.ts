@@ -71,6 +71,9 @@ import cacConfigRoutes from '@/routes/cacConfig';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
+import messageMetadataBackfillRoutes from '@/routes/messageMetadataBackfill';
+import setUpdatedAtTimeRoutes from '@/routes/setUpdatedAtTime';
+import ticketMetadataBackfillRoutes from '@/routes/ticketMetadataBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import aiRoutes from '@/routes/aiRoutes';
@@ -227,6 +230,9 @@ export class App {
     if (process.env.ENABLE_ACTIVITIES_BACKFILL_ROUTES === 'true') {
       this.app.use('/api/admin/activities-backfill', activitiesBackfillRoutes);
     }
+    this.app.use('/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
+    this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);
+    this.app.use('/api/admin/ticket-metadata-backfill', ticketMetadataBackfillRoutes);
     // Ticket duplicate backfill route (always available, no vespa flag)
     this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
     // Product insights recluster route (admin-only)

@@ -130,7 +130,7 @@ export const BookmarkItem = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch the message data - ALWAYS call hooks unconditionally
-  const [message] = useCachedQuery(queries.getMessageForActivity({ messageId: entityId }));
+  const [message] = useCachedQuery(queries.getMessageForActivityV2({ messageId: entityId }));
   const channel = useChannel(message?.conversation?.channelId || '');
   const sender = useUser(message?.senderId ?? '');
 

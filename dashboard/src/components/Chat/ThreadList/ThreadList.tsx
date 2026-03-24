@@ -19,7 +19,7 @@ import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 type ThreadListProps = {
   channelId: string;
   conversationId: string;
-  threadMessages: QueryResultType<typeof queries.conversationMessages>;
+  threadMessages: QueryResultType<typeof queries.conversationMessagesV2>;
   initialScrollOffset?: number;
   onScrollPositionChange?: (position: number) => void;
   isTicketThread?: boolean;

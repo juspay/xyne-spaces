@@ -3,7 +3,6 @@ import {
   Message,
   User,
   ChannelScopeType,
-  Ticket,
   Conversation,
   ConversationParticipant,
 } from '@xyne/shared';
@@ -17,7 +16,6 @@ export interface ThreadInfo {
 
 // Conversation type extended with related fields used in the component tree
 export interface ConversationWithTicket extends Conversation {
-  ticket?: Ticket | undefined;
   parentMessage?:
     | {
         content: string;
@@ -35,7 +33,7 @@ export interface ConversationWithTicket extends Conversation {
 
 export interface MessageBubbleProps {
   isHovered?: boolean;
-  message: QueryResultType<typeof queries.conversationMessages>[number];
+  message: QueryResultType<typeof queries.conversationMessagesV2>[number];
   onUserClick?: (user: User) => void;
   renderActions?: (message: Message) => React.ReactNode;
   showAvatar?: boolean | undefined;

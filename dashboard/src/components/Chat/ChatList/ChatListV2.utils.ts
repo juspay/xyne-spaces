@@ -3,7 +3,7 @@ import { queries } from '../../../zero/queries';
 import { useMemo } from 'react';
 import { CombinedMessageItem, shouldShowAvatar } from './ChatListUtils';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
-import { MessageType } from '@xyne/shared';
+import { MessageType, parseReactionsMd } from '@xyne/shared';
 
 type CombinedMesseges = {
   combinedMessages: CombinedMessageItem[];
@@ -12,7 +12,7 @@ type CombinedMesseges = {
   itemHeights: number[];
 };
 
-type InputProps = QueryResultType<typeof queries.channelConversationsPaginated>;
+type InputProps = QueryResultType<typeof queries.channelConversationsPaginatedV2>;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -333,8 +333,8 @@ export function estimateMessageHeight(
   if (replyCount > 0) height += THREAD_INDICATOR_HEIGHT;
 
   // ── Reactions ──
-  const reactions = message.reactions ?? [];
-  if (reactions.length > 0) height += REACTIONS_HEIGHT;
+  const reactionsData = parseReactionsMd(message.reactions_md);
+  if (Object.keys(reactionsData).length > 0) height += REACTIONS_HEIGHT;
 
   return Math.max(height, 40); // never return less than 40px
 }

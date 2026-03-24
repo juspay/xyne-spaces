@@ -76,7 +76,7 @@ interface ThreadMessagesProps {
   simpleView?: boolean;
   hideHeader?: boolean;
   onSummaryClick?: () => void;
-  threadMessages?: QueryResultType<typeof queries.conversationMessages>;
+  threadMessages?: QueryResultType<typeof queries.conversationMessagesV2>;
 }
 
 export const ThreadMessages = ({
@@ -162,7 +162,7 @@ export const ThreadMessages = ({
 
   // Query thread messages (disabled if pre-fetched messages provided)
   const [queriedMessages, queryDetails] = useCachedQuery(
-    queries.conversationMessages({
+    queries.conversationMessagesV2({
       conversationId: derivedConversationId,
     }),
     {
@@ -1606,6 +1606,7 @@ export const ThreadMessages = ({
           context='thread'
           conversation={conversation}
           isModalOpen={isCreateTicketModalOpen}
+          renderTicketCard={false}
           onModalOpenChange={setIsCreateTicketModalOpen}
           onTicketCreated={handleTicketCreated}
         />

@@ -305,10 +305,9 @@ export const BoardForm = ({
           }));
           const nextSequenceNumber = templateStages.length + 1;
           return [...templateStages, createEmptyStage(nextSequenceNumber)];
-        } else {
-          // No template - return empty stage
-          return [createEmptyStage(1)];
         }
+        // No template - return empty stage
+        return [createEmptyStage(1)];
       });
     }
   }, [selectedTemplate, isEdit]);

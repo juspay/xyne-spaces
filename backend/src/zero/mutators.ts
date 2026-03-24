@@ -37,6 +37,14 @@ import {
   NudgeState,
   SurfaceAreaType,
   SurfaceLinkKind,
+  parseReactionsMd,
+  removeReactionFromData,
+  serializeReactionsMd,
+  FormFieldType,
+  MessageAttachment,
+  createForwardedMessageXml,
+  parseForwardedMessageXml,
+  type BoardMetadata,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { ConversationController } from "@/controllers/conversationController";
@@ -61,7 +69,6 @@ import {
 } from '@/bots/unified/index.js';
 import { z } from 'zod';
 import { zql } from './queries';
-import { FormFieldType, MessageAttachment, createForwardedMessageXml, parseForwardedMessageXml, type BoardMetadata } from '@xyne/shared';
 
 export type AuthData = {
   sub: string;
@@ -2581,7 +2588,16 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               .where('userId', authData.sub)
               .one());
             if (!reactionRow) {
-              throw new Error('Reaction not found');
+              const data = parseReactionsMd(message.reactions_md);
+              const updatedData = removeReactionFromData(data, decodedEmoji, authData.sub);
+              const updatedMd = serializeReactionsMd(updatedData);
+
+              await tx.mutate.messages.update({
+                messageId,
+                reactions_md: updatedMd,
+              });
+
+              return;
             }
             if (authData.sub != reactionRow?.userId) {
               throw Error("Can't remove other user reaction");

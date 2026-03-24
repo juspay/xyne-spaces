@@ -12,6 +12,9 @@ import {
   type SideEffectJobsAccumulator,
   type SideEffectOperation,
 } from '../../side-effects';
+import { mutationSyncProcessor } from '../../mutation-sync/processor';
+import { collectMutationSyncPreviousValue } from '../../mutation-sync/config';
+import type { MutationSyncOperation } from '../../mutation-sync/types';
 
 /**
  * Wraps a Zero transaction with ACL checks and Vespa/side-effect job collection.
@@ -86,6 +89,8 @@ function wrapMutateWithACL(
           }
 
           return async function (this: unknown, args: unknown) {
+            let previousValue: unknown = undefined;
+
             // 1. ACL Check (throws if unauthorized)
             const acl = await ACLFactory.getACL(tableName as TableName, ctx);
             const operationMethod = acl[`can${operation.charAt(0).toUpperCase()}${operation.slice(1)}` as keyof typeof acl];
@@ -105,8 +110,24 @@ function wrapMutateWithACL(
               await collectSideEffectJobs(tableName as TableName, sideEffectOperation, args, tx, sideEffectJobs);
             }
 
+            previousValue = await collectMutationSyncPreviousValue(
+              tableName as TableName,
+              operation as MutationSyncOperation,
+              args,
+              tx
+            );
+
             // 4. Execute original mutation (if ACL passes)
             const result = await (originalOp as (this: unknown, value: unknown) => Promise<unknown>).call(this, args);
+
+            await mutationSyncProcessor(
+              tableName as TableName,
+              operation as MutationSyncOperation,
+              args,
+              tx,
+              ctx,
+              previousValue
+            );
 
             return result;
           };

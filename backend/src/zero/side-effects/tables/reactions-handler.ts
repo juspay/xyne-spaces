@@ -4,10 +4,10 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 
 export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
-
   private async getReactionContext(reactionId: string) {
     const reaction = await db.reaction.findUnique({
       where: { reactionId },
+      select: { reactionId: true, messageId: true, userId: true },
     });
 
     if (!reaction) {
@@ -16,10 +16,7 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
 
     const message = await db.message.findUnique({
       where: { messageId: reaction.messageId },
-      select: {
-        senderId: true,
-        conversationId: true,
-      },
+      select: { senderId: true, conversationId: true },
     });
 
     if (!message) {
@@ -28,9 +25,7 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
 
     const conversation = await db.conversation.findUnique({
       where: { conversationId: message.conversationId },
-      select: {
-        channelId: true,
-      },
+      select: { channelId: true },
     });
 
     if (!conversation?.channelId) {
@@ -40,14 +35,13 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
     const messageAuthorId = message.senderId;
     const reactingUserId = reaction.userId;
 
-    // Don't create activity for self-reactions
     if (messageAuthorId === reactingUserId) {
       return null;
     }
 
     return {
       reactionId,
-      messageId: reaction.messageId, // Include messageId for new FK column
+      messageId: reaction.messageId,
       messageAuthorId,
       channelId: conversation.channelId,
     };
@@ -72,22 +66,47 @@ export class ReactionsSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
-    await activityService.createActivity({
-      userId: context.messageAuthorId,
-      actorAction: 'added',
-      // Dual-write: populate both old and new columns
-      actionSource: 'reaction',
-      actionSourceId: context.reactionId,
-      reactionId: context.reactionId,
-      messageId: context.messageId, // Also store messageId for easier querying
+    await activityService.upsertReactionActivityV2({
+      messageId: context.messageId,
       channelId: context.channelId,
-      actorId: this.ctx.userID
+      actorId: this.ctx.userID,
+      messageAuthorId: context.messageAuthorId,
     });
   }
 
   async onDelete(job: SideEffectJobConfig): Promise<void> {
-    const { entityId: reactionId } = job;
-  
-    await activityService.deleteActivitiesBySource('reaction', reactionId);
+    const previousValue = job.previousValue as
+      | { messageId?: string; emojiName?: string; userId?: string }
+      | undefined;
+
+    if (!previousValue?.messageId || !previousValue.emojiName || !previousValue.userId) {
+      return;
+    }
+
+    const message = await db.message.findUnique({
+      where: { messageId: previousValue.messageId },
+      select: { senderId: true },
+    });
+
+    if (!message) {
+      return;
+    }
+
+    const latestNonSelfReaction = await db.reaction.findFirst({
+      where: { messageId: previousValue.messageId, userId: { not: message.senderId } },
+      select: { userId: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!latestNonSelfReaction) {
+      await activityService.deleteReactionActivityV2(previousValue.messageId, message.senderId);
+      return;
+    }
+
+    await activityService.updateReactionActivityActorIdOnlyV2({
+      messageId: previousValue.messageId,
+      messageAuthorId: message.senderId,
+      actorId: latestNonSelfReaction.userId,
+    });
   }
 }

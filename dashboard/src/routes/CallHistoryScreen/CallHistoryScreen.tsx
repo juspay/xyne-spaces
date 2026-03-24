@@ -242,9 +242,8 @@ const CallHistoryScreen = (): ReactElement => {
         return filteredMissedCalls;
       } else if (activeTab === 'upcoming') {
         return filteredScheduledCalls;
-      } else {
-        return filteredRecentCalls;
       }
+      return filteredRecentCalls;
     }
 
     //default view without search
@@ -252,9 +251,8 @@ const CallHistoryScreen = (): ReactElement => {
       return missedCalls;
     } else if (activeTab === 'upcoming') {
       return scheduledCalls;
-    } else {
-      return calls;
     }
+    return calls;
   };
 
   const tabContent = getTabContent();

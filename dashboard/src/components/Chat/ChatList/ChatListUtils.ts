@@ -4,12 +4,14 @@ import { MessageType } from '@xyne/shared';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 
 // Type definitions for utility functions
-export type ThreadMessage = QueryResultType<typeof queries.channelAndThreadMessages>[number];
+export type ThreadMessage = QueryResultType<typeof queries.channelAndThreadMessagesV2>[number];
+
+type ChatListConversation = QueryResultType<typeof queries.channelConversationsPaginatedV2>[number];
 
 export type CombinedMessageItem =
   | {
       type: 'conversation';
-      data: QueryResultType<typeof queries.channelConversations>[number];
+      data: ChatListConversation;
       createdAt: Date;
     }
   | {
@@ -25,24 +27,26 @@ export type CombinedMessageItem =
 export const createConversationFromMessage = (
   message: ThreadMessage,
   channelId: string,
-): QueryResultType<typeof queries.channelConversations>[number] => {
-  const messageWithReactions = {
-    ...message,
-    reactions: message.reactions || [],
-  } as QueryResultType<typeof queries.conversationMessages>[number];
-
+): ChatListConversation => {
   return {
     conversationId: message.conversationId,
     channelId: channelId,
     createdBy: message.senderId,
     initialMessageId: message.messageId,
+    parentMessageId: null,
     lastActivityAt: message.createdAt,
     replyCount: 0,
     pinned: false,
+    ticketId: null,
     metadata: null,
+    callId: null,
     createdAt: message.createdAt,
-    initialMessage: messageWithReactions,
-  } as QueryResultType<typeof queries.channelConversations>[number];
+    replies_md: null,
+    ticket_md: null,
+    parentMessage: undefined,
+    participants: [],
+    initialMessage: message as QueryResultType<typeof queries.conversationMessagesV2>[number],
+  } as unknown as ChatListConversation;
 };
 
 /**
@@ -194,7 +198,7 @@ export const createMessagePreview = (content: string | undefined): string => {
  * Combines regular conversations and thread messages in chronological order
  */
 export const combineMessages = (
-  messages: QueryResultType<typeof queries.channelConversations> | undefined,
+  messages: QueryResultType<typeof queries.channelConversationsPaginatedV2> | undefined,
   channelThreadMessages: ThreadMessage[],
 ): CombinedMessageItem[] => {
   if (!messages && !channelThreadMessages?.length) return [];

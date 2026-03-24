@@ -44,10 +44,10 @@ import {
 } from '../../../machines/attachmentViewerMachine';
 
 interface MessageAttachmentProps {
-  attachment: QueryResultType<typeof queries.conversationMessages>[number]['attachments'][number];
+  attachment: QueryResultType<typeof queries.conversationMessagesV2>[number]['attachments'][number];
   compact?: boolean;
   isLoading?: boolean;
-  allAttachments?: QueryResultType<typeof queries.conversationMessages>[number]['attachments'];
+  allAttachments?: QueryResultType<typeof queries.conversationMessagesV2>[number]['attachments'];
   isInGrid?: boolean | undefined;
   fullSize?: boolean;
   // Thread context props

@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { ConversationTabContext } from './ConversationTabContext';
 
 interface PinListProps {
-  chatMessages: QueryResultType<typeof queries.channelConversations> | undefined;
+  chatMessages: QueryResultType<typeof queries.channelConversationsV2> | undefined;
   channelId: string;
 }
 
@@ -46,7 +46,7 @@ const PinList: React.FC<PinListProps> = ({ chatMessages, channelId }) => {
       <div className='space-y-4'>
         {pinned.map(conv => {
           const msg = conv.initialMessage as QueryResultType<
-            typeof queries.conversationMessages
+            typeof queries.conversationMessagesV2
           >[number];
 
           return (

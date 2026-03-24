@@ -3,7 +3,9 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { MessageMentionActivity } from './MessageMentionActivity';
 import { CanvasMentionActivity } from './CanvasMentionActivity';
 import { MessageRepliedActivity } from './MessageRepliedActivity';
+import { MessageRepliedActivityV2 } from './MessageRepliedActivityV2';
 import { ReactionAddedActivity } from './ReactionAddedActivity';
+import { ReactionAddedActivityV2 } from './ReactionAddedActivityV2';
 import { DirectMessageActivity } from './DirectMessageActivity';
 import { EtaActivity } from './EtaActivity';
 import { AssignmentPauseActivity } from './AssignmentPauseActivity';
@@ -34,8 +36,14 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
     case 'replied':
       return <MessageRepliedActivity activity={activity} isExpanded={isExpanded} />;
 
+    case 'replied_v2':
+      return <MessageRepliedActivityV2 activity={activity} isExpanded={isExpanded} />;
+
     case 'added':
       return <ReactionAddedActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'added_v2':
+      return <ReactionAddedActivityV2 activity={activity} isExpanded={isExpanded} />;
 
     case 'removed':
       return <ReactionAddedActivity activity={activity} isExpanded={isExpanded} />;

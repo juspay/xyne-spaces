@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { workflowStatusSyncService } from '@/workflows/services/workflowStatusSyncService'
 import { DatabaseClient } from '@/database/client'
 import {logger} from '@/utils/logger';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 const router = Router()
 const prisma = DatabaseClient.getInstance()
@@ -68,6 +69,8 @@ router.post('/trigger', async (req, res) => {
       boardId: 'system',
       xyneId
     })
+
+    await syncConversationTicketMdFromPrismaTicket(prisma, ticket);
 
     // Create workflow context
     const context: ConnectorMigrationContext = {

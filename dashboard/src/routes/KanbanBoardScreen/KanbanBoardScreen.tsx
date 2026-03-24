@@ -555,10 +555,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               { id: 'review', name: 'Review', color: '#8B5CF6' },
               { id: 'completed', name: 'Completed', color: '#10B981' },
             ];
-      } else {
-        // Status view for channel tickets
-        return getStatusColumns();
       }
+      // Status view for channel tickets
+      return getStatusColumns();
     }
 
     // For project and my-tickets views, use status-based columns
