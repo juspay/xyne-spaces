@@ -1,0 +1,242 @@
+/**
+ * Web Worker for XyneAI Streaming
+ * Runs API calls on a separate thread to avoid blocking the main UI thread
+ */
+
+// Worker message types
+export interface WorkerStartStreamMessage {
+  type: 'START_STREAM';
+  payload: {
+    streamId: string;
+    url: string;
+    requestBody: {
+      query: string;
+      channelIds: string[];
+      canvasIds?: string[];
+      ticketIds?: string[];
+      callIds?: string[];
+      conversationId: string;
+      sessionId: string;
+      webSearchEnabled: boolean;
+      researchContext?: { type: string; name: string } | null;
+      canvasViewAccessId?: string;
+      messageAttachmentIds?: string[];
+      attachments?: Array<{
+        data: string;
+        mimeType: string;
+        filename: string;
+      }>;
+    };
+  };
+}
+
+export interface WorkerAbortStreamMessage {
+  type: 'ABORT_STREAM';
+  payload: {
+    streamId: string;
+  };
+}
+
+export type WorkerIncomingMessage = WorkerStartStreamMessage | WorkerAbortStreamMessage;
+
+// Worker response types
+export interface WorkerStreamChunkMessage {
+  type: 'STREAM_CHUNK';
+  payload: {
+    streamId: string;
+    data: Record<string, unknown>;
+  };
+}
+
+export interface WorkerStreamCompleteMessage {
+  type: 'STREAM_COMPLETE';
+  payload: {
+    streamId: string;
+  };
+}
+
+export interface WorkerStreamErrorMessage {
+  type: 'STREAM_ERROR';
+  payload: {
+    streamId: string;
+    error: string;
+  };
+}
+
+export type WorkerOutgoingMessage =
+  | WorkerStreamChunkMessage
+  | WorkerStreamCompleteMessage
+  | WorkerStreamErrorMessage;
+
+// Track active streams
+const activeStreams = new Map<string, AbortController>();
+
+/**
+ * Execute a streaming request
+ */
+async function executeStream(
+  streamId: string,
+  url: string,
+  requestBody: WorkerStartStreamMessage['payload']['requestBody'],
+): Promise<void> {
+  const abortController = new AbortController();
+  activeStreams.set(streamId, abortController);
+
+  try {
+    // eslint-disable-next-line local-rules/no-fetch-use-axios
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+      credentials: 'include',
+      // eslint-disable-next-line @typescript-eslint/naming-convention
+      body: JSON.stringify({
+        query: requestBody.query,
+        /* eslint-disable @typescript-eslint/naming-convention */
+        channel_ids: requestBody.channelIds,
+        ...(requestBody.canvasIds &&
+          requestBody.canvasIds.length > 0 && { canvas_ids: requestBody.canvasIds }),
+        ...(requestBody.ticketIds &&
+          requestBody.ticketIds.length > 0 && { ticket_ids: requestBody.ticketIds }),
+        ...(requestBody.callIds &&
+          requestBody.callIds.length > 0 && { call_ids: requestBody.callIds }),
+        conversation_id: requestBody.conversationId,
+        session_id: requestBody.sessionId,
+        web_search_enabled: requestBody.webSearchEnabled,
+        research_context: requestBody.researchContext ?? null,
+        ...(requestBody.canvasViewAccessId && {
+          canvas_view_access_id: requestBody.canvasViewAccessId,
+        }),
+        ...(requestBody.messageAttachmentIds &&
+          requestBody.messageAttachmentIds.length > 0 && {
+            message_attachment_ids: requestBody.messageAttachmentIds,
+          }),
+        ...(requestBody.attachments &&
+          requestBody.attachments.length > 0 && {
+            attachments: requestBody.attachments.map(a => ({
+              data: a.data,
+              mime_type: a.mimeType,
+              filename: a.filename,
+            })),
+          }),
+        /* eslint-enable @typescript-eslint/naming-convention */
+      }),
+      signal: abortController.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    let buffer = '';
+
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, no-constant-condition
+    while (true) {
+      if (abortController.signal.aborted) {
+        void reader.cancel();
+        return;
+      }
+
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const parsed: unknown = JSON.parse(line.slice(6));
+            if (typeof parsed !== 'object' || parsed === null) continue;
+
+            const data = parsed as Record<string, unknown>;
+
+            // Send chunk to main thread
+            const message: WorkerStreamChunkMessage = {
+              type: 'STREAM_CHUNK',
+              payload: {
+                streamId,
+                data,
+              },
+            };
+            self.postMessage(message);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('[XyneAIWorker] Failed to parse SSE event:', err);
+          }
+        }
+      }
+    }
+
+    // Stream completed successfully
+    const completeMessage: WorkerStreamCompleteMessage = {
+      type: 'STREAM_COMPLETE',
+      payload: { streamId },
+    };
+    self.postMessage(completeMessage);
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      // Stream was aborted - don't send error
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.error('[XyneAIWorker] Error in stream:', err);
+    const errorMessage: WorkerStreamErrorMessage = {
+      type: 'STREAM_ERROR',
+      payload: {
+        streamId,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      },
+    };
+    self.postMessage(errorMessage);
+  } finally {
+    activeStreams.delete(streamId);
+  }
+}
+
+/**
+ * Abort a stream
+ */
+function abortStream(streamId: string): void {
+  const abortController = activeStreams.get(streamId);
+  if (abortController) {
+    abortController.abort();
+    activeStreams.delete(streamId);
+  }
+}
+
+/**
+ * Message handler
+ */
+self.addEventListener('message', (event: MessageEvent<WorkerIncomingMessage>) => {
+  const { type, payload } = event.data;
+
+  switch (type) {
+    case 'START_STREAM':
+      void executeStream(payload.streamId, payload.url, payload.requestBody);
+      break;
+
+    case 'ABORT_STREAM':
+      abortStream(payload.streamId);
+      break;
+
+    default:
+      // eslint-disable-next-line no-console
+      console.error('[XyneAIWorker] Unknown message type:', type);
+  }
+});
+
+// Export empty object to make this a module
+export {};

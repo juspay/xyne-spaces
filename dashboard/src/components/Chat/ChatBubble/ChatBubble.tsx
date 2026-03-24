@@ -275,7 +275,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(attachmentIds.length > 0 && { attachmentIds }),
     };
 
-    // Open XyneAI with thread context and always start a fresh chat
+    // Open XyneAI with thread context but always start a fresh chat
+    // This shows the thread header but doesn't load old conversation
     xyneAIActor.send({
       type: 'OPEN',
       channelId,
