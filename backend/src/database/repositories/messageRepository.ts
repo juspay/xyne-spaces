@@ -616,6 +616,35 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
   }
 
   /**
+   * Find all existing ticket batch messages for a specific call, ordered by creation time.
+   */
+  async findTicketsByCallId(conversationId: string, callId: string): Promise<Message[]> {
+    return await this.db.message.findMany({
+      where: {
+        conversationId,
+        msgType: MessageType.BOT,
+        AND: [
+          {
+            metadata: {
+              path: ['messageSubtype'],
+              equals: 'call_suggested_tickets',
+            },
+          },
+          {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+        ],
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+  }
+
+  /**
    * Find an existing detailed summary message for a call.
    */
   async findExistingDetailedSummaryMessage(
