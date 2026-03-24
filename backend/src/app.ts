@@ -41,6 +41,7 @@ import { websocketService } from '@/services/websocketService';
 import { redisService } from '@/services/redisService';
 import { superpositionClient } from '@/services/superpositionClient';
 import { metricsMiddleware } from '@/middleware/metricsMiddleware';
+import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
 import { externalSourceSyncRoutes } from '@/integrations';
 import migrationRoutes from '@/migration';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
@@ -439,6 +440,9 @@ export class App {
   }
 
   public async listen(): Promise<void> {
+    // Initialize metrics
+    initializeOpenTelemetry();
+
     // Initialize database connection before starting server
     await this.initializeDatabase();
 
@@ -545,6 +549,9 @@ export class App {
 
   public async shutdown(): Promise<void> {
     try {
+      // Shutdown OpenTelemetry
+      await shutdownOpenTelemetry();
+
       // Close superposition client
       await superpositionClient.close();
 

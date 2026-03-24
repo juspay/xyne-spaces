@@ -8,7 +8,7 @@ import { logger } from '../../../utils/logger.js';
 import { researchAgentService, type ResearchAgentResponse } from '../../../services/researchAgentService.js';
 import type { XyneAIAgentContext } from './types.js';
 import { getDescription } from './helpers.js';
-import { askAIResearchAgentUsedTotal } from '@/services/otel';
+import { getAskAIResearchAgentUsedTotal } from '@/services/otel';
 
 // ============================================================================
 // Types
@@ -147,7 +147,7 @@ export function createResearchAgentTool(): Tool<ResearchAgentArgs, XyneAIAgentCo
         
         // Track Research Agent tool usage
         try {
-          askAIResearchAgentUsedTotal.add(1);
+          getAskAIResearchAgentUsedTotal().add(1);
         } catch (metricsError) {
           logger.error('[Tool] research_agent: Error recording metrics:', metricsError);
         }

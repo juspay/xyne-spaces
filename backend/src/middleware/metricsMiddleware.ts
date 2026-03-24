@@ -2,16 +2,16 @@ import { Request, Response, NextFunction } from 'express';
 
 import { logger } from '../utils/logger';
 import {
-  httpRequestDuration,
-  httpRequestTotal,
-  httpRequestErrors,
-  activeConnections
+  getHttpRequestDuration,
+  getHttpRequestTotal,
+  getHttpRequestErrors,
+  getActiveConnections
 } from '@/services/otel';
 
 
 export const metricsMiddleware = (req: Request, res: Response, next: NextFunction) => {
   
-  activeConnections.add(1);
+  getActiveConnections().add(1);
 
   const start = Date.now();
 
@@ -37,14 +37,14 @@ export const metricsMiddleware = (req: Request, res: Response, next: NextFunctio
     const statusCode = res.statusCode.toString();
 
   
-    httpRequestDuration.record(duration, {
+    getHttpRequestDuration().record(duration, {
       method,
       route,
       status_code: statusCode
     });
 
 
-    httpRequestTotal.add(1, {
+    getHttpRequestTotal().add(1, {
       method,
       route,
       status_code: statusCode
@@ -53,7 +53,7 @@ export const metricsMiddleware = (req: Request, res: Response, next: NextFunctio
 
     if (res.statusCode >= 400) {
       const errorType = res.statusCode >= 500 ? 'server_error' : 'client_error';
-      httpRequestErrors.add(1, {
+      getHttpRequestErrors().add(1, {
         method,
         route,
         status_code: statusCode,
@@ -67,7 +67,7 @@ export const metricsMiddleware = (req: Request, res: Response, next: NextFunctio
   });
 
   res.on('close', () => {
-   activeConnections.add(-1);
+   getActiveConnections().add(-1);
  });
 
   next();

@@ -21,28 +21,24 @@ function getMeter(): Meter {
 
 // Call Notifications Counter
 let _callNotifications: Counter<CallNotificationAttributes> | null = null;
-export const callNotifications: Counter<CallNotificationAttributes> = new Proxy({} as Counter<CallNotificationAttributes>, {
-  get(_target, prop) {
-    if (!_callNotifications) {
-      _callNotifications = getMeter().createCounter('call_notifications_total', {
-        description: 'Total number of call notifications with status',
-        unit: '1',
-      });
-    }
-    return _callNotifications[prop as keyof Counter<CallNotificationAttributes>];
-  },
-});
+export function getCallNotifications(): Counter<CallNotificationAttributes> {
+  if (!_callNotifications) {
+    _callNotifications = getMeter().createCounter('call_notifications_total', {
+      description: 'Total number of call notifications with status',
+      unit: '1',
+    });
+  }
+  return _callNotifications;
+}
 
 // Call Jobs Counter
 let _callJobs: Counter<CallJobAttributes> | null = null;
-export const callJobs: Counter<CallJobAttributes> = new Proxy({} as Counter<CallJobAttributes>, {
-  get(_target, prop) {
-    if (!_callJobs) {
-      _callJobs = getMeter().createCounter('call_jobs_total', {
-        description: 'Total number of call jobs with status',
-        unit: '1',
-      });
-    }
-    return _callJobs[prop as keyof Counter<CallJobAttributes>];
-  },
-});
+export function getCallJobs(): Counter<CallJobAttributes> {
+  if (!_callJobs) {
+    _callJobs = getMeter().createCounter('call_jobs_total', {
+      description: 'Total number of call jobs with status',
+      unit: '1',
+    });
+  }
+  return _callJobs;
+}

@@ -13,7 +13,7 @@ import { AuthData, createMutators } from './mutators';
 import { queries } from './queries';
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
-import { zeroMutationLatency, zeroMutationOperations, zeroQueryLatency, zeroQueryOperations } from '@/services/otel';
+import { getZeroMutationLatency, getZeroMutationOperations, getZeroQueryLatency, getZeroQueryOperations } from '@/services/otel';
 import {
   createVespaJobsAccumulator,
   VespaJobsAccumulator,
@@ -141,8 +141,8 @@ export async function handleMutate(request: Request): Promise<unknown> {
     );
 
     const latency = Date.now() - startTime;
-    zeroMutationLatency.record(latency, { mutation: capturedMutatorName || 'unknown' });
-    zeroMutationOperations.add(1, { mutation: capturedMutatorName || 'unknown', stage: 'success' });
+    getZeroMutationLatency().record(latency, { mutation: capturedMutatorName || 'unknown' });
+    getZeroMutationOperations().add(1, { mutation: capturedMutatorName || 'unknown', stage: 'success' });
 
     logger.info('zero_mutation_success', {
       latency,
@@ -189,8 +189,8 @@ export async function handleMutate(request: Request): Promise<unknown> {
     return result;
   } catch (error) {
     const latency = Date.now() - startTime;
-    zeroMutationLatency.record(latency, { mutation: capturedMutatorName || 'unknown' });
-    zeroMutationOperations.add(1, { mutation: capturedMutatorName || 'unknown', stage: 'error' });
+    getZeroMutationLatency().record(latency, { mutation: capturedMutatorName || 'unknown' });
+    getZeroMutationOperations().add(1, { mutation: capturedMutatorName || 'unknown', stage: 'error' });
 
     logger.error('zero_mutation_error', {
       latency,
@@ -229,8 +229,8 @@ export async function handleQueries(request: Request): Promise<any> {
     );
 
     const latency = Date.now() - startTime;
-    zeroQueryLatency.record(latency, { query: capturedQueryName || 'unknown' });
-    zeroQueryOperations.add(1, { query: capturedQueryName || 'unknown', stage: 'success' });
+    getZeroQueryLatency().record(latency, { query: capturedQueryName || 'unknown' });
+    getZeroQueryOperations().add(1, { query: capturedQueryName || 'unknown', stage: 'success' });
 
     logger.info('zero_query_success', {
       latency,
@@ -240,8 +240,8 @@ export async function handleQueries(request: Request): Promise<any> {
     return result;
   } catch (error) {
     const latency = Date.now() - startTime;
-    zeroQueryLatency.record(latency, { query: capturedQueryName || 'unknown' });
-    zeroQueryOperations.add(1, { query: capturedQueryName || 'unknown', stage: 'error' });
+    getZeroQueryLatency().record(latency, { query: capturedQueryName || 'unknown' });
+    getZeroQueryOperations().add(1, { query: capturedQueryName || 'unknown', stage: 'error' });
     logger.error('zero_query_error', {
       latency,
       query: capturedQueryName,
