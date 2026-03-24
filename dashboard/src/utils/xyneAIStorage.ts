@@ -108,10 +108,8 @@ class XyneAIStorage {
       const transaction = db.transaction([STORE_NAME], 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
 
-      // Include threadConversationId in the key if it exists
-      const conversationId = threadConversationId
-        ? `${channelId}_${threadConversationId}_${sessionId}`
-        : `${channelId}_${sessionId}`;
+      // Always use sessionId as the key - simple and unique from backend
+      const conversationId = sessionId;
 
       // Check if conversation already exists
       const existingRequest = store.get(conversationId);
@@ -122,7 +120,7 @@ class XyneAIStorage {
 
           const conversationHistory: ConversationHistory = {
             id: conversationId,
-            channelId,
+            channelId, // Keep channelId for reference (original channel)
             sessionId,
             ...(threadConversationId && { threadConversationId }),
             title: existing?.title || this.generateTitle(messages),
@@ -157,18 +155,16 @@ class XyneAIStorage {
    * Load a specific conversation by channelId and sessionId
    */
   async loadConversation(
-    channelId: string,
+    _channelId: string,
     sessionId: string,
-    threadConversationId?: string,
+    _threadConversationId?: string,
   ): Promise<ConversationHistory | null> {
     try {
       const db = await this.openDB();
       const transaction = db.transaction([STORE_NAME], 'readonly');
       const store = transaction.objectStore(STORE_NAME);
-      const conversationId = threadConversationId
-        ? `${channelId}_${threadConversationId}_${sessionId}`
-        : `${channelId}_${sessionId}`;
-      const request = store.get(conversationId);
+      // Always use sessionId as the key
+      const request = store.get(sessionId);
 
       return new Promise((resolve, reject) => {
         request.onsuccess = (): void => {
@@ -230,6 +226,30 @@ class XyneAIStorage {
   }
 
   /**
+   * Load the most recent global conversation (across all channels)
+   * Only returns non-thread conversations (global context)
+   */
+  async loadLatestGlobalConversation(): Promise<ConversationHistory | null> {
+    try {
+      const allConversations = await this.getAllConversations();
+      if (allConversations.length === 0) return null;
+
+      // Filter to only non-thread conversations (global context)
+      const globalConversations = allConversations.filter(conv => !conv.threadConversationId);
+
+      if (globalConversations.length === 0) return null;
+
+      // Return the most recently updated conversation
+      return globalConversations.sort(
+        (a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime(),
+      )[0]!;
+    } catch (error) {
+      console.error('[XyneAIStorage] Failed to load latest global conversation:', error);
+      return null;
+    }
+  }
+
+  /**
    * Get all conversations for a specific channel
    */
   async getConversationsForChannel(channelId: string): Promise<ConversationHistory[]> {
@@ -264,18 +284,16 @@ class XyneAIStorage {
   }
 
   async deleteConversation(
-    channelId: string,
+    _channelId: string,
     sessionId: string,
-    threadConversationId?: string,
+    _threadConversationId?: string,
   ): Promise<void> {
     try {
       const db = await this.openDB();
       const transaction = db.transaction([STORE_NAME], 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
-      const conversationId = threadConversationId
-        ? `${channelId}_${threadConversationId}_${sessionId}`
-        : `${channelId}_${sessionId}`;
-      store.delete(conversationId);
+      // Always use sessionId as the key
+      store.delete(sessionId);
 
       return new Promise((resolve, reject) => {
         transaction.oncomplete = (): void => {
@@ -292,12 +310,12 @@ class XyneAIStorage {
   }
 
   async toggleStar(
-    channelId: string,
+    _channelId: string,
     sessionId: string,
-    threadConversationId?: string,
+    _threadConversationId?: string,
   ): Promise<void> {
     try {
-      const conversation = await this.loadConversation(channelId, sessionId, threadConversationId);
+      const conversation = await this.loadConversation('', sessionId);
       if (!conversation) return;
 
       const db = await this.openDB();
@@ -322,13 +340,13 @@ class XyneAIStorage {
   }
 
   async renameConversation(
-    channelId: string,
+    _channelId: string,
     sessionId: string,
     newTitle: string,
-    threadConversationId?: string,
+    _threadConversationId?: string,
   ): Promise<void> {
     try {
-      const conversation = await this.loadConversation(channelId, sessionId, threadConversationId);
+      const conversation = await this.loadConversation('', sessionId);
       if (!conversation) return;
 
       const db = await this.openDB();
@@ -410,7 +428,74 @@ class XyneAIStorage {
       throw error;
     }
   }
+
+  /**
+   * Clean up duplicate conversations that were created with old ID format
+   * Old format: channelId_sessionId or channelId_threadId_sessionId
+   * New format: sessionId (unique, no duplicates)
+   */
+  async cleanupDuplicateConversations(): Promise<void> {
+    try {
+      const allConversations = await this.getAllConversations();
+
+      // Group by sessionId to find duplicates
+      const sessionGroups = new Map<string, ConversationHistory[]>();
+      for (const conv of allConversations) {
+        const existing = sessionGroups.get(conv.sessionId) || [];
+        existing.push(conv);
+        sessionGroups.set(conv.sessionId, existing);
+      }
+
+      const db = await this.openDB();
+
+      // For each group with duplicates, keep the newest one and delete others
+      for (const [sessionId, conversations] of sessionGroups.entries()) {
+        if (conversations.length <= 1) continue;
+
+        // Sort by lastUpdated descending, keep the newest
+        conversations.sort((a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime());
+        const [newest, ...duplicates] = conversations;
+
+        // If newest has old format ID (not equal to sessionId), migrate it
+        if (newest && newest.id !== sessionId) {
+          const transaction = db.transaction([STORE_NAME], 'readwrite');
+          const store = transaction.objectStore(STORE_NAME);
+
+          // Delete old format entry
+          store.delete(newest.id);
+
+          // Save with new format (sessionId only)
+          const migratedConversation: ConversationHistory = {
+            ...newest,
+            id: sessionId,
+          };
+          store.put(migratedConversation);
+
+          await new Promise<void>((resolve, reject): void => {
+            transaction.oncomplete = (): void => resolve();
+            transaction.onerror = (): void => reject(new Error('Failed to migrate conversation'));
+          });
+        }
+
+        // Delete duplicate entries
+        for (const duplicate of duplicates) {
+          const transaction = db.transaction([STORE_NAME], 'readwrite');
+          const store = transaction.objectStore(STORE_NAME);
+          store.delete(duplicate.id);
+          await new Promise<void>((resolve, reject): void => {
+            transaction.oncomplete = (): void => resolve();
+            transaction.onerror = (): void => reject(new Error('Failed to delete duplicate'));
+          });
+        }
+      }
+    } catch {
+      // Silently handle cleanup errors - non-critical operation
+    }
+  }
 }
 
 // Export singleton instance
 export const xyneAIStorage = new XyneAIStorage();
+
+// Run cleanup on module load to remove old duplicates
+void xyneAIStorage.cleanupDuplicateConversations();
