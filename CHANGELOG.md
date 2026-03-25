@@ -1,3 +1,10 @@
+## [1.99.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.99.0...v1.99.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* revert recap channel status ([bf1d63a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bf1d63ac5740e732ba005ff89e315c6a759066dd)), closes [#4346](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4346)
+
 ## [1.99.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.98.0...v1.99.0) (2026-03-24)
 
 
