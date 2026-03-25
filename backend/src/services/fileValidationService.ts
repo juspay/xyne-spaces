@@ -45,6 +45,26 @@ export class FileValidationService {
     'application/xml',
     'text/xml',
     'text/html',
+    'text/yaml',
+    'application/x-yaml',
+
+    // Source code files (MIME types browsers actually send)
+    'text/x-python',
+    'text/x-c',
+    'text/x-csrc',
+    'text/x-c++src',
+    'text/x-c++',
+    'text/x-java-source',
+    'text/x-java',
+    'text/x-go',
+    'text/x-ruby',
+    'application/x-ruby',
+    'text/x-csharp',
+    'application/sql',
+    'text/x-sql',
+    'text/typescript',
+    'text/x-typescript',
+    'text/tsx',
 
     // Archive files
     'application/zip',
@@ -134,7 +154,9 @@ export class FileValidationService {
       }
 
       // MIME type validation
-      if (!this.allowedMimeTypes.has(input.mimeType.toLowerCase())) {
+      const normalizedMimeType = input.mimeType.toLowerCase();
+      const isTextLikeMime = normalizedMimeType.startsWith('text/');
+      if (!isTextLikeMime && !this.allowedMimeTypes.has(normalizedMimeType)) {
         errors.push(`File type '${input.mimeType}' is not allowed`);
       }
 

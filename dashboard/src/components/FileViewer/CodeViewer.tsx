@@ -1,18 +1,68 @@
 import React, { useEffect, useState, useMemo, memo, useCallback, useRef } from 'react';
+import type { BaseViewerProps } from './utils';
+import hljs from 'highlight.js';
+import 'highlight.js/styles/github.css';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { BaseViewerProps } from './utils';
 
-// Loading Component
-const LoadingSpinner: React.FC = () => (
-  <div className='flex items-center justify-center h-full min-h-[200px]'>
-    <div className='text-center'>
-      <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3'></div>
-      <p className='text-muted-foreground dark:text-muted text-sm'>Loading JSON file...</p>
-    </div>
-  </div>
-);
+// Static lookup map — O(1) vs sequential if-chain
+const EXTENSION_TO_LANGUAGE: Record<string, string> = {
+  '.ts': 'typescript',
+  '.tsx': 'typescript',
+  '.py': 'python',
+  '.rb': 'ruby',
+  '.go': 'go',
+  '.java': 'java',
+  '.c': 'c',
+  '.cpp': 'cpp',
+  '.cs': 'csharp',
+  '.sql': 'sql',
+  '.yml': 'yaml',
+  '.yaml': 'yaml',
+  '.json': 'json',
+};
 
-// Error Component
+/**
+ * Splits a highlight.js HTML string into per-line segments while correctly
+ * reopening/closing <span> tags that cross line boundaries.
+ *
+ * highlight.js wraps tokens in <span class="hljs-*"> tags that can span
+ * multiple lines (e.g. multi-line comments/strings). Naively splitting by \n
+ * would break those tags. This function tracks the open-tag stack and inserts
+ * the necessary closing/reopening tags at each line boundary.
+ */
+function splitHighlightedLines(html: string): string[] {
+  const normalized = html.replace(/\r\n/g, '\n');
+  const result: string[] = [];
+  const openTags: string[] = [];
+
+  for (const line of normalized.split('\n')) {
+    const lineOpenTags = [...openTags];
+    let pos = 0;
+
+    while (pos < line.length) {
+      const nextOpen = line.indexOf('<span', pos);
+      const nextClose = line.indexOf('</span>', pos);
+
+      if (nextOpen === -1 && nextClose === -1) break;
+
+      if (nextOpen !== -1 && (nextClose === -1 || nextOpen < nextClose)) {
+        const endOfTag = line.indexOf('>', nextOpen) + 1;
+        if (endOfTag > 0) openTags.push(line.substring(nextOpen, endOfTag));
+        pos = endOfTag > 0 ? endOfTag : pos + 1;
+      } else {
+        openTags.pop();
+        pos = nextClose + 7; // '</span>'.length === 7
+      }
+    }
+
+    result.push(lineOpenTags.join('') + line + '</span>'.repeat(openTags.length));
+  }
+
+  return result;
+}
+
+// ── Shared UI sub-components (same pattern as TxtViewer / JsonViewer) ────────
+
 const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () => void }> = ({
   error,
   canRetry = false,
@@ -20,14 +70,14 @@ const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () =
 }) => (
   <div className='flex items-center justify-center h-full min-h-[200px]'>
     <div className='bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 max-w-md text-center'>
-      <p className='text-red-800 dark:text-red-200 font-semibold mb-2'>Unable to display JSON</p>
+      <p className='text-red-800 dark:text-red-200 font-semibold mb-2'>Unable to display file</p>
       <p className='text-red-600 dark:text-red-300 text-sm mb-3'>{error}</p>
       {canRetry && onRetry && (
         <button
           onClick={onRetry}
           className='px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors'
           data-track-category='FileViewer'
-          data-track-name='RETRY_LOAD_JSON'
+          data-track-name='RetryLoadCode'
         >
           Try Again
         </button>
@@ -36,26 +86,32 @@ const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () =
   </div>
 );
 
-const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
+// ── Main component ────────────────────────────────────────────────────────────
+
+const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
   const [lines, setLines] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [isValidJson, setIsValidJson] = useState<boolean>(true);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Calculate file size for display
   const fileSizeMB = useMemo(() => {
     return source ? source.size / (1024 * 1024) : 0;
   }, [source]);
 
-  // Determine if we should use virtualization
+  const language = useMemo(() => {
+    if (!fileName) return undefined;
+    const dotIndex = fileName.lastIndexOf('.');
+    if (dotIndex === -1) return undefined;
+    const ext = fileName.slice(dotIndex).toLowerCase();
+    return EXTENSION_TO_LANGUAGE[ext];
+  }, [fileName]);
+
   const shouldVirtualize = lines.length > 1000;
 
-  // Setup virtualizer for large files with dynamic measurement
   const virtualizer = useVirtualizer({
     count: lines.length,
     getScrollElement: () => containerRef.current,
-    estimateSize: () => 20, // Fallback only - actual size will be measured
+    estimateSize: () => 20,
     overscan: 10,
     enabled: shouldVirtualize && !loading && !error,
   });
@@ -65,10 +121,9 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     if (!shouldVirtualize || loading || error) return;
 
     const id1 = requestAnimationFrame(() => {
-      virtualizer.measure(); // Forces recalculation using currently mounted items
+      virtualizer.measure();
     });
 
-    // Second frame helps when fonts/layout settle
     const id2 = requestAnimationFrame(() => {
       virtualizer.measure();
     });
@@ -102,7 +157,6 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
 
     setLoading(true);
     setError(null);
-    setIsValidJson(true);
 
     try {
       const reader = new FileReader();
@@ -126,12 +180,7 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
         };
       });
 
-      // Start reading the file
-      if (typeof source === 'string') {
-        reader.readAsText(new Blob([source]), 'UTF-8');
-      } else {
-        reader.readAsText(source, 'UTF-8');
-      }
+      reader.readAsText(source, 'UTF-8');
 
       const text = await readPromise;
 
@@ -139,18 +188,15 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
         throw new Error('File is empty or contains no readable content');
       }
 
-      // Try to parse and format JSON
       try {
-        const parsed = JSON.parse(text) as unknown;
-        const formatted = JSON.stringify(parsed, null, 2);
-        // Split into lines for virtualization
-        const allLines = formatted.split(/\r?\n/);
-        setLines(allLines);
+        const highlighted = language
+          ? hljs.highlight(text, { language }).value
+          : hljs.highlightAuto(text).value;
+        setLines(splitHighlightedLines(highlighted));
       } catch {
-        // If not valid JSON, display as-is but mark as invalid
-        const allLines = text.split(/\r?\n/);
-        setLines(allLines);
-        setIsValidJson(false);
+        // Fallback: plain text with HTML escaping
+        const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        setLines(escaped.split(/\r?\n/));
       }
     } catch (err) {
       const errorMessage =
@@ -159,7 +205,7 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     } finally {
       setLoading(false);
     }
-  }, [source]);
+  }, [source, language]);
 
   useEffect(() => {
     void loadFile();
@@ -169,25 +215,25 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     void loadFile();
   };
 
-  // Render loading state
   if (loading) {
     return (
-      <div className='relative h-full bg-background dark:bg-[#1E1E1E]'>
-        <LoadingSpinner />
+      <div className='pt-[65px] p-4 flex items-center justify-center h-full min-h-[200px]'>
+        <div className='text-center'>
+          <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3' />
+          <p className='text-muted-foreground dark:text-muted text-sm'>Loading code...</p>
+        </div>
       </div>
     );
   }
 
-  // Render error state
   if (error) {
     return (
-      <div className='relative h-full bg-background dark:bg-[#1E1E1E]'>
+      <div className='pt-[65px] p-4 flex items-center justify-center h-full min-h-[200px]'>
         <ErrorDisplay error={error} canRetry onRetry={handleRetry} />
       </div>
     );
   }
 
-  // Render content
   return (
     <div
       className='font-mono text-sm bg-background dark:bg-[#1E1E1E] text-foreground dark:text-gray-100 border border-border dark:border-gray-700 rounded-lg mt-[65px]'
@@ -200,37 +246,29 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
     >
       {/* Header with file info */}
       <div className='flex items-center justify-between p-3 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-t-lg flex-shrink-0'>
-        <div className='flex items-center gap-2 min-w-0 flex-1'>
-          <svg
-            className='w-4 h-4 text-muted-foreground flex-shrink-0'
-            fill='currentColor'
-            viewBox='0 0 20 20'
-          >
-            <path
-              fillRule='evenodd'
-              d='M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z'
-              clipRule='evenodd'
-            />
-          </svg>
-          <span className='text-xs text-muted-foreground dark:text-muted-foreground truncate'>
-            {lines.length.toLocaleString()} lines • {fileSizeMB.toFixed(2)}MB
+        <div className='flex items-center gap-4 min-w-0 flex-1'>
+          {language && (
+            <span className='text-xs text-muted-foreground dark:text-muted-foreground truncate uppercase'>
+              • {language}
+            </span>
+          )}
+          <span className='text-xs text-muted-foreground dark:text-muted-foreground'>
+            • {lines.length.toLocaleString()} lines
           </span>
         </div>
-        <div className='flex items-center gap-2'>
+        <div className='flex items-center gap-2 flex-shrink-0'>
+          <span className='text-xs text-muted-foreground dark:text-muted-foreground'>
+            • {fileSizeMB.toFixed(2)}MB
+          </span>
           {shouldVirtualize && (
             <span className='text-xs text-blue-600 dark:text-blue-400 font-medium'>
               Virtualized
             </span>
           )}
-          {!isValidJson && (
-            <span className='text-xs text-yellow-600 dark:text-yellow-400 font-medium'>
-              Invalid JSON
-            </span>
-          )}
         </div>
       </div>
 
-      {/* Content area */}
+      {/* Code content */}
       <div
         ref={containerRef}
         className='flex-1 overflow-auto p-3'
@@ -239,7 +277,6 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
         }}
       >
         {shouldVirtualize ? (
-          // Virtualized rendering for large files with dynamic measurement
           <div
             style={{
               height: virtualizer.getTotalSize(),
@@ -263,42 +300,30 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
                   data-index={virtualRow.index}
                   className='flex w-full'
                 >
-                  <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
+                  <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none leading-5'>
                     {virtualRow.index + 1}
                   </span>
                   <span
-                    className='flex-1 text-xs sm:text-sm'
-                    style={{
-                      wordWrap: 'break-word',
-                      overflowWrap: 'break-word',
-                      whiteSpace: 'pre-wrap',
-                      lineHeight: '20px',
-                    }}
-                  >
-                    {lines[virtualRow.index] || ''}
-                  </span>
+                    // eslint-disable-next-line react/no-danger
+                    dangerouslySetInnerHTML={{ __html: lines[virtualRow.index] ?? '' }}
+                    className='flex-1 whitespace-pre-wrap break-words leading-5'
+                  />
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          // Regular rendering for small files
           <div>
             {lines.map((line, index) => (
               <div key={index} className='flex min-h-[20px]'>
-                <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none'>
+                <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none leading-5'>
                   {index + 1}
                 </span>
                 <span
-                  className='flex-1 text-xs sm:text-sm'
-                  style={{
-                    wordWrap: 'break-word',
-                    overflowWrap: 'break-word',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {line || '\u00A0'} {/* Non-breaking space for empty lines */}
-                </span>
+                  // eslint-disable-next-line react/no-danger
+                  dangerouslySetInnerHTML={{ __html: line || '\u00A0' }}
+                  className='flex-1 whitespace-pre-wrap break-words leading-5'
+                />
               </div>
             ))}
           </div>
@@ -308,6 +333,6 @@ const JsonViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
   );
 });
 
-JsonViewer.displayName = 'JsonViewer';
+CodeViewer.displayName = 'CodeViewer';
 
-export default JsonViewer;
+export default CodeViewer;

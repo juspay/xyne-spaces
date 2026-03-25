@@ -59,6 +59,19 @@ export const ALLOWED_FILE_TYPES = [
   'audio/wav',
   'audio/ogg',
   'audio/mp3',
+  // Source code / text-based files (matched by extension on frontend)
+  '.ts',
+  '.tsx',
+  '.py',
+  '.rb',
+  '.go',
+  '.java',
+  '.c',
+  '.cpp',
+  '.cs',
+  '.sql',
+  '.yml',
+  '.yaml',
 ] as const;
 
 /**
@@ -78,6 +91,19 @@ const EXTENSION_COLORS: Record<string, string> = {
   json: 'bg-purple-600',
   zip: 'bg-yellow-600',
   rar: 'bg-yellow-600',
+  js: 'bg-slate-600',
+  ts: 'bg-slate-600',
+  tsx: 'bg-slate-600',
+  py: 'bg-slate-600',
+  rb: 'bg-slate-600',
+  go: 'bg-slate-600',
+  java: 'bg-slate-600',
+  c: 'bg-slate-600',
+  cpp: 'bg-slate-600',
+  cs: 'bg-slate-600',
+  sql: 'bg-slate-600',
+  yml: 'bg-slate-600',
+  yaml: 'bg-slate-600',
 };
 
 /**
@@ -92,12 +118,24 @@ export const getFileCategory = (file: { type: string; name: string | undefined }
   if (type.startsWith('audio/')) return 'audio';
   if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
   if (type === 'text/csv' || name.endsWith('.csv')) return 'csv';
-  if (
-    type.startsWith('text/') ||
-    name.endsWith('.txt') ||
-    name.endsWith('.json') ||
-    name.endsWith('.md')
-  ) {
+  const codeExtensions = [
+    '.txt',
+    '.json',
+    '.md',
+    '.ts',
+    '.tsx',
+    '.py',
+    '.rb',
+    '.go',
+    '.java',
+    '.c',
+    '.cpp',
+    '.cs',
+    '.sql',
+    '.yml',
+    '.yaml',
+  ];
+  if (type.startsWith('text/') || codeExtensions.some(ext => name.endsWith(ext))) {
     return 'text';
   }
   if (name.endsWith('.zip') || name.endsWith('.rar')) return 'archive';

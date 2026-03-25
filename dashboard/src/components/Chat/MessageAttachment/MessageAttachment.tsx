@@ -10,7 +10,16 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, FileText, Image, Maximize2, MoreVertical, Play, Video } from 'lucide-react';
+import {
+  Download,
+  FileCode,
+  FileText,
+  Image,
+  Maximize2,
+  MoreVertical,
+  Play,
+  Video,
+} from 'lucide-react';
 import { Menu } from '@base-ui/react/menu';
 import {
   formatFileSize,
@@ -581,6 +590,93 @@ const InlineTextFile: React.FC<{
   );
 };
 
+const CODE_FILE_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.py',
+  '.rb',
+  '.go',
+  '.java',
+  '.c',
+  '.cpp',
+  '.cs',
+  '.sql',
+  '.yml',
+  '.yaml',
+  '.json',
+]);
+
+const isCodeFileByName = (fileName: string): boolean => {
+  const dotIndex = fileName.lastIndexOf('.');
+  if (dotIndex === -1) return false;
+  return CODE_FILE_EXTENSIONS.has(fileName.slice(dotIndex).toLowerCase());
+};
+
+/**
+ * Inline Code File Renderer - always opens modal on click (no inline expansion)
+ * No pre-fetching needed — CodeViewer inside the modal handles its own loading.
+ */
+const InlineCodeFile: React.FC<{
+  attachmentId: string;
+  fileName: string;
+  mimeType: string;
+  conversationId?: string;
+  channelId?: string;
+  replyCount?: number;
+}> = ({ attachmentId, fileName, mimeType, conversationId, channelId, replyCount }) => {
+  const windowWidth = useWindowWidth();
+  const formatFileName = (name: string) => (windowWidth < 500 ? truncateFileName(name, 28) : name);
+
+  const openCodeFile = () => {
+    const attachment: AttachmentRef = {
+      attachmentId,
+      fileName,
+      fileUrl: `/attachments/${attachmentId}/download`,
+      mimeType,
+      fileSize: 0,
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+    };
+    attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
+  };
+
+  return (
+    <div className='w-full max-w-2xl'>
+      <div className='flex items-center gap-2'>
+        <button
+          type='button'
+          onClick={openCodeFile}
+          className='flex items-center gap-2 p-2 rounded-md transition-colors duration-150 text-muted-foreground hover:bg-accent hover:text-foreground'
+          data-track-category='MESSAGE'
+          data-track-name='OPEN_CODE_FILE'
+          data-track-metadata={JSON.stringify({ fileName, attachmentId })}
+        >
+          <FileCode className='h-4 w-4' />
+          <span className='truncate max-w-md'>{formatFileName(fileName)}</span>
+          <span className='ml-1 text-xs text-muted-foreground'>[View]</span>
+        </button>
+        <button
+          type='button'
+          onClick={e => {
+            e.stopPropagation();
+            void downloadAttachment(attachmentId, fileName);
+          }}
+          className='p-2 hover:bg-accent rounded-lg transition-colors'
+          title='Download file'
+          data-track-category='MESSAGE'
+          data-track-name='DOWNLOAD_CODE_FILE'
+          data-track-metadata={JSON.stringify({ fileName, attachmentId })}
+        >
+          <Download className='h-4 w-4 text-muted-foreground' />
+        </button>
+      </div>
+    </div>
+  );
+};
+
 /**
  * Inline Video Player with fullscreen option
  * Shows thumbnail first, loads video only when user clicks play
@@ -855,6 +951,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
 
   const isTextFile =
     attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');
+  const isCodeFile = isCodeFileByName(attachment.originalFilename);
   const isVideo = isVideoFile(attachment.mimetype);
 
   const handleCardClick = (): void => {
@@ -916,6 +1013,20 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         attachmentId={attachment.id}
         fileName={attachment.originalFilename}
         {...(metadata && { metadata })}
+        {...(conversationId && { conversationId })}
+        {...(channelId && { channelId })}
+        {...(replyCount !== undefined && { replyCount })}
+      />
+    );
+  }
+
+  // Render inline code viewer with syntax highlighting for code files on PC only
+  if (isCodeFile && !compact && !isMobile) {
+    return (
+      <InlineCodeFile
+        attachmentId={attachment.id}
+        fileName={attachment.originalFilename}
+        mimeType={attachment.mimetype}
         {...(conversationId && { conversationId })}
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}

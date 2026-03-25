@@ -166,7 +166,12 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                 .map(attachment => {
                   const isImageOrText =
                     attachment.mimetype.startsWith('image/') ||
-                    attachment.mimetype === 'text/plain';
+                    attachment.mimetype === 'text/plain' ||
+                    attachment.mimetype.startsWith('text/') ||
+                    attachment.mimetype === 'application/json' ||
+                    attachment.originalFilename.match(
+                      /\.(ts|tsx|js|jsx|py|rb|go|java|c|cpp|cs|sql|yml|yaml|json)$/i,
+                    );
                   const hasDocumentPreview = !isImageOrText && !!attachment.thumbnailUrl;
                   // Calculate the actual index in the full attachments array
                   return (
