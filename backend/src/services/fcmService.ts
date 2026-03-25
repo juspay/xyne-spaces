@@ -213,27 +213,87 @@ class FcmPushService {
   }
 
   async registerToken(userId: string, payload: MobilePushRegistration): Promise<void> {
+    const tokenPreview = payload.token
+      ? `${payload.token.slice(0, 10)}...${payload.token.slice(-8)}`
+      : null;
+    const voipTokenPreview = payload.voipToken
+      ? `${payload.voipToken.slice(0, 10)}...${payload.voipToken.slice(-8)}`
+      : null;
+
+    logger.info('[FCM] registerToken step=enter', {
+      userId,
+      sessionId: payload.sessionId ?? null,
+      platform: payload.platform ?? null,
+      deviceId: payload.deviceId ?? null,
+      tokenPresent: !!payload.token,
+      tokenPreview,
+      voipTokenPresent: !!payload.voipToken,
+      voipTokenPreview,
+    });
+
     if (!payload.token) {
-      return;
-    }
-
-    const session = await this.findSessionForRegistration(userId, payload.sessionId);
-
-    if (!session) {
-      logger.warn('Unable to register push token - no active session', {
+      logger.warn('[FCM] registerToken step=missing_token', {
         userId,
         sessionId: payload.sessionId ?? null,
+        platform: payload.platform ?? null,
+        deviceId: payload.deviceId ?? null,
       });
       return;
     }
+
+    logger.info('[FCM] registerToken step=find_session', {
+      userId,
+      requestedSessionId: payload.sessionId ?? null,
+      tokenPreview,
+    });
+    const session = await this.findSessionForRegistration(userId, payload.sessionId);
+
+    if (!session) {
+      logger.warn('[FCM] registerToken step=session_not_found', {
+        userId,
+        sessionId: payload.sessionId ?? null,
+        tokenPreview,
+        voipTokenPreview,
+      });
+      return;
+    }
+
+    logger.info('[FCM] registerToken step=session_resolved', {
+      userId,
+      requestedSessionId: payload.sessionId ?? null,
+      resolvedSessionId: session.id,
+      sessionDeviceId: session.deviceId ?? null,
+    });
 
     const composedToken = this.composeStoredToken(payload.platform, payload.token);
     const composedVoipToken = payload.voipToken
       ? this.composeStoredToken(payload.platform, payload.voipToken)
       : null;
 
+    const composedTokenPreview = `${composedToken.slice(0, 10)}...${composedToken.slice(-8)}`;
+    const composedVoipTokenPreview = composedVoipToken
+      ? `${composedVoipToken.slice(0, 10)}...${composedVoipToken.slice(-8)}`
+      : null;
+
+    logger.info('[FCM] registerToken step=compose_tokens', {
+      userId,
+      sessionId: session.id,
+      platform: payload.platform ?? null,
+      tokenPreview,
+      composedTokenPreview,
+      voipTokenPreview,
+      composedVoipTokenPreview,
+    });
+
     const nextDeviceId = payload.deviceId ?? session.deviceId ?? null;
 
+    logger.info('[FCM] registerToken step=update_target_session', {
+      userId,
+      sessionId: session.id,
+      nextDeviceId,
+      composedTokenPreview,
+      composedVoipTokenPreview,
+    });
     await db.userSession.update({
       where: { id: session.id },
       data: {
@@ -247,24 +307,52 @@ class FcmPushService {
     const duplicateConditions: Prisma.UserSessionWhereInput[] = [{ fcmToken: composedToken }];
 
     if (composedVoipToken) {
+      logger.info('[FCM] registerToken step=add_duplicate_condition_voip', {
+        userId,
+        sessionId: session.id,
+        composedVoipTokenPreview,
+      });
       duplicateConditions.push({ voipToken: composedVoipToken });
     }
 
     if (nextDeviceId) {
+      logger.info('[FCM] registerToken step=add_duplicate_condition_device', {
+        userId,
+        sessionId: session.id,
+        nextDeviceId,
+      });
       duplicateConditions.push({ deviceId: nextDeviceId });
     }
 
-    await db.userSession.updateMany({
+    logger.info('[FCM] registerToken step=clear_duplicates', {
+      userId,
+      sessionId: session.id,
+      duplicateConditionCount: duplicateConditions.length,
+      nextDeviceId,
+      composedTokenPreview,
+      composedVoipTokenPreview,
+    });
+    const duplicateCleanupResult = await db.userSession.updateMany({
       where: {
+        userId,
         id: { not: session.id },
         OR: duplicateConditions,
       },
       data: {
-        status: SessionStatus.REVOKED,
         fcmToken: null,
         voipToken: null,
         deviceId: null,
       },
+    });
+
+    logger.info('[FCM] registerToken step=complete', {
+      userId,
+      sessionId: session.id,
+      nextDeviceId,
+      duplicateConditionCount: duplicateConditions.length,
+      duplicateCleanupCount: duplicateCleanupResult.count,
+      composedTokenPreview,
+      composedVoipTokenPreview,
     });
   }
 
