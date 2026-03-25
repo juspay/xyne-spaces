@@ -1,13 +1,19 @@
 import express from 'express';
 import { AuthV2Controller } from '../controllers/authV2Controller';
+import { MicrosoftAuthController } from '../controllers/microsoftAuthController';
 import { authV2Middleware } from '../middleware/authV2Middleware';
 
 const router = express.Router();
 const authV2Controller = new AuthV2Controller();
+const microsoftAuthController = new MicrosoftAuthController();
 
 router.get('/login', authV2Controller.initiateLogin);
 
 router.get('/callback', authV2Controller.handleCallback);
+
+router.get('/microsoft/login', microsoftAuthController.initiateLogin);
+
+router.get('/microsoft/callback', microsoftAuthController.handleCallback);
 
 router.post('/exchange-electron', authV2Controller.exchangeElectronCode);
 

@@ -747,6 +747,7 @@ model ExternalStepResponse {
 // Enums for User Management
 enum AuthProvider {
   GOOGLE
+  MICROSOFT
   API_KEY
   @@schema("public")
 }

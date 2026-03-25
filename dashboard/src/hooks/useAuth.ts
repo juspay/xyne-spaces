@@ -16,6 +16,7 @@ export interface UseAuthReturn {
   isNewUser: boolean;
 
   signInWithGoogle: () => void;
+  signInWithMicrosoft: () => void;
   logout: () => void;
   clearError: () => void;
 }
@@ -32,6 +33,10 @@ export const useAuth = (): UseAuthReturn => {
 
   const signInWithGoogle = useCallback(() => {
     send({ type: 'GOOGLE_SIGNIN' });
+  }, [send]);
+
+  const signInWithMicrosoft = useCallback(() => {
+    send({ type: 'MICROSOFT_SIGNIN' });
   }, [send]);
 
   const clearError = useCallback(() => {
@@ -53,6 +58,7 @@ export const useAuth = (): UseAuthReturn => {
     isNewUser: state.context.isNewUser,
 
     signInWithGoogle,
+    signInWithMicrosoft,
     logout,
     clearError,
   };
