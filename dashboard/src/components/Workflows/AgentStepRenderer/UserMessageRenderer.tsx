@@ -1,6 +1,7 @@
 import React from 'react';
 import { User } from 'lucide-react';
 import { BaseStepRendererProps } from './types';
+import { USER_REPLY_PREFIX } from '../constants';
 
 type SafeRecord = Record<string, unknown>;
 
@@ -23,7 +24,10 @@ const parseUserMessageData = (data: UserMessageData | string | SafeRecord): User
           : '';
     const timestamp = typeof record['timestamp'] === 'string' ? record['timestamp'] : undefined;
 
-    const result: UserMessageData = { message };
+    const strippedMessage = message.startsWith(USER_REPLY_PREFIX)
+      ? message.slice(USER_REPLY_PREFIX.length)
+      : message;
+    const result: UserMessageData = { message: strippedMessage };
     if (timestamp !== undefined) {
       result.timestamp = timestamp;
     }
