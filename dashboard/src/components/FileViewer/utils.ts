@@ -6,7 +6,7 @@ import ExcelViewer from './ExcelViewer';
 import ImageViewer from './ImageViewer';
 import PdfViewer from './PdfViewer';
 import VideoViewer from './VideoViewer';
-import JsonViewer from './JsonViewer';
+import CodeViewer from './CodeViewer';
 
 export interface BaseViewerProps {
   source: File | null;
@@ -73,16 +73,48 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
     wrapperClass: 'h-full overflow-auto',
     displayName: 'Markdown Document',
   },
-  json: {
-    mimeTypes: ['application/json'],
-    extensions: ['.json'],
-    component: JsonViewer,
+  code: {
+    mimeTypes: [
+      'text/typescript',
+      'text/x-typescript',
+      'text/tsx',
+      'text/x-python',
+      'text/x-ruby',
+      'application/x-ruby',
+      'text/x-c',
+      'text/x-csrc',
+      'text/x-c++src',
+      'text/x-c++',
+      'text/x-java-source',
+      'text/x-java',
+      'text/x-go',
+      'text/x-csharp',
+      'application/sql',
+      'text/x-sql',
+      'application/json',
+    ],
+    extensions: [
+      '.ts',
+      '.tsx',
+      '.py',
+      '.rb',
+      '.go',
+      '.java',
+      '.c',
+      '.cpp',
+      '.cs',
+      '.sql',
+      '.yml',
+      '.yaml',
+      '.json',
+    ],
+    component: CodeViewer,
     wrapperClass: 'h-full overflow-auto p-4',
-    displayName: 'JSON File',
+    displayName: 'Code File',
   },
   text: {
     mimeTypes: ['text/', 'application/xml'],
-    extensions: ['.txt', '.log', '.xml', '.js', '.ts', '.css', '.html'],
+    extensions: ['.txt', '.log', '.xml'],
     component: TxtViewer,
     wrapperClass: 'h-full overflow-auto p-4',
     displayName: 'Text File',
