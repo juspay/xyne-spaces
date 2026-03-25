@@ -988,6 +988,11 @@ export class CallController {
 
       logger.info(`User ${userId} invited ${invitedUserIds.length} user(s) to call ${callId}`);
 
+      // Notify all connected clients that participants changed
+      if (invitedUserIds.length > 0) {
+        void livekitService.sendParticipantsChanged(callId);
+      }
+
       res.json({
         success: true,
         invitedCount: invitedUserIds.length,
@@ -1637,7 +1642,37 @@ export class CallController {
       logger.error('Failed to create Pulse actionable:', error);
       res.status(500).json({ success: false, error: 'Failed to create Pulse actionable' });
     }
-  }
+  };
+
+  /**
+   * GET /api/calls/:callId/participants
+   * Get all participants for a call with their response status and user details.
+   * Used by the native Participants screen.
+   */
+  getCallParticipants = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    try {
+      logger.info(`[getCallParticipants] Fetching participants for callId: ${callId}`);
+      const participants = await repositories.calls.getParticipantsInfo(callId);
+      logger.info(`[getCallParticipants] Found ${participants.length} participants for callId: ${callId}`);
+      res.json({ success: true, participants });
+    } catch (error) {
+      logger.error('Failed to get call participants:', error);
+      res.status(500).json({ success: false, error: 'Failed to get call participants' });
+    }
+  };
 }
 
 export const callController = new CallController();

@@ -157,6 +157,32 @@ export class LiveKitService {
     }
   }
 
+  /**
+   * Notify all participants in a room that the participant list has changed.
+   * Updates room metadata with a version timestamp, triggering RoomMetadataChanged on all clients.
+   */
+  async sendParticipantsChanged(roomName: string): Promise<void> {
+    try {
+      const rooms = await this.roomService.listRooms([roomName]);
+      if (!rooms || rooms.length === 0) {
+        logger.debug(`[LiveKit] Room ${roomName} not found, skipping participants changed notification`);
+        return;
+      }
+
+      const existingMetadata = rooms[0].metadata ? JSON.parse(rooms[0].metadata) : {};
+      const updatedMetadata = {
+        ...existingMetadata,
+        participantsVersion: Date.now(),
+      };
+
+      await this.roomService.updateRoomMetadata(roomName, JSON.stringify(updatedMetadata));
+      logger.info(`[LiveKit] Sent participants changed notification for room ${roomName}`);
+    } catch (error) {
+      // Non-critical — don't throw, just log
+      logger.warn(`[LiveKit] Failed to send participants changed for room ${roomName}:`, error);
+    }
+  }
+
   getClientUrl(): string {
     return this.clientUrl;
   }

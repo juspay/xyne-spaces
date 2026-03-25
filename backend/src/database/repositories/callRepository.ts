@@ -840,4 +840,66 @@ export class CallRepository {
     }));
   }
 
+  /**
+   * Get all participants for a call with their user details and response status.
+   * Used by the native Participants screen to categorize attendees vs invited.
+   */
+  async getParticipantsInfo(
+    callExternalId: string
+  ): Promise<Array<{
+    userId: string;
+    userName: string;
+    userEmail: string;
+    userPicture: string | null;
+    response: InvitationResponse | null;
+    joinedAt: Date | null;
+    leftAt: Date | null;
+  }>> {
+    const call = await this.findByExternalId(callExternalId);
+    if (!call) {
+      logger.info(`[getParticipantsInfo] No call found for externalId: ${callExternalId}`);
+      return [];
+    }
+
+    logger.info(`[getParticipantsInfo] Resolved call: externalId=${callExternalId}, internalId=${call.id}`);
+
+    // Fetch participants with response status
+    const callParticipants = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: { callId: call.id },
+      select: {
+        userId: true,
+        response: true,
+        joinedAt: true,
+        leftAt: true,
+      },
+    });
+
+    logger.info(`[getParticipantsInfo] Found ${callParticipants.length} call_participant records for callId=${call.id}, userIds: ${callParticipants.map(p => p.userId).join(', ')}`);
+
+    const userIds = callParticipants.map(p => p.userId);
+    if (userIds.length === 0) {
+      return [];
+    }
+
+    // Batch fetch all user details
+    const users = await repositories.users.findMany({
+      where: { id: { in: userIds } },
+    });
+
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    return callParticipants.map(p => {
+      const user = userMap.get(p.userId);
+      return {
+        userId: p.userId,
+        userName: user?.name ?? 'Unknown',
+        userEmail: user?.email ?? '',
+        userPicture: user?.picture ?? null,
+        response: p.response,
+        joinedAt: p.joinedAt,
+        leftAt: p.leftAt,
+      };
+    });
+  }
+
 }

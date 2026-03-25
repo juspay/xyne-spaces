@@ -10,6 +10,7 @@ import { callSideEffectService } from '@/services/callSideEffectService';
 import { livekitWebhookACL } from './livekitWebhookACL';
 import { transcriptService } from '@/services/transcriptService';
 import { CallOrigin } from '@prisma/client';
+import { livekitService } from '@/services/liveKitService';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -341,6 +342,10 @@ class LiveKitWebhookController {
           }
         }
       }
+      // Notify all connected clients that participants changed
+      if (roomName) {
+        void livekitService.sendParticipantsChanged(roomName);
+      }
     } catch (error) {
       logger.error(`[LiveKit Webhook] Error handling participant join:`, error);
     }
@@ -418,6 +423,10 @@ class LiveKitWebhookController {
 
       if (result.messageUpdated) {
         logger.info(`[LiveKit Webhook] Updated system message for call ${callId}`);
+      }
+      // Notify remaining connected clients that participants changed
+      if (callId) {
+        void livekitService.sendParticipantsChanged(callId);
       }
     } catch (error) {
       logger.error(`[LiveKit Webhook] Error handling participant leave:`, error);
