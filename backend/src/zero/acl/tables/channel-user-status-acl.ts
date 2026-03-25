@@ -32,8 +32,12 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
       throw new MutationACLError('Channel user status update failed: status record does not exist', 'channel_user_status');
     }
     
-    // Only the user themselves can update their status record
-    if (status.userId !== this.ctx.userID) {
+    // Allow updating only `isClosed` on any user's status (e.g., admin closing a channel for a user)
+    const argsKeys = Object.keys(args);
+    const isClosedOnlyUpdate = argsKeys.length === 2 && argsKeys.every(k => k === 'id' || k === 'isClosed');
+
+    // Only the user themselves can update their status record (unless it's a isClosed-only update)
+    if (status.userId !== this.ctx.userID && !isClosedOnlyUpdate) {
       throw new MutationACLError('Channel user status update failed: you can only modify your own status records', 'channel_user_status');
     }
 
