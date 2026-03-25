@@ -32,6 +32,9 @@ router.post('/:callId/invite', callController.inviteUsers);
 // Decline call endpoint
 router.post('/:callId/decline', callController.declineCall);
 
+// Get call participants (for native Participants screen)
+router.get('/:callId/participants', callController.getCallParticipants);
+
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);
 

@@ -58,6 +58,7 @@ Xyne Spaces is a modern, scalable platform built with a TypeScript backend and R
 ```bash
 git clone <repository-url>
 cd xyne-spaces
+
 ```
 
 2. **Install dependencies**:

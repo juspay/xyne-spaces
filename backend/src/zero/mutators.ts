@@ -59,6 +59,7 @@ import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { nudgeRegistry } from '@/nudges/registry';
+import { livekitService } from '@/services/liveKitService';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
@@ -3521,6 +3522,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               });
             }
           }
+
+          // Notify all connected LiveKit clients that participants changed
+          // This triggers RoomMetadataChanged so native apps can refresh the participant list
+          asyncTasks.push(async () => {
+            void livekitService.sendParticipantsChanged(callId);
+          });
         },
       ),
       cancel: defineMutator(
