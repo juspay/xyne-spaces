@@ -515,9 +515,6 @@ export class ConversationService {
       });
     }
 
-    // Update channel last activity
-    await this.channelRepository.updateLastActivity(conversation.channelId);
-
     // Get sender info
     const senderInfo = await this.getUserInfo(message.senderId);
 
@@ -653,13 +650,10 @@ export class ConversationService {
       logger.error(`[ConversationService] Error pushing Vespa job for message ${updatedMessage.messageId}:`, error);
     });
 
-    // 7. Update channel last activity
-    await this.channelRepository.updateLastActivity(conversation.channelId);
-
-    // 8. Get sender info
+    // 7. Get sender info
     const senderInfo = await this.getUserInfo(message.senderId);
 
-    // 9. Broadcast updated message via WebSocket
+    // 8. Broadcast updated message via WebSocket
     const chatMessage = {
       messageId: updatedMessage.messageId,
       conversationId: updatedMessage.conversationId,

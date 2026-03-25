@@ -841,9 +841,6 @@ export class ConversationController {
         });
       }
 
-      // Update channel last activity
-      await this.channelRepository.updateLastActivity(conversation.channelId);
-
       // Get sender info
       const senderInfo = await this.getUserInfo(message.senderId);
 
