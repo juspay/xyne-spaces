@@ -44,6 +44,7 @@ import {
   extractAllSubMessages,
   getNodeCreatedAt,
 } from './AgentChatView.utils';
+import { USER_REPLY_PREFIX } from '../constants';
 import { ResponseModal } from './ResponseModal';
 import LiveEditsPanel from '../LiveEditsPanel';
 import { useUser } from '../../../hooks/useUsers';
@@ -392,8 +393,8 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
                 ? (JSON.parse(uStep.data) as SafeRecord)
                 : (uStep.data as SafeRecord);
             const content = record['content'];
-            if (typeof content === 'string') {
-              replyContext = content;
+            if (typeof content === 'string' && content.startsWith(USER_REPLY_PREFIX)) {
+              replyContext = content.slice(USER_REPLY_PREFIX.length);
             }
           } catch {
             // Ignore
@@ -748,7 +749,7 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
                       ) : (
                         <Zap size={16} fill='currentColor' />
                       )}
-                      Go to Automatic
+                      Continue
                     </button>
                   </div>
                 )}
@@ -861,7 +862,7 @@ const AgentMessageBubble: React.FC<{
               title='User message'
               description='Full user message that triggered this agent response'
             >
-              <div className='p-4 space-y-2'>
+              <div className='p-4 space-y-2 max-h-[70vh] overflow-y-auto'>
                 <p className='text-xs font-semibold text-foreground/60 uppercase tracking-wide'>
                   User message
                 </p>

@@ -164,6 +164,12 @@ export const EDGE_STYLING = {
 } as const;
 
 /**
+ * Prefix added to explicit user replies (reruns / chat) so we can distinguish
+ * them from automatic orchestrator-generated user_message steps.
+ */
+export const USER_REPLY_PREFIX = '[user_reply] ';
+
+/**
  * Common workflow status types used across components
  */
 export type WorkflowStatus =

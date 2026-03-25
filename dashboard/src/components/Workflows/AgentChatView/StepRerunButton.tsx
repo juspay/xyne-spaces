@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useWorkflowControl } from '../../../services/Workflow/workflowGraphService';
 import { CombinedWorkflowData } from '../../../services/Workflow/workflowGraphService.types';
 import Tooltip from '../../ui/Tooltip/Tooltip';
+import { USER_REPLY_PREFIX } from '../constants';
 
 interface StepRerunButtonProps {
   executionId?: string;
@@ -114,10 +115,11 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
 
     try {
       setDropdownError(null);
+      const trimmed = contextInput.trim();
       const result = await continueAgenticStepAsync({
         executionId: inputStep.executionId,
         stepId: inputStep.id,
-        message: contextInput.trim(),
+        message: trimmed ? USER_REPLY_PREFIX + trimmed : '',
       });
 
       toast.success('Rerun started', {

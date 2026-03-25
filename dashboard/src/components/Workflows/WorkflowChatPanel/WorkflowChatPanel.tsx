@@ -46,6 +46,7 @@ import { ErrorsPanel } from './ErrorsPanel';
 import { AgentChatView } from '../AgentChatView';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getAgentInfo, AgentInfo } from '../AgentChatView/AgentChatView.utils';
+import { USER_REPLY_PREFIX } from '../constants';
 import { AgentAvatar } from '../AgentChatView/AgentAvatar';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import AttemptBranchGraphModal from '../AttemptBranchGraphModal';
@@ -727,7 +728,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
       const result = await continueAgenticStepAsync({
         executionId: targetExecutionId,
         stepId: targetStep.id,
-        message: continuationMessage.trim(),
+        message: USER_REPLY_PREFIX + continuationMessage.trim(),
       });
       setContinuationMessage('');
       toast.info('Sent', { description: 'Agent processing...', duration: 3000 });
@@ -972,7 +973,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
         <>
           <div
             ref={headerRef}
-            className='flex-shrink-0 border-b border-border px-3 py-1.5 flex items-center'
+            className='flex-shrink-0 border-b border-border px-3 py-1.5 flex items-center min-h-[57px]'
           >
             {/* Desktop: Show mode view */}
             {!isMobile ? (
@@ -1825,7 +1826,7 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                       ) : (
                         <Zap size={14} />
                       )}
-                      Go to Automatic
+                      Continue
                     </button>
                   </div>
                 )}

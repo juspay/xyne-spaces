@@ -20,17 +20,7 @@ import {
   CombinedWorkflowData,
   StepDetailsResponse,
 } from '../../services/Workflow/workflowGraphService.types';
-import {
-  Loader2,
-  AlertCircle,
-  ArrowLeft,
-  Globe,
-  Table2,
-  GitBranch,
-  Eye,
-  Code,
-  Brain,
-} from 'lucide-react';
+import { Loader2, AlertCircle, ArrowLeft, Globe, Table2, GitBranch, Eye, Code } from 'lucide-react';
 import MemoryHeader from '../../components/Memory/MemoryHeader';
 import MemoryTable from '../../components/Memory/MemoryTable';
 import { MemoryScope, MemoryFilters } from '../../types/memory';
@@ -247,18 +237,19 @@ const WorkflowScreen: React.FC = () => {
     closeTab,
   } = useWorkflowTabs(
     [
-      ...(isElectron
-        ? [
-            {
-              id: 'vscode',
-              title: 'Code Viewer',
-              type: 'vscode' as const,
-              icon: <Eye size={15} />,
-              closable: false,
-              disabled: false,
-            },
-          ]
-        : []),
+      // code viewer tab commented out, not useful for now
+      // ...(isElectron
+      //   ? [
+      //       {
+      //         id: 'vscode',
+      //         title: 'Code Viewer',
+      //         type: 'vscode' as const,
+      //         icon: <Eye size={15} />,
+      //         closable: false,
+      //         disabled: false,
+      //       },
+      //     ]
+      //   : []),
       {
         id: 'git-diff',
         title: 'Final Git Diff',
@@ -276,14 +267,15 @@ const WorkflowScreen: React.FC = () => {
         closable: false,
         disabled: false,
       },
-      {
-        id: 'context',
-        title: 'Context',
-        type: 'context' as const,
-        icon: <Brain size={15} />,
-        closable: false,
-        disabled: false,
-      },
+      // context tab commented out, not useful for now
+      // {
+      //   id: 'context',
+      //   title: 'Context',
+      //   type: 'context' as const,
+      //   icon: <Brain size={15} />,
+      //   closable: false,
+      //   disabled: false,
+      // },
       ...(isElectron
         ? [
             {
