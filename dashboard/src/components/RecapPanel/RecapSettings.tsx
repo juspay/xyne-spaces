@@ -4,7 +4,7 @@ import Input from '../ui/Input/Input';
 import { toast } from 'sonner';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
-import { Check, Search, Lock, Hash, X, Loader2, Sparkles } from 'lucide-react';
+import { Check, Search, Lock, Hash, X } from 'lucide-react';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import type { Channel } from '@xyne/shared';
 import { useRecapData } from '../../hooks/useRecapData';
@@ -12,22 +12,13 @@ import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuth } from '../../hooks/useAuth';
 import type { ChannelListItemProps, RecapSettingsProps } from './RecapPanel.types';
 import { useAllVisibleChannels } from '../../hooks/useChannels';
-import { useCheckChannelRecap, RecapStatus } from '../../hooks/useCheckChannelRecap';
-
-interface ChannelListItemWithRecapProps extends ChannelListItemProps {
-  isExistingSubscription: boolean;
-  isCheckingRecap: boolean;
-  recapStatus: RecapStatus;
-}
 
 const ChannelListItem = ({
   channel,
   isSelected,
   onToggle,
   currentUserId,
-  isCheckingRecap,
-  recapStatus,
-}: ChannelListItemWithRecapProps): ReactElement => {
+}: ChannelListItemProps): ReactElement => {
   const { displayName } = useChannelDisplayName(channel, currentUserId || '');
 
   const getIcon = (): ReactElement => {
@@ -36,49 +27,6 @@ const ChannelListItem = ({
     ) : (
       <Hash size={14} className='text-gray-500 flex-shrink-0' />
     );
-  };
-
-  // Render recap status based on channel type and recap availability
-  const renderRecapStatus = (): ReactElement | null => {
-    if (!isSelected) return null;
-
-    // Show checking state while loading
-    if (isCheckingRecap) {
-      return (
-        <div className='flex items-center gap-1.5 text-xs text-gray-500'>
-          <Loader2 size={12} className='animate-spin' />
-          <span>Checking for Recap</span>
-        </div>
-      );
-    }
-
-    // Render based on recap status
-    switch (recapStatus) {
-      case 'available':
-        return (
-          <div className='flex items-center gap-1.5 text-xs text-green-600'>
-            <Sparkles size={12} />
-            <span>Recap available</span>
-          </div>
-        );
-      case 'no_messages':
-        return (
-          <div className='flex items-center gap-1.5 text-xs text-gray-400'>
-            <span>No messages</span>
-          </div>
-        );
-      case 'pending':
-        // No recap exists for yesterday - show "Pending" for all channels
-        // We can't distinguish between "newly added" and "had no messages"
-        // until the next recap cycle generates a recap
-        return (
-          <div className='flex items-center gap-1.5 text-xs text-yellow-600'>
-            <span>Pending</span>
-          </div>
-        );
-      default:
-        return null;
-    }
   };
 
   return (
@@ -106,9 +54,6 @@ const ChannelListItem = ({
           {displayName}
         </span>
       </div>
-
-      {/* Recap Status Indicator */}
-      <div className='flex-shrink-0'>{renderRecapStatus()}</div>
     </button>
   );
 };
@@ -133,63 +78,16 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Track channels to check for recaps (both existing and newly added)
-  const [channelsToCheck, setChannelsToCheck] = useState<Set<string>>(new Set());
-
   // Reset selectedIds and search query when modal opens
+  // Using a ref to track the last synced subscription ids to avoid resetting during user interaction
   useEffect(() => {
     if (isOpen) {
       setSearchQuery('');
       // Only reset from subscriptions when opening - use subscriptions directly
-      const existingChannelIds = subscriptions.map(s => s.channelId);
-      setSelectedIds(new Set(existingChannelIds));
-      // Check recaps for existing subscriptions on open
-      setChannelsToCheck(new Set(existingChannelIds));
+      setSelectedIds(new Set(subscriptions.map(s => s.channelId)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
-
-  // Check for existing recaps for newly added channels
-  const { isChecking, recapDetailedStatusMap } = useCheckChannelRecap(
-    Array.from(channelsToCheck),
-    channelsToCheck.size > 0,
-  );
-
-  // When a channel is toggled, check if it's a new addition and trigger recap check
-  const handleToggleChannelWithCheck = useCallback(
-    (channelId: string): void => {
-      const isCurrentlySelected = selectedIds.has(channelId);
-      const isExistingSubscription = selectedChannelIds.includes(channelId);
-
-      setSelectedIds(prev => {
-        const newSet = new Set(prev);
-        if (newSet.has(channelId)) {
-          newSet.delete(channelId);
-        } else {
-          newSet.add(channelId);
-        }
-        return newSet;
-      });
-
-      // If selecting a new channel (not existing subscription), trigger recap check
-      if (!isCurrentlySelected && !isExistingSubscription) {
-        setChannelsToCheck(prev => {
-          const newSet = new Set(prev);
-          newSet.add(channelId);
-          return newSet;
-        });
-      }
-      // If deselecting a channel that was being checked, remove from check list
-      if (isCurrentlySelected && channelsToCheck.has(channelId)) {
-        setChannelsToCheck(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(channelId);
-          return newSet;
-        });
-      }
-    },
-    [selectedIds, selectedChannelIds, channelsToCheck],
-  );
 
   // Filter and sort channels based on search query and selection
   const filteredChannels = useMemo(() => {
@@ -219,6 +117,18 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
       return aSelected ? -1 : 1;
     });
   }, [channels, searchQuery, selectedIds]);
+
+  const handleToggleChannel = useCallback((channelId: string): void => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(channelId)) {
+        newSet.delete(channelId);
+      } else {
+        newSet.add(channelId);
+      }
+      return newSet;
+    });
+  }, []);
 
   const handleSave = useCallback((): void => {
     const channelIds = Array.from(selectedIds);
@@ -300,22 +210,15 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
               </div>
             ) : (
               <div className='space-y-1'>
-                {filteredChannels.map((channel: Channel) => {
-                  const isExistingSubscription = selectedChannelIds.includes(channel.id);
-                  const recapStatus = recapDetailedStatusMap.get(channel.id) ?? null;
-                  return (
-                    <ChannelListItem
-                      key={channel.id}
-                      channel={channel}
-                      isSelected={selectedIds.has(channel.id)}
-                      onToggle={() => handleToggleChannelWithCheck(channel.id)}
-                      currentUserId={currentUser?.id}
-                      isExistingSubscription={isExistingSubscription}
-                      isCheckingRecap={isChecking && channelsToCheck.has(channel.id)}
-                      recapStatus={recapStatus}
-                    />
-                  );
-                })}
+                {filteredChannels.map((channel: Channel) => (
+                  <ChannelListItem
+                    key={channel.id}
+                    channel={channel}
+                    isSelected={selectedIds.has(channel.id)}
+                    onToggle={() => handleToggleChannel(channel.id)}
+                    currentUserId={currentUser?.id}
+                  />
+                ))}
               </div>
             )}
           </div>
