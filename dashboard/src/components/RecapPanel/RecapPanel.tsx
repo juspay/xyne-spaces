@@ -354,7 +354,9 @@ const RecapPanel = (): ReactElement => {
           <ul className='space-y-2'>
             {card.summary.map((point: string, idx: number) => (
               <li key={idx} className='flex items-start'>
-                <span className='text-gray-800 text-sm leading-relaxed font-normal inline'>
+                <span
+                  className={`text-gray-800 ${isMobile ? 'text-xs' : 'text-sm'} leading-relaxed font-normal font-['Inter'] inline`}
+                >
                   <span className='mr-2'>•</span>
                   <span
                     dangerouslySetInnerHTML={{
@@ -437,7 +439,9 @@ const RecapPanel = (): ReactElement => {
       <div className='h-full flex flex-col overflow-hidden'>
         {/* Header Section - fixed at top */}
         <div className='text-center p-5 pb-4 flex-shrink-0'>
-          <h2 className='text-2xl font-semibold text-gray-900 mb-1'>{greeting}</h2>
+          <h2 className={`${isMobile ? 'text-lg' : 'text-2xl'} font-semibold text-gray-900 mb-1`}>
+            {greeting}
+          </h2>
           <p className='text-sm text-gray-600'>
             Recapping {recapData.meta.totalMessages} messages from {formatRecapDate(recapData.date)}
           </p>
