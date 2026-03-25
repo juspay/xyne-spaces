@@ -119,6 +119,24 @@ export class TicketService {
     }
   }
 
+  async updateTicketAssignee(ticketId: string, userId: string, assigneeId: string): Promise<void> {
+    try {
+      await this.ticketRepository.updateTicketAssignee(ticketId, userId, assigneeId);
+      logger.debug(`[TicketService] Successfully updated assignee for ticket ${ticketId} to user ${assigneeId}.`);
+    } catch (error) {
+      logger.error(`[TicketService] Error updating ticket assignee:`, error);
+    }
+  } 
+
+  async asignUserGroupToTicket(ticketId: string, userId: string, groupId: string): Promise<void> {
+    try {
+      await this.ticketRepository.assignUserGroupToTicket(ticketId, userId, groupId);
+      logger.debug(`[TicketService] Successfully assigned user group ${groupId} to ticket ${ticketId}.`);
+    } catch (error) {
+      logger.error(`[TicketService] Error assigning user group to ticket:`, error);
+    }
+  }
+
   /**
    * Fetch and download all image attachments for a ticket
    * Converts them to Base64 format for use in vision-enabled AI workflows

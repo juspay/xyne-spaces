@@ -14,6 +14,7 @@ function buildTicketTypeInstructions(): string {
     [BaseTicketType.Fix]: 'Bug reports, errors, broken functionality, issues, crashes, something not working',
     [BaseTicketType.Feature]: 'New features, enhancements, additions, improvements, new functionality',
     [BaseTicketType.Hotfix]: 'Critical/urgent production issues, outages, blockers requiring immediate attention',
+    [BaseTicketType.Support]: 'General support requests, questions, non-urgent issues, user assistance',
   };
 
   return ClassifiableTicketTypes.map((type: ClassifiableTicketType) => `- "${type}": ${typeDescriptions[type] || ''}`).join('\n');

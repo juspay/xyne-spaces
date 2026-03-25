@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, TicketReferenceRelation } from '@prisma/client';
+import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, TicketReferenceRelation, ChannelType } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -39,6 +39,8 @@ import { isReleaseTicket } from '@xyne/shared';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { TicketIdService } from '@/services/ticketIdService';
 import { unifiedBotUserService } from '@/bots/unified';
+import { workflowManager } from '@/workflows/services/workflowManager';
+import { WorkflowType } from '@/workflows/types/workflow-enums';
 
 const prisma = DatabaseClient.getInstance();
 const DUPLICATE_REFERENCE_LIMIT = 10;
@@ -218,7 +220,6 @@ export class TicketController {
         assignedTo,
         projectId,
         userGroupId,
-        boardId,
         statusV2,
         priority,
         eta,
@@ -263,7 +264,7 @@ export class TicketController {
 
       // Extract dynamic fields if present (support both string and string[] for MULTI_SELECT)
       const dynamicFields = (req.body.dynamicFields as Record<string, string | string[]>) || {};
-      const requiredFields = { title, description, projectId, boardId };
+      const requiredFields = { title, description, projectId };
       for (const [field, value] of Object.entries(requiredFields)) {
         if (!value) {
           res.status(400).json({ error: `${field.charAt(0).toUpperCase() + field.slice(1)} is required` });
@@ -274,6 +275,34 @@ export class TicketController {
       if (!channelId && !sourceConversationId) {
         res.status(400).json({ error: 'Either channelId or sourceConversationId is required' });
         return;
+      }
+
+      // Determine the actual channel to check its type
+      let actualChannelId = channelId;
+      if (!actualChannelId && sourceConversationId) {
+        const sourceConv = await this.conversationRepository.findById(sourceConversationId);
+        if (sourceConv) {
+          actualChannelId = sourceConv.channelId;
+        }
+      }
+
+      // Validate boardId based on channel type
+      let boardId = req.body.boardId as string | undefined;
+      if (!boardId) {
+        let isSupportChannel = false;
+        if (actualChannelId) {
+          const channel = await this.channelRepository.findById(actualChannelId);
+          isSupportChannel = channel?.type === ChannelType.SUPPORT;
+        }
+
+        if (isSupportChannel) {
+          // Support channels can use default board
+          boardId = await this.boardRepository.findDefaultBoardIdForProject(projectId);
+        } else {
+          // Non-support channels must provide boardId
+          res.status(400).json({ error: 'boardId is required' });
+          return;
+        }
       }
 
       // Validate enum fields if provided
@@ -810,6 +839,28 @@ export class TicketController {
       };
 
       res.status(201).json(response);
+
+      // Check if this is a support channel by fetching the channel type
+      const channel = await this.channelRepository.findById(ticket.channelId);
+      if (channel && channel.type === ChannelType.SUPPORT) {
+        // Trigger IT_SUPPORT_WORKFLOW for support channels
+        await workflowManager.startWorkflow({
+          ticketId: ticket.id,
+          workflowType: WorkflowType.IT_SUPPORT_WORKFLOW,
+          context: {
+            title: ticket.title,
+            description: ticket.description,
+            ticketId: ticket.id,
+            queryText: description,
+            channelName: channel.name,
+            userId,
+            userName: req.user?.name,
+            conversationId: ticket.conversationId,
+            xyneId: ticket.xyneId,
+          },
+          createdBy: userId,
+        })
+      }
 
       // Trigger commit analysis 
       const deployedCommitId = dynamicFields?.['deployedCommitId'] as string;

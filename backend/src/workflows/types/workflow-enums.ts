@@ -22,6 +22,7 @@ export enum WorkflowType {
   INTEGRITY_DEBUG_WORKFLOW = 'INTEGRITY_DEBUG_WORKFLOW',
   XYNE_AUTO_RCA_WORKFLOW = 'XYNE_AUTO_RCA_WORKFLOW',
   VERSION_BUMP_WORKFLOW = 'VERSION_BUMP_WORKFLOW',
+  IT_SUPPORT_WORKFLOW = 'IT_SUPPORT_WORKFLOW',
 }
 
 export enum WorkflowExecutionStatus {
@@ -574,6 +575,7 @@ export function getWorkflowTypeDisplayName(workflowType: WorkflowType): string {
     [WorkflowType.INTEGRITY_DEBUG_WORKFLOW]: 'Integrity Debug Workflow',
     [WorkflowType.XYNE_AUTO_RCA_WORKFLOW]: 'Xyne Auto RCA Workflow',
     [WorkflowType.VERSION_BUMP_WORKFLOW]: 'Version Bump Workflow',
+    [WorkflowType.IT_SUPPORT_WORKFLOW]: 'IT Support Workflow',
   };
   return displayNames[workflowType]
 }

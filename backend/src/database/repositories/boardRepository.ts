@@ -229,6 +229,20 @@ export class BoardRepository {
     });
   }
 
+  async findDefaultBoardIdForProject(projectId: string): Promise<string> {
+    const board = await this.db.board.findFirst({
+      where: { projectId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+
+    if (!board) {
+      throw new Error('No boards found for project');
+    }
+
+    return board.id;
+  }
+
   /**
    * Find board by ID with full details including projectId
    * Used for validating board belongs to correct project

@@ -3,4 +3,5 @@ export enum BaseTicketType {
     Feature = 'Feature',
     Hotfix = 'Hotfix',
     Release = 'Release',
+    Support = 'Support'
 }

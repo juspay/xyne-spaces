@@ -635,6 +635,28 @@ export class TicketRepository {
     return mappings.map(m => m.subTicket);
   }
 
+  async updateTicketAssignee(ticketId: string, newAssigneeId: string, updatedBy: string): Promise<void> {
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: {
+        assignedTo: newAssigneeId,
+        updatedBy: updatedBy,
+        updatedAt: new Date(),
+      }
+    });
+  }
+
+  async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
+    await prisma.ticket.update({
+      where: { id: ticketId },
+      data: {
+        userGroupId: groupId,
+        updatedBy: updatedBy,
+        updatedAt: new Date(),
+      }
+    });
+  } 
+
   async updateTicketMetadata(ticketId: string, metadata: Record<string, any>): Promise<void> {
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },

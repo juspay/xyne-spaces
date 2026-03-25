@@ -24,7 +24,7 @@
  * ```
  */
 
-import { OpenFeature, Client, EvaluationContext } from '@openfeature/server-sdk';
+import { OpenFeature, Client, EvaluationContext, JsonValue } from '@openfeature/server-sdk';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { SuperpositionProvider } from 'superposition-provider';
@@ -191,6 +191,20 @@ export class SuperpositionClient {
       return defaultValue;
     }
   }
+
+  public async getObjectValue(
+    flagKey: string,
+    defaultValue: JsonValue,
+    context?: SuperpositionContext
+  ): Promise<JsonValue> {
+    await this.ensureInitialized();
+    try {
+      return await this.client!.getObjectValue(flagKey, defaultValue, context);
+    } catch (error) {
+      logger.error(`[SuperpositionClient] Error getting object flag '${flagKey}':`, error);
+      return defaultValue;
+    }
+  } 
 
   /**
    * Resolve all configuration details

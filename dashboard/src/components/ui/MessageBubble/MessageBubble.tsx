@@ -54,6 +54,8 @@ import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
 import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
+import { parseWorkflowActionsFromMarkdown } from '../../../utils/markdownWorkflowActions';
+import { WorkflowActionButtons } from './WorkflowActionButtons';
 import { TicketSuggestions } from './TicketSuggestions';
 import { PulseTickets } from './PulseTickets';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
@@ -326,11 +328,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
   const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
   const parsedMarkdown = useMemo(() => {
-    if (isMarkdownContent && hasSuggestedTickets) {
-      return parseMarkdownWithTicketSuggestions(message.content);
+    if (isMarkdownContent) {
+      return parseMarkdownWithTicketSuggestions(message.content, hasSuggestedTickets);
     }
     return { ticketSuggestions: [], ticketsCreated: [], content: message.content };
   }, [isMarkdownContent, hasSuggestedTickets, message.content]);
+  const parsedWorkflowActions = useMemo(() => {
+    if (isBotMessage) {
+      return parseWorkflowActionsFromMarkdown(message.content);
+    }
+    return { workflowActions: null, content: message.content };
+  }, [isBotMessage, message.content]);
 
   const ticketSuggestions = parsedMarkdown.ticketSuggestions;
   const ticketsCreated = parsedMarkdown.ticketsCreated;
@@ -919,6 +927,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   )}
                 </>
               )}
+
+              {isBotMessage && parsedWorkflowActions.workflowActions && metadata?.ticketId && (
+                <WorkflowActionButtons
+                  ticketId={metadata.ticketId}
+                  metadata={parsedWorkflowActions.workflowActions}
+                />
+              )}
+
               {!contentOnly && (
                 <SurfaceNudgeList
                   messageId={message.messageId}

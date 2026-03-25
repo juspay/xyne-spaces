@@ -163,6 +163,7 @@ enum ChannelScopeType {
 enum ChannelType {
   DEFAULT
   EMAIL
+  SUPPORT
   @@schema("public")
 }
 
