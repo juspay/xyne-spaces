@@ -8,7 +8,7 @@ class BitbucketWebhookMiddleware {
 
   constructor() {
     if (!config.bitbucket.webhookSecret) {
-      logger.warn('BITBUCKET_WEBHOOK_SECRET is not configured, webhook updates will be rejected');
+      logger.warn('SCM_WEBHOOK_SECRET is not configured, webhook updates will be rejected');
     }
     this.webhookSecret = config.bitbucket.webhookSecret;
   }

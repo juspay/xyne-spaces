@@ -135,7 +135,7 @@ const envSchema = Joi.object({
   OTEL_BASE_URL: Joi.string().default(''),
   OTEL_SERVICE_NAME: Joi.string().default(''),
   OTEL_EXPORT_INTERVAL_MS: Joi.number().default(60000),
-  BITBUCKET_WEBHOOK_SECRET: Joi.string().default(''),
+  SCM_WEBHOOK_SECRET: Joi.string().default(''),
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
   // Bitbucket Configuration
@@ -144,6 +144,8 @@ const envSchema = Joi.object({
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
   JENKINS_WEBHOOK_SECRET: Joi.string().allow('').default(''),
+  GITHUB_TOKEN: Joi.string().allow('').default(''),
+  GITHUB_API_URL: Joi.string().uri().default(''),
   //Presence Queue Configuration
   PRESENCE_CLEANUP_INTERVAL_MS: Joi.number().default(600000),
   PRESENCE_OFFLINE_GRACE_PERIOD_MS: Joi.number().default(300000),
@@ -294,12 +296,17 @@ export const config = {
   },
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
   bitbucket: {
-    webhookSecret: envVars.BITBUCKET_WEBHOOK_SECRET,
+    webhookSecret: envVars.SCM_WEBHOOK_SECRET,
     apiToken: envVars.BITBUCKET_AUTH,
     apiUsername: envVars.BITBUCKET_USERNAME,
     sshBaseUrl: envVars.BITBUCKET_SSH_BASE_URL,
     baseUrl: envVars.BITBUCKET_BASE_URL,
     password: envVars.BITBUCKET_PASSWORD,
+  },
+  github: {
+    webhookSecret: envVars.SCM_WEBHOOK_SECRET,
+    token: envVars.GITHUB_TOKEN,
+    apiUrl: envVars.GITHUB_API_URL,
   },
   workingHours: {
     start: envVars.WORKING_HOUR_START,
