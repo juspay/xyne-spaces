@@ -99,7 +99,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
       sourceId: messageId,
       states: ['ACTIVE', 'ACTED_ON'],
     }),
-    nudgesEnabled ? { enabled: nudgesEnabled } : false,
+    { enabled: nudgesEnabled },
   );
   const isLoading = nudgesEnabled && nudgesDetails.type === 'unknown';
   const hasFetched = useRef(false);
