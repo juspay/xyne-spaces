@@ -22,7 +22,7 @@ class AuthV2Middleware {
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
     if (!clientId || !clientSecret) {
-      logger.error('GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set. Cannot start AuthV2Middleware.');
+      logger.error('[AUTH] GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set. Cannot start AuthV2Middleware.');
       throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables are required');
     }
 
@@ -51,17 +51,29 @@ class AuthV2Middleware {
   private attemptRefresh = async (req: Request, res: Response, next: NextFunction): Promise<boolean> => {
     try {
       const sessionId = req.cookies?.user_session_id;
-      logger.info(`[Auto-Refresh] Attempting refresh. Cookie found: ${!!sessionId}`);
+      logger.info(`[AUTH] [Auto-Refresh] Attempting refresh. Cookie found: ${!!sessionId}`, {
+        method: req.method,
+        path: req.path,
+        sessionId,
+        cookieTokenPresent: !!req.cookies?.google_access_token,
+      });
 
       if (!sessionId) {
-        logger.info('[Auto-Refresh] No session ID cookie found - cannot refresh');
+        logger.info('[AUTH] [Auto-Refresh] No session ID cookie found - cannot refresh', {
+          method: req.method,
+          path: req.path,
+        });
         return false;
       }
 
       const session = await this.userSessionService.getSessionById(sessionId);
 
       if (!session || !session.user) {
-        logger.warn(`[Auto-Refresh] Session check failed: Session or user not found for ID ${sessionId}`);
+        logger.warn(`[AUTH] [Auto-Refresh] Session check failed: Session or user not found for ID ${sessionId}`, {
+          sessionId,
+          sessionFound: !!session,
+          userFound: !!session?.user,
+        });
         return false;
       }
 
@@ -71,7 +83,13 @@ class AuthV2Middleware {
       const isExpired = now >= session.refreshTokenExpiry;
 
       if (!isActive || isExpired) {
-        logger.warn(`[Auto-Refresh] Session invalid: Status=${session.status}, Expired=${isExpired} (Expiry: ${session.refreshTokenExpiry})`);
+        logger.warn(`[AUTH] [Auto-Refresh] Session invalid: Status=${session.status}, Expired=${isExpired} (Expiry: ${session.refreshTokenExpiry})`, {
+          sessionId,
+          userId: session.user.id,
+          email: session.user.email,
+          sessionStatus: session.status,
+          refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
+        });
         return false;
       }
 
@@ -93,11 +111,20 @@ class AuthV2Middleware {
           const isInvalidGrant = googleError.response?.data?.error === 'invalid_grant';
 
           if (isInvalidGrant) {
-            logger.warn(`[Auto-Refresh] User token revoked for ${session.user.email}`);
+            logger.warn(`[AUTH] [Auto-Refresh] User token revoked for ${session.user.email}`, {
+              sessionId,
+              userId: session.user.id,
+              email: session.user.email,
+            });
             return false;
           } else {
             // For system errors, allow the refresh but log the issue
-            logger.warn(`[Auto-Refresh] Google verification FAILED (Transient): Allowing session. User: ${session.user.email}. Error: ${googleError}`);
+            logger.warn(`[AUTH] [Auto-Refresh] Google verification FAILED (Transient): Allowing session. User: ${session.user.email}. Error: ${googleError}`, {
+              sessionId,
+              userId: session.user.id,
+              email: session.user.email,
+              error: googleError.message,
+            });
           }
           // Proceed with local session if it's just a network/transient error
         }
@@ -157,7 +184,12 @@ class AuthV2Middleware {
       }
       // --------------------------------
 
-      logger.info(`[Auto-Refresh] Valid session found: ${sessionId} for user ${session.user.email}`);
+      logger.info(`[AUTH] [Auto-Refresh] Valid session found: ${sessionId} for user ${session.user.email}`, {
+        sessionId,
+        userId: session.user.id,
+        email: session.user.email,
+        googleId: session.user.providerUserId,
+      });
 
       // Generate new token
       const customToken = jwtService.generateToken({
@@ -166,6 +198,8 @@ class AuthV2Middleware {
         name: session.user.name,
         picture: session.user.picture,
       });
+
+      const tokenPreview = `${customToken.slice(0, 8)}...${customToken.slice(-6)}`;
 
       // Update session activity
       await this.userSessionService.updateSession(session.id, {
@@ -190,23 +224,47 @@ class AuthV2Middleware {
         name: session.user.name,
       };
 
-      logger.info('[Auto-Refresh] SUCCESS: Token refreshed and user attached to request');
+      logger.info('[AUTH] [Auto-Refresh] SUCCESS: Token refreshed and user attached to request', {
+        sessionId,
+        userId: session.user.id,
+        googleId: session.user.providerUserId,
+        email: session.user.email,
+        tokenPreview,
+      });
       next();
       return true;
 
     } catch (refreshError) {
-      logger.error('[Auto-Refresh] CRITICAL ERROR during auto-refresh:', refreshError);
+      logger.error('[AUTH] [Auto-Refresh] CRITICAL ERROR during auto-refresh:', {
+        sessionId: req.cookies?.user_session_id,
+        error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
+        stack: refreshError instanceof Error ? refreshError.stack : undefined,
+      });
       return false;
     }
   };
 
   authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const logPrefix = `[Auth] [${req.method} ${req.path}]`;
+    const sessionId = req.cookies?.user_session_id;
     
     try {
       // 1. Try to get a valid access token first
       const token = this.extractToken(req);
-      logger.info(`${logPrefix} Step 1: Token extraction result: ${!!token}`);
+      const tokenSource = req.cookies?.google_access_token
+        ? 'cookie'
+        : req.headers.authorization?.startsWith('Bearer ')
+          ? 'authorization_header'
+          : 'none';
+      const tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
+      logger.info(`[AUTH] ${logPrefix} Step 1: Token extraction result: ${!!token}`, {
+        method: req.method,
+        path: req.path,
+        sessionId,
+        tokenSource,
+        tokenPresent: !!token,
+        tokenPreview,
+      });
       
       let tokenIsValid = false;
 
@@ -223,30 +281,59 @@ class AuthV2Middleware {
                  email: user.email,
                  name: user.name,
                };
-               logger.info(`${logPrefix} Token verified successfully for user: ${user.email}`);
+               logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email}`, {
+                 sessionId,
+                 tokenSource,
+                 tokenPreview,
+                 tokenSub: decoded.sub,
+                 userId: user.id,
+                 googleId: user.providerUserId,
+                 email: user.email,
+               });
                tokenIsValid = true;
                return next();
              } else {
-               logger.warn(`${logPrefix} Token valid, but user not found in DB: ${decoded.sub}`);
+               logger.warn(`[AUTH] ${logPrefix} Token valid, but user not found in DB: ${decoded.sub}`, {
+                 sessionId,
+                 tokenSource,
+                 tokenPreview,
+                 tokenSub: decoded.sub,
+               });
              }
           }
         } catch (err) {
            // Token invalid/expired, log and fall through to refresh logic
            const isExpired = err instanceof Error && err.message === 'JWT token has expired';
            if (isExpired) {
-             logger.info(`${logPrefix} Token expired. Falling back to refresh.`);
+             logger.info(`[AUTH] ${logPrefix} Token expired. Falling back to refresh.`, {
+               sessionId,
+               tokenSource,
+               tokenPreview,
+             });
            } else {
-             logger.warn(`${logPrefix} Token invalid. Falling back to refresh. Error: ${err instanceof Error ? err.message : String(err)}`);
+             logger.warn(`[AUTH] ${logPrefix} Token invalid. Falling back to refresh. Error: ${err instanceof Error ? err.message : String(err)}`, {
+               sessionId,
+               tokenSource,
+               tokenPreview,
+               error: err instanceof Error ? err.message : String(err),
+             });
            }
         }
       } else {
-        logger.info(`${logPrefix} No token provided. Falling back to refresh.`);
+        logger.info(`[AUTH] ${logPrefix} No token provided. Falling back to refresh.`, {
+          sessionId,
+          tokenSource,
+        });
       }
 
       // If we reached here, token is either missing or invalid/expired.
       // 2. Fallback to Session Refresh
       if (!tokenIsValid) {
-        logger.info(`${logPrefix} Step 2: Attempting session refresh`);
+        logger.info(`[AUTH] ${logPrefix} Step 2: Attempting session refresh`, {
+          sessionId,
+          tokenSource,
+          tokenPreview,
+        });
         
         // Only attempt if we have a session cookie
         if (req.cookies?.user_session_id) {
@@ -255,22 +342,37 @@ class AuthV2Middleware {
              // Logs inside attemptRefresh will handle success details
              return; 
            } else {
-             logger.info(`${logPrefix} Refresh attempt failed.`);
+             logger.info(`[AUTH] ${logPrefix} Refresh attempt failed.`, {
+               sessionId,
+               tokenSource,
+               tokenPreview,
+             });
            }
         } else {
-          logger.info(`${logPrefix} No session cookie (user_session_id) present.`);
+          logger.info(`[AUTH] ${logPrefix} No session cookie (user_session_id) present.`, {
+            tokenSource,
+            tokenPreview,
+          });
         }
       }
 
       // 3. Final Failure
-      logger.warn(`${logPrefix} Authentication FAILED. No valid token and no valid session.`);
+      logger.warn(`[AUTH] ${logPrefix} Authentication FAILED. No valid token and no valid session.`, {
+        sessionId,
+        tokenSource,
+        tokenPreview,
+      });
       res.status(401).json({
         error: 'No session found',
         message: 'Session ID cookie is missing',
       });
 
     } catch (error) {
-      logger.error(`${logPrefix} CRITICAL middleware error:`, error);
+      logger.error(`[AUTH] ${logPrefix} CRITICAL middleware error:`, {
+        sessionId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       res.status(500).json({ 
         error: 'Authentication failed',
         message: 'Internal server error during authentication'
