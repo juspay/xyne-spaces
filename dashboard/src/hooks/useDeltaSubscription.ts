@@ -121,7 +121,7 @@ export function useDeltaSubscription<
     // 2. Cold cache — full fetch via zero.run().
     const fetchAll = async (): Promise<void> => {
       try {
-        const items = await zero.run(queryRef.current);
+        const items = await zero.run(queryRef.current, { type: 'complete' });
         const hasItems = Array.isArray(items) ? items.length > 0 : items !== null;
         if (hasItems) {
           const wm = computeWatermarkRef.current(items);
