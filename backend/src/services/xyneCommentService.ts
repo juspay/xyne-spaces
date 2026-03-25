@@ -1,12 +1,19 @@
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { BitbucketService } from '@/services/bitbucketService';
-import { CommentData } from '@/types/bitbucket';
+import { createGitHubService } from '@/services/githubService';
 import { config } from '@/config/env';
 import { workflowManager } from '@/workflows/services/workflowManager';
 import { WorkflowType, WorkflowExecutionStatus, isActiveStatus } from '@/workflows/types/workflow-enums';
 import { buildPRWorkflowContext } from './prWorkflowContextBuilder';
 import { randomUUID } from 'crypto';
+
+interface ProcessedComment {
+  text: string;
+  author: string;
+  filePath?: string;
+  lineNumber?: number;
+}
 
 export class XyneCommentService {
   private db: ReturnType<typeof DatabaseClient.getInstance>;
@@ -33,40 +40,70 @@ export class XyneCommentService {
       version: '1.0',
     });
 
-    // Step 1: Fetch all activities from Bitbucket (with pagination)
-    const bitbucketService = new BitbucketService({
-      baseUrl: config.bitbucket.baseUrl,
-      username: config.bitbucket.apiUsername,
-      password: config.bitbucket.password,
-      token: config.bitbucket.apiToken,
-      projectKey: projectName,
-      repositorySlug: repoName,
-    });
-    const allActivities: any[] = [];
-    let start = 0;
-    const limit = 100;
-    let hasMore = true;
+    // Detect if this is a GitHub or Bitbucket PR based on URL
+    const isGitHubPR = prUrl?.includes('github.com');
+    const isBitbucketPR = prUrl?.includes('bitbucket');
 
-    while (hasMore) {
-      const response = await bitbucketService.getPullRequestActivities(prId, limit, start);
-      allActivities.push(...(response.values || []));
-      
-      if (response.isLastPage || response.values.length === 0) {
-        hasMore = false;
-      } else {
-        start = response.nextPageStart ?? (start + limit);
+    let allComments: any[] = [];
+
+    if (isGitHubPR) {
+      const githubService = createGitHubService(projectName, repoName);
+      allComments = await githubService.getUnresolvedPullRequestComments(prId);
+
+      logger.info(`[Xyne-Comment] Fetched ${allComments.length} comments from GitHub for PR #${prId}`, {
+        version: '1.0',
+      });
+    } else if (isBitbucketPR) {
+      const bitbucketService = new BitbucketService({
+        baseUrl: config.bitbucket.baseUrl,
+        username: config.bitbucket.apiUsername,
+        password: config.bitbucket.password,
+        token: config.bitbucket.apiToken,
+        projectKey: projectName,
+        repositorySlug: repoName,
+      });
+      const allActivities: any[] = [];
+      let start = 0;
+      const limit = 100;
+      let hasMore = true;
+
+      while (hasMore) {
+        const response = await bitbucketService.getPullRequestActivities(prId, limit, start);
+        allActivities.push(...(response.values || []));
+        
+        if (response.isLastPage || response.values.length === 0) {
+          hasMore = false;
+        } else {
+          start = response.nextPageStart ?? (start + limit);
+        }
       }
+
+      allComments = allActivities;
+
+      logger.info(`[Xyne-Comment] Fetched ${allActivities.length} activities from Bitbucket for PR #${prId}`, {
+        version: '1.0',
+      });
+    } else {
+      logger.warn(`[Xyne-Comment] Unable to determine PR source from URL: ${prUrl}`, {
+        version: '1.0',
+      });
+      return;
     }
 
-    logger.info(`[Xyne-Comment] Fetched ${allActivities.length} activities for PR #${prId}`, {
+    // Step 2: Extract comments and filter for open blocker tasks
+    const filteredComments = this.filterOpenBlockerTasks(allComments, isGitHubPR);
+
+    logger.info(`[Xyne-Comment] Found ${filteredComments.length} unresolved tasks to process`, {
       version: '1.0',
     });
 
-    // Step 2: Extract comments and filter for open blocker tasks
-    const filteredComments = this.filterOpenBlockerTasks(allActivities);
-
-    logger.info(`[Xyne-Comment] Found ${filteredComments.length} open tasks to process`, {
-      version: '1.0',
+    filteredComments.forEach((comment, index) => {
+      logger.info(`[Xyne-Comment] Task ${index + 1}: ${comment.text?.substring(0, 100)}...`, {
+        version: '1.0',
+        author: comment.author,
+        file: comment.filePath,
+        line: comment.lineNumber,
+      });
     });
 
     if (filteredComments.length === 0) {
@@ -134,16 +171,28 @@ export class XyneCommentService {
   /**
    * Extract comments from activities and filter for open blocker tasks
    */
-  private filterOpenBlockerTasks(activities: any[]): CommentData[] {
+  private filterOpenBlockerTasks(activities: any[], isGitHub: boolean = false): ProcessedComment[] {
+    if (isGitHub) {
+      return activities.map((comment: any) => ({
+        text: comment.body,
+        author: comment.user?.login || 'unknown',
+        filePath: comment.path,
+        lineNumber: comment.line,
+      }));
+    }
+
     return activities
-      .filter((activity: any) => activity.action === 'COMMENTED' && activity.comment)
+      .filter((activity: any) => 
+        activity.action === 'COMMENTED' && 
+        activity.comment?.severity === 'BLOCKER' && 
+        activity.comment?.state === 'OPEN'
+      )
       .map((activity: any) => ({
-        ...activity.comment,
-        anchor: activity.commentAnchor || null
-      }))
-      .filter((comment: CommentData) => 
-        comment.severity === 'BLOCKER' && comment.state === 'OPEN'
-      );
+        text: activity.comment.text,
+        author: activity.comment.author?.user?.displayName || activity.comment.author?.user?.name || 'unknown',
+        filePath: activity.commentAnchor?.path,
+        lineNumber: activity.commentAnchor?.line,
+      }));
   }
 
   /**
@@ -194,7 +243,7 @@ export class XyneCommentService {
    */
   private async continueWorkflowWithPRComments(
     ticketId: string,
-    comments: CommentData[],
+    comments: ProcessedComment[],
     prId: number,
     prUrl: string
   ): Promise<void> {
@@ -261,18 +310,7 @@ export class XyneCommentService {
       });
 
       // Step 3: Format PR comments as the description
-      const commentsWithDetails = comments.map(c => ({
-        id: c.id,
-        text: c.text,
-        author: c.author?.displayName || c.author?.name || 'Unknown',
-        severity: c.severity,
-        state: c.state,
-        filePath: c.anchor?.path,
-        lineNumber: c.anchor?.line,
-        createdDate: c.createdDate,
-      }));
-
-      const prCommentsDescription = this.formatPRCommentsForDescription(commentsWithDetails, prId, prUrl);
+      const prCommentsDescription = this.formatPRCommentsForDescription(comments, prId, prUrl);
 
       // Step 4: Build workflow context based on workflow type
       const workflowType = (originalExecution.workflowType || originalExecution.workflow?.workflowType) as WorkflowType;
@@ -377,7 +415,7 @@ export class XyneCommentService {
         prId,
         workflowBranch,
         workflowType: workflowType,
-        commentsProcessed: commentsWithDetails.length,
+        commentsProcessed: comments.length,
       });
     } catch (error) {
       logger.error(`[Xyne-Comment] Failed to create workflow for PR comments:`, {
@@ -393,14 +431,7 @@ export class XyneCommentService {
    * Format PR comments as a description for workflow context (this becomes the primary task description)
    */
   private formatPRCommentsForDescription(
-    comments: Array<{
-      id: number;
-      text: string;
-      author: string;
-      severity?: string;
-      filePath?: string;
-      lineNumber?: number;
-    }>,
+    comments: ProcessedComment[],
     prId: number,
     prUrl: string
   ): string {

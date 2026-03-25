@@ -224,6 +224,8 @@ export async function cloneRepository(
       } catch {
         await git.checkout(['-b', branchName]);
       }
+    } else {
+      await git.checkout(['-b', branchName]);
     }
   }
 

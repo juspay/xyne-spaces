@@ -2,6 +2,8 @@ import { Router, Request, Response} from 'express';
 import { bitbucketWebhookService } from "@/services/bitbucketWebhookService";
 import { bitbucketWebhookMiddleware } from "@/middleware/bitbucketWebhookValidator";
 import { jenkinsWebhookMiddleware } from "@/middleware/jenkinsWebhookValidator";
+import { githubWebhookService } from "@/services/githubWebhookService";
+import { githubWebhookMiddleware } from "@/middleware/githubWebhookValidator";
 import { logger } from "@/utils/logger";
 import { handleJenkinsWebhook } from '@/bots/implementations/qa-alert-bot/qa-alert-bot';
 
@@ -187,6 +189,34 @@ async function handleBitbucketWebhook(req: Request, res: Response): Promise<void
 
 
 router.post('/bitbucket', bitbucketWebhookMiddleware.verify, handleBitbucketWebhook);
+
+async function handleGitHubWebhook(req: Request, res: Response): Promise<void> {
+  try {
+    const payload = req.body;
+    if (!payload) {
+      res.status(400).json({
+        success: false,
+        error: 'No data provided',
+      });
+      return;
+    }
+
+    const eventType = req.headers['x-github-event'] as string;
+    if (!eventType) {
+      logger.warn('[GitHub-Webhook] Missing X-GitHub-Event header');
+      res.status(400).json({ success: false, error: 'Missing X-GitHub-Event' });
+      return;
+    }
+
+    const result = await githubWebhookService.handleWebhookEvent(eventType, payload);
+    res.status(200).json(result);
+  } catch (error) {
+    logger.error('[GitHub-Webhook] Error:', error);
+    res.status(200).json({ success: true, message: 'Acknowledged' });
+  }
+}
+
+router.post('/github', githubWebhookMiddleware.verify, handleGitHubWebhook);
 
 // Use raw body parser for Jenkins webhook to preserve exact bytes for HMAC verification
 router.post('/qa-alerts', 

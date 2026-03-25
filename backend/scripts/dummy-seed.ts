@@ -426,6 +426,7 @@ async function main() {
       const project1 = await tx.project.create({
         data: {
           name: 'Xyne Spaces',
+          code: 'XYNE',
           description: 'Unified collaboration platform',
           createdBy: user1.id,
           updatedBy: user2.id
@@ -435,6 +436,7 @@ async function main() {
       const project2 = await tx.project.create({
         data: {
           name: 'Internal Tools',
+          code: 'INT',
           description: 'Internal productivity tools',
           createdBy: user3.id,
           updatedBy: user4.id
