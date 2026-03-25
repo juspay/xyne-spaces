@@ -209,6 +209,13 @@ export const queries = defineQueries({
           }
           break;
       }
+
+      // Exclude Support tickets from regular board/project views
+      // Support tickets are handled by IT Support Workflow
+      query = query.where(helpers =>
+        helpers.and(helpers.cmp('ticketType', '!=', BaseTicketType.Support)),
+      );
+
       // Build the base query with related data
       let finalQuery = query
         .orderBy('createdAt', 'desc')
@@ -821,7 +828,12 @@ export const queries = defineQueries({
   ),
 
   ticketsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) =>
-    zql.tickets.where('projectId', projectId).where('isArchived', false).related('tags').orderBy('createdAt', 'desc')
+    zql.tickets
+      .where('projectId', projectId)
+      .where('isArchived', false)
+      .where(helpers => helpers.cmp('ticketType', '!=', BaseTicketType.Support))
+      .related('tags')
+      .orderBy('createdAt', 'desc')
   ),
 
 
@@ -1680,8 +1692,15 @@ export const queries = defineQueries({
       limit: z.number().optional(),
     }),
     ({ args: { search, limit } }) => {
+      // Exclude Release and Support tickets from regular search
+      // Release tickets are managed separately, Support tickets are handled by IT Support Workflow
       let query = zql.tickets
-        .where(helpers => helpers.cmp('ticketType', '!=', BaseTicketType.Release))
+        .where(helpers =>
+          helpers.and(
+            helpers.cmp('ticketType', '!=', BaseTicketType.Release),
+            helpers.cmp('ticketType', '!=', BaseTicketType.Support),
+          ),
+        )
         .orderBy('createdAt', 'desc');
       if (search && search.trim()) {
         const searchValue = `%${search.trim()}%`;

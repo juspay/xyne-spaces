@@ -11,7 +11,14 @@ import { toast } from 'sonner';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { InputBox } from '../../ui/InputBox';
-import { MessageType, ChannelScopeType, ChannelVisibility, Conversation } from '@xyne/shared';
+import {
+  MessageType,
+  ChannelScopeType,
+  ChannelVisibility,
+  Conversation,
+  ChannelType,
+  BaseTicketType,
+} from '@xyne/shared';
 import { ALLOWED_FILE_TYPES } from '../../ui/utils/files';
 import { queries } from '../../../zero/queries';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
@@ -37,6 +44,7 @@ import { useCanCreateTicket } from '../../../hooks/usePermissions';
 import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
+import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
 
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
@@ -120,6 +128,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       { enabled: !!conversationId },
     );
     const channel = useChannel(channelId);
+    const isSupportChannel = channel?.type === ChannelType.SUPPORT;
 
     // Use all users for mention resolution
     const allUsersForMentionResolution = React.useMemo((): MentionResult[] => {
@@ -491,8 +500,39 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
           {...(channel?.scopeType === ChannelScopeType.DEFAULT &&
             canCreateTicket && {
               onCreateTicket: (description: string | undefined) => {
-                setTicketDescription(description || '');
-                setIsCreateTicketModalOpen(true);
+                void (async () => {
+                  if (isSupportChannel && user) {
+                    const messageContent = description || 'Support request';
+                    try {
+                      // Backend handles everything: ticket creation, bot message, workflow trigger
+                      const ticketPayload: CreateTicketRequest = {
+                        title: messageContent,
+                        description: messageContent,
+                        channelId: channelId,
+                        projectId: (channel.projectId as string | null) || '',
+                        createdBy: user.id,
+                        updatedBy: user.id,
+                        ticketType: BaseTicketType.Support,
+                        ...(conversationId && { sourceConversationId: conversationId }),
+                      };
+
+                      await createTicket(ticketPayload);
+
+                      inputBoxRef.current?.clearContent();
+                      toast.success('Support Ticket Created', {
+                        description: 'Your support request has been submitted and picked up by AI.',
+                      });
+                    } catch (error) {
+                      console.error('Failed to create support ticket:', error);
+                      toast.error('Failed to create ticket', {
+                        description: 'Please try again or contact support.',
+                      });
+                    }
+                  } else {
+                    setTicketDescription(description || '');
+                    setIsCreateTicketModalOpen(true);
+                  }
+                })();
               },
             })}
           onTranscriptSelect={(content: string) => {

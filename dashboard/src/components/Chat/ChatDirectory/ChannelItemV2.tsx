@@ -1,7 +1,7 @@
 import { ReactElement, useRef, useState, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Hash, Pencil, Headphones, X } from 'lucide-react';
-import { ChannelVisibility, ChannelScopeType } from '@xyne/shared';
+import { ChannelVisibility, ChannelScopeType, ChannelType } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
 import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
@@ -22,6 +22,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { standaloneNavigate } from '../../../utils/electronApp';
+import { SupportChannelBadge } from '../SupportChannelBadge';
 
 interface ChannelItemV2Props {
   channel: VisibleChannel;
@@ -78,6 +79,9 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
   // Get user status for 1-on-1 DMs only (not group DMs)
   const is1on1DM = channel.scopeType === ChannelScopeType.DM;
   const dmUser = useUser(is1on1DM && avatarUserId ? avatarUserId : '');
+
+  // Check if this is a support channel
+  const isSupportChannel = channel?.type === ChannelType.SUPPORT;
 
   const handleCloseDm = (e: React.MouseEvent): void => {
     e.preventDefault();
@@ -180,6 +184,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
           <span className='flex items-center'>{getIcon()}</span>
           <span ref={nameRef} className=' text-sm flex-1 truncate min-w-0 flex items-center gap-2'>
             <span className='visual-regression-hide'>{displayName}</span>
+            {isSupportChannel && <SupportChannelBadge />}
             {is1on1DM && (
               <StatusIndicator
                 statusEmoji={dmUser?.presenceStatus?.statusEmoji}

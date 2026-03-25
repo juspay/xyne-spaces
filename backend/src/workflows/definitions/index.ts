@@ -20,6 +20,7 @@ import { networkDocumentWorkflow } from './network-document-workflow/networkDocu
 import { integrityDebugWorkflow } from './integrity-debug-workflow/integrityDebugWorkflow'
 import { xyneAutoRcaWorkflow } from './xyne-auto-rca-workflow/xyneAutoRcaWorkflow'
 import { versionBumpWorkflow } from './version-bump-workflow/versionBumpWorkflow'
+import { itSupportWorkflow } from './it-support-workflow/itSupportWorkflow'
 import { WorkflowType } from '../types/workflow-enums'
 import {logger} from '@/utils/logger';
 
@@ -46,6 +47,7 @@ export const WORKFLOW_DEFINITIONS = {
   [WorkflowType.INTEGRITY_DEBUG_WORKFLOW]: integrityDebugWorkflow,
   [WorkflowType.XYNE_AUTO_RCA_WORKFLOW]: xyneAutoRcaWorkflow,
   [WorkflowType.VERSION_BUMP_WORKFLOW]: versionBumpWorkflow,
+  [WorkflowType.IT_SUPPORT_WORKFLOW]: itSupportWorkflow,
 } as const
 
 export function registerAllWorkflows(): void {
@@ -72,6 +74,7 @@ export function registerAllWorkflows(): void {
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.INTEGRITY_DEBUG_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.XYNE_AUTO_RCA_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.VERSION_BUMP_WORKFLOW])
+  workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.IT_SUPPORT_WORKFLOW])
 }
 
 export { workflowRegistry } from '../registry/workflowRegistry'

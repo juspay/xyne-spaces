@@ -394,6 +394,7 @@ export enum EmailType {
 export enum ChannelType {
   DEFAULT = 'DEFAULT',
   EMAIL = 'EMAIL',
+  SUPPORT = 'SUPPORT',
 }
 
 // @ts-ignore TS1294

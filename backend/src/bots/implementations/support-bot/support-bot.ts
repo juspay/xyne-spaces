@@ -1,0 +1,252 @@
+import { z } from 'zod'
+import { Bot, UnifiedBaseBot, unifiedBotUserService } from '@/bots/unified/index.js'
+import type {
+  BotExecutionContext,
+  InternalBotDefinition,
+  BotEvent,
+} from '@/bots/unified/types/index.js'
+import { logger } from '@/utils/logger'
+import { conversationService } from '@/services/conversationService'
+import { MessageType, User } from '@prisma/client'
+import { superpositionClient } from '@/services/superpositionClient'
+import { UserGroupRepository, UserRepository } from '@/database/repositories'
+import * as yaml from 'js-yaml'
+
+const CAC_KEYS = {
+  support_group_name: 'support_group_name',
+} as const
+
+type SupportBotInput = {
+  conversationId: string
+  ticketId: string
+  responseText: string
+  escalated?: boolean
+  userId: string
+  gcsPaths?: string[]
+  documentNames?: string[]
+  workflowExecutionId?: string
+  workflowStepId?: string
+}
+
+type SupportBotOutput = {
+  messageSent: boolean
+  conversationId: string
+}
+
+const SupportBotInputSchema = z.object({
+  conversationId: z.string().min(1, 'Conversation ID is required'),
+  ticketId: z.string().min(1, 'Ticket ID is required'),
+  responseText: z.string().min(1, 'Response text is required'),
+  escalated: z.boolean().optional(),
+  userId: z.string().min(1, 'User ID is required'),
+  gcsPaths: z.array(z.string()).optional(),
+  documentNames: z.array(z.string()).optional(),
+  workflowExecutionId: z.string().optional(),
+  workflowStepId: z.string().optional(),
+})
+
+const SupportBotOutputSchema: z.ZodType<SupportBotOutput> = z.object({
+  messageSent: z.boolean(),
+  conversationId: z.string(),
+})
+
+
+
+@Bot({
+  id: 'support-bot',
+  name: 'Support Bot',
+  email: 'support-bot@bot.xyne.ai',
+  description: 'Provides support responses for user queries',
+  inputSchema: SupportBotInputSchema,
+  outputSchema: SupportBotOutputSchema,
+  scope: 'all',
+  interactionMode: 'execute',
+})
+export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput> {
+  protected readonly definition: InternalBotDefinition<SupportBotInput, SupportBotOutput> = {
+    id: 'support-bot',
+    name: 'Support Bot',
+    email: 'support-bot@bot.xyne.ai',
+    description: 'Provides support responses for user queries',
+    runtimeType: 'internal',
+    inputSchema: SupportBotInputSchema,
+    outputSchema: SupportBotOutputSchema,
+    scope: 'all',
+  }
+
+  private userGroupRepository = new UserGroupRepository();
+  private userRepository = new UserRepository();
+  private cachedBotUser: User | null = null;
+
+  /**
+   * Get bot's User ID efficiently with caching
+   */
+  public async getBotUserId(): Promise<string> {
+    if (!this.cachedBotUser) {
+      this.cachedBotUser = await unifiedBotUserService.getBotByEmail('support-bot@bot.xyne.ai')
+      if (!this.cachedBotUser) {
+        throw new Error('Support bot user not found')
+      }
+    }
+    return this.cachedBotUser.id
+  }
+
+  protected async *executeInternal(
+    input: SupportBotInput,
+    context: BotExecutionContext
+  ): AsyncGenerator<BotEvent> {
+    try {
+      logger.info(`[SupportBot] Execution started: ${context.executionId}`, {
+        conversationId: input.conversationId,
+        escalated: input.escalated,
+      })
+
+      yield this.createErrorEvent('This bot does not currently accept commands.')
+    } catch (error) {
+      logger.error(`[SupportBot] Execution failed: ${context.executionId}`, error)
+      throw error
+    }
+  }
+
+  public async getSupportGroup(): Promise<{
+    id: string
+    name: string
+    memberCount: number
+  } | null> {
+    try {
+      const supportGroupAlias = await superpositionClient.getStringValue(CAC_KEYS.support_group_name, "itsupport", {})
+      const supportGroup = await this.userGroupRepository.findByName(supportGroupAlias)
+      if (supportGroup) {
+        const memberCount = supportGroup ? await this.userGroupRepository.getUserCount(supportGroup.id) : 0
+        return {
+          id: supportGroup.id,
+          name: supportGroup.name,
+          memberCount
+        }
+      }
+      return null
+    } catch (error) {
+      logger.error('[SupportBot] Failed to load support group name:', error)
+      return null
+    }
+  }
+
+  async getUser(userId: string): Promise<User | null> { 
+    try { 
+      const user = await this.userRepository.findById(userId);
+      return user;
+    } catch (error) {
+      logger.error(`[SupportBot] Failed to fetch user for ID ${userId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Generic function to send support messages
+   * Can be used for initial response or escalation
+   */
+  public async sendSupportMessage(params: {
+    conversationId: string
+    ticketId: string
+    userId: string
+    responseText?: string
+    gcsPaths?: string[]
+    documentNames?: string[]
+    workflowExecutionId?: string
+    workflowStepId?: string
+    isEscalation?: boolean
+  }): Promise<void> {
+    try {
+      logger.info(`[SupportBot] Sending support message to conversation: ${params.conversationId}`, {
+        isEscalation: params.isEscalation,
+      })
+
+      const supportGroup = await this.getSupportGroup()
+      // const user = await this.getUser(params.userId)
+
+      const botUserId = await this.getBotUserId()
+
+      // const userMention = `<span data-mention="" data-mention-type="user" class="chat-input-mention" data-user-id="${params.userId}" data-username="${user?.name}" data-user-email="${user?.email}" data-user-picture="${user?.picture}">@${user?.name}</span>`
+
+      let messageContent = ''
+
+      if (params.isEscalation) {
+        // Fetch team members
+        messageContent = `This issue is now escalated to <span data-mention="${supportGroup?.name}" data-mention-type="group" data-group-id="${supportGroup?.id}" data-group-name="${supportGroup?.name}" class="chat-input-group-mention" data-member-count="${supportGroup?.memberCount}">@${supportGroup?.name}</span> (${supportGroup?.memberCount} members)\nYou can reach out to any group member directly or continue the conversation here.`
+      } else {
+        // Initial response message - full details
+        messageContent = params.responseText || ''
+      }
+
+      let uploadedFiles: Array<{
+        originalName: string
+        fileName: string
+        fileSize: number
+        mimeType: string
+        fileUrl: string
+      }> | undefined
+
+      if (params.gcsPaths && params.gcsPaths.length > 0 && !params.isEscalation) {
+        const mimeTypeMap: Record<string, string> = {
+          'pdf': 'application/pdf',
+          'doc': 'application/msword',
+          'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'txt': 'text/plain',
+          'md': 'text/markdown',
+        }
+
+        uploadedFiles = params.gcsPaths.map((gcsPath, index) => {
+          const fileName = gcsPath.split('/').pop() || 'document'
+          const extension = fileName.split('.').pop()?.toLowerCase() || ''
+          const mimeType = mimeTypeMap[extension] || 'application/octet-stream'
+          const originalName = params.documentNames?.[index] || fileName
+
+          return {
+            originalName,
+            fileName,
+            fileSize: 0,
+            mimeType,
+            fileUrl: gcsPath,
+          }
+        })
+      }
+
+      // Build message content with frontmatter if workflow context exists
+      let finalMessageContent = messageContent
+      if (params.workflowExecutionId && params.workflowStepId && !params.isEscalation) {
+        const frontmatterData = {
+          workflowActions: {
+            workflowExecutionId: params.workflowExecutionId,
+            workflowStepId: params.workflowStepId,
+            responded: false,
+            buttons: [
+              { label: 'Mark as Solved', action: 'resolved', variant: 'outline' },
+              { label: 'Escalate to Team', action: 'escalate', variant: 'outline' }
+            ]
+          }
+        }
+        finalMessageContent = '---\n' + yaml.dump(frontmatterData) + '---\n\n' + messageContent
+      }
+
+      await conversationService.addMessageToConversation({
+        conversationId: params.conversationId,
+        userId: botUserId,
+        content: finalMessageContent,
+        msgType: MessageType.BOT,
+        ...(params.workflowExecutionId && params.workflowStepId && !params.isEscalation && {
+          metadata: {
+            isAiGenerated: true,
+            contentFormat: 'markdown',
+            ticketId: params.ticketId,
+          }
+        }),
+        ...(uploadedFiles && { uploadedFiles })
+      })
+
+      logger.info(`[SupportBot] Message sent to conversation: ${params.conversationId}`)
+    } catch (error) {
+      logger.error(`[SupportBot] Failed to send support message:`, error)
+      throw error
+    }
+  }
+}

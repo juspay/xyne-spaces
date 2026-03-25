@@ -12,8 +12,6 @@ import {
 import type { FlowJson } from '@/bots/json-ui/types';
 import { NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { notificationService as realTimeNotificationService } from '@/notification-service';
-import { ticketService } from './ticketService';
-import { AI_STAGES } from '@/workflows/types/workflow-enums';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
 import {  getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
@@ -113,8 +111,6 @@ class NotificationService {
         logger.warn(`Ticket not found for workflow: ${workflowId}`);
         return;
       }
-
-      ticketService.updateTicketStageForWorkflow(ticket.id, 'BOT', AI_STAGES.HUMAN_INTERVENTION);
 
       logger.info(
         `[TicketBot] Found workflow with ticket ${ticket.id}, conversationId: ${ticket.conversationId || 'none'}`

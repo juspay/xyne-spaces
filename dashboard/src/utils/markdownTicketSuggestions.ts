@@ -63,7 +63,10 @@ function parseFrontmatter(markdown: string): { data: unknown; end: number } | nu
  * @param markdown - Raw markdown content with optional frontmatter containing ticket data
  * @returns Parsed ticket suggestions, created tickets, and clean markdown content
  */
-export function parseMarkdownWithTicketSuggestions(markdown: string): ParsedMarkdown {
+export function parseMarkdownWithTicketSuggestions(
+  markdown: string,
+  hasSuggestedTickets = true,
+): ParsedMarkdown {
   const frontmatter = parseFrontmatter(markdown);
 
   if (!frontmatter || !frontmatter.data) {
@@ -75,6 +78,14 @@ export function parseMarkdownWithTicketSuggestions(markdown: string): ParsedMark
   }
 
   const { data, end } = frontmatter;
+
+  if (!hasSuggestedTickets) {
+    return {
+      ticketSuggestions: [],
+      ticketsCreated: [],
+      content: markdown.substring(end).trim(),
+    };
+  }
 
   // Type guard and extract suggestions
   const dataObj = data as Record<string, unknown>;

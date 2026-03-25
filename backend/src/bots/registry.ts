@@ -42,6 +42,9 @@ import '@/bots/implementations/bitbucket-bot/bitbucket-bot.js';
 
 import '@/bots/implementations/qa-alert-bot/qa-alert-bot.js';
 
+// Support Bot - system bot for IT support responses
+import '@/bots/implementations/support-bot/support-bot.js';
+
 // Add more internal bot imports here...
 // import '@/bots/implementations/my-bot/my-bot.js';
 

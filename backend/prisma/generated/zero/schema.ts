@@ -143,6 +143,7 @@ export enum ChannelScopeType {
 export enum ChannelType {
   DEFAULT = "DEFAULT",
   EMAIL = "EMAIL",
+  SUPPORT = "SUPPORT",
 }
 
 export enum ChannelRole {
