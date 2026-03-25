@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { ElectronEnrollmentSteps } from '../../components/Auth/ElectronEnrollmentSteps';
 import { indexedDBService } from '../../services/indexedDBService';
 import GoogleLogo from '../../assets/icons/GoogleLogo';
+import { MicrosoftLogo } from '../../assets/icons/MicrosoftLogo';
 import { Loader2 } from 'lucide-react';
 import { ShineBorder } from '../../components/ui/shine-border';
 import { ThemeProvider } from '@juspay/blend-design-system';
@@ -26,7 +27,8 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
  * - Smooth transitions and hover states
  */
 const AuthScreen = (): ReactElement => {
-  const { isAuthenticated, isLoading, error, signInWithGoogle, clearError } = useAuth();
+  const { isAuthenticated, isLoading, error, signInWithGoogle, signInWithMicrosoft, clearError } =
+    useAuth();
   const [searchParams] = useSearchParams();
   const [isEnrollmentFlow, setIsEnrollmentFlow] = useState(false);
 
@@ -62,6 +64,11 @@ const AuthScreen = (): ReactElement => {
   const handleGoogleSignIn = (): void => {
     clearError();
     signInWithGoogle();
+  };
+
+  const handleMicrosoftSignIn = (): void => {
+    clearError();
+    signInWithMicrosoft();
   };
 
   if (isAuthenticated) {
@@ -134,7 +141,7 @@ const AuthScreen = (): ReactElement => {
               {/* Login Section */}
               {!isLoading ? (
                 !isEnrollmentFlow && (
-                  <div className='flex flex-col h-10 justify-center items-center'>
+                  <div className='flex flex-col justify-center items-center'>
                     {/* Google Sign In Button */}
                     <div className='w-full max-w-[280px] md:max-w-[320px]'>
                       <button
@@ -152,6 +159,27 @@ const AuthScreen = (): ReactElement => {
                         </span>
                         <span className='text-sm font-semibold text-center text-white'>
                           Sign in with Google
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* Microsoft Sign In Button */}
+                    <div className='w-full max-w-[280px] md:max-w-[320px] mt-3'>
+                      <button
+                        disabled={isLoading}
+                        onClick={handleMicrosoftSignIn}
+                        className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white rounded-[10px] overflow-hidden h-12'
+                        data-track-category='Auth'
+                        data-track-name='MicrosoftSignIn'
+                      >
+                        <span
+                          data-button-left-slot='true'
+                          className='flex items-center justify-center'
+                        >
+                          <MicrosoftLogo />
+                        </span>
+                        <span className='text-sm font-semibold text-center text-white'>
+                          Sign in with Microsoft
                         </span>
                       </button>
                     </div>

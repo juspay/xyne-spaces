@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { OAuth2Client } from 'google-auth-library';
+// import { OAuth2Client } from 'google-auth-library';
 import { logger } from '../utils/logger';
 import { loggerContext, LogContext } from '@/utils/logger';
 import { UserService } from '../services/userService';
@@ -10,7 +10,7 @@ import '../types/express'; // Import the Express type extensions
 import { config } from '@/config/env';
 
 export class AuthMiddleware {
-  private googleClient?: OAuth2Client;
+  // private googleClient?: OAuth2Client;
   private userService?: UserService;
   private userSessionService?: UserSessionService;
   private googleAuthEnabled: boolean;
@@ -23,7 +23,7 @@ export class AuthMiddleware {
     this.googleAuthEnabled = !!(clientId && clientSecret);
 
     if (this.googleAuthEnabled) {
-      this.googleClient = new OAuth2Client(clientId, clientSecret);
+      // this.googleClient = new OAuth2Client(clientId, clientSecret);
       this.userService = new UserService();
       this.userSessionService = new UserSessionService();
       logger.info('Google OAuth authentication enabled');
@@ -368,8 +368,8 @@ export class AuthMiddleware {
     sessionId: string
   ): Promise<{ success: boolean; customToken?: string; error?: string }> {
     try {
-      if (!this.userSessionService || !this.googleClient) {
-        return { success: false, error: 'Google authentication not configured' };
+      if (!this.userSessionService) {
+        return { success: false, error: 'Session service not configured' };
       }
 
       // Find session by ID

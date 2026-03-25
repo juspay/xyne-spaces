@@ -208,6 +208,7 @@ export enum ConversationParticipation {
 
 export enum AuthProvider {
   GOOGLE = "GOOGLE",
+  MICROSOFT = "MICROSOFT",
   API_KEY = "API_KEY",
 }
 
@@ -1947,6 +1948,7 @@ export const sessionRecordingFileTable = table("session_recording_files")
     id: string(),
     sessionId: string(),
     userId: string(),
+    url: string().optional(),
     status: enumeration<SessionRecordingProcessStatus>(),
     lastProcessedTurn: number().optional(),
   })

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { OAuth2Client, gaxios } from 'google-auth-library';
+import axios from 'axios';
 import { jwtService } from '../services/jwtService';
 import { UserService } from '../services/userService';
 import { logger as baseLogger } from '../utils/logger';
@@ -74,22 +75,23 @@ class AuthV2Middleware {
         return false;
       }
 
-      // --- Google Verification Step ---
-      if (session.refreshToken) {
+      // --- Provider Verification Step ---
+      // Only verify with Google if the user authenticated via Google
+      if (session.user.authProvider === 'GOOGLE' && session.refreshToken) {
         try {
           // Verify if the user is still valid in Google by checking their refresh token
           this.googleClient.setCredentials({ refresh_token: session.refreshToken });
-          
-          // Attempt to get a new access token. 
+
+          // Attempt to get a new access token.
           // If the user has been deleted or suspended in Google, this should throw.
           await this.googleClient.getAccessToken();
-          
+
           logger.info(`[Auto-Refresh] Google verification successful for user ${session.user.email}`);
         } catch (err) {
           const googleError = err as gaxios.GaxiosError;
           // Check if it's a user-related error vs system error
           const isInvalidGrant = googleError.response?.data?.error === 'invalid_grant';
-  
+
           if (isInvalidGrant) {
             logger.warn(`[Auto-Refresh] User token revoked for ${session.user.email}`);
             return false;
@@ -99,10 +101,59 @@ class AuthV2Middleware {
           }
           // Proceed with local session if it's just a network/transient error
         }
-      } else {
-         // If for some reason we rely on a session without a refresh token (unlikely for Google auth flow, but consistent with prior logic)
-         // we might want to log this.
-         logger.info(`[Auto-Refresh] No refresh token in session for user ${session.user.email}. Skipping Google check.`);
+      } else if (session.user.authProvider === 'MICROSOFT') {
+        // Verify if the user is still valid in Azure AD via Microsoft Graph API
+        if (session.accessToken) {
+          try {
+            const graphResponse = await axios.get('https://graph.microsoft.com/v1.0/me', {
+              headers: { Authorization: `Bearer ${session.accessToken}` },
+              validateStatus: () => true, // Don't throw on non-2xx
+            });
+
+            if (graphResponse.status === 200) {
+              logger.info(`[Auto-Refresh] Microsoft Graph verification successful for user ${session.user.email}`);
+            } else if (graphResponse.status === 401) {
+              // Access token expired — try refreshing via Microsoft token endpoint
+              const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+              const tokenResponse = await axios.post(
+                `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+                new URLSearchParams({
+                  client_id: process.env.MICROSOFT_CLIENT_ID!,
+                  client_secret: process.env.MICROSOFT_CLIENT_SECRET!,
+                  grant_type: 'refresh_token',
+                  refresh_token: session.refreshToken,
+                  scope: 'openid email profile User.Read',
+                }),
+                {
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                  validateStatus: () => true,
+                }
+              );
+
+              if (tokenResponse.status === 200) {
+                const tokenData = tokenResponse.data as { access_token: string };
+                await this.userSessionService.updateSession(session.id, {
+                  accessToken: tokenData.access_token,
+                });
+                logger.info(`[Auto-Refresh] Microsoft token refreshed for user ${session.user.email}`);
+              } else {
+                logger.warn(`[Auto-Refresh] Microsoft token refresh failed for ${session.user.email}. User may be disabled in Azure AD.`);
+                return false;
+              }
+            } else {
+              // 403 or other error — user likely disabled/deleted in Azure AD
+              logger.warn(`[Auto-Refresh] Microsoft Graph returned ${graphResponse.status} for ${session.user.email}. User may be disabled in Azure AD.`);
+              return false;
+            }
+          } catch (err) {
+            // Network/transient error — allow session to continue
+            logger.warn(`[Auto-Refresh] Microsoft Graph verification failed (transient) for ${session.user.email}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        } else {
+          logger.info(`[Auto-Refresh] No access token for Microsoft user ${session.user.email}. Skipping Graph check.`);
+        }
+      } else if (!session.refreshToken) {
+         logger.info(`[Auto-Refresh] No refresh token in session for user ${session.user.email}. Skipping provider check.`);
       }
       // --------------------------------
 

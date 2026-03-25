@@ -23,6 +23,7 @@ interface AuthContext {
 
 type AuthEvent =
   | { type: 'GOOGLE_SIGNIN' }
+  | { type: 'MICROSOFT_SIGNIN' }
   | { type: 'LOGOUT' }
   | { type: 'SESSION_VALIDATED'; user: User; isNewUser?: boolean }
   | { type: 'AUTH_ERROR'; message: string }
@@ -254,6 +255,12 @@ export const authMachine = createMachine(
               },
             },
           ],
+          MICROSOFT_SIGNIN: {
+            target: 'authenticating',
+            actions: {
+              type: 'initiateMicrosoftSignIn',
+            },
+          },
           SESSION_VALIDATED: {
             target: 'authenticated',
             actions: {
@@ -406,6 +413,22 @@ export const authMachine = createMachine(
           // Ignore Google Sign-In initiation errors
         }
       },
+      initiateMicrosoftSignIn: () => {
+        try {
+          const isElectron = typeof window.electronAPI?.openExternal === 'function';
+          const loginUrl = isElectron
+            ? `${API_BASE_URL}/v2/auth/microsoft/login?platform=electron`
+            : `${API_BASE_URL}/v2/auth/microsoft/login`;
+
+          if (isElectron && window.electronAPI) {
+            window.electronAPI.openExternal(loginUrl);
+          } else {
+            window.location.href = loginUrl;
+          }
+        } catch {
+          // Ignore Microsoft Sign-In initiation errors
+        }
+      },
       setAuthenticatedUser: assign(({ context, event }) => {
         if (event.type !== 'SESSION_VALIDATED') {
           return context;
@@ -492,7 +515,7 @@ export const authMachine = createMachine(
               headers['x-user-email'] = userEmail;
             }
             // Note: Using direct axios call instead of apiInstance
-            const response = await axios.get(`${API_BASE_URL}/auth/me`, {
+            const response = await axios.get(`${API_BASE_URL}/v2/auth/me`, {
               withCredentials: true,
               headers: {
                 // eslint-disable-next-line @typescript-eslint/naming-convention
