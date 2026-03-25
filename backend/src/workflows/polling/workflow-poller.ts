@@ -307,15 +307,11 @@ export class WorkflowPoller {
       logger.error(`Failed to generate consolidated knowledge for ${execution.id}:`, err)
     })
 
-    // Cleanup workspace directory for parent workflows (not child executions)
-    // The workspace is at /tmp/{parentExecutionId} and is shared across all agentic steps
-    if (!execution.parentWorkflowExecutionId) {
       const workspacePath = `/tmp/${execution.id}`
       logger.info(`🧹 Cleaning up workspace for completed parent workflow: ${workspacePath}`)
       await cleanupRepository(workspacePath).catch((err: Error) => {
         logger.warn(`Failed to cleanup workspace ${workspacePath}:`, err)
       })
-    }
 
     // Send workflow completion notification
     await notificationHooks.onWorkflowCompletion(execution.workflowId, 'SUCCESS')
