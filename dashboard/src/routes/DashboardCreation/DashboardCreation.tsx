@@ -51,7 +51,7 @@ export const DashboardCreation: React.FC = () => {
   const dashboardList = dashboards || [];
 
   return (
-    <div className='flex h-full bg-background rounded-lg shadow-sm'>
+    <div className='flex h-full bg-background md:rounded-2xl shadow-sm overflow-hidden'>
       {/* Left Panel - Create Dashboard Form */}
       <div className='w-80 border-r border-border bg-muted flex flex-col'>
         <div className='p-4 border-b border-border'>

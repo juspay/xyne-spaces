@@ -62,9 +62,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
   // For full-screen pages, we don't need the directory sidebar
   if (isFullScreenPage) {
     return (
-      <main
-        className={cn('h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md')}
-      >
+      <main className={cn('h-full relative md:rounded-2xl overflow-hidden shadow-md')}>
         <Outlet />
       </main>
     );
@@ -75,7 +73,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
       <ConversationPrefetcher />
       <div
         ref={containerRef}
-        className='h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'
+        className='h-full relative md:rounded-2xl overflow-hidden shadow-md'
         data-component='ChatScreen'
       >
         {isWideScreen ? (

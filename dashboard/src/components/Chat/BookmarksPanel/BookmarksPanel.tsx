@@ -27,7 +27,7 @@ const BookmarksPanel = (): ReactElement => {
 
   // Render the left panel content (exact same UI)
   const renderLeftPanel = (): ReactElement => (
-    <div className='flex-1 h-full flex flex-col rounded-lg overflow-hidden bg-background'>
+    <div className='flex-1 h-full flex flex-col overflow-hidden bg-background'>
       {/* Header */}
       <div className='relative p-4 bg-background'>
         <div className='flex items-center gap-2'>
@@ -102,7 +102,7 @@ const BookmarksPanel = (): ReactElement => {
 
   // Desktop view - two-panel layout with resizable panels
   return (
-    <div className='flex h-full w-full md:rounded-2xl overflow-hidden shadow-md'>
+    <div className='flex h-full w-full overflow-hidden shadow-md'>
       <PanelGroup
         direction='horizontal'
         className='flex align-top h-full'
