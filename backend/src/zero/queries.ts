@@ -113,6 +113,15 @@ export const queries = defineQueries({
         .one();
     }
   ),
+  conversationParticipantByConversationId: defineQuery(
+    z.object({ conversationId: z.string() }),
+    ({ ctx, args: { conversationId } }) => {
+      return zql.conversation_participants
+        .where('conversationId', conversationId)
+        .where('userId', ctx.userID)
+        .one();
+    }
+  ),
   getConversationByCallId: defineQuery(
     z.object({ callId: z.string() }),
     ({ ctx, args: { callId } }) => {
@@ -1220,17 +1229,7 @@ export const queries = defineQueries({
             })
             .related('attachments'),
         )
-        .related('parentMessage')
-        .related('participants', participantQuery =>
-          participantQuery
-            .where(helpers =>
-              helpers.or(
-                helpers.cmp('participationType', ConversationParticipation.AUTHOR),
-                helpers.cmp('userId', ctx.userID),
-              ),
-            )
-            .orderBy('joinedAt', 'asc')
-        );
+        .related('parentMessage');
 
       // Apply ordering based on direction
       const orderDirection = direction === 'forward' ? 'desc' : 'asc';
@@ -1263,11 +1262,6 @@ export const queries = defineQueries({
             .related('attachments'),
         )
         .related('parentMessage')
-        .related('participants', participantQuery =>
-          participantQuery
-            .where('participationType', ConversationParticipation.AUTHOR)
-            .orderBy('joinedAt', 'asc'),
-        )
         .related('ticket')
         .orderBy('createdAt', 'desc')
         .limit(limit);
@@ -1289,11 +1283,6 @@ export const queries = defineQueries({
             .related('attachments'),
         )
         .related('parentMessage')
-        .related('participants', participantQuery =>
-          participantQuery
-            .where('participationType', ConversationParticipation.AUTHOR)
-            .orderBy('joinedAt', 'asc'),
-        )
         .related('ticket')
         .orderBy('createdAt', 'desc')
         .limit(limit);

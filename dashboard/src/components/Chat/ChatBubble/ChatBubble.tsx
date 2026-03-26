@@ -31,7 +31,7 @@ import { cn } from '../../../utils/classNames';
 import { copyHtmlToClipboard, markdownToHtml } from '../../../utils/clipboardUtils';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
-import ReplyLayout from '../ReplyLayout/ReplyLayout';
+import ReplyLayoutV2 from '../ReplyLayout/ReplyLayoutV2';
 import { CallLayout } from '../CallLayout';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
@@ -897,7 +897,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         </div>
       )}
       {replies && (
-        <ReplyLayout
+        <ReplyLayoutV2
           replies={
             conversation
               ? {

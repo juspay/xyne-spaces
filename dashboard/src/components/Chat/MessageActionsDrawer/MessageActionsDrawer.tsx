@@ -286,12 +286,13 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
         )}
 
         {/* Conversation Subscription */}
-        {onReplyInThread && conversationId && (
+        {open && onReplyInThread && conversationId && (
           <ConversationSubscription
             conversationId={conversationId}
             {...(conversation && { conversation })}
             variant='full'
             className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-foreground hover:bg-accent'
+            menuOpen={open}
           />
         )}
 
