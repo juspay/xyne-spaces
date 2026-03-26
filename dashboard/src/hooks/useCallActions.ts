@@ -5,6 +5,12 @@ import { roomActor } from '../machines/roomMachine';
 import { CallType, CallOrigin } from '@xyne/shared';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { usePlatform } from './usePlatform';
+import { useAuthContextValues } from './useAuth';
+import { isUserActiveInCall } from './useCalls';
+import { QueryResultType } from '@rocicorp/zero';
+import { queries } from '../zero/queries';
+
+type ActiveCall = QueryResultType<typeof queries.userActiveCalls>[number];
 
 interface PendingAction {
   type: 'JOIN_CALL' | 'INITIATE_CALL';
@@ -28,6 +34,7 @@ interface UseCallActionsReturn {
   isCurrentChannelOnCall: boolean;
   hasActiveCallInChannel: boolean;
   isUserInCurrentChannelCall: boolean;
+  isUserInChannelCallElsewhere: boolean;
   machineState: string;
 }
 
@@ -60,7 +67,7 @@ export const useCallActions = ({
   const isCurrentChannelOnCall = isInCall && stateSnapshot.context.channelId === channelId;
 
   // Get active calls from roomActor context
-  const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
+  const activeCalls = useSelector(roomActor, state => state.context.activeCalls) as ActiveCall[];
 
   // Find active call in the current channel
   const currentChannelCall = activeCalls?.find(
@@ -74,6 +81,11 @@ export const useCallActions = ({
     currentChannelCall &&
     (isCurrentChannelOnCall || stateSnapshot.context.externalId === currentChannelCall.externalId)
   );
+
+  // Check cross-device active status via DB participant record
+  const { userID } = useAuthContextValues();
+  const channelCallParticipants = currentChannelCall?.participants ?? [];
+  const isUserInChannelCallElsewhere = isUserActiveInCall(channelCallParticipants, userID);
 
   // Watch for machine state changes and execute pending action when idle
   useEffect(() => {
@@ -178,6 +190,7 @@ export const useCallActions = ({
     isCurrentChannelOnCall,
     hasActiveCallInChannel,
     isUserInCurrentChannelCall,
+    isUserInChannelCallElsewhere,
     machineState: typeof machineState === 'string' ? machineState : JSON.stringify(machineState),
   };
 };

@@ -46,13 +46,18 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   conversationId,
   isMember,
 }) => {
-  const { handleCallClick, hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } =
-    useCallActions({
-      channelId,
-      targetUserIds,
-      callDisplayName,
-      conversationId,
-    });
+  const {
+    handleCallClick,
+    hasActiveCallInChannel,
+    isUserInCurrentChannelCall,
+    isInCall,
+    isUserInChannelCallElsewhere,
+  } = useCallActions({
+    channelId,
+    targetUserIds,
+    callDisplayName,
+    conversationId,
+  });
 
   const { showConfirmModal, modalContent, handleCallAction, handleConfirmCall, closeModal } =
     useCallConfirmation({
@@ -87,7 +92,9 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
       : hasActiveCallInChannel
         ? isUserInCurrentChannelCall
           ? 'Leave call'
-          : 'Join ongoing call'
+          : isUserInChannelCallElsewhere
+            ? 'Switch'
+            : 'Join ongoing call'
         : isInCall
           ? 'End current call and start new one'
           : 'Start audio call';

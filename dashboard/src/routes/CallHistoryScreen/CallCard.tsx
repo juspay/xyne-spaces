@@ -37,6 +37,8 @@ import {
 } from '../../components/ui/dropdown-menu';
 import { usePlatform } from '../../hooks/usePlatform';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
+import { useSelector } from '@xstate/react';
+import { roomActor } from '../../machines/roomMachine';
 
 interface UpcomingCallCardProps {
   call: Call;
@@ -299,6 +301,9 @@ export const CallCard = ({
   const isCallJoinable = isScheduledCallJoinable(call);
   const isActiveState = call.status === CallStatus.ACTIVE;
 
+  const currentCallId = useSelector(roomActor, state => state.context.externalId);
+  const isUserInThisDevice = currentCallId === call.externalId;
+
   const isUserChannelMember = !!channel;
   const hasTranscript = Boolean(call.transcript);
 
@@ -497,19 +502,17 @@ export const CallCard = ({
                 </Tooltip>
               </>
             )}
-            {isUserInvited && (
+            {isUserInvited && !isUserInThisDevice && (
               <Button
                 onClick={onCallClick}
                 variant='outline'
                 data-testid='call-join-button'
                 className={cn(
-                  isActiveState && !hasCurrentUserJoined
+                  isActiveState
                     ? 'ring ring-green-200 border-green-600 hover:bg-card rounded-lg h-8'
-                    : isCallJoinable && !hasCurrentUserJoined
+                    : isCallJoinable
                       ? 'border-border hover:bg-card rounded-lg h-8'
-                      : (isActiveState || isCallJoinable) && hasCurrentUserJoined
-                        ? 'hidden'
-                        : 'size-7',
+                      : 'size-7',
                   'gap-1.5 items-center',
                 )}
               >
@@ -517,14 +520,14 @@ export const CallCard = ({
                   color={isActiveState ? '#229C10' : 'hsl(var(--muted-foreground))'}
                   size={12}
                 />
-                {(isActiveState || isCallJoinable) && !hasCurrentUserJoined && (
+                {(isActiveState || isCallJoinable) && (
                   <span
                     className={cn(
                       'font-medium text-sm',
                       isActiveState ? 'text-green-600 hover:text-green-600' : 'text-foreground',
                     )}
                   >
-                    Join Call
+                    {hasCurrentUserJoined ? 'Switch' : 'Join Call'}
                   </span>
                 )}
               </Button>
