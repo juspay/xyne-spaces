@@ -1,9 +1,10 @@
 import React from 'react';
 import { Bell, BellOff } from 'lucide-react';
+import { useQuery } from '../../../hooks/useQuery';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
-import { useAuthContext } from '../../../providers/AuthProvider';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 
 interface ConversationSubscriptionProps {
@@ -11,19 +12,26 @@ interface ConversationSubscriptionProps {
   conversation?: ConversationWithTicket;
   variant?: 'icon-only' | 'full' | 'dropdown';
   className?: string;
+  menuOpen?: boolean;
 }
 
 export const ConversationSubscription: React.FC<ConversationSubscriptionProps> = ({
   conversationId,
-  conversation: conversation,
   variant = 'icon-only',
   className = '',
+  menuOpen,
 }) => {
   const zero = useZero();
-  const { user } = useAuthContext();
 
-  // Find current user's participant record
-  const participant = conversation?.participants?.find(p => p.userId === user?.id);
+  const shouldFetch = variant === 'dropdown' || variant === 'full' ? menuOpen === true : true;
+
+  const [participant, participantDetails] = useQuery(
+    queries.conversationParticipantByConversationId({ conversationId }),
+    { enabled: shouldFetch },
+  );
+
+  if (!shouldFetch) return null;
+  if (participantDetails.type !== 'complete') return null;
 
   const isSubscribed = participant?.isSubscribed ?? false;
   const participationType = participant?.participationType;

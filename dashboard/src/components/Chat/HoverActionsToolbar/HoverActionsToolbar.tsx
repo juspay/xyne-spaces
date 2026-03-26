@@ -324,13 +324,14 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {hasEditSection && hasSubscriptionSection && <DropdownMenuSeparator />}
 
                   {/* Conversation Subscription */}
-                  {onReplyInThread && conversationId && (
+                  {isDropdownOpen && onReplyInThread && conversationId && (
                     <DropdownMenuItem asChild>
                       <ConversationSubscription
                         conversationId={conversationId}
                         {...(conversation && { conversation })}
                         variant='dropdown'
                         className='w-full'
+                        menuOpen={isDropdownOpen}
                       />
                     </DropdownMenuItem>
                   )}
