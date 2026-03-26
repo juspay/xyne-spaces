@@ -11,7 +11,9 @@ import { useRecapData } from '../../hooks/useRecapData';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuth } from '../../hooks/useAuth';
 import type { ChannelListItemProps, RecapSettingsProps } from './RecapPanel.types';
-import { useAllVisibleChannels } from '../../hooks/useChannels';
+import { useAllVisibleChannels, searchChannels } from '../../hooks/useChannels';
+
+const DISPLAY_LIMIT = 5;
 
 const ChannelListItem = ({
   channel,
@@ -77,34 +79,31 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // Reset selectedIds and search query when modal opens
   // Using a ref to track the last synced subscription ids to avoid resetting during user interaction
   useEffect(() => {
     if (isOpen) {
       setSearchQuery('');
+      setIsExpanded(false);
       // Only reset from subscriptions when opening - use subscriptions directly
       setSelectedIds(new Set(subscriptions.map(s => s.channelId)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  // Filter and sort channels based on search query and selection
+  // Use fuse-based search when there's a query for better results
   const filteredChannels = useMemo(() => {
     if (!channels || channels.length === 0) return [];
 
-    let result = channels;
-
-    // Filter by search query
+    // When searching, use fuse-based search for better results
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      result = result.filter((channel: { name: string }) =>
-        channel.name.toLowerCase().includes(query),
-      );
+      return searchChannels(channels, searchQuery, channels.length);
     }
 
-    // Sort: subscribed channels first, then by name
-    return [...result].sort((a: Channel, b: Channel) => {
+    // Without search, sort: subscribed channels first, then by name
+    return [...channels].sort((a: Channel, b: Channel) => {
       const aSelected = selectedIds.has(a.id);
       const bSelected = selectedIds.has(b.id);
 
@@ -118,6 +117,26 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
     });
   }, [channels, searchQuery, selectedIds]);
 
+  // Determine which channels to display based on expansion and search
+  const displayChannels = useMemo(() => {
+    if (!filteredChannels || filteredChannels.length === 0) return [];
+
+    // When searching, show all matching results
+    if (searchQuery.trim()) {
+      return filteredChannels;
+    }
+
+    // When not searching, show only top 5 unless expanded
+    if (isExpanded) {
+      return filteredChannels;
+    }
+
+    return filteredChannels.slice(0, DISPLAY_LIMIT);
+  }, [filteredChannels, searchQuery, isExpanded]);
+
+  const hasMoreChannels = !searchQuery.trim() && filteredChannels.length > DISPLAY_LIMIT;
+  const hiddenCount = filteredChannels.length - DISPLAY_LIMIT;
+
   const handleToggleChannel = useCallback((channelId: string): void => {
     setSelectedIds(prev => {
       const newSet = new Set(prev);
@@ -128,6 +147,10 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
       }
       return newSet;
     });
+  }, []);
+
+  const toggleExpanded = useCallback((): void => {
+    setIsExpanded(prev => !prev);
   }, []);
 
   const handleSave = useCallback((): void => {
@@ -210,7 +233,7 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
               </div>
             ) : (
               <div className='space-y-1'>
-                {filteredChannels.map((channel: Channel) => (
+                {displayChannels.map((channel: Channel) => (
                   <ChannelListItem
                     key={channel.id}
                     channel={channel}
@@ -219,6 +242,17 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
                     currentUserId={currentUser?.id}
                   />
                 ))}
+                {hasMoreChannels && (
+                  <button
+                    onClick={toggleExpanded}
+                    className='w-full px-3 py-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-md text-left transition-colors'
+                    data-track-category='RECAP_SETTINGS'
+                    data-track-name='TOGGLE_CHANNEL_EXPANSION'
+                    data-track-metadata={JSON.stringify({ isExpanded })}
+                  >
+                    {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                  </button>
+                )}
               </div>
             )}
           </div>
