@@ -8,7 +8,7 @@ export interface LogContext {
   zeroClientGroupId?: string;
   sessionId?: string;
   clientSessionId?: string;
-  email?: string;
+  emailId?: string;
 }
 
 export const loggerContext = new AsyncLocalStorage<LogContext>();

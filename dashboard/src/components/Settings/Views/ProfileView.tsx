@@ -638,11 +638,11 @@ const ProfileView = ({
 
       <div className='text-xs flex flex-col gap-1 text-muted-foreground'>
         <div>Version: {__APP_VERSION__}</div>
-        {logger.zeroClientID && (
+        {logger.zeroClientId && (
           <button
             onClick={() => {
               navigator.clipboard
-                .writeText(logger.zeroClientID!)
+                .writeText(logger.zeroClientId!)
                 .then(() => {
                   toast.success('Client ID copied to clipboard');
                 })
@@ -654,15 +654,15 @@ const ProfileView = ({
             data-track-category='PROFILE'
             data-track-name='CopyClientId'
           >
-            <span>Client ID: {logger.zeroClientID}</span>
+            <span>Client ID: {logger.zeroClientId}</span>
             <Copy className='size-3' />
           </button>
         )}
-        {logger.zeroClientGroupID && (
+        {logger.zeroClientGroupId && (
           <button
             onClick={() => {
               navigator.clipboard
-                .writeText(logger.zeroClientGroupID!)
+                .writeText(logger.zeroClientGroupId!)
                 .then(() => {
                   toast.success('Client Group ID copied to clipboard');
                 })
@@ -674,7 +674,7 @@ const ProfileView = ({
             data-track-category='PROFILE'
             data-track-name='CopyClientGroupId'
           >
-            <span>Client Group ID: {logger.zeroClientGroupID}</span>
+            <span>Client Group ID: {logger.zeroClientGroupId}</span>
             <Copy className='size-3' />
           </button>
         )}

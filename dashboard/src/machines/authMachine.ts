@@ -504,11 +504,11 @@ export const authMachine = createMachine(
           try {
             const headers: Record<string, string> = {};
             headers['x-request-id'] = uuidv4();
-            if (logger.zeroClientID) {
-              headers['x-client-id'] = logger.zeroClientID;
+            if (logger.zeroClientId) {
+              headers['x-client-id'] = logger.zeroClientId;
             }
-            if (logger.zeroClientGroupID) {
-              headers['x-zero-client-group-id'] = logger.zeroClientGroupID;
+            if (logger.zeroClientGroupId) {
+              headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
             }
             const userEmail = logger.emailId;
             if (userEmail) {
@@ -545,11 +545,11 @@ export const authMachine = createMachine(
         try {
           const headers: Record<string, string> = {};
           headers['x-request-id'] = uuidv4();
-          if (logger.zeroClientID) {
-            headers['x-client-id'] = logger.zeroClientID;
+          if (logger.zeroClientId) {
+            headers['x-client-id'] = logger.zeroClientId;
           }
-          if (logger.zeroClientGroupID) {
-            headers['x-zero-client-group-id'] = logger.zeroClientGroupID;
+          if (logger.zeroClientGroupId) {
+            headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
           }
           const userEmail = logger.emailId;
           if (userEmail) {

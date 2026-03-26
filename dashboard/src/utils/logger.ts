@@ -159,8 +159,8 @@ export interface LoggerConfig {
   platformName: Platform;
   emailId?: string | null;
   notificationWsId?: string | null;
-  zeroClientID?: string | null;
-  zeroClientGroupID?: string | null;
+  zeroClientId?: string | null;
+  zeroClientGroupId?: string | null;
 }
 
 export class Logger implements LoggerConfig {
@@ -170,8 +170,8 @@ export class Logger implements LoggerConfig {
   platformName: Platform;
   emailId?: string | null;
   notificationWsId?: string | null;
-  zeroClientID?: string | null;
-  zeroClientGroupID?: string | null;
+  zeroClientId?: string | null;
+  zeroClientGroupId?: string | null;
   private worker: Worker | null = null;
   private notificationSocketState: NotificationSocketState = NotificationSocketState.DISCONNECTED;
   private zeroSocketState: ZeroSocketState = ZeroSocketState.DISCONNECTED;
@@ -243,23 +243,23 @@ export class Logger implements LoggerConfig {
     }
   }
 
-  setZeroClientID(zeroClientID: string): void {
-    this.zeroClientID = zeroClientID;
+  setZeroClientId(zeroClientId: string): void {
+    this.zeroClientId = zeroClientId;
     if (this.worker) {
       const message: WorkerMessage = {
         type: 'SET_ZERO_CLIENT_ID',
         payload: {
-          zeroClientId: zeroClientID,
+          zeroClientId: zeroClientId,
         },
       };
       this.worker.postMessage(message);
     }
   }
 
-  setZeroClientGroupID(promise: Promise<string>): void {
+  setZeroClientGroupId(promise: Promise<string>): void {
     promise
       .then(groupId => {
-        this.zeroClientGroupID = groupId;
+        this.zeroClientGroupId = groupId;
         if (this.worker) {
           const message: WorkerMessage = {
             type: 'SET_ZERO_CLIENT_GROUP_ID',
@@ -271,7 +271,7 @@ export class Logger implements LoggerConfig {
         }
       })
       .catch(() => {
-        this.zeroClientGroupID = null;
+        this.zeroClientGroupId = null;
       });
   }
 

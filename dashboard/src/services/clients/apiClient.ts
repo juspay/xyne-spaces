@@ -96,13 +96,13 @@ apiConfig.interceptors.request.use(
       config.headers['Access-Control-Allow-Credentials'] = 'true';
       config.headers['x-request-id'] = requestId;
 
-      const zeroClientId = logger.zeroClientID;
+      const zeroClientId = logger.zeroClientId;
       if (zeroClientId) {
         config.headers['x-client-id'] = zeroClientId;
       }
-      const zeroClientGroupID = logger.zeroClientGroupID;
-      if (zeroClientGroupID) {
-        config.headers['x-zero-client-group-id'] = zeroClientGroupID;
+      const zeroClientGroupId = logger.zeroClientGroupId;
+      if (zeroClientGroupId) {
+        config.headers['x-zero-client-group-id'] = zeroClientGroupId;
       }
       const userEmail = logger.emailId;
       if (userEmail) {
