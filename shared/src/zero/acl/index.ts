@@ -14,6 +14,7 @@ export {
   ChannelDailyRecapsACL,
   ChannelParticipantsACL,
   ChannelsACL,
+  ChannelStatsACL,
   ConversationParticipantsACL,
   ConversationsACL,
   MessageAttachmentsACL,
