@@ -90,13 +90,15 @@ export class AuthMiddleware {
               role: apiKeyUser.role,
             };
 
-            logger.info(`[AUTH] API key authenticated user: ${apiKeyUser.username} (${apiKeyUser.id})`, {
-              userId: apiKeyUser.id,
-              username: apiKeyUser.username,
-              email: apiKeyUser.email,
-              role: apiKeyUser.role,
-              sessionId: requestSessionId,
-            });
+            logger.info(
+              `[AUTH] API key authenticated user: ${apiKeyUser.username} (${apiKeyUser.id}) [sessionId=${requestSessionId ?? 'missing'}]`,
+              {
+                userId: apiKeyUser.id,
+                username: apiKeyUser.username,
+                email: apiKeyUser.email,
+                role: apiKeyUser.role,
+              }
+            );
             next();
             return;
           }
@@ -105,8 +107,7 @@ export class AuthMiddleware {
 
       // If Google OAuth is not enabled and API key failed, return 401
       if (!this.googleAuthEnabled) {
-        logger.warn('[AUTH] Authentication failed: API key invalid and Google OAuth not configured', {
-          sessionId: requestSessionId,
+        logger.warn(`[AUTH] Authentication failed: API key invalid and Google OAuth not configured [sessionId=${requestSessionId ?? 'missing'}]`, {
           authHeaderPresent: !!authHeader,
         });
         res.status(401).json({
@@ -144,8 +145,7 @@ export class AuthMiddleware {
         const devUserName = req.headers['x-dev-user-name'] as string;
 
         if (!devUserId || !devUserEmail || !devUserName) {
-          logger.warn('[AUTH] Dev mode headers incomplete', {
-            sessionId: requestSessionId,
+          logger.warn(`[AUTH] Dev mode headers incomplete [sessionId=${requestSessionId ?? 'missing'}]`, {
             devUserId,
             devUserEmail,
             devUserNamePresent: !!devUserName,
@@ -178,8 +178,7 @@ export class AuthMiddleware {
           role: 'user',
         };
 
-        logger.info(`[AUTH] Dev mode authenticated user: ${user.email} (${user.id})`, {
-          sessionId: requestSessionId,
+        logger.info(`[AUTH] Dev mode authenticated user: ${user.email} (${user.id}) [sessionId=${requestSessionId ?? 'missing'}]`, {
           userId: user.id,
           googleId: user.providerUserId,
           email: user.email,
@@ -214,9 +213,8 @@ export class AuthMiddleware {
       }
 
       logger.info(
-        `[AUTH] Auth header: ${authHeader ? 'Present' : 'Missing'}, Session ID: ${sessionId ? 'Present' : 'Missing'}`,
+        `[AUTH] Auth header: ${authHeader ? 'Present' : 'Missing'}, Session ID: ${sessionId ? 'Present' : 'Missing'} [sessionId=${sessionId ?? 'missing'}]`,
         {
-          sessionId,
           sessionIdHeader,
           sessionIdCookie,
           authHeaderPresent: !!authHeader,
@@ -233,8 +231,7 @@ export class AuthMiddleware {
         token = authHeader.split(' ')[1];
         tokenSource = 'authorization_header';
         tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
-        logger.info('[AUTH] Token extracted from Authorization header', {
-          sessionId,
+        logger.info(`[AUTH] Token extracted from Authorization header [sessionId=${sessionId ?? 'missing'}]`, {
           tokenSource,
           tokenPresent: !!token,
           tokenPreview,
@@ -243,8 +240,7 @@ export class AuthMiddleware {
         token = req.cookies.google_access_token;
         tokenSource = 'cookie';
         tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
-        logger.info('[AUTH] Token extracted from HTTP-only cookie', {
-          sessionId,
+        logger.info(`[AUTH] Token extracted from HTTP-only cookie [sessionId=${sessionId ?? 'missing'}]`, {
           tokenSource,
           tokenPresent: !!token,
           tokenPreview,
@@ -253,14 +249,12 @@ export class AuthMiddleware {
 
       // If no token but session ID exists, try to refresh instead of rejecting
       if (!token && sessionId) {
-        logger.info('[AUTH] No token found but session ID exists, attempting refresh', {
-          sessionId,
+        logger.info(`[AUTH] No token found but session ID exists, attempting refresh [sessionId=${sessionId}]`, {
           tokenSource,
           tokenPresent: !!token,
         });
         try {
-          logger.info('[AUTH] Calling refreshTokenBySession from authenticate: missing token with session fallback', {
-            sessionId,
+          logger.info(`[AUTH] Calling refreshTokenBySession from authenticate: missing token with session fallback [sessionId=${sessionId}]`, {
             method: req.method,
             path: req.path,
           });
@@ -287,8 +281,7 @@ export class AuthMiddleware {
             }
             req.cookies.google_access_token = refreshResult.customToken;
 
-            logger.info('[AUTH] Token successfully created via session refresh', {
-              sessionId,
+            logger.info(`[AUTH] Token successfully created via session refresh [sessionId=${sessionId}]`, {
               tokenSource,
               tokenPresent: !!token,
               tokenPreview,
@@ -297,8 +290,7 @@ export class AuthMiddleware {
             throw new Error('Session refresh failed');
           }
         } catch (refreshError) {
-          logger.error('[AUTH] Failed to refresh via session:', {
-            sessionId,
+          logger.error(`[AUTH] Failed to refresh via session [sessionId=${sessionId}]:`, {
             tokenSource,
             error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
             stack: refreshError instanceof Error ? refreshError.stack : undefined,
@@ -313,8 +305,7 @@ export class AuthMiddleware {
 
       // If still no token, reject
       if (!token) {
-        logger.warn('[AUTH] Authentication failed: No token and no valid session', {
-          sessionId,
+        logger.warn(`[AUTH] Authentication failed: No token and no valid session [sessionId=${sessionId ?? 'missing'}]`, {
           tokenSource,
           authHeaderPresent: !!authHeader,
           cookieTokenPresent: !!req.cookies?.google_access_token,
@@ -338,8 +329,7 @@ export class AuthMiddleware {
 
         if (timeUntilExpiry < 5 * 60) {
           // Less than 5 minutes
-          logger.info(`[AUTH] Token is about to expire in ${timeUntilExpiry}s, considering refresh`, {
-            sessionId,
+          logger.info(`[AUTH] Token is about to expire in ${timeUntilExpiry}s, considering refresh [sessionId=${sessionId ?? 'missing'}]`, {
             tokenSource,
             tokenPreview,
             tokenSub: payload?.sub,
@@ -349,9 +339,8 @@ export class AuthMiddleware {
         }
       } catch (verifyError) {
         logger.info(
-          '[AUTH] JWT token verification failed:',
+          `[AUTH] JWT token verification failed [sessionId=${sessionId ?? 'missing'}]:`,
           {
-            sessionId,
             tokenSource,
             tokenPreview,
             error: verifyError instanceof Error ? verifyError.message : 'Unknown error',
@@ -362,16 +351,14 @@ export class AuthMiddleware {
 
       // If token is expired or about to expire, try to refresh using session
       if (isTokenExpired && sessionId) {
-        logger.info('[AUTH] Attempting to refresh token using session ID', {
-          sessionId,
+        logger.info(`[AUTH] Attempting to refresh token using session ID [sessionId=${sessionId}]`, {
           tokenSource,
           tokenPreview,
           tokenSub: payload?.sub,
         });
 
         try {
-          logger.info('[AUTH] Calling refreshTokenBySession from authenticate: expired token refresh path', {
-            sessionId,
+          logger.info(`[AUTH] Calling refreshTokenBySession from authenticate: expired token refresh path [sessionId=${sessionId}]`, {
             method: req.method,
             path: req.path,
           });
@@ -397,8 +384,7 @@ export class AuthMiddleware {
             }
             req.cookies.google_access_token = refreshResult.customToken;
 
-            logger.info('[AUTH] Token successfully refreshed via session and cookie updated', {
-              sessionId,
+            logger.info(`[AUTH] Token successfully refreshed via session and cookie updated [sessionId=${sessionId}]`, {
               tokenSource: 'session_refresh',
               tokenPresent: true,
               tokenPreview: refreshResult.customToken
@@ -410,8 +396,7 @@ export class AuthMiddleware {
             throw new Error('Token refresh failed');
           }
         } catch (refreshError) {
-          logger.error('[AUTH] Failed to refresh token:', {
-            sessionId,
+          logger.error(`[AUTH] Failed to refresh token [sessionId=${sessionId}]:`, {
             tokenSource,
             tokenPreview,
             error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
@@ -433,8 +418,7 @@ export class AuthMiddleware {
       }
 
       if (!payload) {
-        logger.warn('[AUTH] JWT payload missing after verification', {
-          sessionId,
+        logger.warn(`[AUTH] JWT payload missing after verification [sessionId=${sessionId ?? 'missing'}]`, {
           tokenSource,
           tokenPreview,
         });
@@ -447,8 +431,7 @@ export class AuthMiddleware {
 
       // Extract user information from custom JWT token
       // Since we're using our own JWT, we can directly get user from database using the sub (user ID)
-      logger.info('[AUTH] Looking up user from verified token payload', {
-        sessionId,
+      logger.info(`[AUTH] Looking up user from verified token payload [sessionId=${sessionId ?? 'missing'}]`, {
         tokenSource,
         tokenPreview,
         tokenSub: payload.sub,
@@ -457,8 +440,7 @@ export class AuthMiddleware {
       const user = await this.userService!.getUserById(payload.sub);
 
       if (!user) {
-        logger.warn('[AUTH] User not found for verified token payload', {
-          sessionId,
+        logger.warn(`[AUTH] User not found for verified token payload [sessionId=${sessionId ?? 'missing'}]`, {
           tokenSource,
           tokenPreview,
           tokenSub: payload.sub,
@@ -481,8 +463,7 @@ export class AuthMiddleware {
         role: 'user', // Default role, can be enhanced with role management
       };
 
-      logger.info(`[AUTH] Authenticated user: ${user.email} (${user.id})`, {
-        sessionId,
+      logger.info(`[AUTH] Authenticated user: ${user.email} (${user.id}) [sessionId=${sessionId ?? 'missing'}]`, {
         tokenSource,
         tokenPreview,
         tokenSub: payload.sub,
@@ -492,8 +473,7 @@ export class AuthMiddleware {
       });
       next();
     } catch (error) {
-      logger.error('[AUTH] Authentication error:', {
-        sessionId: requestSessionId,
+      logger.error(`[AUTH] Authentication error [sessionId=${requestSessionId ?? 'missing'}]:`, {
         authHeaderPresent: !!authHeader,
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
@@ -513,17 +493,17 @@ export class AuthMiddleware {
     sessionId: string
   ): Promise<{ success: boolean; customToken?: string; error?: string }> {
     try {
-      if (!this.userSessionService) {
-        return { success: false, error: 'Session service not configured' };
-      }
+      logger.info(`[AUTH] refreshTokenBySession started [sessionId=${sessionId}]`);
 
+      if (!this.userSessionService) {
+         return { success: false, error: 'Session service not configured' };
+      }
       // Find session by ID
-      logger.info('[AUTH] refreshTokenBySession fetching session', { sessionId });
+      logger.info(`[AUTH] refreshTokenBySession fetching session [sessionId=${sessionId}]`);
       const session = await this.userSessionService.getSessionById(sessionId);
 
       if (!session || !session.user) {
-        logger.warn('[AUTH] refreshTokenBySession failed: session or session user not found', {
-          sessionId,
+        logger.warn(`[AUTH] refreshTokenBySession failed: session or session user not found [sessionId=${sessionId}]`, {
           sessionFound: !!session,
           userFound: !!session?.user,
         });
@@ -533,8 +513,7 @@ export class AuthMiddleware {
       // Check if session is still active and not expired
       const now = new Date();
       const isSessionExpired = now > session.refreshTokenExpiry;
-      logger.info('[AUTH] refreshTokenBySession validating session state', {
-        sessionId,
+      logger.info(`[AUTH] refreshTokenBySession validating session state [sessionId=${sessionId}]`, {
         userId: session.user.id,
         sessionStatus: session.status,
         refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
@@ -542,8 +521,7 @@ export class AuthMiddleware {
       });
 
       if (session.status !== 'ACTIVE' || isSessionExpired) {
-        logger.warn('[AUTH] refreshTokenBySession failed: session inactive or expired', {
-          sessionId,
+        logger.warn(`[AUTH] refreshTokenBySession failed: session inactive or expired [sessionId=${sessionId}]`, {
           userId: session.user.id,
           sessionStatus: session.status,
           refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
@@ -553,8 +531,7 @@ export class AuthMiddleware {
       }
 
       // Generate a new custom JWT token for the user
-      logger.info('[AUTH] refreshTokenBySession generating custom token', {
-        sessionId,
+      logger.info(`[AUTH] refreshTokenBySession generating custom token [sessionId=${sessionId}]`, {
         userId: session.user.id,
         email: session.user.email,
       });
@@ -566,23 +543,20 @@ export class AuthMiddleware {
       });
 
       // Update session activity
-      logger.info('[AUTH] refreshTokenBySession updating session activity', {
-        sessionId,
+      logger.info(`[AUTH] refreshTokenBySession updating session activity [sessionId=${sessionId}]`, {
         userId: session.user.id,
       });
       await this.userSessionService.updateSession(session.id, {
         lastActivity: new Date(),
       });
 
-      logger.info('[AUTH] refreshTokenBySession completed successfully', {
-        sessionId,
+      logger.info(`[AUTH] refreshTokenBySession completed successfully [sessionId=${sessionId}]`, {
         userId: session.user.id,
         email: session.user.email,
       });
       return { success: true, customToken };
     } catch (error) {
-      logger.error('[AUTH] refreshTokenBySession failed with exception', {
-        sessionId,
+      logger.error(`[AUTH] refreshTokenBySession failed with exception [sessionId=${sessionId}]:`, {
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
       });
