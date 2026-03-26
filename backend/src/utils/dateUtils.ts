@@ -63,3 +63,20 @@ export function formatDateTimeShort(date: Date): string {
     hour12: true,
   });
 }
+
+/**
+ * Format a date to IST locale string for display
+ * e.g. "26 Mar 2025, 04:30:00 PM"
+ */
+export function formatToISTLocaleString(date: Date): string {
+  // Use IST timezone for formatting
+  return date.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
