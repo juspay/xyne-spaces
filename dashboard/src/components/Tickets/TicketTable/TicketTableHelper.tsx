@@ -86,7 +86,9 @@ export const getAssigneeOptions = (users: User[], userGroups: UserGroup[]): Enti
     icon: <Avatar userId={user.id} size='sm' className='rounded-full' />,
   }));
 
-  const groupOptions: EntityOption[] = userGroups.map(group => ({
+  // Filter out deactivated groups (isActive !== false)
+  const activeGroups = userGroups.filter(group => group.isActive !== false);
+  const groupOptions: EntityOption[] = activeGroups.map(group => ({
     value: `group:${group.id}`,
     label: group.name,
     subtitle: 'Group',

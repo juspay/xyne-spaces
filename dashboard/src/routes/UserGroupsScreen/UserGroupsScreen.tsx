@@ -14,6 +14,7 @@ import type { UserGroup as ZeroUserGroup } from '@xyne/shared';
 import { UserResponsibility } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useUserGroups } from '../../hooks/useUserGroup';
 
 const UserGroupsScreen = (): ReactElement => {
   const zero = useZero();
@@ -22,8 +23,7 @@ const UserGroupsScreen = (): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showManagedOnly, setShowManagedOnly] = useState(false);
 
-  // Fetch all user groups using zero - only if user is authenticated
-  const [userGroups] = useCachedQuery(queries.getAllUserGroups());
+  const userGroups = useUserGroups();
   // Fetch current user's group memberships to find which groups they manage
   const [userMemberships] = useCachedQuery(queries.getUserGroupMappingsByUserId());
 
@@ -128,8 +128,52 @@ const UserGroupsScreen = (): ReactElement => {
     }
   };
 
-  const handleDeleteUserGroup = (userGroupId: string): void => {
-    void zero.mutate(mutators.userGroup.delete({ userGroupId }));
+  const handleDeactivateUserGroup = async (userGroupId: string): Promise<void> => {
+    try {
+      const timestamp = Date.now();
+      const result = zero.mutate(mutators.userGroup.deactivate({ userGroupId, timestamp }));
+      const res = await result.server;
+      if (res.type === 'error') {
+        toast.error('Deactivate Failed', {
+          description: res.error.message || 'Failed to deactivate user group',
+          duration: 5000,
+        });
+      } else {
+        toast.success('User Group Deactivated', {
+          description: 'User group has been successfully deactivated',
+          duration: 3000,
+        });
+      }
+    } catch (error) {
+      toast.error('Deactivate Failed', {
+        description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        duration: 5000,
+      });
+    }
+  };
+
+  const handleReactivateUserGroup = async (userGroupId: string): Promise<void> => {
+    try {
+      const timestamp = Date.now();
+      const result = zero.mutate(mutators.userGroup.reactivate({ userGroupId, timestamp }));
+      const res = await result.server;
+      if (res.type === 'error') {
+        toast.error('Reactivate Failed', {
+          description: res.error.message || 'Failed to reactivate user group',
+          duration: 5000,
+        });
+      } else {
+        toast.success('User Group Reactivated', {
+          description: 'User group has been successfully reactivated',
+          duration: 3000,
+        });
+      }
+    } catch (error) {
+      toast.error('Reactivate Failed', {
+        description: error instanceof Error ? error.message : 'An unexpected error occurred',
+        duration: 5000,
+      });
+    }
   };
 
   if (loading) {
@@ -198,7 +242,8 @@ const UserGroupsScreen = (): ReactElement => {
                     key={userGroup.id}
                     userGroup={userGroup}
                     onEdit={setEditingUserGroup}
-                    onDelete={(userGroupId: string) => void handleDeleteUserGroup(userGroupId)}
+                    onDeactivate={handleDeactivateUserGroup}
+                    onReactivate={handleReactivateUserGroup}
                   />
                 ))}
               </div>

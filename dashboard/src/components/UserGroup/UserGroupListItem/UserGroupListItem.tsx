@@ -10,13 +10,15 @@ import { useNavigate } from 'react-router-dom';
 interface UserGroupListItemProps {
   userGroup: UserGroup;
   onEdit: (userGroup: UserGroup) => void;
-  onDelete: (userGroupId: string) => void;
+  onDeactivate: (userGroupId: string) => void | Promise<void>;
+  onReactivate: (userGroupId: string) => void | Promise<void>;
 }
 
 export const UserGroupListItem = ({
   userGroup,
   onEdit,
-  onDelete,
+  onDeactivate,
+  onReactivate,
 }: UserGroupListItemProps): ReactElement => {
   const [userGroupMembers] = useCachedQuery(
     queries.getUserGroupMembers({ userGroupId: userGroup.id }),
@@ -39,8 +41,15 @@ export const UserGroupListItem = ({
       .filter((user): user is User => Boolean(user)) || [];
   const memberCount = members.length;
 
+  const isActive = userGroup.isActive !== false;
+
   return (
-    <div className='bg-background border rounded-lg p-4 hover:bg-muted transition-colors'>
+    <div
+      data-testid='user-group-list-item'
+      className={`bg-background border rounded-lg p-4 hover:bg-muted transition-colors ${
+        !isActive ? 'opacity-60' : ''
+      }`}
+    >
       <div className='flex items-center justify-between'>
         <div className='flex-1'>
           <div className='flex items-center space-x-3'>
@@ -48,7 +57,14 @@ export const UserGroupListItem = ({
               <span className='text-muted-foreground font-medium'>👥</span>
             </div>
             <div>
-              <h3 className='font-medium text-foreground'>{userGroup.name}</h3>
+              <div className='flex items-center gap-2'>
+                <h3 className='font-medium text-foreground'>{userGroup.name}</h3>
+                {!isActive && (
+                  <span className='px-2 py-0.5 text-xs bg-muted text-muted-foreground rounded'>
+                    Deactivated
+                  </span>
+                )}
+              </div>
               {userGroup.description && (
                 <p className='text-sm text-muted-foreground line-clamp-1'>
                   {userGroup.description}
@@ -94,45 +110,65 @@ export const UserGroupListItem = ({
         </div>
 
         <div className='flex items-center space-x-2'>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => void navigate(`/user-groups/${userGroup.id}/assignment-config`)}
-            data-track-category='UserGroups'
-            data-track-name='OpenAssignmentConfig'
-            data-track-metadata={JSON.stringify({
-              groupId: userGroup.id,
-              groupName: userGroup.name,
-            })}
-          >
-            Auto Assignment
-          </Button>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => onEdit(userGroup)}
-            data-track-category='UserGroups'
-            data-track-name='EditUserGroup'
-            data-track-metadata={JSON.stringify({
-              groupId: userGroup.id,
-              groupName: userGroup.name,
-            })}
-          >
-            Edit
-          </Button>
-          <Button
-            variant='destructive'
-            size='sm'
-            onClick={() => onDelete(userGroup.id)}
-            data-track-category='UserGroups'
-            data-track-name='DeleteUserGroup'
-            data-track-metadata={JSON.stringify({
-              groupId: userGroup.id,
-              groupName: userGroup.name,
-            })}
-          >
-            Delete
-          </Button>
+          {isActive ? (
+            <>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => void navigate(`/user-groups/${userGroup.id}/assignment-config`)}
+                data-track-category='UserGroups'
+                data-track-name='OpenAssignmentConfig'
+                data-track-metadata={JSON.stringify({
+                  groupId: userGroup.id,
+                  groupName: userGroup.name,
+                })}
+              >
+                Auto Assignment
+              </Button>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => onEdit(userGroup)}
+                data-track-category='UserGroups'
+                data-track-name='EditUserGroup'
+                data-track-metadata={JSON.stringify({
+                  groupId: userGroup.id,
+                  groupName: userGroup.name,
+                })}
+              >
+                Edit
+              </Button>
+              <Button
+                variant='destructive'
+                size='sm'
+                onClick={() => void onDeactivate(userGroup.id)}
+                data-track-category='UserGroups'
+                data-track-name='DeactivateUserGroup'
+                data-track-metadata={JSON.stringify({
+                  groupId: userGroup.id,
+                  groupName: userGroup.name,
+                })}
+              >
+                Deactivate
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => void onReactivate(userGroup.id)}
+                data-track-category='UserGroups'
+                data-track-name='ReactivateUserGroup'
+                data-track-metadata={JSON.stringify({
+                  groupId: userGroup.id,
+                  groupName: userGroup.name,
+                })}
+              >
+                Reactivate
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </div>

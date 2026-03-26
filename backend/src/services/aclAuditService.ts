@@ -182,6 +182,32 @@ export class ACLAuditService {
   }
 
   /**
+   * Log user group deactivation
+   */
+  async logUserGroupDeactivated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+    return this.logEvent(
+      ACLAuditEventType.USER_GROUP_DEACTIVATED,
+      ACLAuditTargetType.USER_GROUP,
+      groupId,
+      `Deactivated user group: ${groupName}`,
+      actorUserId
+    );
+  }
+
+  /**
+   * Log user group reactivation
+   */
+  async logUserGroupReactivated(groupId: string, groupName: string, actorUserId?: string): Promise<ACLAuditLog> {
+    return this.logEvent(
+      ACLAuditEventType.USER_GROUP_REACTIVATED,
+      ACLAuditTargetType.USER_GROUP,
+      groupId,
+      `Reactivated user group: ${groupName}`,
+      actorUserId
+    );
+  }
+
+  /**
    * Get paginated audit logs
    */
   async getAuditLogs(options: PaginationOptions): Promise<PaginatedResult<ACLAuditLog>> {

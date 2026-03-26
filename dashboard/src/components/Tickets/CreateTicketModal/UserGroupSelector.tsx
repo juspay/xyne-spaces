@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Users } from 'lucide-react';
-import { queries } from '../../../zero/queries';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 
@@ -20,7 +19,7 @@ interface UserGroupSelectorProps {
  * UserGroupSelector - A specialized selector for choosing a single user group
  *
  * Features:
- * - Displays all user groups
+ * - Displays active user groups (deactivated groups are hidden)
  * - Client-side search by group name
  * - Built on top of the generic EntitySelector
  *
@@ -39,27 +38,28 @@ export const UserGroupSelector: React.FC<UserGroupSelectorProps> = ({
   // ==================== DATA FETCHING ====================
 
   /**
-   * Fetch all user groups
-   * Unlike users, we fetch all groups upfront since:
-   * 1. The number of groups is typically small (10-50)
-   * 2. No server-side search query available for groups
-   * 3. Client-side filtering is performant for small datasets
+   * Get all user groups from x-state
+   * Only show active groups for ticket assignment
    */
-  const [allGroups] = useCachedQuery(queries.getAllUserGroups());
+  const allGroups = useUserGroups();
 
   // ==================== DATA TRANSFORMATION ====================
 
   /**
    * Filter groups client-side based on search value
    * Then transform to SelectorOption format
+   * Only show active groups (isActive !== false)
    */
   const groupOptions: SelectorOption[] = useMemo(() => {
     if (!allGroups) return [];
 
+    // Filter out deactivated groups
+    const activeGroups = allGroups.filter(group => group.isActive !== false);
+
     // Filter groups by search value (case-insensitive)
     const filteredGroups = searchValue.trim()
-      ? allGroups.filter(group => group.name.toLowerCase().includes(searchValue.toLowerCase()))
-      : allGroups;
+      ? activeGroups.filter(group => group.name.toLowerCase().includes(searchValue.toLowerCase()))
+      : activeGroups;
 
     // Transform to SelectorOption format
     return filteredGroups.map(group => ({

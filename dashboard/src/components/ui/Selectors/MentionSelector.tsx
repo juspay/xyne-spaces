@@ -154,12 +154,23 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
           </>
         ) : item.type === 'group' ? (
           <>
-            <div className='w-8 h-8 flex items-center justify-center bg-green-50 rounded-full border border-green-200 flex-shrink-0'>
+            <div
+              className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 ${
+                item.isDeactivated
+                  ? 'bg-muted border-muted-foreground/30'
+                  : 'bg-green-50 border-green-200'
+              }`}
+            >
               <span className='text-base leading-none'>👥</span>
             </div>
             <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-              <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+              <span
+                className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${
+                  item.isDeactivated ? 'text-muted-foreground' : 'text-foreground'
+                }`}
+              >
                 {item.alias ? `@${item.alias}` : item.name}
+                {item.isDeactivated && ' (Deactivated)'}
               </span>
               <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
                 {item.alias && item.name !== item.alias ? item.name : ''}

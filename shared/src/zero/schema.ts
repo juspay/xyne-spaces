@@ -285,6 +285,8 @@ export enum ACLAuditEventType {
   USER_GROUP_CREATED = 'USER_GROUP_CREATED',
   USER_GROUP_UPDATED = 'USER_GROUP_UPDATED',
   USER_GROUP_DELETED = 'USER_GROUP_DELETED',
+  USER_GROUP_DEACTIVATED = 'USER_GROUP_DEACTIVATED',
+  USER_GROUP_REACTIVATED = 'USER_GROUP_REACTIVATED',
 }
 
 // @ts-ignore TS1294
@@ -920,6 +922,7 @@ export const userGroupTable = table('user_groups')
     name: string(),
     alias: string().optional(),
     description: string().optional(),
+    isActive: boolean(),
     metadata: json().optional(),
     createdAt: number(),
     updatedAt: number(),
