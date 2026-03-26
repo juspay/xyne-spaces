@@ -23,6 +23,7 @@ export enum WorkflowType {
   XYNE_AUTO_RCA_WORKFLOW = 'XYNE_AUTO_RCA_WORKFLOW',
   VERSION_BUMP_WORKFLOW = 'VERSION_BUMP_WORKFLOW',
   IT_SUPPORT_WORKFLOW = 'IT_SUPPORT_WORKFLOW',
+  JUTILS_CODE_UPDATION = 'JUTILS_CODE_UPDATION',
 }
 
 export enum WorkflowExecutionStatus {
@@ -576,6 +577,7 @@ export function getWorkflowTypeDisplayName(workflowType: WorkflowType): string {
     [WorkflowType.XYNE_AUTO_RCA_WORKFLOW]: 'Xyne Auto RCA Workflow',
     [WorkflowType.VERSION_BUMP_WORKFLOW]: 'Version Bump Workflow',
     [WorkflowType.IT_SUPPORT_WORKFLOW]: 'IT Support Workflow',
+    [WorkflowType.JUTILS_CODE_UPDATION]: 'jUtils Workflow',
   };
   return displayNames[workflowType]
 }
