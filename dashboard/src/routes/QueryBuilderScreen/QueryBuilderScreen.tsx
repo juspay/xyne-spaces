@@ -254,7 +254,7 @@ export const QueryBuilderScreen: React.FC = () => {
   }
 
   return (
-    <div className='flex flex-col h-full bg-background rounded-lg shadow-sm'>
+    <div className='flex flex-col h-full bg-background md:rounded-2xl shadow-sm overflow-hidden'>
       {/* Header */}
       <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
         <div className='flex items-center gap-3'>
