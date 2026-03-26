@@ -1,6 +1,8 @@
 import { ReactElement, useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { Upload } from 'lucide-react';
+import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { useChannel } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
@@ -9,7 +11,7 @@ import {
   xyneAIStorage,
   type ConversationHistory as ConversationHistoryType,
 } from '../../../utils/xyneAIStorage';
-import type { Message, SummarizerCitation, MessageAttachment } from './utils/XyneAITypes';
+import type { Message, SummarizerCitation, MessageAttachment, UserTag } from './utils/XyneAITypes';
 import { buildCitationUrl } from './utils/citationUrlBuilder';
 import { XyneAISuggestions } from './components/XyneAISuggestions';
 import { XyneAIInputBox, type Attachment } from './components/XyneAIInputBox';
@@ -78,8 +80,16 @@ const XyneAISidebar = ({
   // Track the original channel where the current conversation was started
   // This prevents duplicate history entries when user switches channels during a query
   const [conversationChannelId, setConversationChannelId] = useState<string | null>(null);
+  const [currentUserTags, setCurrentUserTags] = useState<Record<string, UserTag>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  // Use drag and drop hook with the existing pattern
+  const {
+    dragAndDropAreaRef,
+    inputRef: xyneAIInputRef,
+    isDragging,
+  } = useDragAndDropAreaRef(channelId ?? undefined);
   const { isMobile } = usePlatform();
   // If startFreshChat is true on mount, mark as loaded immediately to prevent loading old data
   const hasLoadedInitialConversationRef = useRef(startFreshChat);
@@ -838,13 +848,24 @@ const XyneAISidebar = ({
       scrollToBottom();
     }, 50);
 
-    await submitQuery(query, messageAttachments, selectionContexts, displayContent);
+    // Include userTags in the user message for display
+    const userTagsForMessage =
+      Object.keys(currentUserTags).length > 0 ? currentUserTags : undefined;
+
+    await submitQuery(
+      query,
+      messageAttachments,
+      selectionContexts,
+      displayContent,
+      userTagsForMessage,
+    );
   }, [
     inputValue,
     attachments,
     selectedActivities,
     activeSelectionInfos,
     browserContext,
+    currentUserTags,
     submitQuery,
     scrollToBottom,
     conversationChannelId,
@@ -853,8 +874,25 @@ const XyneAISidebar = ({
 
   return (
     <div
-      className={`w-full ${isMobile ? 'h-[95vh] pb-4' : 'h-full rounded-xl'} bg-background flex flex-col min-h-0`}
+      ref={dragAndDropAreaRef}
+      className={`w-full ${isMobile ? 'h-[95vh] pb-4' : 'h-full rounded-xl'} bg-background flex flex-col min-h-0 relative`}
     >
+      {/* Drag and Drop Overlay */}
+      {isDragging && (
+        <div className='absolute inset-0 z-50 bg-background/95 backdrop-blur-sm rounded-xl flex flex-col items-center justify-center border-2 border-dashed border-primary/50'>
+          <div className='flex flex-col items-center gap-3'>
+            <div className='p-4 rounded-full bg-primary/10'>
+              <Upload className='w-8 h-8 text-primary' />
+            </div>
+            <div className='text-center'>
+              <p className='text-lg font-medium text-foreground'>Drop files to attach</p>
+              <p className='text-sm text-muted-foreground'>
+                Images, PDF, text, office documents, or data files
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       {showHistorySidebar ? (
         <ConversationHistory
@@ -929,6 +967,7 @@ const XyneAISidebar = ({
 
           {/* Input Box - Fixed at Bottom */}
           <XyneAIInputBox
+            ref={xyneAIInputRef}
             channelId={channelId}
             channelName={channelName}
             channelDescription={channelDescription}
@@ -955,6 +994,7 @@ const XyneAISidebar = ({
             onWebSearchToggle={() => setWebSearchEnabled(!webSearchEnabled)}
             createCanvasEnabled={createCanvasEnabled}
             onCreateCanvasToggle={() => setCreateCanvasEnabled(!createCanvasEnabled)}
+            onUserTagsChange={setCurrentUserTags}
           />
         </>
       )}

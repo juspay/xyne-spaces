@@ -3,6 +3,7 @@ import type {
   Message,
   MessageAttachment,
   SelectionContext,
+  UserTag,
 } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ResearchContext } from '@xyne/shared';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
@@ -129,6 +130,7 @@ export const useXyneAIStream = ({
       attachments: MessageAttachment[] = [],
       selectionContexts?: SelectionContext[],
       displayContent?: string,
+      userTags?: Record<string, UserTag>,
     ): Promise<void> => {
       // Allow empty query if there are selection contexts
       if (!query.trim() && (!selectionContexts || selectionContexts.length === 0)) return;
@@ -144,6 +146,7 @@ export const useXyneAIStream = ({
         timestamp: new Date(),
         ...(attachments.length > 0 && { attachments }),
         ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),
+        ...(userTags && Object.keys(userTags).length > 0 && { userTags }),
       };
 
       // Create bot message with streaming state
