@@ -174,7 +174,6 @@ const ChannelCommandMenu = ({
   useShortcutById(
     'command.close',
     () => {
-      console.log('i am called');
       onOpenChange(false);
     },
     {

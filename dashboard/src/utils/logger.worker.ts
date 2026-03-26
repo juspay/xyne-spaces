@@ -57,8 +57,8 @@ class LoggerWorker {
   private platformName: string = '';
   private emailId: string | null = null;
   private notificationWsId: string | null = null;
-  private zeroClientID: string | null = null;
-  private zeroClientGroupID: string | null = null;
+  private zeroClientId: string | null = null;
+  private zeroClientGroupId: string | null = null;
   private pageViewId: string | null = null;
   private pageUrl: string | null = null;
   private loggerBaseUrl: string = '';
@@ -93,10 +93,10 @@ class LoggerWorker {
           this.handleSetNotificationWsId(payload);
           break;
         case 'SET_ZERO_CLIENT_ID':
-          this.handleSetZeroClientID(payload);
+          this.handleSetZeroClientId(payload);
           break;
         case 'SET_ZERO_CLIENT_GROUP_ID':
-          this.handleSetZeroClientGroupID(payload);
+          this.handleSetZeroClientGroupId(payload);
           break;
         case 'SET_PAGE_VIEW':
           this.handleSetPageView(payload);
@@ -145,11 +145,11 @@ class LoggerWorker {
         (logEntry as Record<string, unknown>)['notificationSocketState'] =
           payload.notificationSocketState;
       }
-      if (this.zeroClientID !== null) {
-        (logEntry as Record<string, unknown>)['zeroClientId'] = this.zeroClientID;
+      if (this.zeroClientId !== null) {
+        (logEntry as Record<string, unknown>)['zeroClientId'] = this.zeroClientId;
       }
-      if (this.zeroClientGroupID !== null) {
-        (logEntry as Record<string, unknown>)['zeroClientGroupId'] = this.zeroClientGroupID;
+      if (this.zeroClientGroupId !== null) {
+        (logEntry as Record<string, unknown>)['zeroClientGroupId'] = this.zeroClientGroupId;
       }
       if (payload.zeroSocketState !== undefined) {
         (logEntry as Record<string, unknown>)['zeroSocketState'] = payload.zeroSocketState;
@@ -179,15 +179,15 @@ class LoggerWorker {
     }
   }
 
-  private handleSetZeroClientID(payload?: WorkerMessage['payload']): void {
+  private handleSetZeroClientId(payload?: WorkerMessage['payload']): void {
     if (payload?.zeroClientId) {
-      this.zeroClientID = payload.zeroClientId;
+      this.zeroClientId = payload.zeroClientId;
     }
   }
 
-  private handleSetZeroClientGroupID(payload?: WorkerMessage['payload']): void {
+  private handleSetZeroClientGroupId(payload?: WorkerMessage['payload']): void {
     if (payload?.zeroClientGroupId) {
-      this.zeroClientGroupID = payload.zeroClientGroupId;
+      this.zeroClientGroupId = payload.zeroClientGroupId;
     }
   }
 

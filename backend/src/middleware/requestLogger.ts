@@ -10,7 +10,7 @@ export const requestLogger = (req: CustomRequest, res: Response, next: NextFunct
     zeroClientId: (req.headers['x-client-id'] as string) || undefined,
     zeroClientGroupId: (req.headers['x-zero-client-group-id'] as string) || req.get('x-zero-client-group-id') || undefined,
     sessionId: (req.headers['x-session-id'] as string) || req.get('x-session-id') || undefined,
-    email: req.headers['x-user-email'] as string,
+    emailId: req.headers['x-user-email'] as string,
     clientSessionId: req.headers['x-client-session-id'] as string || undefined,
   };
   req.requestId = context.requestId;

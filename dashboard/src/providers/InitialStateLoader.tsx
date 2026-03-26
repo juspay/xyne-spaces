@@ -101,8 +101,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   const context = useAuthContextValues();
   const zero = useZero();
   const state = useConnectionState();
-  logger.setZeroClientID(zero.clientID);
-  logger.setZeroClientGroupID(zero.clientGroupID);
+  logger.setZeroClientId(zero.clientID);
+  logger.setZeroClientGroupId(zero.clientGroupID);
 
   useZeroConnectionLogger(state);
 
@@ -146,11 +146,11 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
       // Call refresh endpoint directly (browser receives Set-Cookie)
       const refreshHeaders: Record<string, string> = {};
       refreshHeaders['x-request-id'] = uuidv4();
-      if (logger.zeroClientID) {
-        refreshHeaders['x-client-id'] = logger.zeroClientID;
+      if (logger.zeroClientId) {
+        refreshHeaders['x-client-id'] = logger.zeroClientId;
       }
-      if (logger.zeroClientGroupID) {
-        refreshHeaders['x-zero-client-group-id'] = logger.zeroClientGroupID;
+      if (logger.zeroClientGroupId) {
+        refreshHeaders['x-zero-client-group-id'] = logger.zeroClientGroupId;
       }
       const userEmail = logger.emailId;
       if (userEmail) {

@@ -115,11 +115,11 @@ const DocsViewer = ({
         // Note: Using direct axios call instead of apiInstance
         const headers: Record<string, string> = {};
         headers['x-request-id'] = uuidv4();
-        if (logger.zeroClientID) {
-          headers['x-client-id'] = logger.zeroClientID;
+        if (logger.zeroClientId) {
+          headers['x-client-id'] = logger.zeroClientId;
         }
-        if (logger.zeroClientGroupID) {
-          headers['x-zero-client-group-id'] = logger.zeroClientGroupID;
+        if (logger.zeroClientGroupId) {
+          headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
         }
         if (logger.emailId) {
           headers['x-user-email'] = logger.emailId;
@@ -209,11 +209,11 @@ const DocsViewer = ({
         // Note: Using direct axios call instead of apiInstance
         const headers: Record<string, string> = {};
         headers['x-request-id'] = uuidv4();
-        if (logger.zeroClientID) {
-          headers['x-client-id'] = logger.zeroClientID;
+        if (logger.zeroClientId) {
+          headers['x-client-id'] = logger.zeroClientId;
         }
-        if (logger.zeroClientGroupID) {
-          headers['x-zero-client-group-id'] = logger.zeroClientGroupID;
+        if (logger.zeroClientGroupId) {
+          headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
         }
         if (logger.emailId) {
           headers['x-user-email'] = logger.emailId;

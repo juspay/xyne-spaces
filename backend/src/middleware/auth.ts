@@ -771,7 +771,7 @@ export class AuthMiddleware {
       const existingContext = loggerContext.getStore();
       const context: LogContext = {
         ...existingContext,
-        email: user.email,
+        emailId: user.email,
       };
       loggerContext.run(context, () => {
         logger.info(`[AUTH] Zero authenticated user: ${user.email} (${user.id})`);
