@@ -207,8 +207,7 @@ const ChannelCommandMenu = ({
         .map(userId => usersById.get(userId)?.name)
         .filter((name): name is string => !!name);
 
-      const concatenated = participantNames.join(',');
-      return [concatenated];
+      return participantNames;
     };
 
     // Add starred channels
@@ -652,18 +651,43 @@ const ChannelCommandMenu = ({
   }, [mentionSearchResults, mentionSearchType]);
 
   // Filter mention results for channels
+  // Channels: space maps to hyphen (e.g., "new test" matches "new-test")
+  // Group DMs: comma or space splits into separate participant name queries
   const availableChannels = useMemo(() => {
     if (mentionSearchType !== MentionType.CHANNEL) return [];
-    const searchLower = mentionSearchQuery.toLowerCase();
-    return allChannels
-      .filter(({ channel }) => {
-        if (searchLower && !channel.name.toLowerCase().includes(searchLower)) {
-          return false;
-        }
-        return true;
-      })
-      .map(({ channel }) => channel);
-  }, [allChannels, mentionSearchQuery, mentionSearchType]);
+    const searchLower = mentionSearchQuery.toLowerCase().trim();
+
+    const matchesQuery = ({
+      channel,
+      searchableNames,
+    }: {
+      channel: Channel;
+      searchableNames?: string[];
+    }): boolean => {
+      if (!searchLower) return true;
+
+      if (isDMChannel(channel.scopeType) && searchableNames) {
+        // Group DMs: split on commas, each part must match a participant
+        const queryParts = searchLower
+          .split(',')
+          .map(p => p.trim())
+          .filter(Boolean);
+        const namesLower = searchableNames.map(n => n.toLowerCase());
+        return queryParts.every(part => namesLower.some(name => name.includes(part)));
+      }
+
+      // Regular channels: match against channel name
+      return channel.name.toLowerCase().includes(searchLower);
+    };
+
+    return allChannels.filter(matchesQuery).map(({ channel }) => {
+      if (!isDMChannel(channel.scopeType)) return { channel, displayName: channel.name };
+      const otherNames = getDMParticipantIdsToFetch(channel, currentUserID)
+        .map(id => usersById.get(id)?.name)
+        .filter((n): n is string => !!n);
+      return { channel, displayName: otherNames.length > 0 ? otherNames.join(', ') : 'Group Chat' };
+    });
+  }, [allChannels, mentionSearchQuery, mentionSearchType, usersById, currentUserID]);
 
   // Use a ref for triggerSummaryFetch to avoid dependency cycles and infinite loops
   const triggerSummaryFetchRef = useRef(triggerSummaryFetch);
@@ -974,10 +998,10 @@ const ChannelCommandMenu = ({
             mentionSearchType === MentionType.CHANNEL &&
             availableChannels[selectedMentionIndex]
           ) {
-            const channel = availableChannels[selectedMentionIndex];
+            const { channel, displayName } = availableChannels[selectedMentionIndex];
             handleMentionSelect({
               id: channel.id,
-              name: channel.name,
+              name: displayName,
               type: MentionType.CHANNEL,
             });
           }
@@ -1041,7 +1065,10 @@ const ChannelCommandMenu = ({
               onUserSearch={handleUserSearch}
               onChannelSearch={handleChannelSearch}
               availableUsers={availableUsers}
-              availableChannels={availableChannels}
+              availableChannels={availableChannels.map(({ channel, displayName }) => ({
+                id: channel.id,
+                name: displayName,
+              }))}
               className='flex-1'
               open={open}
               mentionSearchType={mentionSearchType}
@@ -1361,37 +1388,44 @@ const ChannelCommandMenu = ({
                         heading='Channels'
                         className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                       >
-                        {availableChannels.map((channel, index) => (
-                          <Command.Item
-                            key={channel.id}
-                            value={`mention-channel-${channel.id}`}
-                            onSelect={() => {
-                              handleMentionSelect({
-                                id: channel.id,
-                                name: channel.name,
-                                type: MentionType.CHANNEL,
-                              });
-                            }}
-                            onMouseEnter={() => {
-                              if (setSelectedMentionIndex) {
-                                setSelectedMentionIndex(index);
-                              }
-                            }}
-                            className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                              index === selectedMentionIndex ? 'bg-gray-100' : ''
-                            } ${!isMobile && 'hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98]'}`}
-                            style={{ WebkitTapHighlightColor: 'transparent' }}
-                          >
-                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
-                              <Hash size={16} className='text-gray-600' />
-                            </div>
-                            <div className='flex-1 min-w-0'>
-                              <div className='font-semibold text-xs text-gray-800 truncate'>
-                                {channel.name}
+                        {availableChannels.map(({ channel, displayName }, index) => {
+                          const isGroupDM = isGroupDMChannel(channel.scopeType);
+                          return (
+                            <Command.Item
+                              key={channel.id}
+                              value={`mention-channel-${channel.id}`}
+                              onSelect={() => {
+                                handleMentionSelect({
+                                  id: channel.id,
+                                  name: displayName,
+                                  type: MentionType.CHANNEL,
+                                });
+                              }}
+                              onMouseEnter={() => {
+                                if (setSelectedMentionIndex) {
+                                  setSelectedMentionIndex(index);
+                                }
+                              }}
+                              className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                index === selectedMentionIndex ? 'bg-gray-100' : ''
+                              } ${!isMobile && 'hover:bg-gray-100 active:bg-gray-200 active:scale-[0.98]'}`}
+                              style={{ WebkitTapHighlightColor: 'transparent' }}
+                            >
+                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
+                                {isGroupDM ? (
+                                  <Users size={16} className='text-gray-600' />
+                                ) : (
+                                  <Hash size={16} className='text-gray-600' />
+                                )}
                               </div>
-                            </div>
-                          </Command.Item>
-                        ))}
+                              <div className='flex-1 min-w-0'>
+                                <div className='font-semibold text-xs text-gray-800 truncate'>
+                                  {displayName}
+                                </div>
+                              </div>
+                            </Command.Item>
+                          );
+                        })}
                       </Command.Group>
                     )}
                     {mentionSearchType === MentionType.USER &&

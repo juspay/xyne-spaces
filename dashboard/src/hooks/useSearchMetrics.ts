@@ -80,8 +80,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
     return options.allChannels.filter(({ channel, searchableNames }) => {
       if (searchableNames && searchableNames.length > 0) {
-        const searchableKeywords = searchableNames[0]?.toLowerCase() || '';
-        return keywords.some(keyword => keyword !== '' && searchableKeywords.includes(keyword));
+        const namesLower = searchableNames.map(n => n.toLowerCase());
+        return keywords.some(
+          keyword => keyword !== '' && namesLower.some(name => name.includes(keyword)),
+        );
       }
       return channel.name.toLowerCase().includes(searchLower);
     });
