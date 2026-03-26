@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { setupUserSessionLogging } from './middleware/userSessionLogging';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
@@ -42,7 +43,10 @@ export class DatabaseClient {
         },
       });
 
-    
+      // TEMPORARY: UserSession change logging for debugging - remove after issue resolved
+      if (config.logging.logUserSessionChanges) {
+        setupUserSessionLogging(DatabaseClient.instance, true);
+      }
 
       (DatabaseClient.instance as any).$on('error', (e: any) => {
         logger.error('Database error:', e);

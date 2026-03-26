@@ -19,6 +19,7 @@ const envSchema = Joi.object({
   RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100),
   LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
   LOG_FILE_PATH: Joi.string().default(''),
+  LOG_USER_SESSION_CHANGES: Joi.boolean().default(true),
   DATABASE_URL: Joi.string().required(),
   DATABASE_READ_REPLICA_POOL_URL: Joi.string().optional().default(''),
   WORKFLOW_LOCK_DURATION_MS: Joi.number().default(3600000), // 30 minutes in milliseconds
@@ -193,6 +194,7 @@ export const config = {
   logging: {
     level: envVars.LOG_LEVEL,
     filePath: envVars.LOG_FILE_PATH,
+    logUserSessionChanges: envVars.LOG_USER_SESSION_CHANGES,
   },
   database: {
     url: envVars.DATABASE_URL,
