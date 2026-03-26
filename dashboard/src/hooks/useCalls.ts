@@ -27,6 +27,31 @@ export const getActiveParticipants = <
 };
 
 /**
+ * Find a specific user's participant record in a participants array
+ * @param participants - Array of call participants
+ * @param userId - The user ID to find
+ * @returns The participant record, or undefined if not found
+ */
+export const findUserParticipant = <T extends { userId: string }>(
+  participants: readonly T[],
+  userId: string,
+): T | undefined => participants.find(p => p.userId === userId);
+
+/**
+ * Check if a specific user is actively in a call (ACCEPTED response)
+ * @param participants - Array of call participants
+ * @param userId - The user ID to check
+ * @returns true if the user has an ACCEPTED response
+ */
+export const isUserActiveInCall = <T extends { userId: string; response?: string | null }>(
+  participants: readonly T[],
+  userId: string,
+): boolean =>
+  participants.some(
+    p => p.userId === userId && p.response === (InvitationResponse.ACCEPTED as string),
+  );
+
+/**
  * Formats participant text for display based on participant count
  * @param participants - Array of call participants (only needs userId field)
  * @param userMap - Map of user IDs to user data for quick lookups

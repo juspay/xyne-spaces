@@ -1707,6 +1707,15 @@ export const roomMachine = setup({
             ],
           },
           {
+            // User switched to this call from another device/tab - evicted silently, no toast
+            guard: ({ event }): boolean =>
+              event.type === 'CONNECTION_STATE_CHANGED' &&
+              event.state === ConnectionState.Disconnected &&
+              event.disconnectReason === DisconnectReason.DUPLICATE_IDENTITY,
+            target: 'disconnecting',
+            actions: ['updateConnectionState'],
+          },
+          {
             actions: ['updateConnectionState'],
           },
         ],
