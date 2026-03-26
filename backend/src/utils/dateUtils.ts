@@ -48,6 +48,21 @@ export function getTodayISTDateRange(): { startDate: Date; endDate: Date } {
     endDate: now
   };
 }
+
+/**
+ * Given a start instant and two HH:mm time strings, return the end instant.
+ * Duration is computed as the difference between the two times in minutes so
+ * the result is timezone-agnostic.  Cross-midnight durations (e.g. 23:30 →
+ * 00:30) are handled by adding 24 h when the raw difference is ≤ 0.
+ */
+export function addHHMMDuration(startsAt: Date, startHHMM: string, endHHMM: string): Date {
+  const [sh, sm] = startHHMM.split(':').map(Number);
+  const [eh, em] = endHHMM.split(':').map(Number);
+  let durationMinutes = (eh! * 60 + em!) - (sh! * 60 + sm!);
+  if (durationMinutes <= 0) durationMinutes += 24 * 60;
+  return new Date(startsAt.getTime() + durationMinutes * 60 * 1000);
+}
+
 /**
  * Format a date as a short human-readable date+time string.
  * e.g. "Mon, Feb 26, 4:30 PM"

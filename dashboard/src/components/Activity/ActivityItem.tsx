@@ -78,6 +78,7 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
 
     case 'scheduled_call':
     case 'call_reminder':
+    case 'call_updated':
       return <ScheduledCallActivity activity={activity} isExpanded={isExpanded} />;
 
     default:

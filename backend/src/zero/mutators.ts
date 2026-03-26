@@ -5,6 +5,7 @@ import {
   MessageType,
   CallType,
   CallStatus,
+  RecurringCallSeriesStatus,
   CallOrigin,
   InvitationResponse,
   Schema,
@@ -3531,8 +3532,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       cancel: defineMutator(
-        z.object({ callId: z.string(), timestamp: z.number() }),
-        async ({ tx, args: { callId, timestamp } }) => {
+        z.object({ callId: z.string(), timestamp: z.number(), cancelEntireSeries: z.boolean().optional() }),
+        async ({ tx, args: { callId, timestamp, cancelEntireSeries } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call || call.status !== CallStatus.SCHEDULED) {
             throw new Error('Call not found or not scheduled');
@@ -3542,6 +3543,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             status: CallStatus.CANCELLED,
             updatedAt: timestamp,
           });
+          if (cancelEntireSeries && call.recurringSeriesId) {
+            await tx.mutate.recurring_call_series.update({
+              id: call.recurringSeriesId,
+              status: RecurringCallSeriesStatus.CANCELLED,
+              updatedAt: timestamp,
+            });
+          }
         }
       ),
     },

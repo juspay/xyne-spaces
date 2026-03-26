@@ -4,6 +4,7 @@ import {
   ChannelVisibility,
   MessageType,
   CallStatus,
+  RecurringCallSeriesStatus,
   InvitationResponse,
   ChannelScopeType,
   ChannelAddUserPolicy,
@@ -2339,8 +2340,12 @@ export const mutators = defineMutators({
       },
     ),
     cancel: defineMutator(
-      z.object({ callId: z.string(), timestamp: z.number() }),
-      async ({ tx, args: { callId, timestamp } }) => {
+      z.object({
+        callId: z.string(),
+        timestamp: z.number(),
+        cancelEntireSeries: z.boolean().optional(),
+      }),
+      async ({ tx, args: { callId, timestamp, cancelEntireSeries } }) => {
         const call = await tx.run(zql.calls.where('externalId', callId).one());
         if (!call || call.status !== CallStatus.SCHEDULED) {
           throw new Error('Call not found or not scheduled');
@@ -2350,6 +2355,13 @@ export const mutators = defineMutators({
           status: CallStatus.CANCELLED,
           updatedAt: timestamp,
         });
+        if (cancelEntireSeries && call.recurringSeriesId) {
+          await tx.mutate.recurring_call_series.update({
+            id: call.recurringSeriesId,
+            status: RecurringCallSeriesStatus.CANCELLED,
+            updatedAt: timestamp,
+          });
+        }
       },
     ),
   },

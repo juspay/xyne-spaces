@@ -14,6 +14,7 @@ import Input from '../Input';
 // ==================== TYPES ====================
 
 interface TimePickerProps {
+  id?: string;
   /** Controlled time value in `hh:mm AM/PM` format */
   value: string;
 
@@ -31,6 +32,7 @@ interface TimePickerProps {
 }
 
 export const TimePicker: React.FC<TimePickerProps> = ({
+  id,
   value,
   onChange,
   placeholder = 'Select time',
@@ -102,6 +104,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
         <div className='relative w-full rounded-lg h-9'>
           <Clock className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none' />
           <Input
+            id={id}
             type='text'
             value={displayTime}
             placeholder={placeholder}

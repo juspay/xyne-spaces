@@ -331,14 +331,21 @@ class LiveKitWebhookController {
           logger.info(`[LiveKit Webhook] Updated participant ${participant.identity} to ACCEPTED for call ${roomName}`);
 
           // Trigger side effects for participant response (dismiss notification, cleanup timeout)
-          try {
-            await callSideEffectService.handleParticipantResponse(
-              existingParticipant.id,
-              InvitationResponse.ACCEPTED
-            );
-            logger.info(`[LiveKit Webhook] Triggered participant response side effects for ${participant.identity}`);
-          } catch (sideEffectError) {
-            logger.error(`[LiveKit Webhook] Failed to trigger participant response side effects:`, sideEffectError);
+          // Skip if this is a scheduled call being joined before its scheduled startTime —
+          // no incoming-call notification was sent yet, so there is nothing to dismiss.
+          const startedBeforeScheduledTime = call.startsAt !== null && now < call.startsAt;
+          if (startedBeforeScheduledTime) {
+            logger.info(`[LiveKit Webhook] Skipping participant response side effects for ${participant.identity} — call started before scheduled startTime`);
+          } else {
+            try {
+              await callSideEffectService.handleParticipantResponse(
+                existingParticipant.id,
+                InvitationResponse.ACCEPTED
+              );
+              logger.info(`[LiveKit Webhook] Triggered participant response side effects for ${participant.identity}`);
+            } catch (sideEffectError) {
+              logger.error(`[LiveKit Webhook] Failed to trigger participant response side effects:`, sideEffectError);
+            }
           }
         }
       }

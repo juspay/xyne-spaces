@@ -56,6 +56,17 @@ interface UseCallHistoryReturn {
   hasMoreCalls: boolean;
   loadMoreCalls: () => void;
   onVisibleRangeChanged: (startIndex: number) => void;
+  /** Open the delete-call modal for a specific call */
+  handleDeleteClick: (call: ScheduledCall) => void;
+  deleteModalOpen: boolean;
+  deleteModalCall: ScheduledCall | null;
+  handleDeleteConfirm: (cancelEntireSeries: boolean) => void;
+  closeDeleteModal: () => void;
+  /** Open the edit-call modal for a specific call */
+  handleEditClick: (call: ScheduledCall) => void;
+  editModalOpen: boolean;
+  editModalCall: ScheduledCall | null;
+  closeEditModal: () => void;
 }
 
 export function useCallHistory(userId: string | undefined): UseCallHistoryReturn {
@@ -90,6 +101,10 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   const [pendingCall, setPendingCall] = useState<Call | null>(null);
   const [isJoiningCall, setIsJoiningCall] = useState(false); // Track if joining vs initiating
   const [callIdToJoin, setCallIdToJoin] = useState<string | null>(null); // Store the active call's externalId
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteModalCall, setDeleteModalCall] = useState<ScheduledCall | null>(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editModalCall, setEditModalCall] = useState<ScheduledCall | null>(null);
   const navigate = useNavigate();
 
   const { isMobile } = usePlatform();
@@ -427,6 +442,48 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     }
   };
 
+  const handleDeleteClick = (call: ScheduledCall): void => {
+    setDeleteModalCall(call);
+    setDeleteModalOpen(true);
+  };
+
+  const closeDeleteModal = (): void => {
+    setDeleteModalOpen(false);
+    setDeleteModalCall(null);
+  };
+
+  const handleEditClick = (call: ScheduledCall): void => {
+    setEditModalCall(call);
+    setEditModalOpen(true);
+  };
+
+  const closeEditModal = (): void => {
+    setEditModalOpen(false);
+    setEditModalCall(null);
+  };
+
+  const handleDeleteConfirm = (cancelEntireSeries: boolean): void => {
+    if (!deleteModalCall) return;
+
+    try {
+      void zero.mutate(
+        mutators.calls.cancel({
+          callId: deleteModalCall.externalId,
+          timestamp: Date.now(),
+          cancelEntireSeries: cancelEntireSeries && !!deleteModalCall.recurringSeriesId,
+        }),
+      );
+      toast.success(
+        cancelEntireSeries ? 'Recurring series cancelled' : 'Call cancelled successfully',
+      );
+    } catch (error) {
+      logger.error(Logger.API_CALL_FAILED, { message: 'Failed to cancel call', error });
+      toast.error('Failed to cancel call');
+    }
+
+    closeDeleteModal();
+  };
+
   const handleGotoTranscript = (call: Call): void => {
     const metadata = call.metadata as { conversationId?: string } | null;
     const conversationId = metadata?.conversationId;
@@ -558,5 +615,14 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     hasMoreCalls,
     loadMoreCalls,
     onVisibleRangeChanged,
+    handleDeleteClick,
+    deleteModalOpen,
+    deleteModalCall,
+    handleDeleteConfirm,
+    closeDeleteModal,
+    handleEditClick,
+    editModalOpen,
+    editModalCall,
+    closeEditModal,
   };
 }

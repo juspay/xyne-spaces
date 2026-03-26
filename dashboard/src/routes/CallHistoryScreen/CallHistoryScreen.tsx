@@ -18,8 +18,12 @@ import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { CallConfirmationModal } from '../../components/Call/CallConfirmationModal';
+import { DeleteCallModal } from '../../components/Call/DeleteCallModal';
 import { InstantCallModal } from '../../components/Call/InstantCallModal/InstantCallModal';
-import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
+import {
+  ScheduleCallModal,
+  EditCallData,
+} from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import Button from '../../components/ui/Button';
 import {
@@ -80,10 +84,18 @@ const CallHistoryScreen = (): ReactElement => {
     handleConfirmCall,
     closeConfirmModal,
     handleInstantCall,
-    handleCancelCall,
     hasMoreCalls,
     loadMoreCalls,
     onVisibleRangeChanged,
+    handleDeleteClick,
+    deleteModalOpen,
+    deleteModalCall,
+    handleDeleteConfirm,
+    closeDeleteModal,
+    handleEditClick,
+    editModalOpen,
+    editModalCall,
+    closeEditModal,
   } = useCallHistory(user?.id);
 
   const zero = useZero();
@@ -421,7 +433,11 @@ const CallHistoryScreen = (): ReactElement => {
                             currentUserId={user?.id ?? ''}
                             onCancelClick={e => {
                               e.stopPropagation();
-                              handleCancelCall(call.externalId);
+                              handleDeleteClick(call);
+                            }}
+                            onEditClick={e => {
+                              e.stopPropagation();
+                              handleEditClick(call);
                             }}
                           />
                         ))}
@@ -511,7 +527,11 @@ const CallHistoryScreen = (): ReactElement => {
                       currentUserId={user?.id ?? ''}
                       onCancelClick={e => {
                         e.stopPropagation();
-                        handleCancelCall(call.externalId);
+                        handleDeleteClick(call);
+                      }}
+                      onEditClick={e => {
+                        e.stopPropagation();
+                        handleEditClick(call);
                       }}
                     />
                   ))}
@@ -583,10 +603,19 @@ const CallHistoryScreen = (): ReactElement => {
         subtitle={confirmModalConfig.subtitle}
       />
 
-      {/* Schedule Call Modal */}
+      {/* Schedule Call Modal (create) */}
       <ScheduleCallModal
         isOpen={isScheduleModalOpen}
         onClose={() => setIsScheduleModalOpen(false)}
+      />
+
+      {/* Schedule Call Modal (edit) */}
+      <ScheduleCallModal
+        isOpen={editModalOpen}
+        onClose={closeEditModal}
+        mode='edit'
+        initialCall={editModalCall as EditCallData | null}
+        onSuccess={closeEditModal}
       />
 
       {/* Instant Call Modal */}
@@ -594,6 +623,23 @@ const CallHistoryScreen = (): ReactElement => {
         isOpen={isInstantCallModalOpen}
         onClose={() => setIsInstantCallModalOpen(false)}
         onSubmit={handleInstantCall}
+      />
+
+      {/* Delete Call Modal */}
+      <DeleteCallModal
+        isOpen={deleteModalOpen}
+        onClose={closeDeleteModal}
+        onConfirm={handleDeleteConfirm}
+        callLabel={
+          deleteModalCall
+            ? `${deleteModalCall.title ?? 'Scheduled Call'}${
+                deleteModalCall.startsAt
+                  ? ` | ${new Date(deleteModalCall.startsAt).toLocaleDateString('en-US', { weekday: 'short' })} ${new Date(deleteModalCall.startsAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`
+                  : ''
+              }`
+            : ''
+        }
+        isRecurring={!!deleteModalCall?.recurringSeriesId}
       />
     </div>
   );

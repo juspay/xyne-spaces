@@ -108,6 +108,7 @@
     "remark-frontmatter": "^5.0.0",
     "remark-parse": "^11.0.0",
     "remove-markdown": "^0.6.3",
+    "rrule": "^2.8.1",
     "simple-git": "^3.30.0",
     "simple-oauth2": "^5.1.0",
     "socket.io": "^4.8.1",

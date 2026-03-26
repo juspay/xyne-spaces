@@ -233,6 +233,13 @@ enum InvitationResponse {
   @@schema("public")
 }
 
+enum RecurringCallSeriesStatus {
+  ACTIVE    // Instances are still being generated
+  ENDED     // endsOn has passed
+  CANCELLED // Organizer cancelled the series
+  @@schema("public")
+}
+
 enum ConversationParticipation {
   AUTHOR      // Sent at least one message in the conversation
   MENTIONED   // Tagged/mentioned but hasn't replied yet
@@ -1858,6 +1865,7 @@ enum NotificationType {
   CALL_DISMISS
   CALL_REMINDER
   CALL_SCHEDULED
+  CALL_UPDATED
   @@schema("public")
 }
 
@@ -1981,6 +1989,7 @@ model Call {
   // Relations
   channel      Channel           @relation(fields: [channelId], references: [id])
   participants CallParticipant[]
+  recurringSeries RecurringCallSeries? @relation(fields: [recurringSeriesId], references: [id])
 
   @@index([externalId]) // Fast lookup by public ID
   @@index([createdByUserId]) // Fast lookup of user's calls
@@ -2017,6 +2026,33 @@ model CallParticipant {
   @@index([callId, leftAt]) // Fast active participants lookup
   @@index([response]) // Fast response lookup
   @@map("call_participants")
+  @@schema("public")
+}
+
+model RecurringCallSeries {
+  id             String                    @id @default(cuid())
+  title          String                    // Series title
+  description    String?                   // Series description/agenda
+  organizerId    String                    // User who created the series (no FK constraint)
+  channelId      String                    // Channel where calls happen (no FK constraint)
+  recurrenceRule String                    // RRULE pattern; UNTIL/COUNT are supported — backend derives endsOn from them
+  timezone       String                    // IANA timezone e.g. "America/New_York"
+  startTime      String                    // Time of day, 24h format e.g. "10:00"
+  endTime        String                    // Time of day, 24h format e.g. "11:00"
+  status         RecurringCallSeriesStatus @default(ACTIVE)
+  startsOn       DateTime                  // Series start date (first possible occurrence)
+  endsOn         DateTime?                 // Series end date (null = indefinite)
+  metadata       Json?                     // Extra config e.g. { "reminderMinutes": 10 }
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+
+  // Relations
+  instances Call[] // All Call instances generated from this series
+
+  @@index([organizerId])  // Fast lookup of series created by a user
+  @@index([channelId])    // Fast lookup of series in a channel
+  @@index([status])       // Fast lookup of active series
+  @@map("recurring_call_series")
   @@schema("public")
 }
 

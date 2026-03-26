@@ -6,6 +6,7 @@ import { cn } from '../../../utils/classNames';
 
 // ==================== TYPES ====================
 interface DatePickerProps {
+  id?: string;
   selectedDate: Date | null;
   onSelect: (date: Date | null) => void;
   placeholder?: string;
@@ -148,6 +149,7 @@ const MonthView: React.FC<{
 
 // ==================== MAIN COMPONENT ====================
 export const DatePicker: React.FC<DatePickerProps> = ({
+  id,
   selectedDate,
   onSelect,
   placeholder = 'Select date',
@@ -344,6 +346,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         <div
           role='button'
           tabIndex={0}
+          id={id}
           data-testid='ticket-due-date-selector'
           onClick={() => setIsOpen(!isOpen)}
           onKeyDown={e => {
@@ -357,7 +360,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           data-track-name='ToggleDatePicker'
         >
           <Calendar className='flex-shrink-0 w-3.5 h-3.5 text-muted-foreground' />
-          <span className='text-[13px] text-foreground whitespace-nowrap'>
+          <span className='text-[13px] text-foreground whitespace-nowrap w-full'>
             {selectedDate ? formatDate(selectedDate) : placeholder}
           </span>
           {showClearButton && selectedDate && (

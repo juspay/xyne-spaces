@@ -202,6 +202,12 @@ export enum InvitationResponse {
   LEFT = "LEFT",
 }
 
+export enum RecurringCallSeriesStatus {
+  ACTIVE = "ACTIVE",
+  ENDED = "ENDED",
+  CANCELLED = "CANCELLED",
+}
+
 export enum ConversationParticipation {
   AUTHOR = "AUTHOR",
   MENTIONED = "MENTIONED",
@@ -1541,6 +1547,26 @@ export const callParticipantTable = table("call_participants")
     joinedAt: number().optional(),
     leftAt: number().optional(),
     metadata: json().optional(),
+  })
+  .primaryKey("id");
+
+export const recurringCallSeriesTable = table("recurring_call_series")
+  .columns({
+    id: string(),
+    title: string(),
+    description: string().optional(),
+    organizerId: string(),
+    channelId: string(),
+    recurrenceRule: string(),
+    timezone: string(),
+    startTime: string(),
+    endTime: string(),
+    status: enumeration<RecurringCallSeriesStatus>(),
+    startsOn: number(),
+    endsOn: number().optional(),
+    metadata: json().optional(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -2884,6 +2910,11 @@ export const callTableRelationships = relationships(callTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["callId"],
     destSchema: callParticipantTable,
+  }),
+  recurringSeries: one({
+    sourceField: ["recurringSeriesId"],
+    destField: ["id"],
+    destSchema: recurringCallSeriesTable,
   })
 }));
 
@@ -2891,6 +2922,14 @@ export const callParticipantTableRelationships = relationships(callParticipantTa
   call: one({
     sourceField: ["callId"],
     destField: ["id"],
+    destSchema: callTable,
+  })
+}));
+
+export const recurringCallSeriesTableRelationships = relationships(recurringCallSeriesTable, ({ many }) => ({
+  instances: many({
+    sourceField: ["id"],
+    destField: ["recurringSeriesId"],
     destSchema: callTable,
   })
 }));
@@ -3011,6 +3050,7 @@ export const schema = createSchema(
       browserNotificationSubscriptionTable,
       callTable,
       callParticipantTable,
+      recurringCallSeriesTable,
       canvasTable,
       canvasParticipantTable,
       bookmarkTable,
@@ -3098,6 +3138,7 @@ export const schema = createSchema(
       reactionCountTableRelationships,
       callTableRelationships,
       callParticipantTableRelationships,
+      recurringCallSeriesTableRelationships,
       canvasTableRelationships,
       canvasParticipantTableRelationships,
       appsTableRelationships,
@@ -3177,6 +3218,7 @@ export type NotificationPreference = Row<typeof schema.tables.notification_prefe
 export type BrowserNotificationSubscription = Row<typeof schema.tables.browser_notification_subscriptions>;
 export type Call = Row<typeof schema.tables.calls>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
+export type RecurringCallSeries = Row<typeof schema.tables.recurring_call_series>;
 export type Canvas = Row<typeof schema.tables.canvases>;
 export type CanvasParticipant = Row<typeof schema.tables.canvas_participants>;
 export type Bookmark = Row<typeof schema.tables.bookmarks>;

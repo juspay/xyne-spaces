@@ -219,6 +219,13 @@ export enum CallStatus {
 }
 
 // @ts-ignore TS1294
+export enum RecurringCallSeriesStatus {
+  ACTIVE = 'ACTIVE',
+  ENDED = 'ENDED',
+  CANCELLED = 'CANCELLED',
+}
+
+// @ts-ignore TS1294
 export enum InvitationResponse {
   INVITED = 'INVITED',
   ACCEPTED = 'ACCEPTED',
@@ -1348,6 +1355,25 @@ export const callParticipantTable = table('call_participants')
     joinedAt: number().optional(),
     leftAt: number().optional(),
     metadata: json().optional(),
+  })
+  .primaryKey('id');
+
+export const recurringCallSeriesTable = table('recurring_call_series')
+  .columns({
+    id: string(),
+    title: string(),
+    description: string().optional(),
+    organizerId: string(),
+    channelId: string(),
+    recurrenceRule: string(),
+    timezone: string(),
+    startTime: string(),
+    endTime: string(),
+    status: enumeration<RecurringCallSeriesStatus>(),
+    startsOn: number(),
+    endsOn: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -2778,6 +2804,27 @@ export const callParticipantTableRelationships = relationships(callParticipantTa
   }),
 }));
 
+export const recurringCallSeriesTableRelationships = relationships(
+  recurringCallSeriesTable,
+  ({ one, many }) => ({
+    organizer: one({
+      sourceField: ['organizerId'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    instances: many({
+      sourceField: ['id'],
+      destField: ['recurringSeriesId'],
+      destSchema: callTable,
+    }),
+  }),
+);
+
 export const canvasTableRelationships = relationships(canvasTable, ({ one, many }) => ({
   participants: many({
     sourceField: ['id'],
@@ -3161,6 +3208,7 @@ export const schema = createSchema({
     surfaceNudgeTable,
     callTable,
     callParticipantTable,
+    recurringCallSeriesTable,
     canvasTable,
     canvasParticipantTable,
     bookmarkTable,
@@ -3243,6 +3291,7 @@ export const schema = createSchema({
     surfaceNudgeTableRelationships,
     callTableRelationships,
     callParticipantTableRelationships,
+    recurringCallSeriesTableRelationships,
     canvasTableRelationships,
     canvasParticipantTableRelationships,
     pullRequestsTableRelationships,

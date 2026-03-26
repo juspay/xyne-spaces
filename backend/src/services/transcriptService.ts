@@ -1347,10 +1347,11 @@ Output ONLY the processed transcript, nothing else.`;
       );
 
       if (summary) {
-        // Save summary and title to call record
+        // Save summary and title to call record.
+        // Only set title from AI if the call doesn't already have one (scheduled calls have a pre-set title).
         await repositories.calls.update(call.id, {
           aiSummary: summary,
-          title: title || undefined, // Update title if generated
+          ...(title && !call.title ? { title } : {}),
         });
         logger.info(`[${callId}] call_record_updated | fields_updated=aiSummary`);
 

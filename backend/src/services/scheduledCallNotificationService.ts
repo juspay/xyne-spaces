@@ -6,6 +6,7 @@ import { activityService } from '@/services/activity/activityService';
 import { CallStatus, CallParticipant, NotificationType, ActivityClassification, InvitationResponse } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { formatDateTimeShort } from '@/utils/dateUtils';
+import { recurringCallService } from '@/services/recurringCallService';
 
 interface ScheduledCallReminderData {
   callId: string;
@@ -132,37 +133,70 @@ class ScheduledCallNotificationService {
           return;
         }
 
+        // ── Attempt to end the call if applicable ──
         if (call.status === CallStatus.CANCELLED) {
-          logger.info(`Call ${callId} has been cancelled, skipping auto-end`);
-          return;
+          logger.info(`Call ${callId} has been cancelled, skipping auto-end attempt`);
+        } else if (call.status === CallStatus.SCHEDULED) {
+          const db = DatabaseClient.getInstance();
+          const participants = await db.callParticipant.findMany({ where: { callId } });
+          const activeParticipants = participants.filter(
+            (p: CallParticipant) => p.joinedAt !== null && p.leftAt === null,
+          );
+
+          if (activeParticipants.length > 0) {
+            logger.info(
+              `Call ${callId} has ${activeParticipants.length} active participant(s) at endsAt — not ending, but will still chain next recurring instance`,
+            );
+          } else {
+            await repositories.calls.update(callId, { status: CallStatus.ENDED });
+            logger.info(`✅ Auto-ended call ${callExternalId} — no active participants at scheduled end time`);
+          }
+        } else {
+          logger.info(`Call ${callId} status is ${call.status} — skipping auto-end, but will still chain next recurring instance if applicable`);
         }
 
-        // Only auto-end if call is still SCHEDULED (not already ACTIVE or ENDED)
-        if (call.status !== CallStatus.SCHEDULED) {
-          logger.info(`Call ${callId} status is ${call.status}, skipping auto-end`);
-          return;
+        // ── Chain next recurring instance regardless of call state ──
+        // Fires even if the instance was cancelled — the series continues.
+        if (call.recurringSeriesId) {
+          try {
+            // Idempotency guard: if Bull retries this job after createNextInstance already
+            // succeeded (e.g. DB write succeeded but job was mis-marked as failed), a
+            // SCHEDULED instance for this series after endsAt will already exist — skip.
+            const db = DatabaseClient.getInstance();
+            const existingNext = await db.call.findFirst({
+              where: {
+                recurringSeriesId: call.recurringSeriesId,
+                status: CallStatus.SCHEDULED,
+                startsAt: { gt: new Date(endsAt) },
+              },
+            });
+
+            if (existingNext) {
+              logger.info(
+                `Next instance ${existingNext.id} already exists for series ${call.recurringSeriesId} — skipping duplicate chain`,
+              );
+            } else {
+              const db = DatabaseClient.getInstance();
+              const nextCallId = await db.$transaction(async (tx) =>
+                recurringCallService.createNextInstance(
+                  call.recurringSeriesId!,
+                  new Date(endsAt),
+                  false,
+                  false,
+                  tx,
+                ),
+              );
+              if (nextCallId) {
+                logger.info(`📅 Chained next recurring instance ${nextCallId} for series ${call.recurringSeriesId}`);
+              }
+            }
+          } catch (recurringError) {
+            logger.error(
+              `Failed to create next recurring instance for series ${call.recurringSeriesId}:`,
+              recurringError,
+            );
+          }
         }
-
-        // Check if there are any active participants
-        const db = DatabaseClient.getInstance();
-        const participants = await db.callParticipant.findMany({
-          where: { callId }
-        });
-        const activeParticipants = participants.filter(
-          (p: CallParticipant) => p.joinedAt !== null && p.leftAt === null
-        );
-
-        if (activeParticipants.length > 0) {
-          logger.info(`Call ${callId} has ${activeParticipants.length} active participants, skipping auto-end`);
-          return;
-        }
-
-        // No active participants, mark call as ENDED
-        await repositories.calls.update(callId, {
-          status: CallStatus.ENDED,
-        });
-
-        logger.info(`✅ Auto-ended call ${callExternalId} - no active participants at scheduled end time`);
       } catch (error) {
         logger.error(`Failed to auto-end call ${callId}:`, error);
         throw error; // Bull will retry based on configuration
@@ -439,7 +473,7 @@ class ScheduledCallNotificationService {
         await activityService.createActivity({
           userId,
           actorId: call.createdByUserId,
-          actorAction: NotificationType.CALL_REMINDER,
+          actorAction: 'call_reminder',
           actionSource: 'call',
           actionSourceId: call.externalId,
           callId: call.id,
@@ -467,6 +501,137 @@ class ScheduledCallNotificationService {
       logger.info('📅 Scheduled Call Notification Service shutdown completed');
     } catch (error) {
       logger.error('Error during scheduled call notification service shutdown:', error);
+    }
+  }
+
+  /**
+   * Remove the Bull reminder job for a call (used before rescheduling).
+   */
+  private async removeReminderJob(callId: string): Promise<void> {
+    try {
+      const job = await this.queue.getJob(`call-reminder-${callId}`);
+      if (job) {
+        await job.remove();
+        logger.info(`🗑️  Removed existing reminder job for call ${callId}`);
+      }
+    } catch (error) {
+      logger.warn(`Failed to remove reminder job for call ${callId}:`, error);
+    }
+  }
+
+  /**
+   * Remove the Bull auto-end job for a call (used before rescheduling).
+   */
+  private async removeAutoEndJob(callId: string): Promise<void> {
+    try {
+      const job = await this.queue.getJob(`call-auto-end-${callId}`);
+      if (job) {
+        await job.remove();
+        logger.info(`🗑️  Removed existing auto-end job for call ${callId}`);
+      }
+    } catch (error) {
+      logger.warn(`Failed to remove auto-end job for call ${callId}:`, error);
+    }
+  }
+
+  /**
+   * Remove both Bull jobs (reminder + auto-end) for a call.
+   * Used when deleting call instances during a series update.
+   */
+  async removeCallJobs(callId: string): Promise<void> {
+    await Promise.all([this.removeReminderJob(callId), this.removeAutoEndJob(callId)]);
+  }
+
+  /**
+   * Reschedule the reminder job for a call after its start time has changed.
+   */
+  async rescheduleCallReminder(
+    callId: string,
+    callExternalId: string,
+    title: string,
+    newStartsAt: Date,
+    participantIds: string[],
+  ): Promise<void> {
+    await this.removeReminderJob(callId);
+    await this.scheduleCallReminder(callId, callExternalId, title, newStartsAt, participantIds);
+  }
+
+  /**
+   * Reschedule the auto-end job for a call after its end time has changed.
+   */
+  async rescheduleCallAutoEnd(
+    callId: string,
+    callExternalId: string,
+    newEndsAt: Date,
+  ): Promise<void> {
+    await this.removeAutoEndJob(callId);
+    await this.scheduleCallAutoEnd(callId, callExternalId, newEndsAt);
+  }
+
+  /**
+   * Send CALL_SCHEDULED notifications to all participants informing them that a
+   * scheduled call has been updated (title, time, or participant list changed).
+   * Excludes the organizer. Uses CALL_SCHEDULED notification type with an
+   * "updated" message so existing notification rendering is reused.
+   */
+  async sendCallUpdatedNotifications(params: {
+    callId: string;
+    callExternalId: string;
+    title: string;
+    startsAt: Date;
+    endsAt: Date;
+    channelId: string;
+    organizerUserId: string;
+    participantUserIds: string[];
+  }): Promise<void> {
+    const { callId, callExternalId, title, startsAt, endsAt, channelId, organizerUserId, participantUserIds } = params;
+
+    const participantsToNotify = participantUserIds.filter((id) => id !== organizerUserId);
+    if (participantsToNotify.length === 0) return;
+
+    const startTime = formatDateTimeShort(new Date(startsAt));
+
+    const notificationPromises = participantsToNotify.map(async (participantId) => {
+      try {
+        await notificationService.createNotification(participantId, {
+          type: NotificationType.CALL_UPDATED,
+          title: `📅 ${title} (Updated)`,
+          message: `The scheduled call "${title}" has been updated — new time: ${startTime}`,
+          relatedEntityType: 'call',
+          relatedEntityId: callExternalId,
+          actionUrl: '/calls',
+          metadata: {
+            callId,
+            callExternalId,
+            startsAt,
+            endsAt,
+            startTime,
+            isUpdate: true,
+          },
+        });
+      } catch (error) {
+        logger.error(`Failed to send update notification to user ${participantId}:`, error);
+      }
+    });
+
+    await Promise.all(notificationPromises);
+    logger.info(`Sent CALL_UPDATED notifications for call ${callExternalId} to ${participantsToNotify.length} participants`);
+
+    try {
+      await activityService.createActivities(
+        participantsToNotify.map((participantId) => ({
+          userId: participantId,
+          actorId: organizerUserId,
+          actorAction: 'call_updated',
+          actionSource: 'call',
+          actionSourceId: callExternalId,
+          callId,
+          channelId,
+          classification: ActivityClassification.FYI,
+        }))
+      );
+    } catch (activityError) {
+      logger.error(`Failed to create update activities for call ${callId}:`, activityError);
     }
   }
 }
