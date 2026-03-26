@@ -21,6 +21,7 @@ import { integrityDebugWorkflow } from './integrity-debug-workflow/integrityDebu
 import { xyneAutoRcaWorkflow } from './xyne-auto-rca-workflow/xyneAutoRcaWorkflow'
 import { versionBumpWorkflow } from './version-bump-workflow/versionBumpWorkflow'
 import { itSupportWorkflow } from './it-support-workflow/itSupportWorkflow'
+import { jUtilsCodeUpdationWorkflow } from './jUtils-workflow/jUtilsCodeUpdationWorkflow'
 import { WorkflowType } from '../types/workflow-enums'
 import {logger} from '@/utils/logger';
 
@@ -48,6 +49,7 @@ export const WORKFLOW_DEFINITIONS = {
   [WorkflowType.XYNE_AUTO_RCA_WORKFLOW]: xyneAutoRcaWorkflow,
   [WorkflowType.VERSION_BUMP_WORKFLOW]: versionBumpWorkflow,
   [WorkflowType.IT_SUPPORT_WORKFLOW]: itSupportWorkflow,
+  [WorkflowType.JUTILS_CODE_UPDATION]: jUtilsCodeUpdationWorkflow,
 } as const
 
 export function registerAllWorkflows(): void {
@@ -75,6 +77,7 @@ export function registerAllWorkflows(): void {
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.XYNE_AUTO_RCA_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.VERSION_BUMP_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.IT_SUPPORT_WORKFLOW])
+  workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.JUTILS_CODE_UPDATION])
 }
 
 export { workflowRegistry } from '../registry/workflowRegistry'
