@@ -819,6 +819,7 @@ model UserGroup {
   boardComplexityScores BoardComplexityScore[]
   workloadMappings     UserWorkloadMapping[]
   expertiseMappings    UserExpertiseMapping[]
+  isActive    Boolean     @default(true)
 
   @@map("user_groups")
   @@schema("public")
@@ -1126,6 +1127,8 @@ enum ACLAuditEventType {
   USER_GROUP_CREATED
   USER_GROUP_UPDATED
   USER_GROUP_DELETED
+  USER_GROUP_REACTIVATED
+  USER_GROUP_DEACTIVATED
   @@schema("public")
 }
 

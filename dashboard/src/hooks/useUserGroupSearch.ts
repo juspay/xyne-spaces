@@ -6,12 +6,14 @@ interface UserGroup {
   name: string;
   alias: string | null;
   description: string | null;
+  isActive?: boolean;
   createdAt: number;
   updatedAt: number;
 }
 
 /**
  * Hook to search and filter user groups by query string
+ * Returns all groups (including deactivated) - UI should show deactivated status
  * @param searchQuery - The search query to filter groups
  * @param limit - Maximum number of results to return
  * @returns Array of filtered user groups

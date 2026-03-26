@@ -7,6 +7,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
 import { useUsers } from '../../hooks/useUsers';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useUserGroups } from '../../hooks/useUserGroup';
 
 const ProjectsScreen = (): ReactElement => {
   const location = useLocation();
@@ -16,7 +17,7 @@ const ProjectsScreen = (): ReactElement => {
   // Fetch all projects using zero
   const [projects] = useCachedQuery(queries.getAllProjects());
   const users = useUsers();
-  const [userGroups] = useCachedQuery(queries.getAllUserGroups());
+  const userGroups = useUserGroups();
 
   return (
     <div

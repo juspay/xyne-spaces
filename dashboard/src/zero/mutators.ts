@@ -2915,6 +2915,42 @@ export const mutators = defineMutators({
         });
       },
     ),
+    deactivate: defineMutator(
+      z.object({ userGroupId: z.string(), timestamp: z.number() }),
+      async ({ tx, args: { userGroupId, timestamp } }) => {
+        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+        if (!userGroup) {
+          throw new Error('User group not found');
+        }
+        if (!userGroup.isActive) {
+          throw new Error('User group is already deactivated');
+        }
+
+        await tx.mutate.user_groups.update({
+          id: userGroupId,
+          isActive: false,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    reactivate: defineMutator(
+      z.object({ userGroupId: z.string(), timestamp: z.number() }),
+      async ({ tx, args: { userGroupId, timestamp } }) => {
+        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+        if (!userGroup) {
+          throw new Error('User group not found');
+        }
+        if (userGroup.isActive) {
+          throw new Error('User group is already active');
+        }
+
+        await tx.mutate.user_groups.update({
+          id: userGroupId,
+          isActive: true,
+          updatedAt: timestamp,
+        });
+      },
+    ),
     addUsers: defineMutator(
       z.object({
         userGroupId: z.string(),

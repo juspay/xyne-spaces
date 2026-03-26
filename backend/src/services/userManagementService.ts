@@ -169,6 +169,14 @@ export class UserManagementService {
     return repositories.userGroups.delete(id);
   }
 
+  async deactivateUserGroup(id: string): Promise<UserGroup> {
+    return repositories.userGroups.softDelete(id);
+  }
+
+  async reactivateUserGroup(id: string): Promise<UserGroup> {
+    return repositories.userGroups.restore(id);
+  }
+
   async searchUserGroups(searchTerm: string, options?: PaginationOptions): Promise<PaginatedResult<UserGroup> | UserGroup[]> {
     return repositories.userGroups.findBySearch(searchTerm, options);
   }

@@ -15,6 +15,7 @@ import type { Ticket, TicketTag } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 import { Calendar, Check, User } from 'lucide-react';
 import Tooltip from '../../ui/Tooltip';
 import { formatStatusLabel, getPriorityIcon, isEtaUrgent } from '../TicketCard/TicketCard.utils';
@@ -159,7 +160,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   const [gridApi, setGridApi] = useState<GridApi | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
 
-  const [userGroups] = useCachedQuery(queries.getAllUserGroups());
+  const userGroups = useUserGroups();
   const [projectTickets] = useCachedQuery(
     queries.ticketsByProject({ projectId: projectId ?? '' }),
     {

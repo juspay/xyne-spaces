@@ -47,6 +47,7 @@ import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useUserSearch, useUsers } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
 import { useBoardSuggestion } from '../../../hooks/useBoardSuggestion';
 import { apiInstance } from '../../../services/clients/apiClient';
@@ -489,7 +490,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // Query all tickets in the project to extract available tags
   const [projectTickets] = useCachedQuery(queries.ticketsByProject({ projectId: projectId }));
 
-  const [userGroupOptions] = useCachedQuery(queries.getAllUserGroups());
+  const userGroupOptions = useUserGroups();
 
   const [ticketTypeOptions] = useCachedQuery(
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
@@ -1199,10 +1200,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       })) || [];
 
     const filteredGroups = assigneeSearchValue.trim()
-      ? userGroupOptions?.filter(group =>
-          group.name.toLowerCase().includes(assigneeSearchValue.toLowerCase()),
-        )
-      : userGroupOptions;
+      ? userGroupOptions
+          ?.filter(group => group.isActive !== false)
+          .filter(group => group.name.toLowerCase().includes(assigneeSearchValue.toLowerCase()))
+      : userGroupOptions?.filter(group => group.isActive !== false);
 
     const groupOptions =
       filteredGroups?.map(userGroup => ({

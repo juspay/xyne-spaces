@@ -217,6 +217,7 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
       ...(group.alias && { alias: group.alias }),
       ...(group.description && { description: group.description }),
       memberCount: 0,
+      isDeactivated: group.isActive === false,
     }));
   }, [userGroupsData]);
 

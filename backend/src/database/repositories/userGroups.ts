@@ -162,6 +162,38 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     return deletedUserGroup;
   }
 
+  async softDelete(id: string, actorUserId?: string): Promise<UserGroup> {
+    const userGroup = await this.findById(id);
+    if (!userGroup) {
+      throw new Error('User group not found');
+    }
+
+    const updatedUserGroup = await this.db.userGroup.update({
+      where: { id },
+      data: { isActive: false },
+    });
+
+    await aclAuditService.logUserGroupDeactivated(userGroup.id, userGroup.name, actorUserId);
+
+    return updatedUserGroup;
+  }
+
+  async restore(id: string, actorUserId?: string): Promise<UserGroup> {
+    const userGroup = await this.findById(id);
+    if (!userGroup) {
+      throw new Error('User group not found');
+    }
+
+    const updatedUserGroup = await this.db.userGroup.update({
+      where: { id },
+      data: { isActive: true },
+    });
+
+    await aclAuditService.logUserGroupReactivated(userGroup.id, userGroup.name, actorUserId);
+
+    return updatedUserGroup;
+  }
+
   async findWithMappings(id: string): Promise<UserGroupWithMappings | null> {
     const group = await this.db.userGroup.findUnique({
       where: { id }

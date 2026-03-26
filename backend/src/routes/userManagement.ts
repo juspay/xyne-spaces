@@ -39,6 +39,12 @@ router.put('/groups/:id', userManagementController.updateGroup);
 // Delete a user group
 router.delete('/groups/:id', userManagementController.deleteGroup);
 
+// Deactivate a user group (soft delete)
+router.patch('/groups/:id/deactivate', userManagementController.deactivateGroup);
+
+// Reactivate a user group
+router.patch('/groups/:id/reactivate', userManagementController.reactivateGroup);
+
 // Assign user to group
 router.post('/groups/:groupId/users/:userId', userManagementController.assignUserToGroup);
 

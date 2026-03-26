@@ -614,6 +614,54 @@ export class UserManagementController {
   };
 
   /**
+   * Deactivate a user group (soft delete)
+   */
+  deactivateGroup = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      await userManagementService.deactivateUserGroup(id);
+
+      res.status(200).json({ message: 'Group deactivated successfully' });
+    } catch (error) {
+      logger.error('Error deactivating group:', error);
+      if (error instanceof Error) {
+        if (error.message.includes('not found')) {
+          res.status(404).json({ error: 'Group not found' });
+        } else {
+          res.status(500).json({ error: 'Internal server error' });
+        }
+      } else {
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  };
+
+  /**
+   * Reactivate a user group
+   */
+  reactivateGroup = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      await userManagementService.reactivateUserGroup(id);
+
+      res.status(200).json({ message: 'Group reactivated successfully' });
+    } catch (error) {
+      logger.error('Error reactivating group:', error);
+      if (error instanceof Error) {
+        if (error.message.includes('not found')) {
+          res.status(404).json({ error: 'Group not found' });
+        } else {
+          res.status(500).json({ error: 'Internal server error' });
+        }
+      } else {
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+  };
+
+  /**
    * Assign user to group
    */
   assignUserToGroup = async (req: Request, res: Response): Promise<void> => {

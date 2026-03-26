@@ -420,7 +420,9 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   const [visibleChannels, visibleChannelsDetails] = useCachedQuery(queries.userVisibleChannels(), {
     ttl: '10m',
   });
-  const [allUserGroups, allUserGroupsDetails] = useCachedQuery(queries.getAllUserGroups());
+  const [allUserGroups, allUserGroupsDetails] = useCachedQuery(queries.getAllUserGroups(), {
+    updatedAtEnabled: true,
+  });
   const [userChannelStatus, userChannelStatusDetails] = useCachedQuery(
     queries.getAllChannelsUserStatus(),
     { ttl: '10m' },

@@ -22,4 +22,7 @@ Feature: User Group Creation
     And I type "test user 3" on the element "[data-testid='search-members-input']"
     And I click the button with text "Add to Group"
     And I click on "[data-testid='submit-user-group-btn']"
-    When I click the button with text "Delete"
+    Then I should see the element "[data-testid='user-group-list-item']"
+    When I click the button with text "Deactivate"
+    Then I should see "Deactivated" in the element "[data-testid='user-group-list-item']"
+    And I should see a button with text "Reactivate"

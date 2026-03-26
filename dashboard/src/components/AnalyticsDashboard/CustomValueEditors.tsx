@@ -2,6 +2,7 @@ import React from 'react';
 import type { ValueEditorProps } from 'react-querybuilder';
 import { queries } from '../../zero/queries';
 import { useUserSearch } from '../../hooks/useUsers';
+import { useUserGroups } from '../../hooks/useUserGroup';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import Input from '../../components/ui/Input/Input';
 import { Badge } from '../../components/ui/Badge';
@@ -219,7 +220,7 @@ export const UserGroupSearchValueEditor: React.FC<{
   onChange: (value: unknown) => void;
 }> = ({ value, onChange }) => {
   const [searchQuery, setSearchQuery] = React.useState('');
-  const [allUserGroups] = useCachedQuery(queries.getAllUserGroups());
+  const allUserGroups = useUserGroups();
   const selectedItems = getSelectedItems(value);
 
   const handleRemove = (groupId: string): void => {

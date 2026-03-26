@@ -18,6 +18,7 @@ export type Conversation = QueryResultType<typeof queries.channelConversationsPa
 
 export interface CacheEntry<T> {
   data: QueryResult<T>;
+  lastUpdatedAt?: number;
 }
 
 export interface QueryCacheContext {
@@ -34,6 +35,7 @@ export type QueryCacheEvent =
       hash: string;
       //eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: QueryResult<any>;
+      lastUpdatedAt?: number;
     }
   | {
       type: 'HYDRATE_CACHE';
@@ -65,10 +67,21 @@ export const queryCacheMachine = setup({
     setCache: assign(({ event, context }) => {
       if (event.type !== 'SET_KEY') return context;
 
+      const existing = context.cache.get(event.hash);
       const newCache = new Map(context.cache);
-      newCache.set(event.hash, {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const resolvedLastUpdatedAt = event.lastUpdatedAt ?? existing?.lastUpdatedAt;
+      //eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const entry: CacheEntry<any> = {
         data: event.data,
-      });
+      };
+
+      if (resolvedLastUpdatedAt !== undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        entry.lastUpdatedAt = resolvedLastUpdatedAt;
+      }
+
+      newCache.set(event.hash, entry);
 
       return {
         ...context,

@@ -14,6 +14,7 @@ export interface MentionResult {
   isSpecial?: boolean; // Flag for @channel and @here
   isPrivate?: boolean; // Flag for private channels (when type is 'channel')
   isChannelMember?: boolean; // Flag indicating if the user is a member of the channel
+  isDeactivated?: boolean; // Flag indicating if a group is deactivated
 }
 
 export interface MentionSelectorProps {

@@ -413,6 +413,12 @@ export async function getGroupMembersForNotification(groupId: string): Promise<{
       return [];
     }
 
+    // Block notifications for deactivated groups
+    if (!groupWithUsers.isActive) {
+      logger.info(`🔕 [GROUP-NOTIFICATION] Group ${groupId} is deactivated, blocking notifications`);
+      return [];
+    }
+
     const allUsers: { userId: string; name: string; email: string }[] = [];
 
     // Add users from userGroupMappings
