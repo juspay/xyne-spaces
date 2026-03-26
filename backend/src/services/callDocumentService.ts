@@ -13,6 +13,7 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import { MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { formatToISTLocaleString } from '@/utils/dateUtils';
 import { CanvasRole } from '@prisma/client';
 import { ServerBlockNoteEditor } from '@blocknote/server-util';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
@@ -511,16 +512,21 @@ export class CallDocumentService {
   private async prepareCanvasContent(
     markdownSummary: string,
     channelId: string,
-    callStartedAt?: Date
+    callStartedAt?: Date,
+    callTitle?: string | null
   ): Promise<{
     title: string;
     content: any;
     mentionedUserIds: string[];
   }> {
-    // Extract title from markdown
-    let title = callStartedAt
-      ? `Detailed Summary - Call ${callStartedAt.toLocaleString()}`
-      : `Detailed Summary (Updated)`;
+    // Build canvas title with call title suffix, or fall back to IST timestamp
+    let title: string;
+    if (callStartedAt) {
+      const suffix = callTitle || formatToISTLocaleString(callStartedAt);
+      title = `Detailed Summary - ${suffix}`;
+    } else {
+      title = `Detailed Summary (Updated)`;
+    }
 
     const firstHeadingMatch = markdownSummary.match(/^#\s+(.+)$/m);
     if (firstHeadingMatch) {
@@ -838,7 +844,8 @@ export class CallDocumentService {
     conversationId: string,
     channelId: string,
     callStartedAt: Date,
-    callCreatorUserId: string
+    callCreatorUserId: string,
+    callTitle?: string | null
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -853,7 +860,8 @@ export class CallDocumentService {
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
         markdownSummary,
         channelId,
-        callStartedAt
+        callStartedAt,
+        callTitle
       );
 
       // Create canvas
@@ -940,7 +948,8 @@ export class CallDocumentService {
     channelId: string,
     existingViewAccessId: string,
     currentVersion: number,
-    callId: string
+    callId: string,
+    callTitle?: string | null
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -949,7 +958,9 @@ export class CallDocumentService {
       // Prepare canvas content (title, content, mentions)
       const { title, content: sanitizedContent, mentionedUserIds } = await this.prepareCanvasContent(
         markdownSummary,
-        channelId
+        channelId,
+        undefined,
+        callTitle
       );
 
       const newVersion = currentVersion + 1;
@@ -998,7 +1009,8 @@ export class CallDocumentService {
     conversationId: string,
     channelId: string,
     callStartedAt: Date,
-    callCreatorUserId: string
+    callCreatorUserId: string,
+    callTitle?: string | null
   ): Promise<{ viewAccessId: string | null; version: number }> {
     // Check if an existing canvas exists for this call
     const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
@@ -1012,7 +1024,8 @@ export class CallDocumentService {
         channelId,
         existingCanvas.viewAccessId,
         existingCanvas.version,
-        callId
+        callId,
+        callTitle
       );
 
       return {
@@ -1029,7 +1042,8 @@ export class CallDocumentService {
       conversationId,
       channelId,
       callStartedAt,
-      callCreatorUserId
+      callCreatorUserId,
+      callTitle
     );
 
     return {
@@ -1328,14 +1342,17 @@ A comprehensive detailed summary has been generated from this call.
         conversationId,
         conversation.channelId,
         call.startedAt,
-        call.createdByUserId
+        call.createdByUserId,
+        call.title
       );
       if (!viewAccessId) {
         return { success: false, error: 'Failed to create or update detailed summary canvas' };
       }
 
       const canvasUrl = getCanvasUrl(viewAccessId);
-      const canvasTitle = `Detailed Summary - Call ${new Date(call.startedAt).toLocaleString()}`;
+      // Use call title as suffix, or fall back to IST timestamp
+      const suffix = call.title || formatToISTLocaleString(new Date(call.startedAt));
+      const canvasTitle = `Detailed Summary - ${suffix}`;
 
       // 3. Post to conversation (or update existing message)
       await this.postDetailedSummaryToConversation(
