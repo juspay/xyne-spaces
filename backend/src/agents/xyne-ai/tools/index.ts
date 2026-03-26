@@ -72,6 +72,7 @@ import { createCreateCanvasTool, getCreateCanvasTool } from './create_canvas.js'
 import { createReadCanvasTool, getReadCanvasTool } from './read_canvas.js';
 import { createEditCanvasTool, getEditCanvasTool } from './edit_canvas.js';
 import { createFetchLinkContentTool, getFetchLinkContentTool } from './fetch_link_content.js';
+import { createCreatePptTool, getCreatePptTool } from './create_ppt/index.js';
 
 import type { XyneAIAgentContext } from './types.js';
 
@@ -118,6 +119,9 @@ export { createEditCanvasTool, getEditCanvasTool };
 // Fetch Link Content
 export { createFetchLinkContentTool, getFetchLinkContentTool };
 
+// Create PPT
+export { createCreatePptTool, getCreatePptTool };
+
 // ============================================================================
 // Get All Tools
 // ============================================================================
@@ -153,6 +157,7 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createReadCanvasTool(),
     createEditCanvasTool(),
     createFetchLinkContentTool(),
+    createCreatePptTool(),
   ];
 
   // Add web search tool if runtime flag is true
