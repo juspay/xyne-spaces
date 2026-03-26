@@ -1,0 +1,193 @@
+flowchart TD
+    %% ══════════════════════════════════════════════════════
+    %% 1. CREATE RECURRING SERIES
+    %% ══════════════════════════════════════════════════════
+    CreateStart([Organizer Creates Recurring Series]) --> ValidateSeries["Validate Input
+    callValidator.ts
+    RecurringScheduleCallSchema"]
+
+    ValidateSeries --> FindCreateChannel["Find or Create Channel
+    channelRepository.ts
+    findOrCreateDMChannel"]
+
+    FindCreateChannel --> DeriveEndsOn["Derive endsOn
+    callController.ts
+    deriveEndsOnFromRRule
+    explicit > UNTIL > COUNT > null"]
+
+    DeriveEndsOn --> GuardEndsOn{endsOn <= startsOn?}
+    GuardEndsOn -->|Yes - endsOn already past| Reject400(["400 — RRULE produces
+    no future occurrences"])
+    GuardEndsOn -->|No| CreateSeriesRecord["Create RecurringCallSeries
+    recurringCallService.ts
+    Status: ACTIVE
+    recurrenceRule, timezone
+    startTime, endTime, startsOn, endsOn"]
+
+    CreateSeriesRecord --> CreateFirst["Create First Instance
+    recurringCallService.createNextInstance
+    inclusive=true, notifyParticipants=true"]
+
+    CreateFirst --> InstanceFail{Instance creation failed?}
+    InstanceFail -->|Yes| Rollback["Rollback — delete orphaned
+    series record
+    Atomic cleanup"]
+    Rollback --> Error500(["500 — Failed to create
+    first call instance"])
+    InstanceFail -->|No| ReturnSeries(["200 — seriesId + channelId"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 2. createNextInstance (shared by create + auto-chain)
+    %% ══════════════════════════════════════════════════════
+    ChainStart([createNextInstance called]) --> FetchSeries["Fetch RecurringCallSeries
+    DB lookup by seriesId"]
+    FetchSeries --> CheckActive{Series status ACTIVE?}
+    CheckActive -->|No - ENDED or CANCELLED| SkipChain(["Skip — no new instance"])
+    CheckActive -->|Yes| GetNextOccurrence["getNextOccurrence
+    RRule.after(afterDate, inclusive)
+    Check endsOn boundary"]
+    GetNextOccurrence --> HasNext{Next occurrence exists?}
+    HasNext -->|No| MarkEnded["Update series
+    Status: ENDED"]
+    MarkEnded --> NoInstance(["null — series complete"])
+    HasNext -->|Yes| CalcEndsAt["Compute endsAt
+    dateUtils.addHHMMDuration
+    startTime → endTime diff
+    Cross-midnight safe"]
+    CalcEndsAt --> CreateInstance["createCallWithParticipants
+    callRepository.ts
+    Status: SCHEDULED
+    isRecurring: true
+    recurringSeriesId set"]
+    CreateInstance --> NotifyCheck{notifyParticipants?}
+    NotifyCheck -->|Yes first instance only| SendScheduled["Send CALL_SCHEDULED
+    notifications + activities
+    scheduledCallNotificationService.ts"]
+    NotifyCheck -->|No| ScheduleJobs
+    SendScheduled --> ScheduleJobs["Schedule Bull Jobs
+    Reminder: startsAt − 10 min
+    Auto-End: at endsAt"]
+    ScheduleJobs --> InstanceCreated(["New Call instance created
+    Status: SCHEDULED"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 3. AUTO-END JOB → CHAIN NEXT INSTANCE
+    %% ══════════════════════════════════════════════════════
+    AutoEndFires([Auto-End Bull Job fires at endsAt]) --> CheckCallStatus{Call status?}
+    CheckCallStatus -->|SCHEDULED| EndScheduled["SCHEDULED → ENDED"]
+    CheckCallStatus -->|ACTIVE| CheckParticipants{Active participants present?}
+    CheckParticipants -->|Yes| SkipEnd["Skip auto-end
+    Ends naturally when last
+    participant leaves"]
+    CheckParticipants -->|No| EndActive["ACTIVE → ENDED"]
+
+    EndScheduled --> CheckRecurring{recurringSeriesId set?}
+    EndActive --> CheckRecurring
+    SkipEnd --> CheckRecurring2{recurringSeriesId set?}
+
+    CheckRecurring -->|Yes| CheckDuplicate["Check if next SCHEDULED
+    instance already exists
+    for this series"]
+    CheckRecurring -->|No| Done1(["Call ended"])
+    CheckRecurring2 -->|Yes| CheckDuplicate
+    CheckRecurring2 -->|No| Done1b(["Call ended — no chain"])
+
+    CheckDuplicate --> AlreadyExists{Next instance exists?}
+    AlreadyExists -->|Yes| SkipDuplicate(["Skip — avoid duplicate
+    instance creation"])
+    AlreadyExists -->|No| ChainNext["recurringCallService
+    .createNextInstance
+    afterDate=endsAt
+    inclusive=false"]
+    ChainNext --> ChainStart
+
+    %% ══════════════════════════════════════════════════════
+    %% 4. JOIN VIA OLD RECURRING LINK
+    %% ══════════════════════════════════════════════════════
+    OldLink([User joins via old recurring link]) --> LookupCall["Find call by externalId
+    callRepository.findByExternalId"]
+    LookupCall --> HasSeries{call.recurringSeriesId set?}
+    HasSeries -->|No| NormalJoin(["Normal join flow"])
+    HasSeries -->|Yes| FindActive["Find ACTIVE instance
+    findActiveCallByRecurringSeriesId"]
+    FindActive --> ActiveFound{Active instance found?}
+    ActiveFound -->|Yes| RedirectActive["Redirect to active instance
+    callId = activeSeriesCall.externalId"]
+    ActiveFound -->|No| FindLatest["Find latest SCHEDULED instance
+    findLatestCallByRecurringSeriesId"]
+    FindLatest --> LatestFound{Latest instance found?}
+    LatestFound -->|Yes| RedirectLatest["Redirect to latest scheduled instance
+    callId = latestSeriesCall.externalId"]
+    LatestFound -->|No| FallbackOriginal["Use original call
+    (may be ended)"]
+    RedirectActive --> ContinueJoin(["Continue join flow
+    with resolved call"])
+    RedirectLatest --> ContinueJoin
+    FallbackOriginal --> ContinueJoin
+
+    %% ══════════════════════════════════════════════════════
+    %% 5. EDIT SINGLE CALL INSTANCE  (PATCH /calls/:callId)
+    %% ══════════════════════════════════════════════════════
+    EditInstance([Organizer edits single instance]) --> ValidateUpdate["Validate Input
+    callValidator.ts
+    UpdateScheduleCallSchema"]
+    ValidateUpdate --> AuthCheck1{Organizer? + SCHEDULED?}
+    AuthCheck1 -->|No| Reject403a(["403/400 — Forbidden or
+    invalid status"])
+    AuthCheck1 -->|Yes| ResolveChannel1["Resolve channel
+    explicit channelId →
+    find/create DM → keep existing"]
+    ResolveChannel1 --> UpdateCallRepo["updateScheduledCall
+    callRepository.ts
+    title, startsAt, endsAt
+    add/remove participants"]
+    UpdateCallRepo --> RescheduleJobs["Reschedule Bull jobs
+    new reminder + auto-end times"]
+    RescheduleJobs --> NotifyUpdated1["Send CALL_UPDATED
+    notifications to participants
+    NotificationType.CALL_UPDATED"]
+    NotifyUpdated1 --> EditDone1(["200 — instance updated"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 6. EDIT ENTIRE SERIES  (PATCH /calls/series/:seriesId)
+    %% ══════════════════════════════════════════════════════
+    EditSeries([Organizer edits entire series]) --> ValidateSeries2["Validate Input
+    callValidator.ts
+    UpdateRecurringSeriesSchema"]
+    ValidateSeries2 --> AuthCheck2{Organizer? + not CANCELLED?}
+    AuthCheck2 -->|No| Reject403b(["403/400 — Forbidden"])
+    AuthCheck2 -->|Yes| ResolveChannel2["Resolve channel
+    explicit channelId →
+    find/create DM → keep existing"]
+    ResolveChannel2 --> DetectRegen{"Needs regeneration?
+    recurrenceRule changed
+    OR startTime changed
+    OR endTime changed"}
+    DetectRegen -->|Yes — structural change| UpdateSeriesRecord["Update RecurringCallSeries record
+    new rule, startTime, endTime
+    endsOn, timezone, channelId"]
+    DetectRegen -->|No — metadata only| UpdateSeriesRecord
+    UpdateSeriesRecord --> FutureInstances["Find all future SCHEDULED
+    instances (startsAt > now)"]
+
+    FutureInstances --> RegenBranch{needsRegeneration?}
+    RegenBranch -->|Yes| RemoveJobs["Remove Bull jobs
+    from each future instance"]
+    RemoveJobs --> DeleteInstances["Delete future instances
+    + their participants"]
+    DeleteInstances --> CreateNewNext["recurringCallService
+    .createNextInstance
+    afterDate=now, inclusive=false"]
+    CreateNewNext --> ChainStart
+
+    RegenBranch -->|No| CascadeMeta["Cascade title/channelId
+    to future instances
+    call.updateMany"]
+    CascadeMeta --> UpdateParticipants["Update participants on
+    future instances
+    add/remove delta per instance"]
+    UpdateParticipants --> NotifyUpdated2["Send CALL_UPDATED
+    notifications to channel participants
+    NotificationType.CALL_UPDATED"]
+    CreateNewNext --> NotifyUpdated2
+    NotifyUpdated2 --> EditDone2(["200 — series updated"])

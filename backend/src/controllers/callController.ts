@@ -11,8 +11,6 @@ import { callSideEffectService } from '@/services/callSideEffectService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import z from 'zod';
 import { TrackSource } from 'livekit-server-sdk';
-import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
-import { ScheduleCallSchema } from '@/validators/callValidator';
 
 export class CallController {
   /**
@@ -218,7 +216,7 @@ export class CallController {
   // POST /api/calls/join - Join an existing call
   joinCall = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { callId } = req.body;
+      let callId: string = req.body.callId;
       const user = req.user;
 
       if (!user?.id) {
@@ -231,7 +229,27 @@ export class CallController {
         return;
       }
 
-      const call = await repositories.calls.findByExternalId(callId);
+      let call = await repositories.calls.findByExternalId(callId);
+
+      // --- Recurring series link resolution ---
+      // If the requested call belongs to a recurring series, try to redirect the
+      // participant to the currently active instance (someone shared an old link).
+      // Fallback: use the latest scheduled instance if nothing is live yet.
+      if (call?.recurringSeriesId) {
+        const activeSeriesCall = await repositories.calls.findActiveCallByRecurringSeriesId(call.recurringSeriesId);
+        if (activeSeriesCall) {
+          logger.info(`[joinCall] Recurring series redirect: old call ${callId} → active call ${activeSeriesCall.externalId}`);
+          call = activeSeriesCall;
+          callId = activeSeriesCall.externalId;
+        } else {
+          const latestSeriesCall = await repositories.calls.findLatestCallByRecurringSeriesId(call.recurringSeriesId);
+          if (latestSeriesCall) {
+            logger.info(`[joinCall] Recurring series redirect: old call ${callId} → latest call ${latestSeriesCall.externalId}`);
+            call = latestSeriesCall;
+            callId = latestSeriesCall.externalId;
+          }
+        }
+      }
 
       if (call && call.status === CallStatus.ENDED) {
         res.status(400).json({ success: false, error: 'Cannot join an ended call' });
@@ -1414,146 +1432,6 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to delete recording:', error);
       res.status(500).json({ success: false, error: 'Failed to delete recording' });
-    }
-  };
-
-
-  // POST /api/calls/schedule - Schedule a call for a future time
-  scheduleCall = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user?.id;
-
-      if (!userId) {
-        res.status(401).json({ success: false, error: 'Unauthorized' });
-        return;
-      }
-
-      // Validate request body with Zod
-      const { title, startsAt, endsAt, channelId, targetUserIds } = ScheduleCallSchema.parse(req.body);
-
-      let finalChannelId = channelId;
-      console.log("scheduleCall - targetUserIds:", finalChannelId, targetUserIds);
-      // If no channelId but targetUserIds is provided, find or create DM channel
-      if (!channelId && targetUserIds && targetUserIds.length > 0) {
-        finalChannelId = await repositories.channels.findOrCreateDMChannel(
-          userId,
-          targetUserIds,
-          repositories.channelParticipants,
-          title
-        );
-      }
-
-      // Generate IDs
-      const callId = uuidv4();
-      const externalId = uuidv4();
-
-      // Generate room link for scheduled call
-      const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${CallType.AUDIO}`;
-
-      // Get database client
-      const db = DatabaseClient.getInstance();
-
-      // Create the scheduled call and participants in a transaction
-      const participantUserIds = await db.$transaction(async (tx) => {
-        // Create the scheduled call
-        await tx.call.create({
-          data: {
-            id: callId,
-            externalId: externalId,
-            title: title,
-            createdByUserId: userId,
-            channelId: finalChannelId!,
-            callType: CallType.AUDIO,
-            status: CallStatus.SCHEDULED,
-            timezone: 'UTC',
-            isRecurring: false,
-            recordingEnabled: false,
-            roomLink: roomLink,
-            startsAt: new Date(startsAt),
-            endsAt: new Date(endsAt),
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            lastActivityAt: new Date(),
-          },
-        });
-
-        // Get all channel participants to create call participants
-        const channelParticipants = await repositories.channelParticipants.getChannelParticipants(finalChannelId!);
-
-        // Create call participant records for all channel participants
-        await tx.callParticipant.createMany({
-          data: channelParticipants.map(participant => ({
-            id: uuidv4(),
-            callId: callId,
-            userId: participant.userId,
-            invitedBy: userId,
-            invitedAt: new Date(),
-            response: InvitationResponse.INVITED,
-            respondedAt: null,
-            joinedAt: null,
-            leftAt: null,
-          })),
-        });
-        
-        // Return participant IDs for notification (only if transaction succeeds)
-        return channelParticipants.map(p => p.userId);
-      });
-
-      // Send immediate notifications + create activities for all participants (excluding organizer)
-      try {
-        await scheduledCallNotificationService.sendScheduledCallNotifications({
-          callId,
-          callExternalId: externalId,
-          title,
-          startsAt: new Date(startsAt),
-          endsAt: new Date(endsAt),
-          channelId: finalChannelId!,
-          organizerUserId: userId,
-          participantUserIds,
-        });
-      } catch (error) {
-        logger.error(`Failed to send immediate notifications for call ${callId}:`, error);
-      }
-
-      // Schedule 10-minute reminder notification for all participants
-      try {
-        await scheduledCallNotificationService.scheduleCallReminder(
-          callId,
-          externalId,
-          title,
-          new Date(startsAt),
-          participantUserIds
-        );
-        logger.info(`Scheduled 10-minute reminder for call ${externalId} with ${participantUserIds.length} participants`);
-      } catch (error) {
-        // Log error but don't fail the call creation
-        logger.error(`Failed to schedule reminder for call ${callId}:`, error);
-      }
-
-      // Schedule auto-end job at endsAt time
-      try {
-        await scheduledCallNotificationService.scheduleCallAutoEnd(
-          callId,
-          externalId,
-          new Date(endsAt)
-        );
-        logger.info(`Scheduled auto-end for call ${externalId} at ${new Date(endsAt).toISOString()}`);
-      } catch (error) {
-        // Log error but don't fail the call creation
-        logger.error(`Failed to schedule auto-end for call ${callId}:`, error);
-      }
-
-      logger.info(`Scheduled call created: ${externalId} for channel ${finalChannelId} by user ${userId}`);
-
-      res.json({
-        success: true,
-        callId: callId,
-        externalId: externalId,
-        channelId: finalChannelId,
-      });
-    } catch (error) {
-      logger.error('Failed to schedule call:', error);
-      res.status(500).json({ success: false, error: 'Failed to schedule call' });
     }
   };
 

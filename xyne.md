@@ -24,6 +24,7 @@ This is the main entry point for AI/LLM agents working in this repository. Read 
 | Dashboard-only changes | This file → `dashboard/docs/guidelines/xyne.md` → relevant sub-docs |
 | Full-stack changes | This file → Both guideline files → Zero docs in both |
 | Zero/real-time sync | Both guideline files + `backend/docs/guidelines/zero/` + `dashboard/docs/guidelines/zero/` |
+| system diagrams | This file → [System diagrams](system-diagram/) |
 
 ---
 
@@ -46,6 +47,11 @@ xyne-spaces/
 ├── framework/                  # Agentic AI framework library
 ├── electron/                   # Desktop app wrapper
 ├── xyne-automation/            # Playwright + Cucumber E2E tests
+├── system-diagram/             # Architecture and flow diagrams
+│   └── call/                   # 👈 Call-related system diagrams
+│       ├── schedule-call-flow.mmd        # Scheduled call flow
+│       ├── recurring-call-flow.mmd       # Recurring call flow
+│       └── ios_callback_feature.excalidraw  # iOS callback feature diagram
 └── guidelines/                 # General repo guidelines
     └── AGENTS.md               # Code style for all agents
 ```

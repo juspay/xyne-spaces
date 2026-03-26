@@ -24,16 +24,17 @@ function RadioGroupItem({
     <RadioGroupPrimitive.Item
       data-slot='radio-group-item'
       className={cn(
-        'border-input text-sidebar-badge-accent focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 aspect-square size-4 shrink-0 rounded-full border shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
+        'border-[1.5px] border-secondary-foreground/50 text-sidebar-badge-accent focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 aspect-square size-4 shrink-0 rounded-full shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
+        'data-[state=checked]:border-[1.5px] data-[state=checked]:border-sidebar-badge-accent',
         className,
       )}
       {...props}
     >
       <RadioGroupPrimitive.Indicator
         data-slot='radio-group-indicator'
-        className='relative flex items-center justify-center'
+        className='flex w-full h-full items-center justify-center'
       >
-        <Circle className='fill-sidebar-badge-accent absolute top-1/2 left-1/2 size-2 -translate-x-1/2 -translate-y-1/2' />
+        <Circle className='fill-sidebar-badge-accent stroke-none size-2' />
       </RadioGroupPrimitive.Indicator>
     </RadioGroupPrimitive.Item>
   );
@@ -59,7 +60,7 @@ const RadioGroup = ({
   return (
     <div className={cn('space-y-2', className)}>
       {label && (
-        <label className='text-sm font-medium text-muted-foreground' htmlFor={name}>
+        <label className='text-sm font-normal text-muted-foreground' htmlFor={name}>
           {label}
         </label>
       )}
@@ -85,14 +86,14 @@ const Radio = ({ value, subtext, children, className }: RadioProps): React.React
   return (
     <div className={cn('flex items-center justify-start space-x-3', className)}>
       <RadioGroupItem value={value} id={value} />
-      <div className='flex-1 space-y-0.5 '>
+      <div className='flex-1 space-y-0.5'>
         <label
           htmlFor={value}
-          className='text-sm font-medium text-foreground cursor-pointer leading-1'
+          className='text-sm font-normal text-foreground cursor-pointer align-text-bottom'
         >
           {children}
         </label>
-        {subtext && <p className='text-xs text-muted-foreground  leading-none'>{subtext}</p>}
+        {subtext && <p className='text-xs text-muted-foreground leading-none'>{subtext}</p>}
       </div>
     </div>
   );

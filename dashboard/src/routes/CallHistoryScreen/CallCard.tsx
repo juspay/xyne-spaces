@@ -6,6 +6,7 @@ import {
   Hash,
   MoveDownLeft,
   MoveUpRight,
+  Pencil,
   ScrollText,
   MoreVertical,
   Trash2,
@@ -49,6 +50,7 @@ interface UpcomingCallCardProps {
   isLastItem: boolean;
   currentUserId?: string;
   onCancelClick?: (e: React.MouseEvent) => void;
+  onEditClick?: (e: React.MouseEvent) => void;
 }
 
 interface CallHistoryItemProps {
@@ -71,6 +73,7 @@ export const UpcomingCallCard = ({
   isLastItem,
   currentUserId,
   onCancelClick,
+  onEditClick,
 }: UpcomingCallCardProps) => {
   // Extract user IDs from call participants
   const { isMobile } = usePlatform();
@@ -95,6 +98,11 @@ export const UpcomingCallCard = ({
     }
   };
 
+  const handleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onEditClick?.(e);
+  };
+
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
     onCancelClick?.(e);
@@ -114,23 +122,35 @@ export const UpcomingCallCard = ({
               <Button
                 variant='ghost'
                 size='icon'
-                className='h-6 w-6 p-0.5 text-muted-foreground hover:text-foreground'
+                className='h-6 w-6 p-0.5 text-muted-foreground hover:text-foreground focus:outline-none border border-transparent hover:border-border'
               >
-                <MoreVertical className='size-4' />
+                <MoreVertical className='size-4' strokeWidth={2.2} />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align='end'>
-              <DropdownMenuItem onClick={handleCopyLink} className='flex items-center gap-2'>
+            <DropdownMenuContent align='start' className='rounded-xl p-1.5 w-44 shadow-sm'>
+              <DropdownMenuItem
+                onClick={handleCopyLink}
+                className='flex items-center gap-2  text-sm leading-5 font-medium rounded-lg'
+              >
                 <Copy className='size-4' />
                 Copy Link
               </DropdownMenuItem>
               {currentUserId === call.createdByUserId && (
                 <DropdownMenuItem
-                  onClick={handleDelete}
-                  className='flex items-center gap-2 text-red-600'
+                  onClick={handleEdit}
+                  className='flex items-center gap-2 text-sm leading-5 font-medium rounded-lg'
                 >
-                  <Trash2 className='size-4' />
-                  Delete
+                  <Pencil className='size-4' strokeWidth={2.2} />
+                  Edit Call
+                </DropdownMenuItem>
+              )}
+              {currentUserId === call.createdByUserId && (
+                <DropdownMenuItem
+                  onClick={handleDelete}
+                  className='flex items-start gap-2 text-red-500 hover:text-red-500 text-sm leading-5 font-medium rounded-lg'
+                >
+                  <Trash2 className='size-4' strokeWidth={2.2} />
+                  Delete Call
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
@@ -222,6 +242,12 @@ export const UpcomingCallCard = ({
                   <Copy className='size-4' />
                   Copy Link
                 </DropdownMenuItem>
+                {currentUserId === call.createdByUserId && (
+                  <DropdownMenuItem onClick={handleEdit} className='flex items-center gap-2'>
+                    <Pencil className='size-4' />
+                    Edit
+                  </DropdownMenuItem>
+                )}
                 {currentUserId === call.createdByUserId && (
                   <DropdownMenuItem
                     onClick={handleDelete}

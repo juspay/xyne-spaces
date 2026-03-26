@@ -1,18 +1,24 @@
 import { Router } from 'express';
 import { callController } from '@/controllers/callController';
+import { scheduleCallController } from '@/controllers/scheduleCallController';
 
 const router = Router();
 
 // Call management endpoints
+router.post('/series', scheduleCallController.createRecurringSeries);
+router.patch('/series/:seriesId', scheduleCallController.updateRecurringSeries);
 router.post('/initiate', callController.initiateCall);
 router.post('/join', callController.joinCall);
-router.post('/schedule', callController.scheduleCall);
+router.post('/schedule', scheduleCallController.scheduleCall);
 
 // Recordings endpoints (HEADLESS calls)
 router.get('/recordings', callController.getRecordings);
 router.get('/recordings/:callId', callController.getRecordingDetail);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
+
+// Edit a single scheduled call instance (must come after all static /... routes)
+router.patch('/:callId', scheduleCallController.updateScheduledCall);
 
 // Manual endpoint to process transcript (triggered by user clicking "View Transcript" button)
 router.post('/:callId/process-transcript', callController.processTranscript);

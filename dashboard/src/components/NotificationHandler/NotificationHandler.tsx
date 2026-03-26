@@ -449,6 +449,8 @@ function getToastFn(notificationType: string) {
       return toast.warning;
     case 'call_scheduled':
       return toast.info;
+    case 'call_updated':
+      return toast.info;
     case 'workflow_failure':
       return toast.error;
     default:

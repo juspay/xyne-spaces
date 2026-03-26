@@ -31,34 +31,23 @@ export interface UpdateCallInput {
   startedAt?: Date;
 }
 
-export interface CreateCallInput {
+export interface CreateCallWithParticipantsInput {
+  callId: string;
   externalId: string;
+  title: string;
   createdByUserId: string;
   channelId: string;
   callType: CallType;
-  status: CallStatus;
+  callOrigin: CallOrigin;
   roomLink: string;
   timezone: string;
   isRecurring: boolean;
-  recordingEnabled: boolean;
-  startedAt: Date;
-  title?: string;
-  metadata?: any;
+  recurringSeriesId?: string;
+  startsAt: Date;
+  endsAt: Date;
 }
 
 export class CallRepository {
-  async create(data: CreateCallInput): Promise<Call> {
-    const result = await DatabaseClient.getInstance().call.create({
-      data: {
-        ...data,
-        lastActivityAt: data.startedAt,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    });
-    return result;
-  }
-
   async findByExternalId(externalId: string): Promise<Call | null> {
     const result = await DatabaseClient.getInstance().call.findUnique({
       where: { externalId }
@@ -100,6 +89,39 @@ export class CallRepository {
       }
     });
     return result;
+  }
+
+  /**
+   * Find an active call belonging to a recurring series.
+   * Used when a participant tries to join via an old series link so we can
+   * redirect them to the currently-live instance instead.
+   */
+  async findActiveCallByRecurringSeriesId(recurringSeriesId: string): Promise<Call | null> {
+    return await DatabaseClient.getInstance().call.findFirst({
+      where: {
+        recurringSeriesId,
+        status: CallStatus.ACTIVE,
+      },
+      orderBy: {
+        startedAt: 'desc',
+      },
+    });
+  }
+
+  /**
+   * Find the most recently scheduled call instance for a recurring series.
+   * Used as a fallback when there is no active call — gives the participant
+   * credentials for the latest/upcoming occurrence.
+   */
+  async findLatestCallByRecurringSeriesId(recurringSeriesId: string): Promise<Call | null> {
+    return await DatabaseClient.getInstance().call.findFirst({
+      where: {
+        recurringSeriesId,
+      },
+      orderBy: {
+        startsAt: 'desc',
+      },
+    });
   }
 
   async findAllActiveCalls(): Promise<Call[]> {
@@ -160,6 +182,64 @@ export class CallRepository {
       data,
     });
     return result;
+  }
+
+  /**
+   * Create a SCHEDULED call together with its participants in a single transaction.
+   * Used by both one-time scheduled calls and recurring series instances.
+   * Channel participants are fetched first (outside the transaction) and then
+   * written atomically alongside the call record.
+   * Returns the callId and the list of invited participant userIds.
+   */
+  async createCallWithParticipants(
+    params: CreateCallWithParticipantsInput,
+    tx: Prisma.TransactionClient,
+  ): Promise<{ callId: string; participantUserIds: string[] }> {
+    const channelParticipants = await repositories.channelParticipants.getChannelParticipants(
+      params.channelId,
+    );
+
+    await tx.call.create({
+      data: {
+        id: params.callId,
+        externalId: params.externalId,
+        title: params.title,
+        createdByUserId: params.createdByUserId,
+        channelId: params.channelId,
+        callType: params.callType,
+        callOrigin: params.callOrigin,
+        status: CallStatus.SCHEDULED,
+        timezone: params.timezone,
+        isRecurring: params.isRecurring,
+        ...(params.recurringSeriesId && { recurringSeriesId: params.recurringSeriesId }),
+        recordingEnabled: false,
+        roomLink: params.roomLink,
+        startsAt: params.startsAt,
+        endsAt: params.endsAt,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastActivityAt: new Date(),
+      },
+    });
+
+    await tx.callParticipant.createMany({
+      data: channelParticipants.map((p) => ({
+        id: uuidv4(),
+        callId: params.callId,
+        userId: p.userId,
+        invitedBy: params.createdByUserId,
+        invitedAt: new Date(),
+        response: InvitationResponse.INVITED,
+        respondedAt: null,
+        joinedAt: null,
+        leftAt: null,
+      })),
+    });
+
+    return {
+      callId: params.callId,
+      participantUserIds: channelParticipants.map((p) => p.userId),
+    };
   }
 
   /**
@@ -899,6 +979,59 @@ export class CallRepository {
         joinedAt: p.joinedAt,
         leftAt: p.leftAt,
       };
+    });
+  }
+
+  /**
+   * Update a SCHEDULED call's fields and manage participant delta.
+   * Only modifies fields that are explicitly provided.
+   * Participant changes: addUserIds are added (skipping duplicates), removeUserIds are deleted.
+   */
+  async updateScheduledCall(params: {
+    callId: string;
+    title?: string;
+    startsAt?: Date;
+    endsAt?: Date;
+    channelId?: string;
+    addUserIds?: string[];
+    removeUserIds?: string[];
+  }): Promise<Call> {
+    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds } = params;
+    const db = DatabaseClient.getInstance();
+
+    return await db.$transaction(async (tx) => {
+      const updateData: Record<string, unknown> = { updatedAt: new Date() };
+      if (title !== undefined) updateData.title = title;
+      if (startsAt !== undefined) updateData.startsAt = startsAt;
+      if (endsAt !== undefined) updateData.endsAt = endsAt;
+      if (channelId !== undefined) updateData.channelId = channelId;
+
+      const updatedCall = await tx.call.update({
+        where: { id: callId },
+        data: updateData,
+      });
+
+      if (removeUserIds && removeUserIds.length > 0) {
+        await tx.callParticipant.deleteMany({
+          where: { callId, userId: { in: removeUserIds } },
+        });
+      }
+
+      if (addUserIds && addUserIds.length > 0) {
+        await tx.callParticipant.createMany({
+          data: addUserIds.map((userId) => ({
+            id: uuidv4(),
+            callId,
+            userId,
+            invitedBy: updatedCall.createdByUserId,
+            invitedAt: new Date(),
+            response: InvitationResponse.INVITED,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return updatedCall;
     });
   }
 

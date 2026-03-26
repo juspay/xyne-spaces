@@ -56,6 +56,45 @@ export interface ScheduleCallResponse {
   channelId: string;
 }
 
+export interface CreateRecurringSeriesRequest {
+  title: string;
+  description?: string;
+  channelId?: string;
+  targetUserIds?: string[];
+  timezone: string;
+  recurrenceRule: string; // e.g. "FREQ=WEEKLY;BYDAY=MO,WE,FR"
+  startTime: string; // HH:mm 24-hour format
+  endTime: string; // HH:mm 24-hour format
+  startsOn: number; // epoch ms
+  endsOn?: number; // epoch ms — omit for indefinite series
+}
+
+export interface CreateRecurringSeriesResponse {
+  success: boolean;
+  seriesId: string;
+  channelId: string;
+}
+
+export interface UpdateScheduleCallRequest {
+  title?: string;
+  startsAt?: number; // epoch ms
+  endsAt?: number; // epoch ms
+  targetUserIds?: string[];
+  channelId?: string;
+}
+
+export interface UpdateRecurringSeriesRequest {
+  title?: string;
+  recurrenceRule?: string;
+  startTime?: string; // HH:mm
+  endTime?: string; // HH:mm
+  startsOn?: number; // epoch ms — new UTC dtstart when startTime changes
+  endsOn?: number; // epoch ms
+  timezone?: string;
+  targetUserIds?: string[];
+  channelId?: string;
+}
+
 export interface ApiErrorResponse {
   error: string;
   code?: string;
@@ -305,6 +344,43 @@ export class CallService {
   }
 
   /**
+   * Create a recurring call series
+   * Generates instances for the next 12 weeks and schedules reminder/auto-end jobs per instance
+   */
+  async createRecurringSeries(
+    data: CreateRecurringSeriesRequest,
+  ): Promise<CreateRecurringSeriesResponse> {
+    try {
+      const response = await apiInstance.post<CreateRecurringSeriesResponse>('/calls/series', {
+        title: data.title,
+        description: data.description,
+        channelId: data.channelId,
+        targetUserIds: data.targetUserIds,
+        timezone: data.timezone,
+        recurrenceRule: data.recurrenceRule,
+        startTime: data.startTime,
+        endTime: data.endTime,
+        startsOn: data.startsOn,
+        endsOn: data.endsOn,
+      });
+
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Download call transcript
    * Returns the transcript content as text and content-type header
    * Uses React Query caching (10 min staleTime) to avoid redundant downloads
@@ -339,6 +415,48 @@ export class CallService {
       },
       staleTime: 10 * 60 * 1000,
     });
+  }
+
+  /**
+   * Update a single scheduled call instance (title, time, participants).
+   */
+  async updateScheduledCall(callId: string, data: UpdateScheduleCallRequest): Promise<void> {
+    try {
+      await apiInstance.patch(`/calls/${callId}`, data);
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Update a recurring call series (title, recurrence rule, times, end date, participants).
+   */
+  async updateRecurringSeries(seriesId: string, data: UpdateRecurringSeriesRequest): Promise<void> {
+    try {
+      await apiInstance.patch(`/calls/series/${seriesId}`, data);
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
   }
 
   /**

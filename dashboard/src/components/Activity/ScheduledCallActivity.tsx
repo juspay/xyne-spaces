@@ -16,16 +16,19 @@ export const ScheduledCallActivity = ({
   if (!actor) return null;
 
   const isReminder = activity.actorAction === 'call_reminder';
+  const isUpdated = activity.actorAction === 'call_updated';
   const targetPath = '/calls';
 
   const description = isReminder ? (
     <span className='text-gray-500 text-sm'>reminded you about a scheduled call in</span>
+  ) : isUpdated ? (
+    <span className='text-gray-500 text-sm'>updated a scheduled call in</span>
   ) : (
     <span className='text-gray-500 text-sm'>scheduled a call in</span>
   );
 
   const Icon = isReminder ? Bell : CalendarClock;
-  const iconColor = isReminder ? 'text-amber-500' : 'text-blue-500';
+  const iconColor = isReminder ? 'text-amber-500' : isUpdated ? 'text-orange-500' : 'text-blue-500';
 
   return (
     <ActivityItemCard
@@ -42,7 +45,11 @@ export const ScheduledCallActivity = ({
       className='flex items-start'
     >
       <div className='text-[#181B1D] text-sm line-clamp-1 truncate whitespace-normal break-all'>
-        {isReminder ? 'Your call is starting in 10 min' : 'You have a new scheduled call'}
+        {isReminder
+          ? 'Your call is starting in 10 min'
+          : isUpdated
+            ? 'A scheduled call was updated'
+            : 'You have a new scheduled call'}
       </div>
     </ActivityItemCard>
   );

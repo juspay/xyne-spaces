@@ -678,6 +678,10 @@ export const queries = defineQueries({
     },
   ),
 
+  recurringSeriesById: defineQuery(z.object({ seriesId: z.string() }), ({ args: { seriesId } }) => {
+    return zql.recurring_call_series.where('id', seriesId).one();
+  }),
+
   userActivities: defineQuery(() => {
     return zql.activities
       .orderBy('updatedAt', 'desc')
