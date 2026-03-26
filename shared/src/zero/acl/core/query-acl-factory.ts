@@ -14,6 +14,7 @@ import {
   ChannelDailyRecapsACL,
   ChannelParticipantsACL,
   ChannelsACL,
+  ChannelStatsACL,
   ConversationParticipantsACL,
   ConversationsACL,
   MessageAttachmentsACL,
@@ -79,6 +80,8 @@ export class QueryACLFactory {
         return new ChannelDailyRecapsACL(ctx) as BaseQueryACL<TTable>;
       case 'channels':
         return new ChannelsACL(ctx) as BaseQueryACL<TTable>;
+      case 'channel_stats':
+        return new ChannelStatsACL(ctx) as BaseQueryACL<TTable>;
       case 'conversation_participants':
         return new ConversationParticipantsACL(ctx) as BaseQueryACL<TTable>;
       case 'conversations':

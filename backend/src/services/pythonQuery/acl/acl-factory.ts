@@ -16,6 +16,7 @@ import {
   CanvasesACL,
   ChannelParticipantsACL,
   ChannelsACL,
+  ChannelStatsACL,
   ConversationParticipantsACL,
   ConversationsACL,
   ExternalStepResponsesACL,
@@ -86,6 +87,9 @@ export class ACLFactory {
 
       case 'channel':
         return new ChannelsACL(ctx, prisma)
+      
+      case 'channel_stats':
+        return new ChannelStatsACL(ctx, prisma)
 
       case 'conversationParticipant':
         return new ConversationParticipantsACL(ctx, prisma)
