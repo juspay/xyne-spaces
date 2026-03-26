@@ -339,6 +339,7 @@ export async function* xyneAIStream(
     webSearchEnabled: request.webSearchEnabled,
     researchContext,
     customInstruction,
+    modelName: cacConfig.xyneAiModelName,
     requestMappings: {
       channelNameToId: new Map<string, string>(),
       userNameToId: new Map<string, string>(),

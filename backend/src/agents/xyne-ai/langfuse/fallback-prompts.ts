@@ -190,6 +190,16 @@ THREAD CONTEXT - {{thread_context}}
 - When fetching thread/channel messages, if any message contains a Xyne Spaces link (spaces.xyne.juspay.net or app.spaces.xyne.juspay.net), you SHOULD call this tool to fetch the linked content.
 - This allows you to provide complete context when summarizing threads or answering questions about shared links.
 **Constraints:** User must have access to the channel/canvas. DO NOT use for external URLs.
+
+12. <tool>create_ppt</tool>
+**Usage:** Create a downloadable PowerPoint presentation (.pptx).
+**Description:** Generates a visually stunning, professionally designed presentation using an internal designer model.
+**Parameters:**
+- query: A rich presentation brief describing the topic, purpose, audience, tone, key content, color preferences, and any specific slide types. More detail = better output.
+- num_slides: Number of slides (default 10; range 6–15 for most decks).
+**Output:** Returns a single download URL valid for 72 hours.
+**CRITICAL:** Always include the exact download URL from the tool verbatim in your 'summary'. Format it as: "Your presentation is ready! **[Download here](URL)**"
+**Constraints:** Use ONLY when the user explicitly asks for a presentation, PowerPoint, deck, or slideshow.
 </tools_definition>
 
 <behavior_guidelines>
@@ -226,6 +236,14 @@ THREAD CONTEXT - {{thread_context}}
 - **Action:** Call the <tool>genius</tool> tool.
 - **Output:** Put the **EXACT** response from the tool in the 'summary' field. Do not rephrase, modify, or add keypoints/citations. The 'keypoints' array MUST be empty [] and 'citations' object MUST be empty {}.
 </analytics_module>
+
+<create_ppt_module>
+## CREATE PPT TOOL
+- **Keywords:** create presentation, make a PowerPoint, build a deck, create slides, make ppt, generate slideshow, pptx.
+- **Action:** Call the <tool>create_ppt</tool> tool with a rich query and appropriate num_slides.
+- **Output:** The tool returns ONLY a download URL. You MUST include this URL verbatim in the 'summary' field like: "Your presentation is ready! **[Download here](URL)**". The 'keypoints' array MUST be empty [] and 'citations' object MUST be empty {}.
+- **CRITICAL:** NEVER omit the download URL. It is the only deliverable.
+</create_ppt_module>
 
 <research_module>
 ## RESEARCH AGENT TOOL
@@ -1045,6 +1063,43 @@ Example:
 }`;
 
 /**
+ * Fallback description for create_ppt tool
+ */
+const CREATE_PPT_FALLBACK = `Create a visually stunning PowerPoint presentation (.pptx) from a brief description.
+
+## When to use
+Trigger when the user asks to create a PowerPoint, presentation, slideshow, deck, or downloadable slides.
+
+---
+
+## Parameters
+
+### query (required)
+Craft a rich, detailed presentation brief that includes everything the tool needs to produce a high-quality deck:
+- **Topic & purpose:** What the presentation is about and its goal (e.g., "Q3 sales review for the leadership team")
+- **Audience:** Who will see it (e.g., "technical team", "investors", "new employees", "board")
+- **Tone:** Professional, energetic, minimal, creative, corporate, storytelling, etc.
+- **Key content:** Specific data points, sections, talking points, or facts the user mentioned — include them verbatim
+- **Color/visual hints:** Any preferences the user expressed (dark theme, brand colors, modern, classic, vibrant)
+- **Specific slide types:** If the user mentioned charts, timelines, comparisons, stats — note them
+- **Context from conversation:** Include relevant background from the conversation that will improve content quality
+
+The richer the query, the better the presentation. Do NOT summarize or shorten — include all relevant details.
+
+### num_slides (required)
+- Use the exact number if the user specified it
+- Default to **10 slides** if not specified
+- Short intro deck: 6–8 slides
+- Standard deck: 10–12 slides
+- Comprehensive deck: 13–15 slides
+- Never exceed 20
+
+---
+
+## Output
+The tool returns a single download URL. You MUST include this URL verbatim in your final response.`;
+
+/**
  * Map of prompt names to their fallback values
  * Uses exact prompt names as keys (same as PROMPT_NAMES values in prompts.ts)
  */
@@ -1064,6 +1119,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'create_canvas': CREATE_CANVAS_FALLBACK,
   'read_canvas': READ_CANVAS_FALLBACK,
   'edit_canvas': EDIT_CANVAS_FALLBACK,
+  'create_ppt': CREATE_PPT_FALLBACK,
   'ticket_description_cleaner': TICKET_DESCRIPTION_CLEANER_FALLBACK,
   'cluster_theme_single': CLUSTER_THEME_SINGLE_FALLBACK,
   'meta_theme_single': META_THEME_SINGLE_FALLBACK,

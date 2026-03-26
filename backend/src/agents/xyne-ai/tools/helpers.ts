@@ -34,7 +34,7 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent] = await Promise.all([
+  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, createPpt] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_MESSAGES),
@@ -48,8 +48,9 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     getPromptFromLangfuse(PROMPT_NAMES.READ_CANVAS),
     getPromptFromLangfuse(PROMPT_NAMES.EDIT_CANVAS),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_LINK_CONTENT),
+    getPromptFromLangfuse(PROMPT_NAMES.CREATE_PPT),
   ]);
-  
+
   const descriptions = {
     fetch_channel_messages: fetchChannel || 'Fetch messages from the current channel.',
     fetch_thread_messages: fetchThread || 'Fetch all content from the current thread including messages, attachments, and tickets.',
@@ -64,6 +65,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     read_canvas: readCanvas || 'Read a canvas by its viewAccessId and return the content as markdown.',
     edit_canvas: editCanvas || 'Edit an existing canvas by replacing its content.',
     fetch_link_content: fetchLinkContent || 'Fetch content from a Xyne Spaces link (message, conversation, ticket, or canvas).',
+    create_ppt: createPpt || 'Create a visually stunning PowerPoint presentation from structured slide content.',
   };
   
   return descriptions;

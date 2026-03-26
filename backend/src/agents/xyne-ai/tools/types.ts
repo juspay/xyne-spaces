@@ -73,6 +73,8 @@ export interface XyneAIAgentContext {
   canvasViewAccessId?: string;  // viewAccessId of the canvas when Ask AI is triggered from canvas
   selectionContexts?: SelectionContext[];  // Selected text contexts from canvases
   createCanvasEnabled?: boolean;  // Flag to add create canvas instruction to prompt
+  // Model config
+  modelName?: string;  // LLM model name from CAC config (xyneAiModelName), used by tools that make internal LLM calls
 }
 
 // ============================================================================
@@ -235,6 +237,7 @@ export interface ToolDescriptions {
   read_canvas: string;
   edit_canvas: string;
   fetch_link_content: string;
+  create_ppt: string;
 }
 
 // ============================================================================
