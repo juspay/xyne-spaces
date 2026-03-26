@@ -5,7 +5,7 @@ import { livekitService } from '@/services/liveKitService';
 import { activityService } from '@/services/activity/activityService';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { websocketService } from '@/services/websocketService';
-import { InvitationResponse, NotificationType, ChannelScopeType } from '@prisma/client';
+import { InvitationResponse, NotificationType, ChannelScopeType, CallType } from '@prisma/client';
 import { ActivityClassification } from '@xyne/shared';
 
 class CallSideEffectService {
@@ -149,6 +149,12 @@ class CallSideEffectService {
 
             if (channel?.scopeType === ChannelScopeType.DEFAULT) {
                 this.logger.info(`Skipping side effects for DEFAULT scope channel: ${call.channelId}`);
+                return;
+            }
+
+            // Skip notifications for HEADLESS calls
+            if (call.callType === CallType.HEADLESS) {
+                this.logger.info(`Skipping notification for HEADLESS call: ${call.externalId}`);
                 return;
             }
 
