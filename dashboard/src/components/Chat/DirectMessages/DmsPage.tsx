@@ -1,7 +1,5 @@
-import { ReactElement, useMemo, useState, useRef } from 'react';
+import { ReactElement, useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { Search, PenBox, ArrowLeft, X } from 'lucide-react';
-import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { ChannelScopeType } from '@xyne/shared';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { DmListItem } from './DmListItem';
 import { useNavigate, Outlet, useLocation, useParams, Link } from 'react-router-dom';
@@ -23,6 +21,8 @@ import {
 import { useUsers } from '../../../hooks/useUsers';
 import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
 import Button from '../../ui/Button';
+import { useDmsPaginatedMessages } from '../../../hooks/useDmsPaginatedMessages';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 const DmsPage = (): ReactElement => {
   const navigate = useNavigate();
@@ -31,13 +31,18 @@ const DmsPage = (): ReactElement => {
   const isOnIndexRoute = location.pathname === '/chat/dm';
 
   const dmPanelRef = useRef<ImperativePanelHandle>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   // All hooks must be called before any conditional returns
   const { channelId } = useParams<{ channelId: string }>();
-  const channelData = useAllVisibleChannels();
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const context = useAuthContextValues();
+
+  const selectedChannelIdRef = useRef<string | undefined>(channelId);
+  if (selectedChannelIdRef.current !== channelId) {
+    selectedChannelIdRef.current = channelId;
+  }
 
   const createDmMutation = useMutation({
     mutationFn: (data: CreateDmRequest) => channelService.createDm(data),
@@ -51,26 +56,20 @@ const DmsPage = (): ReactElement => {
   const unreadCounts = useAllUnreadCount();
   const allUsers = useUsers();
 
-  const displayUnreadCounts: Record<string, number> = {
-    ...unreadCounts,
-  };
-
-  const directMessages = useMemo(() => {
-    if (!channelData) return [];
-
-    // Filter for DM and GROUP_DM channels, then sort by activity
-    return channelData
-      .filter(
-        channel =>
-          channel.scopeType === ChannelScopeType.DM ||
-          channel.scopeType === ChannelScopeType.GROUP_DM,
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.channelStats?.lastActivityAt ?? 0).getTime() -
-          new Date(a.channelStats?.lastActivityAt ?? 0).getTime(),
-      );
-  }, [channelData]);
+  const {
+    messagesMap,
+    channels: directMessages,
+    hasMore,
+    loadMore,
+    onVisibleRangeChanged,
+    selectedChannelMovedVersion,
+  } = useDmsPaginatedMessages({ selectedChannelId: channelId });
+  // Scroll to top when the selected channel receives an update and moves
+  useEffect(() => {
+    if (!isMobile && selectedChannelMovedVersion > 0 && virtuosoRef.current) {
+      virtuosoRef.current.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
+    }
+  }, [selectedChannelMovedVersion, isMobile]);
 
   // Create userId -> name map for O(1) lookups
   const userMap = useMemo(() => {
@@ -108,7 +107,38 @@ const DmsPage = (): ReactElement => {
     createDmMutation.mutate(dmRequest);
   };
 
-  // Mobile view - show DM list on index route, chat view otherwise
+  const renderDmItem = useCallback(
+    (_index: number, channel: (typeof filteredDms)[number]) => {
+      return (
+        <DmListItem
+          key={channel.id}
+          channel={channel}
+          unreadCount={unreadCounts[channel.id] || 0}
+          isSelected={channel.id === selectedChannelIdRef.current}
+          latestConversation={messagesMap.get(channel.id)}
+        />
+      );
+    },
+    [unreadCounts, messagesMap],
+  );
+
+  const renderMobileDmItem = useCallback(
+    (index: number, channel: (typeof filteredDms)[number]) => {
+      return (
+        <div className={index === 0 ? 'pt-4' : 'mt-6'}>
+          <DmListItem
+            key={channel.id}
+            channel={channel}
+            unreadCount={unreadCounts[channel.id] || 0}
+            isSelected={channel.id === selectedChannelIdRef.current}
+            latestConversation={messagesMap.get(channel.id)}
+          />
+        </div>
+      );
+    },
+    [unreadCounts, messagesMap],
+  );
+
   if (isMobile) {
     // If on a specific DM route, render the outlet for chat view with white background
     if (!isOnIndexRoute) {
@@ -160,8 +190,7 @@ const DmsPage = (): ReactElement => {
           </div>
         </div>
 
-        {/* DMs List */}
-        <div className='flex-1 w-full max-w-full overflow-y-auto overflow-x-hidden no-scrollbar'>
+        <div className='flex-1 w-full max-w-full overflow-hidden'>
           {filteredDms.length === 0 ? (
             <div className='flex flex-col items-center justify-center h-full pb-24 px-6'>
               <img
@@ -175,16 +204,22 @@ const DmsPage = (): ReactElement => {
               </p>
             </div>
           ) : (
-            <div className='w-full max-w-full pb-20 space-y-6  pt-4'>
-              {filteredDms.map(channel => (
-                <DmListItem
-                  key={`dm-${channel.id}`}
-                  channel={channel}
-                  unreadCount={displayUnreadCounts[channel.id] || 0}
-                  isSelected={channel.id === channelId}
-                />
-              ))}
-            </div>
+            <Virtuoso
+              ref={virtuosoRef}
+              data={filteredDms}
+              computeItemKey={(_, channel) => channel.id}
+              overscan={5}
+              increaseViewportBy={{ top: 100, bottom: 100 }}
+              endReached={() => {
+                if (hasMore) loadMore();
+              }}
+              rangeChanged={range => onVisibleRangeChanged(range.startIndex)}
+              itemContent={renderMobileDmItem}
+              components={{
+                Footer: () => <div className='pb-20' />,
+              }}
+              className='h-full'
+            />
           )}
         </div>
 
@@ -268,8 +303,7 @@ const DmsPage = (): ReactElement => {
               </div>
             </div>
 
-            {/* DMs List */}
-            <div className='flex-1 w-full overflow-y-auto overflow-x-hidden no-scrollbar'>
+            <div className='flex-1 w-full overflow-hidden'>
               {filteredDms.length === 0 ? (
                 <div className='flex flex-col items-center justify-center h-full px-6'>
                   <img
@@ -283,16 +317,19 @@ const DmsPage = (): ReactElement => {
                   </p>
                 </div>
               ) : (
-                <div className='w-full'>
-                  {filteredDms.map(channel => (
-                    <DmListItem
-                      key={`dm-${channel.id}`}
-                      channel={channel}
-                      unreadCount={displayUnreadCounts[channel.id] || 0}
-                      isSelected={channel.id === channelId}
-                    />
-                  ))}
-                </div>
+                <Virtuoso
+                  ref={virtuosoRef}
+                  data={filteredDms}
+                  computeItemKey={(_, channel) => channel.id}
+                  overscan={5}
+                  increaseViewportBy={{ top: 100, bottom: 100 }}
+                  endReached={() => {
+                    if (hasMore) loadMore();
+                  }}
+                  rangeChanged={range => onVisibleRangeChanged(range.startIndex)}
+                  itemContent={renderDmItem}
+                  className='h-full'
+                />
               )}
             </div>
           </div>

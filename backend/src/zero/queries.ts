@@ -1441,6 +1441,50 @@ export const queries = defineQueries({
     }
   ),
 
+  dmChannelsLatestMessagesPaginated: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ lastActivityAt: z.number(), channelId: z.string() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.channel_stats
+        .whereExists('channel', ch =>
+          ch.where(helpers =>
+              helpers.or(
+                helpers.cmp('scopeType', '=', ChannelScopeType.DM),
+                helpers.cmp('scopeType', '=', ChannelScopeType.GROUP_DM),
+            ),
+          ),
+        )
+        .orderBy('lastActivityAt', 'desc')
+        .orderBy('channelId', 'desc');
+
+      if (start) {
+        query = query.start(
+          { lastActivityAt: start.lastActivityAt, channelId: start.channelId },
+          { inclusive: true },
+        );
+      }
+
+      return query
+        .limit(limit)
+        .related('channel', channelQuery =>
+          channelQuery.related('conversations', conversationQuery =>
+            conversationQuery
+              .orderBy('createdAt', 'desc')
+              .limit(1)
+              .related('initialMessage', initialMessageQuery =>
+                initialMessageQuery.where(helpers => {
+                  return helpers.or(
+                    helpers.cmp('visibleTo', 'IS', null),
+                    helpers.cmp('visibleTo', '=', ctx.userID),
+                  );
+                }),
+              ),
+          ),
+        );
+    },
+  ),
   conversationOfUserChannels: defineQuery(({ ctx }) => {
     return zql.channels
       .where((helpers) => {

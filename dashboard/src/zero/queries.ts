@@ -16,6 +16,7 @@ import {
   ChannelRole,
   ChannelVisibility,
   ChannelType,
+  ChannelScopeType,
   ConversationParticipation,
   DocType,
   schema,
@@ -1386,23 +1387,48 @@ export const queries = defineQueries({
         .one();
     },
   ),
-  channelLatestMessageV2: defineQuery(
-    z.object({ channelId: z.string() }),
-    ({ ctx, args: { channelId } }) => {
-      return zql.conversations
-        .where('channelId', channelId)
-        .related('initialMessage', initialMessageQuery =>
-          initialMessageQuery
-            .where(helpers => {
-              return helpers.or(
-                helpers.cmp('visibleTo', 'IS', null),
-                helpers.cmp('visibleTo', '=', ctx.userID),
-              );
-            })
-            .related('attachments'),
+  // Queries from channel_stats as the base table so we can orderBy the
+  // authoritative lastActivityAt field (channels.lastActivityAt is deprecated).
+  dmChannelsLatestMessagesPaginated: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ lastActivityAt: z.number(), channelId: z.string() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.channel_stats
+        .whereExists('channel', ch =>
+          ch.where(helpers =>
+            helpers.or(
+              helpers.cmp('scopeType', '=', ChannelScopeType.DM),
+              helpers.cmp('scopeType', '=', ChannelScopeType.GROUP_DM),
+            ),
+          ),
         )
-        .orderBy('createdAt', 'desc')
-        .one();
+        .orderBy('lastActivityAt', 'desc')
+        .orderBy('channelId', 'desc');
+
+      if (start) {
+        query = query.start(
+          { lastActivityAt: start.lastActivityAt, channelId: start.channelId },
+          { inclusive: true },
+        );
+      }
+
+      return query.limit(limit).related('channel', channelQuery =>
+        channelQuery.related('conversations', conversationQuery =>
+          conversationQuery
+            .orderBy('createdAt', 'desc')
+            .limit(1)
+            .related('initialMessage', initialMessageQuery =>
+              initialMessageQuery.where(helpers => {
+                return helpers.or(
+                  helpers.cmp('visibleTo', 'IS', null),
+                  helpers.cmp('visibleTo', '=', ctx.userID),
+                );
+              }),
+            ),
+        ),
+      );
     },
   ),
   conversationOfUserChannels: defineQuery(({ ctx }) => {

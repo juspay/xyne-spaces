@@ -12,17 +12,17 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { cn } from '../../ui/Dialog';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
-import { queries } from '../../../zero/queries';
 import { formatElapsedTime } from '../../../utils/dateUtils';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
+import { Conversation } from '../../../machines/stateMachine';
 
 interface DmListItemProps {
   channel: Channel;
   unreadCount?: number;
   isSelected?: boolean;
+  latestConversation?: Conversation | undefined;
 }
 
 // Helper: robustly strip HTML tags using DOM parser
@@ -39,14 +39,13 @@ export const DmListItem = ({
   channel,
   unreadCount = 0,
   isSelected = false,
+  latestConversation,
 }: DmListItemProps): ReactElement => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
 
-  // Fetch latest message using the query from queries.ts
-  const [latestConversation] = useCachedQuery(
-    queries.channelLatestMessageV2({ channelId: channel.id }),
-  );
+  // Use the provided latestConversation prop (from batched query in parent)
+  // instead of making individual queries per DM channel
   const lastMessage = latestConversation?.initialMessage;
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
