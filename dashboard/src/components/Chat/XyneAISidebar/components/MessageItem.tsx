@@ -62,7 +62,9 @@ UserTagComponent.displayName = 'UserTagComponent';
 
 /**
  * Process a string to replace user tags with UserTag components
- * Works in real-time during streaming by converting <Name> to @Name format
+ * Handles both formats:
+ * - `@Username` format (from TipTap editor plain text output for user messages)
+ * - `<Username>` format (from bot responses)
  */
 const processStringForUserTags = (
   str: string,
@@ -71,27 +73,39 @@ const processStringForUserTags = (
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
-  // Updated regex to match any content inside < > (e.g., <Pradeep J>, <Prajwal Prasad>)
-  const tagRegex = /<([^>]+)>/g;
+
+  // Create a combined regex that matches both @Username and <Username> formats
+  // @Username format - @ followed by word characters and spaces until a non-word character
+  // <Username> format - content inside angle brackets
+  const tagRegex = /@([\w\s]+(?=\s|$|[^\w]))|<([^>]+)>/g;
+
   while ((match = tagRegex.exec(str)) !== null) {
-    const fullTag = match[0];
     const startIndex = match.index;
 
     if (startIndex > lastIndex) {
       parts.push(str.slice(lastIndex, startIndex));
     }
 
-    const userTag = userTags?.[fullTag];
+    // Determine which format was matched
+    const isAtFormat = match[1] !== undefined; // @Username format
+    const username = isAtFormat ? match[1]!.trim() : match[2]!.trim();
+    const fullMatch = match[0];
+
+    // Try to find userTag - check both possible key formats
+    const keyForAtFormat = `<${username}>`;
+    const userTag = userTags?.[keyForAtFormat];
+
     if (userTag) {
       // Full userTag available - render with hover
-      parts.push(<UserTagComponent key={fullTag} userTag={userTag} />);
+      parts.push(<UserTagComponent key={`${fullMatch}-${startIndex}`} userTag={userTag} />);
     } else {
-      // No userTag yet (during streaming) - render as @Name without hover
-      const name = fullTag.slice(1, -1); // Remove < and >
-      const mentionDisplay = `${name}`;
+      // No userTag - render as plain text without hover
       parts.push(
-        <span key={fullTag} className='mention-text cursor-pointer hover:underline text-blue-600'>
-          {mentionDisplay}
+        <span
+          key={`${fullMatch}-${startIndex}`}
+          className='mention-text cursor-pointer hover:underline text-blue-600'
+        >
+          {username}
         </span>,
       );
     }
@@ -433,7 +447,10 @@ export const MessageItem = ({
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
-                        p: ({ children }) => <span>{children}</span>,
+                        p: ({ children }) => {
+                          const processed = processNodeForUserTags(children, message.userTags);
+                          return <span>{processed}</span>;
+                        },
                         a: ({ href, children, ...props }) => {
                           // Check if URL is external
                           const isExternal = (() => {
