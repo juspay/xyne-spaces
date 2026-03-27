@@ -606,6 +606,8 @@ const CODE_FILE_EXTENSIONS = new Set([
   '.yml',
   '.yaml',
   '.json',
+  '.md',
+  '.markdown',
 ]);
 
 const isCodeFileByName = (fileName: string): boolean => {

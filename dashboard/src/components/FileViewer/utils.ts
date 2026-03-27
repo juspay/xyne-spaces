@@ -1,7 +1,6 @@
 import TxtViewer from './TxtViewer';
 import DocxViewer from './DocxViewer';
 import CsvViewer from './CsvViewer';
-import ReadmeViewer from './ReadmeViewer';
 import ExcelViewer from './ExcelViewer';
 import ImageViewer from './ImageViewer';
 import PdfViewer from './PdfViewer';
@@ -66,15 +65,9 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
     wrapperClass: 'h-full overflow-auto',
     displayName: 'Word Document',
   },
-  markdown: {
-    mimeTypes: ['text/markdown'],
-    extensions: ['.md', '.markdown'],
-    component: ReadmeViewer,
-    wrapperClass: 'h-full overflow-auto',
-    displayName: 'Markdown Document',
-  },
   code: {
     mimeTypes: [
+      'text/markdown',
       'text/typescript',
       'text/x-typescript',
       'text/tsx',
@@ -107,6 +100,8 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
       '.yml',
       '.yaml',
       '.json',
+      '.md',
+      '.markdown',
     ],
     component: CodeViewer,
     wrapperClass: 'h-full overflow-auto p-4',
