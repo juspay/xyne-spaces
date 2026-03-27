@@ -269,7 +269,7 @@ export class WorkflowEngineImpl<
       systemPrompt: agentConfig?.metadata?.description
     }
 
-    const executorType = config.executorType ?? appConfig.workflow.defaultExecutor
+    const executorType = config.executorType ?? this.currentState.context.executorType ?? appConfig.workflow.defaultExecutor
     const useOpenCode = executorType === 'opencode' && appConfig.openCode.enabled
     
     let result, updatedState, gitInfo

@@ -11,115 +11,7 @@ import { AgenticCheckpointConfig, ExecutorType, GitInfo } from '../../workflow-t
 import { ImageAttachment } from '../../types/workflow-enums'
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import { spawn } from 'child_process'
-import { access } from 'fs/promises'
-import { join } from 'path'
 import { logger } from '@/utils/logger';
-
-// Cache for tracking already-installed repos within a session
-const installedRepos = new Map<string, number>()
-const INSTALL_CACHE_TTL = 24 * 60 * 60 * 1000 // 24 hours
-
-/**
- * Install dependencies for Xyne Spaces projects
- * This is specific to the xyne-spaces repository structure
- */
-export const installXyneSpacesDependencies = async (repoPath: string, repoName: string): Promise<void> => {
-  const installKey = `${repoPath}:${repoName}`
-
-  // Check cache
-  const timestamp = installedRepos.get(installKey)
-  if (timestamp && Date.now() - timestamp < INSTALL_CACHE_TTL) {
-    return
-  }
-
-  // Check if this is a xyne-spaces repo by looking for backend/package.json
-  try {
-    await access(join(repoPath, 'backend', 'package.json'))
-  } catch {
-    return
-  }
-
-  logger.info(`[INSTALL-DEPS] Installing dependencies for ${repoName}`)
-
-  const packages = ['shared', 'framework', 'backend', 'dashboard']
-
-  const installPromises = packages.map(async (pkg) => {
-    const pkgPath = join(repoPath, pkg)
-    try {
-      await access(join(pkgPath, 'package.json'))
-    } catch {
-      return
-    }
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const needsBuild = pkg === 'shared' || pkg === 'framework'
-        const installProcess = needsBuild
-          ? spawn('bash', ['-c', 'NODE_ENV=development npm install --force && npm run build'], {
-            cwd: pkgPath,
-            stdio: ['inherit', 'pipe', 'pipe']
-          })
-          : spawn('npm', ['install', '--force'], {
-            cwd: pkgPath,
-            stdio: ['inherit', 'pipe', 'pipe']
-          })
-
-        let completed = false
-        let stderr = ''
-
-        const timeoutId = setTimeout(() => {
-          if (completed) return
-          completed = true
-          installProcess.kill()
-          logger.warn(`[INSTALL-DEPS] ${pkg} install timeout after 10 minutes`)
-          reject(new Error(`Installation timeout for ${pkg}`))
-        }, 600000)
-
-        installProcess.stdout?.on('data', () => { })
-
-        installProcess.stderr?.on('data', (data) => {
-          stderr += data.toString()
-        })
-
-        installProcess.on('close', (code) => {
-          if (completed) return
-          completed = true
-          clearTimeout(timeoutId)
-          if (code !== 0) {
-            const errorDetails = stderr ? `: ${stderr.slice(0, 500)}` : ''
-            logger.warn(`[INSTALL-DEPS] ${pkg} install failed with exit code ${code}${errorDetails}`)
-            reject(new Error(`Installation failed for ${pkg} with exit code ${code}${errorDetails}`))
-          } else {
-            logger.info(`[INSTALL-DEPS] ${pkg} installed successfully`)
-            resolve()
-          }
-        })
-
-        installProcess.on('error', (error) => {
-          if (completed) return
-          completed = true
-          clearTimeout(timeoutId)
-          reject(error)
-        })
-      })
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      logger.warn(`[INSTALL-DEPS] Failed to install ${pkg}: ${errorMessage}`)
-    }
-  })
-  await Promise.allSettled(installPromises)
-
-  // Update cache and cleanup old entries
-  installedRepos.set(installKey, Date.now())
-  if (installedRepos.size > 1000) {
-    const cutoff = Date.now() - INSTALL_CACHE_TTL
-    for (const [key, ts] of installedRepos.entries()) {
-      if (ts < cutoff) {
-        installedRepos.delete(key)
-      }
-    }
-  }
-}
 
 /**
  * Standard agent configuration for Xyne Spaces workflows
@@ -146,13 +38,11 @@ export const createXyneSpacesAgentConfig = (
     repoBranch?: string
     baseBranch?: string
     checkoutCommit?: string
-    postCloneSetup?: (repoPath: string, repoName: string) => Promise<void>
     coAuthor?: { name: string; email: string }
     shallow?: boolean
   } = {
     repoUrl,
     baseBranch,
-    postCloneSetup: installXyneSpacesDependencies,
     shallow: true
   }
   if (repoBranch) {

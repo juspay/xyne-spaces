@@ -6,23 +6,24 @@ import { WorkflowRepository, TicketRepository } from '@/database/repositories/wo
 import { logger } from '@/utils/logger'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { resolve as pathResolve, normalize as pathNormalize } from 'path'
+import { realpath } from 'fs/promises'
 
 const execAsync = promisify(exec)
 
-import { cloneRepository, pushCommits } from '@framework'
+import { cloneRepository, pushCommits, hasUncommittedChanges, commitAllChanges } from '@framework'
 import { workspaceEventService } from '@/services/workspaceEventService'
 
 import { OpenCodeClient } from './opencode-client'
-import { 
+import {
   OpenCodeConfig,
-  OpenCodeCommitTracker, 
-  SessionInfo, 
+  OpenCodeCommitTracker,
+  SessionInfo,
   SDKPromptResponse,
-  QuestionAskedEvent
+  QuestionAskedEvent,
+  normalizeToolInput
 } from './types'
 import type { ToolPart, TextPart, ReasoningPart, StepFinishPart } from '@opencode-ai/sdk/v2'
-import { createOpenCodeEventHandler, EventProcessingStats } from './event-mapper'
+import { createOpenCodeEventHandler, EventProcessingStats, transformToolOutput } from './event-mapper'
 import { formatQuestionsAsText, createQuestionActivity } from '../../utils/external-step-utils'
 
 import type { ConversationRequest, ConversationResult } from '../types.js'
@@ -369,51 +370,26 @@ export class OpenCodeExecutor {
     if (repoUrl && !repoPath) {
       throw new Error(`[DIRECTORY-ISOLATION] Clone failed: repoUrl was provided but repoPath is not set. Refusing to fall back to local directory.`)
     }
-    
+
+    if (repoPath) {
+      repoPath = await realpath(repoPath)
+    }
     const workingDir = repoPath || process.cwd()
-    const normalizedWorkingDir = pathResolve(pathNormalize(workingDir))
 
-    const isIsolated = (() => {
-      try {
-        const allowedPaths = [
-          pathResolve('/tmp/'),
-          pathResolve('/var/folders/'),
-          pathResolve(process.env.TMPDIR || '/tmp/')
-        ]
-        
-        return allowedPaths.some(allowedPath => 
-          normalizedWorkingDir.startsWith(allowedPath) && 
-          !normalizedWorkingDir.includes('..')
-        )
-      } catch {
-        return false
-      }
-    })()
-
-    const isLocalRepo = (() => {
-      try {
-        const normalizedCwd = pathResolve(process.cwd())
-        return normalizedWorkingDir.startsWith(normalizedCwd) && 
-               normalizedWorkingDir.includes('xyne-spaces') &&
-               !isIsolated
-      } catch {
-        return false
-      }
-    })()
-    
-    if (normalizedWorkingDir.includes('..')) {
+    // Directory isolation safety checks
+    if (workingDir.includes('..')) {
       throw new Error(`[DIRECTORY-ISOLATION] Path traversal detected: ${workingDir}`)
     }
-    
-    if (repoUrl && !isIsolated) {
-      throw new Error(`[DIRECTORY-ISOLATION] repoUrl provided but workingDir is not in isolated temp directory. Expected /tmp/{executionId} but got: ${normalizedWorkingDir}`)
+
+    if (repoUrl) {
+      const tmpPaths = ['/tmp/', '/private/tmp/', '/var/folders/', process.env.TMPDIR || '/tmp/']
+      const isIsolated = tmpPaths.some(p => workingDir.startsWith(p))
+      if (!isIsolated) {
+        throw new Error(`[DIRECTORY-ISOLATION] repoUrl provided but workingDir is not in isolated temp directory. Expected /tmp/{executionId} but got: ${workingDir}`)
+      }
     }
     
-    if (isLocalRepo) {
-      throw new Error(`[DIRECTORY-ISOLATION] workingDir is a local xyne-spaces checkout: ${normalizedWorkingDir}. Use an isolated temp directory instead.`)
-    }
-    
-    const client = this.createScopedClient(normalizedWorkingDir)
+    const client = this.createScopedClient(workingDir)
     
     const commitTracker: OpenCodeCommitTracker = {
       hasCommits: false,
@@ -428,55 +404,29 @@ export class OpenCodeExecutor {
     let abortController = new AbortController()
     let savedExternalWaitException: WorkflowExternalWaitException | undefined
 
-    const lspInstructions = `
-## � CODE QUALITY INSTRUCTIONS - READ CAREFULLY 🔧
+    const codeQualityInstructions = `
+## CODE QUALITY INSTRUCTIONS
 
-### RULE 1: COMPLETE IMPLEMENTATION FIRST, THEN FIX LSP ERRORS
-When you see LSP errors after an edit:
-- **DO NOT** immediately try to fix them by removing code
-- **CONTINUE** with your implementation - the errors may resolve as you add more code
-- LSP errors often occur because:
-  - You declared something you'll use later in the implementation
-  - You imported something you'll need in subsequent edits
-  - You added a partial implementation that will be completed
-- **ONLY** after completing ALL implementation steps, check for remaining LSP errors
-- If errors persist after full implementation, THEN fix them minimally
-
-### RULE 2: DO NOT DELETE CODE TO FIX LSP ERRORS
-- NEVER remove implementation code just because of temporary LSP errors
-- If a variable is "declared but never read", you probably need to USE it, not delete it
-- If "Cannot find name X", add the import, don't remove the usage
-- Prefer adding code (imports, usages) over removing code
-
-### RULE 3: PROJECT-WIDE DIAGNOSTICS CHECK
-After completing ALL implementation:
-- Run the \`diagnostics\` tool with an EMPTY file_path parameter
-- This checks ALL files in the project for errors
-- Fix any remaining errors that are genuine issues (not temporary)
-
-### RULE 4: EDIT RETRY ON FAILURE
+### RULE 1: EDIT RETRY ON FAILURE
 If an edit fails with "file has been modified" or "must read file first":
 - Re-read the file using the read tool
 - Retry the edit with fresh content
 - Do not give up
 
-### RULE 5: COMPLETION CRITERIA
+### RULE 2: COMPLETION CRITERIA
 You are ONLY done when:
 - All planned implementation steps are complete
-- Running \`diagnostics\` with empty file_path shows no errors
 - All todos are verified complete
-
-**REMEMBER: Complete the implementation first. Many LSP errors resolve themselves as you add more code.**
 `
 
     // Questioning mode determines whether the agent can ask clarifying questions
     const useQuestioningMode = agentChkConfig.useQuestioningMode ?? false
     const questionEnabled = useQuestioningMode
-    logger.info(`[OPENCODE-EXECUTOR] 🔍 useQuestioningMode=${useQuestioningMode}, questionEnabled=${questionEnabled}, raw agentChkConfig.useQuestioningMode=${agentChkConfig.useQuestioningMode}`)
+    logger.info(`[OPENCODE-EXECUTOR] useQuestioningMode=${useQuestioningMode}, questionEnabled=${questionEnabled}`)
 
     const questionRule = questionEnabled
       ? `
-### RULE 6: CLARIFYING QUESTIONS (MANDATORY)
+### RULE 3: CLARIFYING QUESTIONS (MANDATORY)
 You have access to a \`question\` tool that lets you ask the user clarifying questions.
 
 **YOU MUST USE THE \`question\` TOOL** before finalizing your plan. After exploring the codebase and understanding the requirements, ask the user about:
@@ -494,18 +444,18 @@ Workflow:
 5. After receiving answers, incorporate them and finalize your plan
 `
       : `
-### RULE 6: NO QUESTIONS
+### RULE 3: NO QUESTIONS
 Do NOT ask the user any questions. Proceed directly with the task.
 - Do NOT use the \`question\` tool.
 - Do NOT ask questions in plain text or markdown.
 - Make your best judgment call for any ambiguity and proceed.
 `
 
-    const lspInstructionsWithQuestionRule = lspInstructions + questionRule
+    const additionalInstructions = codeQualityInstructions + questionRule
 
     const systemPrompt = conversationRequest.systemPrompt
-      ? conversationRequest.systemPrompt + `\n\nIMPORTANT: You MUST work in the following directory. All file operations should be relative to or within this path:\n${workingDir}\n${lspInstructionsWithQuestionRule}`
-      : `IMPORTANT: You MUST work in the following directory. All file operations should be relative to or within this path:\n${workingDir}\n${lspInstructionsWithQuestionRule}`
+      ? conversationRequest.systemPrompt + `\n\nIMPORTANT: You MUST work in the following directory. All file operations should be relative to or within this path:\n${workingDir}\n${additionalInstructions}`
+      : `IMPORTANT: You MUST work in the following directory. All file operations should be relative to or within this path:\n${workingDir}\n${additionalInstructions}`
 
     const dbModel = agentChkConfig.agentConfig?.model?.defaultModel
     const dbProviderType = agentChkConfig.agentConfig?.model?.provider?.type
@@ -541,6 +491,8 @@ Do NOT ask the user any questions. Proceed directly with the task.
     // Allows the handleQuestion callback to force-resolve the current promptWithStreaming call
     const forceResolveRef: { resolve?: () => void } = {}
 
+    const sseProcessedToolCalls = new Set<string>()
+    const sseProcessedToolResults = new Set<string>()
     const { handleEvent, getStats } = createOpenCodeEventHandler({
       inputStepDbId,
       parentExecutionId,
@@ -549,8 +501,8 @@ Do NOT ask the user any questions. Proceed directly with the task.
       agentChkConfig,
       storage: this.storage,
       abortController,
-      processedToolCalls: new Set(),
-      processedToolResults: new Set(),
+      processedToolCalls: sseProcessedToolCalls,
+      processedToolResults: sseProcessedToolResults,
       checkPauseOrCancel: () => this.checkWorkflowPauseOrCancelStatusAndThrow(inputStepDbId, abortController),
       grantPermission: async (sessionId: string, permissionId: string) => {
         await client.grantPermission(sessionId, permissionId)
@@ -575,6 +527,7 @@ Do NOT ask the user any questions. Proceed directly with the task.
           content: questionText,
         })
 
+        
         // Set MANUAL mode so the continueAgenticStep endpoint routes the user's reply
         // into the Redis message-storage branch (WAIT_FOR_EVENT + MANUAL).
         // The endpoint will reset mode to AUTOMATIC before re-queuing so the agent
@@ -652,14 +605,10 @@ Do NOT ask the user any questions. Proceed directly with the task.
         
         // Send system prompt on first attempt
         const systemPromptToUse = isFirstAttempt ? systemPrompt : undefined
-        // Debug logging to verify prompt contents
-        logger.info(`[OPENCODE-EXECUTOR] 📤 Sending prompt (attempt=${continuationAttempt}, isFirst=${isFirstAttempt}):`)
-        logger.info(`[OPENCODE-EXECUTOR] 📤 System prompt present: ${!!systemPromptToUse}, length: ${systemPromptToUse?.length ?? 0}`)
-        if (systemPromptToUse) {
-          logger.info(`[OPENCODE-EXECUTOR] 📤 System prompt (first 800 chars): ${systemPromptToUse.substring(0, 800)}`)
-          logger.info(`[OPENCODE-EXECUTOR] 📤 System prompt (last 800 chars): ${systemPromptToUse.substring(Math.max(0, systemPromptToUse.length - 800))}`)
-        }
-        logger.info(`[OPENCODE-EXECUTOR] 📤 User message (first 500 chars): ${messageToSend.substring(0, 500)}`)
+
+        logger.info(`[OPENCODE-EXECUTOR] Sending prompt (attempt=${continuationAttempt}, isFirst=${isFirstAttempt}, systemPrompt=${!!systemPromptToUse})`)
+        logger.debug(`[OPENCODE-EXECUTOR] System prompt (first 500 chars): ${systemPromptToUse?.substring(0, 500) ?? 'none'}`)
+        logger.debug(`[OPENCODE-EXECUTOR] User message (first 500 chars): ${messageToSend.substring(0, 500)}`)
         
         const MAX_PROMPT_RETRIES = 5
         let promptRetry = 0
@@ -722,27 +671,21 @@ Do NOT ask the user any questions. Proceed directly with the task.
           commitTracker,
           workingDir,
           agentChkConfig,
-          abortController
+          abortController,
+          sseProcessedToolCalls
         )
 
-        const stats = getStats()
-        const hasUnfixedLspErrors = stats.lspErrorsUnfixed.size > 0
         const finishReason = promptResponse.info?.finish
         const todoCheck = await client.hasIncompleteTodos(session.id)
         const hasIncompleteTodos = todoCheck.hasIncomplete
 
         // Detect completion or need for continuation
-        if (finishReason === 'stop' && !hasUnfixedLspErrors && !hasIncompleteTodos) {
-          logger.info(`✅ [OPENCODE-EXECUTOR] LLM finished with stop, no LSP errors, no incomplete todos - task complete`)
+        if (finishReason === 'stop' && !hasIncompleteTodos) {
+          logger.info(`✅ [OPENCODE-EXECUTOR] LLM finished with stop, no incomplete todos - task complete`)
           isComplete = true
-        } else if (finishReason === 'stop' && (hasUnfixedLspErrors || hasIncompleteTodos)) {
-          const reasons: string[] = []
-          if (hasUnfixedLspErrors) reasons.push(`${stats.lspErrorsUnfixed.size} unfixed LSP errors`)
-          if (hasIncompleteTodos) reasons.push(`${todoCheck.todos.length} incomplete todos`)
-          logger.warn(`[OPENCODE-EXECUTOR] LLM stopped but has ${reasons.join(' and ')} - will re-prompt`)
+        } else if (finishReason === 'stop' && hasIncompleteTodos) {
+          logger.warn(`[OPENCODE-EXECUTOR] LLM stopped but has ${todoCheck.todos.length} incomplete todos - will re-prompt`)
           continuationAttempt++
-        } else if (finishReason === 'tool-calls') {
-          isComplete = true
         } else {
           isComplete = true
         }
@@ -861,7 +804,6 @@ Do NOT ask the user any questions. Proceed directly with the task.
         try {
           const todoCheck = await client.hasIncompleteTodos(session.id)
           if (todoCheck.hasIncomplete) {
-            const stats = getStats()
             const incompleteTodoList = todoCheck.todos.map(t => `- [${t.status}] ${t.content}`).join('\n')
             const resumePrompt = `The previous execution was interrupted by a network timeout. Please continue the work.
 
@@ -870,8 +812,6 @@ ${incompleteTodoList}
 
 PROGRESS SO FAR:
 - Commits made: ${commitTracker.commitCount}
-- LSP errors detected: ${stats.lspErrorsDetected}
-- LSP errors remaining: ${stats.lspErrorsUnfixed.size}
 
 Please complete the remaining todos. Focus on the incomplete tasks.`
 
@@ -899,7 +839,8 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
                   commitTracker,
                   workingDir,
                   agentChkConfig,
-                  abortController
+                  abortController,
+                  sseProcessedToolCalls
                 )
                 session = resumeSession
                 break
@@ -942,6 +883,13 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     } finally {
       unsubscribe()
 
+      // Clean up Redis continuation subscription to prevent leaks
+      try {
+        await cleanupContinuationListener()
+      } catch (cleanupErr) {
+        logger.warn(`[OPENCODE-EXECUTOR] Failed to cleanup continuation listener:`, cleanupErr)
+      }
+
       try {
         await client.deleteSession(session.id)
         logger.info(`🧹 [OPENCODE-EXECUTOR] Cleaned up session ${session.id}`)
@@ -958,9 +906,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     }
 
     if (repoPath) {
-      const { hasUncommittedChanges: checkUncommitted, commitAllChanges: doCommit } = await import('@framework')
-      
-      const hasUncommittedWork = await checkUncommitted(repoPath)
+      const hasUncommittedWork = await hasUncommittedChanges(repoPath)
       
       if (hasUncommittedWork) {
         const finalCommitMessage = agentChkConfig.repoInfo?.getCommitMessage
@@ -968,7 +914,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
           : 'Final auto-commit of remaining changes'
         
         const coAuthor = agentChkConfig.repoInfo?.coAuthor
-        const finalCommitHash = await doCommit(repoPath, finalCommitMessage, coAuthor?.name, coAuthor?.email)
+        const finalCommitHash = await commitAllChanges(repoPath, finalCommitMessage, coAuthor?.name, coAuthor?.email)
         if (finalCommitHash) {
           commitTracker.hasCommits = true
           commitTracker.latestCommitHash = finalCommitHash
@@ -1097,10 +1043,11 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     response: SDKPromptResponse,
     inputStepDbId: string,
     parentExecutionId: string,
-    commitTracker: OpenCodeCommitTracker,
-    repoPath: string,
-    agentChkConfig: FullAgenticCheckpointConfig,
-    abortController: AbortController
+    _commitTracker: OpenCodeCommitTracker,
+    _repoPath: string,
+    _agentChkConfig: FullAgenticCheckpointConfig,
+    abortController: AbortController,
+    alreadyProcessedToolCalls?: Set<string>
   ): Promise<{ textContent: string }> {
     if (!response?.parts || !Array.isArray(response.parts)) {
       return { textContent: '' }
@@ -1110,8 +1057,9 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     for (const part of response.parts) {
       partTypeCounts[part.type] = (partTypeCounts[part.type] || 0) + 1
     }
+    logger.info(`[OPENCODE-EXECUTOR] processPromptResponse: ${response.parts.length} parts, types: ${JSON.stringify(partTypeCounts)}`)
 
-    const processedToolCalls = new Set<string>()
+    const processedToolCalls = alreadyProcessedToolCalls || new Set<string>()
     const toolCallsInResponse: Array<{ id: string; name: string; arguments: Record<string, unknown> }> = []
     let textContent = ''
     let reasoningContent = ''
@@ -1123,22 +1071,15 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
       switch (part.type) {
         case 'tool': {
           const toolPart = part as ToolPart
-          if (!processedToolCalls.has(toolPart.callID)) {
-            toolCallsInResponse.push({
-              id: toolPart.callID,
-              name: toolPart.tool,
-              arguments: toolPart.state.input
-            })
+          toolCallsInResponse.push({
+            id: toolPart.callID,
+            name: toolPart.tool,
+            arguments: toolPart.state.input
+          })
+          
+          if (toolPart.state.status === 'completed' || toolPart.state.status === 'error') {
+            await this.processCompletedToolPart(toolPart, inputStepDbId, parentExecutionId, processedToolCalls)
           }
-          await this.processToolPart(
-            toolPart,
-            inputStepDbId,
-            parentExecutionId,
-            commitTracker,
-            repoPath,
-            agentChkConfig,
-            processedToolCalls
-          )
           break
         }
 
@@ -1206,243 +1147,74 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
   }
 
   /**
-   * NEW: Uses inputStepDbId instead of childExecutionId
+   * Process a completed/error tool part: ensure step exists, parse output,
+   * normalize input keys, and update storage with final data.
    */
-  private async processToolPart(
+  private async processCompletedToolPart(
     toolPart: ToolPart,
     inputStepDbId: string,
     parentExecutionId: string,
-    commitTracker: OpenCodeCommitTracker,
-    repoPath: string,
-    agentChkConfig: FullAgenticCheckpointConfig,
     processedToolCalls: Set<string>
   ): Promise<void> {
-    const callId = toolPart.callID
-    if (processedToolCalls.has(callId)) {
-      return
-    }
-    processedToolCalls.add(callId)
-
     const toolName = toolPart.tool
     const state = toolPart.state
+    const toolCallStatus = state.status === 'error' ? 'failed' : 'completed'
 
-    await this.storage.createToolExecutionStep(parentExecutionId, inputStepDbId, {
-      id: callId,
-      name: toolName,
-      input: state.input,
-      output: null,
-      duration: 0,
-      success: false
-    })
+    // Ensure step exists (SSE should have created it, but create if not)
+    if (!processedToolCalls.has(toolPart.callID)) {
+      processedToolCalls.add(toolPart.callID)
+      await this.storage.createToolExecutionStep(parentExecutionId, inputStepDbId, {
+        id: toolPart.callID,
+        name: toolName,
+        input: normalizeToolInput(state.input),
+        output: null,
+        duration: 0,
+        success: state.status === 'completed'
+      })
+    }
 
+    // Get raw output string (state.output exists on completed, state.error on error)
+    const rawOutputStr = state.status === 'completed'
+      ? (state as { output: string }).output
+      : ''
+    const rawErrorStr = state.status === 'error'
+      ? (state as { error: string }).error
+      : ''
+
+    logger.info(`[OPENCODE-EXECUTOR] Tool ${toolName} (${toolPart.callID}) — input keys: ${JSON.stringify(Object.keys(state.input))}, output length: ${rawOutputStr?.length || 0}, status: ${state.status}`)
+    logger.debug(`[OPENCODE-EXECUTOR] Tool ${toolName} raw output: ${(rawOutputStr || rawErrorStr || '').substring(0, 500)}`)
+
+    // Parse output: try JSON first, fallback to {content: str}
+    let parsedOutput: unknown
     if (state.status === 'completed') {
-      const { hasUncommittedChanges, commitAllChanges } = await import('@framework')
-      
-      const hasChanges = await hasUncommittedChanges(repoPath)
-
-      let updateAgentData: any = {
-        repositoryURL: commitTracker.repoUrl,
-        branch: commitTracker.branchName
-      }
-
-      if (hasChanges) {
-        const commitMessage = `Auto-commit changes from tool execution ${callId}`
-        const updatedCommitMessage = agentChkConfig.repoInfo?.getCommitMessage
-          ? agentChkConfig.repoInfo.getCommitMessage(commitMessage)
-          : commitMessage
-
-        const coAuthor = agentChkConfig.repoInfo?.coAuthor
-        const commitHash = await commitAllChanges(
-          repoPath,
-          updatedCommitMessage,
-          coAuthor?.name,
-          coAuthor?.email
-        )
-
-        if (commitHash) {
-          updateAgentData = { ...updateAgentData, commitHash }
-          commitTracker.hasCommits = true
-          commitTracker.latestCommitHash = commitHash
-          commitTracker.commitCount++
-
-          if (repoPath && commitTracker.branchName && commitTracker.repoUrl) {
-            try {
-              await pushCommits(repoPath, commitTracker.branchName, commitTracker.repoUrl)
-
-          await workspaceEventService.publishFileTreeUpdate(
-            parentExecutionId,
-            inputStepDbId,
-            commitHash
-          )
-            } catch (pushError) {
-              logger.error(`[OPENCODE-EXECUTOR] Failed to push commit:`, pushError)
-            }
-          }
-        }
-      }
-
-      await this.storage.updateToolExecutionAgentStep(inputStepDbId, callId, updateAgentData)
-      let parsedOutput: unknown
       try {
-        parsedOutput = JSON.parse(state.output)
-      } catch (parseError) {
-        logger.warn(`[OPENCODE-EXECUTOR] Failed to parse tool output as JSON for ${toolName}:`, {
-          error: parseError instanceof Error ? parseError.message : String(parseError),
-          toolId: callId
-        })
-        
-        const trimmedOutput = state.output?.trim() || ''
-        if (trimmedOutput.startsWith('{') || trimmedOutput.startsWith('[')) {
-          logger.error(`[OPENCODE-EXECUTOR] Tool ${toolName} returned malformed JSON`)
-        }
-        
-        parsedOutput = { 
-          content: state.output,
-          _parseError: true
-        }
+        parsedOutput = JSON.parse(rawOutputStr)
+      } catch {
+        parsedOutput = { content: rawOutputStr }
       }
-
-      const transformedOutput = this.transformToolOutput(toolName, parsedOutput)
-
-      await this.storage.updateToolExecutionStep(
-        inputStepDbId,
-        callId,
-        JSON.stringify(transformedOutput),
-        'completed'
-      )
-
-    } else if (state.status === 'error') {
-      await this.storage.createErrorStep(
-        parentExecutionId,
-        inputStepDbId,
-        new Error(`Tool ${toolName} failed: ${state.error}`)
-      )
-
-      await this.storage.updateToolExecutionStep(
-        inputStepDbId,
-        callId,
-        JSON.stringify({ error: state.error }),
-        'failed'
-      )
-
-      logger.error(`[OPENCODE-EXECUTOR] Tool ${toolName} failed: ${state.error}`)
+    } else {
+      parsedOutput = { error: rawErrorStr }
     }
-  }
+    const finalOutput = transformToolOutput(toolName, parsedOutput)
 
-  private transformToolOutput(toolName: string, rawOutput: any): any {
-    if (rawOutput?.error) {
-      return rawOutput
-    }
+    const normalizedInput = state.input && Object.keys(state.input).length > 0
+      ? normalizeToolInput(state.input)
+      : undefined
 
-    switch (toolName) {
-      case 'bash':
-        if (rawOutput?.content) {
-          return {
-            stdout: rawOutput.content,
-            stderr: '',
-            exitCode: 0
-          }
-        }
-        if (rawOutput?.stdout !== undefined) {
-          return rawOutput
-        }
-        return { stdout: JSON.stringify(rawOutput), stderr: '', exitCode: 0 }
-
-      case 'todoread':
-      case 'todowrite':
-        if (Array.isArray(rawOutput)) {
-          return {
-            success: true,
-            todosUpdated: rawOutput.length,
-            todos: rawOutput
-          }
-        }
-        if (rawOutput?.content && typeof rawOutput.content === 'string') {
-          try {
-            const todos = JSON.parse(rawOutput.content)
-            if (Array.isArray(todos)) {
-              return {
-                success: true,
-                todosUpdated: todos.length,
-                todos: todos
-              }
-            }
-          } catch {
-            // Not JSON, keep as-is
-          }
-        }
-        return { success: true, ...rawOutput }
-
-      case 'glob':
-        if (rawOutput?.content && typeof rawOutput.content === 'string') {
-          const files = rawOutput.content.split('\n').filter((f: string) => f.trim().length > 0)
-          return {
-            files: files,
-            count: files.length
-          }
-        }
-        if (rawOutput?.content === '' || (typeof rawOutput?.content === 'string' && !rawOutput.content.trim())) {
-          return {
-            files: [],
-            count: 0
-          }
-        }
-        if (Array.isArray(rawOutput?.files)) {
-          return {
-            files: rawOutput.files,
-            count: rawOutput.count || rawOutput.files.length
-          }
-        }
-        return { files: [], count: 0 }
-
-      case 'read':
-        if (typeof rawOutput === 'string') {
-          return { content: rawOutput }
-        }
-        if (rawOutput?.content) {
-          return { content: rawOutput.content }
-        }
-        return rawOutput
-
-      case 'write':
-        if (typeof rawOutput === 'string') {
-          return { 
-            success: rawOutput.toLowerCase().includes('success'),
-            message: rawOutput
-          }
-        }
-        if (rawOutput?.content && typeof rawOutput.content === 'string') {
-          return {
-            success: rawOutput.content.toLowerCase().includes('success'),
-            message: rawOutput.content
-          }
-        }
-        return { success: true, ...rawOutput }
-
-      case 'edit':
-        if (typeof rawOutput === 'string') {
-          return { 
-            success: !rawOutput.toLowerCase().includes('error'),
-            message: rawOutput
-          }
-        }
-        return rawOutput
-
-      default:
-        return rawOutput
-    }
+    await this.storage.updateToolExecutionStep(
+      inputStepDbId,
+      toolPart.callID,
+      finalOutput,
+      toolCallStatus,
+      normalizedInput
+    )
   }
 
   private buildConversationResultFromResponse(
     response: SDKPromptResponse,
     session: SessionInfo,
-    stats: ReturnType<ReturnType<typeof createOpenCodeEventHandler>['getStats']>
+    _stats: ReturnType<ReturnType<typeof createOpenCodeEventHandler>['getStats']>
   ): ConversationResult {
-    if (stats.lspErrorsUnfixed.size > 0) {
-      const unfixedFiles = Array.from(stats.lspErrorsUnfixed).join(', ')
-      logger.warn(`[OPENCODE-EXECUTOR] LSP errors remain unfixed in: ${unfixedFiles}`)
-    }
-
     const textContent = response.parts
       ?.filter((p): p is TextPart => p.type === 'text')
       .map(p => p.text)
@@ -1462,17 +1234,12 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
       }
     ]
 
-    const hasLspErrors = stats.lspErrorsUnfixed.size > 0
-    const hasError = response.info?.error || session.status === 'error' || hasLspErrors
+    const hasError = response.info?.error || session.status === 'error'
     const finishReason = response.info?.finish
 
     return {
       messages,
-      error: hasError 
-        ? hasLspErrors 
-          ? `Session completed with ${stats.lspErrorsUnfixed.size} files having unfixed LSP errors`
-          : `Session completed with error`
-        : undefined,
+      error: hasError ? `Session completed with error` : undefined,
       toolExecutions: [],
       metrics: {
         totalDuration: response.info?.time?.completed 
@@ -1510,8 +1277,8 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
   }
 
   private async buildContinuationPrompt(
-    stats: EventProcessingStats, 
-    client: OpenCodeClient, 
+    _stats: EventProcessingStats,
+    client: OpenCodeClient,
     sessionId: string
   ): Promise<string> {
     const parts: string[] = []
@@ -1519,17 +1286,6 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     parts.push('🔴 IMPORTANT: You stopped but the task is NOT complete!')
     parts.push('')
     
-    if (stats.lspErrorsUnfixed.size > 0) {
-      parts.push(`⚠️ There are ${stats.lspErrorsUnfixed.size} files with UNFIXED LSP errors:`)
-      stats.lspErrorsUnfixed.forEach(file => {
-        parts.push(`  - ${file}`)
-      })
-      parts.push('')
-      parts.push('You MUST fix these LSP errors before the task can be considered complete.')
-      parts.push('Please read each file with errors and fix them now.')
-      parts.push('')
-    }
-
     try {
       const todoCheck = await client.hasIncompleteTodos(sessionId)
       if (todoCheck.hasIncomplete) {
@@ -1547,9 +1303,7 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
     
     parts.push('Instructions:')
     parts.push('1. Check your todo list - complete all incomplete items')
-    parts.push('2. For each file with LSP errors, read it and fix the errors')
-    parts.push('3. After fixing, run the `diagnostics` tool with empty file_path to verify')
-    parts.push('4. Only stop when ALL todos are complete AND there are no LSP errors')
+    parts.push('2. Only stop when ALL todos are complete')
     parts.push('')
     parts.push('Continue working on the task now.')
     
@@ -1675,13 +1429,15 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
         cwd: repoPath
       })
 
-      const statsMatch = stdout.match(/(\d+)\s+files?\s+changed,\s+(\d+)\s+insertions?\(\+\),\s+(\d+)\s+deletions?\(-\)/)
+      const filesMatch = stdout.match(/(\d+)\s+files?\s+changed/)
+      const insertionsMatch = stdout.match(/(\d+)\s+insertions?\(\+\)/)
+      const deletionsMatch = stdout.match(/(\d+)\s+deletions?\(-\)/)
 
-      if (statsMatch) {
+      if (filesMatch) {
         return {
-          files: parseInt(statsMatch[1], 10),
-          additions: parseInt(statsMatch[2], 10),
-          deletions: parseInt(statsMatch[3], 10)
+          files: parseInt(filesMatch[1], 10),
+          additions: insertionsMatch ? parseInt(insertionsMatch[1], 10) : 0,
+          deletions: deletionsMatch ? parseInt(deletionsMatch[1], 10) : 0
         }
       }
 

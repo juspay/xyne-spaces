@@ -33,7 +33,6 @@ import {
   BaseWorkflowContext,
   AgenticCheckpointResult,
   GitInfo,
-  ExecutorType,
   LoopControl,
 } from '../../workflow-types';
 import { WorkflowDefinition, EmptyPreExecuteResult } from '../../registry/workflowRegistry';
@@ -73,8 +72,6 @@ export interface XyneSpacesFeatureContext extends BaseWorkflowContext {
   repoBranch?: string;
   checkoutCommit?: string;
   imageAttachments?: ImageAttachment[];
-  executorType?: ExecutorType;
-  useQuestioningMode?: boolean;
   taskType?: 'feature' | 'bug' | 'refactor' | 'performance' | 'security' | 'documentation';
 }
 
@@ -102,15 +99,6 @@ const XyneSpacesFeatureInputSchema = BaseWorkflowContextSchema.extend({
   baseBranch: z.string().optional(),
   repoBranch: z.string().optional(),
   checkoutCommit: z.string().optional(),
-  executorType: z.enum(['xyne-code', 'opencode']).optional().describe('Select the executor to use for this workflow'),
-  useQuestioningMode: z.preprocess(
-    (val) => {
-      if (typeof val === 'boolean') return val ? 'true' : 'false';
-      if (typeof val === 'string') return val;
-      return 'false';
-    },
-    z.enum(['true', 'false']).default('false')
-  ).describe('Enable question mode to ask clarifying questions before implementation'),
   imageAttachments: z.array(z.object({
     id: z.string(),
     type: z.literal('image'),
@@ -121,7 +109,7 @@ const XyneSpacesFeatureInputSchema = BaseWorkflowContextSchema.extend({
 });
 
 const xyneSpacesFeatureContextMapper = (
-  payload: z.infer<typeof XyneSpacesFeatureInputSchema> & { ticketId: string; title: string; description: string; baseBranch?: string; repoBranch?: string; checkoutCommit?: string; imageAttachments?: ImageAttachment[]; executorType?: ExecutorType }
+  payload: z.infer<typeof XyneSpacesFeatureInputSchema> & { ticketId: string; title: string; description: string; baseBranch?: string; repoBranch?: string; checkoutCommit?: string; imageAttachments?: ImageAttachment[] }
 ): XyneSpacesFeatureContext => ({
   ...baseContextMapper(payload),
   title: payload.title,
@@ -130,8 +118,6 @@ const xyneSpacesFeatureContextMapper = (
   repoBranch: payload.repoBranch,
   checkoutCommit: payload.checkoutCommit,
   imageAttachments: payload.imageAttachments,
-  executorType: payload.executorType,
-  useQuestioningMode: payload.useQuestioningMode === 'true',
 });
 
 export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<

@@ -128,8 +128,13 @@ export interface SessionCompactedEvent extends OpenCodeEventBase {
 export interface MessageUpdatedEvent extends OpenCodeEventBase {
   type: 'message.updated'
   properties: {
-    sessionId: string
-    message: OpenCodeMessage
+    info: {
+      id?: string
+      sessionID?: string
+      role?: 'user' | 'assistant' | 'system'
+      parts?: MessagePart[]
+      [key: string]: unknown
+    }
   }
 }
 
@@ -437,4 +442,16 @@ export interface SDKPermissionRuleset {
 export interface SDKPermissionRule {
   pattern: string
   action: 'allow' | 'deny' | 'ask'
+}
+
+function camelToSnake(str: string): string {
+  return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)
+}
+
+export function normalizeToolInput(input: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(input)) {
+    result[camelToSnake(key)] = value
+  }
+  return result
 }
