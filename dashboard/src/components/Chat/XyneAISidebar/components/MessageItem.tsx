@@ -16,6 +16,7 @@ import { Tooltip } from '../../../ui/Tooltip';
 import { UserHoverWrapper } from '../../../ui/UserMentionPopover/UserMentionPopover';
 import { useAuth } from '../../../../hooks/useAuth';
 import { useUser } from '../../../../hooks/useUsers';
+import { useProfilePictureUrl } from '../../../../hooks/useProfilePicture';
 import FileDocumentIcon from '../../../icons/FileDocumentIcon';
 import type {
   Message,
@@ -962,7 +963,7 @@ const GeniusKeyPoints = ({
 // Avatar component that uses the useUser hook properly
 const ParticipantAvatar: React.FC<{ participant: Participant }> = ({ participant }) => {
   const user = useUser(participant.id);
-  const avatarSrc = user?.picture || '';
+  const { url: pictureUrl } = useProfilePictureUrl(participant.id, user?.picture);
   const initials =
     participant.name
       ?.split(' ')
@@ -971,8 +972,8 @@ const ParticipantAvatar: React.FC<{ participant: Participant }> = ({ participant
 
   return (
     <div className='w-6 h-6 rounded-lg overflow-hidden ring-2 ring-white flex-shrink-0 bg-gray-200 flex items-center justify-center'>
-      {avatarSrc ? (
-        <img src={avatarSrc} alt={participant.name} className='w-full h-full object-cover' />
+      {pictureUrl ? (
+        <img src={pictureUrl} alt={participant.name} className='w-full h-full object-cover' />
       ) : (
         <span className='text-xs font-medium text-gray-600'>{initials}</span>
       )}

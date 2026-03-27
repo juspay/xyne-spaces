@@ -4,6 +4,7 @@ import Cookies from 'js-cookie';
 import { useAuth } from '../../hooks/useAuth';
 import { useUser } from '../../hooks/useUsers';
 import { useMigratedChannels } from '../../hooks/useChannels';
+import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 import { authActor } from '../../machines/authMachine';
 import Confetti from 'react-confetti';
 
@@ -63,6 +64,7 @@ const OnboardingScreen: React.FC = () => {
 
   const [profileAnim, setProfileAnim] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
+  const { url: pictureUrl } = useProfilePictureUrl(targetUserId, user?.picture);
 
   useEffect((): void | (() => void) => {
     if (onboardingSteps.length > 0 && currentStep === onboardingSteps.length - 1) {
@@ -298,9 +300,9 @@ const OnboardingScreen: React.FC = () => {
                   <div className='bg-background/60 backdrop-blur rounded-[30px] shadow-xl overflow-hidden rotate-[-2deg]'>
                     {/* Avatar */}
                     <div className='relative w-full aspect-square overflow-hidden rounded-t-[30px]'>
-                      {user?.picture ? (
+                      {pictureUrl ? (
                         <img
-                          src={user.picture}
+                          src={pictureUrl}
                           alt='User avatar'
                           className='w-full h-full object-cover'
                         />

@@ -2,6 +2,7 @@ import { Avatar, AvatarOnlinePosition, AvatarShape, AvatarSize } from '@juspay/b
 import { ReactElement } from 'react';
 import { useUser } from '../../hooks/useUsers';
 import { useUserPresence } from '../../hooks/usePresence';
+import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 
 const UserAvatar = ({
   userId,
@@ -21,11 +22,14 @@ const UserAvatar = ({
   const { status } = useUserPresence(targetUserId);
   const isOnline = status === 'ONLINE';
 
+  // Use the same avatar loading logic as the Avatar component
+  const { url: pictureUrl } = useProfilePictureUrl(targetUserId, user?.picture);
+
   return (
     // do not add DIV or SPAN here, it breaks the Avatar component's layout
     <Avatar
       className='visual-regression-hide'
-      src={user?.picture || ''}
+      src={pictureUrl || ''}
       alt={user?.name || 'User avatar'}
       online={showActiveStatus ? isOnline : false}
       shape={shape || AvatarShape.ROUNDED}

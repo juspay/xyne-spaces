@@ -10,6 +10,7 @@ import {
   Headphones,
   Edit2,
   Check,
+  Camera,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../Avatar/Avatar';
@@ -34,6 +35,8 @@ import SearchUser from '../SearchUser/SearchUser';
 import type { User } from '@xyne/shared';
 import { CommonChannelsSection } from '../../UserProfile/CommonChannelsSection';
 import { useUserPresence } from '../../../hooks/usePresence';
+import { uploadProfilePicture } from '../../../services/userProfile/userProfileService';
+import { queryClient } from '../../../services/clients/queryClient';
 
 interface UserProfileProps {
   userId: string;
@@ -65,6 +68,10 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
 
   // Manager edit state
   const [selectedManagerUsers, setSelectedManagerUsers] = useState<User[]>([]);
+
+  // Picture upload state
+  const [isUploadingPicture, setIsUploadingPicture] = useState(false);
+  const pictureInputRef = useRef<HTMLInputElement>(null);
 
   // Use useCallActions hook - channelId will be empty string initially, then update
   const { handleCallClick } = useCallActions({
@@ -235,6 +242,36 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
     setEditError(null);
   };
 
+  const handlePictureClick = (): void => {
+    if (pictureInputRef.current) {
+      pictureInputRef.current.click();
+    }
+  };
+
+  const handlePictureChange = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0];
+    if (!file || !isOwnProfile) return;
+
+    setIsUploadingPicture(true);
+    try {
+      await uploadProfilePicture(file);
+      // Invalidate user cache to refresh picture path (which includes timestamp)
+      // New picture path = new React Query key = fresh fetch
+      void queryClient.invalidateQueries({
+        queryKey: ['user', currentUser?.id],
+        exact: false,
+      });
+    } catch {
+      // Error is already handled by toast in the service
+    } finally {
+      setIsUploadingPicture(false);
+      // Reset input
+      if (pictureInputRef.current) {
+        pictureInputRef.current.value = '';
+      }
+    }
+  };
+
   const statusEmoji = user?.presenceStatus?.statusEmoji;
   const statusContent = user?.presenceStatus?.statusContent;
   const statusExpiryAt = user?.presenceStatus?.statusExpiryAt;
@@ -252,13 +289,41 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
     <div className={cn('bg-background rounded-lg shadow-sm border border-border', className)}>
       {/* Header Section */}
       <div className='pt-2 px-6 pb-6 flex flex-col items-center'>
+        {/* Picture Upload Section */}
         <div className='relative mb-8'>
-          <Avatar userId={user.id} size='big' className='rounded-xl' showActiveStatus={true} />
+          {isOwnProfile ? (
+            <div
+              className='relative group cursor-pointer'
+              onClick={handlePictureClick}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handlePictureClick();
+              }}
+              role='button'
+              tabIndex={0}
+            >
+              <Avatar userId={user.id} size='big' className='rounded-xl' showActiveStatus={true} />
+              <div className='absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded-xl flex items-center justify-center transition-opacity'>
+                <Camera className='size-8 text-white' />
+              </div>
+              <input
+                ref={pictureInputRef}
+                type='file'
+                accept='image/jpeg,image/png,image/webp'
+                onChange={e => {
+                  void handlePictureChange(e);
+                }}
+                className='hidden'
+                disabled={isUploadingPicture}
+              />
+            </div>
+          ) : (
+            <Avatar userId={user.id} size='big' className='rounded-xl' showActiveStatus={true} />
+          )}
         </div>
 
         <div className='w-full'>
           <h2 className='text-2xl font-semibold text-foreground mb-1'>
-            {userProfile?.displayName || user?.name || 'Unknown User'}
+            {user?.name || 'Unknown User'}
           </h2>
 
           {/* Team */}

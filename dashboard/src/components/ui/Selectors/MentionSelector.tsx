@@ -6,6 +6,44 @@ import type { MentionSelectorProps, MentionResult } from './Selectors.types';
 import { detectMentionTrigger, detectChannelTrigger, createVirtualAnchor } from './Selectors.utils';
 import { mentionPluginKey, channelMentionPluginKey } from '../TipTapExtensions';
 import { BasePopoverSelector, type BaseSelectorPluginState } from './BasePopoverSelector';
+import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
+
+/**
+ * Sub-component to render user avatar with resolved profile picture URL.
+ * Hooks must be called at component top level, not inside callbacks.
+ */
+const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
+  const { url: pictureUrl } = useProfilePictureUrl(item.id, item.picture);
+
+  return (
+    <>
+      <Avatar
+        {...(pictureUrl !== undefined && { src: pictureUrl })}
+        alt={item.name}
+        fallback={item.avatar || item.name.charAt(0).toUpperCase()}
+        size={AvatarSize.SM}
+        shape={AvatarShape.CIRCULAR}
+      />
+      <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
+        <div className='flex items-center gap-2'>
+          <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+            {item.name}
+          </span>
+          {item.isChannelMember === false && (
+            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+              Not in channel
+            </span>
+          )}
+        </div>
+        {item.email && (
+          <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+            {item.email}
+          </span>
+        )}
+      </div>
+    </>
+  );
+};
 
 export const MentionSelector: React.FC<MentionSelectorProps> = ({
   editor,
@@ -98,7 +136,6 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
               groupName: mention.name,
               ...(mention.alias !== undefined && { groupAlias: mention.alias }),
               ...(mention.description !== undefined && { description: mention.description }),
-              // ...(mention.memberCount !== undefined && { memberCount: mention.memberCount }),
             })
             .insertContent(' ')
             .run();
@@ -114,100 +151,76 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
   const emptyMessage = triggerChar === '#' ? 'No channels found' : 'No users or groups found';
 
   const renderItem = useCallback(
-    (item: MentionResult, _index: number, isSelected: boolean) => (
-      <div
-        className={`flex items-center transition-all duration-200 ease-in active:scale-[0.98] ${mentionBasedClass} ${
-          isSelected ? 'bg-accent' : ''
-        }`}
-      >
-        {/* Channel mentions (triggered by #) */}
-        {triggerChar === '#' && item.type === 'channel' ? (
-          <>
-            <div className='w-8 h-8 flex items-center justify-center flex-shrink-0'>
-              {item.isPrivate ? (
-                <Lock className='h-3.5 w-3.5 text-muted-foreground' />
-              ) : (
-                <Hash className='h-3.5 w-3.5 text-muted-foreground' />
-              )}
-            </div>
-            <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-              <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-                {item.name}
-              </span>
-            </div>
-          </>
-        ) : item.isSpecial ? (
-          <>
-            <div className='w-8 h-8 flex items-center justify-center bg-orange-50 rounded-full border border-orange-200 flex-shrink-0'>
-              <span className='text-base leading-none'>
-                {item.type === 'channel' ? '📢' : '👋'}
-              </span>
-            </div>
-            <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-              <span className='text-sm font-medium text-orange-700 whitespace-nowrap overflow-hidden text-ellipsis'>
-                @{item.name}
-              </span>
-              <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-                {item.description}
-              </span>
-            </div>
-          </>
-        ) : item.type === 'group' ? (
-          <>
-            <div
-              className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 ${
-                item.isDeactivated
-                  ? 'bg-muted border-muted-foreground/30'
-                  : 'bg-green-50 border-green-200'
-              }`}
-            >
-              <span className='text-base leading-none'>👥</span>
-            </div>
-            <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-              <span
-                className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${
-                  item.isDeactivated ? 'text-muted-foreground' : 'text-foreground'
-                }`}
-              >
-                {item.alias ? `@${item.alias}` : item.name}
-                {item.isDeactivated && ' (Deactivated)'}
-              </span>
-              <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-                {item.alias && item.name !== item.alias ? item.name : ''}
-                {/* {item.memberCount} member{item.memberCount !== 1 ? 's' : ''} */}
-              </span>
-            </div>
-          </>
-        ) : (
-          <>
-            <Avatar
-              {...(item.picture !== undefined && { src: item.picture })}
-              alt={item.name}
-              fallback={item.avatar || item.name.charAt(0).toUpperCase()}
-              size={AvatarSize.SM}
-              shape={AvatarShape.CIRCULAR}
-            />
-            <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-              <div className='flex items-center gap-2'>
+    (item: MentionResult, _index: number, isSelected: boolean) => {
+      return (
+        <div
+          className={`flex items-center transition-all duration-200 ease-in active:scale-[0.98] ${mentionBasedClass} ${
+            isSelected ? 'bg-accent' : ''
+          }`}
+        >
+          {/* Channel mentions (triggered by #) */}
+          {triggerChar === '#' && item.type === 'channel' ? (
+            <>
+              <div className='w-8 h-8 flex items-center justify-center flex-shrink-0'>
+                {item.isPrivate ? (
+                  <Lock className='h-3.5 w-3.5 text-muted-foreground' />
+                ) : (
+                  <Hash className='h-3.5 w-3.5 text-muted-foreground' />
+                )}
+              </div>
+              <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
                 <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
                   {item.name}
                 </span>
-                {item.isChannelMember === false && (
-                  <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-                    Not in channel
-                  </span>
-                )}
               </div>
-              {item.email && (
-                <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-                  {item.email}
+            </>
+          ) : item.isSpecial ? (
+            <>
+              <div className='w-8 h-8 flex items-center justify-center bg-orange-50 rounded-full border border-orange-200 flex-shrink-0'>
+                <span className='text-base leading-none'>
+                  {item.type === 'channel' ? '📢' : '👋'}
                 </span>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    ),
+              </div>
+              <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
+                <span className='text-sm font-medium text-orange-700 whitespace-nowrap overflow-hidden text-ellipsis'>
+                  @{item.name}
+                </span>
+                <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+                  {item.description}
+                </span>
+              </div>
+            </>
+          ) : item.type === 'group' ? (
+            <>
+              <div
+                className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 ${
+                  item.isDeactivated
+                    ? 'bg-muted border-muted-foreground/30'
+                    : 'bg-green-50 border-green-200'
+                }`}
+              >
+                <span className='text-base leading-none'>👥</span>
+              </div>
+              <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
+                <span
+                  className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${
+                    item.isDeactivated ? 'text-muted-foreground' : 'text-foreground'
+                  }`}
+                >
+                  {item.alias ? `@${item.alias}` : item.name}
+                  {item.isDeactivated && ' (Deactivated)'}
+                </span>
+                <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+                  {item.alias && item.name !== item.alias ? item.name : ''}
+                </span>
+              </div>
+            </>
+          ) : (
+            <UserAvatarItem item={item} />
+          )}
+        </div>
+      );
+    },
     [triggerChar, mentionBasedClass],
   );
 
