@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ExternalLink, X } from 'lucide-react';
 import { getYoutubeEmbedUrl, getYoutubeVideoId, isYoutubeUrl } from './youtubeUtils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { YouTubeThumbnail } from './YouTubeThumbnail';
+import type { TicketPreviewSnapshot } from '@xyne/shared';
 
-export interface LinkMetadata {
+export interface ExternalLinkMetadata {
+  type?: 'external';
   url: string;
   title?: string;
   description?: string;
@@ -13,8 +15,50 @@ export interface LinkMetadata {
   favicon?: string;
 }
 
+export interface InternalLinkAttachment {
+  id: string;
+  entityType: string;
+  entityId: string;
+  storageProvider: string;
+  originalFilename: string;
+  mimetype: string;
+  size: number;
+  width?: number | null;
+  height?: number | null;
+  uploadedByUserId: string;
+  createdAt: number;
+  url: string;
+  createdBy: string;
+  metadata?: Record<string, unknown> | null;
+  conversationId?: string | null;
+  thumbnailUrl?: string | null;
+}
+
+export interface InternalMessageLinkMetadata {
+  type: 'internal_message';
+  url: string;
+  messageId: string;
+  channelId: string;
+  channelName: string;
+  channelScopeType?: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+  content: string;
+  timestamp: string;
+  replyCount?: number;
+  isDeleted?: boolean;
+  hasAttachment?: boolean;
+  attachments?: InternalLinkAttachment[];
+  nestedLinkPreview?: Record<string, unknown>;
+  /** Ticket data if the linked conversation has an associated ticket */
+  ticket?: TicketPreviewSnapshot;
+}
+
+export type LinkMetadata = ExternalLinkMetadata | InternalMessageLinkMetadata;
+
 interface LinkPreviewProps {
-  metadata: LinkMetadata;
+  metadata: ExternalLinkMetadata;
   onClick?: () => void;
   onClose?: () => void;
 }
@@ -55,8 +99,10 @@ const getHostnameSafely = (url: string): string | null => {
  * Compatible with Zero sync - displays metadata from message.metadata field
  */
 const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose }) => {
-  const { url, title, description, favicon } = metadata;
+  const { url, title, description, favicon, image } = metadata;
   const { isMobile } = usePlatform();
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   // Safe hostname extraction
   const hostname = getHostnameSafely(url);
@@ -104,7 +150,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
 
   return (
     <div
-      className='link-preview relative flex flex-col gap-1 max-w-3/4 w-full rounded-2xl border border-border overflow-hidden bg-card py-2 pr-8 pl-3'
+      className='link-preview relative flex flex-col gap-1 w-full max-w-[460px] rounded-2xl border border-border overflow-hidden bg-card py-2 pr-8 pl-3'
       aria-label={`Link preview: ${displayTitle}`}
     >
       {onClose && (
@@ -167,6 +213,28 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
         <p className='text-xs text-muted-foreground line-clamp-3' title={description}>
           {description.length > 200 ? description.slice(0, 200) + '...' : description}
         </p>
+      )}
+
+      {/* Line 4: OG image if present */}
+      {image && !imageError && (
+        // Fixed 2:1 aspect ratio (OG image standard is 1200×630 ≈ 2:1).
+        // Skeleton and image share the same box — no layout shift or flicker.
+        <div className='relative w-full mt-1 rounded-xl overflow-hidden aspect-[2/1]'>
+          {!imageLoaded && (
+            <div className='absolute inset-0 animate-pulse bg-gray-200 dark:bg-gray-700' />
+          )}
+          {/* Always in DOM with eager loading — opacity hides until ready.
+              display:none + loading='lazy' prevents the browser fetching the image. */}
+          <img
+            src={image}
+            alt={title ?? ''}
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
+            loading='eager'
+            referrerPolicy='no-referrer'
+            onLoad={() => setImageLoaded(true)}
+            onError={() => setImageError(true)}
+          />
+        </div>
       )}
     </div>
   );

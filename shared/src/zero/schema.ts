@@ -1172,6 +1172,7 @@ export const messageTable = table('messages')
     nudgeCount: number().optional(),
     isSent: boolean(),
     reactions_md: string().optional(), // Markdown format reactions data
+    link_preview_md: string().optional(), // Markdown format internal link preview data
   })
   .primaryKey('messageId');
 

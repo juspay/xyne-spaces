@@ -5,7 +5,8 @@ import { queries } from '../../../zero/queries';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
 import { BotBubble } from '../BotBubble';
-import { LinkMetadata, LinkPreview } from '../LinkPreview/LinkPreview';
+import { LinkPreview } from '../LinkPreview/LinkPreview';
+import { InternalMessagePreview } from '../LinkPreview/InternalMessagePreview';
 import { CanvasPreview } from '../../Canvas/CanvasPreview';
 import { TicketActivityMessage } from '../TicketActivityMessage/TicketActivityMessage';
 import { ConversationTabContext } from '../ConversationTabContext';
@@ -22,6 +23,7 @@ import {
   BookmarkEntityType,
   ChannelScopeType,
   parseForwardedMessageXml,
+  parsePreviewMd,
 } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 // import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
@@ -186,8 +188,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const isBookmarked = !!bookmarkData;
 
   const metadata = message?.metadata as Record<string, unknown> | null;
-  const linkPreviewMetadata =
-    metadata && metadata['linkPreview'] ? (metadata['linkPreview'] as LinkMetadata) : null;
+
+  // Both internal and external link previews are stored in link_preview_md
+  const previewResult = parsePreviewMd(message.link_preview_md);
   const isThreadOpen = conversation?.conversationId === conversationId;
 
   const isMentionUserAddition = metadata && metadata['messageSubtype'] === 'user_not_in_channel';
@@ -880,15 +883,25 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         </>
       )}
 
-      {variant !== 'pinned' && showLinkPreview && linkPreviewMetadata && !canvasId && (
+      {variant !== 'pinned' && showLinkPreview && previewResult && !canvasId && (
         <div
           className={cn(
-            'pr-3 max-w-full border-l-4 border-l-border pl-4 ml-14 transition-colors rounded-r',
+            'pr-3 max-w-full pl-4 ml-14 transition-colors rounded-r border-l-4 border-l-gray-300 dark:border-l-gray-600',
             message.senderId === user?.id && 'max-[500px]:mb-5',
             showHoverActions && 'bg-accent/50',
           )}
         >
-          <LinkPreview metadata={linkPreviewMetadata} onClose={() => setShowLinkPreview(false)} />
+          {previewResult.type === 'message_preview' ? (
+            <InternalMessagePreview
+              metadata={{
+                type: 'internal_message',
+                ...previewResult.data,
+              }}
+              onClose={() => setShowLinkPreview(false)}
+            />
+          ) : (
+            <LinkPreview metadata={previewResult.data} onClose={() => setShowLinkPreview(false)} />
+          )}
         </div>
       )}
       {variant !== 'pinned' && canvasId && showCanvasPreview && (

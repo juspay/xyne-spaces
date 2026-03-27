@@ -12,6 +12,8 @@ export * from './types/userActivity';
 export * from './utils/etaCalculation';
 export * from './utils/project';
 export * from './utils/activityMetadataParser';
+export * from './utils/origins';
+export * from './utils/linkPreviewParser';
 export {
   parseTicketMd,
   serializeTicketMd,

@@ -1549,7 +1549,8 @@ model Message {
   metadata            Json?       // Future extensibility
   nudgeCount          Int?        @default(0) // Proactive nudge count for this message
   isSent              Boolean     @default(true) // Whether the message is sent
-  reactions_md String?
+  reactions_md      String?
+  link_preview_md   String?
 
   // Relations
   messageSearch  MessageSearch? // One-to-one relation with search index

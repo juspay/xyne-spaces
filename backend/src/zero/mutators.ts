@@ -48,7 +48,6 @@ import {
   type BoardMetadata,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
-import { ConversationController } from "@/controllers/conversationController";
 import { generatePlainTextContent } from "@/utils/contentUtils";
 import { extractAllMentions } from '@/utils/mentionParser';
 import { gcsService } from '@/services/gcsService';
@@ -80,7 +79,6 @@ export type AuthData = {
 
 export type ParticipantOperationType = 'participants_added' | 'participants_removed' | 'participants_joined';
 
-const conversationController = new ConversationController();
 
 async function reopenClosedDmParticipants(
   tx: Transaction<Schema>,
@@ -1508,26 +1506,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           asyncTasks.push(async () => {
             if (message === undefined || user === undefined) return;
 
-            // Fetch and update link metadata asynchronously
-            if (content && type === MessageType.USER) {
-              try {
-                const linkMetadata = await conversationController.fetchLinkPreviewMetadata(content);
-                if (linkMetadata) {
-                  await repositories.messages.update(message.messageId, {
-                    metadata: linkMetadata as any,
-                  });
-                  logger.info(
-                    `✅ [LINK-METADATA] Updated message ${message.messageId} with link preview`
-                  );
-                }
-              } catch (error) {
-                logger.error(
-                  `❌ [LINK-METADATA] Failed to fetch link metadata for message ${message.messageId}:`,
-                  error
-                );
-                // Don't throw - message creation should succeed even if link preview fails
-              }
-            }
 
             // Create search index entry
             try {
@@ -2242,26 +2220,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
             if (message === undefined || user === undefined) return;
 
-            // Fetch and update link metadata asynchronously
-            if (content && type === MessageType.USER) {
-              try {
-                const linkMetadata = await conversationController.fetchLinkPreviewMetadata(content);
-                if (linkMetadata) {
-                  await repositories.messages.update(message.messageId, {
-                    metadata: linkMetadata as any,
-                  });
-                  logger.info(
-                    `✅ [LINK-METADATA] Updated reply message ${message.messageId} with link preview`
-                  );
-                }
-              } catch (error) {
-                logger.error(
-                  `❌ [LINK-METADATA] Failed to fetch link metadata for reply message ${message.messageId}:`,
-                  error
-                );
-                // Don't throw - message creation should succeed even if link preview fails
-              }
-            }
 
             // Create search index entry
             try {

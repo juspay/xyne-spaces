@@ -323,9 +323,9 @@ export function estimateMessageHeight(
     if (isTicketCreationMessage) height += 20;
   }
 
-  // ── Link preview ──
-  const hasLinkPreview =
-    metadata?.['linkPreview'] !== undefined && metadata?.['linkPreview'] !== null;
+  // ── Link preview (both internal and external are stored in link_preview_md) ──
+  const hasLinkPreview = !!(message as unknown as { link_preview_md?: string | null })
+    .link_preview_md;
   if (hasLinkPreview) height += LINK_PREVIEW_HEIGHT;
 
   // ── Thread reply indicator ──
