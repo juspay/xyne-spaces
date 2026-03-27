@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-electron",
-  "version": "1.0.34",
+  "version": "1.0.35",
   "description": "Xyne Spaces - Electron Desktop App (Thin Client)",
   "main": "dist/app/main.js",
   "scripts": {
@@ -10,8 +10,8 @@
     "dev:watch": "concurrently \"tsc -w\" \"cross-env NODE_ENV=development nodemon --watch dist --watch ../dashboard --exec electron .\"",
     "build:dashboard": "cd ../dashboard && cross-env NODE_OPTIONS=--max-old-space-size=16384 npm run build",
     "build:mic-monitor": "bash native/mic-monitor/build.sh",
-    "build": "npm run build:mic-monitor && tsc && electron-builder --config build.prod.json && npm run sentry:sourcemaps",
-    "build:sandbox": "npm run build:mic-monitor && tsc && electron-builder --config build.sbx.json && npm run sentry:sourcemaps",
+    "build": "npm run build:mic-monitor && tsc && electron-builder --config build.prod.json ",
+    "build:sandbox": "npm run build:mic-monitor && tsc && electron-builder --config build.sbx.json",
     "copy-ui": "rimraf ui-active && cpy \"../dashboard/dist/**\" ui-active",
     "clear-ui-data": "rimraf ~/Library/Application\\ Support/xyne-spaces-electron/ui-data/",
     "typecheck": "tsc --noEmit",

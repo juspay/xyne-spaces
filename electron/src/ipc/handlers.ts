@@ -15,6 +15,7 @@ import {
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
+import Sentry from '@sentry/electron/main';
 
 
 let previewBrowserView: BrowserView | null = null;
@@ -223,6 +224,7 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on('set-user-email', (_event, email: string) => {
     if (email && typeof email === 'string') {
+      Sentry.setUser({ email });
       Logger.setEmailId(email);
     }
   });
