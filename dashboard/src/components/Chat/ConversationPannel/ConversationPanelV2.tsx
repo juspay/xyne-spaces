@@ -30,6 +30,7 @@ import { stateMachineActor } from '../../../machines/stateMachine';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
 import ChatListV3 from '../ChatList/ChatListV3';
+import LinksTab from '../LinksTab/LinksTab';
 
 interface NavigationState {
   fromMyTickets?: boolean;
@@ -261,6 +262,7 @@ const ConversationPanelV2 = ({
               <KanbanBoardScreen channelId={channelId} />
             ))}
           {tab === 'canvas' && <CanvasTab channelId={channelId} />}
+          {tab === 'links' && <LinksTab channelId={channelId} />}
         </div>
       </div>
     </ConversationTabContext.Provider>
