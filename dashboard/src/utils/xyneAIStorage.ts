@@ -5,7 +5,7 @@ import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import type { MessageAttachment } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
 const DB_NAME = 'XyneAIDB';
-const DB_VERSION = 2; // Incremented for schema change
+const DB_VERSION = 2;
 const STORE_NAME = 'conversations';
 
 export interface StoredMessage {
@@ -27,6 +27,7 @@ export interface StoredMessage {
   toolOutputs?: GeniusToolOutput[];
   feedback?: 0 | 1 | 2; // 0 = no feedback, 1 = like, 2 = dislike
   attachments?: MessageAttachment[];
+  parentId?: string | null; // Parent message ID for tree branching
 }
 
 export interface ConversationHistory {
@@ -39,6 +40,7 @@ export interface ConversationHistory {
   createdAt: Date;
   lastUpdated: Date;
   isStarred?: boolean;
+  branchSelections?: Record<string, string>; // parentId → selected childId for branching
 }
 
 class XyneAIStorage {
@@ -53,6 +55,7 @@ class XyneAIStorage {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onerror = (): void => {
+        this.dbPromise = null; // Reset so next call retries
         reject(new Error('Failed to open IndexedDB'));
       };
 
@@ -84,10 +87,14 @@ class XyneAIStorage {
   }
 
   /**
-   * Generate a title from the first user message
+   * Generate a title from the first user message in the active path.
+   * If branchSelections provided, resolves the active path first.
    */
-  private generateTitle(messages: StoredMessage[]): string {
-    const firstUserMessage = messages.find(m => m.type === 'user');
+  generateTitle(messages: StoredMessage[], branchSelections?: Record<string, string>): string {
+    const displayMessages = branchSelections
+      ? resolveActivePath(messages, branchSelections)
+      : messages;
+    const firstUserMessage = displayMessages.find(m => m.type === 'user');
     if (!firstUserMessage) {
       return 'New conversation';
     }
@@ -102,6 +109,7 @@ class XyneAIStorage {
     sessionId: string,
     messages: StoredMessage[],
     threadConversationId?: string,
+    branchSelections?: Record<string, string>,
   ): Promise<void> {
     try {
       const db = await this.openDB();
@@ -123,11 +131,16 @@ class XyneAIStorage {
             channelId, // Keep channelId for reference (original channel)
             sessionId,
             ...(threadConversationId && { threadConversationId }),
-            title: existing?.title || this.generateTitle(messages),
+            title: existing
+              ? existing.title === this.generateTitle(existing.messages, existing.branchSelections)
+                ? this.generateTitle(messages, branchSelections) // Auto-generated title — regenerate from updated messages
+                : existing.title // Manually renamed — keep it
+              : this.generateTitle(messages, branchSelections),
             messages,
             createdAt: existing?.createdAt || new Date(),
             lastUpdated: new Date(),
             isStarred: existing?.isStarred || false,
+            ...(branchSelections && { branchSelections }),
           };
 
           const putRequest = store.put(conversationHistory);
@@ -499,3 +512,72 @@ export const xyneAIStorage = new XyneAIStorage();
 
 // Run cleanup on module load to remove old duplicates
 void xyneAIStorage.cleanupDuplicateConversations();
+
+// ============================================================================
+// Tree Branching Helpers
+// ============================================================================
+
+export const BRANCH_ROOT_KEY = '__root__';
+
+/**
+ * Walk the message tree from root, picking the selected branch at each fork.
+ * Returns the active path of messages to display.
+ */
+export function resolveActivePath<T extends { id: string; parentId?: string | null }>(
+  allMessages: T[],
+  branchSelections: Record<string, string>,
+): T[] {
+  if (allMessages.length === 0) return [];
+
+  // Legacy conversations: no message has parentId set — return as-is, no branching
+  if (allMessages.every(m => m.parentId === null || m.parentId === undefined)) return allMessages;
+
+  // Build children map: parentId → children (sorted by creation order / array index)
+  const childrenMap = new Map<string, T[]>();
+  for (const msg of allMessages) {
+    const key = msg.parentId ?? BRANCH_ROOT_KEY;
+    const children = childrenMap.get(key);
+    if (children) {
+      children.push(msg);
+    } else {
+      childrenMap.set(key, [msg]);
+    }
+  }
+
+  const path: T[] = [];
+  let currentKey: string = BRANCH_ROOT_KEY;
+
+  for (;;) {
+    const children = childrenMap.get(currentKey);
+    if (!children || children.length === 0) break;
+
+    // Pick selected child, or default to the last one (most recent)
+    const parentId = currentKey;
+    const selectedId = branchSelections[parentId];
+    const selected = selectedId
+      ? (children.find(c => c.id === selectedId) ?? children[children.length - 1]!)
+      : children[children.length - 1]!;
+
+    path.push(selected);
+    currentKey = selected.id;
+  }
+
+  return path;
+}
+
+/**
+ * Get siblings (messages sharing the same parentId) and the current message's index.
+ */
+export function getSiblings<T extends { id: string; parentId?: string | null }>(
+  allMessages: T[],
+  messageId: string,
+): { siblings: T[]; currentIndex: number } {
+  const message = allMessages.find(m => m.id === messageId);
+  if (!message) return { siblings: [], currentIndex: -1 };
+
+  const parentKey = message.parentId ?? null;
+  const siblings = allMessages.filter(m => (m.parentId ?? null) === parentKey);
+  const currentIndex = siblings.findIndex(m => m.id === messageId);
+
+  return { siblings, currentIndex };
+}

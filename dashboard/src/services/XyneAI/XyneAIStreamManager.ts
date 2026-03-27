@@ -51,6 +51,9 @@ export interface StreamRequest {
   webSearchEnabled: boolean;
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
+  parentMessageId?: string | undefined;
+  isRegenerate?: boolean | undefined;
+  localUserMessageId?: string | undefined;
 }
 
 type StreamSubscriber = (state: StreamState) => void;
@@ -82,9 +85,11 @@ class XyneAIStreamManager {
   // Web Worker instance
   private worker: Worker;
 
-  // Map to track raw content and tool outputs for each stream
-  private streamDataMap: Map<string, { rawContent: string; toolOutputs: GeniusToolOutput[] }> =
-    new Map();
+  // Map to track raw content, tool outputs, and local message IDs for each stream
+  private streamDataMap: Map<
+    string,
+    { rawContent: string; toolOutputs: GeniusToolOutput[]; localUserMessageId?: string }
+  > = new Map();
 
   private constructor() {
     // Initialize the Web Worker
@@ -448,6 +453,7 @@ class XyneAIStreamManager {
     this.streamDataMap.set(streamId, {
       rawContent: '',
       toolOutputs: [],
+      ...(request.localUserMessageId && { localUserMessageId: request.localUserMessageId }),
     });
 
     // Send message to worker to start streaming
@@ -480,6 +486,8 @@ class XyneAIStreamManager {
               filename: att.filename,
             })),
           }),
+          ...(request.parentMessageId && { parentMessageId: request.parentMessageId }),
+          ...(request.isRegenerate && { isRegenerate: request.isRegenerate }),
         },
       },
     };
@@ -622,6 +630,33 @@ class XyneAIStreamManager {
         this.handleCompletionEvent(data, botMessageId, rawContent, toolOutputs, updateMessages);
         if (data['sessionId'] && typeof data['sessionId'] === 'string') {
           result.sessionId = data['sessionId'];
+        }
+        // Sync local message IDs with server-assigned IDs for branching tree
+        {
+          const streamData = this.streamDataMap.get(streamId);
+          const localUserMessageId = streamData?.localUserMessageId;
+          const serverUserMsgId = data['userMessageId'] as string | undefined;
+          const serverBotMsgId = data['messageId'] as string | undefined;
+          if (serverUserMsgId || serverBotMsgId) {
+            updateMessages(prev =>
+              prev.map(msg => {
+                if (serverUserMsgId && localUserMessageId && msg.id === localUserMessageId) {
+                  return { ...msg, id: serverUserMsgId };
+                }
+                if (serverBotMsgId && msg.id === botMessageId) {
+                  return {
+                    ...msg,
+                    id: serverBotMsgId,
+                    ...(serverUserMsgId && { parentId: serverUserMsgId }),
+                  };
+                }
+                if (serverUserMsgId && localUserMessageId && msg.parentId === localUserMessageId) {
+                  return { ...msg, parentId: serverUserMsgId };
+                }
+                return msg;
+              }),
+            );
+          }
         }
         break;
 

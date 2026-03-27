@@ -34,6 +34,7 @@ export interface MessageData {
   role: XyneAIMessageRole;
   content: unknown;
   attachment?: AttachmentMetadata[];  // GCS attachment metadata from attachment column
+  previousStepId?: string | null;  // Parent message ID for tree structure
   traceId?: string;
   feedback?: XyneAIFeedback | null;
   createdAt: Date;
@@ -45,8 +46,9 @@ export interface XyneAIMemoryProvider {
   getSession(sessionId: string): Promise<SessionData | null>;
   updateSessionMetadata(sessionId: string, metadata: Record<string, unknown>): Promise<boolean>;
   deleteSession(sessionId: string): Promise<boolean>;
-  addMessage(sessionId: string, role: XyneAIMessageRole, content: unknown, traceId?: string, attachmentMetadata?: AttachmentMetadata[]): Promise<MessageData>;
+  addMessage(sessionId: string, role: XyneAIMessageRole, content: unknown, traceId?: string, attachmentMetadata?: AttachmentMetadata[], previousStepId?: string): Promise<MessageData>;
   getMessages(sessionId: string): Promise<MessageData[]>;
+  getMessagesForPath(sessionId: string, leafMessageId: string): Promise<MessageData[]>;
   getRecentMessages(sessionId: string, limit?: number): Promise<MessageData[]>;
   updateMessageFeedback(messageId: string, feedback: XyneAIFeedback | null): Promise<boolean>;
   initialize(): Promise<void>;
@@ -190,7 +192,8 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     role: XyneAIMessageRole,
     content: unknown,
     traceId?: string,
-    attachmentMetadata?: AttachmentMetadata[]
+    attachmentMetadata?: AttachmentMetadata[],
+    previousStepId?: string
   ): Promise<MessageData> => {
     try {
       const messageId = randomUUID();
@@ -208,6 +211,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
           stepName: role,
           data: JSON.stringify(content),
           attachment: attachmentJson,
+          ...(previousStepId && { previousStepId }),
         },
       });
       
@@ -223,6 +227,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
         sessionId,
         role,
         content,
+        previousStepId: step.previousStepId,
         traceId,
         createdAt: step.createdAt,
         updatedAt: step.updatedAt,
@@ -239,6 +244,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     stepName: string | null;
     data: string | null;
     attachment: string | null;
+    previousStepId: string | null;
     createdAt: Date;
     updatedAt: Date;
   }): MessageData | null => {
@@ -263,6 +269,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
         role: step.stepName as XyneAIMessageRole,
         content: JSON.parse(step.data),
         attachment: attachmentMetadata,
+        previousStepId: step.previousStepId,
         createdAt: step.createdAt,
         updatedAt: step.updatedAt,
       };
@@ -282,11 +289,12 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
           stepName: true,
           data: true,
           attachment: true,
+          previousStepId: true,
           createdAt: true,
           updatedAt: true,
         },
       });
-      
+
       return steps.map(parseStepToMessage).filter((msg): msg is MessageData => msg !== null);
     } catch (error) {
       logger.error(`[XyneAIMemoryProvider] [${sessionId}] Failed to get messages:`, error);
@@ -305,7 +313,8 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
           workflowExecutionId: true,
           stepName: true,
           data: true,
-          attachment: true, 
+          attachment: true,
+          previousStepId: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -314,6 +323,41 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
       return steps.reverse().map(parseStepToMessage).filter((msg): msg is MessageData => msg !== null);
     } catch (error) {
       logger.error(`[XyneAIMemoryProvider] [${sessionId}] Failed to get recent messages:`, error);
+      throw error;
+    }
+  };
+
+  /**
+   * Walk the message tree from a leaf message back to root via previousStepId.
+   * Returns messages in chronological order (root → leaf).
+   * Falls back to full chronological order if no tree structure is found.
+   */
+  const getMessagesForPath = async (sessionId: string, leafMessageId: string): Promise<MessageData[]> => {
+    try {
+      const allMessages = await getMessages(sessionId);
+      const messageMap = new Map(allMessages.map(m => [m.messageId, m]));
+
+      // Walk from leaf to root
+      const path: MessageData[] = [];
+      let currentId: string | null | undefined = leafMessageId;
+      const visited = new Set<string>();
+
+      while (currentId) {
+        if (visited.has(currentId)) break; // prevent cycles
+        visited.add(currentId);
+        const msg = messageMap.get(currentId);
+        if (!msg) break;
+        path.unshift(msg);
+        currentId = msg.previousStepId;
+      }
+
+      // If we found a valid path, return it
+      if (path.length > 0) return path;
+
+      // Fallback: return all messages in chronological order (legacy sessions)
+      return allMessages;
+    } catch (error) {
+      logger.error(`[XyneAIMemoryProvider] [${sessionId}] Failed to get messages for path:`, error);
       throw error;
     }
   };
@@ -343,6 +387,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     deleteSession,
     addMessage,
     getMessages,
+    getMessagesForPath,
     getRecentMessages,
     updateMessageFeedback,
     initialize,

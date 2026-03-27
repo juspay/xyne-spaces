@@ -1,4 +1,4 @@
-import { ReactElement, useState, useRef, useEffect, useCallback } from 'react';
+import { ReactElement, useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Upload } from 'lucide-react';
@@ -9,6 +9,9 @@ import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { BASE_URL } from '../../../services/clients/apiClient';
 import {
   xyneAIStorage,
+  resolveActivePath,
+  getSiblings,
+  BRANCH_ROOT_KEY,
   type ConversationHistory as ConversationHistoryType,
 } from '../../../utils/xyneAIStorage';
 import type { Message, SummarizerCitation, MessageAttachment, UserTag } from './utils/XyneAITypes';
@@ -81,6 +84,23 @@ const XyneAISidebar = ({
   // This prevents duplicate history entries when user switches channels during a query
   const [conversationChannelId, setConversationChannelId] = useState<string | null>(null);
   const [currentUserTags, setCurrentUserTags] = useState<Record<string, UserTag>>({});
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [branchSelections, setBranchSelections] = useState<Record<string, string>>({});
+
+  // Derive the active display path from the full message tree
+  const displayMessages = useMemo(
+    () => resolveActivePath(messages, branchSelections),
+    [messages, branchSelections],
+  );
+
+  // Legacy conversation: no message has parentId — branching features disabled
+  const isLegacyConversation = useMemo(
+    () =>
+      messages.length > 0 &&
+      messages.every((m: Message) => m.parentId === null || m.parentId === undefined),
+    [messages],
+  );
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
@@ -233,6 +253,7 @@ const XyneAISidebar = ({
     if (startFreshChat) {
       // Reset to fresh state (keeps threadInfo but clears messages/conversation)
       setMessages([]);
+      setBranchSelections({});
       setConversationId('');
       setCurrentTraceId(undefined);
       setInputValue('');
@@ -353,6 +374,7 @@ const XyneAISidebar = ({
         });
         setMessages(messagesWithoutStreaming);
         setConversationId(mostRecent.sessionId);
+        setBranchSelections(mostRecent.branchSelections ?? {});
 
         // Restore feedback from stored messages
         const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
@@ -428,6 +450,7 @@ const XyneAISidebar = ({
           conversationId,
           messages,
           threadConversationId,
+          branchSelections,
         );
       } catch (error) {
         console.error('[XyneAISidebar] Failed to save conversation history:', error);
@@ -441,6 +464,7 @@ const XyneAISidebar = ({
     conversationChannelId,
     conversationId,
     activeThreadInfo?.conversationId,
+    branchSelections,
   ]);
 
   // Character reveal animation for streaming messages
@@ -515,6 +539,8 @@ const XyneAISidebar = ({
       setConversationId(conversation.sessionId);
       // Set the original channel ID from the loaded conversation
       setConversationChannelId(conversation.channelId);
+      setBranchSelections(conversation.branchSelections ?? {});
+      setEditingMessageId(null);
       setShowHistorySidebar(false);
 
       // Restore feedback from stored messages
@@ -573,6 +599,7 @@ const XyneAISidebar = ({
       // If deleted conversation was active, clear messages
       if (conversation.sessionId === conversationId) {
         setMessages([]);
+        setBranchSelections({});
         setConversationId('');
       }
     } catch (error) {
@@ -606,6 +633,7 @@ const XyneAISidebar = ({
   const handleNewChat = (): void => {
     // Reset to fresh state
     setMessages([]);
+    setBranchSelections({});
     setConversationId('');
     setConversationChannelId(null); // Reset so new conversation uses current channel
     setCurrentTraceId(undefined);
@@ -613,6 +641,7 @@ const XyneAISidebar = ({
     setAttachments([]);
     setSelectedActivities([]);
     setActiveSelectionInfos([]);
+    setEditingMessageId(null);
     setVisibleCharsMap({});
     setShowHistorySidebar(false);
     setShowUserActivityPanel(false);
@@ -787,6 +816,90 @@ const XyneAISidebar = ({
     return `\nUser journey across app:\n${activityLines}`;
   };
 
+  // Regenerate: re-submit the same user query, creating a sibling bot branch
+  const handleRegenerate = useCallback(async (): Promise<void> => {
+    if (messages.some((m: Message) => m.isStreaming)) return;
+
+    // Find last user message in the display path
+    let lastUserMessage: Message | undefined;
+    for (let i = displayMessages.length - 1; i >= 0; i--) {
+      if (displayMessages[i]?.type === 'user') {
+        lastUserMessage = displayMessages[i];
+        break;
+      }
+    }
+    if (!lastUserMessage) return;
+
+    abortCurrentRequest();
+
+    // Submit with same content, parentId = user message ID (new bot branches as sibling of existing bot)
+    await submitQuery(
+      lastUserMessage.content,
+      lastUserMessage.attachments ?? [],
+      lastUserMessage.selectionContexts,
+      lastUserMessage.content,
+      undefined, // userTags — not needed for regenerate
+      lastUserMessage.id, // parent is the user message itself — bot response branches from it
+      true, // isRegenerate
+    );
+  }, [messages, displayMessages, submitQuery, abortCurrentRequest]);
+
+  // Edit: create a sibling branch with new content from the same parent
+  const handleEditMessage = useCallback(
+    async (messageId: string, newContent: string): Promise<void> => {
+      if (messages.some((m: Message) => m.isStreaming)) return;
+
+      const messageToEdit = messages.find((m: Message) => m.id === messageId);
+      if (!messageToEdit || messageToEdit.type !== 'user') return;
+
+      abortCurrentRequest();
+
+      // Submit with new content, parentId = original message's parent (creates sibling branch)
+      await submitQuery(
+        newContent,
+        messageToEdit.attachments ?? [],
+        messageToEdit.selectionContexts,
+        newContent,
+        undefined, // userTags — not needed for edit
+        messageToEdit.parentId ?? undefined,
+      );
+    },
+    [messages, abortCurrentRequest, submitQuery],
+  );
+
+  // Mobile edit: populate input box but keep messages intact until submit
+  const handleEditMobile = useCallback(
+    (messageId: string): void => {
+      if (messages.some((m: Message) => m.isStreaming)) return;
+
+      const message = messages.find((m: Message) => m.id === messageId);
+      if (!message || message.type !== 'user') return;
+
+      setInputValue(message.content);
+      setEditingMessageId(messageId);
+    },
+    [messages],
+  );
+
+  // Navigate between branches at a given message
+  const handleBranchNavigate = useCallback(
+    (messageId: string, direction: 'prev' | 'next'): void => {
+      const { siblings, currentIndex } = getSiblings(messages, messageId);
+      if (siblings.length <= 1 || currentIndex === -1) return;
+
+      const newIndex =
+        direction === 'prev'
+          ? (currentIndex - 1 + siblings.length) % siblings.length
+          : (currentIndex + 1) % siblings.length;
+      const newSibling = siblings[newIndex];
+      if (!newSibling) return;
+
+      const parentKey = newSibling.parentId ?? BRANCH_ROOT_KEY;
+      setBranchSelections(prev => ({ ...prev, [parentKey]: newSibling.id }));
+    },
+    [messages],
+  );
+
   const handleSubmit = useCallback(async (): Promise<void> => {
     // Allow submission if there's input, activities, OR selection contexts
     if (!inputValue.trim() && selectedActivities.length === 0 && activeSelectionInfos.length === 0)
@@ -831,6 +944,25 @@ const XyneAISidebar = ({
           }))
         : undefined;
 
+    // Determine parentMessageId for branching
+    let parentMessageId: string | undefined;
+
+    if (editingMessageId) {
+      // Mobile edit: create sibling branch from same parent as the edited message
+      const editedMsg = messages.find((m: Message) => m.id === editingMessageId);
+      if (editedMsg) {
+        parentMessageId = editedMsg.parentId ?? undefined;
+      }
+      abortCurrentRequest();
+      setEditingMessageId(null);
+    } else if (!isLegacyConversation) {
+      // Normal submit: chain from last displayed message (only for branching-enabled conversations)
+      const lastDisplayed = displayMessages[displayMessages.length - 1];
+      if (lastDisplayed) {
+        parentMessageId = lastDisplayed.id;
+      }
+    }
+
     setInputValue('');
     setAttachments([]);
     setSelectedActivities([]);
@@ -858,6 +990,7 @@ const XyneAISidebar = ({
       selectionContexts,
       displayContent,
       userTagsForMessage,
+      parentMessageId,
     );
   }, [
     inputValue,
@@ -870,6 +1003,11 @@ const XyneAISidebar = ({
     scrollToBottom,
     conversationChannelId,
     channelId,
+    editingMessageId,
+    messages,
+    displayMessages,
+    abortCurrentRequest,
+    isLegacyConversation,
   ]);
 
   return (
@@ -948,17 +1086,83 @@ const XyneAISidebar = ({
             ) : (
               <div className='px-4 py-4'>
                 <div className='space-y-4 max-w-full'>
-                  {messages.map(message => (
-                    <MessageItem
-                      key={message.id}
-                      message={message}
-                      visibleChars={visibleCharsMap[message.id] || 0}
-                      onFeedback={(id, type) => void handleFeedback(id, type)}
-                      onCitationClick={handleCitationClick}
-                      onSummarizerCitationClick={handleSummarizerCitationClick}
-                      feedbackValue={feedbackMap[message.id] || null}
-                    />
-                  ))}
+                  {(() => {
+                    let lastBotIndex = -1;
+                    let lastUserIndex = -1;
+                    for (let i = displayMessages.length - 1; i >= 0; i--) {
+                      if (lastBotIndex === -1 && displayMessages[i]?.type === 'bot') {
+                        lastBotIndex = i;
+                      }
+                      if (lastUserIndex === -1 && displayMessages[i]?.type === 'user') {
+                        lastUserIndex = i;
+                      }
+                      if (lastBotIndex !== -1 && lastUserIndex !== -1) break;
+                    }
+                    // Build sibling info in one O(n) pass over all messages
+                    // so per-message getSiblings calls aren't O(n²) in the render loop
+                    const siblingIndexById = new Map<string, number>();
+                    const parentGroups = new Map<string, string[]>();
+                    for (const m of messages) {
+                      const key = m.parentId ?? BRANCH_ROOT_KEY;
+                      const group = parentGroups.get(key);
+                      if (group) {
+                        group.push(m.id);
+                      } else {
+                        parentGroups.set(key, [m.id]);
+                      }
+                    }
+                    for (const [, group] of parentGroups) {
+                      group.forEach((id, i) => siblingIndexById.set(id, i));
+                    }
+                    return displayMessages.map((message: Message, index: number) => {
+                      const isLatestBotMessage = message.type === 'bot' && index === lastBotIndex;
+                      const isLatestUserMessage =
+                        message.type === 'user' && index === lastUserIndex;
+                      const parentKey = message.parentId ?? BRANCH_ROOT_KEY;
+                      const groupIds = parentGroups.get(parentKey) ?? [];
+                      const siblingCount = groupIds.length;
+                      const siblingIndex = siblingIndexById.get(message.id) ?? 0;
+                      const hasBranches = siblingCount > 1;
+                      return (
+                        <MessageItem
+                          key={message.id}
+                          message={message}
+                          visibleChars={visibleCharsMap[message.id] || 0}
+                          onFeedback={(id, type) => void handleFeedback(id, type)}
+                          onCitationClick={handleCitationClick}
+                          onSummarizerCitationClick={handleSummarizerCitationClick}
+                          feedbackValue={feedbackMap[message.id] || null}
+                          onRegenerate={
+                            !isLegacyConversation && isLatestBotMessage
+                              ? () => void handleRegenerate()
+                              : undefined
+                          }
+                          onEditSubmit={
+                            !isLegacyConversation && isLatestUserMessage
+                              ? (newContent: string) =>
+                                  void handleEditMessage(message.id, newContent)
+                              : undefined
+                          }
+                          onEditMobile={
+                            !isLegacyConversation && isLatestUserMessage && isMobile
+                              ? () => handleEditMobile(message.id)
+                              : undefined
+                          }
+                          isLatestBotMessage={isLatestBotMessage}
+                          branchInfo={
+                            !isLegacyConversation && hasBranches
+                              ? { index: siblingIndex, total: siblingCount }
+                              : undefined
+                          }
+                          onBranchNavigate={
+                            !isLegacyConversation && hasBranches
+                              ? (dir: 'prev' | 'next') => handleBranchNavigate(message.id, dir)
+                              : undefined
+                          }
+                        />
+                      );
+                    });
+                  })()}
                   <div ref={messagesEndRef} />
                 </div>
               </div>

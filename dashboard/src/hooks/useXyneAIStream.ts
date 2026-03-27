@@ -131,23 +131,45 @@ export const useXyneAIStream = ({
       selectionContexts?: SelectionContext[],
       displayContent?: string,
       userTags?: Record<string, UserTag>,
+      parentMessageId?: string,
+      isRegenerate?: boolean,
     ): Promise<void> => {
       // Allow empty query if there are selection contexts
       if (!query.trim() && (!selectionContexts || selectionContexts.length === 0)) return;
 
       // Get current messages synchronously
-      const currentMessages = await syncMessagesRef();
+      // Strip any still-streaming messages — they may not have been cleared yet if abortCurrentRequest
+      // was called just before submitQuery (React batches the state update, so prev still shows them).
+      const rawMessages = await syncMessagesRef();
+      const currentMessages = rawMessages.map(msg =>
+        msg.isStreaming
+          ? {
+              ...msg,
+              isStreaming: false,
+              isAborted: true,
+              content: msg.content || 'Query aborted by user.',
+            }
+          : msg,
+      );
 
-      // Add user message
-      const userMessage: Message = {
-        id: `user-${Date.now()}`,
-        type: 'user',
-        content: displayContent ?? query,
-        timestamp: new Date(),
-        ...(attachments.length > 0 && { attachments }),
-        ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),
-        ...(userTags && Object.keys(userTags).length > 0 && { userTags }),
-      };
+      // Add user message (original query without internal formatting, but with selectionContexts for UI)
+      // For regenerate: don't create a new user message — reuse the existing one.
+      // The bot response branches as a new child of the same user message.
+      const localUserMessageId =
+        isRegenerate && parentMessageId ? parentMessageId : `user-${Date.now()}`;
+
+      const userMessage: Message | null = isRegenerate
+        ? null
+        : {
+            id: localUserMessageId,
+            type: 'user',
+            content: displayContent ?? query,
+            timestamp: new Date(),
+            ...(attachments.length > 0 && { attachments }),
+            ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),
+            ...(parentMessageId && { parentId: parentMessageId }),
+            ...(userTags && Object.keys(userTags).length > 0 && { userTags }),
+          };
 
       // Create bot message with streaming state
       const botMessageId = `bot-${Date.now()}`;
@@ -164,10 +186,13 @@ export const useXyneAIStream = ({
         channelIdMapping: {},
         statusMessage: 'Thinking',
         participants: [],
+        parentId: localUserMessageId, // Bot is child of user message in tree
       };
 
-      const newMessages = [userMessage, botMessage];
-      const allMessages = [...currentMessages, ...newMessages];
+      // Build initial messages list for stream manager
+      const allMessages = userMessage
+        ? [...currentMessages, userMessage, botMessage]
+        : [...currentMessages, botMessage];
 
       // Start stream via the global stream manager
       // The stream manager will notify subscribers which will update messages with the streaming content
@@ -183,6 +208,9 @@ export const useXyneAIStream = ({
           webSearchEnabled,
           researchContext,
           attachments,
+          parentMessageId,
+          isRegenerate,
+          localUserMessageId,
         },
         allMessages,
       );

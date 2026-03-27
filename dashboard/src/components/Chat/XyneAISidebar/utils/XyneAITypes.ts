@@ -88,4 +88,5 @@ export interface Message {
   userTags?: Record<string, UserTag>; // Tag -> {name, userId} for user mentions
   participants?: Participant[]; // List of participants for Summarizer responses
   selectionContexts?: SelectionContext[]; // Canvas selection contexts
+  parentId?: string | null; // Parent message ID for tree branching
 }

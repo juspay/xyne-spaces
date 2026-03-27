@@ -26,6 +26,8 @@ export interface WorkerStartStreamMessage {
         mimeType: string;
         filename: string;
       }>;
+      parentMessageId?: string;
+      isRegenerate?: boolean;
     };
   };
 }
@@ -122,6 +124,10 @@ async function executeStream(
               filename: a.filename,
             })),
           }),
+        ...(requestBody.parentMessageId && {
+          parent_message_id: requestBody.parentMessageId,
+        }),
+        ...(requestBody.isRegenerate && { is_regenerate: requestBody.isRegenerate }),
         /* eslint-enable @typescript-eslint/naming-convention */
       }),
       signal: abortController.signal,

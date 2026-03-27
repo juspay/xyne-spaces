@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { Globe } from 'lucide-react';
+import { Globe, RefreshCw, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
@@ -231,6 +231,7 @@ interface MessageActionsProps {
   onCopy: () => void;
   onFeedback: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   feedbackValue: 'LIKE' | 'DISLIKE' | null;
+  onRegenerate?: (() => void) | undefined;
 }
 
 interface MessageItemProps {
@@ -245,6 +246,12 @@ interface MessageItemProps {
   ) => void;
   onSummarizerCitationClick: (citation: SummarizerCitation) => void;
   feedbackValue: 'LIKE' | 'DISLIKE' | null;
+  onRegenerate?: (() => void) | undefined;
+  onEditSubmit?: ((newContent: string) => void) | undefined;
+  onEditMobile?: (() => void) | undefined;
+  isLatestBotMessage?: boolean | undefined;
+  branchInfo?: { index: number; total: number } | undefined;
+  onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
 }
 
 // Attachment preview component
@@ -310,6 +317,41 @@ const SelectionContextPreview = ({
   );
 };
 
+// Branch navigation UI: "< 1/2 >"
+const BranchNavigator = ({
+  index,
+  total,
+  onNavigate,
+}: {
+  index: number;
+  total: number;
+  onNavigate: (direction: 'prev' | 'next') => void;
+}): ReactElement => (
+  <div className='flex items-center gap-0.5 text-xs text-muted-foreground'>
+    <button
+      type='button'
+      onClick={() => onNavigate('prev')}
+      className='p-0.5 hover:bg-muted rounded transition-colors'
+      data-track-category='XyneAI'
+      data-track-name='BRANCH_NAVIGATE_PREV'
+    >
+      <ChevronLeft size={14} />
+    </button>
+    <span className='min-w-[2rem] text-center tabular-nums'>
+      {index + 1}/{total}
+    </span>
+    <button
+      type='button'
+      onClick={() => onNavigate('next')}
+      className='p-0.5 hover:bg-muted rounded transition-colors'
+      data-track-category='XyneAI'
+      data-track-name='BRANCH_NAVIGATE_NEXT'
+    >
+      <ChevronRight size={14} />
+    </button>
+  </div>
+);
+
 export const MessageItem = ({
   message,
   visibleChars,
@@ -317,8 +359,17 @@ export const MessageItem = ({
   onCitationClick,
   onSummarizerCitationClick,
   feedbackValue,
+  onRegenerate,
+  onEditSubmit,
+  onEditMobile,
+  isLatestBotMessage,
+  branchInfo,
+  onBranchNavigate,
 }: MessageItemProps): ReactElement => {
   const [copied, setCopied] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+  const editTextareaRef = React.useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
 
   // Handle clicking selection context to navigate to canvas
@@ -369,17 +420,42 @@ export const MessageItem = ({
   };
 
   return (
-    <div className={`flex gap-3 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+    <div
+      className={`group/message flex gap-3 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+    >
       {message.type === 'bot' && (
         <div className='flex-shrink-0 mt-1'>
           <img src='/svgs/icons/ai-bot-gradient-star.svg' alt='AI' width='16' height='16' />
         </div>
       )}
 
+      {/* Edit button for user messages - appears on hover to the left of the bubble */}
+      {message.type === 'user' && (onEditSubmit || onEditMobile) && !isEditing && (
+        <button
+          onClick={() => {
+            if (onEditMobile) {
+              onEditMobile();
+            } else {
+              setEditText(message.content);
+              setIsEditing(true);
+              setTimeout(() => editTextareaRef.current?.focus(), 0);
+            }
+          }}
+          className='self-start mt-2 p-1 rounded opacity-0 group-hover/message:opacity-100 transition-opacity hover:bg-accent flex-shrink-0'
+          title='Edit message'
+          data-track-category='XyneAI'
+          data-track-name='EDIT_MESSAGE'
+        >
+          <Pencil size={14} className='text-muted-foreground' />
+        </button>
+      )}
+
       <div
         className={
           message.type === 'user'
-            ? 'max-w-[80%] overflow-hidden'
+            ? isEditing
+              ? 'max-w-[90%] w-full overflow-hidden'
+              : 'max-w-[80%] overflow-hidden'
             : 'flex-1 max-w-full overflow-hidden'
         }
       >
@@ -418,11 +494,62 @@ export const MessageItem = ({
             <div
               className={`${
                 message.type === 'user'
-                  ? 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[var(--chat-mobile-my-bubble)] text-foreground md:block md:rounded-2xl md:bg-muted md:text-foreground md:px-4 md:py-2 md:w-fit'
+                  ? isEditing
+                    ? 'rounded-2xl bg-muted p-3'
+                    : 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[var(--chat-mobile-my-bubble)] text-foreground md:block md:rounded-2xl md:bg-muted md:text-foreground md:px-4 md:py-2 md:w-fit'
                   : 'rounded-2xl bg-transparent text-foreground max-w-full'
               }`}
             >
-              {message.type === 'user' ? (
+              {message.type === 'user' && isEditing ? (
+                /* Inline edit mode */
+                <div className='flex flex-col gap-2'>
+                  <textarea
+                    ref={editTextareaRef}
+                    value={editText}
+                    onChange={e => setEditText(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (editText.trim()) {
+                          onEditSubmit?.(editText.trim());
+                          setIsEditing(false);
+                        }
+                      }
+                      if (e.key === 'Escape') {
+                        setIsEditing(false);
+                      }
+                    }}
+                    className="w-full bg-transparent text-sm font-['Inter'] font-[450] text-foreground resize-none outline-none min-h-[60px] leading-relaxed"
+                    rows={Math.max(2, editText.split('\n').length)}
+                    data-track-category='XyneAI'
+                    data-track-name='EDIT_TEXTAREA'
+                  />
+                  <div className='flex justify-end gap-2'>
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      className="px-3 py-1.5 text-xs font-medium rounded-full border border-border bg-background hover:bg-accent transition-colors font-['Inter']"
+                      data-track-category='XyneAI'
+                      data-track-name='EDIT_CANCEL'
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (editText.trim()) {
+                          onEditSubmit?.(editText.trim());
+                          setIsEditing(false);
+                        }
+                      }}
+                      disabled={!editText.trim()}
+                      className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
+                      data-track-category='XyneAI'
+                      data-track-name='EDIT_SUBMIT'
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
+              ) : message.type === 'user' ? (
                 <>
                   {/* Selection context previews */}
                   {message.selectionContexts && message.selectionContexts.length > 0 && (
@@ -507,6 +634,17 @@ export const MessageItem = ({
               )}
             </div>
 
+            {/* Branch navigator for user messages (edit branches) - below the bubble */}
+            {message.type === 'user' && branchInfo && onBranchNavigate && (
+              <div className='flex justify-end mt-1'>
+                <BranchNavigator
+                  index={branchInfo.index}
+                  total={branchInfo.total}
+                  onNavigate={onBranchNavigate}
+                />
+              </div>
+            )}
+
             {/* Streaming status indicator - shows below content when there's content */}
             {message.type === 'bot' &&
               message.isStreaming &&
@@ -539,15 +677,27 @@ export const MessageItem = ({
                 </div>
               )}
 
-            {/* Copy/Like/Dislike Buttons */}
+            {/* Branch navigator + Copy/Regenerate/Like/Dislike Buttons */}
             {message.type === 'bot' && !message.isStreaming && !message.isAborted && (
-              <MessageActions
-                message={message}
-                copied={copied}
-                onCopy={handleCopy}
-                onFeedback={onFeedback}
-                feedbackValue={feedbackValue}
-              />
+              <div className='flex items-center justify-between mt-4'>
+                {branchInfo && onBranchNavigate ? (
+                  <BranchNavigator
+                    index={branchInfo.index}
+                    total={branchInfo.total}
+                    onNavigate={onBranchNavigate}
+                  />
+                ) : (
+                  <div />
+                )}
+                <MessageActions
+                  message={message}
+                  copied={copied}
+                  onCopy={handleCopy}
+                  onFeedback={onFeedback}
+                  feedbackValue={feedbackValue}
+                  onRegenerate={isLatestBotMessage ? onRegenerate : undefined}
+                />
+              </div>
             )}
           </>
         )}
@@ -1054,8 +1204,9 @@ const MessageActions = ({
   onCopy,
   onFeedback,
   feedbackValue,
+  onRegenerate,
 }: MessageActionsProps): ReactElement => (
-  <div className='flex justify-between items-center mt-4'>
+  <div className='flex justify-between items-center gap-3'>
     <div className='flex items-center gap-1'>
       {/* Copy Button */}
       <button
@@ -1071,6 +1222,20 @@ const MessageActions = ({
           <img src='/svgs/icons/copy.svg' alt='Copy' width='16' height='16' />
         )}
       </button>
+
+      {/* Regenerate Button - only on the latest bot message */}
+      {onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          className='p-1.5 rounded transition-colors hover:bg-accent'
+          title='Regenerate response'
+          data-track-category='XyneAI'
+          data-track-name='REGENERATE_MESSAGE'
+          data-track-metadata={JSON.stringify({ messageId: message.id })}
+        >
+          <RefreshCw size={16} className='text-current' />
+        </button>
+      )}
 
       {/* Like Button */}
       <button
@@ -1177,7 +1342,7 @@ const MessageActions = ({
           href='https://github.com/searxng/searxng'
           target='_blank'
           rel='noopener noreferrer'
-          className='flex items-center gap-[2.521px] p-[4.51px] rounded-[11.345px] bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
+          className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
         >
           <Globe className='w-2 h-2 text-white' />
         </a>
@@ -1187,7 +1352,7 @@ const MessageActions = ({
     {/* Genius Icon */}
     {message.isGeniusResponse && (
       <Tooltip content='Powered By Genius' side='left'>
-        <div className='flex items-center gap-[2.521px] p-[4.51px] rounded-[11.345px] bg-gradient-to-br from-[#9747FF] to-[#1B85FF]'>
+        <div className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-gradient-to-br from-[#9747FF] to-[#1B85FF]'>
           <img src='/svgs/icons/genius-star-white.svg' alt='Genius' width='8' height='8' />
         </div>
       </Tooltip>

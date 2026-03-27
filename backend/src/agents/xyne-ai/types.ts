@@ -44,6 +44,8 @@ export interface XyneAIRequest {
   webSearchEnabled?: boolean;  // Enable/disable web search tool
   researchContext?: ResearchContext;
   messageAttachmentIds?: string[]; // Attachment IDs to fetch from GCS on backend
+  parentMessageId?: string; // Parent message ID for branching (tree structure)
+  isRegenerate?: boolean; // Whether this is a regenerate request
 }
 
 // ============================================================================
@@ -83,7 +85,8 @@ export interface XyneAIOutput {
 export interface XyneAIStreamChunk {
   type: string;
   sessionId?: string;
-  messageId?: string;
+  messageId?: string; // Bot message ID
+  userMessageId?: string; // User message ID (returned in 'complete' for branching)
   isNewSession?: boolean;
   traceId?: string;
   content?: string;

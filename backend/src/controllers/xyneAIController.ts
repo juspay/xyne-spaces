@@ -60,6 +60,8 @@ const XyneAIRequestSchema = z.object({
     filename: z.string().optional(),
   })).optional(),
   message_attachment_ids: z.array(z.string().min(1)).optional(), // Attachment IDs to fetch from GCS
+  parent_message_id: z.string().optional(), // Parent message ID for branching (tree structure)
+  is_regenerate: z.boolean().optional().default(false), // Whether this is a regenerate request
 });
 
 // Feedback request validation schema
@@ -93,7 +95,7 @@ export class XyneAIController {
       return;
     }
 
-    const { query, session_id, channel_ids, conversation_id, canvas_view_access_id, selection_contexts, create_canvas_enabled, web_search_enabled, research_context, attachments, message_attachment_ids } = parseResult.data;
+    const { query, session_id, channel_ids, conversation_id, canvas_view_access_id, selection_contexts, create_canvas_enabled, web_search_enabled, research_context, attachments, message_attachment_ids, parent_message_id, is_regenerate } = parseResult.data;
 
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -168,6 +170,8 @@ export class XyneAIController {
         researchContext: research_context || undefined,
         messageAttachmentIds: message_attachment_ids,
         agentsConfig,  // Pass CAC config to stream
+        parentMessageId: parent_message_id,
+        isRegenerate: is_regenerate,
       };
 
       // Track metrics: context channels count
