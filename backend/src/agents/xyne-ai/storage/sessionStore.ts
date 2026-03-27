@@ -147,8 +147,9 @@ class XyneAISessionStore {
     query: string,
     timestamp: string,
     attachments?: AttachmentData[],
-    traceId?: string
-  ): Promise<XyneAISession | undefined> {
+    traceId?: string,
+    previousStepId?: string
+  ): Promise<{ session: XyneAISession | undefined; messageId: string }> {
     try {
       const provider = await this.ensureInitialized();
 
@@ -171,12 +172,13 @@ class XyneAISessionStore {
       };
 
       // Pass attachment metadata to provider for storage in attachment column
-      await provider.addMessage(sessionId, 'USER', content, traceId, attachmentMetadata);
+      const messageData = await provider.addMessage(sessionId, 'USER', content, traceId, attachmentMetadata, previousStepId);
 
-      return this.get(sessionId);
+      const session = await this.get(sessionId);
+      return { session, messageId: messageData.messageId };
     } catch (error) {
       logger.error(`[SessionStore] [${sessionId}] Error adding user message:`, error);
-      return undefined;
+      return { session: undefined, messageId: '' };
     }
   }
 
@@ -184,20 +186,23 @@ class XyneAISessionStore {
     sessionId: string,
     toolName: string,
     input: unknown,
-    traceId?: string
-  ): Promise<void> {
+    traceId?: string,
+    previousStepId?: string
+  ): Promise<string> {
     try {
       const provider = await this.ensureInitialized();
-      
+
       const content: ToolInputContent = {
         type: 'tool_input',
         toolName,
         input,
       };
-      
-      await provider.addMessage(sessionId, 'TOOL_INPUT', content, traceId);
+
+      const messageData = await provider.addMessage(sessionId, 'TOOL_INPUT', content, traceId, undefined, previousStepId);
+      return messageData.messageId;
     } catch (error) {
       logger.error(`[SessionStore] [${sessionId}] Error adding TOOL_INPUT:`, error);
+      return '';
     }
   }
 
@@ -205,32 +210,36 @@ class XyneAISessionStore {
     sessionId: string,
     toolName: string,
     output: unknown,
-    traceId?: string
-  ): Promise<void> {
+    traceId?: string,
+    previousStepId?: string
+  ): Promise<string> {
     try {
       const provider = await this.ensureInitialized();
-      
+
       const content: ToolOutputContent = {
         type: 'tool_output',
         toolName,
         content: output,
       };
-      
-      await provider.addMessage(sessionId, 'TOOL_OUTPUT', content, traceId);
+
+      const messageData = await provider.addMessage(sessionId, 'TOOL_OUTPUT', content, traceId, undefined, previousStepId);
+      return messageData.messageId;
     } catch (error) {
       logger.error(`[SessionStore] [${sessionId}] Error adding TOOL_OUTPUT:`, error);
+      return '';
     }
   }
 
   async addAssistantMessage(
-    sessionId: string, 
+    sessionId: string,
     output: XyneAIOutput,
-    traceId?: string
+    traceId?: string,
+    previousStepId?: string
   ): Promise<{ session: XyneAISession; messageId: string } | undefined> {
     try {
       const provider = await this.ensureInitialized();
-      
-      const messageData = await provider.addMessage(sessionId, 'ASSISTANT', output, traceId);
+
+      const messageData = await provider.addMessage(sessionId, 'ASSISTANT', output, traceId, undefined, previousStepId);
       logger.info(`[SessionStore] [${sessionId}] Added assistant message`);
       
       const session = await this.get(sessionId);
@@ -271,6 +280,17 @@ class XyneAISessionStore {
     const session = await this.get(sessionId);
     if (!session) return [];
     return session.history;
+  }
+
+  async getHistoryForPath(sessionId: string, leafMessageId: string): Promise<HistoryMessage[]> {
+    try {
+      const provider = await this.ensureInitialized();
+      const messages = await provider.getMessagesForPath(sessionId, leafMessageId);
+      return await convertMessagesToHistory(messages);
+    } catch (error) {
+      logger.error(`[SessionStore] [${sessionId}] Error getting history for path:`, error);
+      return [];
+    }
   }
 
   async getRecentMessages(sessionId: string, limit: number = 50): Promise<MessageData[]> {

@@ -205,7 +205,7 @@ export interface XyneAIStreamRequest extends XyneAIRequest {
 export async function* xyneAIStream(
   request: XyneAIStreamRequest
 ): AsyncGenerator<XyneAIStreamChunk, void, unknown> {
-  const { query, sessionId, channelIds, conversationId, canvasViewAccessId, selectionContexts, createCanvasEnabled, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds, agentsConfig } = request;
+  const { query, sessionId, channelIds, conversationId, canvasViewAccessId, selectionContexts, createCanvasEnabled, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds, agentsConfig, parentMessageId, isRegenerate } = request;
 
   // Use provided config or fetch defaults
   const cacConfig = agentsConfig ?? AgentsConfig.defaults();
@@ -255,17 +255,46 @@ export async function* xyneAIStream(
     ...fetchedAttachments,
   ];
 
-  // Store user message with attachments
-  const updatedSessionAfterUser = await sessionStore.addUserMessage(session.sessionId, query, timestamp, allAttachments.length > 0 ? allAttachments : undefined);
-  if (!updatedSessionAfterUser) {
-    logger.error(`[XyneAI] [${session.sessionId}] Failed to add user message - session not found`);
-    yield { type: 'error', error: 'Session not found' };
-    yield { type: 'end' };
-    return;
+  // For regenerate: skip user message creation — reuse the existing user message.
+  // parentMessageId is the user message ID; bot response branches as its new child.
+  // For edit/normal: create a new user message linked to parentMessageId.
+  let userMessageId: string;
+  let historyMessages;
+
+  if (isRegenerate && parentMessageId) {
+    // Regenerate: no new user message, parent is the existing user message
+    userMessageId = parentMessageId;
+    // Get history up to (but excluding) the user message — the current query
+    // is appended separately below, so we walk from the user message's parent
+    const pathHistory = await sessionStore.getHistoryForPath(session.sessionId, parentMessageId);
+    // Remove the last entry (the user message itself) to avoid duplicating it
+    historyMessages = formatHistoryForJAF(pathHistory.slice(0, -1));
+  } else {
+    // Normal / Edit: create user message
+    const { session: updatedSessionAfterUser, messageId } = await sessionStore.addUserMessage(
+      session.sessionId, query, timestamp,
+      allAttachments.length > 0 ? allAttachments : undefined,
+      undefined, // traceId - set later
+      parentMessageId, // previousStepId for tree structure
+    );
+    if (!updatedSessionAfterUser) {
+      logger.error(`[XyneAI] [${session.sessionId}] Failed to add user message - session not found`);
+      yield { type: 'error', error: 'Session not found' };
+      yield { type: 'end' };
+      return;
+    }
+    userMessageId = messageId;
+
+    if (parentMessageId) {
+      const pathHistory = await sessionStore.getHistoryForPath(session.sessionId, parentMessageId);
+      historyMessages = formatHistoryForJAF(pathHistory);
+    } else {
+      historyMessages = formatHistoryForJAF(updatedSessionAfterUser.history.slice(0, -1));
+    }
   }
 
-  // Get history BEFORE the current user message (exclude the one we just added)
-  const historyMessages = formatHistoryForJAF(updatedSessionAfterUser.history.slice(0, -1));
+  // Track the last message ID for chaining tool calls and assistant response
+  let lastStepId = userMessageId;
 
   // Convert attachments to JAF format (use merged attachments)
   let jafAttachments: Attachment[] = [];
@@ -373,12 +402,13 @@ export async function* xyneAIStream(
           break;
         
         case 'before_tool_execution':
-          // Store tool input in DB
-          await sessionStore.addToolInput(
+          // Store tool input in DB, chaining to previous step
+          lastStepId = await sessionStore.addToolInput(
             session.sessionId,
             event.data.toolName,
             event.data.args,
-            currentTraceId
+            currentTraceId,
+            lastStepId,
           );
           
           yield {
@@ -401,12 +431,13 @@ export async function* xyneAIStream(
             }
           }
           
-          // Store tool output in DB
-          await sessionStore.addToolOutput(
+          // Store tool output in DB, chaining to previous step
+          lastStepId = await sessionStore.addToolOutput(
             session.sessionId,
             event.data.toolName,
             event.data.result,
-            currentTraceId
+            currentTraceId,
+            lastStepId,
           );
           
           yield {
@@ -463,16 +494,17 @@ export async function* xyneAIStream(
               };
             }
             
-            // Store clean assistant message in DB
-            const result = await sessionStore.addAssistantMessage(session.sessionId, parsedOutput, currentTraceId);
+            // Store clean assistant message in DB, chaining to previous step
+            const result = await sessionStore.addAssistantMessage(session.sessionId, parsedOutput, currentTraceId, lastStepId);
             if (!result) {
               logger.error(`[XyneAI] [${session.sessionId}] Failed to save assistant message`);
             }
-            
-            yield { 
+
+            yield {
               type: 'complete',
               sessionId: session.sessionId,
               messageId: result?.messageId,
+              userMessageId,
               output: parsedOutput,
               userTags: parsedOutput.userTags,
             };
@@ -487,7 +519,7 @@ export async function* xyneAIStream(
                 summary: accumulatedContent,
                 keyPoints: [],
               };
-              await sessionStore.addAssistantMessage(session.sessionId, fallbackOutput, currentTraceId);
+              await sessionStore.addAssistantMessage(session.sessionId, fallbackOutput, currentTraceId, lastStepId);
             }
             yield { type: 'error', error: errDetail ? `${errTag}: ${errDetail}` : errTag };
           }
@@ -503,7 +535,7 @@ export async function* xyneAIStream(
         summary: accumulatedContent,
         keyPoints: [],
       };
-      await sessionStore.addAssistantMessage(session.sessionId, fallbackOutput, currentTraceId);
+      await sessionStore.addAssistantMessage(session.sessionId, fallbackOutput, currentTraceId, lastStepId);
     }
     
     yield { type: 'error', error: 'Unexpected error occurred' };
