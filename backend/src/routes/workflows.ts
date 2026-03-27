@@ -30,6 +30,17 @@ const router = Router();
 const workflowController = new WorkflowController();
 const astParser = new ASTWorkflowParser();
 
+// ========== TEST ARTIFACTS ROUTES (Preview Changes Tab) ==========
+// NOTE: These MUST come BEFORE any routes with path parameters like /:id or /:ticketId
+// GET /api/workflows/artifacts/view - View artifact in browser
+router.get('/artifacts/view', workflowController.viewArtifact);
+
+// GET /api/workflows/artifacts/image - Proxy image from GCS for preview
+router.get('/artifacts/image', workflowController.getArtifactImage);
+
+// GET /api/workflows/artifacts/download - Download artifact from GCS
+router.get('/artifacts/download', workflowController.downloadArtifact);
+
 // ========== WORKFLOW TYPES API ENDPOINT ==========
 // GET /api/workflows/types - Get all available workflow types with metadata
 router.get('/types', async (_req, res): Promise<void> => {
@@ -174,9 +185,6 @@ router.put('/executions/:id', workflowController.updateWorkflowExecution);
 // GET /api/workflows - Get all workflows
 router.get('/', workflowController.getWorkflows);
 
-// GET /api/workflows/:id - Get workflow by ID
-router.get('/:id', workflowController.getWorkflows);
-
 // POST /api/workflows - Create new workflow
 router.post('/', workflowController.createWorkflow);
 
@@ -191,7 +199,11 @@ router.get('/workflow-steps/:stepId/details', workflowController.getWorkflowStep
 
 router.get('/:executionId/git-diff', workflowController.getWorkflowGitDiff);
 
+// GET /api/workflows/executions/:executionId/test-artifacts - List all test artifacts
+router.get('/executions/:executionId/test-artifacts', workflowController.getTestArtifacts);
 
-
+// GET /api/workflows/:id - Get workflow by ID
+// NOTE: This generic route must come AFTER all specific routes
+router.get('/:id', workflowController.getWorkflows);
 
 export default router;

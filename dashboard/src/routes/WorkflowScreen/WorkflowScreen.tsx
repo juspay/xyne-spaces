@@ -20,12 +20,23 @@ import {
   CombinedWorkflowData,
   StepDetailsResponse,
 } from '../../services/Workflow/workflowGraphService.types';
-import { Loader2, AlertCircle, ArrowLeft, Globe, Table2, GitBranch, Eye, Code } from 'lucide-react';
+import {
+  Loader2,
+  AlertCircle,
+  ArrowLeft,
+  Globe,
+  Table2,
+  GitBranch,
+  Eye,
+  Code,
+  ScanEye,
+} from 'lucide-react';
 import MemoryHeader from '../../components/Memory/MemoryHeader';
 import MemoryTable from '../../components/Memory/MemoryTable';
 import { MemoryScope, MemoryFilters } from '../../types/memory';
 import GitDiffPanel from '../../components/Workflows/GitDiffPanel';
 import LiveEditsPanel from '../../components/Workflows/LiveEditsPanel';
+import PreviewChangesPanel from '../../components/Workflows/PreviewChangesPanel';
 import { RCADetailsPanel, type RCAItem } from '../../components/Workflows/RCADetailsPanel';
 import { workflowScreenMachine } from '../../machines/workflowScreenMachine';
 import { VSCodePanel } from '../../components/Workflows/VSCodePanel';
@@ -276,6 +287,14 @@ const WorkflowScreen: React.FC = () => {
       //   closable: false,
       //   disabled: false,
       // },
+      {
+        id: 'preview-changes',
+        title: 'Preview Changes',
+        type: 'preview-changes' as const,
+        icon: <ScanEye size={15} />,
+        closable: false,
+        disabled: false,
+      },
       ...(isElectron
         ? [
             {
@@ -523,6 +542,10 @@ const WorkflowScreen: React.FC = () => {
               </div>
             </div>
           );
+        case 'preview-changes':
+          return effectiveSelectedExecutionId ? (
+            <PreviewChangesPanel executionId={effectiveSelectedExecutionId} />
+          ) : null;
         case 'rca-details':
           // Derive RCA data from selected node
           // eslint-disable-next-line no-case-declarations

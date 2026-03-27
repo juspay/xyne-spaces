@@ -41,6 +41,7 @@ import { WorkflowType, ImageAttachment } from '../../types/workflow-enums';
 import { BaseWorkflowContextSchema, baseContextMapper } from '../../schemas/workflow-schema';
 import { z } from 'zod';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 
 import {
   extractLastMessageContent,
@@ -57,7 +58,7 @@ import {
   filterReviewCommentsBySeverity,
   getTestFixConfig,
 } from './utils';
-import { runDeterministicValidation, getGitDiffForReview, runTestCases, commitPostTestChanges, type TestExecutionResult } from '../validation-helpers';
+import { runDeterministicValidation, getGitDiffForReview, runTestCases, commitPostTestChanges, findScreenshotDirectory, copyScreenshotsToTempDir, uploadScreenshotsToGCS, uploadTestReportsToGCS, type TestExecutionResult } from '../validation-helpers';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 
@@ -460,6 +461,60 @@ export const xyneSpacesFeatureImplementationWorkflow: WorkflowDefinition<
     if (postTestCommitResult.commitHash) {
       gitInfo = { ...gitInfo, commitHash: postTestCommitResult.commitHash };
     }
+
+    // =========================================================================
+    // PHASE 5: COPY FEATURE SCREENSHOTS TO TEMP DIR
+    // =========================================================================
+
+    const currDir = `/tmp/${executionId}-vr-curr`;
+
+    await workflow.createCheckpoint(
+      XyneSpacesWorkflowSteps.STORE_FEATURE_SCREENSHOTS,
+      async () => {
+        logger.info('[VR] Phase 5: Copying feature branch screenshots to temp dir...');
+
+        const screenshotsDir = findScreenshotDirectory(repoPath);
+        if (!screenshotsDir) {
+          logger.warn('[VR] No screenshots found after feature branch tests');
+          return { screenshotCount: 0 };
+        }
+
+        // Copy to temp dir
+        const count = await copyScreenshotsToTempDir(screenshotsDir, currDir);
+
+        logger.info(`[VR] Phase 5 complete: ${count} feature screenshots saved to temp dir`);
+        return { screenshotCount: count };
+      }
+    );
+
+    // =========================================================================
+    // PHASE 6: UPLOAD TEST ARTIFACTS TO GCS FOR PREVIEW CHANGES TAB
+    // =========================================================================
+
+    await workflow.createCheckpoint(
+      XyneSpacesWorkflowSteps.UPLOAD_TO_GCS,
+      async () => {
+        logger.info('[VR] Phase 6: Uploading test artifacts to GCS...');
+
+        // Upload screenshots from temp dir to GCS
+        const screenshotCount = await uploadScreenshotsToGCS(
+          currDir,
+          `workflow-artifacts/${executionId}/screenshots/`,
+          executionId
+        );
+
+        // Also upload any available test reports
+        const reportDir = path.join(repoPath, 'xyne-automation', 'report');
+        const reportCount = await uploadTestReportsToGCS(reportDir, executionId);
+
+        logger.info(`[VR] Phase 6 complete: ${screenshotCount} screenshots, ${reportCount} reports uploaded`);
+
+        // Cleanup temp dir
+        await fs.rm(currDir, { recursive: true, force: true }).catch(() => {});
+
+        return { screenshotCount, reportCount };
+      }
+    );
 
     // =========================================================================
     // FINAL STATUS

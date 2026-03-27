@@ -687,6 +687,12 @@ export enum XyneSpacesWorkflowSteps {
   AUTOMATION_TEST_EXECUTION = 'automation_test_execution',
   AUTOMATION_TEST_FIX = 'automation_test_fix',
   POST_AUTOMATION_COMMIT = 'post_automation_commit',
+
+  // Phase 5: Store Feature Screenshots in Temp directory for protection against accidental cleanup
+  STORE_FEATURE_SCREENSHOTS = 'store_feature_screenshots',
+
+  // Phase 6: Upload Feature Screenshots to GCS
+  UPLOAD_TO_GCS = 'upload_to_gcs',
 }
 
 

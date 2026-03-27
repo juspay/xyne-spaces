@@ -521,6 +521,18 @@ export class GCSService {
   }
 
   /**
+   * List files in the bucket with a given prefix.
+   * Returns an array of objects with name and optional contentType metadata.
+   */
+  async listFiles(prefix: string): Promise<Array<{ name: string; contentType?: string }>> {
+    const [files] = await this.bucket.getFiles({ prefix });
+    return files.map(file => ({
+      name: file.name,
+      contentType: (file.metadata as { contentType?: string } | undefined)?.contentType,
+    }));
+  }
+
+  /**
    * Ensure bucket exists (useful for initialization)
    */
   async ensureBucketExists(): Promise<void> {
