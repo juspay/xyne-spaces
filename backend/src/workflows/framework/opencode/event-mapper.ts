@@ -6,7 +6,6 @@ import {
   MessagePart,
   TextPart,
   ToolInvocationPart,
-  ToolResultPart,
   DoomLoopEvent,
   OpenCodeEvent,
   SessionInfo,
@@ -23,6 +22,7 @@ import {
   QuestionAskedEvent,
   EventWorktreeReady,
   EventWorktreeFailed,
+  normalizeToolInput,
 } from './types'
 import type {
   EventFileEdited,
@@ -31,7 +31,8 @@ import type {
 } from '@opencode-ai/sdk/v2'
 import { WorkflowStorage } from '../../workflow-storage'
 import { FullAgenticCheckpointConfig } from '../../workflow-types'
-import { hasUncommittedChanges, commitAllChanges } from '@framework'
+import { hasUncommittedChanges, commitAllChanges, pushCommits } from '@framework'
+import { workspaceEventService } from '@/services/workspaceEventService'
 import { UpdateAgentStepInput } from '@/types/database'
 
 interface SDKToolPartRaw {
@@ -86,8 +87,6 @@ export interface EventProcessingStats {
   snapshotsCreated: number
   patchesApplied: number
   subtasksCreated: number
-  lspErrorsDetected: number
-  lspErrorsUnfixed: Set<string>
 }
 
 export function createOpenCodeEventHandler(
@@ -111,9 +110,7 @@ export function createOpenCodeEventHandler(
     retryAttempts: 0,
     snapshotsCreated: 0,
     patchesApplied: 0,
-    subtasksCreated: 0,
-    lspErrorsDetected: 0,
-    lspErrorsUnfixed: new Set<string>()
+    subtasksCreated: 0
   }
 
   const handleEvent = async (event: OpenCodeEvent): Promise<void> => {
@@ -277,10 +274,10 @@ async function handleMessageUpdated(
   _context: OpenCodeEventHandlerContext,
   stats: EventProcessingStats
 ): Promise<void> {
-  const message = event.properties.message
+  const info = event.properties.info
 
-  if (!message) {
-    logger.warn('[OpenCode] message.updated event missing message data')
+  if (!info) {
+    logger.debug('[OpenCode] message.updated event missing message data')
     return
   }
 
@@ -343,11 +340,11 @@ async function handleMessagePartUpdated(
 
   switch (partType) {
     case 'tool-invocation':
-      await handleToolInvocation(part as ToolInvocationPart, syntheticMessage, context, stats)
+      logger.debug('[OpenCode] Ignoring legacy tool-invocation part (handled by tool type)')
       break
 
     case 'tool-result':
-      await handleToolResult(part as ToolResultPart, syntheticMessage, context, stats)
+      logger.debug('[OpenCode] Ignoring legacy tool-result part (handled by tool type)')
       break
 
     case 'text':
@@ -383,81 +380,93 @@ async function handleSDKToolPart(
   const toolName = part.tool
   const state = part.state
 
-  if (state.status === 'pending' || state.status === 'running') {
-    if (!context.processedToolCalls.has(callId)) {
-      context.processedToolCalls.add(callId)
+  // Skip pending — input is empty at this state
+  if (state.status === 'pending') {
+    return
+  }
 
-      await context.checkPauseOrCancel()
+  if (!context.processedToolCalls.has(callId)) {
+    context.processedToolCalls.add(callId)
 
-      await context.storage.createToolExecutionStep(context.parentExecutionId, context.inputStepDbId, {
-        id: callId,
-        name: toolName,
-        input: state.input,
-        output: null,
-        duration: 0,
-        success: false
-      })
+    await context.checkPauseOrCancel()
 
-      stats.toolCallsProcessed++
-      logger.info(`[OpenCode] Tool call created: ${toolName} (${callId})`)
+    // Normalize camelCase input keys to snake_case for frontend renderers
+    const normalizedInput = normalizeToolInput(state.input)
+
+    await context.storage.createToolExecutionStep(context.parentExecutionId, context.inputStepDbId, {
+      id: callId,
+      name: toolName,
+      input: normalizedInput,
+      output: null,
+      duration: 0,
+      success: state.status === 'completed'
+    })
+
+    stats.toolCallsProcessed++
+    logger.info(`[OpenCode] Tool call created (${state.status}): ${toolName} (${callId})`)
+  }
+
+  // On completed/error, handle commits (side effects only, no data updates)
+  if (state.status === 'completed' || state.status === 'error') {
+    if (context.processedToolResults.has(callId)) {
+      return
     }
-  } else if (state.status === 'completed' || state.status === 'error') {
-    if (!context.processedToolResults.has(callId)) {
-      context.processedToolResults.add(callId)
+    context.processedToolResults.add(callId)
 
-      await context.checkPauseOrCancel()
+    await context.checkPauseOrCancel()
 
-      const hasChanges = await hasUncommittedChanges(context.repoPath)
+    const hasChanges = await hasUncommittedChanges(context.repoPath)
 
-      let updateAgentData: UpdateAgentStepInput = {
-        repositoryURL: context.commitTracker.repoUrl,
-        branch: context.commitTracker.branchName
-      }
+    let updateAgentData: UpdateAgentStepInput = {
+      repositoryURL: context.commitTracker.repoUrl,
+      branch: context.commitTracker.branchName
+    }
 
-      if (hasChanges) {
-        const commitMessage = `Auto-commit changes from tool execution ${callId}`
-        const updatedCommitMessage = context.agentChkConfig.repoInfo?.getCommitMessage
-          ? context.agentChkConfig.repoInfo.getCommitMessage(commitMessage)
-          : commitMessage
+    if (hasChanges) {
+      const commitMessage = `Auto-commit changes from tool execution ${callId}`
+      const updatedCommitMessage = context.agentChkConfig.repoInfo?.getCommitMessage
+        ? context.agentChkConfig.repoInfo.getCommitMessage(commitMessage)
+        : commitMessage
 
-        const coAuthor = context.agentChkConfig.repoInfo?.coAuthor
-        const commitHash = await commitAllChanges(
-          context.repoPath,
-          updatedCommitMessage,
-          coAuthor?.name,
-          coAuthor?.email
-        )
+      const coAuthor = context.agentChkConfig.repoInfo?.coAuthor
+      const commitHash = await commitAllChanges(
+        context.repoPath,
+        updatedCommitMessage,
+        coAuthor?.name,
+        coAuthor?.email
+      )
 
-        if (commitHash) {
-          updateAgentData = { ...updateAgentData, commitHash: commitHash }
-          context.commitTracker.hasCommits = true
-          context.commitTracker.latestCommitHash = commitHash
-          context.commitTracker.commitCount++
+      if (commitHash) {
+        updateAgentData = { ...updateAgentData, commitHash: commitHash }
+        context.commitTracker.hasCommits = true
+        context.commitTracker.latestCommitHash = commitHash
+        context.commitTracker.commitCount++
+
+        // Push immediately so backend can pull for live workspace viewing (matches xyne-code pattern)
+        if (context.repoPath && context.commitTracker.branchName && context.commitTracker.repoUrl) {
+          try {
+            await pushCommits(context.repoPath, context.commitTracker.branchName, context.commitTracker.repoUrl)
+            logger.info(`[OpenCode] Pushed commit ${commitHash.substring(0, 8)} for live workspace viewing`)
+
+            await workspaceEventService.publishFileTreeUpdate(
+              context.parentExecutionId,
+              context.inputStepDbId,
+              commitHash
+            )
+          } catch (pushError) {
+            logger.error(`[OpenCode] Failed to push commit for live viewing:`, pushError)
+          }
         }
       }
-
-      await context.storage.updateToolExecutionAgentStep(
-        context.inputStepDbId,
-        callId,
-        updateAgentData
-      )
-
-      const toolCallStatus = state.status === 'error' ? 'failed' : 'completed'
-      const rawOutput = state.status === 'error' 
-        ? { error: state.error }
-        : (state.output ? tryParseJSON(state.output) : { success: true })
-
-      const output = transformToolOutput(toolName, rawOutput)
-
-      await context.storage.updateToolExecutionStep(
-        context.inputStepDbId,
-        callId,
-        JSON.stringify(output),
-        toolCallStatus
-      )
-
-      stats.toolResultsProcessed++
     }
+
+    await context.storage.updateToolExecutionAgentStep(
+      context.inputStepDbId,
+      callId,
+      updateAgentData
+    )
+
+    stats.toolResultsProcessed++
   }
 }
 
@@ -469,11 +478,6 @@ interface ToolOutput {
   exitCode?: number
   success?: boolean
   message?: string
-  hasLspErrors?: boolean
-  errorCount?: number
-  filePath?: string | null
-  projectDir?: string | null
-  originalOutput?: string
   files?: string[]
   count?: number
   todosUpdated?: number
@@ -481,7 +485,7 @@ interface ToolOutput {
   [key: string]: unknown
 }
 
-function transformToolOutput(toolName: string, rawOutput: unknown): ToolOutput {
+export function transformToolOutput(toolName: string, rawOutput: unknown): ToolOutput {
   if (typeof rawOutput === 'string') {
     return transformStringOutput(toolName, rawOutput)
   }
@@ -576,34 +580,6 @@ function transformToolOutput(toolName: string, rawOutput: unknown): ToolOutput {
       return { success: true, ...output }
 
     case 'edit':
-      if (output.content && typeof output.content === 'string') {
-        const content = output.content
-        const hasLspErrors = content.includes('LSP errors detected') || content.includes('<diagnostics')
-        
-        if (hasLspErrors) {
-          const fileMatch = content.match(/file="([^"]+)"/)
-          const filePath = fileMatch ? fileMatch[1] : null
-          const dirMatch = filePath?.match(/\/tmp\/[^\/]+\/([^\/]+)/)
-          const projectDir = dirMatch ? dirMatch[1] : null
-          const errorMatches = content.match(/ERROR \[/g)
-          const errorCount = errorMatches ? errorMatches.length : 0
-          
-          logger.warn(`[OpenCode] LSP ERRORS DETECTED: ${errorCount} errors in ${filePath || 'file'}`)
-          
-          return {
-            ...output,
-            success: false,
-            hasLspErrors: true,
-            errorCount,
-            filePath,
-            projectDir,
-            content: `🔴🔴🔴 STOP - LSP ERRORS DETECTED 🔴🔴🔴\n\n${content}\n\n` +
-              `⚠️ CRITICAL: You MUST fix these ${errorCount} LSP errors before proceeding.\n` +
-              `DO NOT move to the next task. Fix the errors in this file first.` +
-              (projectDir ? `\n💡 TIP: After fixing, run \`diagnostics\` tool with empty file_path to check all ${projectDir}/ errors.` : '')
-          }
-        }
-      }
       return output as ToolOutput
 
     case 'background_task':
@@ -626,46 +602,11 @@ function transformStringOutput(toolName: string, rawOutput: string): ToolOutput 
         message: rawOutput
       }
 
-    case 'edit': {
-      const hasLspErrors = rawOutput.includes('LSP errors detected') || rawOutput.includes('<diagnostics')
-      const success = !rawOutput.toLowerCase().includes('error') || (rawOutput.includes('Edit applied successfully') && hasLspErrors)
-      
-      const fileMatch = rawOutput.match(/file="([^"]+)"/)
-      const filePath = fileMatch ? fileMatch[1] : null
-      let projectDir = null
-      if (filePath) {
-        const dirMatch = filePath.match(/\/tmp\/[^\/]+\/([^\/]+)/)
-        projectDir = dirMatch ? dirMatch[1] : null
-      }
-      
-      if (hasLspErrors) {
-        const errorMatches = rawOutput.match(/ERROR \[/g)
-        const errorCount = errorMatches ? errorMatches.length : 0
-        
-        logger.warn(`[OpenCode] LSP ERRORS DETECTED: ${errorCount} errors in ${filePath || 'file'}`)
-        
-        const enhancedOutput = `🔴🔴🔴 STOP - LSP ERRORS DETECTED 🔴🔴🔴\n\n${rawOutput}\n\n` +
-          `⚠️ CRITICAL: You MUST fix these ${errorCount} LSP errors before proceeding.\n` +
-          `DO NOT move to the next task. Fix the errors in this file first.\n` +
-          (projectDir ? `\n💡 TIP: After fixing, run \`diagnostics\` tool with empty file_path to check for project-wide errors in ${projectDir}/.` : '')
-        
-        return {
-          success: false,
-          hasLspErrors: true,
-          errorCount,
-          filePath,
-          projectDir,
-          message: enhancedOutput,
-          originalOutput: rawOutput
-        }
-      }
-      
-      return { 
-        success,
-        hasLspErrors: false,
+    case 'edit':
+      return {
+        success: !rawOutput.toLowerCase().includes('error'),
         message: rawOutput
       }
-    }
 
     default:
       return { content: rawOutput }
@@ -837,121 +778,9 @@ function formatBackgroundTaskContent(
   return lines.join('\n')
 }
 
-function tryParseJSON(str: string): any {
-  try {
-    return JSON.parse(str)
-  } catch {
-    return { content: str }
-  }
-}
-
-async function handleToolInvocation(
-  part: ToolInvocationPart,
-  _message: OpenCodeMessage,
-  context: OpenCodeEventHandlerContext,
-  stats: EventProcessingStats
-): Promise<void> {
-  const toolCall = part.toolInvocation
-  
-  if (context.processedToolCalls.has(toolCall.toolCallId)) return
-  if (toolCall.state !== 'pending' && toolCall.state !== 'running') return
-
-  context.processedToolCalls.add(toolCall.toolCallId)
-
-  await context.checkPauseOrCancel()
-
-  await context.storage.createToolExecutionStep(context.parentExecutionId, context.inputStepDbId, {
-    id: toolCall.toolCallId,
-    name: toolCall.toolName,
-    input: toolCall.args,
-    output: null,
-    duration: 0,
-    success: false
-  })
-
-  stats.toolCallsProcessed++
-}
-
-async function handleToolResult(
-  part: ToolResultPart,
-  _message: OpenCodeMessage,
-  context: OpenCodeEventHandlerContext,
-  stats: EventProcessingStats
-): Promise<void> {
-  const toolResult = part.toolResult
-
-  if (context.processedToolResults.has(toolResult.toolCallId)) return
-
-  context.processedToolResults.add(toolResult.toolCallId)
-
-  await context.checkPauseOrCancel()
-
-  const resultStr = typeof toolResult.result === 'string' 
-    ? toolResult.result 
-    : JSON.stringify(toolResult.result)
-  
-  if (resultStr.includes('LSP errors detected') || resultStr.includes('<diagnostics')) {
-    const fileMatch = resultStr.match(/file="([^"]+)"/)
-    const filePath = fileMatch ? fileMatch[1] : 'unknown'
-    const errorMatches = resultStr.match(/ERROR \[/g)
-    const errorCount = errorMatches ? errorMatches.length : 0
-    
-    stats.lspErrorsDetected += errorCount
-    stats.lspErrorsUnfixed.add(filePath)
-    
-    logger.info(`[OpenCode] LSP ERRORS in tool result: ${errorCount} errors in ${filePath}`)
-  } else if (resultStr.includes('Edit applied successfully') && !resultStr.includes('ERROR')) {
-    const fileMatch = resultStr.match(/file="([^"]+)"/)
-    if (fileMatch) {
-      stats.lspErrorsUnfixed.delete(fileMatch[1])
-    }
-  }
-
-  const hasChanges = await hasUncommittedChanges(context.repoPath)
-
-  let updateAgentData: UpdateAgentStepInput = {
-    repositoryURL: context.commitTracker.repoUrl,
-    branch: context.commitTracker.branchName
-  }
-
-  if (hasChanges) {
-    const commitMessage = `Auto-commit changes from tool execution ${toolResult.toolCallId}`
-    const updatedCommitMessage = context.agentChkConfig.repoInfo?.getCommitMessage
-      ? context.agentChkConfig.repoInfo.getCommitMessage(commitMessage)
-      : commitMessage
-
-    const coAuthor = context.agentChkConfig.repoInfo?.coAuthor
-    const commitHash = await commitAllChanges(
-      context.repoPath,
-      updatedCommitMessage,
-      coAuthor?.name,
-      coAuthor?.email
-    )
-
-    if (commitHash) {
-      updateAgentData = { ...updateAgentData, commitHash: commitHash }
-      context.commitTracker.hasCommits = true
-      context.commitTracker.latestCommitHash = commitHash
-      context.commitTracker.commitCount++
-    }
-  }
-
-  await context.storage.updateToolExecutionAgentStep(
-    context.inputStepDbId,
-    toolResult.toolCallId,
-    updateAgentData
-  )
-
-  const toolCallStatus = toolResult.isError ? 'failed' : 'completed'
-  await context.storage.updateToolExecutionStep(
-    context.inputStepDbId,
-    toolResult.toolCallId,
-    typeof toolResult.result === 'string' ? toolResult.result : JSON.stringify(toolResult.result),
-    toolCallStatus
-  )
-
-  stats.toolResultsProcessed++
-}
+// Legacy handleToolInvocation and handleToolResult removed —
+// tool-invocation/tool-result part types are superseded by the `tool` part type
+// handled by handleSDKToolPart above.
 
 async function handlePartError(
   part: { type: 'error'; error: string },
@@ -1136,36 +965,13 @@ async function handleQuestionAsked(
 
 async function handleFileEdited(
   event: EventFileEdited,
-  context: OpenCodeEventHandlerContext,
+  _context: OpenCodeEventHandlerContext,
   stats: EventProcessingStats
 ): Promise<void> {
   const { file } = event.properties
   stats.filesEdited++
   
   logger.info(`[OpenCode] File edited: ${file}`)
-  
-  const hasChanges = await hasUncommittedChanges(context.repoPath)
-  if (hasChanges) {
-    const commitMessage = `Auto-commit: edited ${file}`
-    const updatedCommitMessage = context.agentChkConfig.repoInfo?.getCommitMessage
-      ? context.agentChkConfig.repoInfo.getCommitMessage(commitMessage)
-      : commitMessage
-
-    const coAuthor = context.agentChkConfig.repoInfo?.coAuthor
-    const commitHash = await commitAllChanges(
-      context.repoPath,
-      updatedCommitMessage,
-      coAuthor?.name,
-      coAuthor?.email
-    )
-    
-    if (commitHash) {
-      context.commitTracker.hasCommits = true
-      context.commitTracker.latestCommitHash = commitHash
-      context.commitTracker.commitCount++
-      logger.info(`[OpenCode] Auto-committed: ${file}`)
-    }
-  }
 }
 
 async function handleWorktreeReady(

@@ -14,8 +14,6 @@ export interface XyneSpacesPlanReviewLoopContext extends BaseWorkflowContext {
   repoBranch?: string;
   checkoutCommit?: string;
   imageAttachments?: ImageAttachment[];
-  executorType?: ExecutorType;
-  useQuestioningMode?: boolean;
   taskType?: 'feature' | 'bug' | 'refactor' | 'performance' | 'security' | 'documentation';
   maxLoopIterations?: number;
   approvalThreshold?: number;

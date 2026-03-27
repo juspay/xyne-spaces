@@ -111,14 +111,7 @@ class OpenCodeServerManager {
         bash: 'allow',
         webfetch: 'allow',
         doom_loop: 'allow',
-        external_directory: 'deny',
-        lsp: 'allow',
-        lsp_diagnostics: 'allow',
-        lsp_goto_definition: 'allow',
-        lsp_find_references: 'allow',
-        lsp_symbols: 'allow',
-        lsp_prepare_rename: 'allow',
-        lsp_rename: 'allow'
+        external_directory: 'deny'
       }
       if (appConfig.openCode.pluginEnabled) {
         const pluginVersion = appConfig.openCode.pluginVersion || 'latest'
@@ -127,14 +120,6 @@ class OpenCodeServerManager {
         await this.ensureOhMyOpencodeConfig()
 
         logger.info(`[OpenCode] Enabling oh-my-opencode plugin (version: ${pluginVersion})`)
-        config.lsp = {
-          'typescript-language-server': {
-            command: ['typescript-language-server', '--stdio'],
-            extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
-            priority: 10,
-            disabled: false
-          }
-        }
       }
       if (appConfig.litellm.baseUrl) {
         const baseURL = appConfig.litellm.baseUrl.replace(/\/$/, '')
@@ -143,8 +128,8 @@ class OpenCodeServerManager {
 
         const modelsConfig: Record<string, unknown> = {}
         for (const model of litellmModels) {
-          modelsConfig[model.userDefinedId] = {
-            name: model.userDefinedId,
+          modelsConfig[model.name] = {
+            name: model.name,
             limit: {
               context: 200000,
               output: 8192
@@ -155,7 +140,7 @@ class OpenCodeServerManager {
 
         const effectiveDefault = modelsConfig[defaultModelId]
           ? defaultModelId
-          : (litellmModels[0]?.userDefinedId || 'glm-latest')
+          : (litellmModels[0]?.name || 'glm-latest')
 
         config.model = `litellm/${effectiveDefault}`
 
@@ -234,7 +219,6 @@ class OpenCodeServerManager {
         disabled: false,
         default_builder_enabled: true,
         planner_enabled: true,
-        force_lsp_verification: true,
         edit_retry_on_failure: true,
         edit_max_retries: 3,
         verify_todos_before_completion: true
@@ -275,14 +259,6 @@ class OpenCodeServerManager {
         preemptive_compaction: true,
         preemptive_compaction_threshold: 0.85
       },
-      tools: {
-        lsp_diagnostics: true,
-        lsp_goto_definition: true,
-        lsp_find_references: true,
-        lsp_symbols: true,
-        lsp_prepare_rename: true,
-        lsp_rename: true
-      },
       hooks: {
         PostToolUse: [
           {
@@ -320,8 +296,8 @@ class OpenCodeServerManager {
     const cacheDir = path.join(os.homedir(), '.cache', 'oh-my-opencode')
 
     try {
-      const litellmModels = await repositories.models.findByProvider('litellm')
-      const modelIds = litellmModels.map(m => m.userDefinedId)
+      const litellmModels = await repositories.models.findByProvider('litellm-api')
+      const modelIds = litellmModels.map(m => m.name)
 
       await fs.promises.mkdir(cacheDir, { recursive: true })
 

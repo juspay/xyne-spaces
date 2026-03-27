@@ -18,11 +18,15 @@ function createLongTimeoutFetch(timeoutMs: number = 600000): typeof fetch {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
     logger.debug(`[OpenCodeFetch] Starting request to ${url} with timeout ${timeoutMs}ms, init.signal present: ${!!init?.signal}`)
     const timeoutSignal = AbortSignal.timeout(timeoutMs)
-    
+
+    const combinedSignal = init?.signal
+      ? AbortSignal.any([init.signal, timeoutSignal])
+      : timeoutSignal
+
     const startTime = Date.now()
     return fetch(input, {
       ...init,
-      signal: timeoutSignal
+      signal: combinedSignal
     }).finally(() => {
       const duration = Date.now() - startTime
       logger.debug(`[OpenCodeFetch] Request to ${url} completed in ${duration}ms`)
@@ -43,6 +47,8 @@ export class OpenCodeClient {
   private directory?: string
   private eventListeners: Map<string, Set<(event: OpenCodeEvent) => void | Promise<void>>> = new Map()
   private eventStreamActive = false
+  private sseReconnectAttempts = 0
+  private static readonly MAX_SSE_RECONNECT_ATTEMPTS = 10
 
   constructor(config: Partial<OpenCodeConfig> = {}) {
     this.config = { ...DEFAULT_OPENCODE_CONFIG, ...config }
@@ -173,30 +179,58 @@ export class OpenCodeClient {
           return
         }
 
-        if (promptFetchResult) {
-          resolve(promptFetchResult)
-          return
-        }
-
         try {
-          const sessionData = await this.getSession(sessionId)
-          if (sessionData) {
-            const messages = (sessionData as unknown as { messages?: Array<{ role: string; parts?: unknown[] }> }).messages || []
-            const lastAssistantMsg = messages.filter(m => m.role === 'assistant').pop()
-            if (lastAssistantMsg) {
+          const messagesResult = await this.client.session.messages({
+            sessionID: sessionId,
+            directory: this.directory
+          })
+
+          if (messagesResult.data && Array.isArray(messagesResult.data)) {
+            const assistantMsgs = messagesResult.data.filter(m => m.info?.role === 'assistant')
+
+            if (assistantMsgs.length > 0) {
+              const allParts: Part[] = []
+              for (const msg of assistantMsgs) {
+                if (msg.parts) {
+                  allParts.push(...(msg.parts as Part[]))
+                }
+              }
+
+              const lastMsg = assistantMsgs[assistantMsgs.length - 1]
+
+              const partTypes: Record<string, number> = {}
+              for (const p of allParts) {
+                partTypes[p.type] = (partTypes[p.type] || 0) + 1
+              }
+              logger.info(`[OpenCodeClient] Resolved via session.messages() — ${assistantMsgs.length} assistant msgs, ${allParts.length} total parts, types: ${JSON.stringify(partTypes)}`)
               resolve({
-                info: lastAssistantMsg as unknown as AssistantMessage,
-                parts: (lastAssistantMsg.parts || []) as Part[]
+                info: lastMsg.info as AssistantMessage,
+                parts: allParts
               })
               return
             }
           }
+
+          // Fallback: use POST result if session.messages() returned nothing
+          if (promptFetchResult) {
+            logger.warn(`[OpenCodeClient] session.messages() returned no assistant message, using POST result`)
+            resolve(promptFetchResult)
+            return
+          }
+
+          logger.warn(`[OpenCodeClient] No assistant message found in session.messages() response`)
           resolve({
             info: { role: 'assistant', parts: [] } as unknown as AssistantMessage,
             parts: []
           })
         } catch (fetchError) {
-          reject(new OpenCodeAPIError(`Failed to fetch session after completion: ${fetchError}`, 500))
+          // Fallback: use POST result if session.messages() fails
+          if (promptFetchResult) {
+            logger.warn(`[OpenCodeClient] session.messages() failed, using POST result: ${fetchError}`)
+            resolve(promptFetchResult)
+            return
+          }
+          reject(new OpenCodeAPIError(`Failed to fetch session messages after completion: ${fetchError}`, 500))
         }
       }
 
@@ -241,28 +275,20 @@ export class OpenCodeClient {
         ...(modelOverride && { model: modelOverride })
       }).then(result => {
         if (result.error) {
-          completeWithError(new OpenCodeAPIError(`Failed to send prompt: ${JSON.stringify(result.error)}`, 400))
+          logger.warn(`[OpenCodeClient] POST returned error: ${JSON.stringify(result.error)} — waiting for SSE session.idle`)
           return
         }
-        promptFetchResult = result.data as SDKPromptResponse
-        if (!resolved && promptFetchResult) {
-          resolved = true
-          cleanup()
-          resolve(promptFetchResult)
+        const data = result.data as SDKPromptResponse
+        if (data?.info) {
+          promptFetchResult = data
+          logger.debug(`[OpenCodeClient] POST returned ${data?.parts?.length ?? 0} parts — waiting for SSE session.idle for full data`)
+        } else {
+          promptFetchResult = undefined
+          logger.debug(`[OpenCodeClient] POST returned empty data — waiting for SSE session.idle`)
         }
       }).catch(error => {
-        if (!resolved) {
-          const isTimeout = error instanceof Error && 
-            (error.message.includes('fetch failed') || 
-             error.message.includes('HeadersTimeoutError') ||
-             (error as Error & { cause?: Error }).cause?.message?.includes('Headers Timeout'))
-          
-          if (!isTimeout) {
-            completeWithError(error instanceof Error ? error : new Error(String(error)))
-          } else {
-            logger.info(`[OpenCodeClient] Prompt fetch timed out, waiting for SSE completion...`)
-          }
-        }
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        logger.warn(`[OpenCodeClient] POST fetch error: ${errorMsg} — waiting for SSE session.idle`)
       })
     })
   }
@@ -400,12 +426,15 @@ export class OpenCodeClient {
     this.eventStreamActive = true
 
     try {
-      const eventResult = await this.client.event.subscribe()
+      const eventResult = await this.client.event.subscribe({
+        directory: this.directory
+      })
       const stream = eventResult?.stream
       
       if (stream) {
         void (async () => {
           try {
+            this.sseReconnectAttempts = 0
             for await (const sdkEvent of stream) {
               if (!this.eventStreamActive) break
               const event = this.mapEventToOpenCodeEvent(sdkEvent as Event)
@@ -413,13 +442,22 @@ export class OpenCodeClient {
             }
           } catch (error) {
             if (this.eventStreamActive) {
-              logger.error('[OpenCodeClient] SSE stream error:', error)
               this.eventStreamActive = false
+              this.sseReconnectAttempts++
+
+              if (this.sseReconnectAttempts > OpenCodeClient.MAX_SSE_RECONNECT_ATTEMPTS) {
+                logger.error(`[OpenCodeClient] SSE stream error — max reconnect attempts (${OpenCodeClient.MAX_SSE_RECONNECT_ATTEMPTS}) reached, giving up:`, error)
+                return
+              }
+
+              const backoffMs = Math.min(1000 * Math.pow(2, this.sseReconnectAttempts - 1), 60000)
+              logger.warn(`[OpenCodeClient] SSE stream error (attempt ${this.sseReconnectAttempts}/${OpenCodeClient.MAX_SSE_RECONNECT_ATTEMPTS}), reconnecting in ${backoffMs}ms:`, error)
+
               setTimeout(() => {
                 if (this.eventListeners.size > 0) {
                   this.ensureEventStreamStarted()
                 }
-              }, 5000)
+              }, backoffMs)
             }
           }
         })()
