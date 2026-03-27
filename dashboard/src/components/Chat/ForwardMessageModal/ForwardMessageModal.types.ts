@@ -1,9 +1,8 @@
-import { QueryResultType } from '@rocicorp/zero';
-import { queries } from '../../../zero/queries';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { User } from '@xyne/shared';
+import { MessageWithOptionalNudgeCounts } from '../../ui/MessageBubble/MessageBubble.types';
 
-export type MessageType = QueryResultType<typeof queries.conversationMessagesV2>[number];
+export type MessageType = MessageWithOptionalNudgeCounts;
 
 export interface ForwardTarget {
   type: 'channel' | 'user';

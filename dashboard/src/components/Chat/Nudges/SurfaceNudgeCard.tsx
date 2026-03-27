@@ -26,6 +26,9 @@ const getNudgeKindLabel = (kind: string): string => NUDGE_KIND_LABELS[kind] ?? k
 
 type ActionsPayload = {
   actionType: string;
+  actionMode: 'read' | 'write';
+  onSuccess: 'none' | 'acted_on' | 'dismissed';
+  createSurfaceLink: boolean;
   data: Record<string, unknown>;
 };
 
@@ -42,7 +45,48 @@ const parseActions = (actions: unknown): ActionsPayload | null => {
   const obj = actions as Record<string, unknown>;
   const actionType = typeof obj['actionType'] === 'string' ? obj['actionType'] : null;
   if (!actionType) return null;
-  return { actionType, data: obj };
+  const defaultBehavior = (() => {
+    switch (actionType) {
+      case 'OPEN_RELATED_MESSAGE':
+      case 'OPEN_TICKET':
+        return {
+          actionMode: 'read' as const,
+          onSuccess: 'none' as const,
+          createSurfaceLink: false,
+        };
+      case 'CREATE_TICKET_FROM_MESSAGE':
+        return {
+          actionMode: 'write' as const,
+          onSuccess: 'acted_on' as const,
+          createSurfaceLink: true,
+        };
+      default:
+        return {
+          actionMode: 'write' as const,
+          onSuccess: 'acted_on' as const,
+          createSurfaceLink: true,
+        };
+    }
+  })();
+
+  return {
+    actionType,
+    actionMode:
+      obj['actionMode'] === 'read' || obj['actionMode'] === 'write'
+        ? obj['actionMode']
+        : defaultBehavior.actionMode,
+    onSuccess:
+      obj['onSuccess'] === 'none' ||
+      obj['onSuccess'] === 'acted_on' ||
+      obj['onSuccess'] === 'dismissed'
+        ? obj['onSuccess']
+        : defaultBehavior.onSuccess,
+    createSurfaceLink:
+      typeof obj['createSurfaceLink'] === 'boolean'
+        ? obj['createSurfaceLink']
+        : defaultBehavior.createSurfaceLink,
+    data: obj,
+  };
 };
 
 const parseActionResult = (actions: unknown): ActionResult | null => {
@@ -76,6 +120,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
   }, [persistedActionResult]);
 
   const isActionable = nudge.state === NudgeState.ACTIVE;
+  const canDismiss = nudge.state === NudgeState.ACTIVE || nudge.state === NudgeState.ACTED_ON;
   const isCreateTicket = nudge.nudgeKind === NudgeKind.CREATE_TICKET_FROM_MESSAGE;
   const isRelatedTicket = nudge.nudgeKind === NudgeKind.FIND_RELATED_TICKET_FROM_MESSAGE;
   const isRelatedMessage = nudge.nudgeKind === NudgeKind.FIND_RELATED_MESSAGE_FROM_MESSAGE;
@@ -178,31 +223,33 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       return;
     }
 
-    setIsActing(true);
-    const nextActionResult: ActionResult = {
-      actionType: 'OPEN_TICKET',
-      result: {
-        entityId: ticketId,
-        channelId: targetChannelId,
-        ...(conversationId ? { conversationId } : {}),
-      },
-    };
+    if (actionsPayload.onSuccess !== 'none' || actionsPayload.createSurfaceLink) {
+      setIsActing(true);
+      const nextActionResult: ActionResult = {
+        actionType: 'OPEN_TICKET',
+        result: {
+          entityId: ticketId,
+          channelId: targetChannelId,
+          ...(conversationId ? { conversationId } : {}),
+        },
+      };
 
-    setLocalActionResult(nextActionResult);
-    void zero.mutate(
-      mutators.nudges.act({
-        nudgeId: nudge.id,
-        actionResult: nextActionResult,
-        timestamp: Date.now(),
-      }),
-    );
+      setLocalActionResult(nextActionResult);
+      void zero.mutate(
+        mutators.nudges.act({
+          nudgeId: nudge.id,
+          actionResult: nextActionResult,
+          timestamp: Date.now(),
+        }),
+      );
+      onActionCompleted?.();
+    }
 
     const route = `${baseRoute}/${targetChannelId}?tab=tickets&ticketId=${ticketId}${
       conversationId ? `&conversationId=${conversationId}` : ''
     }`;
     standaloneNavigate(navigate, route);
     toast.success('Opened related ticket');
-    onActionCompleted?.();
   };
 
   const handleOpenRelatedMessage = (): void => {
@@ -225,31 +272,33 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       return;
     }
 
-    setIsActing(true);
-    const nextActionResult: ActionResult = {
-      actionType: 'OPEN_RELATED_MESSAGE',
-      result: {
-        entityId: relatedMessageId,
-        channelId: targetChannelId,
-        ...(conversationId ? { conversationId } : {}),
-      },
-    };
+    if (actionsPayload.onSuccess !== 'none' || actionsPayload.createSurfaceLink) {
+      setIsActing(true);
+      const nextActionResult: ActionResult = {
+        actionType: 'OPEN_RELATED_MESSAGE',
+        result: {
+          entityId: relatedMessageId,
+          channelId: targetChannelId,
+          ...(conversationId ? { conversationId } : {}),
+        },
+      };
 
-    setLocalActionResult(nextActionResult);
-    void zero.mutate(
-      mutators.nudges.act({
-        nudgeId: nudge.id,
-        actionResult: nextActionResult,
-        timestamp: Date.now(),
-      }),
-    );
+      setLocalActionResult(nextActionResult);
+      void zero.mutate(
+        mutators.nudges.act({
+          nudgeId: nudge.id,
+          actionResult: nextActionResult,
+          timestamp: Date.now(),
+        }),
+      );
+      onActionCompleted?.();
+    }
 
     const route = conversationId
       ? `${baseRoute}/${targetChannelId}/${conversationId}${relatedMessageId ? `?messageId=${relatedMessageId}` : ''}`
       : `${baseRoute}/${targetChannelId}`;
     standaloneNavigate(navigate, route);
     toast.success('Opened related message');
-    onActionCompleted?.();
   };
 
   const handleDismiss = (): void => {
@@ -369,7 +418,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       )}
 
       {/* Dismiss fallback */}
-      {isActionable && (
+      {canDismiss && (
         <div className='mt-3 flex items-center justify-end'>
           <Button
             size='sm'

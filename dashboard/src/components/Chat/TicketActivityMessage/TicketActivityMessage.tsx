@@ -1,14 +1,13 @@
 import React, { ReactElement } from 'react';
-import { QueryResultType } from '@rocicorp/zero';
-import { queries } from '../../../zero/queries';
 import { TicketStatusIcon } from '../../../assets/icons';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
 import { Calendar, Tag, Archive } from 'lucide-react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
+import { MessageWithOptionalNudgeCounts } from '../../ui/MessageBubble/MessageBubble.types';
 
 interface TicketActivityMessageProps {
-  message: QueryResultType<typeof queries.conversationMessagesV2>[number];
+  message: MessageWithOptionalNudgeCounts;
 }
 
 export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ message }) => {

@@ -1,10 +1,12 @@
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import type { Prisma, NudgeKind } from '@prisma/client';
+import type { Prisma, NudgeKind, SurfaceAreaType } from '@prisma/client';
+import { rebuildSurfaceNudgeAudienceCounts } from './surfaceNudgeAudienceCountService';
 import type { NudgeCandidate } from '../types';
 
 interface PersistCandidatesInput {
   sourceId: string;
+  sourceType: SurfaceAreaType;
   nudgeKind: NudgeKind;
   projectId: string;
   candidates: NudgeCandidate[];
@@ -12,37 +14,32 @@ interface PersistCandidatesInput {
 }
 
 class NudgeService {
-  async dismissNudgesForSource(sourceId: string): Promise<void> {
+  async dismissNudgesForSource(sourceId: string, sourceType: SurfaceAreaType): Promise<void> {
     try {
       await db.$transaction(async (tx) => {
         await tx.surfaceNudge.updateMany({
-          where: { sourceId, state: 'ACTIVE' },
+          where: { sourceId, state: { in: ['ACTIVE', 'ACTED_ON'] } },
           data: { state: 'DISMISSED' },
         });
-
-        const message = await tx.message.findUnique({
-          where: { messageId: sourceId },
+        await rebuildSurfaceNudgeAudienceCounts({
+          tx,
+          sourceId,
+          sourceType,
         });
-
-        if (message) {
-          await tx.message.update({
-            where: { messageId: sourceId },
-            data: { nudgeCount: 0 },
-          });
-        }
       });
 
-      logger.info('[NudgeService] Dismissed nudges for source', { sourceId });
+      logger.info('[NudgeService] Dismissed nudges for source', { sourceId, sourceType });
     } catch (error) {
       logger.error('[NudgeService] Failed to dismiss nudges for source', {
         sourceId,
+        sourceType,
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   async persistCandidates(input: PersistCandidatesInput): Promise<void> {
-    const { sourceId, nudgeKind, projectId, candidates, priority } = input;
+    const { sourceId, sourceType, nudgeKind, projectId, candidates, priority } = input;
 
     if (candidates.length === 0) return;
 
@@ -63,35 +60,23 @@ class NudgeService {
             },
           });
         }
-
-        // Update message nudgeCount if source is a message
-        const activeCount = await tx.surfaceNudge.count({
-          where: {
-            sourceId,
-            state: 'ACTIVE',
-          },
+        await rebuildSurfaceNudgeAudienceCounts({
+          tx,
+          sourceId,
+          sourceType,
         });
-
-        const message = await tx.message.findUnique({
-          where: { messageId: sourceId },
-        });
-
-        if (message) {
-          await tx.message.update({
-            where: { messageId: sourceId },
-            data: { nudgeCount: activeCount },
-          });
-        }
       });
 
       logger.info('[NudgeService] Persisted nudge candidates', {
         sourceId,
+        sourceType,
         nudgeKind,
         count: candidates.length,
       });
     } catch (error) {
       logger.error('[NudgeService] Failed to persist nudge candidates', {
         sourceId,
+        sourceType,
         nudgeKind,
         error: error instanceof Error ? error.message : String(error),
       });

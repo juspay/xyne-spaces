@@ -45,7 +45,15 @@ export const queries = defineQueries({
             })
             .related('reactions')
             .related('reactionCounts')
-            .related('attachments'),
+            .related('attachments')
+            .related('nudgeCounts', nudgeCountsQuery =>
+              nudgeCountsQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('userId', '=', ctx.userID),
+                  helpers.cmp('channelId', '=', channelId),
+                ),
+              ),
+            ),
         )
         .related('parentMessage')
         .related('participants', participantQuery =>
@@ -70,7 +78,15 @@ export const queries = defineQueries({
                 helpers.cmp('visibleTo', '=', ctx.userID),
               );
             })
-            .related('attachments'),
+            .related('attachments')
+            .related('nudgeCounts', nudgeCountsQuery =>
+              nudgeCountsQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('userId', '=', ctx.userID),
+                  helpers.cmp('channelId', '=', channelId),
+                ),
+              ),
+            ),
         )
         .related('parentMessage')
         .related('participants', participantQuery =>
@@ -97,7 +113,15 @@ export const queries = defineQueries({
         .orderBy('createdAt', 'asc')
         .related('attachments')
         .related('reactionCounts')
-        .related('reactions');
+        .related('reactions')
+        .related('nudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', 'IS NOT', null),
+            ),
+          ),
+        );
     },
   ),
   conversationMessagesV2: defineQuery(
@@ -112,7 +136,15 @@ export const queries = defineQueries({
           );
         })
         .orderBy('createdAt', 'asc')
-        .related('attachments');
+        .related('attachments')
+        .related('nudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', 'IS NOT', null),
+            ),
+          ),
+        );
     },
   ),
 
@@ -167,6 +199,28 @@ export const queries = defineQueries({
         .orderBy('createdAt', 'asc');
     },
   ),
+
+  surfaceNudgesByCountRowIds: defineQuery(
+    z.object({
+      countRowIds: z.array(z.string()),
+    }),
+    ({ ctx, args: { countRowIds } }) => {
+      let query = zql.surface_nudges.where(helpers =>
+        helpers.or(
+          ...countRowIds.map(countRowId => helpers.cmp('surfaceNudgeCountId', '=', countRowId)),
+        ),
+      );
+
+      query = query.where('state', '=', NudgeState.ACTIVE);
+
+      query = query.where(helpers =>
+        helpers.or(helpers.cmp('visibleTo', 'IS', null), helpers.cmp('visibleTo', '=', ctx.userID)),
+      );
+
+      return query.orderBy('createdAt', 'asc');
+    },
+  ),
+
   getConversationById: defineQuery(
     z.object({ conversationId: z.string() }),
     ({ ctx, args: { conversationId } }) => {
@@ -915,7 +969,15 @@ export const queries = defineQueries({
         )
         .related('reactionCounts')
         .related('reactions')
-        .related('attachments');
+        .related('attachments')
+        .related('nudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', '=', channelId),
+            ),
+          ),
+        );
     },
   ),
   channelAndThreadMessagesV2: defineQuery(
@@ -935,7 +997,15 @@ export const queries = defineQueries({
             }),
           ),
         )
-        .related('attachments');
+        .related('attachments')
+        .related('nudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', '=', channelId),
+            ),
+          ),
+        );
     },
   ),
   getAllProjects: defineQuery(() => {
@@ -1139,7 +1209,15 @@ export const queries = defineQueries({
             })
             .related('reactions')
             .related('reactionCounts')
-            .related('attachments'),
+            .related('attachments')
+            .related('nudgeCounts', nudgeCountsQuery =>
+              nudgeCountsQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('userId', '=', ctx.userID),
+                  helpers.cmp('channelId', '=', channelId),
+                ),
+              ),
+            ),
         )
         .related('parentMessage')
         .related('participants', participantQuery =>
@@ -1188,7 +1266,15 @@ export const queries = defineQueries({
                 helpers.cmp('visibleTo', '=', ctx.userID),
               );
             })
-            .related('attachments'),
+            .related('attachments')
+            .related('nudgeCounts', nudgeCountsQuery =>
+              nudgeCountsQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('userId', '=', ctx.userID),
+                  helpers.cmp('channelId', '=', channelId),
+                ),
+              ),
+            ),
         )
         .related('parentMessage');
 
@@ -1220,7 +1306,15 @@ export const queries = defineQueries({
             })
             .related('reactions')
             .related('reactionCounts')
-            .related('attachments'),
+            .related('attachments')
+            .related('nudgeCounts', nudgeCountsQuery =>
+              nudgeCountsQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('userId', '=', ctx.userID),
+                  helpers.cmp('channelId', '=', channelId),
+                ),
+              ),
+            ),
         )
         .related('parentMessage')
         .related('participants', participantQuery =>
@@ -1244,7 +1338,15 @@ export const queries = defineQueries({
                 helpers.cmp('visibleTo', '=', ctx.userID),
               );
             })
-            .related('attachments'),
+            .related('attachments')
+            .related('nudgeCounts', nudgeCountsQuery =>
+              nudgeCountsQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('userId', '=', ctx.userID),
+                  helpers.cmp('channelId', '=', channelId),
+                ),
+              ),
+            ),
         )
         .related('parentMessage')
         .related('ticket')

@@ -48,7 +48,7 @@ module.exports = {
     'subject-empty': [0],
     'type-empty': [0],
     'subject-case': [0],
-    'header-max-length': [2, 'always', 100],
+    'header-max-length': [2, 'always', 200],
     'body-leading-blank': [2, 'always'],
     'footer-leading-blank': [2, 'always'],
     'ticket-required': [2, 'always']

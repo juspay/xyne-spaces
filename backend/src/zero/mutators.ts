@@ -34,6 +34,7 @@ import {
   AttachmentEntityType,
   AttributionConfidence,
   BaseTicketType,
+  getNudgeActionBehavior,
   LinkVisibility,
   NudgeState,
   SurfaceAreaType,
@@ -79,6 +80,32 @@ export type AuthData = {
 
 export type ParticipantOperationType = 'participants_added' | 'participants_removed' | 'participants_joined';
 
+
+async function decrementSurfaceNudgeCountRow(
+  tx: Transaction<Schema>,
+  surfaceNudgeCountId: string | null | undefined,
+  timestamp: number,
+): Promise<void> {
+  if (!surfaceNudgeCountId) {
+    return;
+  }
+
+  const countRow = await tx.run(zql.surface_nudge_counts.where('id', surfaceNudgeCountId).one());
+  if (!countRow) {
+    return;
+  }
+
+  if (countRow.nudgeCount <= 1) {
+    await tx.mutate.surface_nudge_counts.delete({ id: countRow.id });
+    return;
+  }
+
+  await tx.mutate.surface_nudge_counts.update({
+    id: countRow.id,
+    nudgeCount: countRow.nudgeCount - 1,
+    updatedAt: timestamp,
+  });
+}
 
 async function reopenClosedDmParticipants(
   tx: Transaction<Schema>,
@@ -5937,20 +5964,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: nudgeId,
             state: NudgeState.DISMISSED,
             updatedAt: timestamp,
+            surfaceNudgeCountId: null,
           });
-
-          // Recalculate nudgeCount on the source message (if it exists)
-          const message = await tx.run(zql.messages.where('messageId', nudge.sourceId).one());
-          if (message) {
-            const activeNudges = await tx.run(
-              zql.surface_nudges
-                .where('sourceId', nudge.sourceId)
-                .where('state', NudgeState.ACTIVE),
-            );
-            await tx.mutate.messages.update({
-              messageId: message.messageId,
-              nudgeCount: activeNudges.length,
-            });
+          if (nudge.state === NudgeState.ACTIVE) {
+            await decrementSurfaceNudgeCountRow(tx, nudge.surfaceNudgeCountId, timestamp);
           }
 
           // Emit UserActivityEvent for feedback loop
@@ -5999,41 +6016,50 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             nudge.actions && typeof nudge.actions === 'object' && !Array.isArray(nudge.actions)
               ? (nudge.actions as Record<string, unknown>)
               : {};
+          const actionBehavior = getNudgeActionBehavior(existingActions);
+          const nextState =
+            actionBehavior.onSuccess === 'dismissed'
+              ? NudgeState.DISMISSED
+              : actionBehavior.onSuccess === 'acted_on'
+                ? NudgeState.ACTED_ON
+                : nudge.state;
+          const shouldPersistActionResult =
+            actionBehavior.actionMode === 'write' && actionBehavior.onSuccess !== 'none';
+          const shouldHideNudge = nextState !== NudgeState.ACTIVE;
 
-          await tx.mutate.surface_nudges.update(
-            actionResult
-              ? {
-                  id: nudgeId,
-                  state: NudgeState.ACTED_ON,
-                  updatedAt: timestamp,
-                  actions: {
-                    ...existingActions,
-                    actionResult: actionResult as ReadonlyJSONValue,
+          if (nextState !== nudge.state || (shouldPersistActionResult && actionResult)) {
+            await tx.mutate.surface_nudges.update(
+              shouldPersistActionResult && actionResult
+                ? {
+                    id: nudgeId,
+                    state: nextState,
+                    updatedAt: timestamp,
+                    surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
+                    actions: {
+                      ...existingActions,
+                      actionResult: actionResult as ReadonlyJSONValue,
+                    },
+                  }
+                : {
+                    id: nudgeId,
+                    state: nextState,
+                    updatedAt: timestamp,
+                    surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
                   },
-                }
-              : {
-                  id: nudgeId,
-                  state: NudgeState.ACTED_ON,
-                  updatedAt: timestamp,
-                },
-          );
-
-          // Recalculate nudgeCount on the source message (if it exists)
-          const message = await tx.run(zql.messages.where('messageId', nudge.sourceId).one());
-          if (message) {
-            const activeNudges = await tx.run(
-              zql.surface_nudges
-                .where('sourceId', nudge.sourceId)
-                .where('state', NudgeState.ACTIVE),
             );
-            await tx.mutate.messages.update({
-              messageId: message.messageId,
-              nudgeCount: activeNudges.length,
-            });
+          }
+
+          if (nudge.state === NudgeState.ACTIVE && shouldHideNudge) {
+            await decrementSurfaceNudgeCountRow(tx, nudge.surfaceNudgeCountId, timestamp);
           }
 
           // Create surface_links row when action result has target info
-          if (actionResult && typeof actionResult === 'object' && !Array.isArray(actionResult)) {
+          if (
+            actionBehavior.createSurfaceLink &&
+            actionResult &&
+            typeof actionResult === 'object' &&
+            !Array.isArray(actionResult)
+          ) {
             const result = actionResult as Record<string, unknown>;
             const resultData = result.result as Record<string, unknown> | undefined;
 

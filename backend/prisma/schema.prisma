@@ -1840,14 +1840,50 @@ model SurfaceNudge {
   actions     Json?
   state       NudgeState        @default(ACTIVE)
   visibleTo   String?
+  surfaceNudgeCountId String?
   projectId   String
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
   @@index([sourceId, state])
   @@index([projectId, state])
+  @@index([surfaceNudgeCountId, state])
   @@index([createdAt])
   @@map("surface_nudges")
+  @@schema("public")
+}
+
+model SurfaceNudgeCount {
+  id             String   @id
+  nudgeCount     Int
+  userId         String?
+  channelId      String?
+  gid            String?
+  gidType        String?
+  messageId      String?
+  ticketId       String?
+  canvasId       String?
+  callId         String?
+  conversationId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([messageId, userId])
+  @@index([messageId, channelId])
+  @@index([messageId, gid, gidType])
+  @@index([ticketId, userId])
+  @@index([ticketId, channelId])
+  @@index([ticketId, gid, gidType])
+  @@index([canvasId, userId])
+  @@index([canvasId, channelId])
+  @@index([canvasId, gid, gidType])
+  @@index([callId, userId])
+  @@index([callId, channelId])
+  @@index([callId, gid, gidType])
+  @@index([conversationId, userId])
+  @@index([conversationId, channelId])
+  @@index([conversationId, gid, gidType])
+  @@map("surface_nudge_counts")
   @@schema("public")
 }
 

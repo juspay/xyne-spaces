@@ -9,12 +9,13 @@ import { SurfaceNudgeCard } from './SurfaceNudgeCard';
 
 interface SurfaceNudgeListProps {
   messageId: string;
+  actionableCount: number;
+  countRowIds: string[];
   channelId?: string | undefined;
   contentOnly?: boolean | undefined;
   isMobile?: boolean;
   messageType?: MessageType;
   isDeleted?: boolean;
-  nudgeCount?: number;
   className?: string;
 }
 
@@ -57,12 +58,13 @@ const smoothScrollTo = (scrollContainer: Element, scrollTop: number): void => {
 
 export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
   messageId,
+  actionableCount,
+  countRowIds,
   channelId,
   contentOnly,
   isMobile,
   messageType,
   isDeleted,
-  nudgeCount,
   className,
 }) => {
   const isEligibleMessage = messageType
@@ -70,7 +72,6 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
     : true;
   const enabled = !contentOnly && !isDeleted && isEligibleMessage;
 
-  const actionableCount = nudgeCount ?? 0;
   const hasNudges = actionableCount > 0;
   const [expanded, setExpanded] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -94,37 +95,39 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
   }, [expanded, messageId]);
 
   const nudgesEnabled = enabled && hasNudges && expanded;
-  const [nudgesResult, nudgesDetails] = useCachedQuery(
-    queries.entityNudges({
-      sourceId: messageId,
-      states: ['ACTIVE', 'ACTED_ON'],
+  const indexedNudgesEnabled = nudgesEnabled && countRowIds.length > 0;
+  const effectiveCountRowIds = indexedNudgesEnabled ? countRowIds : ['__disabled__'];
+  const [indexedNudges, indexedNudgesDetails] = useCachedQuery(
+    queries.surfaceNudgesByCountRowIds({
+      countRowIds: effectiveCountRowIds,
     }),
-    { enabled: nudgesEnabled },
+    indexedNudgesEnabled ? { enabled: indexedNudgesEnabled } : false,
   );
-  const isLoading = nudgesEnabled && nudgesDetails.type === 'unknown';
-  const hasFetched = useRef(false);
-  if (nudgesDetails.type === 'complete') {
-    hasFetched.current = true;
-  }
+
+  const isLoading =
+    nudgesEnabled && countRowIds.length > 0 && indexedNudgesDetails.type === 'unknown';
+
+  const hasFetched =
+    !nudgesEnabled || countRowIds.length === 0 || indexedNudgesDetails.type === 'complete';
 
   const nudges = useMemo(() => {
-    const raw = nudgesResult ?? [];
+    const raw = [...(indexedNudges ?? [])];
+    const deduped = new Map<string, (typeof raw)[number]>();
+    for (const nudge of raw) {
+      deduped.set(nudge.id, nudge);
+    }
+    const dedupedNudges = Array.from(deduped.values());
     const kindOrder: Record<string, number> = {
       FIND_RELATED_MESSAGE_FROM_MESSAGE: 0,
       FIND_RELATED_TICKET_FROM_MESSAGE: 1,
       CREATE_TICKET_FROM_MESSAGE: 2,
     };
-    return [...raw].sort((a, b) => {
+    return [...dedupedNudges].sort((a, b) => {
       const ka = kindOrder[a.nudgeKind] ?? 99;
       const kb = kindOrder[b.nudgeKind] ?? 99;
       return ka - kb;
     });
-  }, [nudgesResult]);
-
-  const entries = useMemo(() => {
-    if (!enabled || !hasNudges || !expanded || nudges.length === 0) return [];
-    return nudges;
-  }, [enabled, expanded, hasNudges, nudges]);
+  }, [indexedNudges]);
 
   // Reset activeIndex when nudges change
   useEffect(() => {
@@ -139,17 +142,17 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
 
   // Auto-collapse when all nudges are resolved after initial fetch
   useEffect(() => {
-    if (expanded && hasFetched.current && entries.length === 0) {
+    if (expanded && hasFetched && nudges.length === 0) {
       setExpanded(false);
     }
-  }, [expanded, entries.length]);
+  }, [expanded, hasFetched, nudges.length]);
 
-  // Clamp activeIndex if entries shrink
+  // Clamp activeIndex if nudges shrink
   useEffect(() => {
-    if (entries.length > 0 && activeIndex >= entries.length) {
-      setActiveIndex(entries.length - 1);
+    if (nudges.length > 0 && activeIndex >= nudges.length) {
+      setActiveIndex(nudges.length - 1);
     }
-  }, [activeIndex, entries.length]);
+  }, [activeIndex, nudges.length]);
 
   // Auto-scroll when nudge button appears for the first time
   useEffect(() => {
@@ -226,8 +229,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
   if (!enabled || !hasNudges) return null;
 
   const suggestionLabel = actionableCount === 1 ? '1 Suggestion' : `${actionableCount} Suggestions`;
-
-  const currentNudge = entries[activeIndex];
+  const currentNudge = nudges[activeIndex];
 
   return (
     <div
@@ -264,7 +266,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
         </div>
       )}
 
-      {expanded && !isLoading && entries.length === 0 && hasFetched.current && (
+      {expanded && !isLoading && nudges.length === 0 && hasFetched && (
         <div className='mt-2 flex items-center justify-center py-3'>
           <span className='text-xs text-[#9aa0a5]'>No suggestions</span>
         </div>
@@ -277,14 +279,14 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
             nudge={currentNudge}
             channelId={channelId}
             onActionCompleted={() => {
-              if (activeIndex < entries.length - 1) {
+              if (activeIndex < nudges.length - 1) {
                 setActiveIndex(prev => prev + 1);
               }
             }}
           />
 
           {/* Carousel pagination */}
-          {entries.length > 1 && (
+          {nudges.length > 1 && (
             <div className='mt-2 flex items-center justify-center gap-3'>
               <button
                 type='button'
@@ -304,17 +306,17 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
               </button>
 
               <p className='text-[12px] font-medium tracking-[0.36px] text-[#838383]'>
-                {activeIndex + 1} / {entries.length}
+                {activeIndex + 1}
               </p>
 
               <button
                 type='button'
-                disabled={activeIndex === entries.length - 1}
+                disabled={activeIndex === nudges.length - 1}
                 onClick={() => setActiveIndex(prev => prev + 1)}
                 className={cn(
                   'flex items-center justify-center rounded-[6px] border border-border bg-card p-1',
                   'transition-colors',
-                  activeIndex === entries.length - 1
+                  activeIndex === nudges.length - 1
                     ? 'cursor-not-allowed text-[#d5d7d9]'
                     : 'text-[#9aa0a5] hover:bg-accent',
                 )}

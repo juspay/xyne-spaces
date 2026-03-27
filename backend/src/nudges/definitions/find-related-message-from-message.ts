@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { db } from '@/database/client';
 import {
   makeLiteLLMProvider,
   generateRunId,
@@ -15,10 +16,11 @@ import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import { vespaService } from '@/services/vespaSearch';
 import { parseAgentOutput } from '@/services/agents/utils';
 import type {
-  NudgeDefinition,
-  MessageNudgePayload,
+  ExplicitNudgeAction,
   MessageNudgeEvaluationContext,
+  MessageNudgePayload,
   NudgeCandidate,
+  NudgeDefinition,
 } from '../types';
 import type { VespaChatMessageDocument } from '@/vespa/src/types';
 import {
@@ -148,6 +150,25 @@ Steps:
 
 Rules:
 - If the message is purely social/conversational (greetings, thanks, etc.), skip the tool call and return hasRelatedMessage=false.
+- Do not call search_messages if the source message is only a mention, special mention, greeting, or routing ping with no topic.
+- Examples that must return hasRelatedMessage=false:
+  - "@channel"
+  - "@here"
+  - "@Amrit Raj"
+  - "@Amrit Raj can you check"
+  - "ping"
+  - "following up"
+- Short follow-up questions are allowed only if they still imply a concrete, recoverable topic from the source message itself or the recent_thread_messages.
+- Examples that may be valid:
+  - "any update on the vespa deployment?"
+  - "did we fix the nudge worker issue?"
+  - "is the migration done?"
+  - "any update?" only if recent_thread_messages make the topic explicit and unambiguous.
+- If the topic cannot be identified confidently from the source message plus recent_thread_messages, return hasRelatedMessage=false.
+- If search_messages returns results, that does NOT guarantee the results are relevant. Treat search results only as candidates and inspect the actual message content carefully before deciding.
+- Only set hasRelatedMessage=true if the returned message content clearly matches the same specific topic or issue as the source message. Shared words, vague operational similarity, or generic follow-ups are not enough.
+- Never use search relevance score alone as justification for a match.
+- Bias toward suppressing weak or ambiguous matches.
 - You may call search_messages multiple times with different queries if the first search is not specific enough.
 - Only set hasRelatedMessage=true if a message clearly discusses the same specific topic or issue.
 - summary should be a brief (1 sentence) description of the shared topic.
@@ -313,22 +334,37 @@ export const findRelatedMessageFromMessage: NudgeDefinition<
       return [];
     }
 
+    const relatedChannel = await db.channel.findUnique({
+      where: { id: resolvedChannelId },
+      select: { scopeType: true, visibility: true },
+    });
+
     const description =
       agentResult.summary?.trim() || agentResult.reason || 'A related discussion was found in another thread.';
     const evidence =
       agentResult.matchingEvidence?.trim() || description;
+    const shouldRestrictVisibility =
+      relatedChannel?.scopeType === 'DM' ||
+      relatedChannel?.scopeType === 'GROUP_DM' ||
+      relatedChannel?.visibility === 'PRIVATE';
+
+    const actions: ExplicitNudgeAction = {
+      actionType: 'OPEN_RELATED_MESSAGE',
+      actionMode: 'read',
+      onSuccess: 'none',
+      createSurfaceLink: false,
+      entityId: agentResult.messageId,
+      evidence,
+      conversationId: agentResult.conversationId || '',
+      channelId: resolvedChannelId,
+    };
 
     return [
       {
         title: 'Related conversation found',
         description,
-        actions: {
-          actionType: 'OPEN_RELATED_MESSAGE',
-          entityId: agentResult.messageId,
-          evidence,
-          conversationId: agentResult.conversationId || '',
-          channelId: resolvedChannelId,
-        },
+        ...(shouldRestrictVisibility ? { visibleTo: context.message.senderId } : {}),
+        actions,
       },
     ];
   },

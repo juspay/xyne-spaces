@@ -1305,7 +1305,26 @@ export const surfaceNudgeTable = table('surface_nudges')
     actions: json().optional(),
     state: enumeration<NudgeState>(),
     visibleTo: string().optional(),
+    surfaceNudgeCountId: string().optional(),
     projectId: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const surfaceNudgeCountTable = table('surface_nudge_counts')
+  .columns({
+    id: string(),
+    nudgeCount: number(),
+    userId: string().optional(),
+    channelId: string().optional(),
+    gid: string().optional(),
+    gidType: string().optional(),
+    messageId: string().optional(),
+    ticketId: string().optional(),
+    canvasId: string().optional(),
+    callId: string().optional(),
+    conversationId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2595,6 +2614,11 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     destField: ['messageId'],
     destSchema: reactionCountTable,
   }),
+  nudgeCounts: many({
+    sourceField: ['messageId'],
+    destField: ['messageId'],
+    destSchema: surfaceNudgeCountTable,
+  }),
 }));
 
 export const draftMessageTableRelationships = relationships(draftMessageTable, ({ many }) => ({
@@ -2733,7 +2757,28 @@ export const surfaceNudgeTableRelationships = relationships(surfaceNudgeTable, (
     destField: ['messageId'],
     destSchema: messageTable,
   }),
+  countRow: one({
+    sourceField: ['surfaceNudgeCountId'],
+    destField: ['id'],
+    destSchema: surfaceNudgeCountTable,
+  }),
 }));
+
+export const surfaceNudgeCountTableRelationships = relationships(
+  surfaceNudgeCountTable,
+  ({ one, many }) => ({
+    sourceMessage: one({
+      sourceField: ['messageId'],
+      destField: ['messageId'],
+      destSchema: messageTable,
+    }),
+    canonicalNudges: many({
+      sourceField: ['id'],
+      destField: ['surfaceNudgeCountId'],
+      destSchema: surfaceNudgeTable,
+    }),
+  }),
+);
 
 export const surfaceLinkTableRelationships = relationships(surfaceLinkTable, ({ one }) => ({
   sourceMessage: one({
@@ -3207,6 +3252,7 @@ export const schema = createSchema({
     notificationPreferenceTable,
     proactiveNudgeTable,
     surfaceNudgeTable,
+    surfaceNudgeCountTable,
     callTable,
     callParticipantTable,
     recurringCallSeriesTable,
@@ -3290,6 +3336,7 @@ export const schema = createSchema({
     activityTableRelationships,
     proactiveNudgeTableRelationships,
     surfaceNudgeTableRelationships,
+    surfaceNudgeCountTableRelationships,
     callTableRelationships,
     callParticipantTableRelationships,
     recurringCallSeriesTableRelationships,
@@ -3382,6 +3429,7 @@ export type Activity = Row<typeof schema.tables.activities>;
 export type NotificationPreference = Row<typeof schema.tables.notification_preferences>;
 export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
 export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;
+export type SurfaceNudgeCount = Row<typeof schema.tables.surface_nudge_counts>;
 export type Call = Row<typeof schema.tables.calls>;
 export type CallParticipant = Row<typeof schema.tables.call_participants>;
 export type ConversationParticipant = Row<typeof schema.tables.conversation_participants>;

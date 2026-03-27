@@ -1,7 +1,5 @@
-import { QueryResultType } from '@rocicorp/zero';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
-import { queries } from '../../../zero/queries';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
 import { BotBubble } from '../BotBubble';
@@ -58,7 +56,10 @@ import { useShortcutById } from '../../../shortcuts';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
 import { useUser } from '../../../hooks/useUsers';
 import { SHAREABLE_ORIGIN } from '../../../config';
-import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
+import {
+  ConversationWithTicket,
+  MessageWithOptionalNudgeCounts,
+} from '../../ui/MessageBubble/MessageBubble.types';
 import { SubTicketModal } from '../../Tickets/SubTicketModal/SubTicketModal';
 import { ForwardMessageForm } from '../ForwardMessageModal/ForwardMessageModal';
 import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
@@ -74,7 +75,7 @@ export interface ThreadData {
 }
 
 interface ChatBubbleProps {
-  message: QueryResultType<typeof queries.conversationMessagesV2>[number];
+  message: MessageWithOptionalNudgeCounts;
   channelId: string;
   projectId?: string | undefined;
   channelScopeType?: ChannelScopeType | undefined;

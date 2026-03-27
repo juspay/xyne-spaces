@@ -21,3 +21,4 @@ export {
 } from './utils/activityMetadataParser';
 export * from './types/research';
 export * from './tickets';
+export * from './nudges';

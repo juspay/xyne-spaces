@@ -2,6 +2,17 @@ import type { NudgeKind, SurfaceAreaType } from '@prisma/client';
 import type { ActivityWithRelatedData } from '@/services/userActivityService';
 
 export type NudgeMode = 'explicit' | 'implicit';
+export type NudgeActionMode = 'read' | 'write';
+export type NudgeActionSuccess = 'none' | 'acted_on' | 'dismissed';
+
+export interface ExplicitNudgeAction {
+  actionType: string;
+  actionMode: NudgeActionMode;
+  onSuccess: NudgeActionSuccess;
+  createSurfaceLink?: boolean;
+  actionResult?: Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 // --- Generic activity event payload (the universal nudge trigger) ---
 
