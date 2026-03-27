@@ -1,5 +1,6 @@
 import { repositories } from '../database/repositories/index';
 import { aclService } from './aclService';
+import { gcsService } from './gcsService';
 import { AccessType, PrismaClient } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
@@ -20,6 +21,7 @@ import {
   UserGroupWithMappings,
   ResourceAccessWithDetails,
 } from '../types/database';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * User Management Service
@@ -695,4 +697,44 @@ export class UserManagementService {
       };
     }
   }
+
+  /**
+   * Upload profile picture for a user
+   */
+  async uploadProfilePicture(userId: string, file: Express.Multer.File): Promise<string> {
+    try {
+      // Generate file path with timestamp and uuid for uniqueness
+      const timestamp = Date.now();
+      const uuid = uuidv4();
+      const filename = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const filePath = `profile-pictures/${userId}/${timestamp}-${uuid}-${filename}`;
+
+      // Upload to GCS
+      const gcsResult = await gcsService.uploadFile(file.buffer, {
+        filename: filePath,
+        contentType: file.mimetype,
+        metadata: {
+          userId,
+          originalName: file.originalname,
+          uploadedAt: new Date().toISOString(),
+        },
+      });
+
+      // Store only the GCS path in database (not full URL)
+      // Profile picture is served via streaming endpoint like custom emojis
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { picture: gcsResult.gcsPath },
+      });
+
+      logger.info(`Profile picture uploaded for user ${userId}`, {
+        filePath: gcsResult.gcsPath,
+      });
+      return gcsResult.gcsPath;
+    } catch (error) {
+      logger.error(`Error uploading profile picture for user ${userId}:`, error);
+      throw error;
+    }
+  }
+
 }

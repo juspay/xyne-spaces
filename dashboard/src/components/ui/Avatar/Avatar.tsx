@@ -6,6 +6,7 @@ import { cn } from '../../../utils/classNames';
 import { useUser } from '../../../hooks/useUsers';
 import { useUserPresence } from '../../../hooks/usePresence';
 import { User } from '../../../machines/stateMachine';
+import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 
 export type AvatarSize = 'sm' | 'rg' | 'md' | 'lg' | 'xl' | 'big';
 
@@ -140,6 +141,7 @@ const Avatar = ({
   const { user: currentUser } = useAuth();
   const targetUserId = userId || currentUser?.id || '';
   const user: User | undefined = useUser(targetUserId);
+  const [imageError, setImageError] = React.useState(false);
 
   const { status: presenceStatus } = useUserPresence(targetUserId);
 
@@ -151,12 +153,21 @@ const Avatar = ({
       .toUpperCase()
       .slice(0, 1) || '';
 
+  // Picture path includes timestamp, so it naturally changes on each upload
+  const { url: pictureUrl } = useProfilePictureUrl(targetUserId, user?.picture);
+
   const sizeClass = sizeClasses[size];
   const textSizeClass = textSizeClasses[size];
 
-  const colorClass = !user?.picture
-    ? generateAvatarColor(targetUserId)
-    : { bg: 'bg-muted', text: 'text-muted-foreground' };
+  const colorClass =
+    !pictureUrl || imageError
+      ? generateAvatarColor(targetUserId)
+      : { bg: 'bg-muted', text: 'text-muted-foreground' };
+
+  const handleImageError = (): void => {
+    setImageError(true);
+    console.warn(`Failed to load avatar image for user ${targetUserId}: ${user?.picture}`);
+  };
 
   // Render online indicator as SVG circle (guaranteed perfect circle)
   const renderOnlineIndicator = (): ReactElement | null => {
@@ -197,7 +208,13 @@ const Avatar = ({
       className={cn('relative inline-flex shrink-0 visual-regression-hide', sizeClass, className)}
     >
       <AvatarRoot className={cn(colorClass.bg, colorClass.text, 'size-full', textSizeClass)}>
-        {user?.picture && <AvatarImage src={user.picture} alt={user?.name || 'User avatar'} />}
+        {pictureUrl && !imageError && (
+          <AvatarImage
+            src={pictureUrl}
+            alt={user?.name || 'User avatar'}
+            onError={handleImageError}
+          />
+        )}
 
         <AvatarFallback className={cn(colorClass.bg, colorClass.text, 'size-full', textSizeClass)}>
           {initials}

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { UserManagementService } from '../services/userManagementService';
+import { gcsService } from '../services/gcsService';
 import { AccessType } from '@prisma/client';
 import { logger } from '../utils/logger';
 
@@ -122,6 +123,7 @@ export class UserManagementController {
         id: user.id,
         name: user.name,
         email: user.email,
+        picture: user.picture,
         status: user.status,
         userGroups: user.userGroupMappings.reduce((acc, mapping) => {
           if (mapping.userGroup) {
@@ -844,6 +846,100 @@ export class UserManagementController {
       res.status(500).json({ error: 'Internal server error' });
     }
   };
+
+  /**
+   * Upload profile picture
+   */
+  uploadProfilePicture = async (req: Request & { user?: { id: string } }, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: 'No file provided' });
+        return;
+      }
+
+      // Validate file type
+      const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!ALLOWED_TYPES.includes(file.mimetype)) {
+        res.status(400).json({ error: 'Invalid file type. Only JPG, PNG, and WebP are allowed.' });
+        return;
+      }
+
+      // Validate file size (max 5MB)
+      const MAX_FILE_SIZE = 5 * 1024 * 1024;
+      if (file.size > MAX_FILE_SIZE) {
+        res.status(413).json({ error: 'File too large. Maximum size is 5MB.' });
+        return;
+      }
+
+      // Use the userManagementService to upload picture
+      const picturePath = await userManagementService.uploadProfilePicture(userId, file);
+
+      res.status(200).json({ picture: picturePath });
+    } catch (error) {
+      logger.error('Error uploading profile picture:', error);
+      res.status(500).json({ error: 'Failed to upload profile picture' });
+    }
+  };
+
+  /**
+   * Stream profile picture for a user
+   * GET /api/users/:id/picture
+   * 
+   * Cache strategy mirrors emoji service:
+   * - Picture path includes timestamp, so it changes with each upload
+   * - Changed path = new URL = browser never has it cached
+   * - Safe to use 1-year cache since URL changes = new content
+   */
+  streamProfilePicture = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const user = await userManagementService.getUser(id);
+
+      if (!user?.picture) {
+        res.status(404).json({ error: 'Profile picture not found' });
+        return;
+      }
+
+      const gcsPath = user.picture;
+      const fileExists = await gcsService.fileExists(gcsPath);
+      if (!fileExists) {
+        res.status(404).json({ error: 'Profile picture file not found' });
+        return;
+      }
+
+      const metadata = await gcsService.getFileMetadata(gcsPath);
+      const contentType = metadata.contentType || 'image/png';
+      const fileSize = parseInt(String(metadata.size || '0'), 10);
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Length', fileSize);
+      // Cache for 1 year - safe because picture path includes timestamp and changes on each upload
+      res.setHeader('Cache-Control', 'public, max-age=31536000');
+
+      const stream = await gcsService.createReadStream(gcsPath);
+      stream.pipe(res);
+
+      stream.on('error', (error: Error) => {
+        logger.error('Stream error for profile picture:', error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to stream profile picture' });
+        }
+      });
+    } catch (error) {
+      logger.error('Error streaming profile picture:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to stream profile picture' });
+      }
+    }
+  };
+
 }
 
 export const userManagementController = UserManagementController.getInstance();

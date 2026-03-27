@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ChannelController } from '../controllers/channelController';
 import { userManagementController } from '../controllers/userManagementController';
+import { uploadConfig } from '../middleware/upload';
 
 const router = Router();
 const channelController = new ChannelController();
@@ -9,6 +10,8 @@ const channelController = new ChannelController();
 // Note: Specific routes must come before parameterized routes
 router.get('/search', userManagementController.searchUsers); // Search users
 router.get('/me/dms', channelController.getUserDMs); // Get all user's DM channels
+router.post('/me/picture', uploadConfig.single('picture'), userManagementController.uploadProfilePicture); // Upload profile picture
+router.get('/:id/picture', userManagementController.streamProfilePicture); // Stream user's profile picture
 router.get('/', userManagementController.getAllUsers); // Get all users (must come before /:id)
 router.get('/:id', userManagementController.getUserById); // Get user by ID
 
