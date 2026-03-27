@@ -364,11 +364,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   );
 
   // Fetch boards for the selected channel's project (or default projectId)
-  const selectedProjectId =
+  const selectedChannelProjectId =
     (isFromSubTicket || isFromAI) && selectedChannel?.projectId
       ? selectedChannel.projectId
       : projectId;
-  const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: selectedProjectId }));
+  const [boards] = useCachedQuery(
+    queries.boardsListByProject({ projectId: selectedChannelProjectId }),
+  );
 
   // Get selected board's metadata for ticket form configuration
   const selectedBoard = useMemo(
@@ -468,7 +470,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useDuplicateTicketCheck({
     title: titleValue,
     description: descriptionValue,
-    projectId,
+    projectId: selectedChannelProjectId,
     boardId: formValues?.boardId,
     isOpen,
     debounceMs: 2000,
@@ -481,14 +483,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   } = useBoardSuggestion({
     title: titleValue,
     description: descriptionValue,
-    projectId,
+    projectId: selectedChannelProjectId,
     currentBoardId: formValues?.boardId || '',
     isOpen,
     debounceMs: 2000,
   });
 
   // Query all tickets in the project to extract available tags
-  const [projectTickets] = useCachedQuery(queries.ticketsByProject({ projectId: projectId }));
+  const [projectTickets] = useCachedQuery(
+    queries.ticketsByProject({ projectId: selectedChannelProjectId }),
+  );
 
   const userGroupOptions = useUserGroups();
 
@@ -899,7 +903,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           'channelId',
           isFromSubTicket || isFromAI ? formData.channelId : channelId,
         );
-        formDataPayload.append('projectId', projectId);
+        if (selectedChannelProjectId) {
+          formDataPayload.append('projectId', selectedChannelProjectId);
+        }
 
         if (assignedTo) {
           formDataPayload.append('assignedTo', assignedTo);
@@ -997,7 +1003,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           boardId: formData.boardId,
           // For subtickets or AI-initiated tickets, use the selected channel from form; otherwise use the prop
           channelId: isFromSubTicket || isFromAI ? formData.channelId : channelId,
-          projectId,
+          ...(selectedChannelProjectId && { projectId: selectedChannelProjectId }),
           createdBy: user.id,
           updatedBy: user.id,
           ticketType: formData.ticketType,
