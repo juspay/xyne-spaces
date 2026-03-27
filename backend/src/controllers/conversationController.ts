@@ -20,8 +20,6 @@ import { BotCommandParser, botProcessor, BotMessageMetadata } from '../services/
 import { getBotInfo, isRegisteredBot } from '../bots/core/bot-utils';
 import { v4 as uuidv4 } from 'uuid';
 import { SendMessageResponse, GetMessagesResponse } from '../api/types/MessageTypes';
-import { extractFirstUrl } from '../utils/urlUtils';
-import { linkPreviewService } from '../services/linkPreviewService';
 import { config } from '../config/env';
 import { z } from 'zod';
 import { logger } from '../utils/logger';
@@ -42,16 +40,6 @@ interface UserInfo {
   name: string;
   email: string;
   picture?: string;
-}
-
-interface LinkPreviewMetadata {
-  linkPreview: {
-    url: string;
-    title?: string;
-    description?: string;
-    image?: string;
-    favicon?: string;
-  };
 }
 
 // Zod schema for validating file metadata structure
@@ -114,37 +102,6 @@ export class ConversationController {
       email: 'user@example.com',
       picture: undefined,
     };
-  }
-
-  // Helper method to fetch link preview metadata
-  public async fetchLinkPreviewMetadata(content: string): Promise<LinkPreviewMetadata | null> {
-    try {
-      // Remove mention HTML spans before checking for URLs
-      // This prevents link previews from being generated for user mentions
-      const contentWithoutMentions = content.replace(
-        /<span[^>]*class="[^"]*chat-input-mention[^"]*"[^>]*>@[^<]+<\/span>/g,
-        ''
-      );
-
-      const url = extractFirstUrl(contentWithoutMentions);
-      if (!url) {
-        return null;
-      }
-
-      logger.info('🔗 [LINK-PREVIEW] Detected URL in message:', url);
-
-      // Fetch metadata asynchronously (non-blocking)
-      const metadata = await linkPreviewService.fetchMetadata(url);
-
-      logger.info('✅ [LINK-PREVIEW] Successfully fetched metadata for:', url);
-
-      return {
-        linkPreview: metadata,
-      };
-    } catch (error) {
-      logger.error('❌ [LINK-PREVIEW] Failed to fetch link preview:', error);
-      return null;
-    }
   }
 
   private async pushVespaJobForMessage(
@@ -293,8 +250,6 @@ export class ConversationController {
         return;
       }
 
-      // Fetch link preview metadata if URL is present
-      const linkMetadata = content ? await this.fetchLinkPreviewMetadata(content) : null;
 
       // First create the message
       const messageData: CreateMessageInput = {
@@ -304,7 +259,6 @@ export class ConversationController {
         msgType: msgType || MessageType.USER,
         hasAttachment: files.length > 0,
         visibleTo: visibleTo ?? null,
-        metadata: linkMetadata || undefined,
       };
 
       // Create a placeholder conversation first
@@ -755,8 +709,6 @@ export class ConversationController {
         return;
       }
 
-      // Fetch link preview metadata if URL is present
-      const linkMetadata = content ? await this.fetchLinkPreviewMetadata(content) : null;
 
       // Generate child conversation ID if showInChannel is true
       const childConversationId = showInChannel ? uuidv4() : undefined;
@@ -771,7 +723,6 @@ export class ConversationController {
         showInChannel: showInChannel,
         childConversationId: childConversationId,
         visibleTo: visibleTo ?? null,
-        metadata: linkMetadata || undefined
       };
 
       const message = await this.messageRepository.create(messageData);

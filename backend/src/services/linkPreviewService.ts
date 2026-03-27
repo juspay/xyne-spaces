@@ -2,7 +2,8 @@ import axios from 'axios';
 import { parse } from 'node-html-parser';
 import {logger} from '@/utils/logger';
 
-export interface LinkMetadata {
+export interface ExternalLinkMetadata {
+  type?: 'external';
   url: string;
   title?: string;
   description?: string;
@@ -10,6 +11,49 @@ export interface LinkMetadata {
   image?: string;
   favicon?: string;
 }
+
+export interface InternalLinkAttachment {
+  id: string;
+  entityType: string;
+  entityId: string;
+  storageProvider: string;
+  originalFilename: string;
+  mimetype: string;
+  size: number;
+  width?: number | null;
+  height?: number | null;
+  uploadedByUserId: string;
+  createdAt: number;
+  url: string;
+  createdBy: string;
+  metadata?: Record<string, unknown> | null;
+  conversationId?: string | null;
+  thumbnailUrl?: string | null;
+}
+
+export interface InternalMessageLinkMetadata {
+  type: 'internal_message';
+  url: string;
+  messageId: string;
+  channelId: string;
+  channelName: string;
+  channelScopeType?: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+  content: string;
+  timestamp: string;
+  replyCount?: number;
+  isDeleted?: boolean;
+  hasAttachment?: boolean;
+  attachments?: InternalLinkAttachment[];
+  /** The original message's own link preview (if it had one) */
+  nestedLinkPreview?: Record<string, unknown>;
+  /** Ticket data if the linked conversation has an associated ticket */
+  ticket?: Record<string, unknown>;
+}
+
+export type LinkMetadata = ExternalLinkMetadata | InternalMessageLinkMetadata;
 
 /**
  * LinkPreviewService

@@ -120,6 +120,73 @@ export function extractFirstUrl(text: string): string | null {
   return urls.length > 0 ? urls[0] : null;
 }
 
+// ---------------------------------------------------------------------------
+// Internal link detection
+// ---------------------------------------------------------------------------
+
+const INTERNAL_HOSTS = [
+  'spaces.xyne.juspay.net',
+  'spaces.sandbox.xyne.juspay.net'
+];
+
+// Pre-compiled regex for internal URL extraction (avoids creating new RegExp on each call)
+// Matches: production and sandbox domains
+const INTERNAL_URL_REGEX = /https?:\/\/(?:spaces\.xyne\.juspay\.net|spaces\.sandbox\.xyne\.juspay\.net)\/chat\/[^\s<>"'\)\]]*/i;
+
+export interface InternalLinkInfo {
+  type: 'channel_message' | 'thread_message';
+  url: string;
+  channelId: string;
+  conversationId?: string;
+  messageId?: string;
+}
+
+/**
+ * Extract the first URL that points to our own app from (possibly HTML) text.
+ * Handles localhost:port variants and the production domain.
+ */
+export function extractInternalUrl(text: string): string | null {
+  if (!text) return null;
+  const clean = stripAndDecodeHtml(text);
+  const m = clean.match(INTERNAL_URL_REGEX);
+  return m ? trimSurroundingPunctuation(m[0]) : null;
+}
+
+/**
+ * Parse an internal app URL into its route components.
+ * Returns null when the URL does not match known app patterns.
+ */
+export function parseInternalUrl(url: string): InternalLinkInfo | null {
+  try {
+    const parsed = new URL(url);
+    if (!INTERNAL_HOSTS.includes(parsed.hostname)) return null;
+
+    // /chat/(dir|dm|bookmarks|activity)/:channelId[/:conversationId]
+    const pathMatch = parsed.pathname.match(
+      /^\/chat\/(?:dir|dm|bookmarks|activity)\/([^/]+)(?:\/([^/]+))?/
+    );
+    if (!pathMatch) return null;
+
+    const channelId = pathMatch[1];
+    const pathConversationId = pathMatch[2];
+
+    const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+    const messageId = hashParams.get('messageId') ?? undefined;
+    const originConversationId = hashParams.get('origin') ?? undefined;
+
+    const conversationId = pathConversationId || originConversationId;
+
+    if (messageId && conversationId) {
+      return { type: 'thread_message', url, channelId, conversationId, messageId };
+    }
+    return { type: 'channel_message', url, channelId, conversationId };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * Validate using native URL parser when possible.
  * If input is a bare domain (no protocol), we attempt to prepend "https://" for validation.

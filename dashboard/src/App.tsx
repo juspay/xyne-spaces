@@ -19,7 +19,7 @@ import { VSCodeProvider } from './contexts/VSCodeContext';
 import { WorkflowVSCodeOverlay } from './components/Workflows/VSCodePanel/WorkflowVSCodeOverlay';
 import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
-import { TRUSTED_ORIGINS } from './config';
+import { TRUSTED_ORIGINS } from '@xyne/shared';
 
 const App = (): ReactElement => {
   // Initialize theme on app load

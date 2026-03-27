@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityClassification, ActivityClassificationJobType, UserType } from '@prisma/client';
+import { ActivityClassification, ActivityClassificationJobType, AttachmentEntityType, UserType } from '@prisma/client';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
@@ -17,10 +17,12 @@ import { createDirectMessageActivities } from '@/utils/messageActivityUtils';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { activityTrackingService } from '@/services/activityTrackingService';
-import { Platform } from '@xyne/shared';
+import { Platform, serializeMessagePreviewMd, serializeLinkPreviewMd, parseLinkPreviewMd, type MessagePreviewData, type TicketPreviewSnapshot } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
+import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
+import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
 
 const LARGE_GROUP_DM_THRESHOLD = 8;
 const messageAttachmentRepository = new MessageAttachmentRepository();
@@ -44,6 +46,17 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     if (!message || message.msgType === "SYSTEM" ) {
       return;
+    }
+
+    // Resolve link preview asynchronously (fire-and-forget)
+    // Tries internal app link first, then external OG preview
+    if (message.content && message.msgType === 'USER') {
+      this.resolveLinkPreview(message.messageId, message.content).catch(error => {
+        logger.error('[MessagesSideEffect] Failed to resolve link preview:', {
+          messageId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
 
     const conversation = await db.conversation.findUnique({
@@ -330,6 +343,198 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelParticipantIds
       );
     }
+  }
+
+  /**
+   * Resolve link preview for a message: tries internal app link first,
+   * falls back to external OG metadata.
+   */
+  private async resolveLinkPreview(messageId: string, content: string): Promise<void> {
+    const contentWithoutMentions = content.replace(
+      /<span[^>]*class="[^"]*chat-input-mention[^"]*"[^>]*>@[^<]+<\/span>/g,
+      ''
+    );
+
+    // 1) Try internal app link first (DB lookup, no HTTP fetch)
+    const resolvedInternal = await this.resolveInternalLinkPreview(messageId, contentWithoutMentions);
+    if (resolvedInternal) return;
+
+    // 2) Fall through to external OG-based preview
+    await this.resolveExternalLinkPreview(messageId, contentWithoutMentions);
+  }
+
+  /**
+   * Fetch external OG metadata for the first URL in the content,
+   * then write the result to message.link_preview_md.
+   */
+  private async resolveExternalLinkPreview(messageId: string, content: string): Promise<void> {
+    const url = extractFirstUrl(content);
+    if (!url) return;
+
+    logger.info('[MessagesSideEffect] Detected external URL:', url);
+
+    const metadata = await linkPreviewService.fetchMetadata(url) as ExternalLinkMetadata;
+
+    const md = serializeLinkPreviewMd({
+      url: metadata.url,
+      title: metadata.title,
+      description: metadata.description,
+      siteName: metadata.siteName,
+      image: metadata.image,
+      favicon: metadata.favicon,
+    });
+    if (!md) return;
+
+    await db.message.update({
+      where: { messageId },
+      data: { link_preview_md: md },
+    });
+
+    logger.info(`[MessagesSideEffect] Updated message ${messageId} with external link preview`);
+  }
+
+  /**
+   * Detect an internal app URL in content and resolve it via DB lookups.
+   * Returns true if an internal preview was written, false otherwise.
+   */
+  private async resolveInternalLinkPreview(messageId: string, content: string): Promise<boolean> {
+    const rawUrl = extractInternalUrl(content);
+    if (!rawUrl) return false;
+
+    const info = parseInternalUrl(rawUrl);
+    if (!info) return false;
+
+    logger.info('[MessagesSideEffect] Detected internal URL:', rawUrl);
+
+    let targetMessageId: string | undefined = info.messageId;
+
+    if (!targetMessageId && info.conversationId) {
+      const conv = await db.conversation.findUnique({
+        where: { conversationId: info.conversationId },
+        select: { initialMessageId: true },
+      });
+      targetMessageId = conv?.initialMessageId ?? undefined;
+    }
+
+    if (!targetMessageId) return false;
+
+    const targetMessage = await db.message.findUnique({
+      where: { messageId: targetMessageId },
+    });
+    if (!targetMessage) return false;
+
+    const [senderUser, conv, messageAttachments] = await Promise.all([
+      db.user.findUnique({
+        where: { id: targetMessage.senderId },
+        select: { id: true, name: true, picture: true },
+      }),
+      db.conversation.findUnique({
+        where: { conversationId: targetMessage.conversationId },
+        select: { conversationId: true, replyCount: true, channelId: true },
+      }),
+      db.messageAttachment.findMany({
+        where: {
+          entityId: targetMessageId,
+          entityType: AttachmentEntityType.CHAT,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+    if (!senderUser || !conv) return false;
+
+    const channel = await db.channel.findUnique({
+      where: { id: conv.channelId },
+      select: { id: true, name: true, scopeType: true },
+    });
+    if (!channel) return false;
+
+    const rawContent = targetMessage.content;
+    const plainForLength = rawContent
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Read nested link preview from link_preview_md (new) or fall back to metadata.linkPreview (legacy)
+    let nestedLinkPreview: Record<string, unknown> | undefined;
+    if (targetMessage.link_preview_md) {
+      const parsed = parseLinkPreviewMd(targetMessage.link_preview_md);
+      if (parsed) {
+        nestedLinkPreview = parsed as unknown as Record<string, unknown>;
+      }
+    } else {
+      const msgMeta = targetMessage.metadata as Record<string, unknown> | null;
+      nestedLinkPreview = msgMeta?.['linkPreview'] as Record<string, unknown> | undefined;
+    }
+
+    const ticket = await db.ticket.findFirst({
+      where: { conversationId: targetMessage.conversationId },
+    });
+
+    const attachments = messageAttachments.map((att) => ({
+      id: att.id,
+      entityType: att.entityType,
+      entityId: att.entityId,
+      storageProvider: att.storageProvider,
+      originalFilename: att.originalFilename,
+      mimetype: att.mimetype,
+      size: att.size,
+      width: att.width ?? null,
+      height: att.height ?? null,
+      uploadedByUserId: att.uploadedByUserId,
+      createdAt: att.createdAt.getTime(),
+      url: att.url,
+      createdBy: att.createdBy,
+      metadata: (att.metadata as Record<string, unknown>) ?? null,
+      conversationId: att.conversationId ?? null,
+      thumbnailUrl: att.thumbnailUrl ?? null,
+    }));
+
+    const previewData: MessagePreviewData = {
+      url: rawUrl,
+      messageId: targetMessage.messageId,
+      channelId: channel.id,
+      channelName: channel.name,
+      channelScopeType: channel.scopeType,
+      senderId: senderUser.id,
+      senderName: senderUser.name,
+      senderAvatar: senderUser.picture ?? undefined,
+      content: plainForLength.length > 300 ? rawContent.slice(0, 600) : rawContent,
+      timestamp: targetMessage.createdAt.toISOString(),
+      replyCount: conv.replyCount,
+      isDeleted: targetMessage.isDeleted,
+      hasAttachment: attachments.length > 0,
+      attachments: attachments.length > 0 ? attachments : undefined,
+      nestedLinkPreview: nestedLinkPreview ?? undefined,
+      ticket: ticket ? {
+        id: ticket.id,
+        title: ticket.title,
+        description: ticket.description,
+        statusV2: ticket.statusV2,
+        priority: ticket.priority,
+        xyneId: ticket.xyneId,
+        createdBy: ticket.createdBy,
+        assignedTo: ticket.assignedTo,
+        eta: ticket.eta?.toISOString() ?? null,
+        conversationId: ticket.conversationId,
+        channelId: ticket.channelId,
+        stageName: ticket.stageName,
+        projectId: ticket.projectId,
+        boardId: ticket.boardId,
+        createdAt: ticket.createdAt.toISOString(),
+        updatedAt: ticket.updatedAt.toISOString(),
+      } satisfies TicketPreviewSnapshot : undefined,
+    };
+
+    const md = serializeMessagePreviewMd(previewData);
+    if (!md) return false;
+
+    await db.message.update({
+      where: { messageId },
+      data: { link_preview_md: md },
+    });
+
+    logger.info(`[MessagesSideEffect] Updated message ${messageId} with internal link preview`);
+    return true;
   }
 
   private async createReplyActivity(
