@@ -213,11 +213,10 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     }
   });
 
-  await loadApp(mainWindow);
-
   // Setup media permission request on first focus (macOS)
   setupPermissionRequestOnFocus(mainWindow);
 
+  // Register RBAC check before loading the app
   mainWindow.webContents.on('did-finish-load', async () => {
     const bodyText = await mainWindow?.webContents.executeJavaScript('document.body.innerText').catch(() => '');
     if (bodyText && bodyText.includes('RBAC: access denied')) {
@@ -225,6 +224,8 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       void mainWindow?.loadFile(errorPage);
     }
   });
+
+  await loadApp(mainWindow);
 
   // Handle close (hide on macOS, unless quitting via Cmd+Q)
   mainWindow.on('close', (event) => {

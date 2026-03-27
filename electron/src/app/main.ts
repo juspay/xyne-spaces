@@ -21,6 +21,7 @@ import { initializeUIUpdater } from '../services/ui-updater';
 import { initializeTelemetry } from '../services/telemetry';
 import { setupGlobalErrorHandlers } from '../services/error-handler';
 import { browserSettingsService } from '../services/browser-settings';
+import { clearAllCookies } from '../services/cookies';
 import Sentry from "@sentry/electron/main";
 
 
@@ -91,6 +92,14 @@ app.on('before-quit', async () => {
   
   // Log app quit event
   Logger.info(ElectronEvent.APP_QUIT, {}, 'App');
+
+  // Clear all cookies before quitting
+  try {
+    await clearAllCookies();
+    Logger.info(ElectronEvent.COOKIES_CLEARED, {}, 'App');
+  } catch (error) {
+    Logger.logError(ElectronEvent.COOKIES_CLEAR_FAILED, error, {}, 'App');
+  }
 
   // Stop version checker
   stopVersionChecker();

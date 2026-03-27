@@ -92,6 +92,10 @@ const ElectronEvent = {
     UI_UPDATE_DOWNLOAD_START: 'ui_update_download_start',
     UI_UPDATE_DOWNLOAD_FAILED: 'ui_update_download_failed',
     UI_UPDATE_DOWNLOAD_COMPLETE: 'ui_update_download_complete',
+
+    // Cookie events
+    COOKIES_CLEARED: 'cookies_cleared',
+    COOKIES_CLEAR_FAILED: 'cookies_clear_failed',
     } as const;
 
 export type ElectronEventType = (typeof ElectronEvent)[keyof typeof ElectronEvent];
