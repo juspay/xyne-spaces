@@ -3,6 +3,7 @@ import type { BaseViewerProps } from './utils';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import ReadmeViewer from './ReadmeViewer';
 
 // Static lookup map — O(1) vs sequential if-chain
 const EXTENSION_TO_LANGUAGE: Record<string, string> = {
@@ -19,6 +20,8 @@ const EXTENSION_TO_LANGUAGE: Record<string, string> = {
   '.yml': 'yaml',
   '.yaml': 'yaml',
   '.json': 'json',
+  '.md': 'markdown',
+  '.markdown': 'markdown',
 };
 
 /**
@@ -93,6 +96,12 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const isMarkdown = fileName
+    ? fileName.toLowerCase().endsWith('.md') || fileName.toLowerCase().endsWith('.markdown')
+    : false;
+
+  const [markdownMode, setMarkdownMode] = useState<'raw' | 'rendered'>('raw');
 
   const fileSizeMB = useMemo(() => {
     return source ? source.size / (1024 * 1024) : 0;
@@ -215,6 +224,27 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
     void loadFile();
   };
 
+  // Markdown "rendered" view uses ReadmeViewer in-place (same modal).
+  if (isMarkdown && markdownMode === 'rendered') {
+    return (
+      <div className='relative h-full w-full mt-[65px]'>
+        <div className='absolute right-3 top-3 z-20'>
+          <button
+            type='button'
+            onClick={() => setMarkdownMode('raw')}
+            className='px-3 py-1.5 rounded-md bg-background/80 dark:bg-black/40 backdrop-blur border border-border text-foreground text-xs hover:bg-accent transition-colors'
+            data-track-category='FileViewer'
+            data-track-name='ToggleMarkdownRaw'
+            data-track-metadata={JSON.stringify({ fileName })}
+          >
+            View code
+          </button>
+        </div>
+        <ReadmeViewer source={source} {...(fileName ? { fileName } : {})} />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className='pt-[65px] p-4 flex items-center justify-center h-full min-h-[200px]'>
@@ -264,6 +294,18 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
             <span className='text-xs text-blue-600 dark:text-blue-400 font-medium'>
               Virtualized
             </span>
+          )}
+          {isMarkdown && (
+            <button
+              type='button'
+              onClick={() => setMarkdownMode('rendered')}
+              className='ml-2 px-2.5 py-1 rounded-md border border-border bg-background/70 dark:bg-black/20 text-xs text-foreground hover:bg-accent transition-colors'
+              data-track-category='FileViewer'
+              data-track-name='ToggleMarkdownRendered'
+              data-track-metadata={JSON.stringify({ fileName })}
+            >
+              Preview
+            </button>
           )}
         </div>
       </div>

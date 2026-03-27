@@ -140,7 +140,7 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
 
   // ----- Rendering (safe conditional) -----
   return (
-    <div className='relative min-h-full bg-background dark:bg-[#1E1E1E] font-sans pt-[65px]'>
+    <div className='relative min-h-full bg-background dark:bg-[#1E1E1E] font-sans'>
       {loading && <LoadingSpinner />}
       {error && !loading && <ErrorDisplay error={error} />}
 
