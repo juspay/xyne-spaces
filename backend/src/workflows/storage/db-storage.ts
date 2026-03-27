@@ -30,7 +30,7 @@ import { DatabaseClient } from '@/database/client'
 import { createKnowledgeCanvas, getCanvasUrl } from '@/services/canvasService'
 import { config as appConfig } from '@/config/env'
 import type { KnowledgeLearning } from '../utils/knowledge-generator'
-import { websocketService } from '@/services/websocketService'
+// import { websocketService } from '@/services/websocketService'
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service'
 import {logger} from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
@@ -155,11 +155,11 @@ export class DBWorkflowStorage implements WorkflowStorage {
       })
     }
 
-    try {
-      await this.updateConversationMessageWithProgress(workflowExecutionId)
-    } catch (error) {
-      logger.error(`[WorkflowStorage] Failed to update conversation message for ${workflowExecutionId}:`, error)
-    }
+    // try {
+    //   await this.updateConversationMessageWithProgress(workflowExecutionId)
+    // } catch (error) {
+    //   logger.error(`[WorkflowStorage] Failed to update conversation message for ${workflowExecutionId}:`, error)
+    // }
 
     return createdStep
   }
@@ -318,11 +318,11 @@ export class DBWorkflowStorage implements WorkflowStorage {
     }
 
     // Update conversation progress
-    try {
-      await this.updateConversationMessageWithProgress(workflowExecutionId);
-    } catch (error) {
-      logger.error(`[WorkflowStorage] Failed to update conversation message for ${workflowExecutionId}:`, error);
-    }
+    // try {
+    //   await this.updateConversationMessageWithProgress(workflowExecutionId);
+    // } catch (error) {
+    //   logger.error(`[WorkflowStorage] Failed to update conversation message for ${workflowExecutionId}:`, error);
+    // }
   }
 
 
@@ -2711,11 +2711,11 @@ export class DBWorkflowStorage implements WorkflowStorage {
           }).catch(error => logger.error(`[WorkflowStorage] Failed to broadcast step update to parent:`, error))
         }
 
-        try {
-          await this.updateConversationMessageWithProgress(workflowExecutionId)
-        } catch (error) {
-          logger.error(`[WorkflowStorage] Failed to update conversation message for ${workflowExecutionId}:`, error)
-        }
+        // try {
+        //   await this.updateConversationMessageWithProgress(workflowExecutionId)
+        // } catch (error) {
+        //   logger.error(`[WorkflowStorage] Failed to update conversation message for ${workflowExecutionId}:`, error)
+        // }
       }
     } catch (error) {
       throw new Error(
@@ -2728,151 +2728,151 @@ export class DBWorkflowStorage implements WorkflowStorage {
    * Update conversation message metadata with workflow step progress
    * Called after updating step status to keep conversation message in sync
    */
-  private async updateConversationMessageWithProgress(workflowExecutionId: string): Promise<void> {
-    try {
-      logger.info(`[WorkflowProgress] Updating conversation message for execution ${workflowExecutionId}`);
+  // private async updateConversationMessageWithProgress(workflowExecutionId: string): Promise<void> {
+  //   try {
+  //     logger.info(`[WorkflowProgress] Updating conversation message for execution ${workflowExecutionId}`);
 
-      // Navigate to root execution if this is a child execution (e.g., agent checkpoint)
-      // This ensures we always fetch steps from the parent workflow, not child executions
-      let execution = await this.workflowExecutionRepo.findById(workflowExecutionId);
-      if (!execution) {
-        logger.info(`[WorkflowProgress] Workflow execution ${workflowExecutionId} not found`);
-        return;
-      }
+  //     // Navigate to root execution if this is a child execution (e.g., agent checkpoint)
+  //     // This ensures we always fetch steps from the parent workflow, not child executions
+  //     let execution = await this.workflowExecutionRepo.findById(workflowExecutionId);
+  //     if (!execution) {
+  //       logger.info(`[WorkflowProgress] Workflow execution ${workflowExecutionId} not found`);
+  //       return;
+  //     }
 
-      // Navigate up the execution tree to find the root parent
-      while (execution.parentWorkflowExecutionId) {
-        const parentExecution = await this.workflowExecutionRepo.findById(execution.parentWorkflowExecutionId);
-        if (!parentExecution) {
-          logger.info(`[WorkflowProgress] Parent execution ${execution.parentWorkflowExecutionId} not found, using current execution`);
-          break;
-        }
-        execution = parentExecution;
-      }
+  //     // Navigate up the execution tree to find the root parent
+  //     while (execution.parentWorkflowExecutionId) {
+  //       const parentExecution = await this.workflowExecutionRepo.findById(execution.parentWorkflowExecutionId);
+  //       if (!parentExecution) {
+  //         logger.info(`[WorkflowProgress] Parent execution ${execution.parentWorkflowExecutionId} not found, using current execution`);
+  //         break;
+  //       }
+  //       execution = parentExecution;
+  //     }
 
-      const rootExecutionId = execution.id;
-      logger.info(`[WorkflowProgress] Using root execution ${rootExecutionId} (original: ${workflowExecutionId})`);
+  //     const rootExecutionId = execution.id;
+  //     logger.info(`[WorkflowProgress] Using root execution ${rootExecutionId} (original: ${workflowExecutionId})`);
 
-      // Fetch all workflow steps to build progress metadata
-      // Exclude internal agent execution steps (tool calls, LLM calls, etc.)
-      let allSteps = await this.workflowStepRepo.findMany({
-        where: {
-          workflowExecutionId: rootExecutionId,
-          // Exclude internal agent steps by name pattern
-          NOT: [
-            { stepName: { startsWith: 'tool_' } },
-            { stepName: { startsWith: 'llm_call_' } },
-            { stepName: { equals: 'assistant_message' } },
-            { stepName: { equals: 'framework_error' } },
-            { stepName: { equals: 'final_result' } },
-          ]
-        },
-        orderBy: { createdAt: 'asc' }
-      });
+  //     // Fetch all workflow steps to build progress metadata
+  //     // Exclude internal agent execution steps (tool calls, LLM calls, etc.)
+  //     let allSteps = await this.workflowStepRepo.findMany({
+  //       where: {
+  //         workflowExecutionId: rootExecutionId,
+  //         // Exclude internal agent steps by name pattern
+  //         NOT: [
+  //           { stepName: { startsWith: 'tool_' } },
+  //           { stepName: { startsWith: 'llm_call_' } },
+  //           { stepName: { equals: 'assistant_message' } },
+  //           { stepName: { equals: 'framework_error' } },
+  //           { stepName: { equals: 'final_result' } },
+  //         ]
+  //       },
+  //       orderBy: { createdAt: 'asc' }
+  //     });
 
-      // Categorize steps by status
-      const completedSteps = allSteps
-        .filter(step => step.status === 'completed' || step.status === 'skipped')
-        .map(step => ({
-          stepId: step.id,
-          stepName: step.stepName,
-          type: step.type,
-          status: step.status,
-          stepExecutorType: step.stepExecutorType
-        }));
+  //     // Categorize steps by status
+  //     const completedSteps = allSteps
+  //       .filter(step => step.status === 'completed' || step.status === 'skipped')
+  //       .map(step => ({
+  //         stepId: step.id,
+  //         stepName: step.stepName,
+  //         type: step.type,
+  //         status: step.status,
+  //         stepExecutorType: step.stepExecutorType
+  //       }));
 
-      const ongoingStep = allSteps.find(step => step.status === 'running');
-      const ongoingStepData = ongoingStep ? {
-        stepId: ongoingStep.id,
-        stepName: ongoingStep.stepName,
-        type: ongoingStep.type,
-        status: ongoingStep.status,
-        stepExecutorType: ongoingStep.stepExecutorType
-      } : null;
+  //     const ongoingStep = allSteps.find(step => step.status === 'running');
+  //     const ongoingStepData = ongoingStep ? {
+  //       stepId: ongoingStep.id,
+  //       stepName: ongoingStep.stepName,
+  //       type: ongoingStep.type,
+  //       status: ongoingStep.status,
+  //       stepExecutorType: ongoingStep.stepExecutorType
+  //     } : null;
 
-      const pendingSteps = allSteps
-        .filter(step => step.status === 'pending' || step.status === 'waiting')
-        .map(step => ({
-          stepId: step.id,
-          stepName: step.stepName,
-          type: step.type,
-          stepExecutorType: step.stepExecutorType
-        }));
+  //     const pendingSteps = allSteps
+  //       .filter(step => step.status === 'pending' || step.status === 'waiting')
+  //       .map(step => ({
+  //         stepId: step.id,
+  //         stepName: step.stepName,
+  //         type: step.type,
+  //         stepExecutorType: step.stepExecutorType
+  //       }));
 
-      // Find the workflow to get ticketId and conversationId
-      // Note: execution object is already available from parent navigation above
-      const workflow = await repositories.workflows.findById(execution.workflowId);
-      if (!workflow || !workflow.ticketId) {
-        logger.info(`[WorkflowProgress] Workflow ${execution.workflowId} not found or has no ticketId`);
-        return;
-      }
+  //     // Find the workflow to get ticketId and conversationId
+  //     // Note: execution object is already available from parent navigation above
+  //     const workflow = await repositories.workflows.findById(execution.workflowId);
+  //     if (!workflow || !workflow.ticketId) {
+  //       logger.info(`[WorkflowProgress] Workflow ${execution.workflowId} not found or has no ticketId`);
+  //       return;
+  //     }
 
-      const ticket = await prisma.ticket.findUnique({
-        where: { id: workflow.ticketId }
-      });
-      if (!ticket || !ticket.conversationId) {
-        logger.info(`[WorkflowProgress] Ticket ${workflow.ticketId} not found or has no conversationId`);
-        return;
-      }
+  //     const ticket = await prisma.ticket.findUnique({
+  //       where: { id: workflow.ticketId }
+  //     });
+  //     if (!ticket || !ticket.conversationId) {
+  //       logger.info(`[WorkflowProgress] Ticket ${workflow.ticketId} not found or has no conversationId`);
+  //       return;
+  //     }
 
-      // Find existing SYSTEM message for this workflow in the conversation
-      const allMessages = await prisma.message.findMany({
-        where: {
-          conversationId: ticket.conversationId,
-          msgType: 'SYSTEM',
-        },
-        orderBy: { createdAt: 'desc' }
-      });
+  //     // Find existing SYSTEM message for this workflow in the conversation
+  //     const allMessages = await prisma.message.findMany({
+  //       where: {
+  //         conversationId: ticket.conversationId,
+  //         msgType: 'SYSTEM',
+  //       },
+  //       orderBy: { createdAt: 'desc' }
+  //     });
 
-      const workflowMessage = allMessages.find(msg => {
-        const metadata = msg.metadata as any;
-        return metadata?.workflowId === execution.workflowId;
-      });
+  //     const workflowMessage = allMessages.find(msg => {
+  //       const metadata = msg.metadata as any;
+  //       return metadata?.workflowId === execution.workflowId;
+  //     });
 
-      if (!workflowMessage) {
-        logger.info(`[WorkflowProgress] No workflow message found for workflow ${execution.workflowId} in conversation ${ticket.conversationId}`);
-        return;
-      }
+  //     if (!workflowMessage) {
+  //       logger.info(`[WorkflowProgress] No workflow message found for workflow ${execution.workflowId} in conversation ${ticket.conversationId}`);
+  //       return;
+  //     }
 
-      const existingMetadata = (workflowMessage.metadata as any) || {};
+  //     const existingMetadata = (workflowMessage.metadata as any) || {};
 
-      // Update message metadata with step progress
-      const updatedMetadata = {
-        ...existingMetadata,
-        completedSteps,
-        ongoingStep: ongoingStepData,
-        pendingSteps,
-        totalSteps: allSteps.length,
-        lastUpdated: new Date().toISOString()
-      };
+  //     // Update message metadata with step progress
+  //     const updatedMetadata = {
+  //       ...existingMetadata,
+  //       completedSteps,
+  //       ongoingStep: ongoingStepData,
+  //       pendingSteps,
+  //       totalSteps: allSteps.length,
+  //       lastUpdated: new Date().toISOString()
+  //     };
 
-      await repositories.messages.update(workflowMessage.messageId, {
-        metadata: updatedMetadata
-      });
+  //     await repositories.messages.update(workflowMessage.messageId, {
+  //       metadata: updatedMetadata
+  //     });
 
-      logger.info(`[WorkflowProgress] Updated message ${workflowMessage.messageId} with ${completedSteps.length} completed, ${ongoingStepData ? '1 ongoing' : '0 ongoing'}, ${pendingSteps.length} pending steps`);
+  //     logger.info(`[WorkflowProgress] Updated message ${workflowMessage.messageId} with ${completedSteps.length} completed, ${ongoingStepData ? '1 ongoing' : '0 ongoing'}, ${pendingSteps.length} pending steps`);
 
-      // Broadcast message update to frontend via WebSocket
-      const updatedMessage = await repositories.messages.findById(workflowMessage.messageId);
-      if (updatedMessage) {
-        await websocketService.broadcastToSession(ticket.conversationId, 'message_updated', {
-          messageId: updatedMessage.messageId,
-          conversationId: updatedMessage.conversationId,
-          senderId: updatedMessage.senderId,
-          content: updatedMessage.content,
-          msgType: updatedMessage.msgType,
-          metadata: updatedMessage.metadata,
-          createdAt: updatedMessage.createdAt,
-          isUpdate: true
-        });
+  //     // Broadcast message update to frontend via WebSocket
+  //     const updatedMessage = await repositories.messages.findById(workflowMessage.messageId);
+  //     if (updatedMessage) {
+  //       await websocketService.broadcastToSession(ticket.conversationId, 'message_updated', {
+  //         messageId: updatedMessage.messageId,
+  //         conversationId: updatedMessage.conversationId,
+  //         senderId: updatedMessage.senderId,
+  //         content: updatedMessage.content,
+  //         msgType: updatedMessage.msgType,
+  //         metadata: updatedMessage.metadata,
+  //         createdAt: updatedMessage.createdAt,
+  //         isUpdate: true
+  //       });
 
-        logger.info(`[WorkflowProgress] Broadcasted message update to conversation ${ticket.conversationId}`);
-      }
-    } catch (error) {
-      // Don't throw - this is a non-critical operation that shouldn't block workflow execution
-      logger.error(`[WorkflowProgress] Error updating conversation message for ${workflowExecutionId}:`, error);
-    }
-  }
+  //       logger.info(`[WorkflowProgress] Broadcasted message update to conversation ${ticket.conversationId}`);
+  //     }
+  //   } catch (error) {
+  //     // Don't throw - this is a non-critical operation that shouldn't block workflow execution
+  //     logger.error(`[WorkflowProgress] Error updating conversation message for ${workflowExecutionId}:`, error);
+  //   }
+  // }
 
   async saveStepMarkdownSummary(
     workflowExecutionId: string,
