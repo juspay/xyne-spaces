@@ -14,7 +14,8 @@ export type TabType =
   | 'rca-details'
   | 'workflow'
   | 'thread-summary'
-  | 'context';
+  | 'context'
+  | 'preview-changes';
 
 export interface WorkflowTab {
   id: string;
