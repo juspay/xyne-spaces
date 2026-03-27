@@ -350,6 +350,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const sender = useUser(message.senderId);
   const isMe = user?.id === message.senderId;
   const { baseRoute } = useRouteContext();
+  const actionableCount = useMemo(
+    () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
+    [message.nudgeCounts],
+  );
+  const countRowIds = useMemo(
+    () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
+    [message.nudgeCounts],
+  );
 
   const handleUserClick = (userId: string): void => {
     void navigate(`${baseRoute}/${channelId}/profile/${userId}`);
@@ -938,12 +946,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               {!contentOnly && (
                 <SurfaceNudgeList
                   messageId={message.messageId}
+                  actionableCount={actionableCount}
+                  countRowIds={countRowIds}
                   channelId={channelId}
                   contentOnly={contentOnly}
                   isMobile={isMobile}
                   messageType={message.msgType}
                   isDeleted={message.isDeleted}
-                  nudgeCount={message.nudgeCount ?? 0}
                 />
               )}
               {!contentOnly && (

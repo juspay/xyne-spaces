@@ -2,8 +2,6 @@ import React, { useMemo } from 'react';
 import { AvatarSize } from '@juspay/blend-design-system';
 import { MessageType, parseForwardedMessageXml, isForwardedMessageXml } from '@xyne/shared';
 import { formatTimeAmPm, formatRelativeTimestamp } from '../../../utils/dateUtils';
-import { QueryResultType } from '@rocicorp/zero';
-import { queries } from '../../../zero/queries';
 import { useReactions } from '../../../hooks/useReaction';
 import { Bookmark } from 'lucide-react';
 import { BotBubble } from '../../Chat/BotBubble';
@@ -15,7 +13,7 @@ import { WorkflowBubble } from '../../Chat/WorkflowBubble/WorkflowBubble';
 import { useIsCallActive } from '../../../hooks/useCalls';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { ReactionView } from './MessageBubble';
-import { ConversationWithTicket } from './MessageBubble.types';
+import { ConversationWithTicket, MessageWithOptionalNudgeCounts } from './MessageBubble.types';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
 import { ChannelScopeType } from '@xyne/shared';
 import UserAvatar from '../../UserAvatar/UserAvatar';
@@ -26,10 +24,8 @@ import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
 
-type MessageWithRelations = QueryResultType<typeof queries.conversationMessagesV2>[number];
-
 export interface MobileMessageMyBubbleProps {
-  message: MessageWithRelations;
+  message: MessageWithOptionalNudgeCounts;
   showAvatar?: boolean | undefined;
   isPinned?: boolean | undefined;
   isBookmarked?: boolean | undefined;
@@ -84,6 +80,14 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
     (isBotMessage && metadata?.xyneId && metadata?.ticketId);
   const isActiveCall = useIsCallActive(metadata?.callId);
   const { isMobile } = usePlatform();
+  const actionableCount = useMemo(
+    () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
+    [message.nudgeCounts],
+  );
+  const countRowIds = useMemo(
+    () => Array.from(new Set((message.nudgeCounts ?? []).map(row => row.id))),
+    [message.nudgeCounts],
+  );
 
   // Parse forwarded message XML content
   const forwardedMessageData = useMemo(() => {
@@ -282,13 +286,14 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
           {!contentOnly && (
             <SurfaceNudgeList
               messageId={message.messageId}
+              actionableCount={actionableCount}
+              countRowIds={countRowIds}
               channelId={channelId}
               contentOnly={contentOnly}
               isMobile={true}
               messageType={message.msgType}
               isDeleted={message.isDeleted}
               className='mt-2 w-full'
-              nudgeCount={message.nudgeCount ?? 0}
             />
           )}
 

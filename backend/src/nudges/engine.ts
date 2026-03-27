@@ -3,7 +3,7 @@ import { db } from '@/database/client';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { userActivityService } from '@/services/userActivityService';
 import { superpositionClient } from '@/services/superpositionClient';
-import type { UserActivityEvent, Platform } from '@prisma/client';
+import { SurfaceAreaType, type UserActivityEvent, type Platform } from '@prisma/client';
 import { nudgeRegistry } from './registry';
 import { activityContextResolver } from './services/activityContextResolver';
 import { nudgeService } from './services/surfaceNudgeService';
@@ -190,6 +190,7 @@ export class NudgeEvaluationEngine {
       } else {
         await nudgeService.persistCandidates({
           sourceId: persistenceSourceId,
+          sourceType: definition.direction.from,
           nudgeKind: definition.kind,
           projectId: persistenceProjectId,
           candidates,
@@ -227,7 +228,10 @@ export class NudgeEvaluationEngine {
           (actions.sourceType as any) ?? 'MESSAGE',
           deleteSourceId,
         );
-        await nudgeService.dismissNudgesForSource(deleteSourceId);
+        await nudgeService.dismissNudgesForSource(
+          deleteSourceId,
+          ((actions.sourceType as SurfaceAreaType | undefined) ?? SurfaceAreaType.MESSAGE),
+        );
       } else {
         logger.warn('[NudgeEngine] Unknown implicit action type', { actionType, sourceId });
       }

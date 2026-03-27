@@ -173,7 +173,6 @@ export const ThreadMessages = ({
   // Use pre-fetched messages if provided, otherwise use queried
   const messages = propThreadMessages ?? queriedMessages;
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
-
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
 

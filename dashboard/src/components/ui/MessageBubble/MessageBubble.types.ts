@@ -1,13 +1,26 @@
-import { QueryResultType } from '@rocicorp/zero';
 import {
   Message,
+  MessageAttachment,
+  Reaction,
+  ReactionCount,
   User,
   ChannelScopeType,
   Conversation,
   ConversationParticipant,
 } from '@xyne/shared';
-import { queries } from '../../../zero/queries';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
+
+export type MessageNudgeCountRow = {
+  id: string;
+  nudgeCount: number;
+};
+
+export type MessageWithOptionalNudgeCounts = Message & {
+  attachments?: readonly MessageAttachment[];
+  reactions?: readonly Reaction[];
+  reactionCounts?: readonly ReactionCount[];
+  nudgeCounts?: readonly MessageNudgeCountRow[];
+};
 
 export interface ThreadInfo {
   preview: string;
@@ -33,7 +46,7 @@ export interface ConversationWithTicket extends Conversation {
 
 export interface MessageBubbleProps {
   isHovered?: boolean;
-  message: QueryResultType<typeof queries.conversationMessagesV2>[number];
+  message: MessageWithOptionalNudgeCounts;
   onUserClick?: (user: User) => void;
   renderActions?: (message: Message) => React.ReactNode;
   showAvatar?: boolean | undefined;

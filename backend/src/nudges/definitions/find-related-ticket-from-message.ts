@@ -18,10 +18,11 @@ import { vespaService } from '@/services/vespaSearch';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { parseAgentOutput } from '@/services/agents/utils';
 import type {
-  NudgeDefinition,
-  MessageNudgePayload,
+  ExplicitNudgeAction,
   MessageNudgeEvaluationContext,
+  MessageNudgePayload,
   NudgeCandidate,
+  NudgeDefinition,
 } from '../types';
 import { isEligibleMessage, buildMessageNudgeContext } from './helpers';
 
@@ -318,18 +319,31 @@ export const findRelatedTicketFromMessage: NudgeDefinition<
       return [];
     }
 
+    const ticketChannel = await db.channel.findUnique({
+      where: { id: ticket.channelId },
+      select: { visibility: true },
+    });
+
+    const shouldRestrictVisibility = ticketChannel?.visibility === 'PRIVATE';
+
+    const actions: ExplicitNudgeAction = {
+      actionType: 'OPEN_TICKET',
+      actionMode: 'read',
+      onSuccess: 'none',
+      createSurfaceLink: false,
+      entityId: ticket.id,
+      channelId: ticket.channelId,
+      conversationId: ticket.conversationId,
+      ticketStatus: ticket.statusV2 || ticket.status,
+      evidence: agentResult.matchingEvidence || agentResult.reason,
+    };
+
     return [
       {
         title: `Related ticket: ${agentResult.title || ticket.title || 'Existing ticket found'}`,
         description: agentResult.reason || 'A related ticket was found for this message.',
-        actions: {
-          actionType: 'OPEN_TICKET',
-          entityId: ticket.id,
-          channelId: ticket.channelId,
-          conversationId: ticket.conversationId,
-          ticketStatus: ticket.statusV2 || ticket.status,
-          evidence: agentResult.matchingEvidence || agentResult.reason,
-        },
+        ...(shouldRestrictVisibility ? { visibleTo: context.message.senderId } : {}),
+        actions,
       },
     ];
   },

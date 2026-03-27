@@ -16,10 +16,11 @@ import {
 } from '@/services/nudges/proactiveNudgeSchemas';
 import { compileFallbackPrompt, getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
 import type {
-  NudgeDefinition,
-  MessageNudgePayload,
+  ExplicitNudgeAction,
   MessageNudgeEvaluationContext,
+  MessageNudgePayload,
   NudgeCandidate,
+  NudgeDefinition,
 } from '../types';
 import { isEligibleMessage, buildMessageNudgeContext } from './helpers';
 
@@ -223,21 +224,26 @@ export const createTicketFromMessage: NudgeDefinition<
     );
     const subticketSuggestions = createAction?.payload?.subticket_suggestions ?? [];
 
+    const actions: ExplicitNudgeAction = {
+      actionType: 'CREATE_TICKET_FROM_MESSAGE',
+      actionMode: 'write',
+      onSuccess: 'acted_on',
+      createSurfaceLink: true,
+      evidence: primaryNudge.evidence_spans ?? undefined,
+      title_suggestion: title,
+      description_suggestion: description,
+      subticket_suggestions: subticketSuggestions,
+      conversationId: context.message.conversationId,
+      initialMessageId: conversation?.initialMessageId ?? context.message.messageId,
+    };
+
     return [
       {
         title,
         description,
         priority: primaryNudge.priority ?? undefined,
         visibleTo: payload.senderId,
-        actions: {
-          actionType: 'CREATE_TICKET_FROM_MESSAGE',
-          evidence: primaryNudge.evidence_spans ?? undefined,
-          title_suggestion: title,
-          description_suggestion: description,
-          subticket_suggestions: subticketSuggestions,
-          conversationId: context.message.conversationId,
-          initialMessageId: conversation?.initialMessageId ?? context.message.messageId,
-        },
+        actions,
       },
     ];
   },

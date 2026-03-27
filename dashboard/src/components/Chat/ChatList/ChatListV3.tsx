@@ -209,6 +209,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
+
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const isFetchingRef = useRef(false);
 

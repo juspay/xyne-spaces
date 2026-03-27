@@ -37,6 +37,7 @@ import {
   AttributionConfidence,
   NudgeKind,
   NudgeState,
+  getNudgeActionBehavior,
   SurfaceAreaType,
   SurfaceLinkKind,
   NotificationLevel,
@@ -4231,18 +4232,24 @@ export const mutators = defineMutators({
           id: nudgeId,
           state: NudgeState.DISMISSED,
           updatedAt: timestamp,
+          surfaceNudgeCountId: null,
         });
+        if (nudge.state === NudgeState.ACTIVE) {
+          const countRow = nudge.surfaceNudgeCountId
+            ? await tx.run(zql.surface_nudge_counts.where('id', nudge.surfaceNudgeCountId).one())
+            : null;
 
-        // Recalculate nudgeCount on the source message
-        const message = await tx.run(zql.messages.where('messageId', nudge.sourceId).one());
-        if (message) {
-          const activeNudges = await tx.run(
-            zql.surface_nudges.where('sourceId', nudge.sourceId).where('state', NudgeState.ACTIVE),
-          );
-          await tx.mutate.messages.update({
-            messageId: message.messageId,
-            nudgeCount: activeNudges.length,
-          });
+          if (countRow) {
+            if (countRow.nudgeCount <= 1) {
+              await tx.mutate.surface_nudge_counts.delete({ id: countRow.id });
+            } else {
+              await tx.mutate.surface_nudge_counts.update({
+                id: countRow.id,
+                nudgeCount: countRow.nudgeCount - 1,
+                updatedAt: timestamp,
+              });
+            }
+          }
         }
       },
     ),
@@ -4266,39 +4273,63 @@ export const mutators = defineMutators({
           nudge.actions && typeof nudge.actions === 'object' && !Array.isArray(nudge.actions)
             ? (nudge.actions as Record<string, unknown>)
             : {};
+        const actionBehavior = getNudgeActionBehavior(existingActions);
+        const nextState =
+          actionBehavior.onSuccess === 'dismissed'
+            ? NudgeState.DISMISSED
+            : actionBehavior.onSuccess === 'acted_on'
+              ? NudgeState.ACTED_ON
+              : nudge.state;
+        const shouldPersistActionResult =
+          actionBehavior.actionMode === 'write' && actionBehavior.onSuccess !== 'none';
+        const shouldHideNudge = nextState !== NudgeState.ACTIVE;
 
-        await tx.mutate.surface_nudges.update(
-          actionResult
-            ? {
-                id: nudgeId,
-                state: NudgeState.ACTED_ON,
-                updatedAt: timestamp,
-                actions: {
-                  ...existingActions,
-                  actionResult: actionResult as ReadonlyJSONValue,
+        if (nextState !== nudge.state || (shouldPersistActionResult && actionResult)) {
+          await tx.mutate.surface_nudges.update(
+            shouldPersistActionResult && actionResult
+              ? {
+                  id: nudgeId,
+                  state: nextState,
+                  updatedAt: timestamp,
+                  surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
+                  actions: {
+                    ...existingActions,
+                    actionResult: actionResult as ReadonlyJSONValue,
+                  },
+                }
+              : {
+                  id: nudgeId,
+                  state: nextState,
+                  updatedAt: timestamp,
+                  surfaceNudgeCountId: shouldHideNudge ? null : nudge.surfaceNudgeCountId,
                 },
-              }
-            : {
-                id: nudgeId,
-                state: NudgeState.ACTED_ON,
-                updatedAt: timestamp,
-              },
-        );
-
-        // Recalculate nudgeCount on the source message
-        const message = await tx.run(zql.messages.where('messageId', nudge.sourceId).one());
-        if (message) {
-          const activeNudges = await tx.run(
-            zql.surface_nudges.where('sourceId', nudge.sourceId).where('state', NudgeState.ACTIVE),
           );
-          await tx.mutate.messages.update({
-            messageId: message.messageId,
-            nudgeCount: activeNudges.length,
-          });
+        }
+        if (nudge.state === NudgeState.ACTIVE && shouldHideNudge) {
+          const countRow = nudge.surfaceNudgeCountId
+            ? await tx.run(zql.surface_nudge_counts.where('id', nudge.surfaceNudgeCountId).one())
+            : null;
+
+          if (countRow) {
+            if (countRow.nudgeCount <= 1) {
+              await tx.mutate.surface_nudge_counts.delete({ id: countRow.id });
+            } else {
+              await tx.mutate.surface_nudge_counts.update({
+                id: countRow.id,
+                nudgeCount: countRow.nudgeCount - 1,
+                updatedAt: timestamp,
+              });
+            }
+          }
         }
 
         // Create surface_links row when action result has target info
-        if (actionResult && typeof actionResult === 'object' && !Array.isArray(actionResult)) {
+        if (
+          actionBehavior.createSurfaceLink &&
+          actionResult &&
+          typeof actionResult === 'object' &&
+          !Array.isArray(actionResult)
+        ) {
           const result = actionResult as Record<string, unknown>;
           const innerResult = result['result'] as Record<string, unknown> | undefined;
 
