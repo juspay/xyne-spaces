@@ -13,11 +13,19 @@ const ProjectsListView = (): ReactElement => {
   const zero = useZero();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingProject, setEditingProject] = useState<ZeroProject | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Fetch all projects using zero
   const [projects] = useCachedQuery(queries.getAllProjects());
 
   const loading = projects === undefined;
+
+  const filteredProjects = searchQuery.trim()
+    ? (projects ?? []).filter(p => {
+        const q = searchQuery.toLowerCase();
+        return p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q);
+      })
+    : (projects ?? []);
 
   const handleCreateProject = async (data: {
     name?: string;
@@ -86,11 +94,22 @@ const ProjectsListView = (): ReactElement => {
             />
           </div>
           <p className='text-xs text-muted-foreground'>Manage your projects</p>
+          <div className='mt-3'>
+            <input
+              type='text'
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder='Search by name or project code...'
+              className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              data-track-category='Projects'
+              data-track-name='SearchProjects'
+            />
+          </div>
         </div>
 
         {/* Projects List */}
         <div className='space-y-3'>
-          {projects?.map(project => (
+          {filteredProjects.map(project => (
             <ProjectCard
               key={project.id}
               project={project}
@@ -101,11 +120,22 @@ const ProjectsListView = (): ReactElement => {
         </div>
 
         {/* Empty State */}
-        {projects?.length === 0 && (
+        {filteredProjects.length === 0 && (
           <div className='text-center py-8'>
             <div className='text-muted-foreground text-3xl mb-3'>📁</div>
-            <h3 className='text-sm font-semibold text-foreground mb-1'>No projects yet</h3>
-            <p className='text-xs text-muted-foreground'>Create your first project</p>
+            {searchQuery.trim() ? (
+              <>
+                <h3 className='text-sm font-semibold text-foreground mb-1'>No projects found</h3>
+                <p className='text-xs text-muted-foreground'>
+                  No results for &quot;{searchQuery}&quot;
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className='text-sm font-semibold text-foreground mb-1'>No projects yet</h3>
+                <p className='text-xs text-muted-foreground'>Create your first project</p>
+              </>
+            )}
           </div>
         )}
       </div>
