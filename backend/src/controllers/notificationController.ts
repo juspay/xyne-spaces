@@ -20,7 +20,7 @@ const MIN_FCM_TOKEN_LENGTH = 100;
 const mobilePlatformSchema = z.enum(['ios', 'android', 'unknown']);
 
 const mobileRegisterSchema = z.object({
-  token: z.string().min(MIN_FCM_TOKEN_LENGTH),
+  fcmToken: z.string().min(MIN_FCM_TOKEN_LENGTH),
   voipToken: z.string().optional(),
   platform: mobilePlatformSchema.default('unknown'),
   deviceId: z.string().max(255).optional(),
@@ -76,9 +76,15 @@ export class NotificationController {
       const validated = mobileRegisterSchema.parse(req.body);
       const sessionId = this.resolveSessionId(req);
 
+      if (!sessionId) {
+        logger.error('Failed to register mobile push token: No session ID found');
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
       await notificationService.registerMobilePushToken(userId, {
         ...validated,
-        sessionId: sessionId ?? undefined,
+        sessionId,
       });
 
       res.json({ success: true });
