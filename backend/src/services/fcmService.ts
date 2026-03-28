@@ -152,11 +152,11 @@ class FcmAccessTokenManager {
 }
 
 export type MobilePushRegistration = {
-  token: string;
+  fcmToken: string;
   voipToken?: string;
   platform?: string;
   deviceId?: string;
-  sessionId?: string;
+  sessionId: string;
 };
 
 export type FcmNotificationPayload = {
@@ -213,8 +213,8 @@ class FcmPushService {
   }
 
   async registerToken(userId: string, payload: MobilePushRegistration): Promise<void> {
-    const tokenPreview = payload.token
-      ? `${payload.token.slice(0, 10)}...${payload.token.slice(-8)}`
+    const fcmTokenPreview = payload.fcmToken
+      ? `${payload.fcmToken.slice(0, 10)}...${payload.fcmToken.slice(-8)}`
       : null;
     const voipTokenPreview = payload.voipToken
       ? `${payload.voipToken.slice(0, 10)}...${payload.voipToken.slice(-8)}`
@@ -222,19 +222,19 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=enter', {
       userId,
-      sessionId: payload.sessionId ?? null,
+      sessionId: payload.sessionId,
       platform: payload.platform ?? null,
       deviceId: payload.deviceId ?? null,
-      tokenPresent: !!payload.token,
-      tokenPreview,
+      fcmTokenPresent: !!payload.fcmToken,
+      fcmTokenPreview,
       voipTokenPresent: !!payload.voipToken,
       voipTokenPreview,
     });
 
-    if (!payload.token) {
+    if (!payload.fcmToken) {
       logger.warn('[FCM] registerToken step=missing_token', {
         userId,
-        sessionId: payload.sessionId ?? null,
+        sessionId: payload.sessionId,
         platform: payload.platform ?? null,
         deviceId: payload.deviceId ?? null,
       });
@@ -243,16 +243,22 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=find_session', {
       userId,
-      requestedSessionId: payload.sessionId ?? null,
-      tokenPreview,
+      requestedSessionId: payload.sessionId,
+      fcmTokenPreview,
     });
-    const session = await this.findSessionForRegistration(userId, payload.sessionId);
+    const sessionEntry = await db.userSession.findFirst({
+      where: { id: payload.sessionId, userId },
+      select: {
+        id: true,
+        deviceId: true,
+      },
+    });
 
-    if (!session) {
+    if (!sessionEntry) {
       logger.warn('[FCM] registerToken step=session_not_found', {
         userId,
-        sessionId: payload.sessionId ?? null,
-        tokenPreview,
+        sessionId: payload.sessionId,
+        fcmTokenPreview,
         voipTokenPreview,
       });
       return;
@@ -260,12 +266,12 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=session_resolved', {
       userId,
-      requestedSessionId: payload.sessionId ?? null,
-      resolvedSessionId: session.id,
-      sessionDeviceId: session.deviceId ?? null,
+      requestedSessionId: payload.sessionId,
+      resolvedSessionId: sessionEntry.id,
+      sessionDeviceId: sessionEntry.deviceId ?? null,
     });
 
-    const composedToken = this.composeStoredToken(payload.platform, payload.token);
+    const composedToken = this.composeStoredToken(payload.platform, payload.fcmToken);
     const composedVoipToken = payload.voipToken
       ? this.composeStoredToken(payload.platform, payload.voipToken)
       : null;
@@ -277,25 +283,25 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=compose_tokens', {
       userId,
-      sessionId: session.id,
+      sessionId: sessionEntry.id,
       platform: payload.platform ?? null,
-      tokenPreview,
+      fcmTokenPreview,
       composedTokenPreview,
       voipTokenPreview,
       composedVoipTokenPreview,
     });
 
-    const nextDeviceId = payload.deviceId ?? session.deviceId ?? null;
+    const nextDeviceId = payload.deviceId ?? sessionEntry.deviceId ?? null;
 
     logger.info('[FCM] registerToken step=update_target_session', {
       userId,
-      sessionId: session.id,
+      sessionId: sessionEntry.id,
       nextDeviceId,
       composedTokenPreview,
       composedVoipTokenPreview,
     });
     await db.userSession.update({
-      where: { id: session.id },
+      where: { id: sessionEntry.id },
       data: {
         fcmToken: composedToken,
         voipToken: composedVoipToken,
@@ -309,24 +315,15 @@ class FcmPushService {
     if (composedVoipToken) {
       logger.info('[FCM] registerToken step=add_duplicate_condition_voip', {
         userId,
-        sessionId: session.id,
+        sessionId: sessionEntry.id,
         composedVoipTokenPreview,
       });
       duplicateConditions.push({ voipToken: composedVoipToken });
     }
 
-    if (nextDeviceId) {
-      logger.info('[FCM] registerToken step=add_duplicate_condition_device', {
-        userId,
-        sessionId: session.id,
-        nextDeviceId,
-      });
-      duplicateConditions.push({ deviceId: nextDeviceId });
-    }
-
     logger.info('[FCM] registerToken step=clear_duplicates', {
       userId,
-      sessionId: session.id,
+      sessionId: sessionEntry.id,
       duplicateConditionCount: duplicateConditions.length,
       nextDeviceId,
       composedTokenPreview,
@@ -335,7 +332,7 @@ class FcmPushService {
     const duplicateCleanupResult = await db.userSession.updateMany({
       where: {
         userId,
-        id: { not: session.id },
+        id: { not: sessionEntry.id },
         OR: duplicateConditions,
       },
       data: {
@@ -347,7 +344,7 @@ class FcmPushService {
 
     logger.info('[FCM] registerToken step=complete', {
       userId,
-      sessionId: session.id,
+      sessionId: sessionEntry.id,
       nextDeviceId,
       duplicateConditionCount: duplicateConditions.length,
       duplicateCleanupCount: duplicateCleanupResult.count,
@@ -520,10 +517,10 @@ class FcmPushService {
 
     const webpush = payload.actionUrl
       ? {
-          fcm_options: {
-            link: payload.actionUrl,
-          },
-        }
+        fcm_options: {
+          link: payload.actionUrl,
+        },
+      }
       : undefined;
 
     const apns = this.buildApnsPayload(payload);
@@ -610,25 +607,6 @@ class FcmPushService {
         },
       },
     };
-  }
-
-  private async findSessionForRegistration(userId: string, sessionId?: string) {
-    const where = sessionId
-      ? { id: sessionId, userId }
-      : {
-          userId,
-          status: SessionStatus.ACTIVE,
-          refreshTokenExpiry: { gt: new Date() },
-        };
-
-    return db.userSession.findFirst({
-      where,
-      select: {
-        id: true,
-        deviceId: true,
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
   }
 
   private composeStoredToken(platform: string | undefined, token: string): string {

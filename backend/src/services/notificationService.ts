@@ -13,7 +13,7 @@ import type { FlowJson } from '@/bots/json-ui/types';
 import { NotificationDeliveryMethod, NotificationType } from '@prisma/client';
 import { notificationService as realTimeNotificationService } from '@/notification-service';
 import { fcmPushService, type MobilePushRegistration } from './fcmService';
-import {  getNotificationJobsExpected } from '@/services/otel';
+import { getNotificationJobsExpected } from '@/services/otel';
 import { DatabaseClient } from '@/database/client';
 import * as notificationFilterService from './notificationFilterService';
 
@@ -626,10 +626,9 @@ class NotificationService {
   async registerMobilePushToken(
     userId: string,
     registration: MobilePushRegistration,
-    sessionId?: string
   ): Promise<void> {
     try {
-      await fcmPushService.registerToken(userId, { ...registration, sessionId });
+      await fcmPushService.registerToken(userId, registration);
       logger.info(`Registered mobile push token for user ${userId}`, {
         deviceId: registration.deviceId ?? null,
         platform: registration.platform ?? 'unknown',
@@ -681,7 +680,7 @@ class NotificationService {
   async createNotification(
     userId: string,
     data: NotificationData,
-    { sendDesktop, sendMobile } : { sendDesktop: boolean; sendMobile: boolean } = { sendDesktop: true, sendMobile: true }
+    { sendDesktop, sendMobile }: { sendDesktop: boolean; sendMobile: boolean } = { sendDesktop: true, sendMobile: true }
   ): Promise<void> {
 
     try {
@@ -699,10 +698,10 @@ class NotificationService {
       // ─── MOBILE NOTIFICATIONS ───────────────────────────────────────────────
       if (sendMobile) {
         const hasActiveTokens = await fcmPushService.hasActiveTokens(userId);
-        
+
         if (hasActiveTokens) {
           logger.info(`[NOTIFICATION-SERVICE] MOBILE SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
-          
+
           try {
             const sessions = await fcmPushService.getActiveSessionsWithTokens(userId);
             const isDirectMessageType = typeof data.type === 'string' && data.type.toUpperCase() === 'DIRECT_MESSAGE';
@@ -746,7 +745,7 @@ class NotificationService {
       // ─── DESKTOP NOTIFICATIONS ───────────────────────────────────────────────
       if (sendDesktop) {
         logger.info(`[NOTIFICATION-SERVICE] DESKTOP SENT: User ${userId} | Type: ${data.type} | Title: "${data.title}"`);
-        
+
         await realTimeNotificationService.sendNotification(
           userId,
           data.type,
