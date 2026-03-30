@@ -3864,7 +3864,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
 
             // 5. Create new stage ETA entry for first stage (if it has ETA)
-            if (firstStage.eta !== null) {
+            if (firstStage.eta !== null && firstStage.eta > 0) {
               const stageEtaDeadline = calculateETADeadline(new Date(now), firstStage.eta).getTime();
               const newEntryId = uuidv4();
               
@@ -4032,7 +4032,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 );
 
                 const existingEntry = existingEntries[0]; // Get first entry if exists
-                if (newStage.eta !== null) {
+                if (newStage.eta !== null && newStage.eta > 0) {
                   if (existingEntry) {
                     // Re-entering a stage - reactivate it
                     const newStageEtaDeadline = calculateETADeadline(
@@ -4106,7 +4106,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   });
                 } else {
                   // Create new entry only if stage has ETA
-                  if (newStage.eta !== null) {
+                  if (newStage.eta !== null && newStage.eta > 0) {
                     const stageEtaDeadline = calculateETADeadline(new Date(now), newStage.eta).getTime();
                     const newEntryId = uuidv4();
                     await tx.mutate.ticket_stage_eta.insert({
