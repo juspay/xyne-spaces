@@ -36,6 +36,7 @@ import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { createMarkdownComponents } from '../../../utils/markdownComponents';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
 import { NonParticipantActions } from './NonParticipantActions';
@@ -368,6 +369,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const shouldShowPending = useMemo(() => {
     return debugSettings.showSendIndicators && isMe && !message.isSent;
   }, [debugSettings.showSendIndicators, isMe, message.isSent]);
+
+  // Memoize markdown components to prevent re-renders on parent updates
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents(message.messageId),
+    [message.messageId],
+  );
 
   if (!message) {
     return null;
@@ -739,7 +746,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         : 'bot-markdown-content'
                     }
                   >
-                    <Markdown remarkPlugins={[remarkGfm]}>{parsedMarkdown.content}</Markdown>
+                    <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                      {parsedMarkdown.content}
+                    </Markdown>
                   </div>
                   {(ticketSuggestions.length > 0 || ticketsCreated.length > 0) && channelId && (
                     <TicketSuggestions

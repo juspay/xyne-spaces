@@ -1,9 +1,10 @@
-import { ReactElement, useState } from 'react';
-import { Globe, RefreshCw, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ReactElement, useState, useMemo } from 'react';
+import { Globe, Pencil, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
+import { createMarkdownComponents } from '../../../../utils/markdownComponents';
 import {
   SingleStat,
   Table,
@@ -715,76 +716,46 @@ const MessageContent = ({
   visibleChars,
   onCitationClick,
   onSummarizerCitationClick,
-}: MessageContentProps): ReactElement => (
-  <div className='space-y-4 max-w-full'>
-    {/* Tool Outputs */}
-    {message.toolOutputs && message.toolOutputs.length > 0 && (
-      <ToolOutputsSection toolOutputs={message.toolOutputs} />
-    )}
+}: MessageContentProps): ReactElement => {
+  // Memoize markdown components to prevent re-renders on parent updates
+  const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
 
-    {/* Genius: Summary text */}
-    {(!message.agentType || message.agentType === 'genius') && displayContent && (
-      <div className="text-sm font-['Inter'] leading-6 font-normal">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            p: ({ children }) => {
-              const processed = processNodeForUserTags(children, message.userTags);
-              return <span>{processed}</span>;
-            },
-            a: ({ href, children, ...props }) => {
-              // Check if URL is external
-              const isExternal = (() => {
-                if (!href) return false;
-                try {
-                  const urlObj = new URL(href, window.location.origin);
-                  return urlObj.origin !== window.location.origin;
-                } catch {
-                  return true; // Treat invalid URLs as external for safety
-                }
-              })();
+  return (
+    <div className='space-y-4 max-w-full'>
+      {/* Tool Outputs */}
+      {message.toolOutputs && message.toolOutputs.length > 0 && (
+        <ToolOutputsSection toolOutputs={message.toolOutputs} />
+      )}
 
-              // Add target="_blank" for external links
-              if (isExternal) {
-                return (
-                  <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
-                    {children}
-                  </a>
-                );
-              }
+      {/* Genius: Summary text */}
+      {(!message.agentType || message.agentType === 'genius') && displayContent && (
+        <div className="text-sm font-['Inter'] leading-6 font-normal">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {displayContent}
+          </ReactMarkdown>
+        </div>
+      )}
 
-              return (
-                <a href={href} {...props}>
-                  {children}
-                </a>
-              );
-            },
-          }}
-        >
-          {displayContent}
-        </ReactMarkdown>
-      </div>
-    )}
+      {/* Summarizer: Summary and Key Points */}
+      {message.agentType === 'summarizer' && message.summarizerOutput && (
+        <SummarizerContent
+          message={message}
+          visibleChars={visibleChars}
+          onSummarizerCitationClick={onSummarizerCitationClick}
+        />
+      )}
 
-    {/* Summarizer: Summary and Key Points */}
-    {message.agentType === 'summarizer' && message.summarizerOutput && (
-      <SummarizerContent
-        message={message}
-        visibleChars={visibleChars}
-        onSummarizerCitationClick={onSummarizerCitationClick}
-      />
-    )}
-
-    {/* Genius: Key points with citations */}
-    {(!message.agentType || message.agentType === 'genius') && hasKeypoints && parsedContent && (
-      <GeniusKeyPoints
-        parsedContent={parsedContent}
-        message={message}
-        onCitationClick={onCitationClick}
-      />
-    )}
-  </div>
-);
+      {/* Genius: Key points with citations */}
+      {(!message.agentType || message.agentType === 'genius') && hasKeypoints && parsedContent && (
+        <GeniusKeyPoints
+          parsedContent={parsedContent}
+          message={message}
+          onCitationClick={onCitationClick}
+        />
+      )}
+    </div>
+  );
+};
 
 // Tool outputs rendering
 const ToolOutputsSection = ({ toolOutputs }: { toolOutputs: GeniusToolOutput[] }): ReactElement => (
@@ -893,136 +864,108 @@ const SummarizerContent = ({
   message,
   visibleChars,
   onSummarizerCitationClick,
-}: SummarizerContentProps): ReactElement => (
-  <>
-    {/* Summary */}
-    {message.summarizerOutput?.summary && (
-      <div className='relative'>
-        <div className="text-sm font-['Inter'] leading-6 font-normal">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              p: ({ children }) => {
-                const processed = processNodeForUserTags(children, message.userTags);
-                return <span>{processed}</span>;
-              },
-              a: ({ href, children, ...props }) => {
-                // Check if URL is external
-                const isExternal = (() => {
-                  if (!href) return false;
-                  try {
-                    const urlObj = new URL(href, window.location.origin);
-                    return urlObj.origin !== window.location.origin;
-                  } catch {
-                    return true; // Treat invalid URLs as external for safety
-                  }
-                })();
+}: SummarizerContentProps): ReactElement => {
+  // Memoize markdown components to prevent re-renders on parent updates
+  const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
 
-                // Add target="_blank" for external links
-                if (isExternal) {
-                  return (
-                    <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
-                      {children}
-                    </a>
-                  );
-                }
-
-                return (
-                  <a href={href} {...props}>
-                    {children}
-                  </a>
-                );
-              },
-            }}
-          >
-            {message.isStreaming
-              ? message.summarizerOutput.summary.slice(0, visibleChars || 0)
-              : message.summarizerOutput.summary}
-          </ReactMarkdown>
+  return (
+    <>
+      {/* Summary */}
+      {message.summarizerOutput?.summary && (
+        <div className='relative'>
+          <div className="text-sm font-['Inter'] leading-6 font-normal">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {message.isStreaming
+                ? message.summarizerOutput.summary.slice(0, visibleChars || 0)
+                : message.summarizerOutput.summary}
+            </ReactMarkdown>
+          </div>
+          {message.isStreaming && <span className='animate-pulse ml-1'>▋</span>}
         </div>
-        {message.isStreaming && <span className='animate-pulse ml-1'>▋</span>}
-      </div>
-    )}
+      )}
 
-    {/* Key Points */}
-    {message.summarizerOutput?.keyPoints && message.summarizerOutput.keyPoints.length > 0 && (
-      <div className='space-y-2'>
-        <h3 className='text-sm font-semibold text-muted-foreground'>Key Points</h3>
-        <ul className='space-y-1.5'>
-          {message.summarizerOutput.keyPoints.map((keyPoint: SummarizerKeyPoint, index: number) => (
-            <li key={index} className='flex items-start'>
-              <span className='text-foreground text-sm inline prose prose-sm max-w-none'>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    p: ({ children }) => {
-                      const processed = processNodeForUserTags(children, message.userTags);
-                      return <span>{processed}</span>;
-                    },
-                    a: ({ href, children, ...props }) => {
-                      // Check if URL is external
-                      const isExternal = (() => {
-                        if (!href) return false;
-                        try {
-                          const urlObj = new URL(href, window.location.origin);
-                          return urlObj.origin !== window.location.origin;
-                        } catch {
-                          return true;
-                        }
-                      })();
+      {/* Key Points */}
+      {message.summarizerOutput?.keyPoints && message.summarizerOutput.keyPoints.length > 0 && (
+        <div className='space-y-2'>
+          <h3 className='text-sm font-semibold text-muted-foreground'>Key Points</h3>
+          <ul className='space-y-1.5'>
+            {message.summarizerOutput.keyPoints.map(
+              (keyPoint: SummarizerKeyPoint, index: number) => (
+                <li key={index} className='flex items-start'>
+                  <span className='text-foreground text-sm inline prose prose-sm max-w-none'>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({ children }) => {
+                          const processed = processNodeForUserTags(children, message.userTags);
+                          return <span>{processed}</span>;
+                        },
+                        a: ({ href, children, ...props }) => {
+                          // Check if URL is external
+                          const isExternal = (() => {
+                            if (!href) return false;
+                            try {
+                              const urlObj = new URL(href, window.location.origin);
+                              return urlObj.origin !== window.location.origin;
+                            } catch {
+                              return true;
+                            }
+                          })();
 
-                      if (isExternal) {
-                        return (
-                          <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
-                            {children}
-                          </a>
-                        );
-                      }
-
-                      return (
-                        <a href={href} {...props}>
-                          {children}
-                        </a>
-                      );
-                    },
-                  }}
-                >
-                  {keyPoint.point}
-                </ReactMarkdown>
-                {keyPoint.citation &&
-                  (keyPoint.citation.conversationId ||
-                    keyPoint.citation.externalUrl ||
-                    keyPoint.citation.canvasId) &&
-                  !message.isStreaming && (
-                    <>
-                      {' '}
-                      <button
-                        type='button'
-                        onClick={(): void => {
-                          if (keyPoint.citation) {
-                            onSummarizerCitationClick(keyPoint.citation);
+                          if (isExternal) {
+                            return (
+                              <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                                {children}
+                              </a>
+                            );
                           }
-                        }}
-                        className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-muted text-muted-foreground font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-accent transition-colors cursor-pointer align-middle"
-                        title={`Jump to ${keyPoint.citation.entityType || 'message'} ${keyPoint.citation.messageIndex}`}
-                        data-track-category='XyneAI'
-                        data-track-name='CITATION_CLICK'
-                        data-track-metadata={JSON.stringify({
-                          messageIndex: keyPoint.citation.messageIndex,
-                        })}
-                      >
-                        {keyPoint.citation.messageIndex}
-                      </button>
-                    </>
-                  )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    )}
-  </>
-);
+
+                          return (
+                            <a href={href} {...props}>
+                              {children}
+                            </a>
+                          );
+                        },
+                      }}
+                    >
+                      {keyPoint.point}
+                    </ReactMarkdown>
+                    {keyPoint.citation &&
+                      (keyPoint.citation.conversationId ||
+                        keyPoint.citation.externalUrl ||
+                        keyPoint.citation.canvasId) &&
+                      !message.isStreaming && (
+                        <>
+                          {' '}
+                          <button
+                            type='button'
+                            onClick={(): void => {
+                              if (keyPoint.citation) {
+                                onSummarizerCitationClick(keyPoint.citation);
+                              }
+                            }}
+                            className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-muted text-muted-foreground font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-accent transition-colors cursor-pointer align-middle"
+                            title={`Jump to ${keyPoint.citation.entityType || 'message'} ${keyPoint.citation.messageIndex}`}
+                            data-track-category='XyneAI'
+                            data-track-name='SUMMARIZER_CITATION_CLICK'
+                            data-track-metadata={JSON.stringify({
+                              messageIndex: keyPoint.citation.messageIndex,
+                            })}
+                          >
+                            {keyPoint.citation.messageIndex}
+                          </button>
+                        </>
+                      )}
+                  </span>
+                </li>
+              ),
+            )}
+          </ul>
+        </div>
+      )}
+    </>
+  );
+};
 
 // Genius key points rendering
 const GeniusKeyPoints = ({

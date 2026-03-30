@@ -167,6 +167,167 @@ export function flattenCanvasContexts(canvasContexts: CanvasSelectionContext[]):
   return canvasContexts.flatMap(ctx => ctx.selections);
 }
 
+// IndexedDB for persisting XyneAI state
+const DB_NAME = 'xyneai-state';
+const STORE_NAME = 'context';
+const MERMAID_STORE_NAME = 'mermaid-diagrams';
+const DB_VERSION = 2; // Incremented to add mermaid store
+
+// Initialize IndexedDB
+const initDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = () => reject(new Error(request.error?.message || 'Failed to open IndexedDB'));
+    request.onsuccess = () => resolve(request.result);
+
+    request.onupgradeneeded = event => {
+      const db = (event.target as IDBOpenDBRequest).result;
+
+      // Create context store if it doesn't exist
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+
+      // Create mermaid diagrams store if it doesn't exist
+      if (!db.objectStoreNames.contains(MERMAID_STORE_NAME)) {
+        // Store mermaid diagrams with messageId as key
+        db.createObjectStore(MERMAID_STORE_NAME);
+      }
+    };
+  });
+};
+
+// Save context to IndexedDB
+const saveContextToIndexedDB = async (context: Partial<XyneAIContext>): Promise<void> => {
+  try {
+    const db = await initDB();
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    store.put(context, 'xyneai-context');
+  } catch (error) {
+    console.error('Failed to save XyneAI context to IndexedDB:', error);
+  }
+};
+
+// Load context from IndexedDB
+export const loadContextFromIndexedDB = async (): Promise<Partial<XyneAIContext> | null> => {
+  try {
+    const db = await initDB();
+    const transaction = db.transaction([STORE_NAME], 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    return new Promise<Partial<XyneAIContext> | null>((resolve, reject) => {
+      const request = store.get('xyneai-context');
+      request.onsuccess = () => resolve((request.result as Partial<XyneAIContext>) || null);
+      request.onerror = () =>
+        reject(new Error(request.error?.message || 'Failed to get context from IndexedDB'));
+    });
+  } catch (error) {
+    console.error('Failed to load XyneAI context from IndexedDB:', error);
+    return null;
+  }
+};
+
+// Clear context from IndexedDB
+const clearContextFromIndexedDB = async (): Promise<void> => {
+  try {
+    const db = await initDB();
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    store.delete('xyneai-context');
+  } catch (error) {
+    console.error('Failed to clear XyneAI context from IndexedDB:', error);
+  }
+};
+
+// Mermaid diagram storage interface
+export interface MermaidDiagram {
+  messageId: string;
+  diagram: string;
+  renderedSvg?: string;
+  timestamp: number;
+}
+
+// Save mermaid diagram to IndexedDB
+export const saveMermaidDiagram = async (
+  messageId: string,
+  diagram: string,
+  renderedSvg?: string,
+): Promise<void> => {
+  try {
+    const db = await initDB();
+    const transaction = db.transaction([MERMAID_STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(MERMAID_STORE_NAME);
+
+    const mermaidData: MermaidDiagram = {
+      messageId,
+      diagram,
+      ...(renderedSvg !== undefined && { renderedSvg }),
+      timestamp: Date.now(),
+    };
+
+    store.put(mermaidData, messageId);
+  } catch (error) {
+    console.error('Failed to save mermaid diagram to IndexedDB:', error);
+  }
+};
+
+// Load mermaid diagram from IndexedDB
+export const loadMermaidDiagram = async (messageId: string): Promise<MermaidDiagram | null> => {
+  try {
+    const db = await initDB();
+    const transaction = db.transaction([MERMAID_STORE_NAME], 'readonly');
+    const store = transaction.objectStore(MERMAID_STORE_NAME);
+
+    return new Promise<MermaidDiagram | null>((resolve, reject) => {
+      const request = store.get(messageId);
+      request.onsuccess = () => resolve((request.result as MermaidDiagram) || null);
+      request.onerror = () =>
+        reject(new Error(request.error?.message || 'Failed to get mermaid diagram from IndexedDB'));
+    });
+  } catch (error) {
+    console.error('Failed to load mermaid diagram from IndexedDB:', error);
+    return null;
+  }
+};
+
+// Delete mermaid diagram from IndexedDB
+export const deleteMermaidDiagram = async (messageId: string): Promise<void> => {
+  try {
+    const db = await initDB();
+    const transaction = db.transaction([MERMAID_STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(MERMAID_STORE_NAME);
+    store.delete(messageId);
+  } catch (error) {
+    console.error('Failed to delete mermaid diagram from IndexedDB:', error);
+  }
+};
+
+// Clear old mermaid diagrams (older than 7 days) to prevent storage bloat
+export const clearOldMermaidDiagrams = async (): Promise<void> => {
+  try {
+    const db = await initDB();
+    const transaction = db.transaction([MERMAID_STORE_NAME], 'readwrite');
+    const store = transaction.objectStore(MERMAID_STORE_NAME);
+
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+    const request = store.openCursor();
+    request.onsuccess = event => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+      if (cursor) {
+        const diagram = cursor.value as MermaidDiagram;
+        if (diagram.timestamp < sevenDaysAgo) {
+          cursor.delete();
+        }
+        cursor.continue();
+      }
+    };
+  } catch (error) {
+    console.error('Failed to clear old mermaid diagrams from IndexedDB:', error);
+  }
+};
+
 export const xyneAIMachine = setup({
   types: {
     context: {} as XyneAIContext,
@@ -195,7 +356,7 @@ export const xyneAIMachine = setup({
           event.canvasInfo,
         );
 
-        return {
+        const newContext = {
           xyneAIState: 'open' as XyneAIState,
           contextType,
           contextId,
@@ -205,6 +366,11 @@ export const xyneAIMachine = setup({
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
         };
+
+        // Persist to IndexedDB
+        void saveContextToIndexedDB(newContext);
+
+        return newContext;
       }
       return { xyneAIState: 'open' as XyneAIState };
     }),
@@ -230,7 +396,7 @@ export const xyneAIMachine = setup({
           event.canvasInfo,
         );
 
-        return {
+        const newContext = {
           contextType,
           contextId,
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
@@ -239,36 +405,58 @@ export const xyneAIMachine = setup({
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
         };
+
+        // Persist to IndexedDB
+        void saveContextToIndexedDB(newContext);
+
+        return newContext;
       }
       return {};
     }),
-    setClosed: assign({
-      xyneAIState: 'closed' as XyneAIState,
-      contextType: 'general' as XyneAIContextType,
-      contextId: null,
-      channelId: null,
-      threadInfo: null,
-      startFreshChat: false,
-      canvasInfo: null,
-      canvasContexts: [],
+    setClosed: assign(() => {
+      const newContext = {
+        xyneAIState: 'closed' as XyneAIState,
+        contextType: 'general' as XyneAIContextType,
+        contextId: null,
+        channelId: null,
+        threadInfo: null,
+        startFreshChat: false,
+        canvasInfo: null,
+        canvasContexts: [] as CanvasSelectionContext[],
+      };
+
+      // Clear from IndexedDB when closing
+      void clearContextFromIndexedDB();
+
+      return newContext;
     }),
     setContext: assign(({ event }) => {
       if (event.type === 'SET_CONTEXT') {
-        return {
+        const newContext = {
           contextType: event.contextType,
           contextId: event.contextId,
           channelId: event.contextType === 'chat' ? event.contextId : null, // Legacy support
         };
+
+        // Persist to IndexedDB
+        void saveContextToIndexedDB(newContext);
+
+        return newContext;
       }
       return {};
     }),
     setChannel: assign(({ event }) => {
       if (event.type === 'SET_CHANNEL') {
-        return {
+        const newContext = {
           contextType: 'chat' as XyneAIContextType,
           contextId: event.channelId,
           channelId: event.channelId,
         };
+
+        // Persist to IndexedDB
+        void saveContextToIndexedDB(newContext);
+
+        return newContext;
       }
       return {};
     }),
@@ -384,5 +572,42 @@ export const xyneAIMachine = setup({
   },
 });
 
+// Initialize actor with persisted state
+const initializeActor = async (): Promise<void> => {
+  try {
+    const persistedContext = await loadContextFromIndexedDB();
+    if (persistedContext && persistedContext.xyneAIState === 'open') {
+      // Restore the open state with persisted context
+      // Only include defined values in the send event
+      xyneAIActor.send({
+        type: 'OPEN',
+        ...(persistedContext.contextType !== undefined &&
+          persistedContext.contextType !== null && {
+            contextType: persistedContext.contextType,
+          }),
+        ...(persistedContext.contextId !== undefined &&
+          persistedContext.contextId !== null && {
+            contextId: persistedContext.contextId,
+          }),
+        ...(persistedContext.channelId !== undefined &&
+          persistedContext.channelId !== null && {
+            channelId: persistedContext.channelId,
+          }),
+        ...(persistedContext.threadInfo !== undefined && {
+          threadInfo: persistedContext.threadInfo,
+        }),
+      });
+    }
+
+    // Clean up old mermaid diagrams on app startup
+    void clearOldMermaidDiagrams();
+  } catch (error) {
+    console.error('Failed to initialize XyneAI actor with persisted state:', error);
+  }
+};
+
 // Global XyneAI actor instance
 export const xyneAIActor = createActor(xyneAIMachine).start();
+
+// Initialize with persisted state
+void initializeActor();
