@@ -170,6 +170,13 @@ export const EDGE_STYLING = {
 export const USER_REPLY_PREFIX = '[user_reply] ';
 
 /**
+ * Maximum characters shown in UserMessageRenderer before truncation.
+ */
+export const USER_MESSAGE_CHAR_LIMIT = 300;
+
+export const RA_URL: string = 'https://research-agent.sso.internal.svc.k8s.office.mum.juspay.net/';
+
+/**
  * Common workflow status types used across components
  */
 export type WorkflowStatus =

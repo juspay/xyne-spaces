@@ -15,7 +15,7 @@ import { User } from 'lucide-react';
 import { useWorkflows, Workflow } from '../../hooks/useWorkflows';
 import { TicketFilters } from './TicketHeader';
 import { useUsers } from '../../hooks/useUsers';
-import { PAGE_SIZE } from './constants';
+import { PAGE_SIZE, LAST_WORKFLOW_PATH_KEY } from './constants';
 
 interface TicketTableProps {
   filters: TicketFilters;
@@ -182,6 +182,7 @@ const TicketTable: React.FC<TicketTableProps> = ({ filters }) => {
     const workflowId = row['id'];
     const ticketId = allWorkflows.find(w => w.id === workflowId)?.ticketId;
     if (typeof ticketId === 'string' && typeof workflowId === 'string') {
+      sessionStorage.removeItem(LAST_WORKFLOW_PATH_KEY);
       void navigate(`/tickets/${ticketId}/workflow/${workflowId}`);
     }
   };

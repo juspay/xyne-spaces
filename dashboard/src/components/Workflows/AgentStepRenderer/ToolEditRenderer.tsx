@@ -69,53 +69,53 @@ export const ToolEditRenderer: React.FC<
       <div className='space-y-2 text-sm'>
         <div
           className={`rounded-xl border transition-colors overflow-hidden ${
-            success ? 'bg-amber-50/20 border-amber-200/40' : 'bg-background border-border'
+            success ? 'bg-amber-500/5 border-amber-500/20' : 'bg-background border-border'
           }`}
         >
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className='w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left'
+            className='w-full flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 transition-colors text-left'
             data-track-category='Workflows'
             data-track-name='ToggleFileEditExpand'
             data-track-metadata={JSON.stringify({ fileName, filePath })}
           >
-            <div className='p-2 rounded-lg bg-amber-500/10 text-amber-500'>
-              <FileEdit size={18} />
+            <div className='p-1.5 rounded-md bg-amber-500/10 text-amber-500'>
+              <FileEdit size={14} />
             </div>
 
             <div className='flex flex-col min-w-0'>
               <div className='flex items-center gap-2'>
-                <span className='text-sm font-semibold text-foreground truncate'>{fileName}</span>
+                <span className='text-xs font-semibold text-foreground truncate'>{fileName}</span>
                 {success ? (
                   <div className='flex items-center gap-1.5'>
-                    <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 uppercase tracking-wider border border-amber-200/50'>
+                    <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 uppercase tracking-wider border border-amber-500/20'>
                       Edit
                     </span>
                   </div>
                 ) : (
-                  <span className='inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-600 uppercase tracking-wider'>
+                  <span className='inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-500 uppercase tracking-wider'>
                     Failed
                   </span>
                 )}
               </div>
               {directoryPath && (
-                <span className='text-[11px] text-muted-foreground truncate font-mono'>
+                <span className='text-[10px] text-muted-foreground truncate font-mono'>
                   {directoryPath}/
                 </span>
               )}
             </div>
 
             <div className='ml-auto flex items-center gap-3'>
-              <div className='hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/50 text-[10px] font-medium text-muted-foreground border border-border/50'>
+              <div className='hidden sm:flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-muted/50 text-[10px] font-medium text-muted-foreground border border-border/50'>
                 {success ? (
                   <>
-                    <Check size={12} className='text-green-600' strokeWidth={3} />
+                    <Check size={12} className='text-green-500' strokeWidth={3} />
                     <span>Applied</span>
                   </>
                 ) : (
                   <>
-                    <X size={12} className='text-red-600' strokeWidth={3} />
+                    <X size={12} className='text-red-500' strokeWidth={3} />
                     <span>Failed</span>
                   </>
                 )}
@@ -132,12 +132,14 @@ export const ToolEditRenderer: React.FC<
 
           {/* Diff Content */}
           {isExpanded && (
-            <div className='border-t border-border overflow-auto max-h-[500px] animate-in fade-in slide-in-from-top-1 duration-200'>
-              <PierreDiffView
-                name={filePath || fileName}
-                oldContents={oldString}
-                newContents={newString}
-              />
+            <div className='border-t border-border overflow-auto max-h-[350px] animate-in fade-in slide-in-from-top-1 duration-200'>
+              <div className='[&_*]:text-xs [&_*]:leading-relaxed'>
+                <PierreDiffView
+                  name={filePath || fileName}
+                  oldContents={oldString}
+                  newContents={newString}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -145,7 +147,7 @@ export const ToolEditRenderer: React.FC<
     );
   } catch (error) {
     return (
-      <div className='text-red-600 text-sm p-3 border border-red-200 rounded-lg bg-red-50'>
+      <div className='text-red-500 text-sm p-3 border border-red-500/20 rounded-lg bg-red-500/10'>
         Error parsing edit tool data: {error instanceof Error ? error.message : 'Unknown error'}
       </div>
     );

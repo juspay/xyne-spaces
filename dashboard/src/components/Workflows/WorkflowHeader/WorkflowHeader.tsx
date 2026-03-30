@@ -16,6 +16,10 @@ import {
   XCircle,
   Rocket,
   Play,
+  AlertTriangle,
+  Terminal,
+  CheckCheck,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Ticket } from '../../../hooks/useTickets';
@@ -76,6 +80,7 @@ export interface WorkflowHeaderProps {
   workflowNumber?: number | undefined;
   workflowTitle?: string | undefined;
   repositoryUrl?: string | undefined;
+  failureOutput?: { name?: string; message?: string; stack?: string } | null;
 }
 
 type StatusConfig = { bg: string; text: string; dot: string; label: string };
@@ -176,17 +181,21 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   workflowNumber,
   workflowTitle,
   repositoryUrl,
+  failureOutput,
 }) => {
   const navigate = useNavigate();
   // const [showDesc, setShowDesc] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showJenkinsPanel, setShowJenkinsPanel] = useState(false);
   const [showMetadataDropdown, setShowMetadataDropdown] = useState(false);
+  const [showFailurePopover, setShowFailurePopover] = useState(false);
+  const [stackCopied, setStackCopied] = useState(false);
   const [isTriggering, setIsTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const jenkinsPanelRef = useRef<HTMLDivElement>(null);
   const metadataDropdownRef = useRef<HTMLDivElement>(null);
   const mobileMetadataRef = useRef<HTMLDivElement>(null);
+  const failurePopoverRef = useRef<HTMLDivElement>(null);
 
   const { cancelExecution, isCanceling } = useWorkflowControl();
 
@@ -231,10 +240,19 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
   const closeMenu = useCallback(() => setShowMenu(false), []);
   const closeJenkinsPanel = useCallback(() => setShowJenkinsPanel(false), []);
   const closeMetadataDropdown = useCallback(() => setShowMetadataDropdown(false), []);
+  const closeFailurePopover = useCallback(() => setShowFailurePopover(false), []);
   useClickOutside(menuRef, closeMenu, showMenu);
   useClickOutside(jenkinsPanelRef, closeJenkinsPanel, showJenkinsPanel);
   useClickOutside(metadataDropdownRef, closeMetadataDropdown, showMetadataDropdown);
   useClickOutside(mobileMetadataRef, closeMetadataDropdown, showMetadataDropdown);
+  useClickOutside(failurePopoverRef, closeFailurePopover, showFailurePopover);
+
+  const handleCopyStack = useCallback(() => {
+    if (!failureOutput?.stack) return;
+    void navigator.clipboard.writeText(failureOutput.stack);
+    setStackCopied(true);
+    setTimeout(() => setStackCopied(false), 2000);
+  }, [failureOutput]);
 
   const status = executionStatus?.toLowerCase() || '';
   const isRunning = ['running', 'in_progress'].includes(status);
@@ -343,16 +361,116 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           {executionStatus && (
             <>
               <ChevronRight size={14} className='text-muted-foreground/50 flex-shrink-0' />
-              <div
-                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md ${statusConfig.bg}`}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot} ${isRunning ? 'animate-pulse' : ''}`}
-                />
-                <span className={`text-xs font-medium ${statusConfig.text}`}>
-                  {statusConfig.label}
-                </span>
-              </div>
+              {failureOutput && ['failed', 'failure'].includes(status) ? (
+                <div className='relative' ref={failurePopoverRef}>
+                  <button
+                    onClick={() => setShowFailurePopover(!showFailurePopover)}
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md cursor-pointer transition-all hover:shadow-sm hover:scale-[1.02] active:scale-[0.98] ${statusConfig.bg} group`}
+                    title='Click to see failure details'
+                    data-track-category='Workflows'
+                    data-track-name='OpenFailureDetails'
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot} animate-pulse`}
+                    />
+                    <span className={`text-xs font-medium ${statusConfig.text}`}>
+                      {statusConfig.label}
+                    </span>
+                    <AlertTriangle
+                      size={11}
+                      className={`${statusConfig.text} opacity-70 group-hover:opacity-100 transition-opacity`}
+                    />
+                  </button>
+                  {showFailurePopover && (
+                    <div className='fixed left-2 right-2 top-14 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-2 sm:w-[480px] bg-background border border-red-500/20 rounded-xl shadow-xl z-[200] overflow-hidden'>
+                      {/* Header */}
+                      <div className='flex items-center gap-2.5 px-4 py-3 bg-red-500/10 border-b border-red-500/20'>
+                        <div className='flex-shrink-0 w-7 h-7 rounded-lg bg-red-500/15 flex items-center justify-center'>
+                          <XCircle size={14} className='text-red-500' />
+                        </div>
+                        <div className='flex-1 min-w-0'>
+                          <p className='text-[10px] font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider'>
+                            Workflow Failed
+                          </p>
+                          {failureOutput.name && (
+                            <p className='text-xs font-bold text-foreground truncate'>
+                              {failureOutput.name}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => setShowFailurePopover(false)}
+                          className='flex-shrink-0 p-1 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-foreground transition-colors'
+                          data-track-category='Workflows'
+                          data-track-name='CloseFailurePopover'
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+
+                      {/* Error message */}
+                      {failureOutput.message && (
+                        <div className='px-4 py-3 border-b border-border/60'>
+                          <p className='text-[10px] font-medium text-muted-foreground mb-1 uppercase tracking-wider'>
+                            Reason
+                          </p>
+                          <p className='text-xs text-foreground leading-relaxed'>
+                            {failureOutput.message}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Stack trace */}
+                      {failureOutput.stack && (
+                        <div className='px-4 py-3'>
+                          <div className='flex items-center justify-between mb-2'>
+                            <div className='flex items-center gap-1.5'>
+                              <Terminal size={12} className='text-muted-foreground' />
+                              <p className='text-[10px] font-medium text-muted-foreground uppercase tracking-wider'>
+                                Stack Trace
+                              </p>
+                            </div>
+                            <button
+                              onClick={handleCopyStack}
+                              className='inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-all'
+                              data-track-category='Workflows'
+                              data-track-name='CopyFailureStackTrace'
+                            >
+                              {stackCopied ? (
+                                <>
+                                  <CheckCheck size={11} className='text-emerald-500' />
+                                  <span className='text-emerald-500'>Copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy size={11} />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                          <div className='bg-muted/60 rounded-lg p-3 max-h-52 overflow-y-auto scrollbar-thin scrollbar-thumb-border'>
+                            <pre className='text-xs text-muted-foreground whitespace-pre-wrap break-all font-mono leading-relaxed'>
+                              {failureOutput.stack}
+                            </pre>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md ${statusConfig.bg}`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot} ${isRunning ? 'animate-pulse' : ''}`}
+                  />
+                  <span className={`text-xs font-medium ${statusConfig.text}`}>
+                    {statusConfig.label}
+                  </span>
+                </div>
+              )}
             </>
           )}
         </div>

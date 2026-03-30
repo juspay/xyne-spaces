@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 import Tooltip from '../../ui/Tooltip';
+import { LAST_WORKFLOW_PATH_KEY } from '../../Tickets/constants';
 
 interface WorkflowBubbleProps {
   workflowName: string | undefined;
@@ -151,6 +152,7 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
             cursor={'pointer'}
             onClick={e => {
               e.stopPropagation();
+              sessionStorage.removeItem(LAST_WORKFLOW_PATH_KEY);
               const workflowNumberParam = workflowNumber ? `?workflowNumber=${workflowNumber}` : '';
               const workflowUrl = metadata?.workflowId
                 ? `/tickets/${ticketId}/workflow/${metadata.workflowId}${workflowNumberParam}`

@@ -93,13 +93,13 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
   const getFileIcon = (type: string): React.ReactElement => {
     switch (type) {
       case 'add':
-        return <FilePlus className='w-4 h-4 text-green-600' />;
+        return <FilePlus className='w-4 h-4 text-emerald-500' />;
       case 'delete':
-        return <FileMinus className='w-4 h-4 text-red-600' />;
+        return <FileMinus className='w-4 h-4 text-red-500' />;
       case 'modify':
-        return <Edit className='w-4 h-4 text-blue-600' />;
+        return <Edit className='w-4 h-4 text-blue-500' />;
       case 'rename':
-        return <GitBranch className='w-4 h-4 text-purple-600' />;
+        return <GitBranch className='w-4 h-4 text-violet-500' />;
       default:
         return <Edit className='w-4 h-4 text-muted-foreground' />;
     }
@@ -138,8 +138,8 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
           <div className='flex items-center gap-2'>
             {diffData && (
               <div className='flex items-center gap-4 mr-4 text-sm text-muted-foreground'>
-                <span className='text-green-600'>+{diffData.stats.additions}</span>
-                <span className='text-red-600'>-{diffData.stats.deletions}</span>
+                <span className='text-emerald-500'>+{diffData.stats.additions}</span>
+                <span className='text-red-500'>-{diffData.stats.deletions}</span>
                 <span>{diffData.stats.files} files</span>
               </div>
             )}
@@ -147,7 +147,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
             <select
               value={viewType}
               onChange={e => setViewType(e.target.value as 'split' | 'unified')}
-              className='px-3 py-1 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+              className='px-3 py-1 text-sm border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='Workflows'
               data-track-name='ChangeGitDiffViewType'
               data-track-metadata={JSON.stringify({ viewType })}
@@ -185,7 +185,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
                         onClick={() => setSelectedFile(isSelected ? null : fileName)}
                         className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors text-left ${
                           isSelected
-                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            ? 'bg-primary/10 text-primary border border-primary/20'
                             : 'hover:bg-muted text-foreground'
                         }`}
                         data-track-category='Workflows'
@@ -212,7 +212,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
             {isLoading && (
               <div className='flex items-center justify-center h-full'>
                 <div className='text-center'>
-                  <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4'></div>
+                  <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4'></div>
                   <p className='text-muted-foreground'>Loading git diff...</p>
                 </div>
               </div>
@@ -221,10 +221,10 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
             {error && (
               <div className='flex items-center justify-center h-full'>
                 <div className='text-center'>
-                  <div className='text-red-500 mb-4'>
+                  <div className='text-destructive mb-4'>
                     <X className='w-12 h-12 mx-auto' />
                   </div>
-                  <p className='text-sm text-gray-500 mt-2'>
+                  <p className='text-sm text-muted-foreground mt-2'>
                     {error instanceof Error ? error.message : 'Unknown error'}
                   </p>
                 </div>
@@ -251,7 +251,7 @@ const GitDiffModal: React.FC<GitDiffModalProps> = ({ executionId, isOpen, onClos
                         ({ gitFile }) => !selectedFile || getFileName(gitFile) === selectedFile,
                       )
                       .map(({ fileDiff }, index) => (
-                        <div key={index} className='mb-4'>
+                        <div key={index} className='mb-4 [&_*]:text-[11px] [&_*]:leading-relaxed'>
                           <FileDiff
                             fileDiff={fileDiff}
                             options={{

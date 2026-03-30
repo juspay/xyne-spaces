@@ -1,10 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Loader2, AlertCircle, RotateCcw } from 'lucide-react';
+import { ChevronDown, Loader2, AlertCircle, RotateCcw, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
+import { useSelector } from '@xstate/react';
 import { useWorkflowControl } from '../../../services/Workflow/workflowGraphService';
 import { CombinedWorkflowData } from '../../../services/Workflow/workflowGraphService.types';
 import Tooltip from '../../ui/Tooltip/Tooltip';
-import { USER_REPLY_PREFIX } from '../constants';
+import { USER_REPLY_PREFIX, RA_URL } from '../constants';
+import { browserPanelActor } from '../../../machines/browserPanelMachine';
+import { isElectronApp } from '../../../utils/electronApp';
 
 interface StepRerunButtonProps {
   executionId?: string;
@@ -23,6 +26,10 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
 }) => {
   const { continueAgenticStepAsync, isContinuing, restoreExecutionAsync, isRestoring } =
     useWorkflowControl();
+  const browserPanelState = useSelector(
+    browserPanelActor,
+    state => state.context.browserPanelState,
+  );
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [contextInput, setContextInput] = useState('');
   const [dropdownError, setDropdownError] = useState<string | null>(null);
@@ -191,6 +198,19 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
     }
   };
 
+  const handleOpenRA = (): void => {
+    setIsDropdownOpen(false);
+    if (isElectronApp()) {
+      if (browserPanelState === 'open') {
+        browserPanelActor.send({ type: 'OPEN_URLS', urls: [RA_URL] });
+      } else {
+        browserPanelActor.send({ type: 'OPEN', urls: [RA_URL] });
+      }
+    } else {
+      window.open(RA_URL, '_blank');
+    }
+  };
+
   const isLoading = isContinuing || isRestoring;
   const isAgentic = isAgenticStep();
 
@@ -282,9 +302,15 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
               )}
             </button>
 
-            <div className='text-[10px] text-muted-foreground pt-1 border-t border-border/50'>
-              This will create a new execution starting from this step
-            </div>
+            <button
+              onClick={handleOpenRA}
+              className='w-full px-3 py-1.5 border border-border bg-background hover:bg-muted text-foreground text-xs font-medium rounded transition-colors flex items-center justify-center gap-1.5'
+              data-track-category='Workflows'
+              data-track-name='PlanFromRA'
+            >
+              <ExternalLink size={11} />
+              Plan from RA
+            </button>
           </div>
         </div>
       )}

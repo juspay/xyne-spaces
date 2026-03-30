@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { User } from 'lucide-react';
 import { BaseStepRendererProps } from './types';
-import { USER_REPLY_PREFIX } from '../constants';
+import { USER_REPLY_PREFIX, USER_MESSAGE_CHAR_LIMIT } from '../constants';
 
 type SafeRecord = Record<string, unknown>;
 
@@ -41,10 +41,15 @@ export const UserMessageRenderer: React.FC<
   BaseStepRendererProps<UserMessageData | string | SafeRecord>
 > = ({ data }) => {
   const { message, timestamp } = parseUserMessageData(data);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   if (!message) {
     return null;
   }
+
+  const isTruncated = message.length > USER_MESSAGE_CHAR_LIMIT;
+  const displayedMessage =
+    isTruncated && !isExpanded ? message.slice(0, USER_MESSAGE_CHAR_LIMIT) + '…' : message;
 
   return (
     <div
@@ -63,11 +68,31 @@ export const UserMessageRenderer: React.FC<
                 {timestamp}
               </span>
             )}
+            {isTruncated && isExpanded && (
+              <button
+                onClick={() => setIsExpanded(false)}
+                className='ml-auto text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline focus:outline-none'
+                data-track-category='UserMessageRenderer'
+                data-track-name='ShowLess'
+              >
+                Show less
+              </button>
+            )}
           </div>
           <div className='bg-blue-50 dark:bg-blue-900/30 rounded-lg p-3 border border-blue-200 dark:border-blue-700'>
             <p className='text-sm text-foreground dark:text-gray-200 whitespace-pre-wrap'>
-              {message}
+              {displayedMessage}
             </p>
+            {isTruncated && (
+              <button
+                onClick={() => setIsExpanded(prev => !prev)}
+                className='mt-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline focus:outline-none'
+                data-track-category='UserMessageRenderer'
+                data-track-name='ToggleExpand'
+              >
+                {isExpanded ? 'Show less' : 'Show more'}
+              </button>
+            )}
           </div>
         </div>
       </div>

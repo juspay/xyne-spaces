@@ -27,6 +27,7 @@ import {
   MoreVertical,
   Users2,
   Layers,
+  LayoutList,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AgentStepRenderer } from '../AgentStepRenderer/StepRenderer';
@@ -1023,26 +1024,28 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                     </div>
 
                     <div className='flex items-center gap-2 flex-shrink-0'>
-                      <button
-                        onClick={() => setMainTab('thread')}
-                        className='flex items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted shadow-sm'
-                        style={{ width: '38px', height: '38px' }}
-                        title='Thread'
-                        data-track-category='Workflows'
-                        data-track-name='OpenThreadTab'
-                      >
-                        <MessageSquare size={15} className='text-muted-foreground' />
-                      </button>
-                      <button
-                        onClick={() => setDesktopMode('advanced')}
-                        className='flex items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted shadow-sm'
-                        style={{ height: '38px', width: '38px' }}
-                        title='Go to Advanced Mode'
-                        data-track-category='Workflows'
-                        data-track-name='SelectAdvancedMode'
-                      >
-                        <Layers size={14} className='text-muted-foreground' />
-                      </button>
+                      <Tooltip content='Thread' side='bottom'>
+                        <button
+                          onClick={() => setMainTab('thread')}
+                          className='flex items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted shadow-sm'
+                          style={{ width: '38px', height: '38px' }}
+                          data-track-category='Workflows'
+                          data-track-name='OpenThreadTab'
+                        >
+                          <MessageSquare size={15} className='text-muted-foreground' />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content='Step-by-step view' side='bottom'>
+                        <button
+                          onClick={() => setDesktopMode('advanced')}
+                          className='flex items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted shadow-sm'
+                          style={{ height: '38px', width: '38px' }}
+                          data-track-category='Workflows'
+                          data-track-name='SelectAdvancedMode'
+                        >
+                          <Layers size={14} className='text-muted-foreground' />
+                        </button>
+                      </Tooltip>
                     </div>
                   </div>
                 )}
@@ -1165,98 +1168,31 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                         </div>
                       )}
 
-                      {/* Search Toggle Button */}
-                      <button
-                        onClick={() => {
-                          setIsSearchOpen(!isSearchOpen);
-                          if (isSearchOpen) setSearchQuery('');
-                        }}
-                        className={`flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors ${
-                          isSearchOpen
-                            ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-                            : 'bg-background text-foreground border-border hover:bg-muted'
-                        }`}
-                        style={{ width: '42px', height: '42px' }}
-                        title='Search'
-                        data-track-category='Workflows'
-                        data-track-name='ToggleSearch'
-                      >
-                        <Search size={16} />
-                      </button>
-
                       {/* Thread Button for Advanced Mode */}
-                      <button
-                        onClick={() => setMainTab('thread')}
-                        className='flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted'
-                        style={{ width: '42px', height: '42px' }}
-                        title='Thread'
-                        data-track-category='Workflows'
-                        data-track-name='OpenThreadTab'
-                      >
-                        <MessageSquare size={16} />
-                      </button>
-
-                      {/* More Actions Menu */}
-                      <div className='relative flex-shrink-0'>
+                      <Tooltip content='Thread' side='bottom'>
                         <button
-                          onClick={() => setIsMenuOpen(!isMenuOpen)}
-                          onBlur={() => setTimeout(() => setIsMenuOpen(false), 200)}
-                          className='flex items-center justify-center text-sm font-medium rounded-lg border bg-background text-foreground border-border hover:bg-muted transition-colors'
+                          onClick={() => setMainTab('thread')}
+                          className='flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted shadow-sm'
                           style={{ width: '42px', height: '42px' }}
-                          title='More Options'
                           data-track-category='Workflows'
-                          data-track-name='ToggleMoreActions'
+                          data-track-name='OpenThreadTab'
                         >
-                          <MoreVertical size={16} />
+                          <MessageSquare size={16} className='text-muted-foreground' />
                         </button>
+                      </Tooltip>
 
-                        {isMenuOpen && (
-                          <div className='absolute right-0 top-full mt-1.5 w-48 bg-popover rounded-lg shadow-lg border border-border py-1 z-50 overflow-hidden'>
-                            <button
-                              onClick={() => {
-                                setDesktopMode('basic');
-                                setIsMenuOpen(false);
-                              }}
-                              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors font-medium border-b border-border'
-                              data-track-category='Workflows'
-                              data-track-name='SelectBasicMode'
-                            >
-                              <Bot size={16} className='text-muted-foreground' />
-                              Back to basic mode
-                            </button>
-                            <button
-                              onClick={() => {
-                                setMainTab('history');
-                                setIsMenuOpen(false);
-                              }}
-                              className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-muted text-left transition-colors'
-                              data-track-category='Workflows'
-                              data-track-name='OpenHistoryTab'
-                            >
-                              <History size={16} className='text-muted-foreground' />
-                              Attempts
-                            </button>
-                            {errorSteps.length > 0 && (
-                              <button
-                                onClick={() => {
-                                  setMainTab('errors');
-                                  setIsMenuOpen(false);
-                                }}
-                                className='w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 text-left transition-colors'
-                                data-track-category='Workflows'
-                                data-track-name='OpenErrorsTab'
-                              >
-                                <AlertTriangle size={16} className='text-red-500' />
-                                Errors
-                                <span className='ml-auto bg-red-500/20 text-red-500 text-[10px] font-bold px-1.5 py-0.5 rounded-full'>
-                                  {errorSteps.length > 99 ? '99+' : errorSteps.length}
-                                </span>
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      {/* end gap-0.5 buttons group */}
+                      {/* Back to Basic Mode Button */}
+                      <Tooltip content='Back to chat view' side='bottom'>
+                        <button
+                          onClick={() => setDesktopMode('basic')}
+                          className='flex flex-shrink-0 items-center justify-center text-sm font-medium rounded-lg border transition-colors bg-background text-foreground border-border hover:bg-muted shadow-sm'
+                          style={{ width: '42px', height: '42px' }}
+                          data-track-category='Workflows'
+                          data-track-name='SelectBasicMode'
+                        >
+                          <LayoutList size={16} className='text-muted-foreground' />
+                        </button>
+                      </Tooltip>
                     </div>
 
                     {/* Attempt Dots - Desktop (Advanced Mode Only, Full Width) */}
@@ -1363,6 +1299,27 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                               }}
                             />
                           )}
+                          {/* Search Toggle in attempts bar */}
+                          <div className='ml-auto flex-shrink-0'>
+                            <Tooltip content='Search steps' side='bottom'>
+                              <button
+                                onClick={() => {
+                                  setIsSearchOpen(!isSearchOpen);
+                                  if (isSearchOpen) setSearchQuery('');
+                                }}
+                                className={`flex items-center justify-center rounded-md border transition-colors ${
+                                  isSearchOpen
+                                    ? 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                                    : 'bg-transparent text-muted-foreground border-border hover:bg-muted'
+                                }`}
+                                style={{ width: '24px', height: '24px' }}
+                                data-track-category='Workflows'
+                                data-track-name='ToggleSearch'
+                              >
+                                <Search size={13} />
+                              </button>
+                            </Tooltip>
+                          </div>
                         </div>
                       );
                     })()}

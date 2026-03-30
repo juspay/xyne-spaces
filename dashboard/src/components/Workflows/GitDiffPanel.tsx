@@ -114,13 +114,13 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
   const getFileIcon = (type: string): React.ReactElement => {
     switch (type) {
       case 'add':
-        return <FilePlus className='w-4 h-4 text-green-600' />;
+        return <FilePlus className='w-4 h-4 text-emerald-500' />;
       case 'delete':
-        return <FileMinus className='w-4 h-4 text-red-600' />;
+        return <FileMinus className='w-4 h-4 text-red-500' />;
       case 'modify':
-        return <Edit className='w-4 h-4 text-blue-600' />;
+        return <Edit className='w-4 h-4 text-blue-500' />;
       case 'rename':
-        return <GitBranch className='w-4 h-4 text-purple-600' />;
+        return <GitBranch className='w-4 h-4 text-violet-500' />;
       default:
         return <Edit className='w-4 h-4 text-muted-foreground' />;
     }
@@ -155,7 +155,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
               {/* Branch name with truncation and tooltip */}
               <Tooltip content={diffData.branch} side='bottom' delayDuration={300}>
                 <div className='flex items-center gap-1.5 min-w-0'>
-                  <GitBranch className='w-4 h-4 text-blue-500 flex-shrink-0' />
+                  <GitBranch className='w-4 h-4 text-primary flex-shrink-0' />
                   <span className='font-semibold text-foreground truncate max-w-[120px] sm:max-w-[180px] md:max-w-[240px]'>
                     {diffData.branch}
                   </span>
@@ -190,8 +190,8 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
         <div className='flex items-center gap-2 sm:gap-3'>
           {diffData && (
             <div className='flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-muted-foreground'>
-              <span className='text-green-600 font-medium'>+{diffData.stats.additions}</span>
-              <span className='text-red-600 font-medium'>-{diffData.stats.deletions}</span>
+              <span className='text-emerald-500 font-medium'>+{diffData.stats.additions}</span>
+              <span className='text-red-500 font-medium'>-{diffData.stats.deletions}</span>
               <span className='hidden sm:inline'>{diffData.stats.files} files</span>
               <span className='sm:hidden'>{diffData.stats.files}f</span>
             </div>
@@ -200,7 +200,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
           <select
             value={viewType}
             onChange={e => setViewType(e.target.value as 'split' | 'unified')}
-            className='px-2 py-1 text-xs border border-input rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer'
+            className='px-2 py-1 text-xs border border-input rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer'
             data-track-category='Workflows'
             data-track-name='ChangeGitDiffViewType'
             data-track-metadata={JSON.stringify({ viewType })}
@@ -231,7 +231,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
                         onClick={() => setSelectedFile(isSelected ? null : fileName)}
                         className={`w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded transition-colors text-left cursor-pointer ${
                           isSelected
-                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                            ? 'bg-primary/10 text-primary'
                             : 'hover:bg-accent text-foreground'
                         }`}
                         data-track-category='Workflows'
@@ -254,7 +254,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
           {isLoading && (
             <div className='flex items-center justify-center h-full'>
               <div className='text-center'>
-                <Loader2 className='w-8 h-8 text-blue-500 animate-spin mx-auto mb-4' />
+                <Loader2 className='w-8 h-8 text-primary animate-spin mx-auto mb-4' />
                 <p className='text-muted-foreground text-sm'>Loading git diff...</p>
               </div>
             </div>
@@ -263,8 +263,8 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
           {error && (
             <div className='flex items-center justify-center h-full'>
               <div className='text-center'>
-                <AlertCircle className='w-12 h-12 text-red-500 mx-auto mb-4' />
-                <p className='text-sm text-gray-500 mt-2'>
+                <AlertCircle className='w-12 h-12 text-destructive mx-auto mb-4' />
+                <p className='text-sm text-muted-foreground mt-2'>
                   {error instanceof Error ? error.message : 'Unknown error'}
                 </p>
               </div>
@@ -288,7 +288,7 @@ const GitDiffPanel: React.FC<GitDiffPanelProps> = ({ executionId, onRefresh }) =
                 fileDiffs
                   .filter(({ gitFile }) => !selectedFile || getFileName(gitFile) === selectedFile)
                   .map(({ fileDiff }, index) => (
-                    <div key={index} className='mb-4'>
+                    <div key={index} className='mb-4 [&_*]:text-[11px] [&_*]:leading-relaxed'>
                       <FileDiff
                         fileDiff={fileDiff}
                         options={{

@@ -78,52 +78,52 @@ export const ToolMultiEditRenderer: React.FC<
         <div
           className={`rounded-xl border transition-colors overflow-hidden ${
             successfulEdits > 0
-              ? 'bg-amber-50/20 border-amber-200/40'
+              ? 'bg-amber-500/5 border-amber-500/20'
               : 'bg-background border-border'
           }`}
         >
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className='w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left'
+            className='w-full flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 transition-colors text-left'
             data-track-category='Workflows'
             data-track-name='ToggleMultiFileEditExpand'
             data-track-metadata={JSON.stringify({ fileName, filePath })}
           >
-            <div className='p-2 rounded-lg bg-amber-500/10 text-amber-500'>
-              <FileEdit size={18} />
+            <div className='p-1.5 rounded-md bg-amber-500/10 text-amber-500'>
+              <FileEdit size={14} />
             </div>
 
             <div className='flex flex-col min-w-0'>
               <div className='flex items-center gap-2'>
-                <span className='text-sm font-semibold text-foreground truncate'>
+                <span className='text-xs font-semibold text-foreground truncate'>
                   {filePath ? fileName : `${totalEdits || inputEdits.length} Edits`}
                 </span>
                 {totalEdits > 0 && (
                   <div className='flex items-center gap-1.5'>
-                    <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-600 uppercase tracking-wider border border-amber-200/50'>
+                    <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 uppercase tracking-wider border border-amber-500/20'>
                       Edit
                     </span>
                   </div>
                 )}
               </div>
               {directoryPath && (
-                <span className='text-[11px] text-muted-foreground truncate font-mono'>
+                <span className='text-[10px] text-muted-foreground truncate font-mono'>
                   {directoryPath}/
                 </span>
               )}
             </div>
 
             <div className='ml-auto flex items-center gap-3'>
-              <div className='hidden sm:flex items-center gap-2 px-2 py-1 rounded-md bg-muted/50 text-[10px] font-medium border border-border/50'>
-                <div className='flex items-center gap-1 text-green-600'>
+              <div className='hidden sm:flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-muted/50 text-[10px] font-medium border border-border/50'>
+                <div className='flex items-center gap-1 text-green-500'>
                   <Check size={12} strokeWidth={3} />
                   <span>{successfulEdits}</span>
                 </div>
                 {failedEdits > 0 && (
                   <>
                     <div className='w-px h-3 bg-border mx-1'></div>
-                    <div className='flex items-center gap-1 text-red-600'>
+                    <div className='flex items-center gap-1 text-red-500'>
                       <X size={12} strokeWidth={3} />
                       <span>{failedEdits}</span>
                     </div>
@@ -142,10 +142,10 @@ export const ToolMultiEditRenderer: React.FC<
 
           {/* Expanded Content - Show Diffs */}
           {isExpanded && (
-            <div className='border-t border-border bg-slate-50/30 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200'>
+            <div className='border-t border-border bg-muted/30 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200'>
               {/* Diff Container */}
               {(editsApplied.length > 0 || inputEdits.length > 0) && (
-                <div className='overflow-auto max-h-[500px] divide-y divide-border/40'>
+                <div className='overflow-auto max-h-[350px] divide-y divide-border/40'>
                   {(editsApplied.length > 0 ? editsApplied : inputEdits).map((edit, index) => (
                     <div key={index} className='group'>
                       {/* Edit Header for Multi-edit */}
@@ -156,11 +156,13 @@ export const ToolMultiEditRenderer: React.FC<
                         <div className='h-px flex-1 bg-border/40'></div>
                       </div>
                       {/* Diff View */}
-                      <PierreDiffView
-                        name={filePath || fileName}
-                        oldContents={edit.old_string || ''}
-                        newContents={edit.new_string || ''}
-                      />
+                      <div className='[&_*]:text-xs [&_*]:leading-relaxed'>
+                        <PierreDiffView
+                          name={filePath || fileName}
+                          oldContents={edit.old_string || ''}
+                          newContents={edit.new_string || ''}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -177,7 +179,7 @@ export const ToolMultiEditRenderer: React.FC<
 
               {/* Error Summary if any */}
               {failedEdits > 0 && (
-                <div className='px-4 py-2 bg-red-500/5 border-t border-red-200/50 text-[10px] text-red-600 font-medium flex items-center gap-1.5'>
+                <div className='px-4 py-2 bg-red-500/5 border-t border-red-500/20 text-[10px] text-red-500 font-medium flex items-center gap-1.5'>
                   <X size={12} strokeWidth={3} />
                   {failedEdits} edit{failedEdits !== 1 ? 's' : ''} encountered issues during
                   application.
@@ -190,7 +192,7 @@ export const ToolMultiEditRenderer: React.FC<
     );
   } catch (error) {
     return (
-      <div className='text-red-600 text-sm p-3 border border-red-200 rounded-lg bg-red-50'>
+      <div className='text-red-500 text-sm p-3 border border-red-500/20 rounded-lg bg-red-500/10'>
         Error parsing multi-edit data: {error instanceof Error ? error.message : 'Unknown error'}
       </div>
     );
