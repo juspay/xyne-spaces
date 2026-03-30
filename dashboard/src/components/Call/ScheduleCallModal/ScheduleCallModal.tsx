@@ -354,8 +354,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       });
       setRecurringStartTime(toHHMM(callStart));
       setRecurringEndTime(toHHMM(callEnd));
-      // Default to editing entire series for recurring calls
-      setEditEntireSeries(!!initialCall.recurringSeriesId);
+      // Default to editing single instance (checkbox unchecked)
+      setEditEntireSeries(false);
       // Set isRecurring based on whether this is a recurring series call
       setIsRecurring(!!initialCall.recurringSeriesId);
     } else if (!isEditMode && user?.name) {
@@ -375,29 +375,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
     setIsRecurring(true);
 
-    // Only update times/dates when editing the entire series
-    // When editing a single occurrence, keep its original times
-    if (editEntireSeries) {
-      // Time: parse HH:mm strings (e.g. "09:30") from the series record
-      const parseHHMM = (t: string, base: Date): Date => {
-        const [h = 0, m = 0] = t.split(':').map(Number);
-        const d = new Date(base);
-        d.setHours(h, m, 0, 0);
-        return d;
-      };
-      const currentStartsAt = watch('startsAt') ?? new Date();
-      const seriesStart = parseHHMM(seriesData.startTime, currentStartsAt);
-      const seriesEnd = parseHHMM(seriesData.endTime, currentStartsAt);
-      setValue('startsAt', seriesStart);
-      setValue('endsAt', seriesEnd);
-      setRecurringStartTime(seriesData.startTime);
-      setRecurringEndTime(seriesData.endTime);
-
-      // endsOn
-      if (seriesData.endsOn) {
-        setSeriesEndsOn(new Date(seriesData.endsOn));
-        setSeriesEndsType('on');
-      }
+    // When editing the entire series, preserve the user's current form values
+    // (they want to apply their edits to the series, not overwrite with old series data)
+    // Only update series metadata like endsOn
+    if (editEntireSeries && seriesData.endsOn) {
+      setSeriesEndsOn(new Date(seriesData.endsOn));
+      setSeriesEndsType('on');
     }
 
     if (seriesData.recurrenceRule) {
