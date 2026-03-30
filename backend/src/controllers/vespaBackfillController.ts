@@ -11,7 +11,7 @@ import {
   fileSchema,
   SubApp,
 } from '@/vespa/src/types';
-import { ChannelType, Prisma } from '@prisma/client';
+import { AttachmentEntityType, ChannelType, Prisma } from '@prisma/client';
 
 type BackfillFilters = {
   channelType?: ChannelType;
@@ -477,6 +477,176 @@ export class AdminBackfillController {
   }
 
   /**
+   * Backfill chat attachments to Vespa - Transform-at-queue-time approach
+   * Only backfills message attachments with entityType=CHAT updated within the specified time range
+   * If no timeframe is provided, backfills all chat attachments
+   */
+  private static async backfillChatAttachments(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: any = {
+      entityType: AttachmentEntityType.CHAT || AttachmentEntityType.IMPACT, // Backfill both chat attachments
+    };
+
+    // Build where clause based on provided timeframe
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          ...whereClause,
+          updatedAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          ...whereClause,
+          updatedAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      // No timeframe provided - get all chat attachments
+      timeRange = "all chat attachments (no timeframe limit)";
+    }
+
+    logger.info(`🔄 Backfilling chat attachments ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching chat attachments batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const attachments = await db.messageAttachment.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, createdBy: true } // Only select ID and createdBy initially
+      });
+
+      if (attachments.length === 0) {
+        logger.debug('[Backfill] No more chat attachments found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${attachments.length} chat attachments. Transforming and queueing...`);
+
+      // Transform and queue each attachment
+      for (const attachmentRef of attachments) {
+        try {
+          // Queue only the ID - worker will handle the processing
+          await vespaQueue.addJob({
+            schema: fileSchema,
+            jobType: 'feed',
+            docId: attachmentRef.id,
+            userId: attachmentRef.createdBy,
+            app: SubApp.CHAT_ATTACHMENT,
+          });
+          totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to transform chat attachment ${attachmentRef.id}:`, error);
+          // Continue with other attachments
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Transformed and queued ${totalQueued} chat attachments...`);
+    }
+
+    logger.info(`✓ Transformed and queued ${totalQueued} chat attachments for ingestion`);
+    return totalQueued;
+  }
+
+  /**
+   * Backfill ticket attachments to Vespa - Transform-at-queue-time approach
+   * Only backfills message attachments with entityType=TICKET updated within the specified time range
+   * If no timeframe is provided, backfills all ticket attachments
+   */
+  private static async backfillTicketAttachments(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: any = {
+      entityType: AttachmentEntityType.TICKET,
+    };
+
+    // Build where clause based on provided timeframe
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(updated between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          ...whereClause,
+          updatedAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(updated before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          ...whereClause,
+          updatedAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      // No timeframe provided - get all ticket attachments
+      timeRange = "all ticket attachments (no timeframe limit)";
+    }
+
+    logger.info(`🔄 Backfilling ticket attachments ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching ticket attachments batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const attachments = await db.messageAttachment.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, createdBy: true } // Only select ID and createdBy initially
+      });
+
+      if (attachments.length === 0) {
+        logger.debug('[Backfill] No more ticket attachments found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${attachments.length} ticket attachments. Transforming and queueing...`);
+
+      // Transform and queue each attachment
+      for (const attachmentRef of attachments) {
+        try {
+          // Queue only the ID - worker will handle the processing
+          await vespaQueue.addJob({
+            schema: fileSchema,
+            jobType: 'feed',
+            docId: attachmentRef.id,
+            userId: attachmentRef.createdBy,
+            app: SubApp.TICKET_ATTACHMENT,
+          });
+          totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to transform ticket attachment ${attachmentRef.id}:`, error);
+          // Continue with other attachments
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Transformed and queued ${totalQueued} ticket attachments...`);
+    }
+
+    logger.info(`✓ Transformed and queued ${totalQueued} ticket attachments for ingestion`);
+    return totalQueued;
+  }
+
+  /**
    * Backfill transcripts to Vespa - Transform-at-queue-time approach
    * Only backfills calls with transcripts updated within the specified time range
    * If no timeframe is provided, backfills all calls with transcripts
@@ -582,7 +752,7 @@ export class AdminBackfillController {
       // Determine which schemas to backfill
       const requestedSchemas = schemasParam
         ? schemasParam.split(',').map(s => s.trim().toLowerCase())
-        : ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts'];
+        : ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments'];
 
       // Parse fromTimestamp if provided, otherwise start from the beginning
       let fromTime: Date | null = null;
@@ -606,7 +776,7 @@ export class AdminBackfillController {
         logger.info(`📅 No fromTimestamp provided - will backfill from the beginning`);
       }
 
-      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts'];
+      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments'];
       const schemasToBackfill = requestedSchemas.filter(s => validSchemas.includes(s));
 
       if (schemasToBackfill.length === 0) {
@@ -754,6 +924,14 @@ export class AdminBackfillController {
 
       if (schemasToBackfill.includes('transcripts')) {
         stats.transcripts = await AdminBackfillController.backfillTranscripts(cutoffTime, fromTime);
+      }
+
+      if (schemasToBackfill.includes('chat_attachments')) {
+        stats.chat_attachments = await AdminBackfillController.backfillChatAttachments(cutoffTime, fromTime);
+      }
+
+      if (schemasToBackfill.includes('ticket_attachments')) {
+        stats.ticket_attachments = await AdminBackfillController.backfillTicketAttachments(cutoffTime, fromTime);
       }
 
       const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);

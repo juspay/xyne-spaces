@@ -30,11 +30,11 @@ import { redisService } from './redisService';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
 import { config } from '@/config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { messageSchema } from '@/vespa/src/types';
+import { messageSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { v4 as uuidv4 } from 'uuid';
-import {logger} from '@/utils/logger';
+import { logger } from '@/utils/logger';
 
 interface UserInfo {
   id: string;
@@ -182,6 +182,44 @@ export class ConversationService {
     });
   }
 
+  private async pushVespaJobForAttachments(
+    attachmentIds: string[],
+    userId: string
+  ): Promise<void> {
+    if (attachmentIds.length === 0) return;
+
+    for (const attachmentId of attachmentIds) {
+      vespaQueue.addJob({
+        schema: fileSchema,
+        jobType: "feed",
+        docId: attachmentId,
+        app: SubApp.CHAT_ATTACHMENT,
+      }).catch(async (error) => {
+        logger.error(`[ConversationService] Error queuing Vespa job for attachment ${attachmentId}:`, error);
+        // Log failed insertion to Postgres
+        try {
+          if (db.vespaInsertionLogs) {
+            await db.vespaInsertionLogs.create({
+              data: {
+                status: "FAILED",
+                type: "INSERT",
+                entityId: attachmentId,
+                entityType: fileSchema,
+                namespace: NAMESPACE,
+                errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+                errorDetails: JSON.stringify(error),
+                userId: userId,
+                createdAt: new Date(),
+              },
+            });
+          }
+        } catch (dbError) {
+          logger.error('Failed to log Vespa insertion error to database:', dbError);
+        }
+      });
+    }
+  }
+
   /**
    * Create new conversation with initial message
    * EXACT extraction from conversationController.ts lines 82-179
@@ -298,8 +336,18 @@ export class ConversationService {
         conversationId: conversation.conversationId,
         metadata: file.metadata || {},
       }));
-
       await this.messageAttachmentRepository.createMany(attachmentData);
+
+      // Fetch created attachments from database to get their real IDs for Vespa indexing
+      // This ensures we have the correct DB entries ready before triggering ingestion
+      const savedAttachments = await this.messageAttachmentRepository.findByMessageId(message.messageId);
+
+      if (savedAttachments.length > 0) {
+        const attachmentIds = savedAttachments.map(a => a.id);
+        this.pushVespaJobForAttachments(attachmentIds, userId).catch(error => {
+          logger.error(`[ConversationService] Error pushing Vespa job for attachments in conversation ${conversation.conversationId}:`, error);
+        });
+      }
     }
 
     // Push Vespa job for message indexing
@@ -470,6 +518,16 @@ export class ConversationService {
       }));
 
       await this.messageAttachmentRepository.createMany(attachmentData);
+
+      // Fetch created attachments from database to get their real IDs for Vespa indexing
+      const savedAttachments = await this.messageAttachmentRepository.findByMessageId(message.messageId);
+
+      if (savedAttachments.length > 0) {
+        const attachmentIds = savedAttachments.map(a => a.id);
+        this.pushVespaJobForAttachments(attachmentIds, userId).catch(error => {
+          logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
+        });
+      }
     }
 
     // Push Vespa job for message indexing
@@ -500,7 +558,7 @@ export class ConversationService {
       conversationId,
       message.createdAt
     );
-    
+
     // Check if it has showInChannel and childConversationId
     if (mostRecentPrevMsg?.showInChannel && mostRecentPrevMsg.childConversationId) {
       await this.conversationRepository.update(mostRecentPrevMsg.childConversationId, {
@@ -635,8 +693,17 @@ export class ConversationService {
         conversationId: message.conversationId,
         metadata: file.metadata || {},
       }));
-
       await this.messageAttachmentRepository.createMany(attachmentData);
+
+      // Fetch created attachments from database to get their real IDs for Vespa indexing
+      const savedAttachments = await this.messageAttachmentRepository.findByMessageId(message.messageId);
+
+      if (savedAttachments.length > 0) {
+        const attachmentIds = savedAttachments.map(a => a.id);
+        this.pushVespaJobForAttachments(attachmentIds, message.senderId).catch(error => {
+          logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
+        });
+      }
       logger.info(`[ConversationService] Created ${attachmentData.length} new attachments for message ${messageId}`);
     }
     // If no new files provided, keep existing attachments (don't delete)

@@ -7,6 +7,9 @@ import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { slackService } from '@/services/slackService';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
+import { isSupportedMimeType } from '@/services/fileProcessor';
 import {
   extractAllUsersForNotification,
   getChannelParticipantsForMention,
@@ -343,6 +346,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelParticipantIds
       );
     }
+
+    // Queue Vespa indexing for message attachments
+    await this.queueVespaIndexingForAttachments(messageId);
   }
 
   /**
@@ -700,6 +706,41 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           channelId
         )
       ]);
+    }
+
+    // Queue Vespa indexing for message attachments in DM channels
+    await this.queueVespaIndexingForAttachments(messageId);
+  }
+
+  /**
+   * Queue Vespa indexing for message attachments
+   * Fetches attachments by entityId (messageId) and queues them for indexing
+   */
+  private async queueVespaIndexingForAttachments(messageId: string): Promise<void> {
+    const attachments = await db.messageAttachment.findMany({
+      where: {
+        entityId: messageId,
+        entityType: AttachmentEntityType.CHAT
+      },
+      select: { id: true, createdBy: true, mimetype: true }
+    });
+
+    // Filter only supported MIME types (PDF, DOCX, TXT, MD, etc.)
+    const supportedAttachments = attachments.filter(att => isSupportedMimeType(att.mimetype));
+
+    for (const attachment of supportedAttachments) {
+      try {
+        await vespaQueue.addJob({
+          schema: fileSchema,
+          docId: attachment.id,
+          jobType: 'feed',
+          userId: attachment.createdBy,
+          app: SubApp.CHAT_ATTACHMENT,
+        });
+        logger.info(`[MessagesSideEffectHandler] Queued Vespa indexing for attachment ${attachment.id} in message ${messageId}`);
+      } catch (error) {
+        logger.error(`[MessagesSideEffectHandler] Failed to queue Vespa job for attachment ${attachment.id}:`, error);
+      }
     }
   }
 

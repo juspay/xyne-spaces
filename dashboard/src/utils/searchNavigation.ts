@@ -50,10 +50,14 @@ export const navigateToSearchResult = async (
       break;
 
     case 'attachment':
-      if (result.searchContext?.subApp === 'canvas') {
+      if (result.searchContext?.subApp === 'CANVAS') {
         navigateToCanvas(result, navigate);
-      } else if (result.searchContext?.subApp === 'transcript') {
+      } else if (result.searchContext?.subApp === 'TRANSCRIPT') {
         navigateToTranscript(result, navigate);
+      } else if (result.searchContext?.subApp === 'CHAT_ATTACHMENT') {
+        navigateToChatAttachment(result, navigate);
+      } else if (result.searchContext?.subApp === 'TICKET_ATTACHMENT') {
+        navigateToTicketAttachment(result, navigate);
       } else {
         navigateToAttachment(result, navigate);
       }
@@ -234,6 +238,38 @@ export const navigateToTranscript = (
     void navigate(`/chat/dir/${channelId}`);
   } else {
     // Fallback to attachment viewer
+    navigateToAttachment(result, navigate);
+  }
+};
+
+export const navigateToChatAttachment = (
+  result: DisplaySearchResult,
+  navigate: NavigateFunction,
+): void => {
+  const { channelId, conversationId, messageId } = result.searchContext || {};
+
+  if (messageId) {
+    void navigate(
+      `/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
+    );
+  } else {
+    void navigate(`/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`);
+  }
+};
+
+export const navigateToTicketAttachment = (
+  result: DisplaySearchResult,
+  navigate: NavigateFunction,
+): void => {
+  const { channelId, conversationId, ticketId } = result.searchContext || {};
+
+  if (channelId && conversationId && ticketId) {
+    void navigate(`/chat/dir/${channelId}/${conversationId}/${ticketId}?selectedTab=files`);
+  } else if (channelId && conversationId) {
+    void navigate(`/chat/dir/${channelId}/${conversationId}`);
+  } else if (channelId) {
+    void navigate(`/chat/dir/${channelId}`);
+  } else {
     navigateToAttachment(result, navigate);
   }
 };

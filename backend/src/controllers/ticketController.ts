@@ -25,7 +25,7 @@ import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { randomUUID } from 'crypto';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { ticketSchema } from '@/vespa/src/types';
+import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
@@ -69,6 +69,44 @@ export class TicketController {
     const hasBasicAuth = Boolean(bitbucketConfig.apiUsername) && Boolean(bitbucketConfig.password);
     if (hasToken || hasBasicAuth) {
       this.commitAnalysisController = new CommitAnalysisController();
+    }
+  }
+
+  private async pushVespaJobForAttachments(
+    attachmentIds: string[],
+    userId: string
+  ): Promise<void> {
+    if (attachmentIds.length === 0) return;
+
+    for (const attachmentId of attachmentIds) {
+      vespaQueue.addJob({
+        schema: fileSchema,
+        jobType: "feed",
+        docId: attachmentId,
+        app: SubApp.TICKET_ATTACHMENT
+      }).catch(async (error) => {
+        logger.error(`[TicketController] Error queuing Vespa job for attachment ${attachmentId}:`, error);
+        // Log failed insertion to Postgres
+        try {
+          if (db.vespaInsertionLogs) {
+            await db.vespaInsertionLogs.create({
+              data: {
+                status: "FAILED",
+                type: "INSERT",
+                entityId: attachmentId,
+                entityType: fileSchema,
+                namespace: NAMESPACE,
+                errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+                errorDetails: JSON.stringify(error),
+                userId: userId,
+                createdAt: new Date(),
+              },
+            });
+          }
+        } catch (dbError) {
+          logger.error('Failed to log Vespa insertion error to database:', dbError);
+        }
+      });
     }
   }
 
@@ -616,6 +654,27 @@ export class TicketController {
           }));
 
           await this.messageAttachmentRepository.createMany(attachmentData);
+
+          // Fetch back to get real IDs for manual Vespa trigger
+          const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
+          if (savedAttachments.length > 0) {
+            const attachmentIds = savedAttachments.map(a => a.id);
+            this.pushVespaJobForAttachments(attachmentIds, finalCreatedBy).catch((error: any) => {
+              logger.error(`[TicketController] Error pushing Vespa job for ticket attachments ${ticket.id}:`, error);
+            });
+          }
+        }
+
+        // Trigger Vespa job for converted chat attachments
+        if (sourceConversationId) {
+          // chat attachments were updated to TICKET type, we should re-index them
+          const convertedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
+          if (convertedAttachments.length > 0) {
+            const convertedIds = convertedAttachments.map(a => a.id);
+            this.pushVespaJobForAttachments(convertedIds, finalCreatedBy).catch((error: any) => {
+              logger.error(`[TicketController] Error pushing Vespa job for converted attachments in ticket ${ticket.id}:`, error);
+            });
+          }
         }
 
         // Transfer draft attachments to ticket (if provided)
@@ -668,6 +727,11 @@ export class TicketController {
             }
 
             logger.info(`[Ticket Creation] Transferred ${validDraftAttachmentIds.length} draft attachments to ticket ${ticket.id}`);
+
+            // Trigger Vespa re-indexing for transferred draft attachments
+            this.pushVespaJobForAttachments(validDraftAttachmentIds, userId!).catch((error: any) => {
+              logger.error(`[TicketController] Error pushing Vespa job for transferred draft attachments in ticket ${ticket.id}:`, error);
+            });
           }
         }
 

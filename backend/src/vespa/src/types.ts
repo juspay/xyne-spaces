@@ -55,7 +55,9 @@ export enum VespaDocType {
 export enum SubApp {
   RCA = "RCA",
   CANVAS = "CANVAS",
-  TRANSCRIPT = "TRANSCRIPT"
+  TRANSCRIPT = "TRANSCRIPT",
+  CHAT_ATTACHMENT = "CHAT_ATTACHMENT",
+  TICKET_ATTACHMENT = "TICKET_ATTACHMENT",
 }
 
 export interface VespaDocument {
@@ -256,6 +258,8 @@ export interface VespaFileDocument extends VespaDocument {
   subApp: string,
   channelRef?: string;
   conversationId?: string;
+  messageId?: string;
+  ticketId?: string;
 }
 
 export interface VespaMemoryDocument extends VespaDocument {

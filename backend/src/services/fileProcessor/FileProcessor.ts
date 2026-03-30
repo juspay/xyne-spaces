@@ -1,0 +1,152 @@
+import { GCSService } from "@/services/gcsService"
+import { logger } from "@/utils/logger"
+import type { ProcessingResult, StrategyConfig } from "./types"
+import { BaseStrategy } from "./strategies/BaseStrategy"
+import { TextStrategy } from "./strategies/TextStrategy"
+import { PdfJsStrategy } from "./strategies/PdfJsStrategy"
+import { DocxStrategy } from "./strategies/DocxStrategy"
+
+/**
+ * Supported MIME types for file processing.
+ * Files with these MIME types will be parsed and indexed.
+ */
+export const SUPPORTED_MIME_TYPES = new Set([
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "text/html",
+    "application/json",
+    "application/xml",
+    "text/xml",
+])
+
+/**
+ * Check if a MIME type is supported for file processing
+ */
+export function isSupportedMimeType(mimeType: string): boolean {
+    return SUPPORTED_MIME_TYPES.has(mimeType)
+}
+
+/**
+ * FileProcessor - Orchestrates file loading, parsing, and chunking
+ * 
+ * Uses strategy pattern to support multiple file formats.
+ * The strategy is either specified explicitly or auto-detected from
+ * the file extension or MIME type.
+ * 
+ * @example
+ * // Auto-detect strategy from GCS file extension
+ * const result = await FileProcessor.fromGcs("uploads/report.pdf", "doc-123");
+ * 
+ * @example
+ * // Use a specific strategy
+ * const processor = new FileProcessor(new DocxStrategy({ chunkSize: 2000 }));
+ * const result = await processor.processBuffer(buffer, "doc-456");
+ */
+export class FileProcessor {
+    private strategy: BaseStrategy
+
+    constructor(strategy: BaseStrategy) {
+        this.strategy = strategy
+    }
+
+    /**
+     * Process a buffer using the configured strategy
+     * 
+     * @param buffer - File content as a Buffer
+     * @param vespaDocId - Document ID for Vespa ingestion
+     * @returns Processing result with text chunks
+     */
+    async processBuffer(buffer: Buffer, vespaDocId: string): Promise<ProcessingResult> {
+        logger.info(`[FileProcessor] Processing buffer with strategy: ${this.strategy.getName()}`)
+        const result = await this.strategy.parse(buffer, vespaDocId)
+        logger.info(`[FileProcessor] Extracted ${result.chunks.length} chunks using ${result.processingMethod}`)
+        return result
+    }
+
+    /**
+     * Factory method: Load a file from GCS and process it
+     * 
+     * Auto-detects the parsing strategy based on the file extension.
+     * Falls back to TextStrategy for unknown extensions.
+     * 
+     * @param gcsPath - Path to the file in GCS (e.g., "uploads/org123/report.pdf")
+     * @param vespaDocId - Document ID for Vespa ingestion
+     * @param config - Optional strategy configuration
+     * @returns Processing result with text chunks
+     */
+    static async fromGcs(
+        gcsPath: string,
+        vespaDocId: string,
+        config?: StrategyConfig
+    ): Promise<ProcessingResult> {
+        const gcsService = GCSService.getInstance()
+        const buffer = await gcsService.getFileBuffer(gcsPath)
+
+        const strategy = FileProcessor.detectStrategy(gcsPath, config)
+        const processor = new FileProcessor(strategy)
+
+        return processor.processBuffer(buffer, vespaDocId)
+    }
+
+    /**
+     * Factory method: Create a FileProcessor from a MIME type
+     * 
+     * @param mimeType - MIME type of the file (e.g., "application/pdf")
+     * @param config - Optional strategy configuration
+     * @returns A FileProcessor configured with the appropriate strategy
+     */
+    static fromMimeType(mimeType: string, config?: StrategyConfig): FileProcessor {
+        const strategy = FileProcessor.detectStrategyFromMimeType(mimeType, config)
+        return new FileProcessor(strategy)
+    }
+
+    /**
+     * Detect the appropriate strategy based on file extension
+     */
+    static detectStrategy(filePath: string, config?: StrategyConfig): BaseStrategy {
+        const ext = filePath.split(".").pop()?.toLowerCase() || ""
+
+        switch (ext) {
+            case "pdf":
+                return new PdfJsStrategy(config)
+            case "docx":
+                return new DocxStrategy(config)
+            case "txt":
+            case "md":
+            case "csv":
+            case "html":
+            case "json":
+            case "xml":
+                return new TextStrategy(config)
+            default:
+                logger.warn(`[FileProcessor] Unknown extension "${ext}", defaulting to TextStrategy`)
+                return new TextStrategy(config)
+        }
+    }
+
+    /**
+     * Detect the appropriate strategy based on MIME type
+     */
+    static detectStrategyFromMimeType(mimeType: string, config?: StrategyConfig): BaseStrategy {
+        switch (mimeType) {
+            case "application/pdf":
+                return new PdfJsStrategy(config)
+            case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                return new DocxStrategy(config)
+            case "text/plain":
+            case "text/markdown":
+            case "text/csv":
+            case "text/html":
+            case "application/json":
+            case "application/xml":
+            case "text/xml":
+                return new TextStrategy(config)
+            default:
+                logger.warn(`[FileProcessor] Unknown MIME type "${mimeType}", defaulting to TextStrategy`)
+                return new TextStrategy(config)
+        }
+    }
+}
