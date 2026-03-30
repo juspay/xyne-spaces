@@ -47,6 +47,8 @@ import { ResourceAccessACL } from '../tables/resource-access-acl';
 import { ProactiveNudgesACL } from '../tables/proactive-nudges-acl';
 import { SurfaceNudgesACL } from '../tables/surface-nudges-acl';
 import { SurfaceLinksACL } from '../tables/surface-links-acl';
+import { SavedUserConfigurationsACL } from '../tables/saved-user-configurations-acl';
+import { SavedUserConfigurationValuesACL } from '../tables/saved-user-configuration-values-acl';
 
 export class ACLFactory {
   /**
@@ -167,6 +169,10 @@ export class ACLFactory {
         return new NoAcl<'impacts'>(ctx);
       case 'coes':
         return new NoAcl<'coes'>(ctx);
+      case 'saved_user_configurations':
+        return new SavedUserConfigurationsACL(ctx);
+      case 'saved_user_configuration_values':
+        return new SavedUserConfigurationValuesACL(ctx);
       case 'surface_links':
         return new SurfaceLinksACL(ctx);
       default:

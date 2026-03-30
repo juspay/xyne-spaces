@@ -45,6 +45,7 @@ import {
   WorkflowExecutionsACL,
   WorkflowsACL,
   ReposACL,
+  SavedUserConfigurationsACL,
 } from '../tables';
 export class QueryACLFactory {
   static getACL<TTable extends TableName>(
@@ -148,6 +149,10 @@ export class QueryACLFactory {
         return new WorkflowsACL(ctx) as BaseQueryACL<TTable>;
       case 'repos':
         return new ReposACL(ctx) as BaseQueryACL<TTable>;
+      case 'saved_user_configurations':
+        return new SavedUserConfigurationsACL(ctx) as BaseQueryACL<TTable>;
+      case 'saved_user_configuration_values':
+        return new BaseQueryACL(ctx, table);
       default:
         return new BaseQueryACL(ctx, table);
       case 'emails':

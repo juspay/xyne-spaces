@@ -68,7 +68,7 @@ import {
   getPriorityIcon,
   isStageEtaOverdue,
 } from '../../components/Tickets/TicketCard/TicketCard.utils';
-import { TicketPriority } from '@xyne/shared';
+import { TicketPriority, SavedConfigVisibility, SavedConfigEntityName } from '@xyne/shared';
 import AcOnSlow from '../../assets/icons/AcOnSlowIcon';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useUsers } from '../../hooks/useUsers';
@@ -77,6 +77,79 @@ import { stateMachineActor } from '../../machines/stateMachine';
 import { Dialog } from '../../components/ui/Dialog';
 import Button from '../../components/ui/Button';
 import { useZero } from '../../hooks/useZero';
+
+function valuesToFilters(
+  values: ReadonlyArray<{
+    entityName: SavedConfigEntityName;
+    fieldName: string;
+    fieldValue: string;
+  }>,
+): TicketFilters {
+  const result: TicketFilters = {};
+  for (const { entityName, fieldName, fieldValue } of values) {
+    if (entityName === SavedConfigEntityName.FORM_ENTITY_VALUE) {
+      if (!result.dynamicFields) result.dynamicFields = {};
+      if (fieldName.endsWith('.start')) {
+        const fieldId = fieldName.slice(0, -'.start'.length);
+        result.dynamicFields[fieldId] = {
+          ...(result.dynamicFields[fieldId] as object | undefined),
+          start: Number(fieldValue),
+        };
+      } else if (fieldName.endsWith('.end')) {
+        const fieldId = fieldName.slice(0, -'.end'.length);
+        result.dynamicFields[fieldId] = {
+          ...(result.dynamicFields[fieldId] as object | undefined),
+          end: Number(fieldValue),
+        };
+      } else {
+        result.dynamicFields[fieldName] = [
+          ...((result.dynamicFields[fieldName] as string[] | undefined) ?? []),
+          fieldValue,
+        ];
+      }
+      continue;
+    }
+    switch (fieldName) {
+      case 'priority':
+        result.priority = [...(result.priority ?? []), fieldValue as TicketPriority];
+        break;
+      case 'assignee':
+        result.assignee = [...(result.assignee ?? []), fieldValue];
+        break;
+      case 'createdBy':
+        result.createdBy = [...(result.createdBy ?? []), fieldValue];
+        break;
+      case 'userGroups':
+        result.userGroups = [...(result.userGroups ?? []), fieldValue];
+        break;
+      case 'prReviewers':
+        result.prReviewers = [...(result.prReviewers ?? []), fieldValue];
+        break;
+      case 'qaAssigned':
+        result.qaAssigned = [...(result.qaAssigned ?? []), fieldValue];
+        break;
+      case 'tags':
+        result.tags = [...(result.tags ?? []), fieldValue];
+        break;
+      case 'stages':
+        result.stages = [...(result.stages ?? []), fieldValue];
+        break;
+      case 'dueDateStart':
+        result.dueDateStart = Number(fieldValue);
+        break;
+      case 'dueDateEnd':
+        result.dueDateEnd = Number(fieldValue);
+        break;
+      case 'createdDateStart':
+        result.createdDateStart = Number(fieldValue);
+        break;
+      case 'createdDateEnd':
+        result.createdDateEnd = Number(fieldValue);
+        break;
+    }
+  }
+  return result;
+}
 
 interface BoardKanbanScreenProps {
   viewMode?: 'my-tickets' | `user-tickets` | 'group-tickets';
@@ -161,6 +234,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   );
   const [isComfortView, setIsComfortView] = useState(false);
   const [showOverdueOnly, setShowOverdueOnly] = useState(false);
+  const [deleteViewConfirm, setDeleteViewConfirm] = useState<{
+    configId: string;
+    name: string;
+    isPublic: boolean;
+  } | null>(null);
 
   // Stage form modal state
   const [stageFormModal, setStageFormModal] = useState<{
@@ -265,6 +343,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const [state, send] = useMachine(ticketFiltersMachine);
   const layoutView = searchParams.get('layout') ?? 'kanban';
+  const [selectedViewId, setSelectedViewId] = useState<string | null>(null);
+  const activeViewKey = `active-view-${state.context.storageKey}`;
+  const hasRestoredActiveView = useRef<string | null>(null);
 
   const searchTerm = searchParams.get('search') ?? '';
 
@@ -342,6 +423,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Wrapper functions to send events to machine
   const setFilters = useCallback(
     (nextFilters: TicketFilters) => {
+      // Deselect active saved view when user changes filters
+      if (selectedViewId) {
+        setSelectedViewId(null);
+        try {
+          sessionStorage.removeItem(activeViewKey);
+        } catch (err) {
+          console.error('Failed to remove active view from sessionStorage', err);
+        }
+      }
+
       // Clear stages filter when board changes since stages are board-specific
       const currentBoardId = filters.boards?.[0] ?? null;
       const newBoardId = nextFilters.boards?.[0] ?? null;
@@ -367,7 +458,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         }
       }
     },
-    [send, channelId, viewMode, filters.boards, zero],
+    [send, channelId, viewMode, filters.boards, zero, selectedViewId, activeViewKey],
+  );
+
+  const handleSetGroupBy = useCallback(
+    (value: GroupByType) => {
+      if (selectedViewId) {
+        setSelectedViewId(null);
+        try {
+          sessionStorage.removeItem(activeViewKey);
+        } catch (err) {
+          console.error('Failed to remove active view from sessionStorage', err);
+        }
+      }
+      setGroupBy(value);
+    },
+    [selectedViewId, activeViewKey],
   );
 
   // Setup sensors for drag and drop
@@ -467,6 +573,28 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   // Use stages from selectedBoardDetail (full board details) instead of lightweight allBoards
   const stagesDataForFilteredBoard = selectedBoardDetail?.stages;
+
+  const savedViewsBoardId = filteredSingleBoardId;
+
+  const [savedConfigs] = useCachedQuery(
+    queries.savedConfigsByBoard({ boardId: savedViewsBoardId ?? '' }),
+    { enabled: !!savedViewsBoardId },
+  );
+
+  // Restore selectedViewId from sessionStorage on refresh, once per activeViewKey
+  useEffect(() => {
+    if (state.value !== 'initialized' || !savedConfigs) return;
+    if (hasRestoredActiveView.current === activeViewKey) return;
+    hasRestoredActiveView.current = activeViewKey;
+    try {
+      const storedId = sessionStorage.getItem(activeViewKey);
+      if (storedId && savedConfigs.some(c => c.id === storedId)) {
+        setSelectedViewId(storedId);
+      }
+    } catch (err) {
+      console.error('Failed to read active view from sessionStorage', err);
+    }
+  }, [state.value, savedConfigs, activeViewKey]);
 
   // Aggregate stages/columns based on view mode and board filter
   const stages = useMemo<Stage[]>(() => {
@@ -1230,6 +1358,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               selectedBoardName={selectedBoardDetail?.name ?? undefined}
               searchValue={searchTerm}
               onSearchChange={setSearchTerm}
+              {...(channelId ? { channelId } : {})}
+              groupBy={typeof groupBy === 'object' ? JSON.stringify(groupBy) : groupBy}
+              hasActiveView={!!selectedViewId}
             />
           </div>
         )}
@@ -1434,7 +1565,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 <DropdownMenu.Content
                   align='end'
                   sideOffset={8}
-                  className='z-50 min-w-[250px] bg-background border border-border rounded-lg shadow-xl animate-in fade-in zoom-in-95'
+                  className='z-50 w-[300px] bg-background border border-border rounded-lg shadow-xl animate-in fade-in zoom-in-95'
                 >
                   <div className='mb-1 border-b flex items-center justify-between px-4 py-3'>
                     <span className='text-sm font-bold tracking-wide'>Customise view</span>
@@ -1447,6 +1578,91 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       <X className='w-3.5 h-3.5' />
                     </button>
                   </div>
+
+                  {/* Saved Views section */}
+                  {savedViewsBoardId && savedConfigs && savedConfigs.length > 0 && (
+                    <div className='border-b border-gray-100 px-4 pt-4 pb-3'>
+                      <p className='text-sm font-medium text-[#7C8698] mb-1'>Views</p>
+                      <div className='py-2 flex flex-wrap gap-2 max-h-[180px] overflow-y-auto'>
+                        {savedConfigs.map(config => {
+                          const isOwn = config.userId === user?.id;
+                          const isPrivate = config.visibility === SavedConfigVisibility.PRIVATE;
+                          const isActive = selectedViewId === config.id;
+                          return (
+                            <button
+                              key={config.id}
+                              type='button'
+                              data-track-category='saved-views'
+                              data-track-name='apply-saved-view'
+                              className={`group relative flex items-center gap-1.5 px-[10px] py-[6px] rounded-[10px] border cursor-pointer transition-colors ${
+                                isActive ? 'border-[#57AB02]' : 'border-[#DBDCDF]'
+                              }`}
+                              onClick={() => {
+                                const allValues = (config.values ?? []) as ReadonlyArray<{
+                                  entityName: SavedConfigEntityName;
+                                  fieldName: string;
+                                  fieldValue: string;
+                                }>;
+                                const groupByEntry = allValues.find(
+                                  v => v.fieldName === '__groupBy',
+                                );
+                                const filterValues = allValues.filter(
+                                  v => v.fieldName !== '__groupBy',
+                                );
+                                const newFilters = valuesToFilters(filterValues);
+                                if (filters.boards) newFilters.boards = filters.boards;
+                                setFilters(newFilters);
+                                setSelectedViewId(config.id);
+                                try {
+                                  sessionStorage.setItem(activeViewKey, config.id);
+                                } catch (err) {
+                                  console.error(
+                                    'Failed to persist active view to sessionStorage',
+                                    err,
+                                  );
+                                }
+                                if (groupByEntry) {
+                                  try {
+                                    setGroupBy(JSON.parse(groupByEntry.fieldValue) as GroupByType);
+                                  } catch {
+                                    setGroupBy(groupByEntry.fieldValue as GroupByType);
+                                  }
+                                } else {
+                                  setGroupBy('none');
+                                }
+                                setIsCustomizeOpen(false);
+                              }}
+                            >
+                              <span className='text-sm font-medium truncate max-w-[160px] text-[#7C8698]'>
+                                {config.name}
+                              </span>
+                              {isPrivate && (
+                                <span className='text-xs text-[#7C8698] font-normal'>Private</span>
+                              )}
+                              {isOwn && (
+                                <button
+                                  data-track-category='saved-views'
+                                  data-track-name='delete-saved-view'
+                                  className='hidden group-hover:flex items-center justify-center absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gray-200 hover:bg-red-100 transition-colors'
+                                  title='Delete view'
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    setDeleteViewConfirm({
+                                      configId: config.id,
+                                      name: config.name,
+                                      isPublic: !isPrivate,
+                                    });
+                                  }}
+                                >
+                                  <X className='w-2.5 h-2.5 text-gray-500 hover:text-red-500' />
+                                </button>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {layoutView === 'table' && (
                     <div className='px-4 py-3 border-b border-border'>
@@ -1548,7 +1764,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                         className='outline-none'
                         aria-label='Clear grouping'
                         onSelect={() => {
-                          setGroupBy('none');
+                          handleSetGroupBy('none');
                         }}
                       >
                         <div className='cursor-pointer hover:bg-muted rounded p-1 transition-colors'>
@@ -1573,7 +1789,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                             groupBy.type === 'formField' &&
                             groupBy.fieldId === value.fieldId
                       }
-                      onCheckedChange={() => setGroupBy(value as GroupByType)}
+                      onCheckedChange={() => handleSetGroupBy(value as GroupByType)}
                       data-testid={`group-by-${typeof value === 'string' ? value : value.fieldId}`}
                     >
                       <div className='flex items-center gap-3'>
@@ -1590,6 +1806,39 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Active saved view indicator */}
+      {selectedViewId &&
+        savedConfigs &&
+        (() => {
+          const activeView = savedConfigs.find(c => c.id === selectedViewId);
+          if (!activeView) return null;
+          return (
+            <div className='flex items-center px-4 py-2 bg-white border-b border-gray-100 flex-shrink-0'>
+              <div className='flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-700'>
+                <span className='font-medium'>{activeView.name}</span>
+                <button
+                  data-track-category='saved-views'
+                  data-track-name='dismiss-active-view'
+                  onClick={() => {
+                    setSelectedViewId(null);
+                    try {
+                      sessionStorage.removeItem(activeViewKey);
+                    } catch (err) {
+                      console.error('Failed to remove active view from sessionStorage', err);
+                    }
+                    setFilters({ ...(filters.boards ? { boards: filters.boards } : {}) });
+                    setGroupBy('none');
+                  }}
+                  className='flex items-center justify-center hover:text-gray-900 transition-colors'
+                  title='Dismiss view'
+                >
+                  <X className='w-3.5 h-3.5' />
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* Board-wise View for my-tickets, channel stage view, or multiple boards filter */}
       {/* Board-wise View */}
@@ -1878,6 +2127,63 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 className='bg-sidebar-badge-accent text-primary-foreground hover:bg-blue-700'
               >
                 Approve
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Delete saved view confirmation dialog */}
+      {deleteViewConfirm && (
+        <Dialog
+          open={!!deleteViewConfirm}
+          onOpenChange={open => {
+            if (!open) setDeleteViewConfirm(null);
+          }}
+          title='Delete Saved View'
+        >
+          <div className='p-6'>
+            <p className='text-sm text-gray-600 mb-6'>
+              {deleteViewConfirm.isPublic
+                ? `"${deleteViewConfirm.name}" is a public view visible to all members. Deleting it will remove it for everyone. Are you sure you want to delete it?`
+                : `Are you sure you want to delete the saved view "${deleteViewConfirm.name}"? This action cannot be undone.`}
+            </p>
+            <div className='flex justify-end gap-3'>
+              <Button variant='secondary' onClick={() => setDeleteViewConfirm(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (selectedViewId === deleteViewConfirm.configId) {
+                    setSelectedViewId(null);
+                    try {
+                      sessionStorage.removeItem(activeViewKey);
+                    } catch (err) {
+                      console.error('Failed to remove active view from sessionStorage', err);
+                    }
+                  }
+                  const configId = deleteViewConfirm.configId;
+                  setDeleteViewConfirm(null);
+                  const run = async (): Promise<void> => {
+                    try {
+                      const result = zero.mutate(
+                        mutators.savedUserConfiguration.delete({ configId }),
+                      );
+                      const res = await result.server;
+                      if (res.type === 'error') {
+                        toast.error(res.error?.message ?? 'Failed to delete view');
+                      } else {
+                        toast.success('View deleted');
+                      }
+                    } catch (err: unknown) {
+                      toast.error(err instanceof Error ? err.message : 'Failed to delete view');
+                    }
+                  };
+                  void run();
+                }}
+                className='bg-red-500 text-white hover:bg-red-600'
+              >
+                Delete
               </Button>
             </div>
           </div>

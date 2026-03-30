@@ -2918,3 +2918,60 @@ model InstalledApps {
   @@map("installed_apps")
   @@schema("public")
 }
+
+// Saved Views Enums
+enum SavedConfigContextType {
+  BOARD
+
+  @@schema("public")
+}
+
+enum SavedConfigVisibility {
+  PRIVATE
+  PUBLIC
+
+  @@schema("public")
+}
+
+enum SavedConfigEntityName {
+  TICKET
+  FORM_ENTITY_VALUE
+
+  @@schema("public")
+}
+
+// Saved Views Models
+model SavedUserConfiguration {
+  id          String                  @id @default(cuid())
+  userId      String
+  name        String
+  contextType SavedConfigContextType
+  contextId   String
+  visibility  SavedConfigVisibility
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  values      SavedUserConfigurationValue[]
+
+  @@unique([userId, contextId, name])
+  @@index([contextType, contextId])
+  @@index([userId])
+  @@map("saved_user_configurations")
+  @@schema("public")
+}
+
+model SavedUserConfigurationValue {
+  id         String                  @id @default(cuid())
+  configId   String
+  entityName SavedConfigEntityName
+  fieldName  String
+  fieldValue String
+  createdAt  DateTime
+  updatedAt  DateTime
+
+  config     SavedUserConfiguration  @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
+  @@map("saved_user_configuration_values")
+  @@schema("public")
+}

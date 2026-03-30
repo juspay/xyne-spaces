@@ -596,6 +596,25 @@ export enum AttributionConfidence {
 }
 
 
+// Saved Views Enums
+
+// @ts-ignore TS1294
+export enum SavedConfigContextType {
+  BOARD = 'BOARD',
+}
+
+// @ts-ignore TS1294
+export enum SavedConfigVisibility {
+  PRIVATE = 'PRIVATE',
+  PUBLIC = 'PUBLIC',
+}
+
+// @ts-ignore TS1294
+export enum SavedConfigEntityName {
+  TICKET = 'TICKET',
+  FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
+}
+
 // Define tables
 
 export const agentTable = table('agents')
@@ -1797,6 +1816,32 @@ export const installedAppsTable = table('installed_apps')
     userId: string(),
     webhookUrl: string().optional(),
     signingSecret: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+
+  .primaryKey('id');
+// Saved Views Tables
+export const savedUserConfigurationTable = table('saved_user_configurations')
+  .columns({
+    id: string(),
+    userId: string(),
+    name: string(),
+    contextType: enumeration<SavedConfigContextType>(),
+    contextId: string(),
+    visibility: enumeration<SavedConfigVisibility>(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const savedUserConfigurationValueTable = table('saved_user_configuration_values')
+  .columns({
+    id: string(),
+    configId: string(),
+    entityName: enumeration<SavedConfigEntityName>(),
+    fieldName: string(),
+    fieldValue: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3124,6 +3169,22 @@ export const releaseEventTableRelationships = relationships(releaseEventTable, (
   }),
 }));
 
+// Saved Views Relationships
+export const savedUserConfigurationTableRelationships = relationships(
+  savedUserConfigurationTable,
+  ({ one, many }) => ({
+    user: one({
+      sourceField: ['userId'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+    values: many({
+      sourceField: ['id'],
+      destField: ['configId'],
+      destSchema: savedUserConfigurationValueTable,
+    }),
+  }),
+);
 
 export const rcaTableRelationships = relationships(rcaTable, ({ one, many }) => ({
   ticket: one({
@@ -3196,6 +3257,16 @@ export const channelDailyRecapTableRelationships = relationships(channelDailyRec
   }),
 }));
 
+export const savedUserConfigurationValueTableRelationships = relationships(
+  savedUserConfigurationValueTable,
+  ({ one }) => ({
+    config: one({
+      sourceField: ['configId'],
+      destField: ['id'],
+      destSchema: savedUserConfigurationTable,
+    }),
+  }),
+);
 
 // Define schema
 
@@ -3292,6 +3363,9 @@ export const schema = createSchema({
     // Apps
     appsTable,
     installedAppsTable,
+    // Saved Views
+    savedUserConfigurationTable,
+    savedUserConfigurationValueTable,
   ],
   relationships: [
     agentTableRelationships,
@@ -3377,6 +3451,9 @@ export const schema = createSchema({
     // Apps
     appsTableRelationships,
     installedAppsTableRelationships,
+    // Saved Views
+    savedUserConfigurationTableRelationships,
+    savedUserConfigurationValueTableRelationships,
   ],
 });
 
@@ -3473,6 +3550,9 @@ export type ChannelDailyRecap = Row<typeof schema.tables.channel_daily_recaps>;
 // Apps Types
 export type Apps = Row<typeof schema.tables.apps>;
 export type InstalledApps = Row<typeof schema.tables.installed_apps>;
+// Saved Views Types
+export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
+export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
 
 export type Context = {
   userID: string;
