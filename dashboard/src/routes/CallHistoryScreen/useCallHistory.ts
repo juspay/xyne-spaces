@@ -67,6 +67,9 @@ interface UseCallHistoryReturn {
   editModalOpen: boolean;
   editModalCall: ScheduledCall | null;
   closeEditModal: () => void;
+  /** Toggle for showing channel calls */
+  showChannelCalls: boolean;
+  setShowChannelCalls: (show: boolean) => void;
 }
 
 export function useCallHistory(userId: string | undefined): UseCallHistoryReturn {
@@ -84,6 +87,9 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   // Fetch all calls when user is searching, so search covers everything
   const [searchQuery, setSearchQuery] = useState('');
   const isSearching = searchQuery.trim().length > 0;
+
+  // Toggle for showing channel calls (calls in channels the user is a member of but wasn't invited to)
+  const [showChannelCalls, setShowChannelCalls] = useState(false);
   const [allCallsForSearch] = useCachedQuery(
     queries.userCallHistory({ limit: 9999, start: null }),
     { enabled: isSearching },
@@ -150,14 +156,25 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
           (call.startsAt && new Date(call.startsAt).getTime() <= now),
       ) || [];
 
-    const allCalls = [...baseCalls, ...activeScheduledCalls];
+    // Combine base calls with active scheduled calls
+    let allCalls = [...baseCalls, ...activeScheduledCalls];
+
+    // If showChannelCalls is false (default), filter out calls in channels where user wasn't invited
+    if (!showChannelCalls) {
+      allCalls = allCalls.filter(call => {
+        // Check if user was invited to this call (exists in participants)
+        const userParticipant = call.participants?.find(p => p.userId === userId);
+        // Only show calls where user was invited
+        return !!userParticipant;
+      });
+    }
 
     return allCalls.sort((a, b) => {
       const aTime = a.startedAt || a.startsAt || a.createdAt;
       const bTime = b.startedAt || b.startsAt || b.createdAt;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
-  }, [calls, allCallsForSearch, searchQuery, allScheduledCalls]);
+  }, [calls, allCallsForSearch, searchQuery, allScheduledCalls, showChannelCalls, userId]);
 
   // Filter users by search query (excluding current user)
   const filteredUsers = useMemo(() => {
@@ -624,5 +641,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     editModalOpen,
     editModalCall,
     closeEditModal,
+    showChannelCalls,
+    setShowChannelCalls,
   };
 }
