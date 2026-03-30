@@ -35,7 +35,13 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Avatar from '../../ui/Avatar/Avatar';
 import Badge from '../../ui/Badge';
 import { DisplaySearchResult } from '../../../types/search';
-import { TabType, MentionType, ChannelCommandMenuProps } from './ChannelCommandMenu.types';
+import {
+  TabType,
+  MentionType,
+  ChannelCommandMenuProps,
+  TYPE_SUGGESTIONS,
+  SearchableTypes,
+} from './ChannelCommandMenu.types';
 import ThreadContextPanel from '../ThreadContextPanel/ThreadContextPanel';
 import {
   buildContextItemFromResult,
@@ -66,6 +72,7 @@ import {
 } from '../../../services/summarizeService';
 import { SearchSummaryModal, SummaryModalState } from './SearchSummaryModal';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
+import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
 
 type BotChatState =
   | { status: 'idle' }
@@ -264,6 +271,8 @@ const ChannelCommandMenu = ({
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
+    typeFilter,
+    searchText: cleanedSearchText,
     // Clipboard tracking callbacks
     onPasteDetected,
     onManualKeystroke,
@@ -275,10 +284,19 @@ const ChannelCommandMenu = ({
   });
 
   // Aliases to match old usage if needed or just use new names
-  const search = searchText;
-  const setSearch = setSearchText; // Alias strictness might be issue but setText takes string | fn
+  const search = cleanedSearchText;
+  const setSearch = setSearchText;
 
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+
+  // Type filter visibility - match tab behavior
+  // type:users/people shows grouped local users (same as USERS tab)
+  // type:channels shows grouped local channels (same as CHANNELS tab)
+  const types = parseTypeFilter(typeFilter);
+  const isUsersType = types.some(t => t === SearchableTypes.USERS || t === SearchableTypes.PEOPLE);
+  const isChannelsType = types.includes(SearchableTypes.CHANNELS);
+  const showGroupedLocalResults = !typeFilter || isChannelsType;
+  const showGroupedUsers = !typeFilter || isUsersType;
 
   // Mention search
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
@@ -288,7 +306,43 @@ const ChannelCommandMenu = ({
   const insertMentionRef = useRef<
     ((item: { id: string; name: string; email?: string }) => void) | null
   >(null);
+
+  const insertTextRef = useRef<((text: string) => void) | null>(null);
+
   const { results: mentionSearchResults, searchMentions } = useMentionSearch();
+
+  // Type autocomplete - derived from searchText
+  const typeAutocomplete = useMemo(() => {
+    const match = searchText.match(TYPE_AUTOCOMPLETE_REGEX);
+    if (!match || match[1] === undefined) {
+      return { suffix: '', suggestion: null, match: null };
+    }
+    const query = match[1].split(',').pop() || '';
+    if (query.length === 0) {
+      return { suffix: '', suggestion: null, match: null };
+    }
+    const suggestion = TYPE_SUGGESTIONS.find(
+      t =>
+        t.name.toLowerCase().startsWith(query.toLowerCase()) &&
+        t.name.toLowerCase() !== query.toLowerCase(),
+    );
+    return {
+      suffix: suggestion ? suggestion.name.slice(query.length) : '',
+      suggestion,
+      match,
+    };
+  }, [searchText]);
+  const autocompleteSuffix = typeAutocomplete.suffix;
+
+  const acceptTypeAutocomplete = useCallback(() => {
+    if (!typeAutocomplete.suggestion || !typeAutocomplete.match) return;
+    if (insertTextRef.current && typeAutocomplete.suffix) {
+      insertTextRef.current(typeAutocomplete.suffix);
+    }
+    const beforeType = searchText.slice(0, typeAutocomplete.match.index) || '';
+    const newText = beforeType + 'type:' + typeAutocomplete.suggestion.name;
+    setSearch(newText);
+  }, [typeAutocomplete, searchText, setSearch]);
 
   // Summary modal state
   const [showSummaryModal, setShowSummaryModal] = useState(false);
@@ -874,6 +928,8 @@ const ChannelCommandMenu = ({
     switch (type) {
       case 'user':
         return 'Users';
+      case 'channel':
+        return 'Channels';
       case 'conversation':
         return 'Messages';
       case 'ticket':
@@ -907,7 +963,8 @@ const ChannelCommandMenu = ({
       )}
       onKeyDownCapture={e => {
         // ── Tab / Shift+Tab: cycle filter tabs ──────────────────────────────
-        if (e.key === 'Tab') {
+        // If type autocomplete suggestion is showing, Tab accepts it instead of cycling tabs
+        if (e.key === 'Tab' && !(typeAutocomplete.suggestion && typeAutocomplete.match)) {
           e.preventDefault();
           e.stopPropagation();
 
@@ -967,6 +1024,18 @@ const ChannelCommandMenu = ({
           return;
         }
 
+        // ── Tab / Right Arrow: Accept type autocomplete suggestion ───────────
+        if (
+          (e.key === 'Tab' || e.key === 'ArrowRight') &&
+          typeAutocomplete.suggestion &&
+          typeAutocomplete.match
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          acceptTypeAutocomplete();
+          return;
+        }
+
         // ── Enter handling ───────────────────────────────────────────────────
         if (e.key !== 'Enter') return;
 
@@ -1005,6 +1074,14 @@ const ChannelCommandMenu = ({
             });
           }
           return;
+        }
+
+        // If type autocomplete is showing, accept it on Enter
+        if (typeAutocomplete.suggestion && typeAutocomplete.match) {
+          e.preventDefault();
+          e.stopPropagation();
+          acceptTypeAutocomplete();
+          // Don't return - let the normal Enter flow continue to select the active item
         }
 
         // Prevent Lexical newline
@@ -1076,6 +1153,10 @@ const ChannelCommandMenu = ({
               onInsertMentionReady={handleInsertMentionReady}
               onPasteDetected={onPasteDetected}
               onManualKeystroke={onManualKeystroke}
+              autocompleteSuffix={autocompleteSuffix}
+              onInsertTextReady={insertText => {
+                insertTextRef.current = insertText;
+              }}
             />
           )}
           {/* Search/Close Icon */}
@@ -1455,10 +1536,11 @@ const ChannelCommandMenu = ({
                 {!showEmptyState && !error && !mentionSearchType && (
                   <>
                     {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
-                    {searchText.trim() ? (
+                    {searchText.trim() || typeFilter ? (
                       <>
                         {/* 0. Starred (from local channels) - shown very first */}
                         {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                          showGroupedLocalResults &&
                           groupedChannels['starred'] &&
                           groupedChannels['starred'].length > 0 && (
                             <div className='mb-4'>
@@ -1517,6 +1599,7 @@ const ChannelCommandMenu = ({
 
                         {/* 1. Users (from local) - shown first when searching, real-time updates */}
                         {(activeTab === TabType.ALL || activeTab === TabType.USERS) &&
+                          showGroupedUsers &&
                           filteredLocalUsers.length > 0 && (
                             <div className='mb-4'>
                               {(() => {
@@ -1613,6 +1696,7 @@ const ChannelCommandMenu = ({
                             ) || [];
                           return (
                             (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                            showGroupedLocalResults &&
                             groupDMs.length > 0 && (
                               <div className='mb-4'>
                                 <Command.Group
@@ -1646,6 +1730,7 @@ const ChannelCommandMenu = ({
 
                         {/* 3. Channels (from local channels) */}
                         {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                          showGroupedLocalResults &&
                           groupedChannels['channels'] &&
                           groupedChannels['channels'].length > 0 && (
                             <div className='mb-4'>
@@ -1706,7 +1791,7 @@ const ChannelCommandMenu = ({
                             </div>
                           )}
 
-                        {/* 4. Messages, Tickets, and Attachments (from backend) */}
+                        {/* 4. Backend Results (Messages, Tickets, Attachments) */}
                         {backendResults.length > 0 && (
                           <>
                             {['conversation', 'ticket', 'attachment']
@@ -1768,11 +1853,14 @@ const ChannelCommandMenu = ({
                       </>
                     ) : (
                       <>
-                        {/* Local Channels Results */}
-                        {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                        {/* Local Channels Results - shown when no search/filter OR when type:channels */}
+                        {(activeTab === TabType.ALL ||
+                          activeTab === TabType.CHANNELS ||
+                          isChannelsType) &&
                           filteredLocalChannels.length > 0 && (
                             <>
                               {Object.entries(groupedChannels).map(([category, items]) => {
+                                const typedCategory = category as ChannelCategory;
                                 const isExpanded = expandedCategories.has(category);
                                 const shouldLimit = !search.trim();
                                 const hasMore = items.length > DISPLAY_LIMIT;
@@ -1785,7 +1873,7 @@ const ChannelCommandMenu = ({
                                 return (
                                   <div key={category} className='mb-4'>
                                     <Command.Group
-                                      heading={getCategoryLabel(category as ChannelCategory)}
+                                      heading={getCategoryLabel(typedCategory)}
                                       className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                                     >
                                       {displayItems.map(({ channel }, index) => {

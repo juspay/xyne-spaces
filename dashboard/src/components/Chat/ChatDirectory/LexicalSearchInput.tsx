@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getRoot, EditorState, $isElementNode, LexicalNode } from 'lexical';
+import { $getRoot, $getSelection, EditorState, $isElementNode, LexicalNode } from 'lexical';
 import { MentionNode, $isMentionNode } from './MentionNode';
 import { MentionPlugin } from './MentionPlugin';
 import { PastePlugin } from './PastePlugin';
@@ -36,6 +36,8 @@ interface LexicalSearchInputProps {
   onMentionInserted?: () => void;
   onPasteDetected?: () => void;
   onManualKeystroke?: () => void;
+  autocompleteSuffix?: string;
+  onInsertTextReady?: (insertText: (text: string) => void) => void;
 }
 
 function PlaceholderPlugin({ placeholder }: { placeholder?: string }) {
@@ -87,6 +89,78 @@ function ClearEditorPlugin({ value }: { value: string | undefined }) {
       });
     }
   }, [value, editor]);
+
+  return null;
+}
+
+function InsertTextPlugin({
+  onInsertTextReady,
+}: {
+  onInsertTextReady?: (insertText: (text: string) => void) => void;
+}) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    if (onInsertTextReady) {
+      const insertText = (text: string) => {
+        editor.update(() => {
+          const selection = $getSelection();
+          if (selection !== null) {
+            selection.insertText(text);
+          }
+        });
+      };
+      onInsertTextReady(insertText);
+    }
+  }, [editor, onInsertTextReady]);
+
+  return null;
+}
+
+function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: number) => void }) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    return editor.registerUpdateListener(() => {
+      const editorEl = editor.getRootElement();
+      if (!editorEl) return;
+
+      // Use requestAnimationFrame to ensure DOM has been updated after Lexical's render
+      requestAnimationFrame(() => {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+
+        const range = selection.getRangeAt(0).cloneRange();
+        range.collapse(false);
+
+        const cursorRect = range.getBoundingClientRect();
+
+        // If cursorRect has zero width/height, the range might be collapsed at a node boundary.
+        // Use a temporary zero-width space to measure position accurately.
+        if (cursorRect.left === 0 && cursorRect.right === 0) {
+          const span = document.createElement('span');
+          span.textContent = '\u200b';
+          range.insertNode(span);
+          const spanRect = span.getBoundingClientRect();
+          const containerRect = editorEl
+            .closest('[data-lexical-search-input]')
+            ?.getBoundingClientRect();
+          if (containerRect) {
+            onPositionChange(spanRect.left - containerRect.left);
+          }
+          span.remove();
+          return;
+        }
+
+        const containerRect = editorEl
+          .closest('[data-lexical-search-input]')
+          ?.getBoundingClientRect();
+        if (containerRect) {
+          onPositionChange(cursorRect.left - containerRect.left);
+        }
+      });
+    });
+  }, [editor, onPositionChange]);
 
   return null;
 }
@@ -176,8 +250,14 @@ export function LexicalSearchInput({
   onMentionInserted,
   onPasteDetected,
   onManualKeystroke,
+  autocompleteSuffix,
+  onInsertTextReady,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
+  const [suffixLeft, setSuffixLeft] = useState(0);
+  const handlePositionChange = useCallback((left: number) => {
+    setSuffixLeft(left);
+  }, []);
 
   const initialConfig = {
     namespace: 'SearchInput',
@@ -187,8 +267,8 @@ export function LexicalSearchInput({
         base: 'text-sm',
       },
     },
-    onError: (error: Error) => {
-      console.error('Lexical error:', error);
+    onError: (_error: Error) => {
+      // Silently handle Lexical errors
     },
     nodes: [MentionNode],
     ...(value ? { editorState: value } : {}),
@@ -203,6 +283,14 @@ export function LexicalSearchInput({
               <span className='flex items-center gap-2'>
                 {!isMobile && <Search size={16} className='ml-3 text-[#788187]' />}
                 <ContentEditable className='min-h-5 py-1 text-sm focus:outline-none flex-1' />
+                {autocompleteSuffix && (
+                  <span
+                    className='text-[#C9CCCF] pointer-events-none text-sm absolute top-1/2 -translate-y-1/2 whitespace-nowrap'
+                    style={{ left: `${suffixLeft}px` }}
+                  >
+                    {autocompleteSuffix}
+                  </span>
+                )}
               </span>
             }
             {...(placeholder
@@ -220,6 +308,8 @@ export function LexicalSearchInput({
             />
           )}
           <ClearEditorPlugin value={value} />
+          {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
+          <CursorPositionPlugin onPositionChange={handlePositionChange} />
           <MentionPlugin
             {...(onUserSearch ? { onUserSearch } : {})}
             {...(onChannelSearch ? { onChannelSearch } : {})}

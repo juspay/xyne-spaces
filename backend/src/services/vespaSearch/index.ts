@@ -4,6 +4,7 @@ import { Request, Response } from 'express';
 import config from 'vespa/src/config';
 import { transformVespaResults } from './resultTransform';
 import { db } from '@/database/client';
+import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, VespaDocType, VespaSearchHit } from '@/vespa/src/types';
 
 
@@ -90,6 +91,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       rankProfile,
       // Frontend-compatible filters
       type,        // 'messages' | 'attachments' | 'channels' | 'tickets' | 'files'
+      subApp,      // 'canvas' | 'transcript' | 'RCA' - sub-app filter for files
       from,        // User name or ID
       in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)
       // Unified filters (work for both slack and ticket)
@@ -107,8 +109,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       range,       // Time keyword filter (today, yesterday, etc.)
       stage,       // Ticket stage
       assignee,    // Assigned user name
-      filterOnly,  // Flag for filter-only search (no query text)
-      subApp       // Canvas/Transcript sub-app filter
+      filterOnly  // Flag for filter-only search (no query text)
+      // Note: subApp was moved up to be with other frontend filters
     } = req.query;
 
     const userId = (req as any).user?.id;
@@ -152,18 +154,58 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     }
 
-    // Map frontend 'type' filter to docType
+    // Determine which apps to search based on type filter
+    let searchApps = (apps as string).split(',');
+
+    const validTypes = VALID_DOC_TYPES as readonly string[];
+
+    // Map frontend 'type' filter to docType and subApp
     if (type) {
-      const typeMapping: Record<string, string[]> = {
-        'messages': [VespaDocType.MESSAGE],
-        'attachments': [VespaDocType.ATTACHMENT],
-        'channels': [VespaDocType.CHANNEL],
-        'tickets': [VespaDocType.TICKET],
-        'files': [VespaDocType.FILE],
+      // Frontend sends exact type names only (prefix expansion is handled client-side)
+      const types = (type as string).split(',').map(t => t.trim().toLowerCase()).filter(t => validTypes.includes(t));
+
+      // Unified type mapping — includes subApp types (canvas, transcript, rca)
+      // Types filtered locally (users, people, channels) have null app so they don't trigger a Vespa search
+      const typeMapping: Record<string, { app: 'chat' | 'ticket' | 'file' | null, optionsKey: 'slack' | 'ticket' | 'file', docType: string, subApp?: string }> = {
+        'messages': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.MESSAGE },
+        'attachments': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.ATTACHMENT },
+        'channels': { app: null, optionsKey: 'slack', docType: VespaDocType.CHANNEL },
+        'tickets': { app: 'ticket', optionsKey: 'ticket', docType: VespaDocType.TICKET },
+        'files': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE },
+        'users': { app: null, optionsKey: 'slack', docType: VespaDocType.USER },
+        'people': { app: null, optionsKey: 'slack', docType: VespaDocType.USER },
+        'canvas': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: 'canvas' },
+        'transcript': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: 'transcript' },
+        'rca': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: 'RCA' },
       };
-      const mappedTypes = typeMapping[type as string];
-      if (mappedTypes) {
-        options.slack.docType = mappedTypes;
+
+      const mappedApps = new Set<'chat' | 'ticket' | 'file'>();
+      const subApps: string[] = [];
+
+      types.forEach(t => {
+        const mapped = typeMapping[t];
+        if (mapped) {
+          if (mapped.app) {
+            mappedApps.add(mapped.app);
+          }
+          if (!options[mapped.optionsKey].docType) {
+            options[mapped.optionsKey].docType = [];
+          }
+          options[mapped.optionsKey].docType!.push(mapped.docType);
+          if (mapped.subApp) {
+            subApps.push(mapped.subApp);
+          }
+        }
+      });
+
+      if (subApps.length > 0) {
+        options.file.subApp = subApps;
+      }
+
+      // Restrict apps to only those needed for the type filter
+      // If only local types (users/people/channels) were requested, search all apps
+      if (mappedApps.size > 0) {
+        searchApps = Array.from(mappedApps);
       }
     }
     
@@ -245,7 +287,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     const results = await vespaService.searchService.searchVespa(
       q as string,
       userId,
-      (apps as string).split(','),
+      searchApps,
       options,
       searchId as string
     );

@@ -42,12 +42,13 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'Rank profile must be a string'
   }),
 
-  // Frontend-compatible filters
+  // Frontend-compatible filters (includes subApp types: canvas, transcript, rca)
+  // Supports comma-separated values: messages,files or canvas,transcript
   type: Joi.string()
-    .valid('messages', 'attachments', 'channels', 'tickets' , 'files')
+    .pattern(/^(messages|attachments|channels|tickets|users|files|canvas|transcript|rca|people)(,(messages|attachments|channels|tickets|users|files|canvas|transcript|rca|people))*$/)
     .optional()
     .messages({
-      'any.only': 'Type must be one of: messages, attachments, channels, tickets, files' 
+      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, channels, tickets, users, files, canvas, transcript, rca, people'
     }),
 
   from: Joi.alternatives()

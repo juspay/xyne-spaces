@@ -19,7 +19,13 @@ import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
 import { useUserSearch } from './useUsers';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
-import { parseSearchFilters } from '../utils/searchFilterParser';
+import {
+  parseSearchFilters,
+  parseTypeFilter,
+  hasLocalTypeFilter,
+  hasIncompleteType,
+  getBackendTypes,
+} from '../utils/searchFilterParser';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -54,6 +60,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  // Parse filters early for UI visibility (typeFilter) and cleaned searchText
+  const parsedFilters = useMemo(() => parseSearchFilters(text), [text]);
+  const { searchText: cleanedSearchText, type: typeFilter } = parsedFilters;
+
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
   const [selectedMentions, setSelectedMentions] = useState<
@@ -64,18 +74,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Load More Ref
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  // Filter local users using the search hook
-  const filteredLocalUsers = useUserSearch(text, BACKEND_RESULTS_LIMIT);
+  // Filter local users using the search hook - use cleaned searchText
+  const filteredLocalUsers = useUserSearch(cleanedSearchText, BACKEND_RESULTS_LIMIT);
 
-  // Filter local channels
+  // Filter local channels - use cleaned searchText
   const filteredLocalChannels: Array<{
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
   }> = useMemo(() => {
-    if (!options.allChannels || !text.trim()) return options.allChannels || [];
+    if (!options.allChannels || !cleanedSearchText.trim()) return options.allChannels || [];
 
-    const searchLower = text.toLowerCase();
+    const searchLower = cleanedSearchText.toLowerCase();
     const keywords = searchLower.split(',').map(k => k.trim().toLowerCase());
 
     return options.allChannels.filter(({ channel, searchableNames }) => {
@@ -87,7 +97,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       }
       return channel.name.toLowerCase().includes(searchLower);
     });
-  }, [options.allChannels, text]);
+  }, [options.allChannels, cleanedSearchText]);
 
   const [currentSearchContext, setCurrentSearchContext] = useState<{
     query: string;
@@ -484,7 +494,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       selectedMentions: Array<{ id: string; type: MentionType; prefix?: string }>,
       useVespaSearch: boolean,
       filteredLocalUsers: User[],
-      filteredLocalChannelsCount: number, // New Argument
+      filteredLocalChannels: Array<{
+        channel: Channel;
+        category: ChannelCategory;
+        searchableNames?: string[];
+      }>,
       onComplete?: (results: DisplaySearchResult[], query: string) => void,
     ) => {
       const {
@@ -498,14 +512,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         range: rangeFilter,
         stage: stageFilter,
         status: statusFilter,
+        type: typeFilter,
       } = parseSearchFilters(query);
 
       // Adjust local results count logic for context
-      // Note: filteredLocalChannelsCount is passed in. For user tab, we count users?
-      // For now, respect the passed count for channels.
       let localCount = 0;
       if (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) {
-        localCount = filteredLocalChannelsCount;
+        localCount = filteredLocalChannels.length;
       }
 
       setCurrentSearchContext({
@@ -518,7 +531,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       // Check if any filters are active
       const hasFilters =
         priorityFilter ||
-        boardFilter || //TODO: In commandChannelMenu
+        boardFilter ||
         tagsFilter ||
         beforeFilter ||
         afterFilter ||
@@ -526,9 +539,44 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         rangeFilter ||
         stageFilter ||
         statusFilter ||
+        typeFilter ||
         selectedMentions.length > 0;
 
-      if (activeTab === TabType.USERS) {
+      // Handle type filter - users/channels use filtered local results (shown as grouped in UI)
+      const types = parseTypeFilter(typeFilter);
+      const hasLocalType = hasLocalTypeFilter(types);
+      const isIncomplete = hasIncompleteType(types);
+
+      if (hasLocalType || isIncomplete) {
+        // Return empty results - users/channels are shown via filteredLocalUsers/filteredLocalChannels
+        setSearchResults([]);
+        setPaginationState(prev => ({
+          ...prev,
+          [activeTab]: {
+            page: 1,
+            hasMore: false,
+            total: 0,
+            offset: 0,
+            cumulativeCount: 0,
+          },
+        }));
+      } else if (typeFilter && getBackendTypes(types).length === 0) {
+        // Invalid type filter (e.g., type:foobar) — no valid types to search
+        setSearchResults([]);
+        setPaginationState(prev => ({
+          ...prev,
+          [activeTab]: {
+            page: 1,
+            hasMore: false,
+            total: 0,
+            offset: 0,
+            cumulativeCount: 0,
+          },
+        }));
+        setIsSearching(false);
+        pendingSearchCountRef.current -= 1;
+        return;
+      } else if (activeTab === TabType.USERS) {
         const results = [
           ...filteredLocalUsers.map((user: User) => ({
             id: user.id,
@@ -550,7 +598,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             cumulativeCount: results.length,
           },
         }));
-      } else if ((searchText || hasFilters) && activeTab !== TabType.CHANNELS) {
+      } else if (searchText || hasFilters) {
         setIsSearching(true);
         setSearchError(null);
         markSearchStart();
@@ -599,21 +647,23 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               return;
             }
 
-            if (activeTab === TabType.MESSAGES) {
+            // Handle type filter - only send backend-valid types (strip local types like users/people/channels)
+            if (typeFilter) {
+              const backendTypes = getBackendTypes(parseTypeFilter(typeFilter));
+              if (backendTypes.length > 0) {
+                searchFilters.type = backendTypes.join(',');
+              }
+            } else if (activeTab === TabType.MESSAGES) {
               searchFilters.type = VespaDocTypes.MESSAGES;
-              searchFilters.apps = VespaApps.CHAT;
             } else if (activeTab === TabType.ATTACHMENTS) {
               searchFilters.type = VespaDocTypes.FILES;
-              searchFilters.apps = VespaApps.FILE;
             } else if (activeTab === TabType.TICKETS) {
               searchFilters.type = VespaDocTypes.TICKETS;
-              searchFilters.apps = VespaApps.TICKET;
             }
 
             // Add assignee filter for Tickets/ALL (force ticket-only search)
             if (assigneeMentions.length > 0) {
               searchFilters.type = VespaDocTypes.TICKETS;
-              searchFilters.apps = VespaApps.TICKET;
               searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
             }
 
@@ -638,18 +688,24 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 searchId: currentSessionId,
               });
 
-              mergedResults = [
-                ...filteredLocalUsers.map((user: User) => ({
-                  id: user.id,
-                  type: 'user' as const,
-                  title: user.name,
-                  subtitle: user.email || '',
-                  relevanceScore: 1,
-                  metadata: {},
-                })),
-                ...vespaResponse.results,
-              ];
-              totalCount = vespaResponse.totalCount + filteredLocalUsers.length;
+              // Only merge local users when no type filter is applied
+              if (typeFilter) {
+                mergedResults = vespaResponse.results;
+                totalCount = vespaResponse.totalCount;
+              } else {
+                mergedResults = [
+                  ...filteredLocalUsers.map((user: User) => ({
+                    id: user.id,
+                    type: 'user' as const,
+                    title: user.name,
+                    subtitle: user.email || '',
+                    relevanceScore: 1,
+                    metadata: {},
+                  })),
+                  ...vespaResponse.results,
+                ];
+                totalCount = vespaResponse.totalCount + filteredLocalUsers.length;
+              }
               currentOffset = vespaResponse.limit;
               hasMore = false;
             } else {
@@ -791,7 +847,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         selectedMentions,
         useVespaSearch,
         filteredLocalUsers,
-        filteredLocalChannels.length,
+        filteredLocalChannels,
         options.onSearchComplete,
       );
     }, 300);
@@ -802,8 +858,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     activeTab,
     selectedMentions,
     useVespaSearch,
-    filteredLocalUsers, // Should be stable or memoized if possible, but it comes from useUserSearch which memos
-    // filteredLocalChannels.length - use length to avoid deep dep
+    filteredLocalUsers,
     filteredLocalChannels.length,
     options.onSearchComplete,
     performSearch,
@@ -824,6 +879,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       range: rangeFilter,
       stage: stageFilter,
       status: statusFilter,
+      type: typeFilter,
     } = parseSearchFilters(text);
 
     const hasFilters =
@@ -836,7 +892,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       rangeFilter ||
       stageFilter ||
       statusFilter ||
+      typeFilter ||
       selectedMentions.length > 0;
+
+    // Check for local/incomplete types - don't call backend for users/channels or partial typing
+    const loadMoreTypes = parseTypeFilter(typeFilter);
+    if (hasLocalTypeFilter(loadMoreTypes) || hasIncompleteType(loadMoreTypes)) return;
 
     if (isLoadingMore || (!searchText && !hasFilters) || activeTab === TabType.CHANNELS) return;
 
@@ -853,7 +914,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
         const searchFilters: VespaSearchFilters = {
           query: searchText,
-          apps: `${VespaApps.CHAT},${VespaApps.TICKET}`,
+          apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
           offset: currentOffset,
           limit: currentOffset + pageSize,
           filterOnly: !searchText && !!hasFilters,
@@ -882,21 +943,23 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           return;
         }
 
-        if (activeTab === TabType.MESSAGES) {
+        // Handle type filter - only send backend-valid types (strip local types like users/people/channels)
+        if (typeFilter) {
+          const backendTypes = getBackendTypes(parseTypeFilter(typeFilter));
+          if (backendTypes.length > 0) {
+            searchFilters.type = backendTypes.join(',');
+          }
+        } else if (activeTab === TabType.MESSAGES) {
           searchFilters.type = VespaDocTypes.MESSAGES;
-          searchFilters.apps = VespaApps.CHAT;
         } else if (activeTab === TabType.ATTACHMENTS) {
           searchFilters.type = VespaDocTypes.FILES;
-          searchFilters.apps = VespaApps.FILE;
         } else if (activeTab === TabType.TICKETS) {
           searchFilters.type = VespaDocTypes.TICKETS;
-          searchFilters.apps = VespaApps.TICKET;
         }
 
         // Add assignee filter for Tickets/ALL (force ticket-only search)
         if (assigneeMentions.length > 0) {
           searchFilters.type = VespaDocTypes.TICKETS;
-          searchFilters.apps = VespaApps.TICKET;
           searchFilters.assignee = assigneeMentions.map(user => user.id).join(',');
         }
 
@@ -1080,9 +1143,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
+    typeFilter,
 
     // Input state
     text,
+    searchText: cleanedSearchText,
     inputRef,
 
     // Clipboard tracking callbacks
