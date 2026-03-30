@@ -33,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import Input from '../../components/ui/Input';
+import { Switch } from '../../components/ui/Switch';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useUsers } from '../../hooks/useUsers';
 import { useZero } from '../../hooks/useZero';
@@ -96,6 +97,8 @@ const CallHistoryScreen = (): ReactElement => {
     editModalOpen,
     editModalCall,
     closeEditModal,
+    showChannelCalls,
+    setShowChannelCalls,
   } = useCallHistory(user?.id);
 
   const zero = useZero();
@@ -350,18 +353,33 @@ const CallHistoryScreen = (): ReactElement => {
             </Tabs.Root>
           </div>
 
-          {/* Search Input */}
-          <div className='my-4 relative'>
-            <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 text-muted-foreground dark:text-muted-foreground size-4' />
-            <Input
-              type='text'
-              placeholder='Search calls'
-              value={searchQuery}
-              maxLength={56}
-              onChange={e => setSearchQuery(e.target.value)}
-              className='pl-8 w-full placeholder:text-muted-foreground max-w-full md:max-w-[350px] rounded-xl focus-visible:ring-0 duration-300 ease-in-out'
-              data-testid='user-search-input'
-            />
+          {/* Search Input and Channel Calls Toggle */}
+          <div className='my-4 flex items-center justify-between gap-4'>
+            <div className='relative flex-1 max-w-full md:max-w-[350px]'>
+              <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 text-muted-foreground dark:text-muted-foreground size-4' />
+              <Input
+                type='text'
+                placeholder='Search calls'
+                value={searchQuery}
+                maxLength={56}
+                onChange={e => setSearchQuery(e.target.value)}
+                className='pl-8 w-full placeholder:text-muted-foreground rounded-xl focus-visible:ring-0 duration-300 ease-in-out'
+                data-testid='user-search-input'
+              />
+            </div>
+            <div className='flex items-center gap-3 shrink-0'>
+              <label
+                htmlFor='channel-calls-toggle'
+                className='text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
+              >
+                Show all calls in my channels
+              </label>
+              <Switch
+                id='channel-calls-toggle'
+                checked={showChannelCalls}
+                onCheckedChange={setShowChannelCalls}
+              />
+            </div>
           </div>
 
           {/* Selected Users Pills */}

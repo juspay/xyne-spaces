@@ -198,6 +198,7 @@ CALL SUMMARY:
 
 // Detailed AI Summary prompt - phase-based comprehensive analysis
 const DETAILED_SUMMARY_PROMPT = `You are creating a comprehensive, phase-based meeting summary that captures the natural flow of conversation.
+**LANGUAGE: Generate this entire summary in English, regardless of the transcript language.**
 
 Analyze the transcript and divide it into distinct phases/segments based on topic shifts or conversation flow.
 
