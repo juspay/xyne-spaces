@@ -17,6 +17,9 @@ router.get('/recordings/:callId', callController.getRecordingDetail);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 
+// Pulse org list proxy (must be before /:callId wildcard)
+router.get('/pulse-orgs', callController.getPulseOrgs);
+
 // Edit a single scheduled call instance (must come after all static /... routes)
 router.patch('/:callId', scheduleCallController.updateScheduledCall);
 

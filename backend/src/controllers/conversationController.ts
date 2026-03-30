@@ -31,7 +31,7 @@ import { messageSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { replaceTicketSuggestionWithCreated } from '../utils/ticketSuggestionMarkdownGenerator';
-import { markPulseItemAsSent as rewritePulseItemAsSent } from '../utils/markPulseItemAsSent';
+import { markPulseItemAsSent as rewritePulseItemAsSent, updatePulseMerchant as rewritePulseMerchant } from '../utils/markPulseItemAsSent';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 
 // Local type definitions
@@ -1463,6 +1463,79 @@ export class ConversationController {
       });
     } catch (error) {
       logger.error('Error marking Pulse item as sent:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // PUT /api/conversations/{conversationId}/messages/{messageId}/pulse-merchant
+  // Update a merchant entry in a Pulse actionables message's YAML frontmatter
+  updatePulseMerchant = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId, messageId } = req.params;
+      const { merchantId: localMerchantId, orgId, orgName } = req.body as {
+        merchantId: string;  // local frontmatter id, e.g. "m1"
+        orgId: string;
+        orgName: string;
+      };
+
+      if (!localMerchantId || !orgId || !orgName) {
+        res.status(400).json({ error: 'merchantId, orgId, and orgName are required' });
+        return;
+      }
+
+      const message = await this.messageRepository.findById(messageId);
+      if (!message) {
+        res.status(404).json({ error: 'Message not found' });
+        return;
+      }
+
+      if (message.conversationId !== conversationId) {
+        res.status(400).json({ error: 'Message does not belong to this conversation' });
+        return;
+      }
+
+      if (message.msgType !== MessageType.BOT) {
+        res.status(400).json({ error: 'Only bot Pulse messages can be updated' });
+        return;
+      }
+
+      const metadata = message.metadata as Record<string, unknown>;
+      if (metadata?.['messageSubtype'] !== 'pulse_actionables') {
+        res.status(400).json({ error: 'Message is not a Pulse actionables message' });
+        return;
+      }
+
+      // Resolve merchantId and productId from the Pulse org API
+      const { pulseService } = await import('@/services/pulseService');
+      const orgList = await pulseService.fetchOrgList();
+      const matchedOrg = orgList.find(o => (o.id ?? o.orgId) === orgId);
+
+      const pulseMerchantIds = matchedOrg?.merchantIdList ?? matchedOrg?.merchantIds ?? [];
+      const pulseMerchantId = pulseMerchantIds.length > 0 ? pulseMerchantIds[0] : null;
+
+      // Fetch product/lead data for this org
+      const products = await pulseService.fetchOrgLeadData(orgId);
+      const productId = products.length > 0 ? (products[0].id ?? (products[0] as any).productId ?? null) : null;
+
+      const updatedContent = rewritePulseMerchant(message.content, localMerchantId, {
+        name: orgName,
+        orgId,
+        merchantId: pulseMerchantId,
+        productId,
+      });
+
+      const updatedMessage = await this.messageRepository.update(messageId, {
+        content: updatedContent,
+        edited: true,
+      });
+
+      res.status(200).json({
+        success: true,
+        messageId: updatedMessage.messageId,
+        conversationId: updatedMessage.conversationId,
+      });
+    } catch (error) {
+      logger.error('Error updating Pulse merchant:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };

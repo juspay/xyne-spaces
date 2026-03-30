@@ -1523,6 +1523,33 @@ export class CallController {
   };
 
   /**
+   * GET /api/calls/pulse-orgs
+   * Return the list of Pulse organisations so the frontend can let users
+   * reassign a merchant without exposing Pulse credentials to the browser.
+   */
+  getPulseOrgs = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const { pulseService } = await import('@/services/pulseService');
+      const orgs = await pulseService.fetchOrgList();
+
+      // logger.info(`[Pulse] getPulseOrgs: retrieved ${orgs.length} orgs — ${orgs.map(o => o.name ?? o.orgName ?? o.id).join(', ')}`);
+
+      res.json({
+        success: true,
+        orgs: orgs.map(o => ({
+          id: o.id ?? o.orgId ?? '',
+          name: o.name ?? o.orgName ?? '',
+          orgId: o.id ?? o.orgId ?? '',
+          merchantIds: o.merchantIdList ?? o.merchantIds ?? [],
+        })),
+      });
+    } catch (error) {
+      logger.error('Failed to fetch Pulse orgs:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch Pulse orgs' });
+    }
+  };
+
+  /**
    * GET /api/calls/:callId/participants
    * Get all participants for a call with their response status and user details.
    * Used by the native Participants screen.

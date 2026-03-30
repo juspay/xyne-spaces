@@ -63,3 +63,53 @@ export function markPulseItemAsSent(
   const newFrontmatter = '---\n' + yamlDump(updatedData) + '---\n';
   return newFrontmatter + markdown.substring(end);
 }
+
+export interface PulseMerchantUpdate {
+  name: string;
+  orgId: string;
+  merchantId: string | null;
+  productId: string | null;
+}
+
+/**
+ * Rewrite a Pulse actionables message's YAML frontmatter to update a
+ * merchant entry (e.g. when the user corrects the auto-detected merchant).
+ *
+ * @param markdown  - Full message content (frontmatter + body)
+ * @param localMerchantId - The `id` field inside the merchants array (e.g. "m1")
+ * @param update    - New merchant details to apply
+ * @returns Updated markdown string, or original if merchant not found
+ */
+export function updatePulseMerchant(
+  markdown: string,
+  localMerchantId: string,
+  update: PulseMerchantUpdate,
+): string {
+  const frontmatter = parseFrontmatter(markdown);
+  if (!frontmatter?.data) return markdown;
+
+  const { data, end } = frontmatter;
+  const dataObj = data as Record<string, unknown>;
+
+  const rawMerchants: Record<string, unknown>[] = Array.isArray(dataObj['merchants'])
+    ? [...(dataObj['merchants'] as unknown[]).map(m => ({ ...(m as Record<string, unknown>) }))]
+    : [];
+
+  const idx = rawMerchants.findIndex(
+    m => (m as Record<string, unknown>)['id'] === localMerchantId,
+  );
+  if (idx === -1) return markdown; // merchant not found
+
+  rawMerchants[idx] = {
+    ...rawMerchants[idx],
+    name: update.name,
+    orgId: update.orgId,
+    merchantId: update.merchantId,
+    productId: update.productId,
+  };
+
+  const updatedData: Record<string, unknown> = { ...dataObj, merchants: rawMerchants };
+
+  const newFrontmatter = '---\n' + yamlDump(updatedData) + '---\n';
+  return newFrontmatter + markdown.substring(end);
+}
