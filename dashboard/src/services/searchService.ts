@@ -429,12 +429,12 @@ export class SearchService {
       params['assignee'] = filters.assignee;
     }
 
-    if (filters.filterOnly !== undefined) {
-      params['filterOnly'] = filters.filterOnly.toString();
-    }
-
     if (filters.subApp) {
       params['subApp'] = filters.subApp;
+    }
+
+    if (filters.filterOnly !== undefined) {
+      params['filterOnly'] = filters.filterOnly.toString();
     }
 
     return params;

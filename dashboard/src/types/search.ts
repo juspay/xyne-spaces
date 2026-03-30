@@ -142,10 +142,10 @@ export interface VespaSearchFilters {
   range?: string; // Time keyword (today, yesterday, this week, last 7 days, etc.)
   stage?: string; // Ticket stage
   assignee?: string; // Assigned user ID
+  subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'
 
   // Filter-only mode (no query text, just filters)
   filterOnly?: boolean;
-  subApp?: string;
 }
 
 export interface VespaSearchGroup {

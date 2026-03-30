@@ -190,19 +190,37 @@ export async function validateTicketIds(ticketIds: string[]): Promise<IdValidati
 }
 
 /**
+ * Valid document types for the type: filter (shared across search and validation)
+ */
+export const VALID_DOC_TYPES = [
+  'messages', 'attachments', 'channels', 'tickets', 'users', 'files',
+  'canvas', 'transcript', 'rca',
+  'people',
+] as const;
+
+/**
  * Validate docType values (static validation - no DB query needed)
  * @param docTypes - Array of document types to validate
  * @returns Object containing valid and invalid types
  */
 export function validateDocTypes(docTypes: string[]): IdValidationResult {
-  const validDocTypes = ['messages', 'attachments', 'channels', 'tickets', 'users', 'files'];
 
   if (!docTypes || docTypes.length === 0) {
     return { valid: [], invalid: [] };
   }
 
-  const valid = docTypes.filter(t => validDocTypes.includes(t.toLowerCase()));
-  const invalid = docTypes.filter(t => !validDocTypes.includes(t.toLowerCase()));
+  const valid: string[] = [];
+  const invalid: string[] = [];
+
+  for (const t of docTypes) {
+    const lower = t.toLowerCase();
+    // Only accept exact matches — prefix expansion is handled client-side
+    if ((VALID_DOC_TYPES as readonly string[]).includes(lower)) {
+      valid.push(t);
+    } else {
+      invalid.push(t);
+    }
+  }
 
   return { valid, invalid };
 }
