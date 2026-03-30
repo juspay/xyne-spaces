@@ -36,7 +36,7 @@ export const InlineEmoji = Node.create({
   parseHTML() {
     return [
       {
-        tag: 'img[data-emoji="false"]',
+        tag: 'img[data-emoji="true"]',
       },
     ];
   },
