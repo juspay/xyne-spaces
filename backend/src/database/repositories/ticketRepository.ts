@@ -115,7 +115,7 @@ export class TicketRepository {
 
     const stageEnteredAt = new Date();
     // Only create TicketStageEta entry if the selected stage has ETA
-    if (selectedStage.eta !== null) {
+    if (selectedStage.eta !== null && selectedStage.eta > 0) {
       const stageEtaDeadline = calculateETADeadline(stageEnteredAt, selectedStage.eta);
       await db.ticketStageEta.create({
         data: {
@@ -287,7 +287,7 @@ export class TicketRepository {
         });
       } else {
         // First time entering this stage - create new entry only if stage has ETA
-        if (targetStage.eta !== null) {
+        if (targetStage.eta !== null && targetStage.eta > 0) {
 
           const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
 
@@ -348,7 +348,7 @@ export class TicketRepository {
         });
       } else {
         // Entry doesn't exist (edge case - create it)
-        if (targetStage.eta !== null) {
+        if (targetStage.eta !== null && targetStage.eta > 0) {
           const stageEtaDeadline = calculateETADeadline(now, targetStage.eta);
           await prisma.ticketStageEta.create({
             data: {

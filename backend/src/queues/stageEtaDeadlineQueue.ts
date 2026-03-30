@@ -187,7 +187,7 @@ class StageEtaDeadlineQueue {
       if (!ticket || !stage) continue;
 
       // Skip if stage ETA is not set on the board (ETA was disabled after entry was created)
-      if (stage.eta === null) continue;
+      if (stage.eta === null || stage.eta === 0) continue;
 
       // Get stage name from stage entry and compare with ticket's current stage
       if (!stage || stage.name !== ticket.stageName) continue;
