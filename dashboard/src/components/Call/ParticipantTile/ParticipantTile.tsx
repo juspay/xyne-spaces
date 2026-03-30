@@ -4,6 +4,7 @@ import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { ParticipantAvatar } from '../ParticipantAvatar/ParticipantAvatar';
 import { getAvatarColors } from '../ParticipantAvatar/avatarColors';
 import { cn } from '../../../utils/classNames';
+import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 
 // Import LiveKit's built-in hooks that handle track management with observables
 import { VideoTrack } from '@livekit/components-react';
@@ -62,6 +63,20 @@ export function ParticipantTile({
 
   // Determine avatar and background colors
   const colors = getAvatarColors(participant.identity);
+
+  // Extract picture path from participant metadata
+  let picturePath: string | null = null;
+  try {
+    const meta = participant.participant?.metadata;
+    if (meta) {
+      const parsed = JSON.parse(meta) as { picture?: string };
+      picturePath = parsed.picture ?? null;
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  const { url: pictureUrl } = useProfilePictureUrl(participant.identity, picturePath);
 
   // Create track references for LiveKit components only if publication exists
   const videoTrackRef =
@@ -155,18 +170,7 @@ export function ParticipantTile({
               name={participant.name || 'Unknown'}
               size={avatarSize}
               backgroundColor={colors.avatar}
-              pictureUrl={(() => {
-                try {
-                  const meta = participant.participant?.metadata;
-                  if (meta) {
-                    const parsed: { picture?: string } = JSON.parse(meta) as { picture?: string };
-                    return parsed.picture || null;
-                  }
-                } catch {
-                  // ignore parse errors
-                }
-                return null;
-              })()}
+              pictureUrl={pictureUrl}
             />
           )}
         </div>

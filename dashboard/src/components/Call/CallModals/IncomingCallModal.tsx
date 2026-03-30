@@ -22,6 +22,7 @@ import {
   AvatarSize,
 } from '@juspay/blend-design-system';
 import { useUsers } from '../../../hooks/useUsers';
+import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 import { cn } from '../../../utils/classNames';
 import { Dialog } from '../../ui/Dialog/Dialog';
 
@@ -389,6 +390,7 @@ function CallNotificationUI({
   const { caller, callType } = notification;
   const navigate = useNavigate();
   const hasTitle = !!(notification.title && notification.title.trim());
+  const { url: callerPictureUrl } = useProfilePictureUrl(caller.id, caller.picture);
 
   // Handle title click - navigate to conversation for thread calls
   const handleTitleClick = useCallback(() => {
@@ -463,7 +465,7 @@ function CallNotificationUI({
           <div className='flex justify-center'>
             <div className='[&_*]:!rounded-full'>
               <Avatar
-                src={caller.picture || ''}
+                src={callerPictureUrl || ''}
                 alt={caller.name}
                 shape={AvatarShape.ROUNDED}
                 size={AvatarSize.LG}
