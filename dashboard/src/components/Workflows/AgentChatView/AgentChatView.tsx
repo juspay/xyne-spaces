@@ -579,50 +579,54 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
             </div>
 
             <div className='flex bg-muted/80 backdrop-blur-md p-1 rounded-xl border border-border w-full md:w-auto md:min-w-[260px] shadow-inner'>
-              <button
-                onClick={() => setActiveTab('chat')}
-                className={`flex-1 py-1.5 px-4 text-[11px] font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2.5 ${
-                  activeTab === 'chat'
-                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
-                }`}
-                data-track-category='Workflows'
-                data-track-name='SwitchToAgentChatTab'
-              >
-                <div
-                  className={`p-1 rounded-md transition-colors duration-200 ${activeTab === 'chat' ? 'bg-muted text-foreground' : 'bg-transparent text-muted-foreground'}`}
+              <Tooltip content='Chat View' side='bottom'>
+                <button
+                  onClick={() => setActiveTab('chat')}
+                  className={`flex-1 py-1.5 px-4 text-[11px] font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2.5 ${
+                    activeTab === 'chat'
+                      ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
+                  }`}
+                  data-track-category='Workflows'
+                  data-track-name='SwitchToAgentChatTab'
                 >
-                  <Bot size={13} strokeWidth={2.5} />
-                </div>
-                Chat View
-                <span
-                  className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono transition-colors duration-200 ${activeTab === 'chat' ? 'bg-muted/60 text-foreground' : 'bg-muted/40 text-muted-foreground'}`}
+                  <div
+                    className={`p-1 rounded-md transition-colors duration-200 ${activeTab === 'chat' ? 'bg-muted text-foreground' : 'bg-transparent text-muted-foreground'}`}
+                  >
+                    <Bot size={13} strokeWidth={2.5} />
+                  </div>
+                  Chat View
+                  <span
+                    className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono transition-colors duration-200 ${activeTab === 'chat' ? 'bg-muted/60 text-foreground' : 'bg-muted/40 text-muted-foreground'}`}
+                  >
+                    {visibleMessages.length}
+                  </span>
+                </button>
+              </Tooltip>
+              <Tooltip content='Diff View' side='bottom'>
+                <button
+                  onClick={() => setActiveTab('diff')}
+                  className={`flex-1 py-1.5 px-4 text-[11px] font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2.5 ${
+                    activeTab === 'diff'
+                      ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
+                  }`}
+                  data-track-category='Workflows'
+                  data-track-name='SwitchToAgentDiffTab'
                 >
-                  {visibleMessages.length}
-                </span>
-              </button>
-              <button
-                onClick={() => setActiveTab('diff')}
-                className={`flex-1 py-1.5 px-4 text-[11px] font-bold rounded-lg transition-all duration-200 flex items-center justify-center gap-2.5 ${
-                  activeTab === 'diff'
-                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'
-                }`}
-                data-track-category='Workflows'
-                data-track-name='SwitchToAgentDiffTab'
-              >
-                <div
-                  className={`p-1 rounded-md transition-colors duration-200 ${activeTab === 'diff' ? 'bg-muted text-foreground' : 'bg-transparent text-muted-foreground'}`}
-                >
-                  <FileEdit size={13} strokeWidth={2.5} />
-                </div>
-                Diff View
-                <span
-                  className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono transition-colors duration-200 ${activeTab === 'diff' ? 'bg-muted/60 text-foreground' : 'bg-muted/40 text-muted-foreground'}`}
-                >
-                  {allEditSteps.length}
-                </span>
-              </button>
+                  <div
+                    className={`p-1 rounded-md transition-colors duration-200 ${activeTab === 'diff' ? 'bg-muted text-foreground' : 'bg-transparent text-muted-foreground'}`}
+                  >
+                    <FileEdit size={13} strokeWidth={2.5} />
+                  </div>
+                  Diff View
+                  <span
+                    className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono transition-colors duration-200 ${activeTab === 'diff' ? 'bg-muted/60 text-foreground' : 'bg-muted/40 text-muted-foreground'}`}
+                  >
+                    {allEditSteps.length}
+                  </span>
+                </button>
+              </Tooltip>
             </div>
 
             <div className='w-[100px] hidden md:flex justify-end'></div>

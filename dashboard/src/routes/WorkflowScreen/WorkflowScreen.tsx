@@ -42,7 +42,7 @@ import { workflowScreenMachine } from '../../machines/workflowScreenMachine';
 import { VSCodePanel } from '../../components/Workflows/VSCodePanel';
 import { usePlatform } from '../../hooks/usePlatform';
 
-const LAST_WORKFLOW_PATH_KEY = 'last-viewed-workflow-path';
+import { LAST_WORKFLOW_PATH_KEY } from '../../components/Tickets/constants';
 
 const RERUN_EXCLUDED_KEYS = new Set(['workflowType', 'ticketId', 'conversationId', 'xyneId']);
 
@@ -64,12 +64,16 @@ const WorkflowScreen: React.FC = () => {
   // Initialize state machine for persistent state management
   const [state, send] = useMachine(workflowScreenMachine);
 
-  // Initialize machine when ticketId is available
   useEffect(() => {
     if (ticketId) {
       send({ type: 'INIT', ticketId, defaultAgentChatOpen: isMobile });
     }
   }, [ticketId, send, isMobile]);
+  useEffect(() => {
+    if (state.matches('initialized')) {
+      send({ type: 'SET_SELECTED_EXECUTION_ID', executionId: null });
+    }
+  }, [workflowId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save the full path (including workflowNumber query param) to sessionStorage whenever
   // the ticket or search params (e.g. workflowNumber) change, so navigating away and
@@ -133,7 +137,7 @@ const WorkflowScreen: React.FC = () => {
       return response.data;
     },
     staleTime: 0, // no cache
-    enabled: Boolean(ticket?.id), // Only fetch when ticket is available
+    enabled: Boolean(ticket?.id) && state.matches('initialized'), // Only fetch when ticket is available AND machine is initialized
     placeholderData: keepPreviousData,
   });
 
@@ -593,6 +597,7 @@ const WorkflowScreen: React.FC = () => {
             gitBranch={gitInfo?.branch}
             workflowType={workflowType}
             onTriggerWorkflow={() => setIsWorkflowModalOpen(true)}
+            {...(workflowOutput && { failureOutput: workflowOutput })}
           />
         )}
         <div className='flex-1 flex items-center justify-center'>
@@ -665,6 +670,7 @@ const WorkflowScreen: React.FC = () => {
             workflowType={workflowType}
             onTriggerWorkflow={() => setIsWorkflowModalOpen(true)}
             createdBy={createdBy}
+            {...(workflowOutput && { failureOutput: workflowOutput })}
           />
         )}
         <div className='flex-1 flex items-center justify-center'>
@@ -739,6 +745,7 @@ const WorkflowScreen: React.FC = () => {
         {...(workflowNumber && { workflowNumber: parseInt(workflowNumber, 10) })}
         {...(workflowTitle && { workflowTitle })}
         {...(repositoryUrl && { repositoryUrl })}
+        {...(workflowOutput && { failureOutput: workflowOutput })}
       />
 
       {ticket && (

@@ -53,24 +53,24 @@ export const ToolWriteRenderer: React.FC<
           {/* File Header - Collapsible */}
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className='w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors text-left'
+            className='w-full flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50 transition-colors text-left'
             data-track-category='Workflows'
             data-track-name='ToggleFileWriteExpand'
             data-track-metadata={JSON.stringify({ fileName, filePath })}
           >
             <div
-              className={`p-2 rounded-lg ${
+              className={`p-1.5 rounded-md ${
                 success && !error
                   ? 'bg-green-500/10 text-green-600'
                   : 'bg-blue-500/10 text-blue-500'
               }`}
             >
-              <FileEdit size={18} />
+              <FileEdit size={14} />
             </div>
 
             <div className='flex flex-col min-w-0'>
               <div className='flex items-center gap-2'>
-                <span className='text-sm font-semibold text-foreground truncate'>{fileName}</span>
+                <span className='text-xs font-semibold text-foreground truncate'>{fileName}</span>
                 {success && !error ? (
                   <div className='flex items-center gap-1.5'>
                     <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-500/10 text-green-600 uppercase tracking-wider border border-green-200/50'>
@@ -84,14 +84,14 @@ export const ToolWriteRenderer: React.FC<
                 )}
               </div>
               {directoryPath && (
-                <span className='text-[11px] text-muted-foreground truncate font-mono'>
+                <span className='text-[10px] text-muted-foreground truncate font-mono'>
                   {directoryPath}/
                 </span>
               )}
             </div>
 
             <div className='ml-auto flex items-center gap-3'>
-              <div className='hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/50 text-[10px] font-medium text-muted-foreground border border-border/50'>
+              <div className='hidden sm:flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-muted/50 text-[10px] font-medium text-muted-foreground border border-border/50'>
                 {success && !error ? (
                   <>
                     <Check size={12} className='text-green-600' strokeWidth={3} />
@@ -116,7 +116,7 @@ export const ToolWriteRenderer: React.FC<
 
           {/* Expanded Content */}
           {isExpanded && (
-            <div className='border-t border-border bg-slate-50/30 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200'>
+            <div className='border-t border-border bg-muted/30 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200'>
               {/* Error message */}
               {error && (
                 <div className='p-3 bg-red-500/5 border-b border-red-200/50'>
@@ -139,7 +139,7 @@ export const ToolWriteRenderer: React.FC<
 
               {/* File content preview */}
               {content && (
-                <div className='max-h-[400px] overflow-auto'>
+                <div className='max-h-[300px] overflow-auto'>
                   <pre className='p-4 text-xs font-mono text-foreground/90 whitespace-pre-wrap break-words leading-relaxed'>
                     {content.length > 2000 ? `${content.substring(0, 2000)}...` : content}
                   </pre>

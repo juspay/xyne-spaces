@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import TicketHeader, { TicketFilters } from '../../components/Tickets/TicketHeader';
 import TicketTable from '../../components/Tickets/TicketTable';
 
-const LAST_WORKFLOW_PATH_KEY = 'last-viewed-workflow-path';
+import { LAST_WORKFLOW_PATH_KEY } from '../../components/Tickets/constants';
 
 const TicketsScreen = (): ReactElement => {
   const navigate = useNavigate();
