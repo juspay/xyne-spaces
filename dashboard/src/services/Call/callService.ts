@@ -495,6 +495,34 @@ export class CallService {
       throw error;
     }
   }
+
+  /**
+   * Fetch the list of Pulse organisations.
+   * Used to let users reassign a merchant in the Pulse actionables UI.
+   */
+  async fetchPulseOrgs(): Promise<
+    Array<{ id: string; name: string; orgId: string; merchantIds: string[] }>
+  > {
+    try {
+      const response = await apiInstance.get<{
+        success: boolean;
+        orgs: Array<{ id: string; name: string; orgId: string; merchantIds: string[] }>;
+      }>('/calls/pulse-orgs');
+      return response.data.orgs;
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
 }
 
 export const callService = new CallService();

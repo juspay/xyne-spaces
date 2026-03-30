@@ -478,6 +478,37 @@ export class ConversationService {
       throw error;
     }
   }
+
+  /**
+   * Update a Pulse merchant entry in the message frontmatter.
+   * Used when the user corrects the auto-detected merchant name.
+   */
+  async updatePulseMerchant(
+    conversationId: string,
+    messageId: string,
+    data: { merchantId: string; orgId: string; orgName: string },
+  ): Promise<{ success: boolean; messageId: string; conversationId: string }> {
+    try {
+      const response = await apiInstance.put<{
+        success: boolean;
+        messageId: string;
+        conversationId: string;
+      }>(`/conversations/${conversationId}/messages/${messageId}/pulse-merchant`, data);
+      return response.data;
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
 }
 
 export const conversationService = new ConversationService();

@@ -14,4 +14,7 @@ router.put('/:conversationId/messages/:messageId/ticket-suggestion', conversatio
 // Mark a Pulse actionable item as sent (moves pulseItem → pulseSent in frontmatter)
 router.put('/:conversationId/messages/:messageId/pulse-item', conversationController.markPulseItemAsSent);
 
+// Update a Pulse merchant entry in the message frontmatter (user corrects auto-detected merchant)
+router.put('/:conversationId/messages/:messageId/pulse-merchant', conversationController.updatePulseMerchant);
+
 export default router;

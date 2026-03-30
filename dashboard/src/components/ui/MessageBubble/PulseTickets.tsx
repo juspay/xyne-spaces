@@ -22,6 +22,7 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [queue, setQueue] = useState<PulseItem[]>([]);
+  const [initialQueueLength, setInitialQueueLength] = useState(0);
 
   if (pulseItems.length === 0 && pulseSent.length === 0) return null;
 
@@ -35,24 +36,31 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
 
   const startCreation = () => {
     const items = pulseItems.filter(i => selectedIds.includes(i.itemId));
-    if (items.length > 0) setQueue(items);
+    if (items.length > 0) {
+      setInitialQueueLength(items.length);
+      setQueue(items);
+    }
   };
 
   const handleModalClose = () => {
-    // Move past the current item (whether submitted or cancelled)
-    setQueue(prev => prev.slice(1));
-    if (queue.length <= 1) {
-      // Last item done — clear selections
-      setSelectedIds([]);
-    }
+    // Cancel — discard the entire remaining queue
+    setQueue([]);
+    setSelectedIds([]);
   };
 
   const handleActionableCreated = () => {
-    // Remove the just-submitted item from selections then advance queue
+    // Remove the just-submitted item from selections, then advance to the next item
     if (activeItem) {
       setSelectedIds(prev => prev.filter(id => id !== activeItem.itemId));
     }
-    setQueue(prev => prev.slice(1));
+    setQueue(prev => {
+      const next = prev.slice(1);
+      if (next.length === 0) {
+        // Last item done — clear selections
+        setSelectedIds([]);
+      }
+      return next;
+    });
   };
 
   // Map merchant IDs to names/details
@@ -137,6 +145,7 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
       {/* Modal — opens for each selected item in sequence */}
       {activeItem && (
         <PulseCreateActionableModal
+          key={activeItem.itemId}
           isOpen={true}
           onClose={handleModalClose}
           callId={callId}
@@ -145,6 +154,10 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
           conversationId={conversationId}
           messageId={messageId}
           onSuccess={handleActionableCreated}
+          queuePosition={{
+            current: initialQueueLength - queue.length + 1,
+            total: initialQueueLength,
+          }}
         />
       )}
     </div>

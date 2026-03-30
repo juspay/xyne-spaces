@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { callService } from '../../../services/Call/callService';
 import { conversationService } from '../../../services/Chat/conversationService';
@@ -9,6 +9,13 @@ import type { User } from '@xyne/shared';
 
 export type { PulseItem };
 
+interface PulseOrg {
+  id: string;
+  name: string;
+  orgId: string;
+  merchantIds: string[];
+}
+
 interface PulseCreateActionableModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -18,6 +25,7 @@ interface PulseCreateActionableModalProps {
   merchant: PulseMerchant | null;
   conversationId: string;
   messageId: string;
+  queuePosition?: { current: number; total: number };
 }
 
 export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProps> = ({
@@ -29,6 +37,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
   merchant,
   conversationId,
   messageId,
+  queuePosition,
 }) => {
   const allUsers = useUsers();
 
@@ -44,6 +53,54 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
   const [description, setDescription] = useState('');
   const [selectedAssignees, setSelectedAssignees] = useState<User[]>(initialAssignee);
   const [submitting, setSubmitting] = useState(false);
+
+  // Merchant edit state
+  const [localMerchant, setLocalMerchant] = useState<PulseMerchant | null>(merchant);
+  const [isEditingMerchant, setIsEditingMerchant] = useState(false);
+  const [merchantSearch, setMerchantSearch] = useState('');
+  const [orgs, setOrgs] = useState<PulseOrg[]>([]);
+  const [loadingOrgs, setLoadingOrgs] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus input when dropdown opens safely without triggering jsx-a11y/no-autofocus
+  useEffect(() => {
+    if (isEditingMerchant) {
+      const t = setTimeout(() => searchInputRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [isEditingMerchant]);
+
+  const fetchOrgs = async () => {
+    if (orgs.length > 0) return;
+    setLoadingOrgs(true);
+    try {
+      const result = await callService.fetchPulseOrgs();
+      setOrgs(result);
+    } catch {
+      toast.error('Failed to load organisation list');
+    } finally {
+      setLoadingOrgs(false);
+    }
+  };
+
+  const handleEditMerchantClick = () => {
+    setIsEditingMerchant(true);
+    setMerchantSearch('');
+    void fetchOrgs();
+  };
+
+  const handleSelectOrg = (org: PulseOrg) => {
+    // Retain original id for updating the frontmatter via the localMerchantId reference
+    if (localMerchant) {
+      setLocalMerchant({
+        ...localMerchant,
+        name: org.name,
+        orgId: org.orgId,
+      });
+    }
+    setIsEditingMerchant(false);
+  };
 
   if (!isOpen) return null;
 
@@ -62,21 +119,32 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
     try {
       const assigneeEmail = selectedAssignees[0]?.email ?? '';
 
+      // If merchant was changed, persist to the chat transcript frontmatter
+      if (localMerchant && merchant && localMerchant.orgId !== merchant.orgId) {
+        // Run in background so we don't block submit, but it will propagate to UI
+        void conversationService.updatePulseMerchant(conversationId, messageId, {
+          merchantId: localMerchant.id,
+          orgId: localMerchant.orgId,
+          orgName: localMerchant.name,
+        });
+      }
+
       await callService.createPulseActionable(callId, {
         title: title.trim(),
         ...(description.trim() && { description: description.trim() }),
         ...(assigneeEmail && { assignee: assigneeEmail }),
-        ...(merchant?.name && { merchantName: merchant.name }),
-        ...(merchant?.orgId && { orgId: merchant.orgId }),
-        merchantId: merchant?.merchantId ?? null,
-        productId: merchant?.productId ?? null,
+        ...(localMerchant?.name && { merchantName: localMerchant.name }),
+        ...(localMerchant?.orgId && { orgId: localMerchant.orgId }),
+        // For ticket create, if org changed we might not have the correct product ID local here yet
+        // until backend resolves it in updatePulseMerchant. But we pass what we have.
+        merchantId: localMerchant?.merchantId ?? null,
+        productId: localMerchant?.productId ?? null,
       });
 
       await conversationService.markPulseItemAsSent(conversationId, messageId, item.itemId);
 
       toast.success('Pulse actionable created successfully');
       onSuccess?.();
-      onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create Pulse actionable');
     } finally {
@@ -106,7 +174,9 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
         <div className='flex items-center gap-2 px-5 py-4 border-b border-border'>
           <span className='text-lg'>⚡</span>
           <h2 className='text-base font-semibold text-foreground flex-1'>
-            Create Pulse Actionable
+            {queuePosition && queuePosition.total > 1
+              ? `Create Pulse Actionable (${queuePosition.current}/${queuePosition.total})`
+              : 'Create Pulse Actionable'}
           </h2>
           <button
             type='button'
@@ -120,21 +190,105 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
 
         {/* Form */}
         <form onSubmit={e => void handleSubmit(e)} className='px-5 py-4 flex flex-col gap-4'>
-          {/* Merchant (read-only) */}
-          {merchant?.name && (
-            <div className='flex flex-col gap-1'>
+          {/* Merchant (Editable) */}
+          {localMerchant?.name && (
+            <div className='flex flex-col gap-1 relative'>
               <label
                 htmlFor='pulse-merchant'
-                className='text-xs font-medium text-muted-foreground uppercase tracking-wide'
+                className='text-xs font-medium text-muted-foreground uppercase tracking-wide flex justify-between items-center'
               >
-                Merchant
+                <span>Merchant</span>
               </label>
-              <div
-                id='pulse-merchant'
-                className='border border-border rounded-lg px-3 py-2 text-sm text-foreground bg-muted select-none cursor-default'
-              >
-                {merchant.name}
-              </div>
+
+              {!isEditingMerchant ? (
+                <button
+                  id='pulse-merchant'
+                  type='button'
+                  onClick={handleEditMerchantClick}
+                  disabled={submitting}
+                  className='border border-border rounded-lg px-3 py-2 text-sm text-foreground bg-muted hover:bg-accent transition-colors flex items-center justify-between text-left focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-60 disabled:cursor-not-allowed w-full'
+                >
+                  <div className='flex items-center'>
+                    <span>{localMerchant.name}</span>
+                    {localMerchant.orgId !== merchant?.orgId && (
+                      <span className='ml-2 text-[10px] text-blue-600 font-medium px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900 rounded-full'>
+                        Changed
+                      </span>
+                    )}
+                  </div>
+                  <svg
+                    xmlns='http://www.w3.org/2000/svg'
+                    width='16'
+                    height='16'
+                    viewBox='0 0 24 24'
+                    fill='none'
+                    stroke='currentColor'
+                    strokeWidth='2'
+                    strokeLinecap='round'
+                    strokeLinejoin='round'
+                    className='text-muted-foreground ml-2 opacity-70 flex-shrink-0'
+                  >
+                    <path d='m6 9 6 6 6-6' />
+                  </svg>
+                </button>
+              ) : (
+                <div className='border border-border rounded-lg bg-background overflow-hidden relative z-10'>
+                  <div className='p-2 border-b border-border bg-muted/50'>
+                    <input
+                      ref={searchInputRef}
+                      type='text'
+                      value={merchantSearch}
+                      onChange={e => setMerchantSearch(e.target.value)}
+                      placeholder='Search alternative organisation…'
+                      className='w-full text-xs px-2 py-1.5 border border-border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                    />
+                  </div>
+                  <div className='max-h-40 overflow-y-auto'>
+                    {loadingOrgs ? (
+                      <div className='px-3 py-4 text-xs text-muted-foreground text-center'>
+                        Loading…
+                      </div>
+                    ) : orgs.filter(o =>
+                        o.name.toLowerCase().includes(merchantSearch.toLowerCase().trim()),
+                      ).length === 0 ? (
+                      <div className='px-3 py-4 text-xs text-muted-foreground text-center'>
+                        No matches found
+                      </div>
+                    ) : (
+                      orgs
+                        .filter(o =>
+                          o.name.toLowerCase().includes(merchantSearch.toLowerCase().trim()),
+                        )
+                        .map(org => {
+                          const isCurrentOrg = org.orgId === localMerchant.orgId;
+                          return (
+                            <button
+                              key={org.orgId}
+                              type='button'
+                              onClick={() => handleSelectOrg(org)}
+                              className={`w-full text-left px-3 py-2 text-xs transition-colors border-none cursor-pointer ${
+                                isCurrentOrg
+                                  ? 'bg-blue-50 text-blue-700 font-medium dark:bg-blue-950 dark:text-blue-300'
+                                  : 'bg-transparent text-foreground hover:bg-accent'
+                              }`}
+                            >
+                              {org.name}
+                            </button>
+                          );
+                        })
+                    )}
+                  </div>
+                  <div className='p-2 border-t border-border bg-muted/30 flex justify-end'>
+                    <button
+                      type='button'
+                      onClick={() => setIsEditingMerchant(false)}
+                      className='text-xs text-muted-foreground hover:text-foreground'
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
