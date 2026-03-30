@@ -1,5 +1,11 @@
 import { ReactElement, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { v4 as uuidv4 } from 'uuid';
+import { toast } from 'sonner';
+import { useZero } from '../../../hooks/useZero';
+import { mutators } from '../../../zero/mutators';
+import { Switch } from '../../ui/Switch';
+import { SavedConfigContextType, SavedConfigVisibility, SavedConfigEntityName } from '@xyne/shared';
 import {
   ListFilter,
   ChevronRight,
@@ -39,6 +45,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { TabType } from '../../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { logger, Event } from '../../../utils/logger';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface FilterMenuItem {
   id: string;
@@ -50,6 +57,24 @@ interface FilterMenuItem {
   fieldType?: FormFieldType;
   fieldEnum?: string[] | null;
 }
+
+const ARRAY_FILTER_KEYS = [
+  'priority',
+  'assignee',
+  'createdBy',
+  'userGroups',
+  'prReviewers',
+  'qaAssigned',
+  'tags',
+  'stages',
+] as const satisfies (keyof TicketFilters)[];
+
+const NUMERIC_FILTER_KEYS = [
+  'dueDateStart',
+  'dueDateEnd',
+  'createdDateStart',
+  'createdDateEnd',
+] as const satisfies (keyof TicketFilters)[];
 
 const FILTER_MENU_ITEMS: FilterMenuItem[] = [
   { id: 'priority', label: 'Priority', icon: BarChart4Icon, filterKey: 'priority' },
@@ -80,6 +105,9 @@ export const TicketFiltersDropdown = ({
   searchValue,
   onSearchChange,
   selectedBoardName,
+  channelId,
+  groupBy,
+  hasActiveView,
 }: TicketFiltersProps & {
   searchValue?: string;
   onSearchChange?: (searchTerm: string) => void;
@@ -167,6 +195,12 @@ export const TicketFiltersDropdown = ({
   const [activeSubmenu, setActiveSubmenu] = useState<string | null>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const menuItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [showSavePopover, setShowSavePopover] = useState(false);
+  const [viewName, setViewName] = useState('');
+  const [isPublic, setIsPublic] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const zero = useZero();
+  const { isMobile } = usePlatform();
 
   // Memoized filter active check for menu items
   const isFilterActive = useCallback(
@@ -415,12 +449,100 @@ export const TicketFiltersDropdown = ({
   const getActiveFilterCount = getMoreFiltersActiveCount() + getFilterAssigneeCount();
 
   const hasActiveFilters = getActiveFilterCount > 0;
+  const hasActiveFiltersOrGroupBy =
+    hasActiveFilters || (groupBy !== undefined && groupBy !== 'none');
   const hasMoreFiltersActive = getMoreFiltersActiveCount() > 0;
   const hasAssigneeFilter = getFilterAssigneeCount() > 0;
 
   const handleClearAllFilters = useCallback((): void => {
     onFiltersChange({});
   }, [onFiltersChange]);
+
+  // Serialize current filters (excluding boards) into config values rows
+  const filtersToValues = useCallback((): {
+    id: string;
+    entityName: SavedConfigEntityName;
+    fieldName: string;
+    fieldValue: string;
+  }[] => {
+    const values: {
+      id: string;
+      entityName: SavedConfigEntityName;
+      fieldName: string;
+      fieldValue: string;
+    }[] = [];
+    const addTicket = (fieldName: string, fieldValue: string) =>
+      values.push({
+        id: uuidv4(),
+        entityName: SavedConfigEntityName.TICKET,
+        fieldName,
+        fieldValue,
+      });
+    const addFormEntity = (fieldName: string, fieldValue: string) =>
+      values.push({
+        id: uuidv4(),
+        entityName: SavedConfigEntityName.FORM_ENTITY_VALUE,
+        fieldName,
+        fieldValue,
+      });
+
+    for (const key of ARRAY_FILTER_KEYS) {
+      (filters[key] as string[] | undefined)?.forEach(v => addTicket(key, v));
+    }
+    for (const key of NUMERIC_FILTER_KEYS) {
+      const v = filters[key];
+      if (v !== undefined) addTicket(key, String(v));
+    }
+    if (filters.dynamicFields) {
+      Object.entries(filters.dynamicFields).forEach(([fieldId, val]) => {
+        if (Array.isArray(val)) {
+          val.forEach(v => addFormEntity(fieldId, v));
+        } else {
+          if (val.start !== undefined) addFormEntity(`${fieldId}.start`, String(val.start));
+          if (val.end !== undefined) addFormEntity(`${fieldId}.end`, String(val.end));
+        }
+      });
+    }
+    if (groupBy && groupBy !== 'none') addTicket('__groupBy', groupBy);
+    return values;
+  }, [filters, groupBy]);
+
+  const handleSaveView = useCallback((): void => {
+    if (!viewName.trim() || !selectedBoard) return;
+    setIsSaving(true);
+    const name = viewName.trim();
+    setShowSavePopover(false);
+    setViewName('');
+    setIsPublic(false);
+
+    const run = async (): Promise<void> => {
+      try {
+        const result = zero.mutate(
+          mutators.savedUserConfiguration.create({
+            id: uuidv4(),
+            name,
+            contextType: SavedConfigContextType.BOARD,
+            contextId: selectedBoard.id,
+            channelId: channelId ?? '',
+            visibility: isPublic ? SavedConfigVisibility.PUBLIC : SavedConfigVisibility.PRIVATE,
+            timestamp: Date.now(),
+            values: filtersToValues(),
+          }),
+        );
+        const res = await result.server;
+        if (res.type === 'error') {
+          toast.error(res.error?.message ?? 'Failed to save view');
+        } else {
+          toast.success('View saved');
+        }
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : 'Failed to save view');
+      } finally {
+        setIsSaving(false);
+      }
+    };
+    void run();
+  }, [viewName, selectedBoard, channelId, isPublic, filtersToValues, zero]);
 
   const handleMenuItemClick = (category: string): void => {
     const newActiveSubmenu = activeSubmenu === category ? null : category;
@@ -767,6 +889,77 @@ export const TicketFiltersDropdown = ({
             <X className='w-4 h-4' />
             <span>Clear Filters</span>
           </Button>
+        )}
+
+        {/* Save View Button — shown when a specific board is selected and filters are active */}
+        {selectedBoard && hasActiveFiltersOrGroupBy && !hasActiveView && !isMobile && (
+          <Popover.Root
+            open={showSavePopover}
+            onOpenChange={open => {
+              setShowSavePopover(open);
+              if (!open) {
+                setViewName('');
+                setIsPublic(false);
+              }
+            }}
+          >
+            <Popover.Trigger asChild>
+              <Button
+                variant='outline'
+                className='bg-[#FAFAFA] border border-[#E8E8E8] rounded-[10px] h-8'
+                data-track-category='Tickets'
+                data-track-name='OpenSaveViewPopover'
+              >
+                <span className='text-[#202020]'>Save view</span>
+              </Button>
+            </Popover.Trigger>
+            <Popover.Content
+              side='bottom'
+              align='end'
+              sideOffset={6}
+              className='z-[60] w-72 bg-white border border-gray-200 rounded-xl shadow-lg p-4 flex flex-col gap-4'
+            >
+              <input
+                type='text'
+                placeholder='Name this view'
+                value={viewName}
+                data-track-category='saved-views'
+                data-track-name='view-name-input'
+                onChange={e => setViewName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && viewName.trim()) handleSaveView();
+                }}
+                className='w-full text-sm border-0 border-b border-gray-200 focus:outline-none focus:border-gray-400 pb-1 placeholder-gray-400'
+              />
+              <div className='flex items-center justify-between'>
+                <Switch
+                  checked={isPublic}
+                  onCheckedChange={setIsPublic}
+                  label='Public'
+                  id='save-view-public-toggle'
+                />
+                <div className='flex items-center gap-1'>
+                  <button
+                    data-track-category='saved-views'
+                    data-track-name='cancel-save-view'
+                    onClick={() => setShowSavePopover(false)}
+                    className='text-sm font-medium text-[#202020] px-2 h-8'
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    data-track-category='saved-views'
+                    data-track-name='confirm-save-view'
+                    onClick={handleSaveView}
+                    disabled={!viewName.trim() || isSaving}
+                    className='text-sm font-semibold px-4 h-8 rounded-[8px] bg-sidebar-badge-accent text-white disabled:opacity-50 disabled:cursor-not-allowed'
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </Popover.Content>
+          </Popover.Root>
         )}
 
         {/* ticket search */}

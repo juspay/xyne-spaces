@@ -47,6 +47,9 @@ import {
   createForwardedMessageXml,
   parseForwardedMessageXml,
   type BoardMetadata,
+  SavedConfigContextType,
+  SavedConfigVisibility,
+  SavedConfigEntityName,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
@@ -378,6 +381,7 @@ async function createNonParticipantSystemMessages(
     // Don't throw - let the message creation succeed even if system message fails
   }
 }
+
 
 export function createMutators(authData: AuthData, asyncTasks: Array<() => Promise<void>>) {
   return defineMutators({
@@ -7996,6 +8000,155 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           if (access) {
             await tx.mutate.link_access.delete({ id: access.id });
           }
+        }
+      ),
+    },
+    savedUserConfiguration: {
+      create: defineMutator(
+        z.object({
+          id: z.string(),
+          name: z.string().min(1),
+          contextType: z.nativeEnum(SavedConfigContextType),
+          contextId: z.string(),
+          channelId: z.string(),
+          visibility: z.nativeEnum(SavedConfigVisibility),
+          timestamp: z.number(),
+          values: z.array(
+            z.object({
+              id: z.string(),
+              entityName: z.nativeEnum(SavedConfigEntityName),
+              fieldName: z.string(),
+              fieldValue: z.string(),
+            })
+          ),
+        }),
+        async ({
+          tx,
+          args: { id, name, contextType, contextId, visibility, timestamp, values },
+        }) => {
+          // Check for duplicate name (case-insensitive) per user per contextId
+          const allUserConfigs = await tx.run(
+            zql.saved_user_configurations
+              .where('userId', authData.sub)
+              .where('contextId', contextId)
+          );
+          if (allUserConfigs.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+            throw new Error('A saved view with this name already exists for this board');
+          }
+
+          await tx.mutate.saved_user_configurations.insert({
+            id,
+            userId: authData.sub,
+            name,
+            contextType,
+            contextId,
+            visibility,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+
+          for (const value of values) {
+            await tx.mutate.saved_user_configuration_values.insert({
+              id: value.id,
+              configId: id,
+              entityName: value.entityName,
+              fieldName: value.fieldName,
+              fieldValue: value.fieldValue,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        }
+      ),
+      update: defineMutator(
+        z.object({
+          configId: z.string(),
+          name: z.string().min(1).optional(),
+          visibility: z.nativeEnum(SavedConfigVisibility).optional(),
+          timestamp: z.number(),
+          values: z
+            .array(
+              z.object({
+                id: z.string(),
+                entityName: z.nativeEnum(SavedConfigEntityName),
+                fieldName: z.string(),
+                fieldValue: z.string(),
+              })
+            )
+            .optional(),
+        }),
+        async ({ tx, args: { configId, name, visibility, timestamp, values } }) => {
+          const config = await tx.run(zql.saved_user_configurations.where('id', configId).one());
+          if (!config) {
+            throw new Error('Saved view not found');
+          }
+          if (config.userId !== authData.sub) {
+            throw new Error('You can only edit your own saved views');
+          }
+
+          // If renaming, check for duplicate name (case-insensitive)
+          if (name && name.toLowerCase() !== config.name.toLowerCase()) {
+            const allUserConfigs = await tx.run(
+              zql.saved_user_configurations
+                .where('userId', authData.sub)
+                .where('contextId', config.contextId)
+            );
+            if (allUserConfigs.some(c => c.id !== configId && c.name.toLowerCase() === name.toLowerCase())) {
+              throw new Error('A saved view with this name already exists for this board');
+            }
+          }
+
+          await tx.mutate.saved_user_configurations.update({
+            id: configId,
+            ...(name !== undefined && { name }),
+            ...(visibility !== undefined && { visibility }),
+            updatedAt: timestamp,
+          });
+
+          // Full replace of values if provided
+          if (values) {
+            const existingValues = await tx.run(
+              zql.saved_user_configuration_values.where('configId', configId)
+            );
+            for (const existing of existingValues) {
+              await tx.mutate.saved_user_configuration_values.delete({ id: existing.id });
+            }
+            for (const value of values) {
+              await tx.mutate.saved_user_configuration_values.insert({
+                id: value.id,
+                configId,
+                entityName: value.entityName,
+                fieldName: value.fieldName,
+                fieldValue: value.fieldValue,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+            }
+          }
+        }
+      ),
+      delete: defineMutator(
+        z.object({
+          configId: z.string(),
+        }),
+        async ({ tx, args: { configId } }) => {
+          const config = await tx.run(zql.saved_user_configurations.where('id', configId).one());
+          if (!config) {
+            throw new Error('Saved view not found');
+          }
+          if (config.userId !== authData.sub) {
+            throw new Error('You can only delete your own saved views');
+          }
+
+          // Delete all value rows first (cascade may handle this, but be explicit)
+          const existingValues = await tx.run(
+            zql.saved_user_configuration_values.where('configId', configId)
+          );
+          for (const value of existingValues) {
+            await tx.mutate.saved_user_configuration_values.delete({ id: value.id });
+          }
+
+          await tx.mutate.saved_user_configurations.delete({ id: configId });
         }
       ),
     },

@@ -311,8 +311,16 @@ export const ticketFiltersMachine = setup({
     initializeFromUrl: assign(({ event, context }) => {
       if (event.type !== 'INIT') return context;
 
-      const urlFilters = readFiltersFromUrl(event.searchParams);
-      const urlViewType = event.searchParams.get('viewType');
+      // Read directly from window.location.search instead of event.searchParams to avoid
+      // a stale-closure bug: when INIT re-fires because selectedBoardIdFromDb changes (e.g.
+      // after the user clears filters and the Zero optimistic update sets it to null),
+      // the React effect closure may still hold the old searchParams from the previous render,
+      // while window.location.search is already updated (React Router calls history.replaceState
+      // synchronously). Using the live URL prevents initializeFromUrl from re-applying stale
+      // saved-view filters.
+      const currentParams = new URLSearchParams(window.location.search);
+      const urlFilters = readFiltersFromUrl(currentParams);
+      const urlViewType = currentParams.get('viewType');
       // UPDATED: Pass projectId and boardId to getStorageKey
       const storageKey = getStorageKey(
         event.channelId,

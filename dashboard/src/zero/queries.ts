@@ -6,6 +6,7 @@ import {
   FormContextType,
   FormEntityType,
   LookupType,
+  SavedConfigContextType,
 } from '@xyne/shared';
 import { z } from 'zod';
 import {
@@ -1876,4 +1877,12 @@ export const queries = defineQueries({
       return query.orderBy('createdAt', 'asc');
     },
   ),
+  // Saved Views queries
+  savedConfigsByBoard: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
+    return zql.saved_user_configurations
+      .where('contextType', SavedConfigContextType.BOARD)
+      .where('contextId', boardId)
+      .related('values')
+      .orderBy('createdAt', 'desc');
+  }),
 });

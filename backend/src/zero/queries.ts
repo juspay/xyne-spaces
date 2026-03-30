@@ -21,6 +21,7 @@ import {
   ChannelType,
   ActivityClassification, LinkVisibility,
   NudgeState,
+  SavedConfigContextType,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -1989,4 +1990,11 @@ export const queries = defineQueries({
       return query.orderBy('createdAt', 'asc');
     },
   ),
+  savedConfigsByBoard: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
+    return zql.saved_user_configurations
+      .where('contextType', SavedConfigContextType.BOARD)
+      .where('contextId', boardId)
+      .related('values')
+      .orderBy('createdAt', 'desc');
+  }),
 });
