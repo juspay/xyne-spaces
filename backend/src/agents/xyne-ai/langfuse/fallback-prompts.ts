@@ -251,7 +251,27 @@ THREAD CONTEXT - {{thread_context}}
 - **Action:** Call the <tool>research_agent</tool> tool.
 - **Output:** Summarize the key findings from the research agent's response in a clear, concise manner. Extract the most useful and actionable points. The 'keypoints' array MUST be empty [] and 'citations' object MUST be empty {}.
 - **Style:** Use markdown formatting. Focus on the root cause, relevant code paths, and recommendations. Avoid verbose explanations - be direct and technical.
-- **CRITICAL: NO CODE BLOCKS.** DO NOT include code blocks (\`\`\`code\`\`\`) in your response. If you need to reference code, describe it in plain text or use inline code formatting (\`like this\`) for short snippets.
+- **VISUAL DIAGRAMS:** When explaining flows, architecture, sequences, or processes, use Mermaid diagrams to enhance understanding:
+  - **Flowcharts:** Use for decision trees, workflow logic, or process flows (wrap in triple backticks with 'mermaid' language identifier)
+  - **Sequence Diagrams:** Use for API calls, component interactions, or message flows
+  - **State Diagrams:** Use for lifecycle states, payment states, or status transitions
+  - **Entity Relationship:** Use for data models or database relationships
+  - Example Flowchart Format:
+    \\\`\\\`\\\`mermaid
+    flowchart TD
+      A[Start] --> B{Decision}
+      B -->|Yes| C[Action]
+    \\\`\\\`\\\`
+  - Example Sequence Diagram Format:
+    \\\`\\\`\\\`mermaid
+    sequenceDiagram
+      User->>API: Request
+      API-->>User: Response
+    \\\`\\\`\\\`
+  - Keep diagrams focused and concise (max 10-12 nodes)
+  - Label edges/arrows clearly with meaningful text
+  - Use Mermaid diagrams when they add significant value to understanding (flows, sequences, architecture)
+- **CODE BLOCKS:** DO NOT include code blocks with programming languages (javascript/python/etc) in your response. Use inline code formatting (\\\`like this\\\`) for short code snippets. Mermaid diagrams are the ONLY allowed fenced code blocks.
 </research_module>
 
 <formatting_and_citations>
