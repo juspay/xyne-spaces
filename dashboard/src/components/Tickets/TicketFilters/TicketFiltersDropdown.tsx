@@ -46,6 +46,7 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { TabType } from '../../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { logger, Event } from '../../../utils/logger';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useCanViewAnalytics } from '../../../hooks/usePermissions';
 
 interface FilterMenuItem {
   id: string;
@@ -244,6 +245,7 @@ export const TicketFiltersDropdown = ({
   }, [isOpen]);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+  const canViewAnalytics = useCanViewAnalytics();
   const { setActiveTab, setUseVespaSearch } = useSearchMetrics({ allChannels: [] });
 
   useEffect(() => {
@@ -865,16 +867,18 @@ export const TicketFiltersDropdown = ({
           )}
         </Popover.Root>
         {/* Analytics Dashboard Button */}
-        <Button
-          variant='outline'
-          className='bg-background border border-border rounded-[10px] h-8'
-          onClick={() => void navigate('/analytics-dashboard')}
-          data-track-category='Tickets'
-          data-track-name='OpenAnalyticsDashboard'
-        >
-          <BarChart3 className='w-4 h-4' />
-          <span>Analytics</span>
-        </Button>
+        {canViewAnalytics && (
+          <Button
+            variant='outline'
+            className='bg-background border border-border rounded-[10px] h-8'
+            onClick={() => void navigate('/analytics-dashboard')}
+            data-track-category='Tickets'
+            data-track-name='OpenAnalyticsDashboard'
+          >
+            <BarChart3 className='w-4 h-4' />
+            <span>Analytics</span>
+          </Button>
+        )}
 
         {/* Clear Filters Button */}
         {hasActiveFilters && (
