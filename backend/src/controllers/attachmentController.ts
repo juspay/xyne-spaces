@@ -10,6 +10,12 @@ import { logger } from '../utils/logger';
 import { AttachmentEntityType } from '@prisma/client';
 import { uploadFiles } from '../services/fileUploadService';
 import { config } from '../config/env';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { fileSchema, SubApp } from '@/vespa/src/types';
+import { DatabaseClient } from '../database/client';
+import { NAMESPACE } from '@/vespa/vespaConfig';
+
+const db = DatabaseClient.getInstance();
 
 export class AttachmentController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -20,6 +26,44 @@ export class AttachmentController {
     this.messageAttachmentRepository = new MessageAttachmentRepository();
     this.conversationRepository = new ConversationRepository();
     this.channelParticipantRepository = new ChannelParticipantRepository();
+  }
+
+  private async pushVespaJobForAttachments(
+    attachmentIds: string[],
+    userId: string
+  ): Promise<void> {
+    if (attachmentIds.length === 0) return;
+
+    for (const attachmentId of attachmentIds) {
+      vespaQueue.addJob({
+        schema: fileSchema,
+        jobType: "feed",
+        docId: attachmentId,
+        app: SubApp.CHAT_ATTACHMENT
+      }).catch(async (error: any) => {
+        logger.error(`[AttachmentController] Error queuing Vespa job for attachment ${attachmentId}:`, error);
+        // Log failed insertion to Postgres
+        try {
+          if (db.vespaInsertionLogs) {
+            await db.vespaInsertionLogs.create({
+              data: {
+                status: "FAILED",
+                type: "INSERT",
+                entityId: attachmentId,
+                entityType: fileSchema,
+                namespace: NAMESPACE,
+                errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+                errorDetails: JSON.stringify(error),
+                userId: userId,
+                createdAt: new Date(),
+              },
+            });
+          }
+        } catch (dbError) {
+          logger.error('Failed to log Vespa insertion error to database:', dbError);
+        }
+      });
+    }
   }
 
   /**
@@ -66,7 +110,7 @@ export class AttachmentController {
       // Encode filename to handle special characters
       const encodedFilename = encodeURIComponent(attachment.originalFilename);
       res.setHeader('Content-Disposition', `inline; filename="${encodedFilename}"`);
-      
+
       // Disable caching for transcripts (they can be updated), cache other files
       if (meta?.type === 'transcript') {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -222,7 +266,7 @@ export class AttachmentController {
         res.status(404).json({ error: 'Attachment not found' });
         return;
       }
-      
+
       if (attachment.entityType !== AttachmentEntityType.DRAFT) {
         // CHECK: Verify user has access to this attachment
         // Attachments belong to conversations, conversations belong to channels
@@ -420,6 +464,16 @@ export class AttachmentController {
       }));
 
       await this.messageAttachmentRepository.createMany(attachmentData);
+
+      // Fetch created attachments from database to get their real IDs for Vespa indexing
+      const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(entityId, AttachmentEntityType.IMPACT);
+
+      if (savedAttachments.length > 0) {
+        const attachmentIds = savedAttachments.map(a => a.id);
+        this.pushVespaJobForAttachments(attachmentIds, userId).catch(error => {
+          logger.error(`[AttachmentController] Error pushing Vespa job for attachments for entity ${entityId}:`, error);
+        });
+      }
 
       res.status(200).json({ success: true, count: attachmentData.length });
     } catch (error) {

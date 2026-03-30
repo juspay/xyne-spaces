@@ -21,3 +21,4 @@ export { TicketsVespaHandler } from './tables/tickets-handler';
 export { ChannelsVespaHandler } from './tables/channels-handler';
 export { ProjectsVespaHandler } from './tables/projects-handler';
 export { RCAVespaHandler } from './tables/rca-handler';
+export { MessageAttachmentsVespaHandler } from './tables/message-attachments-handler';

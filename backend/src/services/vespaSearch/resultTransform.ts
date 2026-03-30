@@ -428,6 +428,8 @@ import { PrismaClient } from '@prisma/client';
          subApp: doc.subApp,
          conversationId: doc.conversationId,
          channelId: doc.channelId,
+         messageId: doc.messageId,
+         ticketId: doc.ticketId,
        },
      };
    }

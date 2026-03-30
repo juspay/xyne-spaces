@@ -6,6 +6,7 @@ import { ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type
 import { VespaJob, VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
 import { Conversation, Channel, Message, Project, Ticket, VespaOperationType as VespaOpType, Canvas, Call } from '@prisma/client';
+import { FileProcessor } from '@/services/fileProcessor';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
 import { messageSignalService } from '@/services/personalization';
@@ -23,6 +24,7 @@ type ProjectsSchema = Schema['tables']['projects'];
 type TicketsSchema = Schema['tables']['tickets'];
 type CanvasesSchema = Schema['tables']['canvases'];
 type TranscriptsSchema = Schema['tables']['calls'];
+type MessageAttachmentsSchema = Schema['tables']['message_attachments'];
 
 const getRef = (schema: VespaSchema, docId: string) => `id:${NAMESPACE}:${schema}::${docId}`
 
@@ -630,7 +632,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<Vesp
     docId: args.id,
     docType: VespaDocType.FILE,
     fileName: args.title || 'Untitled Canvas',
-    description: `Canvas document${channel?.name ? ' in channel : ' + channel.name : ''}`,
+    description: `Canvas document in ${channel?.name || 'Unknown Channel'}`,
     chunks: chunks,
     chunks_pos: chunks.map((_, index) => String(index)),
     image_chunks: [],
@@ -654,7 +656,7 @@ export const mapCanvas = async (args: InsertValue<CanvasesSchema>): Promise<Vesp
     fileSize: 0,
     isPrivate: true,
     mimeType: 'application/json',
-    subApp: 'canvas',
+    subApp: SubApp.CANVAS,
     channelRef,
     conversationId: undefined
   };
@@ -677,7 +679,7 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promi
   if (conversation) {
     conversationId = conversation.conversationId;
   }
-  else { 
+  else {
     const callMetadata = args.metadata as { conversationId?: string } | null;
     conversationId = callMetadata?.conversationId;
   }
@@ -746,7 +748,7 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promi
     fileSize: fileSize,
     isPrivate: true,
     mimeType: 'text/plain',
-    subApp: 'transcript',
+    subApp: SubApp.TRANSCRIPT,
     channelRef,
     conversationId
   };
@@ -802,6 +804,127 @@ export const mapRCA = (args: RCAWithRelations): VespaFileDocument => {
   };
 };
 
+/**
+ * Map a MessageAttachment to a VespaFileDocument
+ * 
+ * This function:
+ * 1. Loads the file from GCS
+ * 2. Parses and chunks it using the appropriate FileProcessor strategy
+ * 3. Resolves the channel from the conversation
+ * 4. Builds a complete VespaFileDocument for indexing
+ */
+export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Promise<VespaFileDocument> => {
+  // Resolve channel from conversation
+  let channelRef: string | undefined;
+  let channelId: string | undefined;
+  let conversationId = args.conversationId || undefined;
+
+  if (conversationId) {
+    const conversation = await db.conversation.findUnique({
+      where: { conversationId },
+      select: { channelId: true }
+    });
+    if (conversation) {
+      channelId = conversation.channelId;
+      channelRef = getRef(channelSchema, conversation.channelId);
+    }
+  }
+
+  // Get permissions from channel participants (anyone in the channel can view files)
+  let permissions: string[] = [];
+  if (channelId) {
+    const channelParticipants = await db.channelParticipant.findMany({
+      where: { channelId },
+      select: { userId: true }
+    });
+    permissions = channelParticipants.map(p => p.userId);
+  }
+  
+  const channel = channelId ? (await db.channel.findUnique({
+    where: { id: channelId }
+  })) : undefined;
+
+  // If no channel participants found, fall back to conversation participants
+  if (permissions.length === 0 && conversationId) {
+    const participants = await db.conversationParticipant.findMany({
+      where: { conversationId },
+      select: { userId: true }
+    });
+    permissions = participants.map(p => p.userId);
+  }
+
+  // Parse file content into chunks using FileProcessor
+  let chunks: string[] = [];
+  let fileSize = args.size || 0;
+  try {
+    if (args.url) {
+      // Extract GCS path from URL
+      let gcsPath = args.url;
+      if (gcsPath.startsWith('gs://')) {
+        const match = gcsPath.match(/^gs:\/\/[^\/]+\/(.+)$/);
+        if (match) {
+          gcsPath = match[1];
+        }
+      } else if (gcsPath.startsWith('http')) {
+        // Extract path from HTTP URL (e.g., https://storage.googleapis.com/bucket/path)
+        try {
+          const url = new URL(gcsPath);
+          gcsPath = url.pathname.replace(/^\/[^\/]+\//, ''); // Remove /bucket/ prefix
+        } catch {
+          logger.warn(`[Mapper] Could not parse URL for file ${args.id}: ${gcsPath}`);
+        }
+      }
+
+      const gcsService = GCSService.getInstance();
+      const buffer = await gcsService.getFileBuffer(gcsPath);
+      fileSize = buffer.length;
+
+      // Use FileProcessor to detect strategy from mime type and parse
+      const processor = FileProcessor.fromMimeType(args.mimetype);
+      const result = await processor.processBuffer(buffer, args.id);
+      chunks = result.chunks;
+
+      logger.info(`[Mapper] Extracted ${chunks.length} chunks from file ${args.id} (${args.originalFilename}) using ${result.processingMethod}`);
+    }
+  } catch (error) {
+    logger.error(`[Mapper] Failed to process file ${args.id} (${args.originalFilename}):`, error);
+    // Continue with empty chunks - don't fail the entire operation
+  }
+
+  return {
+    docId: args.id,
+    docType: VespaDocType.FILE,
+    fileName: args.originalFilename || 'Untitled File',
+    description: `File uploaded in ${channel?.name || 'Unknown Channel'}`,
+    chunks: chunks,
+    chunks_pos: chunks.map((_, index) => String(index)),
+    image_chunks: [],
+    image_chunks_pos: [],
+    metadata: JSON.stringify({
+      entityType: args.entityType,
+      entityId: args.entityId,
+      storageProvider: args.storageProvider,
+      conversationId: conversationId,
+      thumbnailUrl: args.thumbnailUrl,
+    }),
+    createdBy: args.createdBy,
+    createdAt: toTimestamp(args.createdAt),
+    updatedAt: toTimestamp(args.createdAt), // MessageAttachment doesn't have updatedAt
+    ownerId: args.uploadedByUserId,
+    permissions: permissions,
+    urlInternal: args.url,
+    urlOriginal: args.url,
+    fileSize: fileSize,
+    isPrivate: true,
+    mimeType: args.mimetype,
+    subApp: args.entityType === 'TICKET' ? SubApp.TICKET_ATTACHMENT : SubApp.CHAT_ATTACHMENT,
+    channelRef,
+    conversationId,
+    messageId: args.entityType === 'CHAT' ? args.entityId : undefined,
+    ticketId: args.entityType === 'TICKET' ? args.entityId : undefined
+  };
+};
+
 export const mapBySchema = async (
   schemaName: VespaSchema,
   args: VespaPayload,
@@ -825,7 +948,7 @@ export const mapBySchema = async (
         return mapTicket(args as InsertValue<TicketsSchema>);
       case fileSchema:
         if (!app) {
-          throw new Error(`${schemaName}: fileSchema requires 'app' parameter to determine mapper (CANVAS, TRANSCRIPT, or RCA)`);
+          throw new Error(`${schemaName}: fileSchema requires 'app' parameter to determine mapper (CANVAS, TRANSCRIPT, RCA, or FILE)`);
         }
         switch (app) {
           case SubApp.CANVAS:
@@ -834,6 +957,9 @@ export const mapBySchema = async (
             return mapTranscript(args as InsertValue<TranscriptsSchema>);
           case SubApp.RCA:
             return mapRCA(args as RCAWithRelations);
+          case SubApp.CHAT_ATTACHMENT:
+          case SubApp.TICKET_ATTACHMENT:
+            return mapFile(args as InsertValue<MessageAttachmentsSchema>);
           default:
             throw new Error(`No mapper defined for sub-app: ${app}`);
         }
@@ -894,7 +1020,7 @@ export const fetchDataBySchema = async (
 
     case fileSchema:
       if (!app) {
-        throw new Error(`${schema}: fileSchema requires 'app' parameter to determine fetcher (CANVAS, TRANSCRIPT, or RCA)`);
+        throw new Error(`${schema}: fileSchema requires 'app' parameter to determine fetcher (CANVAS, TRANSCRIPT, RCA, or FILE)`);
       }
       switch (app) {
         case SubApp.CANVAS:
@@ -908,6 +1034,11 @@ export const fetchDataBySchema = async (
         case SubApp.RCA:
           const releaseRepository = new ReleaseRepository();
           return await releaseRepository.getRCAById(docId, { includeImpacts: true, includeCOEs: true }) as RCAWithRelations;
+        case SubApp.CHAT_ATTACHMENT:
+        case SubApp.TICKET_ATTACHMENT:
+          return await db.messageAttachment.findUnique({
+            where: { id: docId }
+          }) as any;
         default:
           throw new Error(`No fetcher defined for sub-app: ${app}`);
       }

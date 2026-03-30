@@ -153,26 +153,37 @@ private buildUserConditions(): string {
    * Applies to file schemas
    */
   private buildFileConditions(filters: FileFilters, userId: string): string {
-    // File search
     const conditions: string[] = [];
-    conditions.push(`docType contains "file"`);
 
     // DocType filter
-    if (filters.docType && filters.docType.length > 0) {
-      const docTypes = filters.docType.map(t => `docType contains "${t.trim()}"`).join(' or ');
-      conditions.push(`(${docTypes})`);
-    } else {
-      conditions.push(`docType contains "file"`);
+    conditions.push(`docType contains "file"`);
+
+    // Build subApp conditions with appropriate access control
+    const subAppConditions: string[] = [];
+
+    // Determine which subApps to include (default to ALL if not specified)
+    const subApps = filters.subApp && filters.subApp.length > 0
+      ? filters.subApp.map(s => s.trim())
+      : ['CANVAS', 'TRANSCRIPT', 'CHAT_ATTACHMENT', 'TICKET_ATTACHMENT', 'RCA'];
+
+    // Canvas: require owner/permissions/isPrivate check
+    if (subApps.some(s => s === 'CANVAS')) {
+      subAppConditions.push(`((subApp contains "CANVAS") and (ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false"))`);
     }
 
-    // SubApp filter
-    if (filters.subApp && filters.subApp.length > 0) {
-      const subApps = filters.subApp.map(s => `subApp contains "${s.trim()}"`).join(' or ');
-      conditions.push(`(${subApps})`);
+    // Chat/Ticket/Transcript attachments: require owner/channelPermissions/isPrivate check
+    if (subApps.some(s => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT' || s === 'TRANSCRIPT')) {
+      subAppConditions.push(`((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT" or subApp contains "TRANSCRIPT") and (ownerId contains "${userId}" or channelPermissions contains "${userId}" or isPrivate contains "false"))`);
     }
 
-    // Access control
-    conditions.push(`(ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false")`);
+    // RCA: no permission check (public)
+    if (subApps.some(s => s === 'RCA')) {
+      subAppConditions.push(`subApp contains "RCA"`);
+    }
+
+    if (subAppConditions.length > 0) {
+      conditions.push(`(${subAppConditions.join(' or ')})`);
+    }
 
     // Date filters
     if (filters.createdBefore) {
