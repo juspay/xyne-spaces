@@ -583,7 +583,7 @@ const WorkflowScreen: React.FC = () => {
   // Loading state UI
   if (isLoading) {
     return (
-      <div className='h-screen bg-background flex flex-col'>
+      <div className='h-screen bg-background flex flex-col rounded-2xl overflow-hidden'>
         {ticket && (
           <WorkflowHeader
             ticket={ticket}
@@ -613,7 +613,7 @@ const WorkflowScreen: React.FC = () => {
   // Ticket not found state
   if (ticketNotFound) {
     return (
-      <div className='h-screen bg-background flex flex-col'>
+      <div className='h-screen bg-background flex flex-col rounded-2xl overflow-hidden'>
         <div className='h-14 border-b border-border flex items-center px-4'>
           <button
             onClick={() => window.history.back()}
@@ -655,7 +655,7 @@ const WorkflowScreen: React.FC = () => {
     const errorMessage = error?.message || 'Failed to load workflow data';
 
     return (
-      <div className='h-screen bg-background flex flex-col'>
+      <div className='h-screen bg-background flex flex-col rounded-2xl overflow-hidden'>
         {ticket && (
           <WorkflowHeader
             ticket={ticket}
@@ -715,7 +715,7 @@ const WorkflowScreen: React.FC = () => {
 
   return (
     <div
-      className='h-full bg-background flex flex-col overflow-hidden rounded-lg shadow-md relative'
+      className='h-full bg-background flex flex-col overflow-hidden rounded-2xl shadow-md relative'
       data-component='WorkflowScreen'
     >
       {/* Minimal Header */}
