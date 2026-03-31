@@ -262,6 +262,15 @@ export interface VespaFileDocument extends VespaDocument {
   ticketId?: string;
 }
 
+export interface PullRequestReference {
+  prId: number;
+  repoName: string;
+  sourceBranchName: string;
+  destinationBranchName: string;
+  prUrl: string;
+  status: string;
+}
+
 export interface VespaMemoryDocument extends VespaDocument {
   userId: string;
   sessionId: string;
@@ -281,6 +290,7 @@ export interface VespaMemoryDocument extends VespaDocument {
   parentRef?: string;
   reviewStatus: string;
   relevanceScore?: number;
+  pullRequests?: PullRequestReference[];
 }
 
 export type VespaSearchResult =

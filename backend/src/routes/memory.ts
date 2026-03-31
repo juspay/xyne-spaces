@@ -97,4 +97,12 @@ router.post('/turn', authMiddleware.authenticate, memoryController.bufferSession
   */
 router.post('/index', authMiddleware.authenticate, memoryController.indexMemoryDocument);
 
+/**
+  * @route GET /api/memory/sessionHistory
+  * @desc Get normalized session history for a given sessionId
+  * @access Private (requires authentication)
+  * @query sessionId - The session or workflow execution ID
+  */
+router.get('/sessionHistory', authMiddleware.authenticate, memoryController.getSessionHistory);
+
 export default router;
