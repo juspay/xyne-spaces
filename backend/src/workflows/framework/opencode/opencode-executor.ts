@@ -1,7 +1,7 @@
 import { WorkflowStorage, FrameworkExecutionResult } from '../../workflow-storage'
 import { FullAgenticCheckpointConfig, WorkflowState, BaseWorkflowContext, GitInfo, GitDiffFile, GitDiffStats, AgenticContinuationOverride } from '../../workflow-types'
 import { WorkflowPausedException, WorkflowCancelledException, WorkflowExternalWaitException } from '../../exceptions/workflow-exceptions'
-import { BitbucketManager } from '@/bitbucket/apis'
+import { getGitProvider } from '@/git-providers/factory'
 import { WorkflowRepository, TicketRepository } from '@/database/repositories/workflows'
 import { logger } from '@/utils/logger'
 import { exec } from 'child_process'
@@ -50,7 +50,6 @@ export class OpenCodeExecutor {
 
   constructor(
     private storage: WorkflowStorage,
-    private bitbucketManager = new BitbucketManager(),
     openCodeConfig: Partial<OpenCodeConfig> = {},
     private workflowRepo = new WorkflowRepository(),
     private ticketRepo = new TicketRepository()
@@ -954,7 +953,8 @@ Please complete the remaining todos. Focus on the incomplete tasks.`
 
         try {
           const prTargetBranch = baseBranch || 'main'
-          await this.bitbucketManager.raisePr(repoUrl, inputStepDbId, prTargetBranch, branchName, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId)
+          const gitProvider = getGitProvider(repoUrl)
+          await gitProvider.raisePr(repoUrl, parentExecutionId, prTargetBranch, branchName, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId)
         } catch (error) {
           logger.error(`[OPENCODE-EXECUTOR] Failed to create PR:`, error)
         }

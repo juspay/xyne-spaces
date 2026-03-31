@@ -11,7 +11,7 @@ import { ticketService } from '../services/ticketService';
 import { AI_STAGES, WorkflowExecutionStatus } from '@/workflows/types/workflow-enums';
 import { logger } from '@/utils/logger';
 import { config as appConfig } from '@/config/env';
-import { bitbucketManager } from '../bitbucket/apis';
+import { getGitProvider } from '@/git-providers/factory';
 import { extractWorkspace } from '../workflows/framework/agent-executor';
 import { calculateDiffStats } from '@/utils/diffUtils';
 import { redisService } from '@/services/redisService';
@@ -1434,7 +1434,7 @@ export class WorkflowController {
         });
         return;
       }
-
+      const gitProvider = getGitProvider(gitInfo.repoUrl);
       let gitDiff: any[];
       let diffStats: any;
       let commitHash = gitInfo.commitHash;
@@ -1442,12 +1442,12 @@ export class WorkflowController {
       // Try PR diff first if PR link exists
       if (gitInfo.pr_link) {
         const prUrl = gitInfo.pr_link;
-        const prId = bitbucketManager.extractPRIdFromUrl(prUrl);
+        const prId = gitProvider.extractPRIdFromUrl(prUrl);
         
         if (prId) {
           logger.info(`[getWorkflowGitDiff] Fetching PR diff for PR #${prId}`);
           
-          gitDiff = await bitbucketManager.getPRDiff(parsed.projectName, parsed.repoName, prId);
+          gitDiff = await gitProvider.getPRDiff(parsed.projectName, parsed.repoName, prId);
           
           if (gitDiff.length > 0) {
             diffStats = calculateDiffStats(gitDiff);
@@ -1471,11 +1471,11 @@ export class WorkflowController {
       }
       
       // Fallback to branch diff - get latest commit
-      const latest = await bitbucketManager.getLatestCommit(parsed.projectName, parsed.repoName, gitInfo.branch);
+      const latest = await gitProvider.getLatestCommit(parsed.projectName, parsed.repoName, gitInfo.branch);
       if (latest) {
         commitHash = latest.id;
         logger.info(`[getWorkflowGitDiff] Fetching branch diff for latest commit: ${commitHash}`);
-        gitDiff = await bitbucketManager.getDiff(
+        gitDiff = await gitProvider.getDiff(
           parsed.projectName, 
           parsed.repoName, 
           gitInfo.baseCommitHash || commitHash, 
