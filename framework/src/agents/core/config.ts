@@ -85,6 +85,7 @@ export interface ExecutionConfig {
     readonly continueOnToolError?: boolean;
     readonly maxRetries?: number;
     readonly retryDelay?: number;
+    readonly maxDelay?: number;
   };
   /** Automatic conversation compacting settings */
   readonly compacting?: {
@@ -219,6 +220,7 @@ export const ExecutionConfigSchema = z.object({
     continueOnToolError: z.boolean().optional(),
     maxRetries: z.number().int().min(0).max(10).optional(),
     retryDelay: z.number().positive().optional(),
+    maxDelay: z.number().positive().optional(),
   }).optional().default({}),
   compacting: z.object({
     enabled: z.boolean().default(false),

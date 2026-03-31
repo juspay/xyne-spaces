@@ -32,7 +32,7 @@ export function createModelClient(agentConfig: AgentConfig): LLMClient {
     retry: {
       maxAttempts: agentConfig.execution.errorHandling.maxRetries,
       baseDelay: agentConfig.execution.errorHandling.retryDelay,
-      maxDelay: 30000, // 30 seconds max delay
+      maxDelay: agentConfig.execution.errorHandling.maxDelay ?? 30000,
       exponentialBackoff: true
     }
   };

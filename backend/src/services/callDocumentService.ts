@@ -609,10 +609,14 @@ export class CallDocumentService {
           mode: 'single',
           timeouts: { llm: 180000 },
           limits: {},
-          errorHandling: {},
+          errorHandling: {
+            maxRetries: 5,
+            retryDelay: 120000,
+            maxDelay: 960000,
+          },
         },
         events: {
-          logging: LogLevel.ERROR,
+          logging: LogLevel.WARN,
         },
       };
 
