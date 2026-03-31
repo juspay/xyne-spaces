@@ -133,6 +133,7 @@ const envSchema = Joi.object({
   // Web Search Configuration
   WEB_SEARCH_URL: Joi.string().uri().allow('').default(''),
   WEB_SEARCH_API_KEY: Joi.string().allow('').default(''),
+  ENABLE_WORKFLOW_RECOVERY: Joi.boolean().default(true),
   // Otel Configuration
   OTEL_BASE_URL: Joi.string().default(''),
   OTEL_SERVICE_NAME: Joi.string().default(''),
@@ -342,6 +343,7 @@ export const config = {
     pluginEnabled: envVars.OPENCODE_PLUGIN_ENABLED,
     pluginVersion: envVars.OPENCODE_PLUGIN_VERSION,
   },
+  workflowRecoveryEnabled: envVars.ENABLE_WORKFLOW_RECOVERY,
   ticketDescriptionClean: {
     model: envVars.TICKET_DESC_CLEAN_MODEL,
     maxRetries: envVars.TICKET_DESC_CLEAN_MAX_RETRIES,

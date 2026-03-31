@@ -21,7 +21,7 @@ import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
 import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
-
+import { recoveryService } from './workflows/services/recovery-service' 
 config()
 
 class WorkerService {
@@ -56,6 +56,13 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+          // Only schedule recovery if not disabled (recovery should run in separate pod)
+    const enableRecovery = appConfig.workflowRecoveryEnabled
+    if (enableRecovery) {
+      await recoveryService.start()
+    } else {
+      logger.info('Recovery worker is disabled ')
+    }
 
       if (vespaEnabled) {
         await vespaWorker.start()
@@ -152,6 +159,10 @@ class WorkerService {
       const workerSchedulerEnabled = appConfig.workerSchedulerEnabled
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
+      const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
+      if (enableRecovery) {
+        await recoveryService.stop()
+      }
 
       if (vespaEnabled) {
         await vespaWorker.shutdown()

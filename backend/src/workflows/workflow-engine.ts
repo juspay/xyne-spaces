@@ -91,7 +91,6 @@ export class WorkflowEngineImpl<
     handler: CheckpointHandler<R, Args>,
     ...args: Args
   ): Promise<R> {
-    // All workflows manage locks (child workflows now run on separate workers)
     const lockRenewed = await this.lockService.renewLock(this.currentState.workflowExecutionId)
     if (!lockRenewed) {
       throw new WorkflowLockLostException(this.currentState.workflowExecutionId, id, "Lock lost - another worker may have taken over")
@@ -169,7 +168,6 @@ export class WorkflowEngineImpl<
       agentConfig,
     }
 
-    // All workflows manage locks (child workflows now run on separate workers)
     const lockRenewed = await this.lockService.renewLock(this.currentState.workflowExecutionId)
     if (!lockRenewed) {
       throw new WorkflowLockLostException(this.currentState.workflowExecutionId, id, "Lock lost - another worker may have taken over")
@@ -340,7 +338,6 @@ export class WorkflowEngineImpl<
     condition: ConditionalHandler<Args>,
     ...args: Args
   ): Promise<boolean> {
-    // All workflows manage locks (child workflows now run on separate workers)
     const lockRenewed = await this.lockService.renewLock(this.currentState.workflowExecutionId)
     if (!lockRenewed) {
       throw new WorkflowLockLostException(this.currentState.workflowExecutionId, id, "Lock lost - another worker may have taken over")
@@ -406,7 +403,6 @@ export class WorkflowEngineImpl<
     responseProcessor: ExternalResponseProcessor<R, E>,
     ...args: Args
   ): Promise<R> {
-    // All workflows manage locks (child workflows now run on separate workers)
     const lockRenewed = await this.lockService.renewLock(this.currentState.workflowExecutionId)
     if (!lockRenewed) {
       throw new WorkflowLockLostException(this.currentState.workflowExecutionId, id, "Lock lost - another worker may have taken over")
@@ -527,7 +523,6 @@ export class WorkflowEngineImpl<
     body: WhileLoopBodyFunction<TContext>,
     parentStepId?: string
   ): Promise<void> {
-    // All workflows manage locks (child workflows now run on separate workers)
     const lockRenewed = await this.lockService.renewLock(this.currentState.workflowExecutionId)
     if (!lockRenewed) {
       throw new WorkflowLockLostException(this.currentState.workflowExecutionId, id, "Lock lost - another worker may have taken over")
@@ -580,7 +575,6 @@ export class WorkflowEngineImpl<
     config: ParallelWorkflowConfig<Tasks, TFinalResult>,
     parentStepId?: string
   ): Promise<TFinalResult> {
-    // All workflows manage locks (child workflows now run on separate workers)
     const lockRenewed = await this.lockService.renewLock(this.currentState.workflowExecutionId)
     if (!lockRenewed) {
       throw new WorkflowLockLostException(this.currentState.workflowExecutionId, id, "Lock lost - another worker may have taken over")

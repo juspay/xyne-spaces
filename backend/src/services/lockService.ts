@@ -1,117 +1,53 @@
-import { DatabaseClient } from '@/database/client';
+import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 
+const LOCK_TTL_SECONDS = Math.ceil(config.workflow.lockDurationMs / 1000);
+const LOCK_KEY_PREFIX = 'workflow:lock:';
+
 export class LockService {
-  private readonly LOCK_DURATION = config.workflow.lockDurationMs;
-  private db = DatabaseClient.getInstance();
-
-  async tryAcquireLock(executionId: string, workerId: string): Promise<boolean> {
-    try {
-      await this.db.workflowExecutionLock.create({
-        data: {
-          workflowExecutionId: executionId,
-          workerId: workerId,
-          expiry: new Date(Date.now() + this.LOCK_DURATION)
-        }
-      });
-
-      // logger.info(`Lock acquired for execution ${executionId} by worker ${workerId}`);
-      return true;
-
-    } catch (error) {
-      const existingLock = await this.db.workflowExecutionLock.findUnique({
-        where: { workflowExecutionId: executionId }
-      });
-
-      if (!existingLock) {
-        logger.warn(`Failed to acquire lock for execution ${executionId}: ${error}`);
-        return false;
-      }
-
-      const now = new Date();
-      if (existingLock.expiry > now) {
-        logger.debug(`Execution ${executionId} locked by ${existingLock.workerId}, expires at ${existingLock.expiry}`);
-        return false;
-      }
-
-      try {
-        await this.db.$transaction([
-          this.db.workflowExecutionLock.delete({
-            where: { workflowExecutionId: executionId }
-          }),
-          this.db.workflowExecutionLock.create({
-            data: {
-              workflowExecutionId: executionId,
-              workerId: workerId,
-              expiry: new Date(Date.now() + this.LOCK_DURATION)
-            }
-          })
-        ]);
-
-        logger.info(`Took over expired lock for execution ${executionId}, previous owner: ${existingLock.workerId}`);
-        return true;
-
-      } catch (transactionError) {
-        logger.warn(`Failed to take over expired lock for execution ${executionId}: ${transactionError}`);
-        return false;
-      }
-    }
+  private lockKey(executionId: string): string {
+    return `${LOCK_KEY_PREFIX}${executionId}`;
   }
 
-  async renewLock(executionId: string, workerId?: string): Promise<boolean> {
+  async setLock(executionId: string, workerId: string): Promise<boolean> {
+    const result =await redisService.set(this.lockKey(executionId), workerId, LOCK_TTL_SECONDS);
+    return result;
+  }
+
+  async renewLock(executionId: string): Promise<boolean> {
     try {
-      const whereClause = workerId
-        ? {
-            workflowExecutionId: executionId,
-            workerId: workerId,
-            expiry: { gt: new Date() }
-          }
-        : {
-            workflowExecutionId: executionId,
-            expiry: { gt: new Date() }
-          };
-
-      const result = await this.db.workflowExecutionLock.updateMany({
-        where: whereClause,
-        data: {
-          expiry: new Date(Date.now() + this.LOCK_DURATION),
-          updatedAt: new Date()
-        }
-      });
-
-      const renewed = result.count > 0;
-      // if (renewed) {
-      //   logger.debug(`Lock renewed for execution ${executionId}`);
-      // } else {
-      //   logger.warn(`Failed to renew lock for execution ${executionId} - lock may be lost`);
-      // }
-
-      return renewed;
-
+      const client = redisService.getClient();
+      const result = await client.expire(this.lockKey(executionId), LOCK_TTL_SECONDS);
+      return result === 1;
     } catch (error) {
       logger.error(`Error renewing lock for execution ${executionId}: ${error}`);
       return false;
     }
   }
 
-  async releaseLock(executionId: string, workerId: string): Promise<void> {
+  async releaseLock(executionId: string): Promise<void> {
     try {
-      const result = await this.db.workflowExecutionLock.deleteMany({
-        where: {
-          workflowExecutionId: executionId,
-          workerId: workerId
-        }
-      });
-
-      if (result.count > 0) {
-        // logger.info(`Lock released for execution ${executionId} by worker ${workerId}`);
-      } else {
-        logger.warn(`No lock found to release for execution ${executionId} by worker ${workerId}`);
-      }
-
+      await redisService.del(this.lockKey(executionId));
     } catch (error) {
       logger.error(`Error releasing lock for execution ${executionId}: ${error}`);
+    }
+  }
+
+  async getLockOwner(executionId: string): Promise<string | null> {
+    return redisService.get(this.lockKey(executionId));
+  }
+
+  async getExpiredExecutionIds(runningIds: string[]): Promise<string[]> {
+    if (runningIds.length === 0) return [];
+    try {
+      const client = redisService.getClient();
+      const keys = runningIds.map(id => this.lockKey(id));
+      const values = await client.mget(...keys);
+      return runningIds.filter((_, i) => values[i] === null);
+    } catch (error) {
+      logger.error(`Error checking lock expiry for running executions: ${error}`);
+      return [];
     }
   }
 }

@@ -6,7 +6,7 @@ import { WorkflowExecutionStatus, WorkflowStatus } from '../types/workflow-enums
 import { logger } from '@/utils/logger'
 import { notificationService } from '@/services/notificationService'
 import { UpdateWorkflowExecutionInput, WorkflowExecution } from '@/types/database'
-
+import { LockService } from '@/services/lockService'
 
 // Note: Including legacy statuses for backwards compatibility during migration
 const ACTIVE_STATUSES = [
@@ -58,6 +58,16 @@ export class WorkflowStatusSyncService {
             // This catch prevents unhandled promise rejection warnings
             logger.warn(`Status sync failed for execution ${id}:`, error)
           })
+        }
+      }
+      // release lock if the status is cancelled|failure|success|WAIT_FOR_EVENT|EXTERNAL_WAIT
+      if (data.status && typeof data.status === 'string') {
+        if (
+          this.isTerminalStatus(data.status) ||
+          data.status === 'WAIT_FOR_EVENT' ||
+          data.status === 'EXTERNAL_WAIT'
+        ) {
+          await new LockService().releaseLock(id);
         }
       }
 
