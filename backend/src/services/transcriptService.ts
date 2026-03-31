@@ -237,10 +237,14 @@ export class TranscriptService {
           mode: 'single' as const,
           timeouts: { llm: 300000 },
           limits: {},
-          errorHandling: {},
+          errorHandling: {
+            maxRetries: 5,
+            retryDelay: 120000,
+            maxDelay: 960000,
+          },
         },
         events: {
-          logging: 'error' as const,
+          logging: 'warn' as const,
         },
       };
 
