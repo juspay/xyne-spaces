@@ -5,6 +5,7 @@
 
 import express, { Router, Request, Response } from 'express';
 import slackRoutes from './slack';
+import jiraRoutes from './jira';
 
 const router = Router();
 
@@ -13,6 +14,9 @@ router.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Route to Slack migration
 router.use('/slack', slackRoutes);
+
+// Route to Jira migration
+router.use('/jira', jiraRoutes);
 
 // Handle unknown migration routes
 router.use('*', (req: Request, res: Response) => {
