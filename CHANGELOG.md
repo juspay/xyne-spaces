@@ -1,3 +1,33 @@
+## [1.101.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.100.0...v1.101.0) (2026-03-31)
+
+
+### Features
+
+* Add type modifier for CmdK search ([b9952cb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b9952cb02cee4417d3f033f7732d914028650492)), closes [#4105](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4105)
+* added jenkins file for creation of changelog on release build ([bb23454](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bb23454e25d095f2f4ca4b676845e9ed64083ac1)), closes [#4366](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4366)
+* added org picker and allowed multiple creation at once ([1a1a5f1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1a1a5f178ef06ecd452c17f02436a0ab9ace7837)), closes [#4521](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4521)
+* changes for native-app notifications ([d200fe7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d200fe7f32537623631fcceb013df59e314130a1)), closes [#4370](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4370) [#4286](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4286)
+* files ingest to vespa ([b08e614](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b08e61414901e20bf5dc13ea11d4dc63f70f563b)), closes [#4314](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4314)
+* github pr functionality ([b2930c0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b2930c087e4f7b883170ff177dda89ce547e8a0e)), closes [#4458](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4458)
+* impelemnts saved-ticket views be ([89705d6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/89705d6f0515cddf723024861384403c0b73495f)), closes [#3517](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3517)
+
+
+### Bug Fixes
+
+* adding missing package ([25a6a51](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/25a6a511c77269b8d73c10ab7a8efc4ad004a17a)), closes [#4520](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4520)
+* changes in the workflow live panel & header ([904699a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/904699a9ade89e3b1cba38eaf09984cdae52b49e)), closes [#4421](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4421)
+* custom profile picture fix for calls ([b2ae612](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b2ae61269166036a5ae1fc5db412eadfaedf89ea))
+* default time fix ([b16e46a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b16e46aabdd4727a613e348e157f4d49e3020b00)), closes [#4482](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4482)
+* fix for stale data in recurring call series modal ([215bead](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/215bead242195a20555be25844e2b5f3ec4cbfb8))
+* fixed random mobile logouts ([143b702](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/143b7025e0025ee818b724dfdef238fbe9e69895))
+* fixed scrolling in my dms page ([fcf2c49](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fcf2c497d84e77d9b8b5ac3b8285ba487f265d43))
+* Hide analytics button for unauthorized users ([17899f6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/17899f6a801e1952587cfc2261ad7ad2e8f7ace2)), closes [#4509](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4509)
+* made data emoji true in case of inline emoji node ([77fa2f9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/77fa2f98a0146c72d37c9a9d82d30249ae975bd5)), closes [#4372](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4372)
+* new app chat design improvement ([6ef3509](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6ef3509183283a05f4e20e8dfd34a90e06051c2f)), closes [#4503](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4503)
+* Option to filter channel calls ([0bf890c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0bf890c9ee2b42306f6a896e8247087de7ebed75)), closes [#4483](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4483)
+* redesign ticket workflow UI with custom components replacing blend-design-system ([5b20d6b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5b20d6b76eb8f8b944b49c67b009389b56b6c9e4)), closes [#4478](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4478)
+* showing stage overdue if not eta is set for a stage ([e5be9ed](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e5be9ed934c6edb6d71d9aac3558d3408b56ae0d)), closes [#4472](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4472)
+
 ## [1.100.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.99.1...v1.100.0) (2026-03-27)
 
 
