@@ -773,6 +773,39 @@ class MultiUserTranscriber:
             participant_identity: The participant's identity (for cleanup)
         """
         try:
+            # Force VAD flush: inject silence to trigger END_OF_SPEECH for any buffered speech
+            if hasattr(session, '_activity') and session._activity:
+                activity = session._activity
+                if hasattr(activity, '_audio_recognition') and activity._audio_recognition:
+                    audio_rec = activity._audio_recognition
+                    try:
+                        audio_rec.commit_user_turn(
+                            transcript_timeout=2.0,
+                            stt_flush_duration=0.6,
+                            audio_detached=False
+                        )
+                        # Wait for the async flush task to complete
+                        if hasattr(audio_rec, '_commit_user_turn_atask') and audio_rec._commit_user_turn_atask:
+                            try:
+                                await asyncio.wait_for(audio_rec._commit_user_turn_atask, timeout=3.0)
+                            except asyncio.TimeoutError:
+                                logger.warning(f"stt_flush_task_timeout | participant_id={participant_identity}")
+                        
+                        # Emit transcript if flush captured speech (normal callback won't fire since session is closing)
+                        transcript = getattr(audio_rec, '_audio_transcript', None)
+                        if transcript and transcript.strip():
+                            agent = getattr(activity, '_agent', None)
+                            participant_name = getattr(agent, 'participant_name', participant_identity) if agent else participant_identity
+                            await self._emit_transcription({
+                                "user": participant_name,
+                                "text": transcript,
+                                "timestamp": time.time(),
+                                "spoken_at": time.time(),
+                                "participant_identity": participant_identity,
+                            })
+                    except Exception as e:
+                        logger.warning(f"stt_flush_failed | participant_id={participant_identity}, error={e}")
+            
             logger.info(f"stt_drain_started")
             await session.drain()
             logger.info(f"stt_drain_completed")
