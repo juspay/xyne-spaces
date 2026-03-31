@@ -1,3 +1,23 @@
+## [1.102.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.101.0...v1.102.0) (2026-03-31)
+
+
+### Features
+
+* Add session history extraction logic in memoryy ([5add7e2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5add7e2d2b3cf073d980b2a2ffa44d0c2355b018)), closes [#4536](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4536)
+* changes to call notification native app ([6627d69](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6627d696bb52ca74b76af0cf1d79a512295dcebb)), closes [#4490](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4490)
+* jira migration setup ([2048557](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2048557940d978d1c52acf049776f40c72947270)), closes [#4497](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4497)
+* native app message actions ([d4e2511](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d4e2511edc168dda3ad91de9b35b36d77f107a9f)), closes [#4562](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4562)
+* workflow execution to redis ([af29c62](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/af29c62ec426e8733d4f478af4520a1abd16b3ad)), closes [#4538](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4538)
+
+
+### Bug Fixes
+
+* change in the workflow rerun dashboard logic ([fe0cd72](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fe0cd727395e57eec99d9d6ea5a22fc21ac37735)), closes [#4545](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4545)
+* fix stt drain on mute unmute ([be7b4ca](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/be7b4ca21aa33b3c128389dfc9b90bb36862b504))
+* native app activity message rendering, splashscreen and app icon ([544e4f9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/544e4f939bda24a51d81f2e17a2e093107addb01)), closes [#4506](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4506)
+* pending native app change ([7fe2aa8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7fe2aa82f8dbbb8efddd0fb3c4e11edfe0f451ce)), closes [#4436](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4436)
+* retry configuration for all LLM calls ([20ec229](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/20ec22903c7b2d0bb59096ba0bdbc2dde821e6b5)), closes [#4500](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4500)
+
 ## [1.101.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.100.0...v1.101.0) (2026-03-31)
 
 
