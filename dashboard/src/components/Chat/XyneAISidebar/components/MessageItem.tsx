@@ -1,4 +1,4 @@
-import { ReactElement, useState, useMemo } from 'react';
+import { ReactElement, useState, useMemo, useEffect } from 'react';
 import { Globe, Pencil, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -373,6 +373,22 @@ export const MessageItem = ({
   const editTextareaRef = React.useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
 
+  // Rotating status for long-running tools (research_agent, create_ppt)
+  const [rotatingIndex, setRotatingIndex] = useState(0);
+  const statusPhrases = Array.isArray(message.statusMessage) ? message.statusMessage : null;
+  const displayStatus = statusPhrases
+    ? statusPhrases[rotatingIndex % statusPhrases.length]
+    : (message.statusMessage as string | undefined);
+
+  useEffect(() => {
+    if (!statusPhrases || !message.isStreaming) return;
+    setRotatingIndex(0);
+    const interval = setInterval(() => {
+      setRotatingIndex(prev => (prev + 1) % statusPhrases.length);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [statusPhrases, message.isStreaming]);
+
   // Handle clicking selection context to navigate to canvas
   const handleSelectionContextClick = (canvasViewAccessId: string): void => {
     void navigate(`/chat/canvas/${canvasViewAccessId}`);
@@ -461,13 +477,10 @@ export const MessageItem = ({
         }
       >
         {/* Streaming status indicator - shows inline with icon when no content */}
-        {message.type === 'bot' &&
-        message.isStreaming &&
-        message.statusMessage &&
-        !displayContent ? (
+        {message.type === 'bot' && message.isStreaming && displayStatus && !displayContent ? (
           <div className='flex items-center gap-0.5 mt-1'>
             <span className="text-xs text-muted-foreground font-['Inter'] italic">
-              {sanitizeText(message.statusMessage)}
+              {sanitizeText(displayStatus)}
             </span>
             <span className='inline-flex gap-0.5'>
               <span
@@ -592,6 +605,9 @@ export const MessageItem = ({
                             }
                           })();
 
+                          // API paths (e.g. /api/attachments/.../download) should bypass React Router
+                          const isApiPath = href?.startsWith('/api/');
+
                           if (isExternal) {
                             return (
                               <a
@@ -599,6 +615,24 @@ export const MessageItem = ({
                                 target='_blank'
                                 rel='noopener noreferrer'
                                 className='text-blue-600 hover:text-blue-700 underline'
+                                {...props}
+                              >
+                                {children}
+                              </a>
+                            );
+                          }
+
+                          if (isApiPath) {
+                            return (
+                              <a
+                                href={href}
+                                className='text-blue-600 hover:text-blue-700 underline'
+                                data-track-category='xyne-ai'
+                                data-track-name='api-download'
+                                onClick={e => {
+                                  e.preventDefault();
+                                  window.location.href = href!;
+                                }}
                                 {...props}
                               >
                                 {children}
@@ -647,36 +681,33 @@ export const MessageItem = ({
             )}
 
             {/* Streaming status indicator - shows below content when there's content */}
-            {message.type === 'bot' &&
-              message.isStreaming &&
-              message.statusMessage &&
-              displayContent && (
-                <div className='mt-2'>
-                  <span className="text-xs text-muted-foreground font-['Inter'] italic flex items-center gap-0.5">
-                    {sanitizeText(message.statusMessage)}
-                    <span className='inline-flex gap-0.5'>
-                      <span
-                        className='animate-bounce'
-                        style={{ animationDelay: '0ms', animationDuration: '1s' }}
-                      >
-                        .
-                      </span>
-                      <span
-                        className='animate-bounce'
-                        style={{ animationDelay: '200ms', animationDuration: '1s' }}
-                      >
-                        .
-                      </span>
-                      <span
-                        className='animate-bounce'
-                        style={{ animationDelay: '400ms', animationDuration: '1s' }}
-                      >
-                        .
-                      </span>
+            {message.type === 'bot' && message.isStreaming && displayStatus && displayContent && (
+              <div className='mt-2'>
+                <span className="text-xs text-muted-foreground font-['Inter'] italic flex items-center gap-0.5">
+                  {sanitizeText(displayStatus)}
+                  <span className='inline-flex gap-0.5'>
+                    <span
+                      className='animate-bounce'
+                      style={{ animationDelay: '0ms', animationDuration: '1s' }}
+                    >
+                      .
+                    </span>
+                    <span
+                      className='animate-bounce'
+                      style={{ animationDelay: '200ms', animationDuration: '1s' }}
+                    >
+                      .
+                    </span>
+                    <span
+                      className='animate-bounce'
+                      style={{ animationDelay: '400ms', animationDuration: '1s' }}
+                    >
+                      .
                     </span>
                   </span>
-                </div>
-              )}
+                </span>
+              </div>
+            )}
 
             {/* Branch navigator + Copy/Regenerate/Like/Dislike Buttons */}
             {message.type === 'bot' && !message.isStreaming && !message.isAborted && (
@@ -730,7 +761,58 @@ const MessageContent = ({
       {/* Genius: Summary text */}
       {(!message.agentType || message.agentType === 'genius') && displayContent && (
         <div className="text-sm font-['Inter'] leading-6 font-normal">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              ...markdownComponents,
+              a: ({ href, children, ...props }) => {
+                // Check if URL is external
+                const isExternal = (() => {
+                  if (!href) return false;
+                  try {
+                    const urlObj = new URL(href, window.location.origin);
+                    return urlObj.origin !== window.location.origin;
+                  } catch {
+                    return true;
+                  }
+                })();
+
+                const isApiPath = href?.startsWith('/api/');
+
+                // Add target="_blank" for external links
+                if (isExternal) {
+                  return (
+                    <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                      {children}
+                    </a>
+                  );
+                }
+
+                if (isApiPath) {
+                  return (
+                    <a
+                      href={href}
+                      data-track-category='xyne-ai'
+                      data-track-name='api-download'
+                      onClick={e => {
+                        e.preventDefault();
+                        window.location.href = href!;
+                      }}
+                      {...props}
+                    >
+                      {children}
+                    </a>
+                  );
+                }
+
+                return (
+                  <a href={href} {...props}>
+                    {children}
+                  </a>
+                );
+              },
+            }}
+          >
             {displayContent}
           </ReactMarkdown>
         </div>
@@ -874,7 +956,58 @@ const SummarizerContent = ({
       {message.summarizerOutput?.summary && (
         <div className='relative'>
           <div className="text-sm font-['Inter'] leading-6 font-normal">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                ...markdownComponents,
+                a: ({ href, children, ...props }) => {
+                  // Check if URL is external
+                  const isExternal = (() => {
+                    if (!href) return false;
+                    try {
+                      const urlObj = new URL(href, window.location.origin);
+                      return urlObj.origin !== window.location.origin;
+                    } catch {
+                      return true;
+                    }
+                  })();
+
+                  const isApiPath = href?.startsWith('/api/');
+
+                  // Add target="_blank" for external links
+                  if (isExternal) {
+                    return (
+                      <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                        {children}
+                      </a>
+                    );
+                  }
+
+                  if (isApiPath) {
+                    return (
+                      <a
+                        href={href}
+                        data-track-category='xyne-ai'
+                        data-track-name='api-download'
+                        onClick={e => {
+                          e.preventDefault();
+                          window.location.href = href!;
+                        }}
+                        {...props}
+                      >
+                        {children}
+                      </a>
+                    );
+                  }
+
+                  return (
+                    <a href={href} {...props}>
+                      {children}
+                    </a>
+                  );
+                },
+              }}
+            >
               {message.isStreaming
                 ? message.summarizerOutput.summary.slice(0, visibleChars || 0)
                 : message.summarizerOutput.summary}
@@ -912,9 +1045,28 @@ const SummarizerContent = ({
                             }
                           })();
 
+                          const isApiPath = href?.startsWith('/api/');
+
                           if (isExternal) {
                             return (
                               <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                                {children}
+                              </a>
+                            );
+                          }
+
+                          if (isApiPath) {
+                            return (
+                              <a
+                                href={href}
+                                data-track-category='xyne-ai'
+                                data-track-name='api-download'
+                                onClick={e => {
+                                  e.preventDefault();
+                                  window.location.href = href!;
+                                }}
+                                {...props}
+                              >
                                 {children}
                               </a>
                             );
@@ -1007,9 +1159,28 @@ const GeniusKeyPoints = ({
                       }
                     })();
 
+                    const isApiPath = href?.startsWith('/api/');
+
                     if (isExternal) {
                       return (
                         <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                          {children}
+                        </a>
+                      );
+                    }
+
+                    if (isApiPath) {
+                      return (
+                        <a
+                          href={href}
+                          data-track-category='xyne-ai'
+                          data-track-name='api-download'
+                          onClick={e => {
+                            e.preventDefault();
+                            window.location.href = href!;
+                          }}
+                          {...props}
+                        >
                           {children}
                         </a>
                       );

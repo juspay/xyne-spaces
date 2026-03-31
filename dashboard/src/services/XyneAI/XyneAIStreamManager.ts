@@ -59,7 +59,7 @@ export interface StreamRequest {
 type StreamSubscriber = (state: StreamState) => void;
 
 // Helper function to clear status message from a message object
-const clearStatusMessage = <T extends { statusMessage?: string }>(
+const clearStatusMessage = <T extends { statusMessage?: string | string[] }>(
   message: T,
 ): Omit<T, 'statusMessage'> => {
   const { statusMessage: _, ...rest } = message;
