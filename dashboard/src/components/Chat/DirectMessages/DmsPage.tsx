@@ -24,6 +24,12 @@ import Button from '../../ui/Button';
 import { useDmsPaginatedMessages } from '../../../hooks/useDmsPaginatedMessages';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
+// Hardcoded item heights derived from CSS (avoids DOM measurement via ref)
+// Desktop: py-3 (24px) + size-[48px] avatar + 1px border-bottom = 73px
+// Mobile: 47px DmListItem + 16px pt-4 wrapper padding = 63px
+const DESKTOP_ITEM_HEIGHT = 75;
+const MOBILE_ITEM_HEIGHT = 65;
+
 const DmsPage = (): ReactElement => {
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -61,7 +67,6 @@ const DmsPage = (): ReactElement => {
     channels: directMessages,
     hasMore,
     loadMore,
-    onVisibleRangeChanged,
     selectedChannelMovedVersion,
   } = useDmsPaginatedMessages({ selectedChannelId: channelId });
   // Scroll to top when the selected channel receives an update and moves
@@ -110,17 +115,24 @@ const DmsPage = (): ReactElement => {
   const renderDmItem = useCallback(
     (_index: number, channel: (typeof filteredDms)[number]) => {
       return (
-        <DmListItem
-          key={channel.id}
-          channel={channel}
-          unreadCount={unreadCounts[channel.id] || 0}
-          isSelected={channel.id === selectedChannelIdRef.current}
-          latestConversation={messagesMap.get(channel.id)}
-        />
+        <div>
+          <DmListItem
+            key={channel.id}
+            channel={channel}
+            unreadCount={unreadCounts[channel.id] || 0}
+            isSelected={channel.id === selectedChannelIdRef.current}
+            latestConversation={messagesMap.get(channel.id)}
+          />
+        </div>
       );
     },
     [unreadCounts, messagesMap],
   );
+
+  const itemHeight = isMobile ? MOBILE_ITEM_HEIGHT : DESKTOP_ITEM_HEIGHT;
+
+  // Trigger loadMore ~5 items before reaching the bottom
+  const bottomThreshold = itemHeight * 5;
 
   const renderMobileDmItem = useCallback(
     (index: number, channel: (typeof filteredDms)[number]) => {
@@ -208,12 +220,12 @@ const DmsPage = (): ReactElement => {
               ref={virtuosoRef}
               data={filteredDms}
               computeItemKey={(_, channel) => channel.id}
+              fixedItemHeight={itemHeight}
               overscan={5}
-              increaseViewportBy={{ top: 100, bottom: 100 }}
+              increaseViewportBy={{ top: 100, bottom: bottomThreshold }}
               endReached={() => {
                 if (hasMore) loadMore();
               }}
-              rangeChanged={range => onVisibleRangeChanged(range.startIndex)}
               itemContent={renderMobileDmItem}
               components={{
                 Footer: () => <div className='pb-20' />,
@@ -321,12 +333,12 @@ const DmsPage = (): ReactElement => {
                   ref={virtuosoRef}
                   data={filteredDms}
                   computeItemKey={(_, channel) => channel.id}
+                  fixedItemHeight={itemHeight}
                   overscan={5}
-                  increaseViewportBy={{ top: 100, bottom: 100 }}
+                  increaseViewportBy={{ top: 100, bottom: bottomThreshold }}
                   endReached={() => {
                     if (hasMore) loadMore();
                   }}
-                  rangeChanged={range => onVisibleRangeChanged(range.startIndex)}
                   itemContent={renderDmItem}
                   className='h-full'
                 />

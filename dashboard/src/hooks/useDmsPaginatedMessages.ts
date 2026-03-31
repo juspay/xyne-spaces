@@ -24,7 +24,6 @@ interface UseDmsPaginatedMessagesReturn {
   channels: DmChannel[];
   hasMore: boolean;
   loadMore: () => void;
-  onVisibleRangeChanged: (startIndex: number) => void;
   isLoading: boolean;
   /** Increments each time the selected channel moves to the top (index 0). Use to trigger scroll-to-top. */
   selectedChannelMovedVersion: number;
@@ -77,8 +76,6 @@ export const useDmsPaginatedMessages = (
     prevSelectedIndexRef.current = -1;
     prevSelectedActivityRef.current = -1;
   }
-
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // PAGE 1: Always-live Zero subscription. Reactively updates when any DM channel changes.
   const [page1, page1Details] = useCachedQuery(
@@ -199,45 +196,6 @@ export const useDmsPaginatedMessages = (
     })();
   }, [hasMore, zero]);
 
-  /**
-   * onVisibleRangeChanged: Called by Virtuoso when the visible range changes.
-   *
-   * When the user scrolls back to the top (startIndex <= 2), we discard all
-   * deeper-page snapshots and reset to only live page-1 data.
-   * The next time the user scrolls to the bottom, page 2 will be re-fetched fresh.
-   *
-   * Uses page1Ref so the debounce always sees the latest page1 snapshot (no stale closure).
-   */
-  const onVisibleRangeChanged = useCallback((startIndex: number) => {
-    if (startIndex > 2) return;
-    if (accumulatedStatsRef.current.length <= PAGE_SIZE) return;
-
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      debounceRef.current = null;
-
-      // Read page1 via ref — always the latest value, no stale closure
-      const currentPage1 = page1Ref.current;
-      if (!currentPage1 || currentPage1.length === 0) return;
-
-      // Prune to only page-1 channels (the live slice)
-      const page1Ids = new Set(currentPage1.map(s => s.channelId));
-      const pruned = accumulatedStatsRef.current.filter(s => page1Ids.has(s.channelId));
-
-      if (pruned.length < accumulatedStatsRef.current.length) {
-        accumulatedStatsRef.current = pruned;
-        setAccumulatedStats(pruned);
-        setHasMore(true);
-        isFetchingRef.current = false;
-      }
-    }, 150);
-  }, []); // no deps — reads everything via refs
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
   const isLoading = page1Details.type !== 'complete' && accumulatedStats.length === 0;
 
   const channels = useMemo<DmChannel[]>(() => {
@@ -270,7 +228,6 @@ export const useDmsPaginatedMessages = (
     channels,
     hasMore,
     loadMore,
-    onVisibleRangeChanged,
     isLoading,
     selectedChannelMovedVersion,
   };
