@@ -12,7 +12,6 @@ import {
   FileEdit,
   Bot,
   Repeat,
-  Zap,
   Layers,
   User,
 } from 'lucide-react';
@@ -544,6 +543,18 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
   const showGoToAutomaticButton =
     executionMode === 'MANUAL' && executionStatus === 'WAIT_FOR_EVENT';
 
+  // Auto-continue: when workflow enters MANUAL + WAIT_FOR_EVENT, automatically resume
+  const autoContinueTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (showGoToAutomaticButton && !isSettingMode && !autoContinueTriggeredRef.current) {
+      autoContinueTriggeredRef.current = true;
+      void handleGoToAutomatic();
+    }
+    if (!showGoToAutomaticButton) {
+      autoContinueTriggeredRef.current = false;
+    }
+  }, [showGoToAutomaticButton, isSettingMode]);
+
   useEffect(() => {
     const currentCount = agentMessages.filter(m => m.summary || m.status === 'running').length;
     if (currentCount > prevMessageCountRef.current) {
@@ -738,23 +749,13 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
                   );
                 })}
 
-                {showGoToAutomaticButton && (
+                {/* Auto-continuing indicator shown while resuming */}
+                {showGoToAutomaticButton && isSettingMode && (
                   <div className='flex justify-center mt-2 mb-4'>
-                    <button
-                      onClick={() => void handleGoToAutomatic()}
-                      disabled={isSettingMode}
-                      className='flex items-center gap-2 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-xl hover:bg-blue-100 transition-all shadow-sm hover:shadow disabled:opacity-50'
-                      data-track-category='Workflows'
-                      data-track-name='GoToAutomaticFromChat'
-                      data-track-metadata={JSON.stringify({ executionId })}
-                    >
-                      {isSettingMode ? (
-                        <Loader2 size={16} className='animate-spin' />
-                      ) : (
-                        <Zap size={16} fill='currentColor' />
-                      )}
-                      Continue
-                    </button>
+                    <div className='flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-600'>
+                      <Loader2 size={16} className='animate-spin' />
+                      Continuing automatically...
+                    </div>
                   </div>
                 )}
               </>
@@ -934,11 +935,13 @@ const AgentMessageBubble: React.FC<{
                   </button>
                 </Tooltip>
               )}
-              {/* Rerun button */}
+              {/* Rerun button — hidden while workflow is running unless this is the running step */}
               {executionId &&
                 combinedStepsData &&
                 graphNodes &&
-                message.nodeIndex < graphNodes.length && (
+                message.nodeIndex < graphNodes.length &&
+                (['SUCCESS', 'FAILURE', 'CANCELLED'].includes(executionStatus || '') ||
+                  graphNodes[message.nodeIndex]?.status === 'running') && (
                   <StepRerunButton
                     executionId={executionId}
                     stepIds={graphNodes[message.nodeIndex]?.stepIds || []}

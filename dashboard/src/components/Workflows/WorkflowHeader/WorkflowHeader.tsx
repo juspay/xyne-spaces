@@ -478,7 +478,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           {onTriggerWorkflow && (
             <button
               onClick={onTriggerWorkflow}
-              className='hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border hover:bg-muted hover:border-border transition-colors text-xs text-foreground'
+              className='hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-2xl border border-border hover:bg-muted hover:border-border transition-colors text-xs text-foreground'
               title='Rerun Workflow'
               data-track-category='Workflows'
               data-track-name='TriggerWorkflow'
@@ -492,7 +492,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
             <button
               onClick={handleCancelWorkflow}
               disabled={isCanceling || !executionId}
-              className='hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20 hover:border-red-500/30 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed'
+              className='hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-2xl border border-red-500/20 bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20 hover:border-red-500/30 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed'
               title='Cancel Workflow'
               data-track-category='Workflows'
               data-track-name='CancelWorkflow'
@@ -504,7 +504,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           )}
           {(onOpenWorkflowGraph || onGraphViewToggle) && (
             <button
-              className={`hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border transition-colors text-xs ${isGraphViewOpen ? 'bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-400 hover:bg-blue-500/20' : 'border-border hover:bg-muted hover:border-border text-foreground'}`}
+              className={`hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-2xl border transition-colors text-xs ${isGraphViewOpen ? 'bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-400 hover:bg-blue-500/20' : 'border-border hover:bg-muted hover:border-border text-foreground'}`}
               title={isGraphViewOpen ? 'Hide Workflow Graph' : 'Show Workflow Graph'}
               onClick={onGraphViewToggle || onOpenWorkflowGraph}
               data-track-category='Workflows'
@@ -523,7 +523,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
               <button
                 data-jenkins-trigger
                 onClick={() => setShowJenkinsPanel(!showJenkinsPanel)}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border transition-colors text-xs ${
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-2xl border transition-colors text-xs ${
                   showJenkinsPanel
                     ? 'border-orange-500/30 bg-orange-500/20 text-orange-700 dark:text-orange-400'
                     : 'border-orange-500/20 bg-orange-500/10 text-orange-700 dark:text-orange-400 hover:bg-orange-500/20 hover:border-orange-500/30'
@@ -555,7 +555,7 @@ export const WorkflowHeader: React.FC<WorkflowHeaderProps> = ({
           )}
           <div className='relative' ref={menuRef}>
             <button
-              className='p-1.5 rounded-md hover:bg-muted transition-colors'
+              className='p-1.5 rounded-2xl hover:bg-muted transition-colors'
               onClick={() => setShowMenu(!showMenu)}
               title='More'
               data-track-category='Workflows'

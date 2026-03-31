@@ -815,9 +815,21 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
     }
   };
 
-  // Check if we should show the "Go to Automatic" button
+  // Check if we should auto-continue (previously showed "Go to Automatic" button)
   const showGoToAutomaticButton =
     executionMode === 'MANUAL' && executionStatus === 'WAIT_FOR_EVENT';
+
+  // Auto-continue: when workflow enters MANUAL + WAIT_FOR_EVENT, automatically resume
+  const autoContinueTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (showGoToAutomaticButton && !isSettingMode && !autoContinueTriggeredRef.current) {
+      autoContinueTriggeredRef.current = true;
+      void handleGoToAutomatic();
+    }
+    if (!showGoToAutomaticButton) {
+      autoContinueTriggeredRef.current = false;
+    }
+  }, [showGoToAutomaticButton, isSettingMode]);
 
   return (
     <div className='h-full flex flex-col bg-background overflow-hidden min-w-0'>
@@ -1767,146 +1779,143 @@ export const WorkflowChatPanel: React.FC<WorkflowChatPanelProps> = ({
                 </>
               </div>
               <div className='flex-shrink-0 bg-white border-t border-gray-100 p-3'>
-                {/* Show "Go to Automatic" button when in manual mode and PAUSED */}
-                {showGoToAutomaticButton && (
+                {/* Auto-continuing indicator shown while resuming */}
+                {showGoToAutomaticButton && isSettingMode && (
                   <div className='mb-3 flex justify-end'>
-                    <button
-                      onClick={() => void handleGoToAutomatic()}
-                      disabled={isSettingMode}
-                      className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50'
-                      data-track-category='Workflows'
-                      data-track-name='GoToAutomatic'
-                      data-track-metadata={JSON.stringify({ executionId })}
-                    >
-                      {isSettingMode ? (
-                        <Loader2 size={14} className='animate-spin' />
-                      ) : (
-                        <Zap size={14} />
-                      )}
-                      Continue
-                    </button>
-                  </div>
-                )}
-                {/* Show input box for agent steps - always visible and enabled */}
-                {isAgentInputStep ? (
-                  // Agent step - always show input box, allow sending even when running
-                  <div className='relative rounded-lg border bg-gray-50 border-gray-200 focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100'>
-                    <textarea
-                      value={continuationMessage}
-                      onChange={e => setContinuationMessage(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          void handleSendMessage();
-                        }
-                      }}
-                      placeholder={
-                        currentNode?.status === 'completed'
-                          ? 'Type your query to rerun...'
-                          : currentNode?.status === 'failed'
-                            ? 'Type your query to continue...'
-                            : `Type your message to ${formatStepName(currentNode?.stepName || '')}...`
-                      }
-                      disabled={isContinuing}
-                      className='w-full px-3 py-2.5 text-sm bg-transparent resize-none focus:outline-none disabled:opacity-50'
-                      rows={2}
-                      data-track-category='Workflows'
-                      data-track-name='WorkflowContinuationInput'
-                      data-track-metadata={JSON.stringify({
-                        executionId,
-                        stepName: currentNode?.stepName,
-                      })}
-                    />
-                    <div className='flex items-center justify-end px-2 py-1.5 border-t border-gray-100'>
-                      {currentNode?.status === 'running' && (
-                        <div className='flex items-center gap-2 mr-auto text-sm text-gray-500'>
-                          <Loader2 size={14} className='text-blue-500 animate-spin' />
-                          <span>Running...</span>
-                        </div>
-                      )}
-                      <button
-                        onClick={() => void handleSendMessage()}
-                        disabled={isContinuing || !continuationMessage.trim()}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-sm font-medium ${
-                          continuationMessage.trim() && !isContinuing
-                            ? 'bg-blue-500 text-white hover:bg-blue-600'
-                            : 'bg-border text-muted-foreground cursor-not-allowed'
-                        }`}
-                        data-track-category='Workflows'
-                        data-track-name='SendContinuationMessage'
-                        data-track-metadata={JSON.stringify({ executionId })}
-                      >
-                        {isContinuing ? (
-                          <Loader2 size={14} className='animate-spin' />
-                        ) : (
-                          <>
-                            <Send size={14} />
-                            Send
-                          </>
-                        )}
-                      </button>
+                    <div className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600'>
+                      <Loader2 size={14} className='animate-spin' />
+                      Continuing automatically...
                     </div>
                   </div>
-                ) : currentNode ? (
-                  <div className='flex items-center justify-end py-2'>
-                    <button
-                      onClick={() => {
-                        if (!executionId || !currentNode) return;
-                        const stepId = currentNode.stepIds[0];
-                        if (!stepId) return;
-                        let stepExecutionId = executionId;
-                        if (combinedStepsData?.workflows?.length) {
-                          for (const workflow of combinedStepsData.workflows) {
-                            for (const step of workflow.steps) {
-                              if (step.id === stepId && step.workflowExecutionId) {
-                                stepExecutionId = step.workflowExecutionId;
-                                break;
+                )}
+                {/* Bottom controls: only show for running step while workflow is active, or for all steps once terminal */}
+                {['SUCCESS', 'FAILURE', 'CANCELLED'].includes(executionStatus || '') ||
+                currentNode?.status === 'running' ? (
+                  <>
+                    {/* Show input box for agent steps */}
+                    {isAgentInputStep ? (
+                      <div className='relative rounded-lg border bg-gray-50 border-gray-200 focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100'>
+                        <textarea
+                          value={continuationMessage}
+                          onChange={e => setContinuationMessage(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              void handleSendMessage();
+                            }
+                          }}
+                          placeholder={
+                            currentNode?.status === 'completed'
+                              ? 'Type your query to rerun...'
+                              : currentNode?.status === 'failed'
+                                ? 'Type your query to continue...'
+                                : `Type your message to ${formatStepName(currentNode?.stepName || '')}...`
+                          }
+                          disabled={isContinuing}
+                          className='w-full px-3 py-2.5 text-sm bg-transparent resize-none focus:outline-none disabled:opacity-50'
+                          rows={2}
+                          data-track-category='Workflows'
+                          data-track-name='WorkflowContinuationInput'
+                          data-track-metadata={JSON.stringify({
+                            executionId,
+                            stepName: currentNode?.stepName,
+                          })}
+                        />
+                        <div className='flex items-center justify-end px-2 py-1.5 border-t border-gray-100'>
+                          {currentNode?.status === 'running' && (
+                            <div className='flex items-center gap-2 mr-auto text-sm text-gray-500'>
+                              <Loader2 size={14} className='text-blue-500 animate-spin' />
+                              <span>Running...</span>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => void handleSendMessage()}
+                            disabled={isContinuing || !continuationMessage.trim()}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-sm font-medium ${
+                              continuationMessage.trim() && !isContinuing
+                                ? 'bg-blue-500 text-white hover:bg-blue-600'
+                                : 'bg-border text-muted-foreground cursor-not-allowed'
+                            }`}
+                            data-track-category='Workflows'
+                            data-track-name='SendContinuationMessage'
+                            data-track-metadata={JSON.stringify({ executionId })}
+                          >
+                            {isContinuing ? (
+                              <Loader2 size={14} className='animate-spin' />
+                            ) : (
+                              <>
+                                <Send size={14} />
+                                Send
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    ) : currentNode ? (
+                      <div className='flex items-center justify-end py-2'>
+                        <button
+                          onClick={() => {
+                            if (!executionId || !currentNode) return;
+                            const stepId = currentNode.stepIds[0];
+                            if (!stepId) return;
+                            let stepExecutionId = executionId;
+                            if (combinedStepsData?.workflows?.length) {
+                              for (const workflow of combinedStepsData.workflows) {
+                                for (const step of workflow.steps) {
+                                  if (step.id === stepId && step.workflowExecutionId) {
+                                    stepExecutionId = step.workflowExecutionId;
+                                    break;
+                                  }
+                                }
                               }
                             }
-                          }
-                        }
-                        void restoreExecutionAsync({ executionId: stepExecutionId, stepId }).then(
-                          result => {
-                            toast.success('Rerun started', {
-                              description: 'Execution restarted from this step',
-                              duration: 3000,
-                            });
-                            if (result.rerunExecutionId && onExecutionChange) {
-                              onExecutionChange(result.rerunExecutionId);
-                            }
-                          },
-                          (error: unknown) => {
-                            toast.error('Rerun failed', {
-                              description:
-                                error instanceof Error ? error.message : 'Failed to rerun step',
-                              duration: 4000,
-                            });
-                          },
-                        );
-                      }}
-                      disabled={isRestoring || !executionId}
-                      className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition-colors disabled:opacity-50'
-                      data-track-category='Workflows'
-                      data-track-name='RerunDeterministicStep'
-                      data-track-metadata={JSON.stringify({
-                        executionId,
-                        stepName: currentNode?.stepName,
-                      })}
-                    >
-                      {isRestoring ? (
-                        <Loader2 size={14} className='animate-spin' />
-                      ) : (
-                        <RotateCcw size={14} />
-                      )}
-                      Rerun from here
-                    </button>
-                  </div>
-                ) : (
-                  <div className='flex items-center justify-center gap-2 py-3 px-4 bg-gray-50 rounded-lg border border-gray-200'>
-                    <Circle size={16} className='text-gray-300' />
-                    <span className='text-sm text-gray-500'>No step selected</span>
-                  </div>
-                )}
+                            void restoreExecutionAsync({
+                              executionId: stepExecutionId,
+                              stepId,
+                            }).then(
+                              result => {
+                                toast.success('Rerun started', {
+                                  description: 'Execution restarted from this step',
+                                  duration: 3000,
+                                });
+                                if (result.rerunExecutionId && onExecutionChange) {
+                                  onExecutionChange(result.rerunExecutionId);
+                                }
+                              },
+                              (error: unknown) => {
+                                toast.error('Rerun failed', {
+                                  description:
+                                    error instanceof Error ? error.message : 'Failed to rerun step',
+                                  duration: 4000,
+                                });
+                              },
+                            );
+                          }}
+                          disabled={isRestoring || !executionId}
+                          className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-sky-700 bg-sky-50 border border-sky-200 rounded-lg hover:bg-sky-100 transition-colors disabled:opacity-50'
+                          data-track-category='Workflows'
+                          data-track-name='RerunDeterministicStep'
+                          data-track-metadata={JSON.stringify({
+                            executionId,
+                            stepName: currentNode?.stepName,
+                          })}
+                        >
+                          {isRestoring ? (
+                            <Loader2 size={14} className='animate-spin' />
+                          ) : (
+                            <RotateCcw size={14} />
+                          )}
+                          Rerun from here
+                        </button>
+                      </div>
+                    ) : (
+                      <div className='flex items-center justify-center gap-2 py-3 px-4 bg-gray-50 rounded-lg border border-gray-200'>
+                        <Circle size={16} className='text-gray-300' />
+                        <span className='text-sm text-gray-500'>No step selected</span>
+                      </div>
+                    )}
+                  </>
+                ) : null}
               </div>
             </>
           )}
