@@ -74,7 +74,7 @@ export class EventPoller {
 
   private async tryPromote(execution: any): Promise<void> {
     // Try to acquire lock
-    const lockAcquired = await this.lockService.tryAcquireLock(execution.id, this.workerId)
+    const lockAcquired = await this.lockService.setLock(execution.id, this.workerId)
 
     if (!lockAcquired) {
       return
@@ -103,7 +103,7 @@ export class EventPoller {
     } catch (error) {
       logger.error(`Failed to promote execution ${execution.id}:`, error)
     } finally {
-      await this.lockService.releaseLock(execution.id, this.workerId)
+      await this.lockService.releaseLock(execution.id)
     }
   }
 

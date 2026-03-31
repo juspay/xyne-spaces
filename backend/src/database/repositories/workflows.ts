@@ -23,6 +23,34 @@ import {
   WorkflowExecutionWithState,
 } from './workflowExecutionStateUtils';
 
+function buildClaimQuery(workflowType?: string, tags?: string[]): string {
+  const tagFilter = tags && tags.length > 0
+    ? `AND "tag" IN (${tags.map(t => `'${t.replace(/'/g, "''")}'`).join(', ')})`
+    : ''
+
+  const typeFilter = workflowType
+    ? `AND "workflowType" = '${workflowType.replace(/'/g, "''")}'`
+    : ''
+
+  return `
+    WITH claimed AS (
+      SELECT "id"
+      FROM "workflow_executions"
+      WHERE "status" = 'PENDING'
+      ${tagFilter}
+      ${typeFilter}
+      ORDER BY "createdAt" ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE "workflow_executions"
+    SET "status" = 'RUNNING', "updatedAt" = NOW()
+    FROM claimed
+    WHERE "workflow_executions"."id" = claimed."id"
+    RETURNING "workflow_executions"."id"
+  `
+}
+
 export class TicketRepository extends BaseRepository<Ticket, CreateTicketInput, UpdateTicketInput> {
   constructor() {
     super('ticket');
@@ -312,6 +340,36 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
       },
     });
     return stitchExecutionStateMany(executions);
+  }
+
+  async claimNextPendingExecution(workflowType?: string, tags?: string[]): Promise<WorkflowExecutionWithState | null> {
+    const claimed = await this.db.$queryRawUnsafe<Array<{ id: string }>>(
+      buildClaimQuery(workflowType, tags)
+    )
+
+    if (claimed.length === 0) return null
+
+    const execution = await this.db.workflowExecution.findUnique({
+      where: { id: claimed[0].id },
+    })
+
+    return stitchExecutionState(execution)
+  }
+
+  async findRunningExecutionIds(): Promise<string[]> {
+    const executions = await this.db.workflowExecution.findMany({
+      where: { status: 'RUNNING' },
+      select: { id: true },
+    })
+    return executions.map(e => e.id)
+  }
+
+  async resetExecutionsToPending(ids: string[]): Promise<void> {
+    if (ids.length === 0) return
+    await this.db.workflowExecution.updateMany({
+      where: { id: { in: ids }, status: 'RUNNING' },
+      data: { status: 'PENDING' },
+    })
   }
 
   async getCreatedBy(executionId: string): Promise<string | null> {

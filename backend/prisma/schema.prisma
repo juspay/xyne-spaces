@@ -590,6 +590,7 @@ model WorkflowExecution {
   parentWorkflowExecution WorkflowExecution?     @relation("WorkflowExecutionParent", fields: [parentWorkflowExecutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   childWorkflowExecutions WorkflowExecution[]    @relation("WorkflowExecutionParent")
   workflowSteps           WorkflowStep[]
+  // @deprecated - lock table replaced by Redis-based expiry (workflow:lock:{id})
   workflowExecutionLock   WorkflowExecutionLock?
   externalStepResponses   ExternalStepResponse[]
   pullRequests            PullRequests[]
@@ -611,6 +612,9 @@ model WorkflowExecutionState {
   @@schema("workflow")
 }
 
+/// @deprecated - No longer used. Locking is now handled via Redis keys (workflow:lock:{executionId}).
+/// Workflow poller uses FOR UPDATE SKIP LOCKED on workflow_executions to claim rows atomically.
+/// This table is retained for reference and will be dropped in a future migration.
 model WorkflowExecutionLock {
   id                  String   @id @default(cuid())
   workflowExecutionId String   @unique

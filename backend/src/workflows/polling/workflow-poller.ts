@@ -20,9 +20,7 @@ import { notificationHooks } from '@/hooks/notificationHooks'
 import { cleanupRepository } from '@framework'
 import { generateConsolidatedKnowledgeLearnings } from '../utils/knowledge-generator'
 import type { WorkflowStorage } from '../workflow-storage'
-import { db } from '@/database/client'
 
-const RECOVERY_INTERVAL_MS = 10 * 60 * 1000 // 10 minutes
 
 interface PollingLoop {
   index: number
@@ -61,7 +59,7 @@ export class WorkflowPoller {
       this.scheduleNextPoll(loop, i * staggerTime)
     })
 
-    this.scheduleRecovery()
+
   }
 
   async stop(): Promise<void> {
@@ -90,8 +88,7 @@ export class WorkflowPoller {
           await workflowStatusSyncService.updateWorkflowExecution(executionId, {
             status: WorkflowExecutionStatus.PENDING
           })
-
-          await this.lockService.releaseLock(executionId, this.workerId)
+          await this.lockService.releaseLock(executionId)
           logger.info(`Reset workflow execution ${executionId} to PENDING`)
         } catch (error) {
           logger.error(`Failed to reset workflow execution ${executionId} to PENDING:`, error)
@@ -104,49 +101,6 @@ export class WorkflowPoller {
     logger.info('⏹️ Workflow poller stopped')
   }
 
-  private scheduleRecovery(): void {
-    if (!this.isRunning) return
-
-    this.recoveryTimer = setTimeout(async () => {
-      try {
-        await this.claimAndRecoverStaleExecutions()
-      } catch (error) {
-        logger.warn('[RECOVERY] Error during stale execution recovery:', error)
-      } finally {
-        this.scheduleRecovery()
-      }
-    }, RECOVERY_INTERVAL_MS)
-  }
-
-  private async claimAndRecoverStaleExecutions(): Promise<void> {
-    const recovered = await db.$queryRaw<Array<{ id: string }>>`
-      WITH stale AS (
-        SELECT we."id"
-        FROM "workflow_executions" we
-        LEFT JOIN "workflow"."workflow_execution_locks" wel
-          ON wel."workflowExecutionId" = we."id"
-        WHERE we."status" = ${WorkflowExecutionStatus.RUNNING}
-          AND (wel."id" IS NULL OR wel."expiry" <= NOW())
-        FOR UPDATE OF we SKIP LOCKED
-      ),
-      delete_locks AS (
-        DELETE FROM "workflow"."workflow_execution_locks"
-        WHERE "workflowExecutionId" IN (SELECT id FROM stale)
-      )
-      UPDATE "workflow_executions" we
-      SET "status" = ${WorkflowExecutionStatus.PENDING},
-          "updatedAt" = NOW()
-      FROM stale
-      WHERE we."id" = stale."id"
-      RETURNING we."id"
-    `
-
-    if (recovered.length > 0) {
-      logger.info(
-        `[RECOVERY] Reset ${recovered.length} stale RUNNING execution(s) to PENDING: [${recovered.map(r => r.id).join(', ')}]`
-      )
-    }
-  }
 
   private scheduleNextPoll(loop: PollingLoop, delay: number = this.currentInterval): void {
     if (!this.isRunning) return
@@ -166,27 +120,23 @@ export class WorkflowPoller {
     if (!this.isRunning) return false
 
     const allowedWorkflowType = process.env.WORKFLOW_TYPE
-    const pendingExecutions: WorkflowExecutionWithState[] = await repositories.workflowExecutions.findByStatus('PENDING', allowedWorkflowType, 1, ['root', 'rerun'])
+    const execution = await repositories.workflowExecutions.claimNextPendingExecution(
+      allowedWorkflowType,
+      ['root', 'rerun']
+    )
 
-    if (pendingExecutions.length === 0) {
+    if (!execution) {
       this.currentInterval = this.config.maxInterval
       return false
     }
 
     this.currentInterval = this.config.minInterval
-
-    // Execute the single workflow
-    await this.tryProcessExecution(loop, pendingExecutions[0])
+    await this.processExecution(loop, execution)
     return true
   }
 
-  private async tryProcessExecution(loop: PollingLoop, execution: WorkflowExecutionWithState): Promise<void> {
-    // Try to acquire lock
-    const lockAcquired = await this.lockService.tryAcquireLock(execution.id, this.workerId)
-
-    if (!lockAcquired) {
-      return
-    }
+  private async processExecution(loop: PollingLoop, execution: WorkflowExecutionWithState): Promise<void> {
+    await this.lockService.setLock(execution.id, this.workerId)
     loop.currentExecutionId = execution.id
 
     try {
@@ -195,7 +145,7 @@ export class WorkflowPoller {
       await this.handleWorkflowError(execution, error as Error)
     } finally {
       loop.currentExecutionId = undefined
-      await this.lockService.releaseLock(execution.id, this.workerId)
+      await this.lockService.releaseLock(execution.id)
     }
   }
 
