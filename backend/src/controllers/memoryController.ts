@@ -5,6 +5,7 @@ import { VespaDocType, VespaMemoryDocument } from '@/vespa/src/types';
 import { DatabaseClient } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { buildSessionRecordingKey, SESSION_RECORDING_KEYS_SET } from '@/utils/sessionRecordingKeys';
+import { sessionHistoryService } from '@/services/sessionHistory/sessionHistoryService';
 
 export interface SessionTurnPayload {
   sessionId: string;
@@ -403,6 +404,51 @@ export class MemoryController {
       res.status(500).json({
         success: false,
         error: 'Failed to buffer messages',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
+  /**
+   * GET /api/memory/sessionHistory
+   * Returns the normalized session history for a given sessionId and agent.
+   */
+  getSessionHistory = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const { sessionId } = req.query;
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        res.status(400).json({ success: false, error: 'sessionId is required' });
+        return;
+      }
+
+      const prisma = DatabaseClient.getInstance();
+      const record = await (prisma as any).sessionRecordingFile.findUnique({
+        where:  { sessionId },
+        select: { url: true },
+      });
+
+      if (!record?.url) {
+        res.status(404).json({ success: false, error: `No recording found for sessionId=${sessionId}` });
+        return;
+      }
+
+      const history = await sessionHistoryService.extractSessionHistory(record.url);
+
+      res.status(200).json({ success: true, sessionId, data: history });
+    } catch (error) {
+      logger.error('Error fetching session history', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch session history',
         message: error instanceof Error ? error.message : 'Unknown error',
       });
     }

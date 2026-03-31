@@ -193,9 +193,38 @@ function transformMemoryHits(
   });
 }
 
-/**
- * Search memory documents in Vespa
- */
+async function attachPullRequestsToDocuments(
+  documents: VespaMemoryDocument[],
+  ticketId: string,
+): Promise<void> {
+  try {
+    const prisma = DatabaseClient.getInstance();
+    const pullRequests = await prisma.pullRequests.findMany({
+      where: { ticketId },
+      select: {
+        prId: true,
+        repoName: true,
+        sourceBranchName: true,
+        destinationBranchName: true,
+        prUrl: true,
+        status: true,
+      },
+    });
+    if (pullRequests.length === 0) return;
+    for (const doc of documents) {
+      if (doc.ticketId === ticketId) {
+        doc.pullRequests = pullRequests;
+      }
+    }
+  } catch (prError) {
+    logger.error('Error fetching pull requests for ticketId', {
+      ticketId,
+      error: prError instanceof Error ? prError.message : 'Unknown error',
+    });
+  }
+}
+
+
 export async function searchMemory(
   request: MemorySearchRequest,
   userId: string,
@@ -254,6 +283,10 @@ export async function searchMemory(
   const totalCount = response.root?.fields?.totalCount || 0;
 
   const documents = transformMemoryHits(hits, scope);
+
+  if (ticketId) {
+    await attachPullRequestsToDocuments(documents, ticketId);
+  }
 
   return {
     documents,
@@ -330,50 +363,24 @@ export async function updateMemory(
     const oldDoc = await getMemoryById(docId);
     if (!oldDoc) throw new Error(`Document ${docId} not found`);
 
-    // If only reviewStatus is being updated, do an in-place update
-    const fieldKeys = Object.keys(fields);
-    if (
-      fieldKeys.length === 1 &&
-      fieldKeys[0] === 'reviewStatus' &&
-      typeof fields.reviewStatus === 'string'
-    ) {
-      // In-place update (patch)
-      await vespaClient.updateDocument(
-        { reviewStatus: fields.reviewStatus },
-        {
-          namespace: NAMESPACE,
-          cluster: CLUSTER,
-          schema: MEMORY_SCHEMA as VespaSchema,
-          docId,
-        }
-      );
-      logger.info(`[Memory] In-place updated reviewStatus for document ${docId}`);
-      return getMemoryById(docId);
-    }
-
-    // Otherwise, create a new versioned document
-    // Use timestamp to ensure unique new docId
-    const newDocId = `${oldDoc.docId}-${Date.now()}`;
-
-    // If rawContent is being updated, auto-derive chatSummary
+    // If rawContent is being updated, auto-derive chatSummary from it
     if (fields.rawContent) {
-      const cleanedContent = stripMarkdown(fields.rawContent);
-      fields.chatSummary = chunkContent(cleanedContent);
+      fields.chatSummary = chunkContent(stripMarkdown(fields.rawContent));
     }
 
-    const newDoc: VespaMemoryDocument = {
-      ...oldDoc,
-      ...fields,
-      docId: newDocId,
-      parentRef: oldDoc.docId,
-      updatedAt: Date.now(),
-      createdAt: oldDoc.createdAt,
-    };
+    // In-place update for all provided fields
+    await vespaClient.updateDocument(
+      fields as Record<string, unknown>,
+      {
+        namespace: NAMESPACE,
+        cluster: CLUSTER,
+        schema: MEMORY_SCHEMA as VespaSchema,
+        docId,
+      }
+    );
 
-    await insertMemory(newDoc);
-
-    logger.info(`[Memory] Created new version ${newDocId} for document ${docId}`);
-    return getMemoryById(newDocId);
+    logger.info(`[Memory] In-place updated document ${docId}`, { fields: Object.keys(fields) });
+    return getMemoryById(docId);
   } catch (error) {
     logger.error(`[Memory] Error updating document ${docId}:`, error);
     throw error;

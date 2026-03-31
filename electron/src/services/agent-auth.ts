@@ -103,7 +103,7 @@ class AgentAuthService {
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Set CORS headers for localhost only
     res.setHeader('Access-Control-Allow-Origin', 'http://127.0.0.1');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
@@ -127,6 +127,10 @@ class AgentAuthService {
         await this.handleMemorySearch(req, res);
       } else if (req.method === 'POST' && url.pathname === '/memory/upload') {
         await this.handleMemoryUpload(req, res);
+      } else if (req.method === 'GET' && url.pathname === '/memory/sessionHistory') {
+        await this.handleSessionHistory(req, res, url);
+      } else if (req.method === 'PATCH' && url.pathname.startsWith('/memory/')) {
+        await this.handleMemoryUpdate(req, res, url);
       } else if (req.method === 'GET' && url.pathname === '/health') {
         this.sendJson(res, 200, { status: 'ok' });
       } else {
@@ -454,6 +458,99 @@ class AgentAuthService {
   }
 
 
+
+  /**
+   * Handle GET /memory/sessionHistory - Fetch normalized session history
+   * Query parameters:
+   * {
+   *   sessionId: string; // required
+   * }
+   */
+  private async handleSessionHistory(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const sessionId = url.searchParams.get('sessionId');
+    if (!sessionId) {
+      this.sendJson(res, 400, { error: 'sessionId query parameter is required' });
+      return;
+    }
+
+    log.info(`[AgentAuth] Session history request: sessionId=${sessionId}`);
+
+    try {
+      const cookies = await session.defaultSession.cookies.get({});
+      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+      const backendUrl = `${config.BACKEND_URL}/api/memory/sessionHistory?sessionId=${encodeURIComponent(sessionId)}`;
+      log.info(`[AgentAuth] Proxying GET memory/sessionHistory request to ${backendUrl}`);
+
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': cookieString
+        }
+      });
+
+      res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(backendResponse.data));
+    } catch (error: any) {
+      log.error('[AgentAuth] Session history request failed:', error);
+      this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
+    }
+  }
+
+  /**
+   * Handle PATCH /memory/:docId - Partial update of a memory document
+   * Payload structure (at least one field required):
+   * {
+   *   userQuery?: string;
+   *   chatSummary?: string[];
+   *   rawContent?: string;
+   *   tags?: string[];
+   *   filePointers?: string[];
+   *   commitId?: string;
+   *   reviewStatus?: 'pending' | 'verified' | 'rejected';
+   * }
+   */
+  private async handleMemoryUpdate(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const docId = url.pathname.replace('/memory/', '');
+    if (!docId) {
+      this.sendJson(res, 400, { error: 'docId is required' });
+      return;
+    }
+
+    const body = await this.parseBody(req);
+    if (!body || typeof body !== 'object') {
+      this.sendJson(res, 400, { error: 'Invalid request body' });
+      return;
+    }
+
+    log.info(`[AgentAuth] Memory update request: docId=${docId}`);
+
+    try {
+      const cookies = await session.defaultSession.cookies.get({});
+      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+      const backendUrl = `${config.BACKEND_URL}/api/memory/${encodeURIComponent(docId)}`;
+      log.info(`[AgentAuth] Proxying PATCH memory/${docId} request to ${backendUrl}`);
+
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': cookieString
+        },
+        data: body
+      });
+
+      res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(backendResponse.data));
+    } catch (error: any) {
+      log.error('[AgentAuth] Memory update request failed:', error);
+      this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
+    }
+  }
 
   // ==================== End Memory Proxy Handlers ====================
 
