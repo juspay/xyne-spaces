@@ -75,6 +75,18 @@ export default {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        action: {
+          primary: 'var(--action-primary)',
+          'primary-foreground': 'var(--action-primary-foreground)',
+        },
+        status: {
+          new: 'var(--status-new)',
+          pending: 'var(--status-pending)',
+          scheduled: 'var(--status-scheduled)',
+          success: 'var(--status-success)',
+          failure: 'var(--status-failure)',
+          paused: 'var(--status-paused)',
+        },
         sidebar: {
           DEFAULT: 'var(--sidebar)',
           'primary-foreground': 'var(--sidebar-primary-foreground)',
@@ -83,7 +95,7 @@ export default {
           'item-active': 'var(--sidebar-item-active)',
           'badge-accent': 'var(--sidebar-badge-accent)',
           'badge-accent-foreground': 'var(--sidebar-badge-accent-foreground)',
-          'divider': 'var(--sidebar-divider)',
+          divider: 'var(--sidebar-divider)',
         },
         appSidebar: {
           active: 'var(--app-sidebar-active)',
@@ -128,13 +140,13 @@ export default {
           },
         },
         fadeUp: {
-      '0%': { opacity: '0', transform: 'translateY(24px)' },
-      '100%': { opacity: '1', transform: 'translateY(0)' },
-    },
-    fadeLeft: {
-      '0%': { opacity: '0', transform: 'translateX(32px)' },
-      '100%': { opacity: '1', transform: 'translateX(0)' },
-    },
+          '0%': { opacity: '0', transform: 'translateY(24px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        fadeLeft: {
+          '0%': { opacity: '0', transform: 'translateX(32px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
         'slide-in-up': {
           from: {
             opacity: '0',
@@ -166,14 +178,14 @@ export default {
           },
         },
         shine: {
-          "0%": {
-            "background-position": "0% 0%",
+          '0%': {
+            'background-position': '0% 0%',
           },
-          "50%": {
-            "background-position": "100% 100%",
+          '50%': {
+            'background-position': '100% 100%',
           },
-          "to": {
-            "background-position": "0% 0%",
+          to: {
+            'background-position': '0% 0%',
           },
         },
       },
@@ -183,7 +195,7 @@ export default {
         'slide-in-up': 'slide-in-up 0.2s ease-in forwards',
         'slide-in-from-right': 'slide-in-from-right 0.3s ease-out forwards',
         'slide-in-from-left': 'slide-in-from-left 0.3s ease-out forwards',
-        shine: "shine var(--duration) infinite linear",
+        shine: 'shine var(--duration) infinite linear',
       },
     },
   },

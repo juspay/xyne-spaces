@@ -42,7 +42,7 @@ import { Button } from '../../components/ui/Button/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
-import { TicketListItem } from '../../components/Tickets/TicketListItem/TicketListItem';
+import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import {
   DndContext,
@@ -469,30 +469,20 @@ const SupportScreen = (): ReactElement => {
                     </DragOverlay>
                   </DndContext>
                 ) : (
-                  (displayedTickets || []).map(ticket => {
-                    return (
-                      <TicketListItem
-                        key={ticket.id}
-                        ticket={ticket}
-                        showExtraFields={true}
-                        onClick={() => {
-                          void navigate(`/support/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              title: ticket.title,
-                              ticketId: ticket.id,
-                            },
-                          });
-                        }}
-                        data-track-category='Support'
-                        data-track-name='SelectTicket'
-                        data-track-metadata={JSON.stringify({
+                  <TicketListView
+                    tickets={displayedTickets || []}
+                    showExtraFields={true}
+                    activeTicketId={ticketId}
+                    onTicketClick={ticket => {
+                      void navigate(`/support/${ticket.xyneId}`, {
+                        state: {
+                          conversationId: (ticket as unknown as SupportTicket).conversationId,
+                          title: ticket.title,
                           ticketId: ticket.id,
-                          xyneId: ticket.xyneId,
-                        })}
-                      />
-                    );
-                  })
+                        },
+                      });
+                    }}
+                  />
                 )}
               </div>
             </div>

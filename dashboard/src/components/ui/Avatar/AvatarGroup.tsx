@@ -57,6 +57,7 @@ function AvatarCountBadge({
   pixelSize: number;
 }): ReactElement {
   const textSizeClasses: Record<AvatarSize, string> = {
+    xs: 'text-[8px]',
     sm: 'text-xs',
     rg: 'text-xs',
     md: 'text-sm',
@@ -108,6 +109,7 @@ const AvatarGroup = ({
 
   // Map size to pixel value for mask calculation
   const sizeMap: Record<AvatarSize, number> = {
+    xs: 16, // size-4 = 1rem = 16px
     sm: 20, // size-5 = 1.25rem = 20px
     rg: 30, // w-[30px] h-[30px] = 30px
     md: 32, // size-8 = 2rem = 32px

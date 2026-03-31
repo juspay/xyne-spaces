@@ -1,16 +1,20 @@
-import React from 'react';
-import {
-  MultiSelect,
-  TextInput,
-  DateRangePicker,
-  DateFormatPreset,
-  DateRange,
-} from '@juspay/blend-design-system';
-import { Search } from 'lucide-react';
-import { SearchUser } from '../ui/SearchUser/SearchUser';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { Search, LayoutList, Table2, X } from 'lucide-react';
+import * as Popover from '@radix-ui/react-popover';
+import { DateRangeFilter } from '../ui/DateRangeFilter';
+import { Button } from '../ui/Button/Button';
+import { SegmentedToggle, SegmentedToggleOption } from '../ui/SegmentedToggle';
+import FilterMenu from './FilterMenu';
+import ActiveFiltersBar from './ActiveFiltersBar';
 import { User } from '@xyne/shared';
-import { useWorkflowTypes } from '../../hooks/useWorkflowTypes';
+import { cn } from '../../utils/classNames';
 
+export interface DateRange {
+  startDate: Date;
+  endDate: Date;
+}
+
+export type ViewMode = 'table' | 'list';
 export interface TicketFilters {
   searchQuery: string;
   statusFilter: string[];
@@ -24,185 +28,284 @@ export interface TicketFilters {
 interface TicketHeaderProps {
   filters: TicketFilters;
   onFiltersChange: (filters: TicketFilters) => void;
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
 }
 
-const TicketHeader: React.FC<TicketHeaderProps> = ({ filters, onFiltersChange }) => {
-  const { workflowTypes, isLoading, error } = useWorkflowTypes();
+/* ── Status tab presets ── */
+type StatusTabKey = 'all' | 'running' | 'pending' | 'paused' | 'completed' | 'failed';
 
-  const handleMultiSelectChange =
-    (filterKey: keyof TicketFilters) =>
-    (value: string): void => {
-      const currentValues = filters[filterKey] as string[];
-      if (value === '') {
-        onFiltersChange({ ...filters, [filterKey]: [] });
-      } else {
-        const newValues = currentValues.includes(value)
-          ? currentValues.filter(v => v !== value)
-          : [...currentValues, value];
-        onFiltersChange({ ...filters, [filterKey]: newValues });
-      }
-    };
+const STATUS_TAB_MAP: Record<StatusTabKey, string[]> = {
+  all: [],
+  running: ['RUNNING'],
+  pending: ['PENDING', 'WAITING'],
+  paused: ['PAUSED'],
+  completed: ['COMPLETED', 'SUCCESS'],
+  failed: ['FAILED', 'FAILURE'],
+};
 
-  const hasActiveFilters = (): boolean => {
-    return (
-      filters.statusFilter.length > 0 ||
-      filters.workflowTypeFilter.length > 0 ||
-      filters.environmentFilter.length > 0 ||
-      filters.createdByFilter.length > 0 ||
-      filters.assignedToFilter.length > 0 ||
-      filters.dateRangeFilter !== null
+const STATUS_TAB_OPTIONS: SegmentedToggleOption<StatusTabKey>[] = [
+  { value: 'all', label: 'All' },
+  { value: 'running', label: 'Running' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'paused', label: 'Paused' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'failed', label: 'Failed' },
+];
+
+const arraysEqual = (a: string[], b: string[]): boolean => {
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((v, i) => v === sortedB[i]);
+};
+
+const TicketHeader: React.FC<TicketHeaderProps> = ({
+  filters,
+  onFiltersChange,
+  viewMode,
+  onViewModeChange,
+}) => {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const activeStatusTab = useMemo((): StatusTabKey => {
+    const entry = (Object.entries(STATUS_TAB_MAP) as [StatusTabKey, string[]][]).find(
+      ([, statuses]) => arraysEqual(statuses, filters.statusFilter),
     );
-  };
+    return entry?.[0] ?? 'all';
+  }, [filters.statusFilter]);
 
-  const clearAllFilters = (): void => {
-    onFiltersChange({
-      ...filters,
-      searchQuery: '',
-      statusFilter: [],
-      workflowTypeFilter: [],
-      environmentFilter: [],
-      createdByFilter: [],
-      assignedToFilter: [],
-      dateRangeFilter: null,
-    });
-  };
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
 
-  const clearFilters = (): void => {
-    onFiltersChange({
-      ...filters,
-      statusFilter: [],
-      workflowTypeFilter: [],
-      environmentFilter: [],
-      createdByFilter: [],
-      assignedToFilter: [],
-      dateRangeFilter: null,
-    });
-  };
+  const hasSearchQuery = filters.searchQuery.trim().length > 0;
 
-  const statusOptions = ['NEW', 'PENDING', 'SCHEDULED', 'SUCCESS', 'FAILURE', 'PAUSED'];
-  const workflowTypeOptions = workflowTypes.map(wf => ({
-    label: wf.label,
-    value: wf.id,
-  }));
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [markerStyle, setMarkerStyle] = useState<{ left: number; width: number }>({
+    left: 0,
+    width: 0,
+  });
+
+  const updateMarker = useCallback(() => {
+    if (!tabsRef.current) return;
+    const buttons = tabsRef.current.querySelectorAll<HTMLButtonElement>('[data-slot="status-tab"]');
+    const idx = STATUS_TAB_OPTIONS.findIndex(t => t.value === activeStatusTab);
+    const btn = buttons[idx];
+    if (!btn) return;
+    setMarkerStyle({ left: btn.offsetLeft, width: btn.offsetWidth });
+  }, [activeStatusTab]);
+
+  useEffect(() => {
+    updateMarker();
+  }, [updateMarker]);
+
+  useEffect(() => {
+    const el = tabsRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => updateMarker());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [updateMarker]);
+
+  const viewToggleOptions: SegmentedToggleOption<ViewMode>[] = useMemo(
+    () => [
+      { value: 'table' as ViewMode, icon: <Table2 size={14} />, title: 'Table View' },
+      { value: 'list' as ViewMode, icon: <LayoutList size={14} />, title: 'List View' },
+    ],
+    [],
+  );
 
   return (
-    <div className='space-y-6 mb-8'>
-      <div className='flex items-center justify-between'>
-        <h1 className='font-semibold text-xl leading-[32px] tracking-normal text-foreground whitespace-nowrap'>
+    <div data-id='ticket-header-container' className='flex flex-col gap-4'>
+      {/* Title */}
+      <div
+        data-id='ticket-header-title-row'
+        className='flex items-center justify-between px-6 pt-6 pb-2'
+      >
+        <h1
+          data-id='ticket-header-title'
+          className='font-semibold text-base leading-6 tracking-normal text-foreground whitespace-nowrap'
+        >
           Tickets Workflows
         </h1>
       </div>
 
-      <div className='flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4'>
-        <div className='flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto'>
-          <div className='w-[300px]'>
-            <TextInput
-              placeholder='Search for Ticket ID / Ticket Title'
-              value={filters.searchQuery}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                onFiltersChange({ ...filters, searchQuery: e.target.value })
-              }
-              leftSlot={<Search className='w-4 h-4' />}
-            />
-          </div>
-          {filters.searchQuery.trim() && (
+      {/* Filters row */}
+      <div
+        data-id='ticket-header-filters-row'
+        className='flex items-center justify-between gap-4 px-6'
+      >
+        {/* LEFT: Status tabs */}
+        <div
+          ref={tabsRef}
+          data-id='ticket-header-status-tabs'
+          className='relative inline-flex items-center gap-1'
+        >
+          {/* Sliding pill behind selected tab */}
+          <div
+            className='absolute inset-y-0 rounded-full border border-action-primary bg-action-primary/10 transition-[left,width] duration-200 ease-in-out'
+            style={{ left: markerStyle.left, width: markerStyle.width }}
+          />
+          {STATUS_TAB_OPTIONS.map(tab => (
             <button
-              onClick={clearAllFilters}
-              className='flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors whitespace-nowrap'
+              key={tab.value}
+              type='button'
+              data-slot='status-tab'
+              data-id={`ticket-header-status-tab-${tab.value}`}
               data-track-category='Tickets'
-              data-track-name='ClearAllSearch'
+              data-track-name='SelectStatusTab'
+              onClick={() =>
+                onFiltersChange({ ...filters, statusFilter: STATUS_TAB_MAP[tab.value] })
+              }
+              className={cn(
+                'relative z-10 h-7 px-2.5 text-sm font-normal whitespace-nowrap rounded-full',
+                activeStatusTab === tab.value
+                  ? 'text-action-primary font-medium'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
             >
-              <span>Clear All</span>
+              {tab.label}
             </button>
-          )}
+          ))}
         </div>
 
-        <div className='flex flex-wrap items-center gap-2 lg:gap-4 w-full lg:w-auto'>
-          {hasActiveFilters() && (
-            <button
-              onClick={clearFilters}
-              className='flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors whitespace-nowrap'
-              data-track-category='Tickets'
-              data-track-name='ClearFilters'
-            >
-              <span>Clear Filters</span>
-            </button>
-          )}
+        {/* RIGHT: Controls */}
+        <div data-id='ticket-header-controls' className='flex items-center gap-2 flex-shrink-0'>
+          {/* Search icon button — !transition-none overrides Button's transition-all to prevent theme switch lag */}
+          <Popover.Root open={searchOpen} onOpenChange={setSearchOpen}>
+            <Popover.Trigger asChild>
+              <Button
+                data-id='ticket-header-search-btn'
+                variant='outline'
+                size='iconSm'
+                className={cn(
+                  'relative size-7 rounded-full !transition-none',
+                  hasSearchQuery && 'border-action-primary',
+                )}
+                title='Search'
+              >
+                <Search className='size-3.5' />
+                {hasSearchQuery && (
+                  <span
+                    data-id='ticket-header-search-indicator'
+                    className='absolute top-0 right-0 size-2 rounded-full bg-action-primary'
+                  />
+                )}
+              </Button>
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content
+                data-id='ticket-header-search-popover'
+                side='bottom'
+                align='end'
+                sideOffset={4}
+                className='z-50 rounded-full border bg-popover text-popover-foreground shadow-md px-3 py-2 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 duration-150'
+                onOpenAutoFocus={e => {
+                  e.preventDefault();
+                  searchInputRef.current?.focus();
+                }}
+                onCloseAutoFocus={e => e.preventDefault()}
+              >
+                <div
+                  data-id='ticket-header-search-input-wrapper'
+                  className='flex items-center gap-2 w-[280px]'
+                >
+                  <Search className='size-4 text-muted-foreground flex-shrink-0' />
+                  <input
+                    data-id='ticket-header-search-input'
+                    data-track-category='Tickets'
+                    data-track-name='SearchInput'
+                    ref={searchInputRef}
+                    type='text'
+                    value={filters.searchQuery}
+                    onChange={e => onFiltersChange({ ...filters, searchQuery: e.target.value })}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') setSearchOpen(false);
+                      if (e.key === 'Escape') {
+                        setSearchOpen(false);
+                      }
+                    }}
+                    placeholder='Search Ticket ID / Title...'
+                    className='flex-1 h-7 text-sm bg-transparent outline-none placeholder:text-muted-foreground'
+                  />
+                  {hasSearchQuery && (
+                    <button
+                      type='button'
+                      data-id='ticket-header-search-clear'
+                      data-track-category='Tickets'
+                      data-track-name='ClearSearch'
+                      onClick={() => onFiltersChange({ ...filters, searchQuery: '' })}
+                      className='p-0.5 rounded-sm text-muted-foreground hover:text-foreground'
+                    >
+                      <X className='size-3.5' />
+                    </button>
+                  )}
+                </div>
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
 
-          <MultiSelect
-            label=''
-            items={[
-              {
-                items: statusOptions.map(option => ({
-                  label: option,
-                  value: option,
-                })),
-              },
-            ]}
-            selectedValues={filters.statusFilter}
-            onChange={handleMultiSelectChange('statusFilter')}
-            placeholder='Status'
-            enableSearch={true}
-            enableSelectAll={true}
-          />
-
-          <MultiSelect
-            label=''
-            items={[
-              {
-                items: workflowTypeOptions,
-              },
-            ]}
-            selectedValues={filters.workflowTypeFilter}
-            onChange={handleMultiSelectChange('workflowTypeFilter')}
-            placeholder={isLoading ? 'Loading...' : error ? 'Error loading types' : 'Workflow Type'}
-            enableSearch={true}
-            enableSelectAll={true}
-            disabled={isLoading}
-          />
-
-          <div className='w-[200px]'>
-            <SearchUser
-              excludeUserIds={[]}
-              selectedUsers={filters.createdByFilter}
-              onUsersChange={users => onFiltersChange({ ...filters, createdByFilter: users })}
-              placeholder='Created By'
-              label=''
-              width='100%'
-              hintText=''
-            />
-          </div>
-
-          <div className='w-[200px]'>
-            <SearchUser
-              excludeUserIds={[]}
-              selectedUsers={filters.assignedToFilter}
-              onUsersChange={users => onFiltersChange({ ...filters, assignedToFilter: users })}
-              placeholder='Assigned To'
-              label=''
-              width='100%'
-              hintText=''
-            />
-          </div>
-
-          <DateRangePicker
-            showDateTimePicker={false}
-            value={
-              filters.dateRangeFilter || {
-                startDate: new Date(),
-                endDate: new Date(),
-              }
+          {/* Filter menu */}
+          <FilterMenu
+            assignedToUsers={filters.assignedToFilter}
+            createdByUsers={filters.createdByFilter}
+            workflowTypeFilter={filters.workflowTypeFilter}
+            onAssignedToChange={users => onFiltersChange({ ...filters, assignedToFilter: users })}
+            onCreatedByChange={users => onFiltersChange({ ...filters, createdByFilter: users })}
+            onWorkflowTypeChange={values =>
+              onFiltersChange({ ...filters, workflowTypeFilter: values })
             }
-            onChange={(range: DateRange) => onFiltersChange({ ...filters, dateRangeFilter: range })}
-            formatConfig={{
-              preset: DateFormatPreset.SHORT_RANGE,
-              includeTime: false,
-              includeYear: true,
-            }}
-            showPresets={true}
+          />
+
+          {/* Date range */}
+          <DateRangeFilter
+            dateRange={filters.dateRangeFilter}
+            onChange={range => onFiltersChange({ ...filters, dateRangeFilter: range })}
+          />
+
+          {/* View toggle */}
+          <SegmentedToggle
+            options={viewToggleOptions}
+            value={viewMode}
+            onChange={onViewModeChange}
           />
         </div>
       </div>
+
+      {/* Active filters bar */}
+      <ActiveFiltersBar
+        createdByUsers={filters.createdByFilter}
+        assignedToUsers={filters.assignedToFilter}
+        workflowTypeFilter={filters.workflowTypeFilter}
+        onRemoveCreatedBy={user =>
+          onFiltersChange({
+            ...filters,
+            createdByFilter: filters.createdByFilter.filter(u => u.id !== user.id),
+          })
+        }
+        onRemoveAssignedTo={user =>
+          onFiltersChange({
+            ...filters,
+            assignedToFilter: filters.assignedToFilter.filter(u => u.id !== user.id),
+          })
+        }
+        onRemoveWorkflowType={value =>
+          onFiltersChange({
+            ...filters,
+            workflowTypeFilter: filters.workflowTypeFilter.filter(v => v !== value),
+          })
+        }
+        onClearAll={() =>
+          onFiltersChange({
+            ...filters,
+            createdByFilter: [],
+            assignedToFilter: [],
+            workflowTypeFilter: [],
+          })
+        }
+      />
     </div>
   );
 };

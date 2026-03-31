@@ -1,6 +1,6 @@
 import { ReactElement, useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import TicketHeader, { TicketFilters } from '../../components/Tickets/TicketHeader';
+import TicketHeader, { TicketFilters, ViewMode } from '../../components/Tickets/TicketHeader';
 import TicketTable from '../../components/Tickets/TicketTable';
 
 import { LAST_WORKFLOW_PATH_KEY } from '../../components/Tickets/constants';
@@ -9,6 +9,14 @@ const TicketsScreen = (): ReactElement => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [shouldRedirect, setShouldRedirect] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('ticket-screen-view-mode');
+    return saved === 'list' || saved === 'table' ? saved : 'table';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('ticket-screen-view-mode', viewMode);
+  }, [viewMode]);
   const [filters, setFilters] = useState<TicketFilters>(() => {
     const saved = localStorage.getItem('ticket-screen-filters');
     if (saved) {
@@ -66,21 +74,21 @@ const TicketsScreen = (): ReactElement => {
   }, [searchParams, navigate]);
 
   if (shouldRedirect) {
-    return <div className='h-full bg-background' />;
+    return <div data-id='tickets-screen-redirect-placeholder' className='h-full bg-background' />;
   }
 
   return (
-    <div className='h-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
-      <main className='mx-auto py-6 sm:px-6 lg:px-8'>
-        <div className='px-4 py-6 sm:px-0'>
-          <div className='bg-background rounded-lg shadow'>
-            <div className='px-6 py-4'>
-              <TicketHeader filters={filters} onFiltersChange={setFilters} />
-              <TicketTable filters={filters} />
-            </div>
-          </div>
-        </div>
-      </main>
+    <div
+      data-id='tickets-screen-container'
+      className='h-full bg-background md:rounded-2xl overflow-hidden shadow-md flex flex-col gap-4'
+    >
+      <TicketHeader
+        filters={filters}
+        onFiltersChange={setFilters}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
+      <TicketTable filters={filters} viewMode={viewMode} />
     </div>
   );
 };

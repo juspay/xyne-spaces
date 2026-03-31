@@ -44,6 +44,8 @@
     --sidebar-item-active: #eff3ed;
     --sidebar-badge-accent: #57ab02;
     --sidebar-badge-accent-foreground: #ffffff;
+    --action-primary: #57ab02;
+    --action-primary-foreground: #ffffff;
     --sidebar-divider: #e5ebf0;
     --metrics-bar-color: #27699d;
     --metrics-bar-divider: rgba(0, 0, 0, 0.5);
@@ -71,6 +73,14 @@
     --stage-completed-border: 120 30% 88%;
     --stage-cancelled-bg: 0 30% 96%;
     --stage-cancelled-border: 0 30% 88%;
+
+    /* Workflow status colors - accessible on light bg */
+    --status-new: #6b7280;
+    --status-pending: #d97706;
+    --status-scheduled: #2563eb;
+    --status-success: #16a34a;
+    --status-failure: #dc2626;
+    --status-paused: #7c3aed;
   }
 
   /* Classic theme - default theme with current design */
@@ -121,6 +131,8 @@
     --sidebar-item-active: #ffffff;
     --sidebar-badge-accent: #6e7aa6;
     --sidebar-badge-accent-foreground: #ffffff;
+    --action-primary: #6e7aa6;
+    --action-primary-foreground: #ffffff;
     --sidebar-divider: #e5ebf0;
     --metrics-bar-color: #ffffff;
     --metrics-bar-divider: rgba(255, 255, 255, 0.5);
@@ -140,6 +152,14 @@
     --mention-group-color: #3d74b6;
     --link-color: #2563eb;
     --link-hover-color: #1d4ed8;
+
+    /* Workflow status colors - accessible on light bg */
+    --status-new: #6b7280;
+    --status-pending: #d97706;
+    --status-scheduled: #2563eb;
+    --status-success: #16a34a;
+    --status-failure: #dc2626;
+    --status-paused: #7c3aed;
   }
 
   /* Midnight theme - dark theme variant */
@@ -183,6 +203,8 @@
     --sidebar-item-active: #333639;
     --sidebar-badge-accent: #4a9e00;
     --sidebar-badge-accent-foreground: #ffffff;
+    --action-primary: #0073bf;
+    --action-primary-foreground: #ffffff;
     --sidebar-divider: #2b2d2e;
     --metrics-bar-color: #3b82c4;
     --metrics-bar-divider: rgba(255, 255, 255, 0.2);
@@ -210,12 +232,28 @@
     --stage-completed-border: 120 20% 25%;
     --stage-cancelled-bg: 0 20% 15%;
     --stage-cancelled-border: 0 20% 25%;
+
+    /* Workflow status colors - accessible on dark bg */
+    --status-new: #9ca3af;
+    --status-pending: #fbbf24;
+    --status-scheduled: #60a5fa;
+    --status-success: #4ade80;
+    --status-failure: #f87171;
+    --status-paused: #a78bfa;
   }
 }
 
 @layer base {
   * {
     @apply border-border;
+  }
+
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 
   html,
