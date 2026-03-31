@@ -276,7 +276,7 @@ export class WorkflowEngineImpl<
     
     if (useOpenCode) {
       logger.info(`[WORKFLOW-ENGINE] Using OpenCode executor for checkpoint ${String(id)}, useQuestioningMode=${fullConfig.useQuestioningMode}`)
-      const openCodeExecutor = new OpenCodeExecutor(this.storage, undefined, {
+      const openCodeExecutor = new OpenCodeExecutor(this.storage, {
         baseUrl: appConfig.openCode.baseUrl,
         timeout: appConfig.openCode.timeoutMs,
         autoCompact: appConfig.openCode.autoCompact

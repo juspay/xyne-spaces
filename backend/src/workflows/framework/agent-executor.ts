@@ -11,8 +11,8 @@
 
 import { WorkflowStorage, FrameworkExecutionResult } from '../workflow-storage'
 import { FullAgenticCheckpointConfig, WorkflowState, BaseWorkflowContext, GitInfo, GitDiffFile, GitDiffStats, AgenticContinuationOverride } from '../workflow-types'
-import { WorkflowPausedException, WorkflowCancelledException, WorkflowExternalWaitException } from '../exceptions/workflow-exceptions'
-import { BitbucketManager } from '@/bitbucket/apis'
+import { WorkflowPausedException, WorkflowCancelledException,WorkflowExternalWaitException } from '../exceptions/workflow-exceptions'
+import { getGitProvider } from '@/git-providers/factory'
 import { TicketRepository, WorkflowRepository } from '@/database/repositories/workflows'
 import { AgentStepRepository } from '@/database/repositories/agentSteps'
 import { PRMetricsRepository } from '@/database/repositories/pullRequestsRepository'
@@ -31,12 +31,36 @@ export function extractWorkspace(url: string): { projectName: string; repoName: 
   const lastPart = parts[parts.length - 1];
   const repoName = lastPart.replace(/\.git$/, "");
 
+
+  // GitHub format: https://github.com/owner/repo.git or git@github.com:owner/repo.git
+  // For GitHub, "owner" is analogous to "projectName" in Bitbucket
+  if (url.includes('github.com')) {
+    // HTTPS format: https://github.com/owner/repo.git
+    const httpsMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+    if (httpsMatch) {
+      return { projectName: httpsMatch[1], repoName: httpsMatch[2].replace(/\.git$/, '') };
+    }
+    
+    // SSH format: git@github.com:owner/repo.git
+    const sshMatch = url.match(/git@github\.com:([^\/]+)\/([^\/]+)/);
+    if (sshMatch) {
+      return { projectName: sshMatch[1], repoName: sshMatch[2].replace(/\.git$/, '') };
+    }
+  }
+
+  // Bitbucket Server format: /scm/PROJECT/repo
   const scmIndex = parts.indexOf('scm');
   let projectName: string;
 
   if (scmIndex !== -1) {
     projectName = parts[scmIndex + 1];
   } else {
+    // SSH format: ssh://git@bitbucket.host:7999/PROJECT/repo.git
+    // or git@bitbucket.host:PROJECT/repo.git
+    const sshMatch = url.match(/[:\/]([^\/]+)\/([^\/]+?)(?:\.git)?$/);
+    if (sshMatch) {
+      return { projectName: sshMatch[1], repoName: sshMatch[2] };
+    }
     projectName = parts[3];
   }
 
@@ -67,7 +91,7 @@ interface AgentTracker {
 }
 
 export class AgentExecutor {
-  constructor(private storage: WorkflowStorage, private bitbucketManager = new BitbucketManager(), private workflowRepo = new WorkflowRepository(), private ticketRepo = new TicketRepository()) {}
+  constructor(private storage: WorkflowStorage, private workflowRepo = new WorkflowRepository(), private ticketRepo = new TicketRepository()) {}
 
   /**
    * Execute framework agent with pause/resume support
@@ -845,19 +869,42 @@ export class AgentExecutor {
           parentState
         );
 
+        let raisedPrUrl: string | undefined;
         try {
-          const prUrl = await this.bitbucketManager.raisePr(repoUrl, parentExecutionId, baseBranch, repoBranch, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId);
-          
-          if (prUrl) {
-            logger.info(`[AGENT-EXECUTOR] PR created: ${prUrl}`);
-            if (pushResult) {
-              pushResult.pullRequestUrl = prUrl;
-            } else {
-              pushResult = { pullRequestUrl: prUrl, repoUrl };
-            }
-          }
+          raisedPrUrl = await getGitProvider(repoUrl).raisePr(repoUrl, parentExecutionId, baseBranch, repoBranch, projectName, repoName, ticketTitle, ticketDescription, xyneId, ticketId);
+          logger.info(`[AGENT-EXECUTOR] Successfully created PR: ${raisedPrUrl}`);
         } catch (error) {
           logger.error(`Failed to create PR:`, error);
+        }
+
+        // Store PR in database and set pushResult.pullRequestUrl
+        if (raisedPrUrl) {
+          const gitProvider = getGitProvider(repoUrl);
+          const prId = gitProvider.extractPRIdFromUrl(raisedPrUrl);
+          if (prId !== null) {
+            try {
+              const prRepo = new PRMetricsRepository();
+              await prRepo.insertPRIfNotPresent({
+                prId,
+                prUrl: raisedPrUrl,
+                childExecutionId: parentExecutionId,
+                repoName: repoName ?? '',
+                sourceBranchName: repoBranch ?? branchName ?? '',
+                destinationBranchName: baseBranch ?? '',
+                repoUrl,
+                ticketId: ticketId || undefined
+              });
+              logger.info(`[AGENT-EXECUTOR] PR #${prId} stored in DB: ${raisedPrUrl}`);
+            } catch (dbError) {
+              logger.error(`[AGENT-EXECUTOR] Failed to store PR in DB:`, dbError);
+            }
+          }
+          // Set pushResult.pullRequestUrl so gitInfo gets populated correctly
+          if (pushResult) {
+            pushResult.pullRequestUrl = raisedPrUrl;
+          } else {
+            pushResult = { pullRequestUrl: raisedPrUrl, repoUrl };
+          }
         }
       }
     }
