@@ -72,7 +72,7 @@ export interface Message {
   conversationIdMapping?: Record<string, string>;
   channelIdMapping?: Record<string, string>;
   toolOutputs?: GeniusToolOutput[];
-  statusMessage?: string; // Agent status like "analysing your query..." or "Running JAF agent..."
+  statusMessage?: string | string[]; // Agent status — string or rotating phrases array for long-running tools
   // Tool input tracking
   toolName?: string; // Name of the tool being called
   toolInput?: unknown; // Input parameters for the tool

@@ -115,9 +115,13 @@ const extractSafeString = (value: unknown): string => {
 };
 
 /**
- * Generate contextual status message based on tool name and input
+ * Generate contextual status message based on tool name and input.
+ * Returns a single string for quick tools, or an array of rotating phrases for long-running tools.
  */
-export const generateToolInputStatus = (toolName: string, toolInput: unknown): string => {
+export const generateToolInputStatus = (
+  toolName: string,
+  toolInput: unknown,
+): string | string[] => {
   try {
     const input = parseToolInput(toolInput);
     if (!input) {
@@ -242,11 +246,37 @@ export const generateToolInputStatus = (toolName: string, toolInput: unknown): s
       case 'sequentialthinking':
         return 'Thinking';
 
-      case 'fetch_channel_messages':
+      case 'fetch_channel_messages': {
+        const channels = input['channels'];
+        if (Array.isArray(channels) && channels.length > 0) {
+          const names = channels.map((c: unknown) => extractSafeString(c)).filter(Boolean);
+          if (names.length > 0) {
+            return `Fetching messages from ${names.join(', ')}`;
+          }
+        }
         return 'Fetching channel messages';
+      }
 
       case 'fetch_thread_messages':
         return 'Fetching thread messages';
+
+      case 'search_relevant_messages': {
+        const query = extractSafeString(input['query']);
+        if (query) {
+          const truncated = query.length > 50 ? query.slice(0, 50) + '...' : query;
+          return `Searching messages for "${truncated}"`;
+        }
+        return 'Searching messages';
+      }
+
+      case 'search_relevant_tickets': {
+        const query = extractSafeString(input['query']);
+        if (query) {
+          const truncated = query.length > 50 ? query.slice(0, 50) + '...' : query;
+          return `Searching tickets for "${truncated}"`;
+        }
+        return 'Searching tickets';
+      }
 
       case 'web_search': {
         const query = extractSafeString(input['query']);
@@ -258,8 +288,59 @@ export const generateToolInputStatus = (toolName: string, toolInput: unknown): s
         return 'Searching the web';
       }
 
+      case 'xyne_rca': {
+        const query = extractSafeString(input['query']);
+        if (query) {
+          const truncated = query.length > 50 ? query.slice(0, 50) + '...' : query;
+          return `Investigating: "${truncated}"`;
+        }
+        return 'Running root cause analysis';
+      }
+
+      case 'create_canvas': {
+        const title = extractSafeString(input['title']);
+        return title ? `Creating canvas "${sanitizeString(title)}"` : 'Creating canvas';
+      }
+
+      case 'read_canvas':
+        return 'Reading canvas content';
+
+      case 'edit_canvas': {
+        const title = extractSafeString(input['title']);
+        return title ? `Editing canvas "${sanitizeString(title)}"` : 'Editing canvas';
+      }
+
+      case 'fetch_link_content': {
+        const url = extractSafeString(input['url']);
+        if (url) {
+          try {
+            const hostname = new URL(url).hostname;
+            return `Fetching content from ${sanitizeString(hostname)}`;
+          } catch {
+            // invalid URL, fall through
+          }
+        }
+        return 'Fetching link content';
+      }
+
       case 'research_agent':
-        return 'Running deep research, it may take a while';
+        return [
+          'Diving deep into your question',
+          'Gathering and cross-referencing sources',
+          'Analyzing findings from multiple angles',
+          'Synthesizing key insights',
+          'Wrapping up the research',
+        ];
+
+      case 'create_ppt': {
+        return [
+          `Designing your presentation`,
+          'Choosing the perfect color palette',
+          'Laying out slides and visual elements',
+          'Adding finishing touches to each slide',
+          'Rendering and uploading your deck',
+        ];
+      }
 
       default:
         return 'Processing';

@@ -8,13 +8,14 @@
  */
 
 import { z } from 'zod';
-import { v4 as uuidv4 } from 'uuid';
 import https from 'node:https';
 import { type Tool } from '@xynehq/jaf';
+import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '../../../../utils/logger.js';
 import type { XyneAIAgentContext } from '../types.js';
 import { getDescription } from '../helpers.js';
 import { gcsService } from '../../../../services/gcsService.js';
+import { MessageAttachmentRepository } from '../../../../database/repositories/messageAttachmentRepository.js';
 import { config } from '../../../../config/env.js';
 import { PPTX_DESIGNER_SYSTEM_PROMPT } from './prompt.js';
 
@@ -373,27 +374,43 @@ export function createCreatePptTool(): Tool<
           await pptx.write({ outputType: 'nodebuffer' }) as ArrayBuffer
         );
 
-        // ── Step 5: Upload to GCS ───────────────────────────────────────────
-        const now = new Date();
-        const uid = uuidv4().split('-')[0];
+        // ── Step 5: Upload to GCS & save to MessageAttachment ─────────────
+        const pptxMimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
         const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
-        const gcsPath = `presentations/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getTime()}-${uid}-${safeTitle}.pptx`;
+        const filename = `${safeTitle}.pptx`;
 
-        await gcsService.uploadFileV2(buffer, {
-          path: gcsPath,
-          contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-          metadata: { title, uploadedAt: now.toISOString(), userId: context.userId },
+        const gcsResult = await gcsService.uploadFile(buffer, {
+          filename,
+          contentType: pptxMimeType,
+          metadata: { title, source: 'xyne-ai-create-ppt' },
+          scopeType: 'ASKAI',
+          scopeId: context.sessionId,
+        });
+
+        const messageAttachmentRepo = new MessageAttachmentRepository();
+        const attachment = await messageAttachmentRepo.create({
+          entityId: context.conversationId ?? context.sessionId,
+          entityType: AttachmentEntityType.CHAT,
+          originalFilename: filename,
+          size: gcsResult.size,
+          mimetype: pptxMimeType,
+          url: gcsResult.gcsPath,
+          uploadedByUserId: context.userId,
+          createdBy: context.userId,
+          storageProvider: config.fileStorage.provider,
+          conversationId: context.conversationId ?? null,
+          metadata: { title, type: 'presentation', source: 'create_ppt' },
         });
 
         logger.info(
-          `[Tool] [${context.sessionId}] create_ppt: uploaded ${gcsPath} (${(buffer.length / 1024).toFixed(0)}KB)`
+          `[Tool] [${context.sessionId}] create_ppt: uploaded ${gcsResult.gcsPath} (${(buffer.length / 1024).toFixed(0)}KB), attachmentId=${attachment.id}`
         );
 
         // ── Step 6: Return download URL ─────────────────────────────────────
-        const isDevFakeGcs = config.env !== 'production' && config.gcs.fakeGcsHost?.length > 0;
-        const downloadUrl = isDevFakeGcs
-          ? `http://${config.gcs.fakeGcsHost}/storage/v1/b/${config.gcs.bucketName}/o/${encodeURIComponent(gcsPath)}?alt=media`
-          : await gcsService.generateSignedUrl(gcsPath, 72);
+        const isLocalDev = (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') && config.gcs.fakeGcsHost;
+        const downloadUrl = isLocalDev
+          ? `http://${config.gcs.fakeGcsHost}/download/storage/v1/b/${config.gcs.bucketName}/o/${encodeURIComponent(gcsResult.gcsPath)}?alt=media`
+          : `/api/attachments/${attachment.id}/download`;
 
         return downloadUrl;
       } catch (error) {
