@@ -8,17 +8,19 @@ import { useUserPresence } from '../../../hooks/usePresence';
 import { User } from '../../../machines/stateMachine';
 import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 
-export type AvatarSize = 'sm' | 'rg' | 'md' | 'lg' | 'xl' | 'big';
+export type AvatarSize = 'xs' | 'sm' | 'rg' | 'md' | 'lg' | 'xl' | 'big';
 
 interface AvatarProps {
   userId?: string | null;
   size?: AvatarSize;
+  rounded?: boolean;
   showActiveStatus?: boolean;
   className?: string;
 }
 
 // Only dimension classes
 const sizeClasses: Record<AvatarSize, string> = {
+  xs: 'size-4',
   sm: 'size-5',
   rg: 'w-[30px] h-[30px]',
   md: 'size-8',
@@ -29,6 +31,7 @@ const sizeClasses: Record<AvatarSize, string> = {
 
 // Text size classes
 const textSizeClasses: Record<AvatarSize, string> = {
+  xs: 'text-[8px]',
   sm: 'text-[10px]',
   rg: 'text-xs',
   md: 'text-sm',
@@ -39,6 +42,7 @@ const textSizeClasses: Record<AvatarSize, string> = {
 
 // Indicator config: radius of the colored circle, stroke width for white border
 const indicatorConfig: Record<AvatarSize, { radius: number; stroke: number }> = {
+  xs: { radius: 2, stroke: 1 },
   sm: { radius: 3, stroke: 1.5 },
   rg: { radius: 4, stroke: 2 },
   md: { radius: 4, stroke: 2 },
@@ -135,6 +139,7 @@ const generateAvatarColor = (userId: string): { bg: string; text: string } => {
 const Avatar = ({
   userId,
   size = 'md',
+  rounded = false,
   showActiveStatus = true,
   className,
 }: AvatarProps): ReactElement => {
@@ -159,10 +164,7 @@ const Avatar = ({
   const sizeClass = sizeClasses[size];
   const textSizeClass = textSizeClasses[size];
 
-  const colorClass =
-    !pictureUrl || imageError
-      ? generateAvatarColor(targetUserId)
-      : { bg: 'bg-muted', text: 'text-muted-foreground' };
+  const colorClass = generateAvatarColor(targetUserId);
 
   const handleImageError = (): void => {
     setImageError(true);
@@ -203,20 +205,32 @@ const Avatar = ({
     );
   };
 
+  const roundedClass = rounded ? 'rounded-full' : '';
+
   return (
     <div
-      className={cn('relative inline-flex shrink-0 visual-regression-hide', sizeClass, className)}
+      className={cn(
+        'relative inline-flex shrink-0 visual-regression-hide',
+        sizeClass,
+        roundedClass,
+        className,
+      )}
     >
-      <AvatarRoot className={cn(colorClass.bg, colorClass.text, 'size-full', textSizeClass)}>
+      <AvatarRoot
+        className={cn(colorClass.bg, colorClass.text, 'size-full', textSizeClass, roundedClass)}
+      >
         {pictureUrl && !imageError && (
           <AvatarImage
             src={pictureUrl}
             alt={user?.name || 'User avatar'}
             onError={handleImageError}
+            className={roundedClass}
           />
         )}
 
-        <AvatarFallback className={cn(colorClass.bg, colorClass.text, 'size-full', textSizeClass)}>
+        <AvatarFallback
+          className={cn(colorClass.bg, colorClass.text, 'size-full', textSizeClass, roundedClass)}
+        >
           {initials}
         </AvatarFallback>
       </AvatarRoot>

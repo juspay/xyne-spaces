@@ -1,34 +1,27 @@
 import { ReactElement, useMemo, useRef } from 'react';
-import { useParams } from 'react-router-dom';
 import { Sparkles, CircleDashed, Circle, Clock, XCircle, CheckCircle2 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import useMeasure from '../../../hooks/useMeasure';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { TicketStatus } from '@xyne/shared';
+import type { TicketListItem } from './TicketListView.types';
 
-export interface TicketListItemProps {
-  ticket: {
-    id: string;
-    xyneId?: string | null;
-    title: string;
-    status: TicketStatus | string;
-    stageName?: string | null;
-    createdAt: number;
-    metadata?: unknown;
-  };
+interface TicketListRowProps {
+  ticket: TicketListItem;
   onClick: () => void;
+  isActive?: boolean;
   showExtraFields?: boolean;
 }
 
 const ticketStatusConfig: Record<TicketStatus, ReactElement> = {
-  [TicketStatus.NEW]: <CircleDashed size={14} className='text-muted-foreground' />,
+  [TicketStatus.NEW]: <CircleDashed size={14} className='text-status-new' />,
   [TicketStatus.IN_PROGRESS]: (
-    <Circle size={14} className='text-yellow-600' fill='currentColor' fillOpacity={0.2} />
+    <Circle size={14} className='text-status-pending' fill='currentColor' fillOpacity={0.2} />
   ),
-  [TicketStatus.WAIT_FOR_APPROVAL]: <Clock size={14} className='text-orange-600' />,
-  [TicketStatus.REJECTED]: <XCircle size={14} className='text-red-600' />,
+  [TicketStatus.WAIT_FOR_APPROVAL]: <Clock size={14} className='text-status-scheduled' />,
+  [TicketStatus.REJECTED]: <XCircle size={14} className='text-status-failure' />,
   [TicketStatus.RESOLVED]: (
-    <CheckCircle2 size={14} className='text-green-600' fill='currentColor' fillOpacity={0.2} />
+    <CheckCircle2 size={14} className='text-status-success' fill='currentColor' fillOpacity={0.2} />
   ),
 };
 
@@ -77,14 +70,13 @@ const extractDomainFromEmail = (fromEmailAddress: string | null | undefined): st
   return null;
 };
 
-export const TicketListItem = ({
+export const TicketListRow = ({
   ticket,
   onClick,
+  isActive = false,
   showExtraFields = false,
-}: TicketListItemProps): ReactElement => {
-  const { ticketId } = useParams<{ ticketId?: string }>();
+}: TicketListRowProps): ReactElement => {
   const ticketIdValue = ticket.xyneId || ticket.id || '';
-  const isActive = ticketId === ticketIdValue;
   const containerRef = useRef<HTMLDivElement>(null);
   const { width } = useMeasure({ ref: containerRef, observeResize: true });
   const isHumanInterventionTicket = ticket.stageName?.toLowerCase().includes('human') ?? false;
@@ -103,7 +95,7 @@ export const TicketListItem = ({
     ticketStatusConfig[ticket.status as TicketStatus] ?? ticketStatusConfig[TicketStatus.NEW];
   if (isHumanInterventionTicket) {
     statusIcon = (
-      <Sparkles size={14} className='text-indigo-600' fill='currentColor' fillOpacity={0.3} />
+      <Sparkles size={14} className='text-status-paused' fill='currentColor' fillOpacity={0.3} />
     );
   }
 
@@ -114,6 +106,8 @@ export const TicketListItem = ({
     <div
       ref={containerRef}
       onClick={onClick}
+      data-track-category='Tickets'
+      data-track-name='ClickTicketListRow'
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -122,13 +116,11 @@ export const TicketListItem = ({
       }}
       role='button'
       tabIndex={0}
+      data-slot='ticket-list-row'
       className={cn(
-        'flex items-center justify-between px-6 py-3 border-b border-border w-full cursor-pointer transition-colors gap-10',
+        'flex items-center justify-between px-6 py-3 border-b border-border last:border-b-0 w-full cursor-pointer transition-colors gap-10',
         isActive ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-muted',
       )}
-      data-track-category='Tickets'
-      data-track-name='OpenTicket'
-      data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
     >
       <div className='flex items-center gap-2 min-w-0 flex-1'>
         <Tooltip
