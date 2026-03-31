@@ -527,18 +527,10 @@ class FcmPushService {
     const requestBody = {
       message: {
         token,
-        notification: {
-          title: payload.title,
-          body: payload.message,
-        },
         data: this.buildDataPayload(payload),
         android: {
           priority: 'high',
           ttl: '86400s',
-          notification: {
-            channel_id: 'default',
-            notification_priority: 'PRIORITY_HIGH',
-          },
         },
         ...(webpush ? { webpush } : {}),
         ...(apns ? { apns } : {}),
