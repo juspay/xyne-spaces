@@ -92,6 +92,7 @@ import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNati
 import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
 import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
+import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 
 const AppRoot = (): ReactElement => {
   // Create panel refs for WebView
@@ -823,6 +824,14 @@ export const router = createBrowserRouter([
                 element: (
                   <ResourceProtectedRoute resourceName='USERS'>
                     <ResourceAccessScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: '/jira-migration',
+                element: (
+                  <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                    <JiraMigrationScreen />
                   </ResourceProtectedRoute>
                 ),
               },

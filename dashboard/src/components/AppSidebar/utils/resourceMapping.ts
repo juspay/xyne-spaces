@@ -9,6 +9,7 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/user-groups': 'USER-GROUPS',
   '/listProjects': 'LISTPROJECTS',
   '/resource-access': 'USERS',
+  '/jira-migration': 'TICKET-MIGRATION',
   '/forms': 'FORMS',
   '/support': 'SUPPORT',
   '/product-insights': 'PRODUCT-INSIGHTS',

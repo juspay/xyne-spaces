@@ -39,6 +39,7 @@ import {
   ShieldUser,
   Brain,
   Sparkles,
+  ArrowRightLeft,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -69,6 +70,7 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/user-groups', label: 'User Groups', icon: UsersIcon },
   { path: '/listProjects', label: 'List Projects', icon: Folder },
   { path: '/resource-access', label: 'User Management', icon: ShieldUser, iconSize: 18 },
+  { path: '/jira-migration', label: 'Jira Migration', icon: ArrowRightLeft, iconSize: 18 },
   { path: '/support', label: 'Support', icon: LifeBuoy },
   { path: '/browser', label: 'Browser', icon: Globe },
   { path: '/forms', label: 'Forms', icon: Clipboard },
