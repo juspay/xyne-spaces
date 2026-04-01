@@ -28,6 +28,10 @@ export enum AppEventType {
     DM = 'DIRECT_MESSAGE',                   
 }
 
+export enum ContentFormat {
+    MARKDOWN = 'markdown',
+}
+
 /**
  * Attachment interface for app events
  */

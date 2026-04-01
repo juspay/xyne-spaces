@@ -6,7 +6,7 @@ import type {
   BotEvent,
 } from '@/bots/unified/types/index.js'
 import { logger } from '@/utils/logger'
-import { Channel, ContentFormat, MessageType, User } from '@prisma/client'
+import { Channel, MessageType, User } from '@prisma/client'
 import axios from 'axios'
 import { superpositionClient } from '@/services/superpositionClient'
 import { UserGroupRepository, UserRepository } from '@/database/repositories'
@@ -248,7 +248,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
           conversationId: params.conversationId,
           text: finalMessageContent,
           msgType: MessageType.BOT,
-          contentFormat: ContentFormat.MARKDOWN,
+          ...(!params.isEscalation && { contentFormat: 'markdown'}),
           ...(uploadedFiles && { uploadedFiles })
         },
         {

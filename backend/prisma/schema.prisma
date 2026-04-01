@@ -193,11 +193,6 @@ enum MessageType {
   @@schema("public")
 }
 
-enum ContentFormat {
-  MARKDOWN
-  @@schema("public")
-}
-
 enum OrgRole {
   OWNER
   ADMIN
@@ -1549,7 +1544,6 @@ model Message {
   childConversationId String?     // Child conversation created from this message (no FK constraint)
   senderId            String      // User who sent the message (no FK constraint)
   content             String      // Text content
-  contentFormat       ContentFormat? 
   msgType             MessageType @default(USER) // USER | BOT | SYSTEM
   hasAttachment       Boolean     @default(false) // Quick check for attachments
   edited              Boolean     @default(false) // Whether the message has been edited

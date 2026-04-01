@@ -1,6 +1,6 @@
 import { conversationService } from '@/services/conversationService';
 import { logger } from '@/utils/logger';
-import { MessageType, ContentFormat } from '@prisma/client';
+import { MessageType } from '@prisma/client';
 import { ChatEventType, ChatActionResponse, ChannelHistoryResponse, ChannelHistoryCursor, ChannelHistoryItem, ConversationRepliesResponse, ConversationRepliesCursor, ConversationRepliesItem } from '../types';
 import { UploadedFileResult } from '@/services/fileUploadService';
 import { repositories } from '@/database/repositories';
@@ -31,8 +31,8 @@ export async function findOrCreateConversation(
     content: string,
     conversationId?: string,
     uploadedFiles?: UploadedFileResult[],
-    contentFormat?: ContentFormat,
     msgType?: MessageType,
+    metadata?: Record<string, any>,
 ): Promise<ChatActionResponse> {
   try {
     // Default to USER message type if not provided
@@ -47,7 +47,7 @@ export async function findOrCreateConversation(
         content: content,
         msgType: messageType,
         uploadedFiles: uploadedFiles,
-        contentFormat: contentFormat,
+        metadata: metadata,
       });
 
       return {
@@ -64,6 +64,7 @@ export async function findOrCreateConversation(
         content: content,
         msgType: messageType,
         uploadedFiles: uploadedFiles,
+        messageMetadata: metadata,
       });
 
       return {

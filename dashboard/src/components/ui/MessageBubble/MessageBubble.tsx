@@ -8,7 +8,6 @@ import {
   isForwardedMessageXml,
   parseReactionsMd,
   ReactionsData,
-  ContentFormat,
 } from '@xyne/shared';
 import {
   formatFullTimestamp,
@@ -328,8 +327,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
   // Detect any message with markdown content format (call_summary, call_prd, etc.)
-  const isMarkdownContent =
-    metadata?.['contentFormat'] === 'markdown' || message.contentFormat === ContentFormat.MARKDOWN;
+  const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
   const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
   const parsedMarkdown = useMemo(() => {
     if (isMarkdownContent) {
