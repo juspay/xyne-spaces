@@ -8,6 +8,7 @@ import {
   isForwardedMessageXml,
   parseReactionsMd,
   ReactionsData,
+  ContentFormat,
 } from '@xyne/shared';
 import {
   formatFullTimestamp,
@@ -326,7 +327,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
   // Detect any message with markdown content format (call_summary, call_prd, etc.)
-  const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
+  const isMarkdownContent =
+    metadata?.['contentFormat'] === 'markdown' || message.contentFormat === ContentFormat.MARKDOWN;
   const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
   const parsedMarkdown = useMemo(() => {
     if (isMarkdownContent) {
@@ -334,6 +336,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     return { ticketSuggestions: [], ticketsCreated: [], content: message.content };
   }, [isMarkdownContent, hasSuggestedTickets, message.content]);
+  console.log(
+    `Parsed markdown content for message ${message.messageId}:`,
+    message,
+    parsedMarkdown,
+    conversation?.ticketId,
+  );
   const parsedWorkflowActions = useMemo(() => {
     if (isBotMessage) {
       return parseWorkflowActionsFromMarkdown(message.content);
@@ -945,9 +953,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </>
               )}
 
-              {isBotMessage && parsedWorkflowActions.workflowActions && metadata?.ticketId && (
+              {isBotMessage && parsedWorkflowActions.workflowActions && conversation?.ticketId && (
                 <WorkflowActionButtons
-                  ticketId={metadata.ticketId}
+                  ticketId={conversation.ticketId}
                   metadata={parsedWorkflowActions.workflowActions}
                 />
               )}

@@ -36,12 +36,14 @@ export async function authenticateApp(
     // 1. Extract JWT token from Authorization header
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      logger.error('[APP-AUTH] Authorization header is missing or does not start with Bearer');
       sendError(res, 401, 'Unauthorized', 'JWT token is required in Authorization header (Bearer token)');
       return;
     }
 
     const jwtToken = authHeader.substring(7); // Remove 'Bearer ' prefix
     if (!jwtToken || jwtToken.trim().length === 0) {
+      logger.error('[APP-AUTH] JWT token is missing after Bearer prefix');
       sendError(res, 401, 'Unauthorized', 'JWT token is required in Authorization header');
       return;
     }
@@ -50,6 +52,7 @@ export async function authenticateApp(
     const decoded = jwt.decode(jwtToken);
     const tokenResult = TokenPayloadSchema.safeParse(decoded);
     if (!tokenResult.success) {
+      logger.error(`[APP-AUTH] Token payload validation failed:`, tokenResult.error);
       sendError(res, 401, 'Unauthorized', `Invalid token payload`);
       return;
     }
@@ -65,6 +68,7 @@ export async function authenticateApp(
     });
 
     if (!installedApp) {
+      logger.error(`[APP-AUTH] No installed app found for appId: ${appId} and userId: ${userId}`);
       sendError(res, 401, 'Unauthorized', 'App installation not found');
       return;
     }
@@ -78,6 +82,7 @@ export async function authenticateApp(
     // Validate verified payload structure
     const verifiedResult = TokenPayloadSchema.safeParse(verified);
     if (!verifiedResult.success) {
+      logger.error(`[APP-AUTH] Verified token payload validation failed:`, verifiedResult.error);
       sendError(res, 401, 'Unauthorized', `Invalid verified token payload`);
       return;
     }

@@ -1,6 +1,6 @@
 import { conversationService } from '@/services/conversationService';
 import { logger } from '@/utils/logger';
-import { MessageType } from '@prisma/client';
+import { MessageType, ContentFormat } from '@prisma/client';
 import { ChatEventType, ChatActionResponse, ChannelHistoryResponse, ChannelHistoryCursor, ChannelHistoryItem, ConversationRepliesResponse, ConversationRepliesCursor, ConversationRepliesItem } from '../types';
 import { UploadedFileResult } from '@/services/fileUploadService';
 import { repositories } from '@/database/repositories';
@@ -18,6 +18,11 @@ import { decodeCursor, paginateResults } from './paginationUtils';
  * @param conversationId - Conversation ID to reply to (optional)
  * @param uploadedFiles - Pre-uploaded files to attach to the message (optional)
  * @param msgType - Message type (optional, defaults to USER)
+ * @param metadata - Additional metadata (optional)
+ * @param replyBroadcast - Show reply in channel (optional)
+ * @param lastActivityAt - Custom last activity timestamp (optional)
+ * @param isBot - Whether the message is from a bot (optional)
+ * @param createdAt - Custom creation timestamp (optional)
  * @returns The result containing conversation and message IDs
  */
 export async function findOrCreateConversation(
@@ -26,7 +31,8 @@ export async function findOrCreateConversation(
     content: string,
     conversationId?: string,
     uploadedFiles?: UploadedFileResult[],
-    msgType?: MessageType
+    contentFormat?: ContentFormat,
+    msgType?: MessageType,
 ): Promise<ChatActionResponse> {
   try {
     // Default to USER message type if not provided
@@ -41,6 +47,7 @@ export async function findOrCreateConversation(
         content: content,
         msgType: messageType,
         uploadedFiles: uploadedFiles,
+        contentFormat: contentFormat,
       });
 
       return {

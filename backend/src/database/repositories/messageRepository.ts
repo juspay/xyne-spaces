@@ -1,5 +1,5 @@
 import { BaseRepository } from './base';
-import { Message, MessageType } from '@prisma/client';
+import { ContentFormat, Message, MessageType } from '@prisma/client';
 //import { logger } from '@/utils/logger';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { websocketService } from '@/services/websocketService';
@@ -12,6 +12,7 @@ export interface CreateMessageInput {
   childConversationId?: string;
   senderId: string;
   content: string;
+  contentFormat?: ContentFormat;
   msgType?: MessageType; // 'USER' | 'BOT'
   hasAttachment?: boolean;
   showInChannel?: boolean;
@@ -107,11 +108,16 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
       await this.validateEnum(data.msgType, 'msgType', ['USER', 'BOT', 'SYSTEM', 'FORWARDED']);
     }
 
+    if(data.contentFormat){
+      await this.validateEnum(data.contentFormat, 'contentFormat', ['MARKDOWN']);
+    }
+
      const result = await this.db.message.create({
         data: {
           conversationId: data.conversationId,
           senderId: data.senderId,
           content: data.content,
+          contentFormat: data.contentFormat,
           msgType: data.msgType || 'USER',
           hasAttachment: data.hasAttachment || false,
           showInChannel: data.showInChannel ?? false,

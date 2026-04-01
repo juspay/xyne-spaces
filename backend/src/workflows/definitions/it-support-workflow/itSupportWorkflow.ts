@@ -1,23 +1,20 @@
 import { WorkflowEngine, BaseWorkflowContext, ExternalStepRequestResult, RequestHandlerSuccess } from '../../workflow-types'
 import { WorkflowDefinition } from '../../registry/workflowRegistry'
-import { WorkflowType, AI_STAGES } from '../../types/workflow-enums'
+import { WorkflowType } from '../../types/workflow-enums'
 import { z } from 'zod'
 import { logger } from '@/utils/logger'
 import { superpositionClient } from '@/services/superpositionClient'
 
 import { SupportBot } from '@/bots/implementations/support-bot/support-bot'
-import { ticketService } from '@/services/ticketService'
 import { Agent, createUserMessage } from 'agentic-framework'
 import { agentService } from '@/services/agentService'
-import { DatabaseClient } from '@/database/client'
-import { ChannelType } from '@prisma/client'
 
 export interface SupportQueryContext extends BaseWorkflowContext {
   ticketId: string
   queryText: string
   querySubType?: string 
   conversationId: string
-  channelName: string
+  channelId: string
   attachments?: string[] 
   userId: string
 }
@@ -52,7 +49,7 @@ export const supportQueryInputSchema = z.object({
   queryText: z.string().min(1, 'Query text is required'),
   querySubType: z.string().optional(),
   conversationId: z.string(),
-  channelName: z.string(),
+  channelId: z.string(),
   userId: z.string(),
   attachments: z.array(z.string()).optional(),
 })
@@ -64,7 +61,7 @@ export const supportQueryContextMapper = (
   queryText: payload.queryText,
   querySubType: payload.querySubType,
   conversationId: payload.conversationId,
-  channelName: payload.channelName,
+  channelId: payload.channelId,
   attachments: payload.attachments,
   userId: payload.userId,
 })
@@ -96,7 +93,7 @@ const querySchema = z.object({
  */
 async function loadSupportedQueries(): Promise<Query[]> {
   try {
-    const json = await superpositionClient.getObjectValue(CAC_KEYS.support_queries,{},{})
+    const json = await superpositionClient.getObjectValue(CAC_KEYS.support_queries,{queries: []},{})
     const config = querySchema.parse(json);
 
     if (!config || !config.queries || config.queries.length === 0) {
@@ -111,17 +108,7 @@ async function loadSupportedQueries(): Promise<Query[]> {
   }
 }
 
-async function isSupportChannel(channelName: string): Promise<boolean> {
-  try {
-    const channel = await DatabaseClient.getInstance().channel.findFirst({
-      where: { name: channelName }
-    });
-    return channel?.type === ChannelType.SUPPORT;
-  } catch (error) {
-    logger.error('[SupportChannel] Failed to check support channel:', error);
-    return false;
-  }
-}
+
 
 
 
@@ -210,17 +197,18 @@ async function classifyQueryWithAI(
  * Initialize ticket by assigning to support-bot 
  */
 async function initializeTicketHandler(
-  ticketId: string
+  ticketId: string,
+  conversationId: string
 ): Promise<{ initialized: boolean; assignedTo: string | null }> {
   logger.info(`[SupportWorkflow] Initializing ticket ${ticketId}`)
 
   try {
-    const botUserId = await supportBot.getBotUserId();
-    await ticketService.updateTicketAssignee(ticketId, botUserId, botUserId);
-    await ticketService.updateTicketStageForWorkflow(ticketId, botUserId, AI_STAGES.AI_PICKED_UP)
+
+    const botUserId = supportBot.getBotUserId();
+    // Update assignee and stage in one call
+    await supportBot.updateTicket(ticketId, conversationId, { assigneeId: botUserId, stage: 'AI_PICKED_UP' });
 
     logger.info(`[SupportWorkflow] Ticket ${ticketId} assigned to support-bot and stage updated to AI_PICKED_UP`)
-
     return { initialized: true, assignedTo: botUserId }
   } catch (error) {
     logger.error('[SupportWorkflow] Failed to initialize ticket:', error)
@@ -327,14 +315,14 @@ export const itSupportWorkflow: WorkflowDefinition<
     engine: WorkflowEngine<SupportQueryContext, typeof SupportQuerySteps>
   ): Promise<SupportQueryOutput> {
     const context = engine.getContext()
-    const { queryText, ticketId, channelName } = context
+    const { queryText, ticketId, channelId } = context
 
     logger.info(`🎫 [IT Support Workflow] Starting for ticket: ${ticketId}`)
 
     // Validate this is a support channel
-    const isSupport = await isSupportChannel(channelName)
+    const isSupport = await supportBot.validateChannel(channelId)
     if (!isSupport) {
-      logger.warn(`[SupportWorkflow] Channel ${channelName} is not configured as a support channel`)
+      logger.warn(`[SupportWorkflow] Channel ${channelId} is not configured as a support channel`)
       throw new Error('Workflow can only be triggered in configured support channels')
     }
 
@@ -346,12 +334,12 @@ export const itSupportWorkflow: WorkflowDefinition<
     const initResult = await engine.createCheckpoint(
       SupportQuerySteps.INITIALIZE_TICKET,
       initializeTicketHandler,
-      ticketId
+      ticketId,
+      context.conversationId
     )
 
     logger.info(`Step 0 Complete: Ticket Initialization`)
     logger.info(`   Initialized: ${initResult.initialized}`)
-    logger.info(`   Assigned To: ${initResult.assignedTo || 'N/A'}`)
 
     // STEP 1: AI Classification
     const analysisResult = await engine.createCheckpoint(
@@ -377,7 +365,6 @@ export const itSupportWorkflow: WorkflowDefinition<
     logger.info(`   Documents: ${documentResult.found ? documentResult.documentNames?.join(', ') : 'None'}`)
 
     const handleUserAction = async (rawResponse: string) => {
-      const botUserId = await supportBot.getBotUserId();
       let userActionPayload: UserAction;
       try{
         userActionPayload = JSON.parse(rawResponse) as UserAction
@@ -388,12 +375,13 @@ export const itSupportWorkflow: WorkflowDefinition<
       logger.info(`Step 3 Complete: User Decision Received: ${userActionPayload.decision}`)
 
       if(userActionPayload.decision === "resolved"){
-        await ticketService.updateTicketStageForWorkflow(ticketId, botUserId, "COMPLETED");
+        await supportBot.updateTicket(ticketId, context.conversationId, { stage: 'COMPLETED' });
       }
       else if(userActionPayload.decision === "escalate"){
         const userGroup = await supportBot.getSupportGroup();
-        await ticketService.asignUserGroupToTicket(ticketId, context.userId, userGroup!.id)
-        await ticketService.updateTicketStageForWorkflow(ticketId, botUserId, "HUMAN_INTERVENTION");
+        
+        // Assign user group and update stage in one call
+        await supportBot.updateTicket(ticketId, context.conversationId, { groupId: userGroup!.id, stage: 'HUMAN_INTERVENTION' });
         
         // Send escalation message
         await supportBot.sendSupportMessage({

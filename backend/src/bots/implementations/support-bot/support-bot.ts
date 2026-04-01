@@ -1,16 +1,17 @@
 import { z } from 'zod'
-import { Bot, UnifiedBaseBot, unifiedBotUserService } from '@/bots/unified/index.js'
+import { Bot, UnifiedBaseBot } from '@/bots/unified/index.js'
 import type {
   BotExecutionContext,
   InternalBotDefinition,
   BotEvent,
 } from '@/bots/unified/types/index.js'
 import { logger } from '@/utils/logger'
-import { conversationService } from '@/services/conversationService'
-import { MessageType, User } from '@prisma/client'
+import { Channel, ContentFormat, MessageType, User } from '@prisma/client'
+import axios from 'axios'
 import { superpositionClient } from '@/services/superpositionClient'
 import { UserGroupRepository, UserRepository } from '@/database/repositories'
 import * as yaml from 'js-yaml'
+import jwt from "jsonwebtoken";
 
 const CAC_KEYS = {
   support_group_name: 'support_group_name',
@@ -50,6 +51,11 @@ const SupportBotOutputSchema: z.ZodType<SupportBotOutput> = z.object({
   conversationId: z.string(),
 })
 
+const TokenPayloadSchema = z.object({
+    appId: z.string().min(1, 'appId is required').trim(),
+    userId: z.string().min(1, 'userId is required').trim(),
+  });
+
 
 
 @Bot({
@@ -74,21 +80,26 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
     scope: 'all',
   }
 
+  private readonly BACKEND_URL: string;
+  private readonly APP_JWT_TOKEN: string;
   private userGroupRepository = new UserGroupRepository();
   private userRepository = new UserRepository();
-  private cachedBotUser: User | null = null;
+  private botUserId: string;
 
-  /**
-   * Get bot's User ID efficiently with caching
-   */
-  public async getBotUserId(): Promise<string> {
-    if (!this.cachedBotUser) {
-      this.cachedBotUser = await unifiedBotUserService.getBotByEmail('support-bot@bot.xyne.ai')
-      if (!this.cachedBotUser) {
-        throw new Error('Support bot user not found')
-      }
+  constructor() {
+    super();
+    const backendUrl = process.env.API_BASE_URL || process.env.BACKEND_URL;
+    if (!backendUrl) {
+      logger.warn('API_BASE_URL or BACKEND_URL environment variable is not set');
     }
-    return this.cachedBotUser.id
+    if (!process.env.APP_JWT_TOKEN) {
+      logger.warn('APP_JWT_TOKEN environment variable is not set.');
+    }
+    this.BACKEND_URL = backendUrl || 'http://localhost:3000';
+    this.APP_JWT_TOKEN = process.env.APP_JWT_TOKEN || '';
+    const parsed = TokenPayloadSchema.safeParse(jwt.decode(this.APP_JWT_TOKEN));
+    this.botUserId = parsed.data?.userId || '';
+
   }
 
   protected async *executeInternal(
@@ -140,6 +151,10 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
       return null;
     }
   }
+   
+  public getBotUserId(): string {
+    return this.botUserId;
+  }
 
   /**
    * Generic function to send support messages
@@ -163,8 +178,6 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
 
       const supportGroup = await this.getSupportGroup()
       // const user = await this.getUser(params.userId)
-
-      const botUserId = await this.getBotUserId()
 
       // const userMention = `<span data-mention="" data-mention-type="user" class="chat-input-mention" data-user-id="${params.userId}" data-username="${user?.name}" data-user-email="${user?.email}" data-user-picture="${user?.picture}">@${user?.name}</span>`
 
@@ -228,25 +241,126 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
         finalMessageContent = '---\n' + yaml.dump(frontmatterData) + '---\n\n' + messageContent
       }
 
-      await conversationService.addMessageToConversation({
-        conversationId: params.conversationId,
-        userId: botUserId,
-        content: finalMessageContent,
-        msgType: MessageType.BOT,
-        ...(params.workflowExecutionId && params.workflowStepId && !params.isEscalation && {
-          metadata: {
-            isAiGenerated: true,
-            contentFormat: 'markdown',
-            ticketId: params.ticketId,
-          }
-        }),
-        ...(uploadedFiles && { uploadedFiles })
-      })
+
+      await axios.post(
+        `${this.BACKEND_URL}/api/apps/chat/postMessage`,
+        {
+          conversationId: params.conversationId,
+          text: finalMessageContent,
+          msgType: MessageType.BOT,
+          contentFormat: ContentFormat.MARKDOWN,
+          ...(uploadedFiles && { uploadedFiles })
+        },
+        {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.APP_JWT_TOKEN}` 
+          },
+          timeout: 30000,
+        }
+      )
 
       logger.info(`[SupportBot] Message sent to conversation: ${params.conversationId}`)
     } catch (error) {
-      logger.error(`[SupportBot] Failed to send support message:`, error)
+          // Sanitize error to avoid circular reference issues when logging
+    const errorDetails = {
+      message: error instanceof Error ? error.message : String(error),
+      ...(axios.isAxiosError(error) && {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        code: error.code,
+        url: error.config?.url,
+      }),
+    };
+      logger.error(`[SupportBot] Failed to send support message:`, errorDetails)
       throw error
+    }
+  }
+
+  /**
+   * Validate if a channel is a support channel
+   * @param channelName - The name of the channel to validate
+   * @returns boolean indicating if the channel is a support channel
+   */
+  public async validateChannel(channelId: string): Promise<boolean> {
+    try {
+      console.log(`[SupportBot] Validating channel ID: ${channelId}`)
+      const response = await axios.post(
+        `${this.BACKEND_URL}/api/apps/channel/info`,
+        { 
+          channelId: channelId
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.APP_JWT_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 5000,
+        }
+      );
+      const channel = response.data as Channel;
+
+      return channel.type === 'SUPPORT';
+    } catch (error) {
+      const errorDetails = {
+        message: error instanceof Error ? error.message : String(error),
+        ...(axios.isAxiosError(error) && {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          code: error.code,
+          url: error.config?.url,
+        }),
+      };
+      logger.error('[SupportBot] Failed to validate channel:', errorDetails);
+      return false;
+    }
+  }
+
+  /**
+   * Generic ticket update function
+   * @param ticketId - The ID of the ticket to update
+   * @param conversationId - The conversation ID for channel validation
+   * @param params - Update parameters (pass any combination of assigneeId, stage, groupId)
+   * @returns boolean indicating success/failure
+   */
+  public async updateTicket(
+    ticketId: string,
+    conversationId: string,
+    params: { assigneeId?: string; stage?: string; groupId?: string }
+  ): Promise<boolean> {
+    try {
+      await axios.post(
+        `${this.BACKEND_URL}/api/apps/ticket/updateTicket`,
+        {
+          ticketId,
+          conversationId,
+          ...params,
+        },
+        {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.APP_JWT_TOKEN}`,
+          },
+          timeout: 30000,
+        }
+      );
+
+      logger.info(`[SupportBot] Ticket ${ticketId} updated successfully`);
+      return true;
+    } catch (error) {
+      const errorDetails = {
+        message: error instanceof Error ? error.message : String(error),
+        ...(axios.isAxiosError(error) && {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          code: error.code,
+          url: error.config?.url,
+        }),
+      }; 
+      logger.error(`[SupportBot] Failed to update ticket ${ticketId}:`, errorDetails);
+      return false;
     }
   }
 }

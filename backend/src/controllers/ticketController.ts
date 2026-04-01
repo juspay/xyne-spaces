@@ -916,7 +916,7 @@ export class TicketController {
             description: ticket.description,
             ticketId: ticket.id,
             queryText: description,
-            channelName: channel.name,
+            channelId: channel.id,
             userId,
             userName: req.user?.name,
             conversationId: ticket.conversationId,
