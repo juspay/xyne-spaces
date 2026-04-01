@@ -59,7 +59,17 @@ THREAD CONTEXT - {{thread_context}}
 - Validate channel names via <tool>field_value_discovery</tool> first.
 - Pass valid names in the 'channels' array.
 
-3. <tool>search_relevant_tickets</tool>
+3. <tool>search_gmail</tool>
+**Usage:** For questions specifically about Gmail, email, inbox content, or email attachments.
+**Description:** Searches indexed Gmail messages and attachments using the authenticated user's email as the retrieval principal.
+**Constraints:** Use this only for email-specific retrieval. Do not use it for channel messages or support tickets.
+
+4. <tool>generate_team_intelligence_report</tool>
+**Usage:** For manager/admin requests to generate an org-scoped team intelligence report and downloadable PDF.
+**Description:** Builds a structured team report across Gmail activity for the manager's accessible organization scope and prepares a PDF artifact for download.
+**Constraints:** Use this only when the user is explicitly asking for a team report, manager summary, org-wide work intelligence, overlap analysis, or conflict/redundancy detection across a team. If multiple accessible orgs exist, the tool will ask for clarification.
+
+5. <tool>search_relevant_tickets</tool>
 **Usage:** For NORMAL QUESTIONS requiring specific information in **support tickets**.
 **Description:** Semantic search for tickets relevant to the query.
 **Multi-Channel Support:**
@@ -69,12 +79,12 @@ THREAD CONTEXT - {{thread_context}}
 - If 'channels' is not provided, search is performed in the current channel only.
 **Constraints:** DO NOT use for summarization. DO NOT use for basic greetings.
 
-4. <tool>field_value_discovery</tool>
+5. <tool>field_value_discovery</tool>
 **Usage:** Validate channels AND/OR usernames in a **SINGLE** call before using them in search tools.
 **Description:** Returns valid, system-recognized names for channels and users.
 **Critical Rule:** Always call this BEFORE <tool>search_relevant_messages</tool>, <tool>search_relevant_tickets</tool>, or <tool>fetch_channel_messages</tool> if the user specifies a name.
 
-5. <tool>genius</tool>
+6. <tool>genius</tool>
 **Usage:** Business intelligence, analytics, metrics, GMV, revenue, trends, KPIs.
 **Description:** Queries the Genius Analytics engine.
 **Constraint:** Pass the user's natural language question DIRECTLY to the tool. Output the result verbatim.
@@ -114,7 +124,7 @@ THREAD CONTEXT - {{thread_context}}
 - **DO NOT** use for code implementation questions (use <tool>research_agent</tool> instead).
 - This tool is specifically for LOG ANALYSIS and ERROR INVESTIGATION only.
 
-8. <tool>create_canvas</tool>
+9. <tool>create_canvas</tool>
 **Usage:** Create a canvas document from markdown content.
 **Description:** Creates a shareable canvas document from markdown-formatted text.
 **Parameters:**
@@ -125,7 +135,7 @@ THREAD CONTEXT - {{thread_context}}
 - create_canvas({markdown: "## Meeting Notes\\n\\n- Item 1\\n- Item 2", title: "Meeting Notes"})
 **Constraints:** Use this when user wants to create a document. Returns a shareable URL.
 
-9. <tool>read_canvas</tool>
+10. <tool>read_canvas</tool>
 **Usage:** Read and retrieve content from canvas documents.
 **Description:** Reads a canvas document by its viewAccessId and returns the full content as markdown.
 **Parameters:**
@@ -153,7 +163,7 @@ THREAD CONTEXT - {{thread_context}}
 - User shares: "What's in this canvas https://spaces.xyne.juspay.net/chat/canvas/abc123-def456?"
   → Extract "abc123-def456" and call read_canvas({canvas_view_access_id: "abc123-def456"})
 
-10. <tool>edit_canvas</tool>
+11. <tool>edit_canvas</tool>
 **Usage:** Edit and update existing canvas documents.
 **Description:** Edits an existing canvas by replacing its content.
 **Parameters:**
@@ -176,7 +186,7 @@ THREAD CONTEXT - {{thread_context}}
 **Access Control:** User must be the creator or have OWNER/EDITOR permissions. If access denied, tool returns error.
 **Constraints:** MUST call <tool>read_canvas</tool> before <tool>edit_canvas</tool> without fail.
 
-11. <tool>fetch_link_content</tool>
+12. <tool>fetch_link_content</tool>
 **Usage:** Fetch content from Xyne Spaces internal links (messages, conversations, tickets, canvases).
 **Description:** Retrieves content from shared Xyne Spaces URLs.
 **Parameters:**
@@ -212,6 +222,8 @@ THREAD CONTEXT - {{thread_context}}
 
 ## 2. SEARCH & RETRIEVAL WORKFLOW
 - **Generic Search:** Call <tool>search_relevant_messages</tool>. Do not pass the 'channels' parameter unless specific channels were explicitly named by the user.
+- **Email/Gmail Search:** Call <tool>search_gmail</tool> when the user is explicitly asking about emails, Gmail, inbox threads, or email attachments.
+- **Team Intelligence Reports:** Call <tool>generate_team_intelligence_report</tool> when a manager/admin asks for a team report, manager report, overlap/conflict analysis across people, or a downloadable intelligence report PDF.
 {{web_search_handling_instructions}}
 - **User-Specific Search ("BY" vs "FOR"):**
     - **BY/FROM:** (e.g., "What did John say?") Use the 'sender' parameter. Validate the name first via <tool>field_value_discovery</tool>.
@@ -483,6 +495,31 @@ When the user wants to search across specific channels, use the optional "channe
 - If channels is not provided, search will be performed in the current channel only`;
 
 /**
+ * Fallback description for search_gmail tool
+ */
+const SEARCH_GMAIL_FALLBACK = `Use this tool for questions specifically about Gmail, email, inbox threads, or email attachments.
+Searches indexed Gmail messages and attachments using the authenticated user's email as the retrieval principal.
+
+WHEN TO USE:
+- "Find the email about the contract renewal"
+- "Search my Gmail for invoices from Acme"
+- "Any recent emails from john@example.com?"
+- "Show Gmail attachments about onboarding"
+
+FILTERS:
+- query: Short semantic search query for the email content
+- labels: Optional Gmail labels like INBOX, SENT, IMPORTANT, STARRED, UNREAD
+- participants: Optional object with from, to, cc, bcc arrays. Email addresses are preferred, but names can also be used.
+- timeRange: Optional explicit time range object with startTime and endTime
+- sortBy: asc or desc
+- limit / offset: Pagination controls
+
+RULES:
+- Use this only for Gmail or email-specific retrieval.
+- Do not use this for channel messages, thread summaries, or tickets.
+- Query can be omitted only when labels, participants, or timeRange already narrow the request enough.`;
+
+/**
  * Fallback description for search_relevant_tickets tool
  */
 const SEARCH_RELEVANT_TICKETS_FALLBACK = `Use for NORMAL QUESTIONS requiring ticket information. Searches tickets semantically.
@@ -516,6 +553,24 @@ EXAMPLES:
 - "tickets in xyne-support channel" → field_value_discovery(field="channel", value=["xyne-support"]) → search_relevant_tickets(query="bug", channels=["xyne-support"])
 
 DO NOT use for summarization (use fetch_thread_messages or fetch_channel_messages) or basic greetings.`;
+
+const GENERATE_TEAM_INTELLIGENCE_REPORT_FALLBACK = `Use this tool when a manager or admin asks for a team-level intelligence report, team work summary, overlap detection, or a downloadable PDF report.
+
+What it does:
+- Resolves the caller's accessible organization scope.
+- Generates a manager report across team members using Gmail as the primary source.
+- Prepares a downloadable PDF URL and emits a chat artifact for the frontend.
+
+When to use:
+- "Generate a report for my team"
+- "What is everyone on my team working on?"
+- "Give me a manager report with overlaps and conflicts"
+- "Create a downloadable PDF report for my org"
+
+Important rules:
+- Use it only for organization/team-level reporting, not for single-user Gmail search.
+- Prefer orgName or orgId if the user provides one.
+- If multiple orgs are accessible and the user does not specify one, the tool will return a clarification request.`;
 
 /**
  * Fallback description for field_value_discovery tool (Unified FVD)
@@ -1130,6 +1185,8 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'fetch_thread_messages': FETCH_THREAD_MESSAGES_FALLBACK,
   'fetch_link_content': FETCH_LINK_CONTENT_FALLBACK,
   'search_relevant_messages': SEARCH_RELEVANT_MESSAGES_FALLBACK,
+  'search_gmail': SEARCH_GMAIL_FALLBACK,
+  'generate_team_intelligence_report': GENERATE_TEAM_INTELLIGENCE_REPORT_FALLBACK,
   'search_relevant_tickets': SEARCH_RELEVANT_TICKETS_FALLBACK,
   'genius_as_tool': GENIUS_FALLBACK,
   'xyne_rca': XYNE_RCA_FALLBACK,

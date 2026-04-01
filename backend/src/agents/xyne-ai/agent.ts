@@ -46,11 +46,16 @@ function createModelProvider(apiKey: string) {
 // Agent Definition
 // ============================================================================
 
-function createXyneAIAgent(systemPrompt: string, webSearchEnabled?: boolean, hasThreadContext?: boolean): Agent<XyneAIAgentContext, string> {
+function createXyneAIAgent(
+  systemPrompt: string,
+  webSearchEnabled?: boolean,
+  gmailSearchEnabled?: boolean,
+  hasThreadContext?: boolean
+): Agent<XyneAIAgentContext, string> {
   return {
     name: 'XyneAI',
     instructions: () => systemPrompt,
-    tools: getXyneAITools({ webSearchEnabled, hasThreadContext }),
+    tools: getXyneAITools({ webSearchEnabled, gmailSearchEnabled, hasThreadContext }),
     modelConfig: {
       temperature: 0.3,
     },
@@ -226,7 +231,12 @@ export async function createAgentRunner(
     context.customInstruction,
     hasThreadContext
   );
-  const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, hasThreadContext);
+  const agent = createXyneAIAgent(
+    systemPrompt,
+    context.webSearchEnabled,
+    context.gmailSearchEnabled,
+    hasThreadContext
+  );
   const agentRegistry = createAgentRegistry(agent);
   const runConfig = createRunConfig(agentRegistry, modelName, apiKey, onEvent);
   const initialState = createInitialState(enrichedContext, messages);

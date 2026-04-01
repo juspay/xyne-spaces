@@ -14,7 +14,7 @@ interface RecapSummary {
   messageCount: number;
   citationMetadata?: {
     entityIdMapping: Record<number, string>;
-    entityTypeMapping: Record<number, 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search'>;
+    entityTypeMapping: Record<number, 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search' | 'email'>;
     conversationIdMapping: Record<number, string>;
     messageIdMapping: Record<number, string>;
     canvasIdMapping: Record<number, string>;

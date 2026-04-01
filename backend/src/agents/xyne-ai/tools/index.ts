@@ -20,6 +20,7 @@ export type {
   ToolMessage,
   ToolResult,
   ToolResultWithCapping,
+  EntityType,
   MessageMappings,
   EnhancedCitationMappings,
   ToolDescriptions,
@@ -62,6 +63,11 @@ export {
 import { createFetchChannelMessagesTool, getFetchChannelMessagesTool } from './fetch_channel_messages.js';
 import { createFetchThreadMessagesTool, getFetchThreadMessagesTool } from './fetch_thread_messages.js';
 import { createSearchRelevantMessagesTool, getSearchRelevantMessagesTool } from './search_relevant_messages.js';
+import { createSearchGmailTool, getSearchGmailTool } from './search_gmail.js';
+import {
+  createGenerateTeamIntelligenceReportTool,
+  getGenerateTeamIntelligenceReportTool,
+} from './generate_team_intelligence_report.js';
 import { createSearchRelevantTicketsTool, getSearchRelevantTicketsTool } from './search_relevant_tickets.js';
 import { createFieldValueDiscoveryTool } from './field_value_discovery.js';
 import { createGeniusTool, getGeniusTool } from './genius.js';
@@ -88,6 +94,15 @@ export { createFetchThreadMessagesTool, getFetchThreadMessagesTool };
 
 // Search Relevant Messages
 export { createSearchRelevantMessagesTool, getSearchRelevantMessagesTool };
+
+// Search Gmail
+export { createSearchGmailTool, getSearchGmailTool };
+
+// Generate Team Intelligence Report
+export {
+  createGenerateTeamIntelligenceReportTool,
+  getGenerateTeamIntelligenceReportTool,
+};
 
 // Search Relevant Tickets
 export { createSearchRelevantTicketsTool, getSearchRelevantTicketsTool };
@@ -131,6 +146,7 @@ export { createCreatePptTool, getCreatePptTool };
  */
 export interface GetXyneAIToolsOptions {
   webSearchEnabled?: boolean;
+  gmailSearchEnabled?: boolean;
   hasThreadContext?: boolean;
 }
 
@@ -143,11 +159,16 @@ export interface GetXyneAIToolsOptions {
  * @param options.hasThreadContext Whether to include the fetch_thread_messages tool (when conversationId is present)
  */
 export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneAIAgentContext>[] {
-  const { webSearchEnabled = false, hasThreadContext = false } = options || {};
+  const {
+    webSearchEnabled = false,
+    gmailSearchEnabled = false,
+    hasThreadContext = false,
+  } = options || {};
   
   const tools: Tool<any, XyneAIAgentContext>[] = [
     createFetchChannelMessagesTool(),
     createSearchRelevantMessagesTool(),
+    createGenerateTeamIntelligenceReportTool(),
     createSearchRelevantTicketsTool(),
     createFieldValueDiscoveryTool(),
     createGeniusTool(),
@@ -159,6 +180,10 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createFetchLinkContentTool(),
     createCreatePptTool(),
   ];
+
+  if (gmailSearchEnabled) {
+    tools.push(createSearchGmailTool());
+  }
 
   // Add web search tool if runtime flag is true
   if (webSearchEnabled) {

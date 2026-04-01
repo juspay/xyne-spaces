@@ -64,6 +64,7 @@ const XyneAISidebar = ({
   const [isLoadingConversation, setIsLoadingConversation] = useState(true);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [gmailSearchEnabled, setGmailSearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
   const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
     null,
@@ -242,6 +243,7 @@ const XyneAISidebar = ({
     setConversationId,
     setCurrentTraceId,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
+    gmailSearchEnabled,
     researchContext: selectedResearchContext,
     createCanvasEnabled,
     channelId: channelId || undefined, // Pass channelId for thread ID construction
@@ -1196,6 +1198,8 @@ const XyneAISidebar = ({
             webSearchEnabled={webSearchEnabled}
             webSearchAccessible={webSearchAccessible}
             onWebSearchToggle={() => setWebSearchEnabled(!webSearchEnabled)}
+            gmailSearchEnabled={gmailSearchEnabled}
+            onGmailSearchToggle={() => setGmailSearchEnabled(!gmailSearchEnabled)}
             createCanvasEnabled={createCanvasEnabled}
             onCreateCanvasToggle={() => setCreateCanvasEnabled(!createCanvasEnabled)}
             onUserTagsChange={setCurrentUserTags}

@@ -18,6 +18,7 @@ interface UseXyneAIStreamParams {
   setConversationId: React.Dispatch<React.SetStateAction<string>>;
   setCurrentTraceId?: React.Dispatch<React.SetStateAction<string | undefined>>;
   webSearchEnabled?: boolean;
+  gmailSearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
   createCanvasEnabled?: boolean;
   channelId?: string | undefined; // Added for thread ID construction
@@ -33,6 +34,7 @@ export const useXyneAIStream = ({
   setConversationId,
   setCurrentTraceId,
   webSearchEnabled = false,
+  gmailSearchEnabled = false,
   researchContext,
   createCanvasEnabled = false,
   channelId,
@@ -206,6 +208,7 @@ export const useXyneAIStream = ({
           attachmentIds,
           canvasViewAccessId,
           webSearchEnabled,
+          gmailSearchEnabled,
           researchContext,
           attachments,
           parentMessageId,
@@ -226,6 +229,7 @@ export const useXyneAIStream = ({
       canvasViewAccessId,
       researchContext,
       webSearchEnabled,
+      gmailSearchEnabled,
       createCanvasEnabled,
       syncMessagesRef,
     ],

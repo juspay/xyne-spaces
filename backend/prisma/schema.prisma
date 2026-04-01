@@ -1721,14 +1721,16 @@ model ExternalSource {
   name            String   @unique           // "zoho-euler", "slack-external"
   sourceType      String                    // "zoho", "slack", "jira", etc. - flexible string
   displayName     String                    // "Zoho (Euler Team)"
-  channelId       String                    // Target channel for messages (no FK constraint)
+  channelId       String?                   // Target channel for messages (legacy/optional)
   boardId         String?                   // Target board for ticket creation (no FK constraint) - N:1 with Board
+  ownerUserId     String?                   // Owner for user-scoped integrations like Gmail search
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([boardId])
+  @@index([ownerUserId])
   @@map("external_sources")
   @@schema("workflow")
 }
@@ -2820,6 +2822,38 @@ model ChannelDailyRecap {
   @@id([channelId, recapDate])
   @@index([recapDate])
   @@map("channel_daily_recaps")
+  @@schema("public")
+}
+
+enum TeamIntelligenceReportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  @@schema("public")
+}
+
+model TeamIntelligenceReport {
+  id                  String                       @id @default(cuid())
+  orgId               String
+  requestedByUserId   String
+  status              TeamIntelligenceReportStatus @default(PENDING)
+  timeRangeStart      DateTime
+  timeRangeEnd        DateTime
+  includeTranscripts  Boolean                     @default(false)
+  teamMemberIds       String[]
+  sourceSummary       Json?
+  reportJson          Json?
+  reportMarkdown      String?
+  error               String?
+  completedAt         DateTime?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+
+  @@index([orgId, createdAt])
+  @@index([requestedByUserId, createdAt])
+  @@index([status, createdAt])
+  @@map("team_intelligence_reports")
   @@schema("public")
 }
 

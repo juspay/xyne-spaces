@@ -118,6 +118,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const isLoadingMoreRef = useRef(false);
   const [paginationState, setPaginationState] = useState<
     Record<
       TabType,
@@ -134,6 +135,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     [TabType.USERS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     [TabType.CHANNELS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     [TabType.MESSAGES]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+    [TabType.GMAIL]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     [TabType.TICKETS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     [TabType.ATTACHMENTS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
   });
@@ -479,6 +481,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       [TabType.USERS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.CHANNELS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.MESSAGES]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+      [TabType.GMAIL]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.TICKETS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.ATTACHMENTS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     });
@@ -609,7 +612,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         try {
           if (shouldUseVespa) {
             const limit = BACKEND_RESULTS_LIMIT;
-            const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`;
+            const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.GMAIL}`;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
@@ -655,6 +658,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               }
             } else if (activeTab === TabType.MESSAGES) {
               searchFilters.type = VespaDocTypes.MESSAGES;
+              searchFilters.apps = VespaApps.CHAT;
+            } else if (activeTab === TabType.GMAIL) {
+              searchFilters.apps = VespaApps.GMAIL;
             } else if (activeTab === TabType.ATTACHMENTS) {
               searchFilters.type = VespaDocTypes.FILES;
             } else if (activeTab === TabType.TICKETS) {
@@ -899,12 +905,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     const loadMoreTypes = parseTypeFilter(typeFilter);
     if (hasLocalTypeFilter(loadMoreTypes) || hasIncompleteType(loadMoreTypes)) return;
 
-    if (isLoadingMore || (!searchText && !hasFilters) || activeTab === TabType.CHANNELS) return;
+    if (isLoadingMoreRef.current || (!searchText && !hasFilters) || activeTab === TabType.CHANNELS)
+      return;
 
     const currentPagination = paginationState[activeTab];
     if (!currentPagination.hasMore) return;
 
     const shouldUseVespa = useVespaSearch && activeTab !== 'users';
+    isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
 
     try {
@@ -914,7 +922,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
         const searchFilters: VespaSearchFilters = {
           query: searchText,
-          apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`,
+          apps: `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.GMAIL}`,
           offset: currentOffset,
           limit: currentOffset + pageSize,
           filterOnly: !searchText && !!hasFilters,
@@ -951,6 +959,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           }
         } else if (activeTab === TabType.MESSAGES) {
           searchFilters.type = VespaDocTypes.MESSAGES;
+          searchFilters.apps = VespaApps.CHAT;
+        } else if (activeTab === TabType.GMAIL) {
+          searchFilters.apps = VespaApps.GMAIL;
         } else if (activeTab === TabType.ATTACHMENTS) {
           searchFilters.type = VespaDocTypes.FILES;
         } else if (activeTab === TabType.TICKETS) {
@@ -1047,17 +1058,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     } catch (searchError) {
       console.error('Failed to load more results:', searchError);
     } finally {
+      isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [
-    isLoadingMore,
-    paginationState,
-    searchSessionId,
-    text,
-    activeTab,
-    selectedMentions,
-    useVespaSearch,
-  ]);
+  }, [paginationState, searchSessionId, text, activeTab, selectedMentions, useVespaSearch]);
 
   // Load more results wrapper for effect
   const loadMore = useCallback(async () => {

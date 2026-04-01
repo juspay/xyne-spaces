@@ -22,6 +22,9 @@ import { callValidationWorker } from '@/workers/callValidationWorker';
 import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
 import { recoveryService } from './workflows/services/recovery-service' 
+import { googleMailSyncQueue } from '@/queues/googleMailSyncQueue';
+import { teamIntelligenceReportQueue } from '@/queues/teamIntelligenceReportQueue';
+
 config()
 
 class WorkerService {
@@ -130,6 +133,11 @@ class WorkerService {
         logger.info('Starting conversation ingestion worker...');
         await conversationIngestionWorker.start();
       }
+      logger.info('Initializing Google Mail sync queue...');
+      await googleMailSyncQueue.initializeWorker();
+
+      logger.info('Initializing team intelligence report queue...');
+      await teamIntelligenceReportQueue.initializeWorker();
 
       process.on('SIGINT', () => this.shutdown())
       process.on('SIGTERM', () => this.shutdown())
@@ -207,6 +215,8 @@ class WorkerService {
       if (appConfig.enableConversationIngestionWorker) {
         await conversationIngestionWorker.shutdown();
       }
+      await googleMailSyncQueue.close();
+      await teamIntelligenceReportQueue.close();
 
       await DatabaseClient.disconnect()
 

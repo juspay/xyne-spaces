@@ -153,6 +153,8 @@ export const PROMPT_NAMES = {
   FETCH_THREAD_MESSAGES: 'fetch_thread_messages',
   FETCH_LINK_CONTENT: 'fetch_link_content',
   SEARCH_RELEVANT_MESSAGES: 'search_relevant_messages',
+  SEARCH_GMAIL: 'search_gmail',
+  GENERATE_TEAM_INTELLIGENCE_REPORT: 'generate_team_intelligence_report',
   SEARCH_RELEVANT_TICKETS: 'search_relevant_tickets',
   GENIUS: 'genius_as_tool',
   XYNE_RCA: 'xyne_rca',

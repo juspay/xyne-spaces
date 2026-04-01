@@ -48,6 +48,7 @@ export const TabType = {
   USERS: 'users',
   CHANNELS: 'channels',
   MESSAGES: 'messages',
+  GMAIL: 'gmail',
   TICKETS: 'tickets',
   ATTACHMENTS: 'attachments',
 } as const;
@@ -58,6 +59,7 @@ export const VespaApps = {
   CHAT: 'chat',
   TICKET: 'ticket',
   FILE: 'file',
+  GMAIL: 'gmail',
 } as const;
 
 export type VespaApps = (typeof VespaApps)[keyof typeof VespaApps];
