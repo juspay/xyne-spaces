@@ -1,10 +1,8 @@
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
-import { UserRepository } from '@/database/repositories/users';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { encrypt } from '@/services/encryptionService';
-import { gcsService } from '@/services/gcsService';
 import { logger } from '@/utils/logger';
 import {
   ActivityType,
@@ -21,8 +19,15 @@ import {
   TicketStatusV2,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
 import { serializeTicketMd, type TicketCardSummary } from '@xyne/shared';
+import { adfToHtmlAsync, adfToText } from '@/services/jira/adfHtml';
+import { JiraMigrationClient } from '@/services/jira/client';
+import { JiraUserResolver } from '@/services/jira/userResolver';
+import {
+  queueJiraImportAttachmentVespaJob,
+  queueJiraImportMessageVespaJob,
+  queueJiraImportTicketVespaJob,
+} from '@/services/jira/vespa';
 
 type JiraFieldDefinition = {
   id: string;
@@ -87,21 +92,6 @@ type JiraIssue = {
   fields: Record<string, any>;
 };
 
-type JiraSearchResponse = {
-  issues: JiraIssue[];
-  nextPageToken?: string;
-  isLast?: boolean;
-  maxResults?: number;
-  total?: number;
-};
-
-type JiraCommentResponse = {
-  startAt: number;
-  maxResults: number;
-  total: number;
-  comments: JiraComment[];
-};
-
 type CachedTicketRecord = {
   id: string;
   conversationId: string | null;
@@ -111,15 +101,6 @@ type CachedTicketRecord = {
   createdBy: string;
   assignedTo: string | null;
   metadata: any;
-};
-
-type UserResolutionLookup = {
-  byExactName: Map<string, string>;
-  byProfileDisplayName: Map<string, string>;
-  byNormalizedComparable: Map<string, string>;
-  byEmail: Map<string, string>;
-  byEmailLocalPart: Map<string, string>;
-  emailLocalPartCandidates: Array<{ normalizedLocalPart: string; userId: string; email: string }>;
 };
 
 export interface JiraMigrationExecuteInput {
@@ -199,6 +180,98 @@ const sanitizeFieldName = (value: string): string =>
 
 const normalize = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+const JIRA_CUSTOM_FIELD_NAME_SKIP_PATTERNS = [
+  'rank',
+  'epiclink',
+  'epiclinkdeprecated',
+  'development',
+  'timeinstatus',
+  'charttimeinstatus',
+  'requiredfields',
+  'go-livechecklist',
+  'golivechecklist',
+  'checklistsheet',
+];
+
+const JIRA_CUSTOM_FIELD_CUSTOM_SCHEMA_SKIP_PATTERNS = [
+  'lexorank',
+  'epiclink',
+  'development',
+  'timeinstatus',
+];
+
+const isOpaqueJiraCustomFieldString = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+
+  return (
+    /\{[a-z]+\=/.test(trimmed) ||
+    trimmed.includes('json={\"cachedValue\"') ||
+    trimmed.includes('dataType=pullrequest') ||
+    /\d+_\*:.*\|\*_/.test(trimmed)
+  );
+};
+
+const extractMeaningfulJiraCustomFieldValues = (value: unknown): string[] => {
+  if (value === null || value === undefined) return [];
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed && !isOpaqueJiraCustomFieldString(trimmed) ? [trimmed] : [];
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return [String(value)];
+  }
+
+  if (Array.isArray(value)) {
+    return [...new Set(value.flatMap(item => extractMeaningfulJiraCustomFieldValues(item)).filter(Boolean))];
+  }
+
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+
+    const directCandidates = [obj.displayName, obj.name, obj.value, obj.label]
+      .filter((candidate): candidate is string => typeof candidate === 'string')
+      .map(candidate => candidate.trim())
+      .filter(candidate => candidate && !isOpaqueJiraCustomFieldString(candidate));
+
+    if (directCandidates.length > 0) {
+      return [...new Set(directCandidates)];
+    }
+
+    if (typeof obj.key === 'string' && /^[A-Z][A-Z0-9_]+-\d+$/.test(obj.key.trim())) {
+      return [obj.key.trim()];
+    }
+
+    return [];
+  }
+
+  return [];
+};
+
+const valueToPreviewString = (value: unknown): string =>
+  extractMeaningfulJiraCustomFieldValues(value).join(', ');
+
+const extractJiraUsersFromCustomFieldValue = (value: unknown): JiraUser[] => {
+  if (value === null || value === undefined) return [];
+
+  if (Array.isArray(value)) {
+    return value.flatMap(item => extractJiraUsersFromCustomFieldValue(item));
+  }
+
+  if (typeof value !== 'object') {
+    return [];
+  }
+
+  const user = value as JiraUser;
+  if (!user.accountId && !user.displayName && !user.emailAddress) {
+    return [];
+  }
+
+  return [user];
+};
+
 const shouldSkipJiraCustomField = (definition?: JiraFieldDefinition): boolean => {
   if (!definition) return false;
 
@@ -206,18 +279,10 @@ const shouldSkipJiraCustomField = (definition?: JiraFieldDefinition): boolean =>
   const normalizedCustom = normalize(definition.schema?.custom || '');
 
   return (
-    normalizedName === 'rank' ||
-    normalizedCustom.includes('lexorank') ||
-    normalizedCustom.endsWith('rank')
+    JIRA_CUSTOM_FIELD_NAME_SKIP_PATTERNS.some(pattern => normalizedName.includes(pattern)) ||
+    JIRA_CUSTOM_FIELD_CUSTOM_SCHEMA_SKIP_PATTERNS.some(pattern => normalizedCustom.includes(pattern))
   );
 };
-
-const JIRA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
-const JIRA_MAX_RETRY_ATTEMPTS = 5;
-const JIRA_BASE_RETRY_DELAY_MS = 1000;
-const JIRA_MAX_RETRY_DELAY_MS = 15000;
-
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 const TICKET_PRELOAD_QUERY_BATCH_SIZE = 1000;
 const EXTERNAL_MAPPING_PRELOAD_QUERY_BATCH_SIZE = 2000;
@@ -269,449 +334,6 @@ const mapWithConcurrency = async <T, R>(
   return results;
 };
 
-const valueToPreviewString = (value: unknown): string => {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map(v => valueToPreviewString(v)).filter(Boolean).join(', ');
-  }
-  if (typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    if (typeof obj.displayName === 'string') return obj.displayName;
-    if (typeof obj.name === 'string') return obj.name;
-    if (typeof obj.value === 'string') return obj.value;
-    if (typeof obj.key === 'string') return obj.key;
-    if (typeof obj.id === 'string') return obj.id;
-    return JSON.stringify(obj);
-  }
-  return String(value);
-};
-
-
-const createBlockNoteText = (
-  text: string,
-  styles?: { bold?: boolean; italic?: boolean; code?: boolean },
-): BlockNoteInlineContent => ({
-  type: 'text',
-  text,
-  ...(styles && Object.keys(styles).length > 0 ? { styles } : {}),
-});
-
-const extractBlockNoteTextStyles = (marks: any[]): { bold?: boolean; italic?: boolean; code?: boolean } => {
-  const styles: { bold?: boolean; italic?: boolean; code?: boolean } = {};
-
-  for (const mark of marks) {
-    if (!mark?.type) continue;
-    if (mark.type === 'strong') styles.bold = true;
-    if (mark.type === 'em') styles.italic = true;
-    if (mark.type === 'code') styles.code = true;
-  }
-
-  return styles;
-};
-
-const adfInlineToBlockNote = (node: any): BlockNoteInlineContent[] => {
-  if (!node) return [];
-  if (typeof node === 'string') {
-    return node ? [createBlockNoteText(node)] : [];
-  }
-  if (Array.isArray(node)) {
-    return node.flatMap(adfInlineToBlockNote);
-  }
-
-  if (node.type === 'text') {
-    const marks = Array.isArray(node.marks) ? node.marks : [];
-    const text = typeof node.text === 'string' ? node.text : '';
-    const styles = extractBlockNoteTextStyles(marks);
-    const linkMark = marks.find((mark: any) => mark?.type === 'link' && typeof mark?.attrs?.href === 'string');
-    if (linkMark?.attrs?.href) {
-      return [
-        {
-          type: 'link',
-          href: linkMark.attrs.href,
-          content: [createBlockNoteText(text || linkMark.attrs.href, styles) as any],
-        } as BlockNoteInlineContent,
-      ];
-    }
-    return text ? [createBlockNoteText(text, styles)] : [];
-  }
-
-  if (node.type === 'hardBreak') return [createBlockNoteText('\n')];
-  if (node.type === 'mention') {
-    const mentionText = node.attrs?.text || node.attrs?.displayName || node.attrs?.id || '';
-    return mentionText ? [createBlockNoteText(mentionText)] : [];
-  }
-  if (node.type === 'emoji') {
-    const emojiText = node.attrs?.text || node.attrs?.shortName || '';
-    return emojiText ? [createBlockNoteText(emojiText)] : [];
-  }
-  if (node.type === 'status') {
-    return node.attrs?.text ? [createBlockNoteText(node.attrs.text)] : [];
-  }
-  if (node.type === 'date') {
-    return node.attrs?.timestamp ? [createBlockNoteText(node.attrs.timestamp)] : [];
-  }
-  if (node.type === 'inlineCard' || node.type === 'blockCard' || node.type === 'embedCard') {
-    return node.attrs?.url
-      ? [
-          {
-            type: 'link',
-            href: node.attrs.url,
-            content: [createBlockNoteText(node.attrs.url) as any],
-          } as BlockNoteInlineContent,
-        ]
-      : [];
-  }
-
-  return Array.isArray(node.content) ? node.content.flatMap(adfInlineToBlockNote) : [];
-};
-
-const adfBlockContentToInline = (node: any): BlockNoteInlineContent[] => {
-  if (!node) return [];
-  if (Array.isArray(node)) return node.flatMap(adfBlockContentToInline);
-
-  if (['paragraph', 'heading', 'tableCell', 'tableHeader'].includes(node.type)) {
-    return Array.isArray(node.content) ? node.content.flatMap(adfInlineToBlockNote) : [];
-  }
-
-  return Array.isArray(node.content) ? node.content.flatMap(adfBlockContentToInline) : adfInlineToBlockNote(node);
-};
-
-const prependInlinePrefix = (prefix: string, content: BlockNoteInlineContent[]): BlockNoteInlineContent[] => {
-  if (!prefix) return content;
-  return [createBlockNoteText(prefix), ...content];
-};
-
-const adfTableCellToBlockNote = (node: any) => ({
-  type: 'tableCell' as const,
-  content: adfBlockContentToInline(node),
-});
-
-const adfToBlockNoteBlocks = (node: any): BlockNoteBlock[] => {
-  if (!node) return [];
-  if (Array.isArray(node)) return node.flatMap(adfToBlockNoteBlocks);
-
-  switch (node.type) {
-    case 'doc':
-      return Array.isArray(node.content) ? node.content.flatMap(adfToBlockNoteBlocks) : [];
-    case 'paragraph':
-      return [{ id: randomUUID(), type: 'paragraph', content: Array.isArray(node.content) ? node.content.flatMap(adfInlineToBlockNote) : [] }];
-    case 'heading': {
-      const level = typeof node.attrs?.level === 'number' ? Math.min(3, Math.max(1, node.attrs.level)) as 1 | 2 | 3 : 1;
-      return [{ id: randomUUID(), type: 'heading', props: { level }, content: Array.isArray(node.content) ? node.content.flatMap(adfInlineToBlockNote) : [] }];
-    }
-    case 'bulletList':
-      return Array.isArray(node.content)
-        ? node.content.flatMap((item: any) => {
-            const children = adfToBlockNoteBlocks(item);
-            return children.map(child => ({ ...child, type: 'bulletListItem' as const }));
-          })
-        : [];
-    case 'orderedList':
-      return Array.isArray(node.content)
-        ? node.content.flatMap((item: any) => {
-            const children = adfToBlockNoteBlocks(item);
-            return children.map(child => ({ ...child, type: 'numberedListItem' as const }));
-          })
-        : [];
-    case 'taskList':
-      return Array.isArray(node.content) ? node.content.flatMap(adfToBlockNoteBlocks) : [];
-    case 'listItem':
-    case 'taskItem': {
-      const children = Array.isArray(node.content) ? node.content.flatMap(adfToBlockNoteBlocks) : [];
-      const checkboxPrefix = node.type === 'taskItem'
-        ? node.attrs?.state === 'DONE'
-          ? '[x] '
-          : '[ ] '
-        : '';
-
-      if (children.length === 0) {
-        return [{
-          id: randomUUID(),
-          type: node.type === 'taskItem' ? 'bulletListItem' : 'paragraph',
-          content: checkboxPrefix ? [createBlockNoteText(checkboxPrefix)] : [],
-        } as BlockNoteBlock];
-      }
-
-      const [first, ...rest] = children;
-      const firstBlock = {
-        ...first,
-        ...(checkboxPrefix && Array.isArray((first as any).content)
-          ? { content: prependInlinePrefix(checkboxPrefix, (first as any).content) }
-          : {}),
-        ...(node.type === 'taskItem' && first.type === 'paragraph' ? { type: 'bulletListItem' as const } : {}),
-        ...(rest.length > 0 ? { children: rest } : {}),
-      } as BlockNoteBlock;
-
-      return [firstBlock];
-    }
-    case 'codeBlock':
-      return [{
-        id: randomUUID(),
-        type: 'codeBlock',
-        props: node.attrs?.language ? { language: node.attrs.language } : undefined,
-        content: [{ type: 'text', text: adfToText(node).trimEnd(), styles: {} }],
-      }];
-    case 'blockquote':
-    case 'panel':
-      return [{
-        id: randomUUID(),
-        type: 'quote',
-        content: [createBlockNoteText(adfToText(node).trim()) as any].filter((inline: any) => inline.text !== ''),
-      }];
-    case 'rule':
-      return [{ id: randomUUID(), type: 'divider', content: undefined }];
-    case 'table': {
-      const rows = Array.isArray(node.content)
-        ? node.content
-            .filter((row: any) => row?.type === 'tableRow')
-            .map((row: any) => ({
-              cells: Array.isArray(row.content) ? row.content.map(adfTableCellToBlockNote) : [],
-            }))
-        : [];
-      return rows.length > 0
-        ? [{ id: randomUUID(), type: 'table', content: { type: 'tableContent', rows, headerRows: 1 } }]
-        : [];
-    }
-    default:
-      return Array.isArray(node.content) ? node.content.flatMap(adfToBlockNoteBlocks) : [];
-  }
-};
-
-const adfHasRichFormatting = (node: any): boolean => {
-  if (!node) return false;
-  if (Array.isArray(node)) return node.some(adfHasRichFormatting);
-  if (node.type === 'text' && Array.isArray(node.marks) && node.marks.length > 0) return true;
-  if (['heading', 'bulletList', 'orderedList', 'taskList', 'taskItem', 'codeBlock', 'blockquote', 'panel', 'rule', 'table'].includes(node.type)) {
-    return true;
-  }
-  return Array.isArray(node.content) ? node.content.some(adfHasRichFormatting) : false;
-};
-
-const escapeHtml = (value: string): string =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-
-const escapeHtmlAttribute = (value: string): string => escapeHtml(value);
-
-const adfInlineToHtml = (node: any): string => {
-  if (!node) return '';
-  if (typeof node === 'string') return escapeHtml(node);
-  if (Array.isArray(node)) return node.map(adfInlineToHtml).join('');
-
-  if (node.type === 'text') {
-    const marks = Array.isArray(node.marks) ? node.marks : [];
-    let html = escapeHtml(typeof node.text === 'string' ? node.text : '');
-
-    for (const mark of marks) {
-      if (!mark?.type) continue;
-      switch (mark.type) {
-        case 'link': {
-          const href = typeof mark.attrs?.href === 'string' ? mark.attrs.href : '';
-          if (href) {
-            html = `<a href="${escapeHtmlAttribute(href)}" target="_blank" rel="noopener noreferrer">${html || escapeHtml(href)}</a>`;
-          }
-          break;
-        }
-        case 'strong':
-          html = `<strong>${html}</strong>`;
-          break;
-        case 'em':
-          html = `<em>${html}</em>`;
-          break;
-        case 'code':
-          html = `<code>${html}</code>`;
-          break;
-        case 'strike':
-          html = `<s>${html}</s>`;
-          break;
-        case 'underline':
-          html = `<u>${html}</u>`;
-          break;
-        default:
-          break;
-      }
-    }
-
-    return html;
-  }
-
-  if (node.type === 'hardBreak') return '<br />';
-  if (node.type === 'mention') {
-    const mentionText = node.attrs?.text || node.attrs?.displayName || node.attrs?.id || '';
-    return escapeHtml(mentionText);
-  }
-  if (node.type === 'emoji') {
-    const emojiText = node.attrs?.text || node.attrs?.shortName || '';
-    return escapeHtml(emojiText);
-  }
-  if (node.type === 'status') {
-    return escapeHtml(node.attrs?.text || '');
-  }
-  if (node.type === 'date') {
-    return escapeHtml(node.attrs?.timestamp || '');
-  }
-  if (node.type === 'inlineCard' || node.type === 'blockCard' || node.type === 'embedCard') {
-    const url = node.attrs?.url || '';
-    return url
-      ? `<a href="${escapeHtmlAttribute(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`
-      : '';
-  }
-
-  return Array.isArray(node.content) ? node.content.map(adfInlineToHtml).join('') : '';
-};
-
-const adfListItemsToHtml = (items: any[] | undefined, ordered: boolean): string => {
-  const tag = ordered ? 'ol' : 'ul';
-  const content = Array.isArray(items)
-    ? items
-        .map(item => {
-          if (!item) return '';
-          const html = adfToHtml(item, { listMode: true });
-          return html ? `<li>${html}</li>` : '';
-        })
-        .join('')
-    : '';
-
-  return content ? `<${tag}>${content}</${tag}>` : '';
-};
-
-const adfTaskListToHtml = (items: any[] | undefined): string => {
-  const content = Array.isArray(items)
-    ? items
-        .map(item => {
-          if (!item) return '';
-          const isDone = item?.attrs?.state === 'DONE';
-          const html = adfToHtml(item, { listMode: true, taskMode: true });
-          return `<li><input type="checkbox" disabled${isDone ? ' checked' : ''} /> ${html}</li>`;
-        })
-        .join('')
-    : '';
-
-  return content ? `<ul data-jira-task-list="true">${content}</ul>` : '';
-};
-
-const adfTableCellToHtml = (node: any, tagName: 'th' | 'td'): string => {
-  const content = Array.isArray(node?.content) ? node.content.map((child: any) => adfToHtml(child)).join('') : '';
-  const normalized = content || '<p></p>';
-  return `<${tagName}>${normalized}</${tagName}>`;
-};
-
-const adfToHtml = (node: any, options: { listMode?: boolean; taskMode?: boolean } = {}): string => {
-  if (!node) return '';
-  if (typeof node === 'string') return escapeHtml(node);
-  if (Array.isArray(node)) return node.map(child => adfToHtml(child, options)).join('');
-
-  switch (node.type) {
-    case 'doc':
-      return Array.isArray(node.content) ? node.content.map((child: any) => adfToHtml(child)).join('') : '';
-    case 'paragraph': {
-      const content = Array.isArray(node.content) ? node.content.map(adfInlineToHtml).join('') : '';
-      return options.listMode ? content : `<p>${content || '<br />'}</p>`;
-    }
-    case 'heading': {
-      const level = typeof node.attrs?.level === 'number' ? Math.min(3, Math.max(1, node.attrs.level)) : 1;
-      const content = Array.isArray(node.content) ? node.content.map(adfInlineToHtml).join('') : '';
-      return `<h${level}>${content}</h${level}>`;
-    }
-    case 'bulletList':
-      return adfListItemsToHtml(node.content, false);
-    case 'orderedList':
-      return adfListItemsToHtml(node.content, true);
-    case 'taskList':
-      return adfTaskListToHtml(node.content);
-    case 'listItem':
-    case 'taskItem':
-      return Array.isArray(node.content) ? node.content.map((child: any) => adfToHtml(child, { listMode: true, taskMode: options.taskMode })).join('') : '';
-    case 'codeBlock': {
-      const language = typeof node.attrs?.language === 'string' && node.attrs.language.trim() ? ` data-language="${escapeHtmlAttribute(node.attrs.language.trim())}"` : '';
-      return `<pre><code${language}>${escapeHtml(adfToText(node).trimEnd())}</code></pre>`;
-    }
-    case 'blockquote':
-    case 'panel': {
-      const content = Array.isArray(node.content) ? node.content.map((child: any) => adfToHtml(child)).join('') : '';
-      return `<blockquote>${content}</blockquote>`;
-    }
-    case 'rule':
-      return '<hr />';
-    case 'table': {
-      const rows = Array.isArray(node.content) ? node.content.filter((row: any) => row?.type === 'tableRow') : [];
-      const htmlRows = rows
-        .map((row: any, rowIndex: number) => {
-          const cells = Array.isArray(row.content) ? row.content : [];
-          const cellHtml = cells.map((cell: any) => adfTableCellToHtml(cell, cell?.type === 'tableHeader' || rowIndex === 0 ? 'th' : 'td')).join('');
-          return `<tr>${cellHtml}</tr>`;
-        })
-        .join('');
-      return htmlRows ? `<table><tbody>${htmlRows}</tbody></table>` : '';
-    }
-    default:
-      if (Array.isArray(node.content)) return node.content.map((child: any) => adfToHtml(child, options)).join('');
-      return adfInlineToHtml(node);
-  }
-};
-
-const adfToText = (node: any): string => {
-  if (!node) return '';
-  if (typeof node === 'string') return node;
-  if (Array.isArray(node)) return node.map(adfToText).join('');
-  if (node.type === 'text') {
-    const marks = Array.isArray(node.marks) ? node.marks : [];
-    const linkMark = marks.find((mark: any) => mark?.type === 'link' && typeof mark?.attrs?.href === 'string');
-    if (linkMark?.attrs?.href && node.text && node.text !== linkMark.attrs.href) {
-      return `${node.text} (${linkMark.attrs.href})`;
-    }
-    return node.text || '';
-  }
-  if (node.type === 'hardBreak') return '\n';
-  if (node.type === 'inlineCard' || node.type === 'blockCard' || node.type === 'embedCard') {
-    return node.attrs?.url || '';
-  }
-  if (node.type === 'mention') {
-    return node.attrs?.text || node.attrs?.displayName || node.attrs?.id || '';
-  }
-  if (node.type === 'emoji') {
-    return node.attrs?.text || node.attrs?.shortName || '';
-  }
-  if (node.type === 'status') {
-    return node.attrs?.text || '';
-  }
-  if (node.type === 'date') {
-    return node.attrs?.timestamp || '';
-  }
-  const content = Array.isArray(node.content) ? node.content.map(adfToText).join('') : '';
-
-  switch (node.type) {
-    case 'paragraph':
-    case 'heading':
-      return `${content}
-`;
-    case 'bulletList':
-    case 'orderedList':
-    case 'taskList':
-      return `${content}
-`;
-    case 'listItem':
-      return `- ${content}
-`;
-    case 'taskItem':
-      return `${node.attrs?.state === 'DONE' ? '[x]' : '[ ]'} ${content}
-`;
-    case 'codeBlock':
-      return `${content}
-`;
-    case 'doc':
-      return content;
-    default:
-      return content;
-  }
-};
 
 const inferXyneFieldType = (field: JiraFieldDefinition, sampleValues: string[]): FormFieldType => {
   const schemaType = field.schema?.type;
@@ -747,15 +369,6 @@ const normalizeNamePart = (value: string): string =>
     .replace(/[^a-z0-9]/g, '');
 
 const normalizeComparableValue = (value?: string | null): string => normalizeNamePart(value || '');
-
-const normalizeEmailLocalPart = (value?: string | null): string =>
-  (value || '')
-    .normalize('NFKD')
-    .replace(/[^\x00-\x7F]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '')
-    .replace(/[^a-z0-9._-]/g, '');
 
 const resolveJiraParentIssueKey = (
   issue: JiraIssue,
@@ -794,76 +407,6 @@ const buildJiraMigrationProjectLogPrefix = (jiraProjectKey: string): string =>
 
 const buildJiraMigrationIssueLogPrefix = (jiraProjectKey: string, issue: JiraIssue): string =>
   `${buildJiraMigrationProjectLogPrefix(jiraProjectKey)}[${issue.id}]`;
-
-const inferEmailCandidatesFromDisplayName = (displayName?: string): string[] => {
-  if (!displayName) return [];
-
-  const parts = displayName
-    .split(/\s+/)
-    .map(normalizeNamePart)
-    .filter(Boolean)
-    .slice(0, 4);
-
-  const rawLocalPart = normalizeEmailLocalPart(displayName);
-  if (parts.length === 0 && !rawLocalPart) return [];
-
-  const candidates = new Set<string>();
-  const addCandidate = (localPart?: string) => {
-    if (localPart) {
-      candidates.add(`${localPart}@juspay.in`);
-    }
-  };
-
-  addCandidate(rawLocalPart);
-  addCandidate(rawLocalPart.replace(/[._-]/g, ''));
-
-  if (parts.length === 0) {
-    return Array.from(candidates);
-  }
-
-  const buildPermutations = (items: string[]): string[][] => {
-    if (items.length <= 1) return [items];
-    const permutations: string[][] = [];
-    items.forEach((item, index) => {
-      const remaining = items.slice(0, index).concat(items.slice(index + 1));
-      buildPermutations(remaining).forEach(permutation => {
-        permutations.push([item, ...permutation]);
-      });
-    });
-    return permutations;
-  };
-
-  const seenSelections = new Set<string>();
-  const buildSelections = (startIndex: number, current: string[]) => {
-    if (current.length > 0) {
-      const key = current.join('|');
-      if (!seenSelections.has(key)) {
-        seenSelections.add(key);
-        buildPermutations(current).forEach(permutation => {
-          addCandidate(permutation.join('.'));
-          addCandidate(permutation.join(''));
-        });
-      }
-    }
-
-    for (let index = startIndex; index < parts.length; index += 1) {
-      current.push(parts[index]);
-      buildSelections(index + 1, current);
-      current.pop();
-    }
-  };
-
-  buildSelections(0, []);
-
-  if (parts.length >= 2) {
-    const first = parts[0];
-    const last = parts[parts.length - 1];
-    addCandidate(`${first}${last[0]}`);
-    addCandidate(`${first[0]}${last}`);
-  }
-
-  return Array.from(candidates);
-};
 
 const inferStageStatusV2 = (jiraStatus: string): TicketStatusV2 => {
   const lower = jiraStatus.toLowerCase();
@@ -944,26 +487,11 @@ const inferStatusMatch = (
 };
 
 
-const escapeJqlString = (value: string): string => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-
-const buildProjectJql = (projectKey: string, dateFrom?: string, issueKeys?: string[]): string => {
-  const clauses = [`project = "${escapeJqlString(projectKey)}"`];
-
-  if (dateFrom) {
-    clauses.push(`created >= "${dateFrom}"`);
-  }
-
-  if (issueKeys && issueKeys.length > 0) {
-    const escapedIssueKeys = issueKeys.map(key => `"${key.replace(/"/g, '\"')}"`);
-    clauses.push(`issuekey IN (${escapedIssueKeys.join(', ')})`);
-  }
-
-  return `${clauses.join(' AND ')} ORDER BY created ASC`;
-};
 
 export class JiraMigrationImportService {
   private ticketRepository = new TicketRepository();
-  private userRepository = new UserRepository();
+  private jiraClient = new JiraMigrationClient();
+  private userResolver = new JiraUserResolver();
   private externalSourceRepository = new ExternalSourceRepository();
   private cachedTicketsByIssueId = new Map<string, CachedTicketRecord>();
   private cachedTicketsByIssueKey = new Map<string, CachedTicketRecord>();
@@ -984,9 +512,22 @@ export class JiraMigrationImportService {
     mimetype: string;
     url: string;
   }>();
-  private resolvedUserCache = new Map<string, string>();
-  private userResolutionLookup: UserResolutionLookup | null = null;
 
+  private queueMessageVespaJobs(messages: Array<{ messageId: string; userId: string }>): void {
+    for (const message of messages) {
+      queueJiraImportMessageVespaJob(message.messageId, message.userId);
+    }
+  }
+
+  private queueTicketVespaJob(ticketId: string, userId: string): void {
+    queueJiraImportTicketVespaJob(ticketId, userId);
+  }
+
+  private queueAttachmentVespaJobs(attachments: Array<{ attachmentId: string; userId: string }>): void {
+    for (const attachment of attachments) {
+      queueJiraImportAttachmentVespaJob(attachment.attachmentId, attachment.userId);
+    }
+  }
 
   private resetExecutionCaches(): void {
     this.cachedTicketsByIssueId.clear();
@@ -996,20 +537,7 @@ export class JiraMigrationImportService {
     this.existingFormValuesByKey.clear();
     this.existingCommentMessagesByKey.clear();
     this.existingAttachmentsByKey.clear();
-    this.resolvedUserCache.clear();
-    this.userResolutionLookup = null;
-  }
-
-  private buildUserCacheKey(user: JiraUser | undefined): string | null {
-    if (!user) return null;
-
-    const parts = [
-      user.accountId?.trim(),
-      user.displayName?.trim().toLowerCase(),
-      user.emailAddress?.trim().toLowerCase(),
-    ].filter(Boolean);
-
-    return parts.length > 0 ? parts.join('|') : null;
+    this.userResolver.reset();
   }
 
   private cacheTicketRecord(ticket: CachedTicketRecord, issueId?: string | null, issueKey?: string | null): void {
@@ -1141,83 +669,6 @@ export class JiraMigrationImportService {
         }
       }
     }
-  }
-
-  private async warmUserResolutionLookup(): Promise<void> {
-    if (this.userResolutionLookup) return;
-
-    const [users, profiles] = await Promise.all([
-      db.user.findMany({
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      }),
-      db.userProfile.findMany({
-        where: {
-          displayName: {
-            not: null,
-          },
-        },
-        select: {
-          userId: true,
-          displayName: true,
-        },
-      }),
-    ]);
-
-    const byExactName = new Map<string, string>();
-    const byProfileDisplayName = new Map<string, string>();
-    const byNormalizedComparable = new Map<string, string>();
-    const byEmail = new Map<string, string>();
-    const byEmailLocalPart = new Map<string, string>();
-    const emailLocalPartCandidates: Array<{ normalizedLocalPart: string; userId: string; email: string }> = [];
-
-    for (const user of users) {
-      if (user.name) {
-        byExactName.set(user.name.toLowerCase(), user.id);
-      }
-
-      const normalizedName = normalizeComparableValue(user.name);
-      if (normalizedName && !byNormalizedComparable.has(normalizedName)) {
-        byNormalizedComparable.set(normalizedName, user.id);
-      }
-
-      const email = user.email.toLowerCase();
-      byEmail.set(email, user.id);
-
-      const normalizedLocalPart = normalizeComparableValue(email.split('@')[0] || '');
-      if (normalizedLocalPart) {
-        if (!byEmailLocalPart.has(normalizedLocalPart)) {
-          byEmailLocalPart.set(normalizedLocalPart, user.id);
-        }
-        emailLocalPartCandidates.push({
-          normalizedLocalPart,
-          userId: user.id,
-          email: user.email,
-        });
-      }
-    }
-
-    for (const profile of profiles) {
-      if (!profile.displayName) continue;
-
-      byProfileDisplayName.set(profile.displayName.toLowerCase(), profile.userId);
-      const normalizedDisplayName = normalizeComparableValue(profile.displayName);
-      if (normalizedDisplayName && !byNormalizedComparable.has(normalizedDisplayName)) {
-        byNormalizedComparable.set(normalizedDisplayName, profile.userId);
-      }
-    }
-
-    this.userResolutionLookup = {
-      byExactName,
-      byProfileDisplayName,
-      byNormalizedComparable,
-      byEmail,
-      byEmailLocalPart,
-      emailLocalPartCandidates,
-    };
   }
 
   private async preloadExistingTickets(issues: JiraIssue[]): Promise<void> {
@@ -1369,10 +820,13 @@ export class JiraMigrationImportService {
         if (rawValue === null || rawValue === undefined) continue;
         if (Array.isArray(rawValue) && rawValue.length === 0) continue;
         if (typeof rawValue === 'string' && rawValue.trim() === '') continue;
+
+        const previewValue = valueToPreviewString(rawValue);
+        if (!previewValue) continue;
+
         const stat = customFieldStats.get(fieldId) || { values: new Set<string>(), issueCoverageCount: 0 };
         stat.issueCoverageCount += 1;
-        const previewValue = valueToPreviewString(rawValue);
-        if (previewValue) stat.values.add(previewValue);
+        stat.values.add(previewValue);
         customFieldStats.set(fieldId, stat);
       }
     }
@@ -1497,433 +951,6 @@ export class JiraMigrationImportService {
     };
   }
 
-  private buildHeaders(): Record<string, string> {
-    const { eulerBotEmail, eulerBotAuthToken } = config.jira;
-    if (!config.jira.baseUrl || !eulerBotEmail || !eulerBotAuthToken) {
-      throw new Error('Jira migration requires backend Jira credentials in env');
-    }
-    return {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Basic ${Buffer.from(`${eulerBotEmail}:${eulerBotAuthToken}`).toString('base64')}`,
-    };
-  }
-
-  private parseRetryAfterMs(value: string | null): number | null {
-    if (!value) return null;
-
-    const seconds = Number(value);
-    if (!Number.isNaN(seconds) && seconds >= 0) {
-      return seconds * 1000;
-    }
-
-    const retryAt = Date.parse(value);
-    if (Number.isNaN(retryAt)) {
-      return null;
-    }
-
-    return Math.max(0, retryAt - Date.now());
-  }
-
-  private computeRetryDelayMs(attempt: number, retryAfterHeader: string | null): number {
-    const retryAfterMs = this.parseRetryAfterMs(retryAfterHeader);
-    if (retryAfterMs !== null) {
-      return Math.min(retryAfterMs, JIRA_MAX_RETRY_DELAY_MS);
-    }
-
-    const exponentialDelay = Math.min(
-      JIRA_BASE_RETRY_DELAY_MS * 2 ** (attempt - 1),
-      JIRA_MAX_RETRY_DELAY_MS,
-    );
-    const jitter = Math.floor(Math.random() * 250);
-    return Math.min(exponentialDelay + jitter, JIRA_MAX_RETRY_DELAY_MS);
-  }
-
-  private async fetchJiraWithRetry(
-    url: string,
-    init?: RequestInit,
-    context?: string,
-    logPrefix = '[jira-migration][jira-api]',
-  ): Promise<Response> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= JIRA_MAX_RETRY_ATTEMPTS; attempt += 1) {
-      try {
-        const response = await fetch(url, init);
-
-        if (response.ok) {
-          return response;
-        }
-
-        if (!JIRA_RETRYABLE_STATUS_CODES.has(response.status) || attempt === JIRA_MAX_RETRY_ATTEMPTS) {
-          const errorText = await response.text();
-          throw new Error(`Jira request failed (${response.status})${context ? ` during ${context}` : ''}: ${errorText}`);
-        }
-
-        const delayMs = this.computeRetryDelayMs(attempt, response.headers.get('Retry-After'));
-        logger.warn(`${logPrefix} Retrying Jira request after retryable response`, {
-          context,
-          attempt,
-          maxAttempts: JIRA_MAX_RETRY_ATTEMPTS,
-          statusCode: response.status,
-          delayMs,
-          url,
-        });
-        await sleep(delayMs);
-      } catch (error) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        lastError = err;
-
-        const isRetryableNetworkError = !('message' in err) || !err.message.includes('Jira request failed (');
-        if (!isRetryableNetworkError || attempt === JIRA_MAX_RETRY_ATTEMPTS) {
-          throw err;
-        }
-
-        const delayMs = this.computeRetryDelayMs(attempt, null);
-        logger.warn(`${logPrefix} Retrying Jira request after network error`, {
-          context,
-          attempt,
-          maxAttempts: JIRA_MAX_RETRY_ATTEMPTS,
-          delayMs,
-          url,
-          error: err.message,
-        });
-        await sleep(delayMs);
-      }
-    }
-
-    throw lastError || new Error(`Jira request failed${context ? ` during ${context}` : ''}`);
-  }
-
-  private async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.fetchJiraWithRetry(
-      `${config.jira.baseUrl}${path}`,
-      {
-        ...init,
-        headers: { ...this.buildHeaders(), ...(init?.headers || {}) },
-      },
-      path,
-      '[jira-migration][jira-api]',
-    );
-    return response.json() as Promise<T>;
-  }
-
-  private async fetchIssuesPage(
-    projectKey: string,
-    requestPageToken?: string,
-    maxResults: number = 100,
-    dateFrom?: string,
-  ): Promise<{
-    total: number;
-    issues: JiraIssue[];
-    nextPageToken: string | null;
-    hasNextPage: boolean;
-    pageSize: number;
-    requestPageToken: string | null;
-  }> {
-    const result = await this.fetchJson<JiraSearchResponse>('/rest/api/3/search/jql', {
-      method: 'POST',
-      body: JSON.stringify({
-        jql: buildProjectJql(projectKey, dateFrom),
-        maxResults,
-        fields: ['*all'],
-        ...(requestPageToken ? { nextPageToken: requestPageToken } : {}),
-      }),
-    });
-
-    logger.info('[JiraMigrationImport] Jira search page fetched', {
-      projectKey,
-      maxResults,
-      nextPageTokenPresent: Boolean(requestPageToken),
-      returnedIssueCount: result.issues.length,
-      total: result.total,
-      isLast: result.isLast,
-      responseNextPageTokenPresent: Boolean(result.nextPageToken),
-      sampleIssueKeys: result.issues.slice(0, 5).map(issue => issue.key),
-    });
-
-    return {
-      total: typeof result.total === 'number' ? result.total : result.issues.length,
-      issues: result.issues,
-      nextPageToken: result.nextPageToken || null,
-      hasNextPage: result.isLast !== true && Boolean(result.nextPageToken),
-      pageSize: maxResults,
-      requestPageToken: requestPageToken || null,
-    };
-  }
-
-
-  private async fetchIssuesByKeys(projectKey: string, issueKeys: string[], dateFrom?: string): Promise<JiraIssue[]> {
-    const uniqueIssueKeys = [...new Set(issueKeys.map(key => key.trim().toUpperCase()).filter(Boolean))];
-    if (uniqueIssueKeys.length === 0) {
-      return [];
-    }
-    const result = await this.fetchJson<JiraSearchResponse>('/rest/api/3/search/jql', {
-      method: 'POST',
-      body: JSON.stringify({
-        jql: buildProjectJql(projectKey, dateFrom, uniqueIssueKeys),
-        maxResults: Math.min(uniqueIssueKeys.length, 100),
-        fields: ['*all'],
-      }),
-    });
-
-    logger.info('[JiraMigrationImport] Jira search page fetched for selected issue keys', {
-      projectKey,
-      requestedIssueKeyCount: uniqueIssueKeys.length,
-      returnedIssueCount: result.issues.length,
-      sampleIssueKeys: result.issues.slice(0, 10).map(issue => issue.key),
-    });
-
-    return result.issues;
-  }
-
-  private async fetchAllComments(issueKey: string): Promise<JiraComment[]> {
-    const comments: JiraComment[] = [];
-    let startAt = 0;
-    const maxResults = 100;
-    let total = 0;
-
-    do {
-      const result = await this.fetchJson<JiraCommentResponse>(
-        `/rest/api/3/issue/${issueKey}/comment?startAt=${startAt}&maxResults=${maxResults}`,
-      );
-      total = result.total;
-      comments.push(...result.comments);
-      startAt += result.comments.length;
-      if (result.comments.length === 0) break;
-    } while (comments.length < total);
-
-    return comments;
-  }
-
-  private async resolveUser(
-    user: JiraUser | undefined,
-    fallbackUserId: string,
-    unresolvedUsers: Map<string, { displayName: string | null; accountId: string | null; suggestedEmails: string[] }>,
-  ): Promise<string> {
-    if (!user) return fallbackUserId;
-
-    const userCacheKey = this.buildUserCacheKey(user);
-    if (userCacheKey && this.resolvedUserCache.has(userCacheKey)) {
-      return this.resolvedUserCache.get(userCacheKey)!;
-    }
-
-    await this.warmUserResolutionLookup();
-
-    if (user.displayName) {
-      const normalizedDisplayName = normalizeComparableValue(user.displayName);
-      const inferredEmails = inferEmailCandidatesFromDisplayName(user.displayName);
-
-      const exactNameMatch = this.userResolutionLookup?.byExactName.get(user.displayName.toLowerCase());
-      if (exactNameMatch) {
-        if (userCacheKey) this.resolvedUserCache.set(userCacheKey, exactNameMatch);
-        return exactNameMatch;
-      }
-
-      const profileDisplayNameMatch = this.userResolutionLookup?.byProfileDisplayName.get(user.displayName.toLowerCase());
-      if (profileDisplayNameMatch) {
-        logger.info('[JiraMigration] Resolved Jira user by user profile display name', {
-          displayName: user.displayName,
-          resolvedUserId: profileDisplayNameMatch,
-        });
-        if (userCacheKey) this.resolvedUserCache.set(userCacheKey, profileDisplayNameMatch);
-        return profileDisplayNameMatch;
-      }
-
-      const normalizedLookupMatch = this.userResolutionLookup?.byNormalizedComparable.get(normalizedDisplayName);
-      if (normalizedLookupMatch) {
-        logger.info('[JiraMigration] Resolved Jira user by normalized name match', {
-          displayName: user.displayName,
-          resolvedUserId: normalizedLookupMatch,
-        });
-        if (userCacheKey) this.resolvedUserCache.set(userCacheKey, normalizedLookupMatch);
-        return normalizedLookupMatch;
-      }
-
-      for (const email of inferredEmails) {
-        const inferredEmailMatch = this.userResolutionLookup?.byEmail.get(email.toLowerCase());
-        if (inferredEmailMatch) {
-          logger.info('[JiraMigration] Resolved Jira user by inferred email', {
-            displayName: user.displayName,
-            inferredEmail: email,
-            resolvedUserId: inferredEmailMatch,
-          });
-          if (userCacheKey) this.resolvedUserCache.set(userCacheKey, inferredEmailMatch);
-          return inferredEmailMatch;
-        }
-      }
-
-      if (user.emailAddress) {
-        const jiraEmailMatch = this.userResolutionLookup?.byEmail.get(user.emailAddress.toLowerCase());
-        if (jiraEmailMatch) {
-          if (userCacheKey) this.resolvedUserCache.set(userCacheKey, jiraEmailMatch);
-          return jiraEmailMatch;
-        }
-      }
-
-      for (const email of inferredEmails) {
-        const localPart = email.split('@')[0] || '';
-        const normalizedLocalPart = normalizeComparableValue(localPart);
-        if (!normalizedLocalPart) continue;
-
-        const exactLocalPartMatch = this.userResolutionLookup?.byEmailLocalPart.get(normalizedLocalPart);
-        if (exactLocalPartMatch) {
-          logger.info('[JiraMigration] Resolved Jira user by inferred email prefix', {
-            displayName: user.displayName,
-            resolvedUserId: exactLocalPartMatch,
-          });
-          if (userCacheKey) this.resolvedUserCache.set(userCacheKey, exactLocalPartMatch);
-          return exactLocalPartMatch;
-        }
-
-        const prefixMatch = this.userResolutionLookup?.emailLocalPartCandidates.find(candidate =>
-          candidate.normalizedLocalPart.startsWith(normalizedLocalPart) ||
-          candidate.normalizedLocalPart.includes(normalizedLocalPart),
-        );
-        if (prefixMatch) {
-          logger.info('[JiraMigration] Resolved Jira user by inferred email prefix', {
-            displayName: user.displayName,
-            resolvedUserId: prefixMatch.userId,
-            resolvedEmail: prefixMatch.email,
-          });
-          if (userCacheKey) this.resolvedUserCache.set(userCacheKey, prefixMatch.userId);
-          return prefixMatch.userId;
-        }
-      }
-
-      const byName = await db.user.findFirst({
-        where: {
-          name: {
-            equals: user.displayName,
-            mode: 'insensitive',
-          },
-        },
-      });
-      if (byName) return byName.id;
-
-      const byProfileDisplayName = await db.userProfile.findFirst({
-        where: {
-          displayName: {
-            equals: user.displayName,
-            mode: 'insensitive',
-          },
-        },
-      });
-
-      if (byProfileDisplayName?.userId) {
-        const profileUser = await db.user.findUnique({
-          where: { id: byProfileDisplayName.userId },
-        });
-
-        if (profileUser?.id) {
-          logger.info('[JiraMigration] Resolved Jira user by user profile display name', {
-            displayName: user.displayName,
-            resolvedUserId: profileUser.id,
-            resolvedEmail: profileUser.email,
-          });
-          return profileUser.id;
-        }
-      }
-
-      const possibleNameMatches = await db.user.findMany({
-        where: {
-          OR: user.displayName
-            .split(/\s+/)
-            .map(normalizeNamePart)
-            .filter(Boolean)
-            .map(part => ({
-              name: {
-                contains: part,
-                mode: 'insensitive' as const,
-              },
-            })),
-        },
-        take: 20,
-      });
-
-      const normalizedNameMatch = possibleNameMatches.find(candidate => {
-        const normalizedCandidateName = normalizeComparableValue(candidate.name);
-        const normalizedCandidateEmailLocalPart = normalizeComparableValue(candidate.email.split('@')[0] || '');
-        return (
-          normalizedCandidateName === normalizedDisplayName ||
-          inferredEmails.some(email => normalizeComparableValue(email.split('@')[0] || '') === normalizedCandidateEmailLocalPart)
-        );
-      });
-
-      if (normalizedNameMatch) {
-        logger.info('[JiraMigration] Resolved Jira user by normalized name match', {
-          displayName: user.displayName,
-          resolvedUserId: normalizedNameMatch.id,
-          resolvedEmail: normalizedNameMatch.email,
-        });
-        return normalizedNameMatch.id;
-      }
-
-      for (const email of inferredEmails) {
-        const byInferredEmail = await this.userRepository.findByEmail(email);
-        if (byInferredEmail) {
-          logger.info('[JiraMigration] Resolved Jira user by inferred email', {
-            displayName: user.displayName,
-            inferredEmail: email,
-            resolvedUserId: byInferredEmail.id,
-          });
-          return byInferredEmail.id;
-        }
-      }
-
-      if (user.emailAddress) {
-        const existingByJiraEmail = await this.userRepository.findByEmail(user.emailAddress);
-        if (existingByJiraEmail) return existingByJiraEmail.id;
-      }
-
-      const byEmailPrefix = await db.user.findFirst({
-        where: {
-          OR: inferredEmails.flatMap(email => {
-            const localPart = email.split('@')[0] || '';
-            const normalizedLocalPart = normalizeComparableValue(localPart);
-            return [
-              {
-                email: {
-                  startsWith: localPart,
-                  mode: 'insensitive' as const,
-                },
-              },
-              {
-                email: {
-                  contains: normalizedLocalPart,
-                  mode: 'insensitive' as const,
-                },
-              },
-            ];
-          }),
-        },
-      });
-
-      if (byEmailPrefix) {
-        logger.info('[JiraMigration] Resolved Jira user by inferred email prefix', {
-          displayName: user.displayName,
-          resolvedUserId: byEmailPrefix.id,
-          resolvedEmail: byEmailPrefix.email,
-        });
-        return byEmailPrefix.id;
-      }
-
-      unresolvedUsers.set(user.accountId || user.displayName, {
-        displayName: user.displayName || null,
-        accountId: user.accountId || null,
-        suggestedEmails: inferredEmails,
-      });
-    }
-    logger.warn('[jira-migration][user-resolution] Falling back to actor user for unresolved Jira user', {
-      displayName: user.displayName || null,
-      emailAddress: user.emailAddress || null,
-      accountId: user.accountId || null,
-      fallbackUserId,
-    });
-    return fallbackUserId;
-  }
-
-
   private async ensureExactJiraStages(
     boardId: string,
     actorUserId: string,
@@ -2027,15 +1054,41 @@ export class JiraMigrationImportService {
   }
 
 
-  private normalizeFormValue(rawValue: any, fieldType: string): any {
+  private async normalizeFormValue(
+    rawValue: any,
+    fieldType: string,
+    fallbackUserId: string,
+    unresolvedUsers: Map<string, { displayName: string | null; accountId: string | null; suggestedEmails: string[] }>,
+  ): Promise<any> {
     if (rawValue === null || rawValue === undefined) return null;
 
-    if (fieldType === 'MULTI_SELECT' || fieldType === 'USER') {
-      const values = Array.isArray(rawValue) ? rawValue : [rawValue];
-      return values.map(v => valueToPreviewString(v)).filter(Boolean);
+    if (fieldType === 'USER') {
+      const jiraUsers = extractJiraUsersFromCustomFieldValue(rawValue);
+      if (jiraUsers.length === 0) {
+        return null;
+      }
+
+      const resolvedUserIds = [
+        ...new Set(
+          (await Promise.all(
+            jiraUsers.map(user => this.userResolver.resolveUser(user, fallbackUserId, unresolvedUsers)),
+          )).filter(Boolean),
+        ),
+      ];
+
+      return resolvedUserIds.length > 0 ? resolvedUserIds : null;
     }
 
-    return valueToPreviewString(rawValue);
+    const meaningfulValues = extractMeaningfulJiraCustomFieldValues(rawValue);
+    if (meaningfulValues.length === 0) {
+      return null;
+    }
+
+    if (fieldType === 'MULTI_SELECT') {
+      return meaningfulValues;
+    }
+
+    return meaningfulValues.join(', ');
   }
 
   private async findExistingTicketByJiraId(issueId: string, issueKey: string) {
@@ -2110,90 +1163,33 @@ export class JiraMigrationImportService {
     return existing;
   }
 
-  private async downloadJiraAttachment(attachment: JiraAttachment, issueKey: string) {
-    if (!attachment.content) {
-      throw new Error(`Jira attachment ${attachment.id} does not have a content URL`);
-    }
+  private async renderJiraMessageContent(
+    body: unknown,
+    unresolvedUsers: Map<string, { displayName: string | null; accountId: string | null; suggestedEmails: string[] }>,
+    fallbackHtml: string,
+  ): Promise<string> {
+    const content = await adfToHtmlAsync(body, {
+      resolveUserMention: async mention => {
+        const resolvedMentionUserId = await this.userResolver.resolveUserOrNull(
+          {
+            accountId: mention.id,
+            displayName: mention.displayName || mention.text,
+          },
+          unresolvedUsers,
+        );
 
-    const response = await this.fetchJiraWithRetry(
-      attachment.content,
-      {
-        headers: this.buildHeaders(),
-      },
-      `attachment download for ${issueKey}/${attachment.id}`,
-    );
+        if (!resolvedMentionUserId) {
+          return null;
+        }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const uploaded = await gcsService.uploadFile(buffer, {
-      filename: attachment.filename,
-      contentType: attachment.mimeType || response.headers.get('content-type') || 'application/octet-stream',
-      metadata: {
-        jiraIssueKey: issueKey,
-        jiraAttachmentId: attachment.id,
-        importedAt: new Date().toISOString(),
+        const username = (mention.displayName || mention.text || '').replace(/^@/, '').trim();
+        return username
+          ? { userId: resolvedMentionUserId, username }
+          : null;
       },
-      scopeType: 'TICKET',
-      scopeId: issueKey,
     });
 
-    return {
-      gcsPath: uploaded.gcsPath,
-      size: uploaded.size,
-      filename: uploaded.filename,
-      mimeType: attachment.mimeType || response.headers.get('content-type') || 'application/octet-stream',
-    };
-  }
-
-  private async createJiraRichContentCanvas(
-    channelId: string,
-    createdByUserId: string,
-    title: string,
-    blocks: BlockNoteBlock[],
-    metadata: any,
-  ): Promise<string | null> {
-    if (blocks.length === 0) {
-      return null;
-    }
-
-    const now = new Date();
-    const canvasId = randomUUID();
-    const viewAccessId = randomUUID();
-    const participantId = randomUUID();
-
-    await db.$transaction(async tx => {
-      await tx.canvas.create({
-        data: {
-          id: canvasId,
-          title,
-          content: blocks as any,
-          channelId,
-          createdBy: createdByUserId,
-          viewAccessId,
-          editAccessId: null,
-          visibility: 'PUBLIC',
-          isTemplate: false,
-          isCollaborative: false,
-          lastEditedBy: createdByUserId,
-          lastEditedAt: now,
-          createdAt: now,
-          updatedAt: now,
-          metadata,
-        },
-      });
-
-      await tx.canvasParticipant.create({
-        data: {
-          id: participantId,
-          canvasId,
-          userId: createdByUserId,
-          role: 'OWNER',
-          joinedAt: now,
-          updatedAt: now,
-        },
-      });
-    });
-
-    return `${config.slackFrontendUrl}/chat/canvas/${viewAccessId}`;
+    return content.trim() || fallbackHtml;
   }
 
   private async importComments(
@@ -2208,7 +1204,7 @@ export class JiraMigrationImportService {
     commentMessageMap: Map<string, string>;
     comments: JiraComment[];
   }> {
-    const comments = await this.fetchAllComments(issue.key);
+    const comments = await this.jiraClient.fetchAllComments(issue.key);
     await this.preloadExistingCommentMessages(
       conversationId,
       comments.map(comment => comment.id),
@@ -2242,11 +1238,13 @@ export class JiraMigrationImportService {
         continue;
       }
 
-      const senderId = await this.resolveUser(comment.author, fallbackUserId, unresolvedUsers);
+      const senderId = await this.userResolver.resolveUser(comment.author, fallbackUserId, unresolvedUsers);
       const createdAt = comment.created ? new Date(comment.created) : new Date();
-      const content = adfToHtml(comment.body).trim() || '<p>[Imported Jira comment]</p>';
-      const commentBlocks = adfToBlockNoteBlocks(comment.body);
-      const hasRichCommentBody = adfHasRichFormatting(comment.body) && commentBlocks.length > 0;
+      const content = await this.renderJiraMessageContent(
+        comment.body,
+        unresolvedUsers,
+        '<p>[Imported Jira comment]</p>',
+      );
       const messageId = randomUUID();
 
       messagesToCreate.push({
@@ -2273,14 +1271,6 @@ export class JiraMigrationImportService {
               emailAddress: comment.author?.emailAddress || null,
             },
           },
-          ...(hasRichCommentBody
-            ? {
-                richContent: {
-                  format: 'blocknote',
-                  blocks: commentBlocks,
-                },
-              }
-            : {}),
         },
       });
       commentMessageMap.set(comment.id, messageId);
@@ -2301,6 +1291,12 @@ export class JiraMigrationImportService {
       await db.message.createMany({
         data: messagesToCreate as any,
       });
+      this.queueMessageVespaJobs(
+        messagesToCreate.map(message => ({
+          messageId: message.messageId,
+          userId: message.senderId,
+        })),
+      );
     }
 
     if (participantJoinedAtByUserId.size > 0) {
@@ -2541,7 +1537,7 @@ export class JiraMigrationImportService {
         return cachedDownload;
       }
 
-      const downloadPromise = this.downloadJiraAttachment(attachment, issue.key);
+      const downloadPromise = this.jiraClient.downloadAttachment(attachment, issue.key);
       downloadCache.set(attachment.id, downloadPromise);
       return downloadPromise;
     };
@@ -2571,7 +1567,7 @@ export class JiraMigrationImportService {
               };
             })();
 
-        const uploadedBy = await this.resolveUser(
+        const uploadedBy = await this.userResolver.resolveUser(
           plannedMatch.attachment.author,
           fallbackUserId,
           unresolvedUsers,
@@ -2616,6 +1612,7 @@ export class JiraMigrationImportService {
             url: createdAttachment.url,
           },
         );
+        queueJiraImportAttachmentVespaJob(createdAttachment.id, uploadedBy);
 
         return { status: 'imported' as const, messageId: plannedMatch.messageId };
       },
@@ -2700,8 +1697,8 @@ export class JiraMigrationImportService {
       attachmentsToImport,
       ATTACHMENT_IMPORT_CONCURRENCY,
       async attachment => {
-        const uploadedBy = await this.resolveUser(attachment.author, fallbackUserId, unresolvedUsers);
-        const downloaded = await this.downloadJiraAttachment(attachment, issue.key);
+        const uploadedBy = await this.userResolver.resolveUser(attachment.author, fallbackUserId, unresolvedUsers);
+        const downloaded = await this.jiraClient.downloadAttachment(attachment, issue.key);
 
         return {
           attachmentId: attachment.id,
@@ -2739,6 +1736,14 @@ export class JiraMigrationImportService {
       await this.preloadExistingAttachments(
         ticketId,
         attachmentsToCreate.map(attachment => attachment.attachmentId),
+      );
+      this.queueAttachmentVespaJobs(
+        attachmentsToCreate.flatMap(attachment => {
+          const existing = this.existingAttachmentsByKey.get(this.buildAttachmentCacheKey(ticketId, attachment.attachmentId));
+          return existing
+            ? [{ attachmentId: existing.id, userId: attachment.uploadedByUserId }]
+            : [];
+        }),
       );
       imported += attachmentsToCreate.length;
     }
@@ -3174,7 +2179,7 @@ export class JiraMigrationImportService {
           defaultTicketStatusV2: true,
         },
       }),
-      this.fetchJson<JiraFieldDefinition[]>('/rest/api/3/field'),
+      this.jiraClient.fetchFieldDefinitions(),
     ]);
 
     if (!project) throw new Error('Target project not found');
@@ -3202,7 +2207,7 @@ export class JiraMigrationImportService {
       created: externalSourceCreated,
     } = await this.ensureExternalSource(jiraProjectKey, channel.id, board.id);
 
-    await this.warmUserResolutionLookup();
+    await this.userResolver.warmUserResolutionLookup();
 
     let stages: JiraStageSummary[] = [...initialStages];
     const fieldMap = new Map<string, { fieldId: string; fieldType: string }>();
@@ -3301,8 +2306,11 @@ export class JiraMigrationImportService {
         const statusName = issue.fields.status?.name || 'Open';
         const summary = issue.fields.summary || issue.key;
         const description = adfToText(issue.fields.description).trim() || `[Imported from Jira ${issue.key}]`;
-        const descriptionBlocks = adfToBlockNoteBlocks(issue.fields.description);
-        const hasRichDescription = adfHasRichFormatting(issue.fields.description) && descriptionBlocks.length > 0;
+        const rootMessageContent = await this.renderJiraMessageContent(
+          issue.fields.description,
+          unresolvedUsers,
+          `<p>[Imported from Jira ${issue.key}]</p>`,
+        );
         const createdAt = issue.fields.created ? new Date(issue.fields.created) : new Date();
         const issueResult: JiraMigrationIssueResult = {
           issueKey: issue.key,
@@ -3314,11 +2322,10 @@ export class JiraMigrationImportService {
         const issueLogPrefix = buildJiraMigrationIssueLogPrefix(jiraProjectKey, issue);
 
         try {
-          const resolvedReporterId = await this.resolveUser(reporter, actorUserId, unresolvedUsers);
-          const resolvedAssigneeId = await this.resolveUser(assignee, actorUserId, unresolvedUsers);
+          const resolvedReporterId = await this.userResolver.resolveUser(reporter, actorUserId, unresolvedUsers);
+          const resolvedAssigneeId = await this.userResolver.resolveUser(assignee, actorUserId, unresolvedUsers);
           const stageMatch = inferStatusMatch(statusName, stages);
           let initialMessageIdForTicket: string | null = null;
-          let createdTicketMetadata: Record<string, any> | null = null;
 
           if (!existingTicket) {
             const generatedConversationId = randomUUID();
@@ -3342,7 +2349,7 @@ export class JiraMigrationImportService {
                   messageId: initialMessageId,
                   conversationId: generatedConversationId,
                   senderId: resolvedReporterId,
-                  content: description,
+                  content: rootMessageContent,
                   msgType: MessageType.USER,
                   hasAttachment: false,
                   edited: false,
@@ -3357,14 +2364,6 @@ export class JiraMigrationImportService {
                       issueKey: issue.key,
                       importedRootMessage: true,
                     },
-                    ...(hasRichDescription
-                      ? {
-                          richContent: {
-                            format: 'blocknote',
-                            blocks: descriptionBlocks,
-                          },
-                        }
-                      : {}),
                   }) as any,
                 },
               });
@@ -3431,14 +2430,6 @@ export class JiraMigrationImportService {
                       parentKey: resolveJiraParentIssueKey(issue, fieldDefinitions),
                       resolution: issue.fields.resolution?.name || null,
                       resolutionDate: issue.fields.resolutiondate || null,
-                      ...(hasRichDescription
-                        ? {
-                            richDescription: {
-                              format: 'blocknote',
-                              blocks: descriptionBlocks,
-                            },
-                          }
-                        : {}),
                     },
                   },
                 },
@@ -3475,7 +2466,6 @@ export class JiraMigrationImportService {
 
             ticketId = ticket.id;
             conversationId = generatedConversationId;
-            createdTicketMetadata = (ticket.metadata as Record<string, any> | null) || null;
             this.cacheTicketRecord(
               {
                 id: ticket.id,
@@ -3506,83 +2496,17 @@ export class JiraMigrationImportService {
             }
 
             importedTickets += 1;
+            this.queueTicketVespaJob(ticket.id, resolvedReporterId);
 
-            if (ticketId && initialMessageIdForTicket && hasRichDescription) {
-              try {
-                const descriptionCanvasUrl = await this.createJiraRichContentCanvas(
-                  channel.id,
-                  resolvedReporterId,
-                  `Jira Description: ${issue.key} - ${summary}`,
-                  descriptionBlocks,
-                  {
-                    source: 'jira_ticket_description',
-                    issueId: issue.id,
-                    issueKey: issue.key,
-                    ticketId,
-                    conversationId: generatedConversationId,
-                  },
-                );
-
-                if (descriptionCanvasUrl) {
-                  const nextTicketMetadata = {
-                    ...(createdTicketMetadata || {}),
-                    jira: {
-                      ...(((createdTicketMetadata || {}).jira as Record<string, unknown> | undefined) || {}),
-                      descriptionCanvasUrl,
-                    },
-                  };
-
-                  await db.ticket.update({
-                    where: { id: ticketId },
-                    data: {
-                      metadata: nextTicketMetadata as any,
-                    },
-                  });
-
-                  await db.message.update({
-                    where: { messageId: initialMessageIdForTicket },
-                    data: {
-                      metadata: ({
-                        source: {
-                          system: 'jira',
-                          issueId: issue.id,
-                          issueKey: issue.key,
-                          importedRootMessage: true,
-                        },
-                        richContent: {
-                          format: 'blocknote',
-                          blocks: descriptionBlocks,
-                          canvasUrl: descriptionCanvasUrl,
-                        },
-                      }) as any,
-                    },
-                  });
-
-                  this.cacheTicketRecord(
-                    {
-                      ...(this.getCachedTicketRecord(issue.id, issue.key) || {
-                        id: ticketId,
-                        conversationId: generatedConversationId,
-                        xyneId: issue.key,
-                        title: summary,
-                        description,
-                        createdBy: resolvedReporterId,
-                        assignedTo: assignee ? resolvedAssigneeId : null,
-                        metadata: nextTicketMetadata,
-                      }),
-                      metadata: nextTicketMetadata,
-                    },
-                    issue.id,
-                    issue.key,
-                  );
-                }
-              } catch (error) {
-                logger.warn(`${issueLogPrefix} Rich Jira description canvas creation failed`, {
-                  issueKey: issue.key,
-                  error: error instanceof Error ? error.message : 'Unknown error',
-                });
-              }
+            if (initialMessageIdForTicket) {
+              this.queueMessageVespaJobs([
+                {
+                  messageId: initialMessageIdForTicket,
+                  userId: resolvedReporterId,
+                },
+              ]);
             }
+
           } else {
             skippedTickets += 1;
           }
@@ -3621,34 +2545,41 @@ export class JiraMigrationImportService {
             });
           }
 
-          const formEntityValuesData = Array.from(fieldMap.entries())
-            .map(([jiraFieldId, mapping]) => {
-              const value = this.normalizeFormValue(issue.fields[jiraFieldId], mapping.fieldType);
-              if (
-                value === null ||
-                value === undefined ||
-                (typeof value === 'string' && value.trim() === '') ||
-                (Array.isArray(value) && value.length === 0)
-              ) {
-                return null;
-              }
-              return {
-                entityId: ticketId,
-                entityType: FormEntityType.TICKET,
-                fieldId: mapping.fieldId,
-                contextId: board.id,
-                fieldValue: '',
-                actualFieldValue: value,
-              };
-            })
-            .filter(Boolean) as Array<{
-              entityId: string;
-              entityType: FormEntityType;
-              fieldId: string;
-              contextId: string;
-              fieldValue: string;
-              actualFieldValue: any;
-            }>;
+          const formEntityValuesData: Array<{
+            entityId: string;
+            entityType: FormEntityType;
+            fieldId: string;
+            contextId: string;
+            fieldValue: string;
+            actualFieldValue: any;
+          }> = [];
+
+          for (const [jiraFieldId, mapping] of fieldMap.entries()) {
+            const value = await this.normalizeFormValue(
+              issue.fields[jiraFieldId],
+              mapping.fieldType,
+              actorUserId,
+              unresolvedUsers,
+            );
+
+            if (
+              value === null ||
+              value === undefined ||
+              (typeof value === 'string' && value.trim() === '') ||
+              (Array.isArray(value) && value.length === 0)
+            ) {
+              continue;
+            }
+
+            formEntityValuesData.push({
+              entityId: ticketId,
+              entityType: FormEntityType.TICKET,
+              fieldId: mapping.fieldId,
+              contextId: board.id,
+              fieldValue: '',
+              actualFieldValue: value,
+            });
+          }
 
           try {
             if (!existingTicket) {
@@ -3856,7 +2787,7 @@ export class JiraMigrationImportService {
     };
 
     if (input.issueKeys && input.issueKeys.length > 0) {
-      const selectedIssues = await this.fetchIssuesByKeys(jiraProjectKey, input.issueKeys, input.dateFrom);
+      const selectedIssues = await this.jiraClient.fetchIssuesByKeys(jiraProjectKey, input.issueKeys, input.dateFrom);
       totalIssues = selectedIssues.length;
       await ensureInitialProgress();
       await processIssuesChunk(selectedIssues);
@@ -3866,7 +2797,7 @@ export class JiraMigrationImportService {
       const pageSize = 100;
 
       while (hasNextPage) {
-        const page = await this.fetchIssuesPage(jiraProjectKey, nextPageToken, pageSize, input.dateFrom);
+        const page = await this.jiraClient.fetchIssuesPage(jiraProjectKey, nextPageToken, pageSize, input.dateFrom);
         if (!initialProgressPublished) {
           totalIssues = page.total;
           await ensureInitialProgress();
