@@ -57,7 +57,7 @@ export function ChangelogFilters({ months, years }: ChangelogFiltersProps) {
           <span>{selectedMonth}</span>
           <ChevronDownIcon />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent>
           <DropdownMenuItem
             onClick={() => updateFilter("month", "All")}
             className={selectedMonth === "All" ? "bg-gray-100" : ""}
@@ -82,7 +82,7 @@ export function ChangelogFilters({ months, years }: ChangelogFiltersProps) {
           <span>{selectedYear}</span>
           <ChevronDownIcon />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent>
           <DropdownMenuItem
             onClick={() => updateFilter("year", "All")}
             className={selectedYear === "All" ? "bg-gray-100" : ""}
