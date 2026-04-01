@@ -65,8 +65,10 @@ export async function shutdownStreamProvider(): Promise<void> {
 
 function getCurrentTimestamp(): string {
   const now = new Date();
+  // Convert to IST (UTC+5:30) by adding 330 minutes
+  const istTime = new Date(now.getTime() + (330 * 60 * 1000));
   const pad = (n: number): string => n.toString().padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  return `${istTime.getUTCFullYear()}-${pad(istTime.getUTCMonth() + 1)}-${pad(istTime.getUTCDate())} ${pad(istTime.getUTCHours())}:${pad(istTime.getUTCMinutes())}:${pad(istTime.getUTCSeconds())}`;
 }
 
 // ============================================================================
