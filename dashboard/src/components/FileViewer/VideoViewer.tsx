@@ -6,6 +6,7 @@ import { useScope, useShortcutById } from '../../shortcuts';
 import { usePlatform } from '../../hooks/usePlatform';
 import { Menu } from '@base-ui/react/menu';
 import { cn } from '../../utils/classNames';
+import { attachmentViewerActor } from '../../machines/attachmentViewerMachine';
 
 interface VideoViewerProps extends BaseViewerProps {
   attachmentId?: string;
@@ -184,6 +185,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     const handleTimeUpdate = (): void => {
       if (videoRef.current) {
         setCurrentTime(videoRef.current.currentTime);
+        attachmentViewerActor.send({ type: 'SET_VIDEO_TIME', time: videoRef.current.currentTime });
       }
     };
 
