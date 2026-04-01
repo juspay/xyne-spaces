@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { BaseTicketType, PRActivityValue } from '@xyne/shared';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -378,6 +379,8 @@ export class TicketRepository {
       }
     });
 
+    await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+
     // Create activity record for the stage change
     if (source === ActivitySource.WEBHOOK && prActivityData) {
       // For WEBHOOK source: Create PR activity with stage change info
@@ -636,7 +639,7 @@ export class TicketRepository {
   }
 
   async updateTicketAssignee(ticketId: string, newAssigneeId: string, updatedBy: string): Promise<void> {
-    await prisma.ticket.update({
+    const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
       data: {
         assignedTo: newAssigneeId,
@@ -644,10 +647,12 @@ export class TicketRepository {
         updatedAt: new Date(),
       }
     });
+
+    await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
   }
 
   async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
-    await prisma.ticket.update({
+    const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
       data: {
         userGroupId: groupId,
@@ -655,6 +660,8 @@ export class TicketRepository {
         updatedAt: new Date(),
       }
     });
+
+    await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
   } 
 
   async updateTicketMetadata(ticketId: string, metadata: Record<string, any>): Promise<void> {
@@ -669,7 +676,7 @@ export class TicketRepository {
 
     const existingMetadata = (ticket.metadata as Record<string, any>) || {};
 
-    await prisma.ticket.update({
+    const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
       data: {
         metadata: {
@@ -678,5 +685,7 @@ export class TicketRepository {
         }
       }
     });
+
+    await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
   }
 }

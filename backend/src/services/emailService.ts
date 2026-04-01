@@ -441,10 +441,12 @@ export class EmailService {
       try {
         const assignmentResult = await evaluateAssignmentRule(groupId, boardId);
         if (assignmentResult.assignedUserId) {
-          await this.prisma.ticket.update({
+          const updatedTicket = await this.prisma.ticket.update({
             where: { id: ticket.id },
             data: { assignedTo: assignmentResult.assignedUserId }
           });
+
+          await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
           
           // Sync workload mapping for the assigned user
           try {
@@ -780,10 +782,12 @@ export class EmailService {
       try {
         const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId);
         if (assignmentResult.assignedUserId) {
-          await this.prisma.ticket.update({
+          const updatedTicket = await this.prisma.ticket.update({
             where: { id: ticket.id },
             data: { assignedTo: assignmentResult.assignedUserId }
           });
+
+          await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
 
           try {
             await syncUserWorkload(assignmentResult.assignedUserId, userGroupId, boardId, userId);
