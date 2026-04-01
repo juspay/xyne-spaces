@@ -1043,7 +1043,6 @@ export class ChannelController {
     }
   };
 
-
   // GET /api/channels/publish-targets - Get channels where user can publish docs
   // Returns DEFAULT scope channels (not DMs or GROUP_DMs)
   getChannelsForDocs = async (req: Request, res: Response): Promise<void> => {

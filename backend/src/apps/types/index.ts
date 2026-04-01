@@ -181,6 +181,19 @@ export interface ConversationRepliesCursor {
     createdAt: number;
 }
 
+export interface ChannelsResponse {
+    id: string;
+    name: string;
+    description?: string;
+    type: string;
+    scopeType: string;
+    visibility: string;
+    projectId: string;
+    createdBy: string;
+    createdAt: Date;
+    participantCount: number;
+}
+
 /**
  * Request type for conversation replies API endpoint
  */

@@ -5,6 +5,7 @@ import { createTicketWithConversation } from '../core/ticketutils';
 import { TicketPriority } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
+import { ticketService } from '@/services/ticketService';
 
 const CreateTicketBodySchema = z.object({
   title: z.string().min(1, 'Title is required').trim(),
@@ -18,6 +19,22 @@ const CreateTicketBodySchema = z.object({
   assignedUserGroupAlias: z.string().trim().optional(),
   userId: z.string().min(1, 'User ID is required').trim(),
 });
+
+const UpdateTicketBodySchema = z.object({
+  ticketId: z.string().min(1, 'Ticket ID is required').trim(),
+  userId: z.string().min(1, 'User ID is required').trim(),
+  channelId: z.string().trim().optional(),
+  conversationId: z.string().trim().optional(),
+  assigneeId: z.string().trim().optional(),
+  stage: z.string().trim().optional(),
+  groupId: z.string().trim().optional(),
+}).refine(
+  data => !!data.channelId || !!data.conversationId,
+  { message: 'Either channelId or conversationId is required', path: ['channelId'] }
+).refine(
+  data => !!data.assigneeId || !!data.stage || !!data.groupId,
+  { message: 'At least one of assigneeId, stage, or groupId is required', path: ['assigneeId'] }
+);
 
 export class TicketController {
 
@@ -137,6 +154,83 @@ export class TicketController {
       res.status(500).json({ 
         error: 'Internal server error',
         code: 'INTERNAL_ERROR',
+      });
+    }
+  };
+
+  /**
+   * Update a ticket - Generic update endpoint
+   * POST /api/apps/ticket/updateTicket
+   * 
+   * Required fields:
+   * - ticketId: string - ID of the ticket to update
+   * - userId: string - User ID performing the update
+   * - channelId or conversationId: string - For channel access validation
+   * 
+   * Optional fields (at least one required):
+   * - assigneeId: string - Update ticket assignee
+   * - stage: string - Update ticket stage
+   * - groupId: string - Assign user group to ticket
+   */
+  updateTicket = async (req: Request, res: Response): Promise<void> => {
+    try {
+      // Validate request body with Zod
+      const bodyResult = UpdateTicketBodySchema.safeParse(req.body);
+
+      logger.info(`[TicketController] Received update ticket request`, {
+        body: req.body,
+        validationSuccess: bodyResult.success,
+        validationErrors: bodyResult.success ? null : bodyResult.error.errors,
+      });
+      
+      if (!bodyResult.success) {
+        res.status(400).json({ 
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: bodyResult.error.errors
+        });
+        return;
+      }
+
+      const { ticketId, userId, assigneeId, stage, groupId } = bodyResult.data;
+
+      logger.info(`[TicketController] Updating ticket: ${ticketId}`, {
+        userId,
+        assigneeId,
+        stage,
+        groupId,
+      });
+
+      // Execute updates based on provided fields
+      if (assigneeId) {
+        await ticketService.updateTicketAssignee(ticketId, userId, assigneeId);
+        logger.info(`[TicketController] Ticket assignee updated: ${ticketId}`);
+      }
+
+      if (stage) {
+        await ticketService.updateTicketStageForWorkflow(ticketId, userId, stage);
+        logger.info(`[TicketController] Ticket stage updated: ${ticketId}`);
+      }
+
+      if (groupId) {
+        await ticketService.asignUserGroupToTicket(ticketId, userId, groupId);
+        logger.info(`[TicketController] User group assigned: ${ticketId}`);
+      }
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      logger.error('[TicketController] Error updating ticket:', {
+        error: errorMessage,
+        stack: errorStack,
+        ticketId: req.body.ticketId,
+        userId: req.body.userId,
+      });
+      res.status(500).json({ 
+        error: 'Internal server error',
+        code: 'INTERNAL_ERROR',
+        message: errorMessage,
       });
     }
   };

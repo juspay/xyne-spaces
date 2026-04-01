@@ -7,12 +7,21 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
-
+import { MessageType, ContentFormat } from '@xyne/shared';
 
 const ChatActionBodySchema = z.object({
   text: z.string().optional(),
   attachments: z.array(z.any()).optional(),
   userId: z.string().min(1, 'User ID is required').trim(),
+  uploadedFiles: z.array(z.object({
+    originalName: z.string(),
+    fileName: z.string(),
+    fileSize: z.number(),
+    mimeType: z.string(),
+    fileUrl: z.string(),
+    thumbnailUrl: z.string().optional(),
+  })).optional(),
+  contentFormat: z.nativeEnum(ContentFormat).optional(),
 });
 
 const PostMessageBodySchema = ChatActionBodySchema.extend({
@@ -86,6 +95,21 @@ export class ChatController {
   /**
    * Post a message to a channel or conversation
    * POST /api/external-event/chat/postMessage
+   * 
+   * Required fields:
+   * - userId: string - User ID posting the message
+   * - channelId or conversationId: string - Target channel or conversation
+   * 
+   * Optional fields:
+   * - text: string - Message text content
+   * - attachments: array - Slack-style attachments (will be parsed)
+   * - uploadedFiles: array - Pre-uploaded files to attach
+   * - msgType: 'USER' | 'BOT' | 'SYSTEM' - Message type (defaults to USER)
+   * - metadata: object - Additional metadata
+   * - replyBroadcast: boolean - Show reply in channel
+   * - lastActivityAt: string - Custom last activity timestamp
+   * - isBot: boolean - Whether the message is from a bot
+   * - createdAt: string - Custom creation timestamp
    */
   postMessage = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -101,20 +125,35 @@ export class ChatController {
         return;
       }
 
-      const { channelId, text, conversationId, attachments, userId } = bodyResult.data;
+      const { 
+        channelId, 
+        text, 
+        conversationId, 
+        attachments, 
+        userId,
+        uploadedFiles,
+        contentFormat,
+      } = bodyResult.data;
 
       // Resolve channelId from conversationId if not provided
       const resolvedChannelId = await resolveChannelId(channelId, conversationId);
 
-      // Process message content (resolve mentions and parse with BlockKit)
-      const content = await this.processMessageContent(text, attachments);
+      let content = text || '';
+      console.log(`Received message content for posting:`, { text, attachments, contentFormat });
+      if(contentFormat !== ContentFormat.MARKDOWN){
+        // Process message content (resolve mentions and parse with BlockKit)
+        content = await this.processMessageContent(text, attachments);
+      }
 
-      // Post the message
+      // Post the message with all features
       const result = await findOrCreateConversation(
         resolvedChannelId,
         userId,
         content,
-        conversationId
+        conversationId,
+        uploadedFiles,
+        contentFormat as ContentFormat | undefined,
+        MessageType.BOT
       );
 
       res.status(201).json(result);

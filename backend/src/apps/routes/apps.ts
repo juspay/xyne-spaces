@@ -6,6 +6,7 @@ import chatRoutes from './chat';
 import fileRoutes from './files';
 import ticketRoutes from './ticket';
 import userRoutes from './user';
+import channelRoutes from './channel';
 import { authenticateApp } from '../middelware/authenticator';
 import { uploadMultiple } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
@@ -28,5 +29,8 @@ router.use('/ticket', authenticateApp, ticketRoutes);
 
 // User routes
 router.use('/user', authenticateApp, userRoutes);
+
+// Channel routes
+router.use('/channel', authenticateApp, channelRoutes);
 
 export default router;
