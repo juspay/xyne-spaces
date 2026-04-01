@@ -125,6 +125,7 @@ const nativeOutboundMessageTypeValues = {
   REQUEST_CLIENT_SESSION_ID: 'REQUEST_CLIENT_SESSION_ID',
   RESTORE_RECORDING_SCREEN: 'RESTORE_RECORDING_SCREEN',
   CLEAR_RECORDING_STATE: 'CLEAR_RECORDING_STATE',
+  REQUEST_NATIVE_SHELL: 'REQUEST_NATIVE_SHELL',
 } as const;
 
 export type NativeOutboundMessageType = keyof typeof nativeOutboundMessageTypeValues;
@@ -319,6 +320,9 @@ type ReactNativeOutboundPayloadMap = {
       id: string;
       email: string | null;
     } | null;
+  };
+  REQUEST_NATIVE_SHELL: {
+    reason?: string;
   };
   REQUEST_MEDIA_PERMISSIONS: {
     permissions: ('microphone' | 'camera' | 'screenShare')[];
@@ -523,6 +527,13 @@ class ReactNativeBridge {
 
   requestNativePushToken(): boolean {
     return this.send(NativeOutboundMessageType.REQUEST_NATIVE_PUSH_TOKEN);
+  }
+
+  requestNativeShell(reason?: string): boolean {
+    return this.send(
+      NativeOutboundMessageType.REQUEST_NATIVE_SHELL,
+      reason === undefined ? undefined : { reason },
+    );
   }
 
   saveFileToDevice(
