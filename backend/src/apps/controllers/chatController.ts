@@ -7,7 +7,8 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
-import { MessageType, ContentFormat } from '@xyne/shared';
+import { MessageType } from '@xyne/shared';
+import { ContentFormat } from '../types';
 
 const ChatActionBodySchema = z.object({
   text: z.string().optional(),
@@ -152,8 +153,8 @@ export class ChatController {
         content,
         conversationId,
         uploadedFiles,
-        contentFormat as ContentFormat | undefined,
-        MessageType.BOT
+        MessageType.BOT,
+        { contentFormat }
       );
 
       res.status(201).json(result);

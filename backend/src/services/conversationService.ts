@@ -23,7 +23,6 @@ import {
   Message,
   MessageType,
   AttachmentEntityType,
-  ContentFormat,
 } from '@prisma/client';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
@@ -76,7 +75,6 @@ export interface AddMessageToConversationParams {
   conversationId: string;
   userId: string;
   content?: string;
-  contentFormat?: ContentFormat;
   msgType?: MessageType;
   files?: Express.Multer.File[];
   uploadedFiles?: UploadedFileResult[]; // For pre-uploaded files (external sources)
@@ -444,7 +442,6 @@ export class ConversationService {
       conversationId,
       userId,
       content,
-      contentFormat,
       msgType,
       files = [],
       uploadedFiles = [],
@@ -514,7 +511,6 @@ export class ConversationService {
       childConversationId: childConversationId,
       metadata,
       ...(createdAt && { createdAt }),
-      ...(contentFormat && { contentFormat }),
     };
 
     const message = await this.messageRepository.create(messageData, true);

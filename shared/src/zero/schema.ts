@@ -144,10 +144,6 @@ export enum MessageType {
   FORWARDED = 'FORWARDED',
 }
 
-export enum ContentFormat {
-  MARKDOWN = 'MARKDOWN',
-}
-
 // @ts-ignore TS1294
 export enum OrgRole {
   OWNER = 'OWNER',
@@ -1185,7 +1181,6 @@ export const messageTable = table('messages')
     childConversationId: string().optional(),
     senderId: string(),
     content: string(),
-    contentFormat: enumeration<ContentFormat>().optional(),
     msgType: enumeration<MessageType>(),
     hasAttachment: boolean(),
     edited: boolean(),
