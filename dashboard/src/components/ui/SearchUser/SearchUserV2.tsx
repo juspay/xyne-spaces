@@ -4,6 +4,7 @@ import { Search, X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useUsersPresence } from '../../../hooks/usePresence';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import Avatar from '../Avatar/Avatar';
 import Button from '../Button';
 
@@ -103,11 +104,13 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
   // Filter options based on search query
   const filteredOptions = useMemo(() => {
     const baseOptions = searchQuery.trim()
-      ? options.filter(
-          opt =>
-            opt.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            opt.email?.toLowerCase().includes(searchQuery.toLowerCase()),
-        )
+      ? options.filter(opt => {
+          const displayName = getUserDisplayName(opt);
+          return (
+            displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            opt.email?.toLowerCase().includes(searchQuery.toLowerCase())
+          );
+        })
       : options;
 
     return baseOptions.filter(opt => !selectedUserIds.has(opt.id));
@@ -239,31 +242,34 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                       'no-scrollbar',
                     )}
                   >
-                    {filteredOptions.map(user => (
-                      <BaseCombobox.Item
-                        key={user.id}
-                        value={user.id}
-                        className={cn(
-                          'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-[highlighted]:bg-accent',
-                        )}
-                      >
-                        <Avatar
-                          userId={user.id}
-                          size={'sm'}
-                          showActiveStatus={false}
-                          className='rounded-md size-[18px] flex items-center justify-center bg-background'
-                        />
-                        <div className='flex-1 w-full flex items-center gap-2'>
-                          <span className='text-sm'>{user.name.split(' ')[0]}</span>
-                          {onlineUserIdsSet.has(user.id) ? (
-                            <span className='w-1.5 h-1.5 bg-green-600 rounded-full'></span>
-                          ) : (
-                            <span className='w-1.5 h-1.5 border border-muted-foreground rounded-full'></span>
+                    {filteredOptions.map(user => {
+                      const displayName = getUserDisplayName(user);
+                      return (
+                        <BaseCombobox.Item
+                          key={user.id}
+                          value={user.id}
+                          className={cn(
+                            'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-[highlighted]:bg-accent',
                           )}
-                          <span className='text-sm text-muted-foreground'>{user.name}</span>
-                        </div>
-                      </BaseCombobox.Item>
-                    ))}
+                        >
+                          <Avatar
+                            userId={user.id}
+                            size={'sm'}
+                            showActiveStatus={false}
+                            className='rounded-md size-[18px] flex items-center justify-center bg-background'
+                          />
+                          <div className='flex-1 w-full flex items-center gap-2'>
+                            <span className='text-sm'>{displayName.split(' ')[0]}</span>
+                            {onlineUserIdsSet.has(user.id) ? (
+                              <span className='w-1.5 h-1.5 bg-green-600 rounded-full'></span>
+                            ) : (
+                              <span className='w-1.5 h-1.5 border border-muted-foreground rounded-full'></span>
+                            )}
+                            <span className='text-sm text-muted-foreground'>{displayName}</span>
+                          </div>
+                        </BaseCombobox.Item>
+                      );
+                    })}
                   </BaseCombobox.List>
                 )}
               </BaseCombobox.Popup>
@@ -301,13 +307,13 @@ const UserPill = forwardRef<
       )}
     >
       <Avatar userId={user.id} size='sm' showActiveStatus={false} />
-      <span className='truncate max-w-80'>{user.name}</span>
+      <span className='truncate max-w-80'>{getUserDisplayName(user)}</span>
       <Button
         size='icon'
         variant='ghost'
         onClick={handleClick}
         className='ml-1 hover:bg-accent rounded p-0.5 size-4'
-        aria-label={`Remove ${user.name} from list`}
+        aria-label={`Remove ${getUserDisplayName(user)} from list`}
       >
         <X className='size-3' />
       </Button>

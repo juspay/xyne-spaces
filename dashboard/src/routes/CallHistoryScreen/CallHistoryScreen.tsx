@@ -43,6 +43,7 @@ import { CallCard, UpcomingCallCard } from './CallCard';
 import { Call } from './callHistoryItem.utils';
 import { ParticipantsModal } from './ParticipantsModal';
 import * as Tabs from '@radix-ui/react-tabs';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -210,7 +211,7 @@ const CallHistoryScreen = (): ReactElement => {
       const participantNames = call.participants
         ?.map(p => {
           const user = allUsersData.find(u => u.id === p.userId);
-          return user?.name?.toLowerCase() || '';
+          return getUserDisplayName(user).toLowerCase();
         })
         .join(' ');
 
@@ -391,7 +392,9 @@ const CallHistoryScreen = (): ReactElement => {
                   className='flex items-center gap-2 px-3 py-1.5 bg-primary/20 dark:bg-primary/20 rounded-full'
                 >
                   <Avatar userId={selectedUser.id} size='sm' />
-                  <span className='text-sm font-medium text-primary'>{selectedUser.name}</span>
+                  <span className='text-sm font-medium text-primary'>
+                    {getUserDisplayName(selectedUser)}
+                  </span>
                   <button
                     onClick={() => handleRemoveUser(selectedUser.id)}
                     className='text-primary hover:text-primary/80'

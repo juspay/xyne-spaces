@@ -16,6 +16,7 @@ import { format, isToday, isTomorrow } from 'date-fns';
 import { useMemo } from 'react';
 import type { User, UserGroup } from '../../../machines/stateMachine';
 import { EntityOption, StatusEntityOption } from './TicketTableTypes';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export const TAG_COLORS = [
   'bg-red-500',
@@ -81,7 +82,7 @@ export const PriorityOptions: EntityOption[] = [
 export const getAssigneeOptions = (users: User[], userGroups: UserGroup[]): EntityOption[] => {
   const userOptions: EntityOption[] = users.map(user => ({
     value: `user:${user.id}`,
-    label: user.name || user.email || 'Unknown User',
+    label: getUserDisplayName(user),
     subtitle: user.email,
     icon: <Avatar userId={user.id} size='sm' className='rounded-full' />,
   }));

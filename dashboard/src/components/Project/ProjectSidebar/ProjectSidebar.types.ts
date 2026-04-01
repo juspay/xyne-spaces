@@ -38,6 +38,7 @@ export type Person = {
   name: string;
   email: string;
   picture?: string | null;
+  displayName?: string | null;
 };
 
 // Props for the ProjectSidebar component

@@ -52,6 +52,7 @@ import { useIsCallActive } from '../../../hooks/useCalls';
 import { useUsers, useUser } from '../../../hooks/useUsers';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
@@ -357,6 +358,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const { user } = useAuth();
   const { isMobile } = usePlatform();
   const sender = useUser(message.senderId);
+  const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
   const isMe = user?.id === message.senderId;
   const { baseRoute } = useRouteContext();
   const actionableCount = useMemo(
@@ -581,7 +583,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     handleUserClick(sender.id);
                   }
                 }}
-                aria-label={`View ${sender?.name || 'user'} profile`}
+                aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
               >
                 {isMobile ? (
                   <UserAvatar
@@ -627,7 +629,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </h3>
               ) : isXyneBot ? (
                 <h3 className='text-sm font-medium text-foreground'>
-                  {sender?.name || 'AI Assistant'}
+                  {getUserDisplayName(sender) || 'AI Assistant'}
                 </h3>
               ) : isPrivateSystemNotice ? (
                 <div className=''>
@@ -652,9 +654,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     variant='ghost'
                     onClick={() => handleUserClick(sender.id)}
                     className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-foreground hover:underline p-0 h-auto min-w-0`}
-                    aria-label={`View ${sender?.name || 'user'} profile`}
+                    aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                   >
-                    {sender.name}
+                    {getUserDisplayName(sender)}
                   </Button>
                 ) : (
                   <UserHoverWrapper userId={sender.id}>
@@ -662,9 +664,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       variant='ghost'
                       onClick={() => handleUserClick(sender.id)}
                       className={`text-sm font-medium text-foreground hover:underline p-0 h-auto min-w-0`}
-                      aria-label={`View ${sender?.name || 'user'} profile`}
+                      aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                     >
-                      {sender.name}
+                      {getUserDisplayName(sender)}
                     </Button>
                   </UserHoverWrapper>
                 )
@@ -721,7 +723,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               isActiveCall={isActiveCall}
               {...(channelId && { channelId })}
               {...(message.conversationId && { conversationId: message.conversationId })}
-              {...(sender?.name && { senderName: sender.name })}
+              {...(sender && { senderName: getUserDisplayName(sender) })}
               showAvatar={showAvatar}
               {...(context && { context })}
               attachments={attachments}
@@ -809,7 +811,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         )
                       )}
                       <span className='text-xs font-medium text-foreground'>
-                        {forwardedMessageData.originalSenderName || 'Unknown User'}
+                        {getUserDisplayName(originalSender) ||
+                          forwardedMessageData.originalSenderName ||
+                          'Unknown User'}
                       </span>
                       {forwardedMessageData.originalCreatedAt && (
                         <span className='text-xs text-muted-foreground visual-regression-hide'>
@@ -1036,7 +1040,7 @@ export const ReactionView = ({
   const usersById = useMemo(() => {
     const map = new Map<string, { name: string }>();
     for (const u of users) {
-      map.set(u.id, { name: u.name });
+      map.set(u.id, { name: getUserDisplayName(u) });
     }
     return map;
   }, [users]);

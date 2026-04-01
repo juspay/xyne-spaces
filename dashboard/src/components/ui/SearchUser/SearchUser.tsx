@@ -9,6 +9,7 @@ import { cn } from '../../../utils/classNames';
 import { Search, X } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
 import { useUserSearch } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface SearchUserProps {
   excludeUserIds?: string[];
@@ -172,13 +173,13 @@ export const SearchUser: React.FC<SearchUserProps> = ({
         <div className='flex flex-wrap gap-2 mb-2'>
           {selectedUsers.map(user => (
             <Badge key={user.id} variant='primary' className='flex items-center gap-1.5 pr-1'>
-              <span className='text-xs'>{user.name}</span>
+              <span className='text-xs'>{getUserDisplayName(user)}</span>
               {!disabled.value && (
                 <button
                   type='button'
                   onClick={() => handleTagRemove(user)}
                   className='rounded-full p-0.5 transition-colors'
-                  aria-label={`Remove ${user.name}`}
+                  aria-label={`Remove ${getUserDisplayName(user)}`}
                 >
                   <X className='h-3 w-3' />
                 </button>
@@ -282,7 +283,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                       <Avatar userId={user.id} size='sm' showActiveStatus={false} />
                     </div>
                     <div className='flex flex-col min-w-0 flex-1'>
-                      <span className='font-medium truncate'>{user.name}</span>
+                      <span className='font-medium truncate'>{getUserDisplayName(user)}</span>
                       <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
                     </div>
                   </li>

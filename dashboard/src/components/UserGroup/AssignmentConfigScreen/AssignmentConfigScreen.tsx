@@ -15,6 +15,7 @@ import type { User } from '../../../machines/stateMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 import { formatExpiryTime } from '../../../utils/statusUtils';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface AssignmentConfigScreenProps {
   userGroupId: string;
@@ -558,7 +559,7 @@ export const AssignmentConfigScreen = ({
                               <div className='ml-4 flex-1'>
                                 <div className='flex items-center gap-2'>
                                   <div className='text-sm font-medium text-foreground'>
-                                    {user.name}
+                                    {getUserDisplayName(user)}
                                   </div>
                                   {isUnavailable && (
                                     <Tooltip content={unavailableTooltip}>

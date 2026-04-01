@@ -12,7 +12,7 @@ import type { BoardRow, User, FormMapping, FormContextMapping } from './BoardCre
 import { toast } from 'sonner';
 import { FormContextType, TicketStatusV2, TicketPriority } from '@xyne/shared';
 import { Button } from '../../ui/Button';
-
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 interface BoardCreateScreenProps {
   projectId: string;
   isOpen: boolean;
@@ -58,8 +58,8 @@ const BoardCreateScreen = ({
     const userMap = new Map<string, string>();
     if (allUsers && Array.isArray(allUsers)) {
       allUsers.forEach((user: User) => {
-        if (user.id && user.name) {
-          userMap.set(user.id, user.name);
+        if (user.id) {
+          userMap.set(user.id, getUserDisplayName(user));
         }
       });
     }

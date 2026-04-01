@@ -8,6 +8,7 @@ import SearchInput from './SearchInput';
 import { useSearchFilter } from '../../../hooks/useSearchFilter';
 import { highlightText } from './highlightText';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 const ProjectSidebar = ({
   projects = [],
@@ -41,7 +42,7 @@ const ProjectSidebar = ({
   // Search filters for each section
   const personsSearch = useSearchFilter({
     items: persons,
-    searchKeys: ['name'],
+    searchKeys: ['name', 'displayName'],
   });
 
   const projectsSearch = useSearchFilter({
@@ -319,26 +320,29 @@ const ProjectSidebar = ({
                 </div>
               ) : (
                 <>
-                  {personsSearch.filteredItems.slice(0, visiblePersonsCount).map(person => (
-                    <SidebarItem
-                      key={person.id}
-                      label={highlightText(person.name, personsSearch.searchQuery)}
-                      isActive={currentAssignee === person.id}
-                      avatar={{
-                        url: person.picture ?? null,
-                        fallbackText: person.name.charAt(0).toUpperCase(),
-                      }}
-                      onClick={() => {
-                        void navigate(`/projects?assignee=${person.id}`);
-                      }}
-                      data-track-category='Projects'
-                      data-track-name='SelectPersonFilter'
-                      data-track-metadata={JSON.stringify({
-                        personId: person.id,
-                        personName: person.name,
-                      })}
-                    />
-                  ))}
+                  {personsSearch.filteredItems.slice(0, visiblePersonsCount).map(person => {
+                    const displayName = getUserDisplayName(person);
+                    return (
+                      <SidebarItem
+                        key={person.id}
+                        label={highlightText(displayName, personsSearch.searchQuery)}
+                        isActive={currentAssignee === person.id}
+                        avatar={{
+                          url: person.picture ?? null,
+                          fallbackText: displayName.charAt(0).toUpperCase(),
+                        }}
+                        onClick={() => {
+                          void navigate(`/projects?assignee=${person.id}`);
+                        }}
+                        data-track-category='Projects'
+                        data-track-name='SelectPersonFilter'
+                        data-track-metadata={JSON.stringify({
+                          personId: person.id,
+                          personName: displayName,
+                        })}
+                      />
+                    );
+                  })}
                   {/* Show more button */}
                   {personsSearch.filteredItems.length > visiblePersonsCount && (
                     <button

@@ -4,6 +4,7 @@ import { AvatarShape, AvatarSize } from '@juspay/blend-design-system';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { useUserSearch, useUser } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 /**
  * Props for UserSelector component
@@ -65,7 +66,7 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
 
     return users.map(user => ({
       value: user.id,
-      label: user.name || 'Unnamed User',
+      label: getUserDisplayName(user),
       subtitle: user.email,
       icon: <UserAvatar userId={user.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
     }));
@@ -97,7 +98,7 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
     // Otherwise, add selected user to the beginning of the list
     const selectedOption: SelectorOption = {
       value: selectedUser.id,
-      label: selectedUser.name || 'Unnamed User',
+      label: getUserDisplayName(selectedUser),
       subtitle: selectedUser.email,
       icon: (
         <UserAvatar userId={selectedUser.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />

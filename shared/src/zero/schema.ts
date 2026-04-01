@@ -970,6 +970,7 @@ export const userTable = table('users')
     status: enumeration<UserStatus>(),
     userType: enumeration<UserType>(),
     metadata: json().optional(),
+    displayName: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

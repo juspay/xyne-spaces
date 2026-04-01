@@ -11,6 +11,7 @@ import { useChannel } from '../../../hooks/useChannels';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export const MentionText: React.FC<MentionTextProps> = props => {
   const context = useAuthContextValues();
@@ -141,10 +142,13 @@ export const MentionText: React.FC<MentionTextProps> = props => {
   }
 
   if (props.type === 'user') {
+    // Use displayName from userProfile if available, fallback to username prop
+    const displayUsername = user ? getUserDisplayName(user) : props.username;
+
     if (!user) {
       return (
         <span className='text-[color:var(--mention-group-color)] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]'>
-          @{props.username}
+          @{displayUsername}
         </span>
       );
     }
@@ -154,7 +158,7 @@ export const MentionText: React.FC<MentionTextProps> = props => {
         <span
           className={`${isCurrentUser ? 'bg-[var(--mention-current-user-bg)]' : 'bg-[var(--mention-bg)]'} px-1 py-[2px] text-[color:var(--mention-color)] rounded-[4px] font-normal cursor-pointer no-underline transition-colors duration-200 inline whitespace-nowrap leading-inherit align-baseline hover:text-[color:var(--mention-hover-color)]`}
         >
-          @{props.username}
+          @{displayUsername}
         </span>
       </UserHoverWrapper>
     );

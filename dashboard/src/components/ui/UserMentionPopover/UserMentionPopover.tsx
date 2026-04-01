@@ -14,6 +14,7 @@ import { isStatusExpired } from '../../../utils/statusUtils';
 import { StatusIndicator } from '../StatusIndicator';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 /**
  * UserHoverWrapper Component
@@ -39,7 +40,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
   const { handleCallClick } = useCallActions({
     channelId: dmChannelId || '',
     targetUserIds: dmChannelId ? [userId] : undefined,
-    callDisplayName: dmChannelId ? user?.name || 'User' : undefined,
+    callDisplayName: dmChannelId ? getUserDisplayName(user) || 'User' : undefined,
   });
 
   // Trigger call after channelId is set (if user clicked button before channel was created)
@@ -144,7 +145,9 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
         <div className='flex items-start gap-4 p-4'>
           <Avatar userId={user.id} size='xl' />
           <div className='flex-1'>
-            <div className='font-semibold text-lg text-foreground mb-1'>{user.name}</div>
+            <div className='font-semibold text-lg text-foreground mb-1'>
+              {getUserDisplayName(user)}
+            </div>
             {user.email && (
               <div className='text-sm text-muted-foreground truncate'>{user.email}</div>
             )}

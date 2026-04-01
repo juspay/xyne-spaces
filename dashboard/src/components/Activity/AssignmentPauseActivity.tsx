@@ -3,6 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { PauseCircle, PlayCircle } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 export const AssignmentPauseActivity = ({
   activity,
@@ -19,7 +20,7 @@ export const AssignmentPauseActivity = ({
 
   if (!user) return null;
 
-  const userName = user.name || user.email || 'A team member';
+  const userName = getUserDisplayName(user);
 
   // No target path needed - this is just informational
   const targetPath = '';

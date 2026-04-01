@@ -6,6 +6,7 @@ import { Check } from 'lucide-react';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface InviteUser {
   id: string;
@@ -157,7 +158,7 @@ export function AIInviteDialog({
                   data-track-name='Toggle_Invite_User'
                   data-track-metadata={JSON.stringify({
                     userId: user.id,
-                    userName: user.name,
+                    userName: getUserDisplayName(user),
                     callId,
                   })}
                 >
@@ -171,7 +172,9 @@ export function AIInviteDialog({
                     {selectedUserIds.has(user.id) && <Check className='w-3 h-3' />}
                   </div>
                   <div className='flex-1 min-w-0'>
-                    <div className='font-medium text-foreground truncate'>{user.name}</div>
+                    <div className='font-medium text-foreground truncate'>
+                      {getUserDisplayName(user)}
+                    </div>
                     <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
                   </div>
                 </button>

@@ -6141,6 +6141,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           };
 
           await tx.mutate.user_profiles.upsert(profileData);
+
+          // Update displayName on User table if provided
+          if (params.displayName !== undefined) {
+            await tx.mutate.users.update({
+              id: authData.sub,
+              displayName: params.displayName,
+              updatedAt: now,
+            });
+          }
         },
       ),
     },

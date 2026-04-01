@@ -6,6 +6,7 @@ import type { MentionResult } from '../components/ui/Selectors';
 import { useSelf, useUsers, useUserSearch } from './useUsers';
 import type { User } from '../machines/stateMachine';
 import { useUserGroupSearch } from './useUserGroupSearch';
+import { getUserDisplayName } from '../utils/userDisplayName';
 
 interface UseMentionSearchResult {
   results: MentionResult[];
@@ -95,18 +96,18 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
   const allUsersData = useUsers();
 
   // Helper to convert user to MentionResult
-  const toMentionResult = useCallback(
-    (user: User, isCurrentUser = false): MentionResult => ({
+  const toMentionResult = useCallback((user: User, isCurrentUser = false): MentionResult => {
+    const displayName = getUserDisplayName(user);
+    return {
       id: user.id,
-      name: isCurrentUser ? `${user.name} (you)` : user.name,
-      username: user.name,
+      name: isCurrentUser ? `${displayName} (you)` : displayName,
+      username: displayName,
       type: 'user' as const,
       email: user.email,
-      picture: getUserPicture(user.name, user.picture),
-      avatar: user.name.charAt(0).toUpperCase(),
-    }),
-    [],
-  );
+      picture: getUserPicture(displayName, user.picture),
+      avatar: displayName.charAt(0).toUpperCase(),
+    };
+  }, []);
 
   // All users in the system for mention resolution when sending messages
   const allUsers = useMemo((): MentionResult[] => {
@@ -121,15 +122,18 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
     if (shouldSearch) {
       if (!usersData) return [];
 
-      const baseUsers = usersData.map(user => ({
-        id: user.id,
-        name: context.userID === user.id ? `${user.name} (you)` : user.name,
-        username: user.name,
-        type: 'user' as const,
-        email: user.email,
-        picture: getUserPicture(user.name, user.picture),
-        avatar: user.name.charAt(0).toUpperCase(),
-      }));
+      const baseUsers = usersData.map(user => {
+        const displayName = getUserDisplayName(user);
+        return {
+          id: user.id,
+          name: context.userID === user.id ? `${displayName} (you)` : displayName,
+          username: displayName,
+          type: 'user' as const,
+          email: user.email,
+          picture: getUserPicture(displayName, user.picture),
+          avatar: displayName.charAt(0).toUpperCase(),
+        };
+      });
 
       if (isDMChannel) {
         return baseUsers;

@@ -7,6 +7,7 @@ import { RCASidebar } from './components';
 import { useCacConfig } from '../../hooks/useCacConfig';
 import { DEFAULT_RCA_CAC_CONFIG, type RcaCacConfig } from './rcaCacConfig';
 import type { RCARecord } from './RCAScreen.types';
+import { getUserLabel } from '../../utils/userDisplayName';
 
 const ITEMS_PER_PAGE = 50;
 
@@ -53,7 +54,7 @@ const RCAListScreen = () => {
   );
 
   const ownerItems = useMemo(
-    () => users.map(user => ({ label: user.name || user.email, value: user.id })),
+    () => users.map(user => ({ label: getUserLabel(user), value: user.id })),
     [users],
   );
 

@@ -9,6 +9,7 @@ import type { User } from '@xyne/shared';
 import { UserResponsibility } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export const UserGroupSidePanel = (): ReactElement | null => {
   const navigate = useNavigate();
@@ -113,7 +114,9 @@ export const UserGroupSidePanel = (): ReactElement | null => {
               >
                 <Avatar userId={user.id} size='md' showActiveStatus={true} />
                 <div className='flex-1 min-w-0'>
-                  <p className='text-[14px] font-medium text-foreground truncate'>{user.name}</p>
+                  <p className='text-[14px] font-medium text-foreground truncate'>
+                    {getUserDisplayName(user)}
+                  </p>
                   <p className='text-[12px] text-muted-foreground truncate'>{user.email}</p>
                 </div>
                 <span

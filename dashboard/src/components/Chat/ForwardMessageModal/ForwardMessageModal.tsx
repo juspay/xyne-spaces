@@ -17,6 +17,7 @@ import { MessageAttachment } from '../MessageAttachment/MessageAttachment';
 import { formatRelativeTimestamp } from '../../../utils/dateUtils';
 import HuddleIcon from '../../icons/HuddleIcon';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   ChannelVisibility,
   ChannelScopeType,
@@ -289,7 +290,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           if (otherUser && otherUser.id !== currentUser?.id) {
             defaults.push({
               leftSlot: <Avatar userId={otherUser.id} size='sm' />,
-              label: otherUser.name,
+              label: getUserDisplayName(otherUser),
               description: otherUser.email,
               value: otherUser.id,
             });
@@ -326,7 +327,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       .filter(currUser => currentUser?.id !== currUser.id && !selectedUserIds.has(currUser.id))
       .map(currUser => ({
         leftSlot: <Avatar userId={currUser.id} size='sm' />,
-        label: currUser.name,
+        label: getUserDisplayName(currUser),
         description: currUser.email,
         value: currUser.id,
       }));
@@ -375,7 +376,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
       const newTarget: ForwardTarget = {
         type: 'user',
         id: selectedUser.id,
-        name: selectedUser.name,
+        name: getUserDisplayName(selectedUser),
       };
       setSelectedTargets((prev: ForwardTarget[]) => [...prev, newTarget]);
       setInputValue('');

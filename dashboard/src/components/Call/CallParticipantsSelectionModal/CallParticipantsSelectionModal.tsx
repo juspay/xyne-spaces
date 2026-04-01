@@ -11,6 +11,7 @@ import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../../hooks/useChannels';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -66,7 +67,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const inviteUserOptions = useMemo(
     () =>
       filteredUsers.map(user => ({
-        label: user.name ?? user.email,
+        label: getUserDisplayName(user),
         value: `user:${user.id}`,
         icon: (
           <Avatar
@@ -190,7 +191,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                       className='rounded-md flex-shrink-0'
                     />
                     <span className='text-sm font-medium text-foreground whitespace-nowrap'>
-                      {user.name ?? user.email}
+                      {getUserDisplayName(user)}
                     </span>
                     <button
                       type='button'

@@ -4426,6 +4426,15 @@ export const mutators = defineMutators({
         };
 
         await tx.mutate.user_profiles.upsert(profileData);
+
+        // Update displayName on User table if provided
+        if (displayName !== undefined) {
+          await tx.mutate.users.update({
+            id: ctx.userID,
+            displayName,
+            updatedAt: timestamp,
+          });
+        }
       },
     ),
   },
