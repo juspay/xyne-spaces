@@ -25,16 +25,16 @@ const ChannelListItem = ({
 
   const getIcon = (): ReactElement => {
     return channel.visibility === ChannelVisibility.PRIVATE ? (
-      <Lock size={14} className='text-gray-500 flex-shrink-0' />
+      <Lock size={14} className='text-muted-foreground flex-shrink-0' />
     ) : (
-      <Hash size={14} className='text-gray-500 flex-shrink-0' />
+      <Hash size={14} className='text-muted-foreground flex-shrink-0' />
     );
   };
 
   return (
     <button
       type='button'
-      className='flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-md cursor-pointer transition-colors w-full text-left'
+      className='flex items-center space-x-3 p-3 hover:bg-accent rounded-md cursor-pointer transition-colors w-full text-left'
       onClick={onToggle}
       data-track-category='RECAP_SETTINGS'
       data-track-name='TOGGLE_CHANNEL'
@@ -52,7 +52,7 @@ const ChannelListItem = ({
       {/* Channel Icon and Name */}
       <div className='flex items-center space-x-2 flex-1 min-w-0 overflow-hidden'>
         {getIcon()}
-        <span className='text-sm font-medium text-gray-900 truncate whitespace-nowrap'>
+        <span className='text-sm font-medium text-foreground truncate whitespace-nowrap'>
           {displayName}
         </span>
       </div>
@@ -82,12 +82,10 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Reset selectedIds and search query when modal opens
-  // Using a ref to track the last synced subscription ids to avoid resetting during user interaction
   useEffect(() => {
     if (isOpen) {
       setSearchQuery('');
       setIsExpanded(false);
-      // Only reset from subscriptions when opening - use subscriptions directly
       setSelectedIds(new Set(subscriptions.map(s => s.channelId)));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,40 +95,22 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
   const filteredChannels = useMemo(() => {
     if (!channels || channels.length === 0) return [];
 
-    // When searching, use fuse-based search for better results
     if (searchQuery.trim()) {
       return searchChannels(channels, searchQuery, channels.length);
     }
 
-    // Without search, sort: subscribed channels first, then by name
     return [...channels].sort((a: Channel, b: Channel) => {
       const aSelected = selectedIds.has(a.id);
       const bSelected = selectedIds.has(b.id);
-
-      // If both are selected or both are not selected, sort by name
-      if (aSelected === bSelected) {
-        return a.name.localeCompare(b.name);
-      }
-
-      // Selected channels come first
+      if (aSelected === bSelected) return a.name.localeCompare(b.name);
       return aSelected ? -1 : 1;
     });
   }, [channels, searchQuery, selectedIds]);
 
-  // Determine which channels to display based on expansion and search
   const displayChannels = useMemo(() => {
     if (!filteredChannels || filteredChannels.length === 0) return [];
-
-    // When searching, show all matching results
-    if (searchQuery.trim()) {
-      return filteredChannels;
-    }
-
-    // When not searching, show only top 5 unless expanded
-    if (isExpanded) {
-      return filteredChannels;
-    }
-
+    if (searchQuery.trim()) return filteredChannels;
+    if (isExpanded) return filteredChannels;
     return filteredChannels.slice(0, DISPLAY_LIMIT);
   }, [filteredChannels, searchQuery, isExpanded]);
 
@@ -157,7 +137,6 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
     const channelIds = Array.from(selectedIds);
     const timestamp = Date.now();
 
-    // Use Zero mutator for real-time sync - instant and optimistic
     zero.mutate(
       mutators.recap.saveSubscriptions({
         channelIds,
@@ -171,7 +150,6 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
   }, [selectedIds, onClose, zero, onSaved]);
 
   const handleCancel = useCallback((): void => {
-    // Reset selection to original subscriptions
     setSelectedIds(new Set(selectedChannelIds));
     onClose();
   }, [onClose, selectedChannelIds]);
@@ -183,13 +161,13 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='w-full max-w-lg max-h-[80vh] bg-white rounded-xl shadow-2xl flex flex-col m-4'>
+      <div className='w-full max-w-lg max-h-[80vh] bg-background rounded-xl shadow-2xl flex flex-col m-4 border border-border'>
         {/* Header */}
-        <div className='p-4 border-b flex items-center justify-between'>
-          <h3 className='font-bold text-gray-900 text-xl'>Choose your channels</h3>
+        <div className='p-4 border-b border-border flex items-center justify-between'>
+          <h3 className='font-bold text-foreground text-xl'>Choose your channels</h3>
           <button
             onClick={handleCancel}
-            className='p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-200'
+            className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200'
             aria-label='Close'
             title='Close'
             data-track-category='RECAP_SETTINGS'
@@ -201,8 +179,7 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
 
         {/* Content */}
         <div className='flex-1 overflow-hidden p-6'>
-          {/* Description */}
-          <p className='text-sm text-gray-500 mb-4'>
+          <p className='text-sm text-muted-foreground mb-4'>
             Select the channels you want to include in your daily AI recap summaries. You can change
             this anytime.
           </p>
@@ -210,7 +187,7 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
           {/* Search Input */}
           <div className='relative mb-4'>
             <Search
-              className='absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400'
+              className='absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground'
               size={16}
             />
             <Input
@@ -226,9 +203,9 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
 
           <div className='max-h-[50vh] overflow-y-auto -mx-2'>
             {!channels || channels.length === 0 ? (
-              <div className='text-center text-gray-500 py-8'>No channels available</div>
+              <div className='text-center text-muted-foreground py-8'>No channels available</div>
             ) : filteredChannels.length === 0 ? (
-              <div className='text-center text-gray-500 py-8'>
+              <div className='text-center text-muted-foreground py-8'>
                 No channels found matching &ldquo;{searchQuery}&rdquo;
               </div>
             ) : (
@@ -245,7 +222,7 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
                 {hasMoreChannels && (
                   <button
                     onClick={toggleExpanded}
-                    className='w-full px-3 py-2 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-md text-left transition-colors'
+                    className='w-full px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-accent rounded-md text-left transition-colors'
                     data-track-category='RECAP_SETTINGS'
                     data-track-name='TOGGLE_CHANNEL_EXPANSION'
                     data-track-metadata={JSON.stringify({ isExpanded })}
@@ -259,7 +236,7 @@ const RecapSettings = ({ isOpen, onClose, onSaved }: RecapSettingsProps): ReactE
         </div>
 
         {/* Footer */}
-        <div className='flex justify-end gap-3 p-4 border-t bg-white'>
+        <div className='flex justify-end gap-3 p-4 border-t border-border bg-background rounded-b-xl'>
           <Button
             variant='ghost'
             onClick={handleCancel}

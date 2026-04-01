@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ReactElement, useState, useEffect, useCallback, useMemo } from 'react';
 import DOMPurify from 'dompurify';
 import { useNavigate, useParams, Outlet } from 'react-router-dom';
 import {
@@ -7,13 +7,13 @@ import {
   Clock,
   Hash,
   X,
-  Check,
   CheckCircle,
   Mail,
   MailOpen,
+  CheckCheck,
 } from 'lucide-react';
 import { useRecapData } from '../../hooks/useRecapData';
-import { CitationMetadata, RecapSubscription, RecapCard } from './RecapPanel.types';
+import { RecapSubscription, RecapCard } from './RecapPanel.types';
 import { getYesterdayIST, formatRecapDate } from './RecapPanel.utils';
 import RecapSettings from './RecapSettings';
 import { useZero } from '../../hooks/useZero';
@@ -47,11 +47,11 @@ const RecapPanel = (): ReactElement => {
   const zero = useZero();
   const { isMobile } = usePlatform();
 
+  // Show right panel when a cited thread is open
+  const showThreadPanel = !!params.channelId;
+
   // Use the cached recap data hook
   const { recapData, subscriptions, isLoadingSubscriptions, isFirstTime } = useRecapData();
-
-  // Check if we're showing the side panel (when channelId is present in URL)
-  const showSidePanel = !!params.channelId;
 
   // Settings modal state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -63,38 +63,8 @@ const RecapPanel = (): ReactElement => {
   // State
   const [markedAsReadChannels, setMarkedAsReadChannels] = useState<Set<string>>(new Set());
 
-  // Track if we've already auto-marked as read on initial open
-  const hasAutoMarkedRead = useRef(false);
-
   // Stable random greeting for this session
   const [greeting] = useState(() => getRandomGreeting());
-
-  // Ref for auto-scrolling to selected channel card
-  const selectedCardRef = useRef<HTMLDivElement>(null);
-  const hasScrolledToCard = useRef(false);
-
-  // Auto-scroll to selected channel card when data loads
-  useEffect(() => {
-    if (params.channelId && recapData && recapData.cards.length > 0 && !hasScrolledToCard.current) {
-      // Small delay to ensure DOM is rendered
-      const timer = setTimeout(() => {
-        if (selectedCardRef.current) {
-          selectedCardRef.current.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center',
-          });
-          hasScrolledToCard.current = true;
-        }
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-    return undefined;
-  }, [params.channelId, recapData]);
-
-  // Reset scroll flag when channel changes
-  useEffect(() => {
-    hasScrolledToCard.current = false;
-  }, [params.channelId]);
 
   // Auto-open settings modal for first-time users when they click "Choose Channels"
   // The modal is opened via handleOpenSettings
@@ -105,45 +75,6 @@ const RecapPanel = (): ReactElement => {
       setJustSavedFirstTime(false);
     }
   }, [justSavedFirstTime, subscriptions]);
-
-  // Auto mark as read ONLY ONCE per recap date
-  // This marks all subscribed channels as seen for yesterday's recap
-  // Only runs if:
-  // 1. User hasn't already seen this recap date (tracked by checking if any channel has lastSeenRecapDate >= yesterday)
-  // 2. There are actual recaps to display
-  // After the first auto-mark, user's "mark as unread" selections are preserved
-  useEffect(() => {
-    if (
-      !hasAutoMarkedRead.current &&
-      !isFirstTime &&
-      subscriptions.length > 0 &&
-      recapData?.configured &&
-      recapData.cards.length > 0
-    ) {
-      const { dateObj: yesterdayDate } = getYesterdayIST();
-      const yesterdayTimestamp = yesterdayDate.getTime();
-
-      // Check if user has already seen this recap date
-      // If ANY subscription has lastSeenRecapDate >= yesterday, user has been here before
-      const hasAlreadySeenThisRecap = subscriptions.some((sub: RecapSubscription) => {
-        return sub.lastSeenRecapDate && sub.lastSeenRecapDate >= yesterdayTimestamp;
-      });
-
-      // Only auto-mark if this is truly the first time seeing this recap
-      if (!hasAlreadySeenThisRecap) {
-        hasAutoMarkedRead.current = true;
-        const now = Date.now();
-
-        // Mark all subscriptions as seen for yesterday's recap
-        zero.mutate(
-          mutators.recap.markSeen({
-            recapDate: yesterdayTimestamp,
-            timestamp: now,
-          }),
-        );
-      }
-    }
-  }, [isFirstTime, subscriptions, recapData, zero]);
 
   // Calculate marked as read channels from subscription details (no extra API call needed)
   useEffect(() => {
@@ -162,6 +93,26 @@ const RecapPanel = (): ReactElement => {
     }
   }, [subscriptions, recapData]);
 
+  // Split cards into unread and read sections (moved up to be used in handleMarkAllAsRead)
+  const { unreadCards, readCards } = useMemo(() => {
+    if (!recapData) {
+      return { unreadCards: [], readCards: [] };
+    }
+
+    const unread: RecapCard[] = [];
+    const read: RecapCard[] = [];
+
+    for (const card of recapData.cards) {
+      if (markedAsReadChannels.has(card.channelId)) {
+        read.push(card);
+      } else {
+        unread.push(card);
+      }
+    }
+
+    return { unreadCards: unread, readCards: read };
+  }, [recapData, markedAsReadChannels]);
+
   // Handle settings open/close
   const handleOpenSettings = useCallback((): void => {
     setIsSettingsOpen(true);
@@ -170,6 +121,23 @@ const RecapPanel = (): ReactElement => {
   const handleCloseSettings = useCallback((): void => {
     setIsSettingsOpen(false);
   }, []);
+
+  // Handle mark all as read
+  const handleMarkAllAsRead = useCallback((): void => {
+    if (unreadCards.length === 0) return;
+
+    const { dateObj: yesterdayDate } = getYesterdayIST();
+    const yesterdayTimestamp = yesterdayDate.getTime();
+    const now = Date.now();
+
+    // Mark all subscriptions as seen for yesterday's recap
+    zero.mutate(
+      mutators.recap.markSeen({
+        recapDate: yesterdayTimestamp,
+        timestamp: now,
+      }),
+    );
+  }, [unreadCards.length, zero]);
 
   // Handle when settings is saved - track if this was a first-time save
   const handleSettingsSaved = useCallback((): void => {
@@ -180,83 +148,39 @@ const RecapPanel = (): ReactElement => {
     setIsSettingsOpen(false);
   }, [isFirstTime]);
 
-  // Handle citation click - navigate within recap route with message highlighting
-  // Citations now contain messageId directly for precise linking to specific messages
+  // Handle citation click - open channel view in right panel while keeping recap visible
   const handleCitationClick = (
     channelId: string,
     pointNumber: number,
-    citations: Record<string, string[]>,
-    messageIds: Record<string, string>,
-    _channelName: string,
+    pointCitations: Record<string, { conversationId?: string; messageId?: string }> | undefined,
     drilldown?: { conversationId: string | null; messageId: string | null },
-    citationMetadata?: CitationMetadata,
   ): void => {
     const pointKey = String(pointNumber);
 
-    // Get citation values - these should be messageIds (from updated backend)
-    const citationValues = citations[pointKey];
-    const citedMessageId = citationValues?.[0];
+    // Like ask AI: read conversationId and messageId directly from per-point data
+    const pointCitation = pointCitations?.[pointKey];
+    const messageId = pointCitation?.messageId ?? drilldown?.messageId ?? undefined;
+    const conversationId = pointCitation?.conversationId ?? drilldown?.conversationId ?? undefined;
 
-    let messageId: string | undefined;
-    let conversationId: string | undefined;
-
-    // Step 1: If we have citationMetadata, look up the conversationId for this messageId
-    if (citationMetadata && citedMessageId) {
-      const convMapping = citationMetadata.conversationIdMapping;
-      const msgMapping = citationMetadata.messageIdMapping;
-
-      // Find the conversationId for this messageId
-      for (const [idx, msgId] of Object.entries(msgMapping)) {
-        if (msgId === citedMessageId) {
-          const index = parseInt(idx, 10);
-          conversationId = convMapping[index];
-          messageId = citedMessageId;
-          break;
-        }
-      }
-    }
-
-    // Step 2: Fallback to messageIds and drilldown
-    if (!messageId) {
-      messageId = messageIds[pointKey] || drilldown?.messageId || undefined;
-    }
-    if (!conversationId) {
-      conversationId = drilldown?.conversationId || undefined;
-    }
-
-    if (!conversationId) {
-      // No conversation ID - navigate to channel only
-      if (isMobile) {
-        void navigate(`/chat/dir/${channelId}`);
-      } else {
-        void navigate(`/chat/dir/recap/${channelId}`);
-      }
-      return;
-    }
-
-    // On mobile: Navigate to full-screen thread view
-    // On desktop: Navigate within recap route to show thread in side panel
-    if (isMobile) {
-      if (messageId) {
-        void navigate(
-          `/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
-        );
-      } else {
-        void navigate(`/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`);
-      }
+    // Both mobile and desktop: open channel view with #origin to auto-scroll to the citation
+    // Mobile navigates to /chat/dir/:channelId (full screen); desktop uses split recap route
+    if (conversationId && messageId) {
+      const hash = `#origin=${conversationId}&messageId=${messageId}`;
+      void navigate(
+        isMobile ? `/chat/dir/${channelId}${hash}` : `/chat/dir/recap/${channelId}${hash}`,
+      );
+    } else if (conversationId) {
+      const hash = `#origin=${conversationId}`;
+      void navigate(
+        isMobile ? `/chat/dir/${channelId}${hash}` : `/chat/dir/recap/${channelId}${hash}`,
+      );
     } else {
-      if (messageId) {
-        void navigate(
-          `/chat/dir/recap/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
-        );
-      } else {
-        void navigate(`/chat/dir/recap/${channelId}/${conversationId}#origin=${conversationId}`);
-      }
+      void navigate(isMobile ? `/chat/dir/${channelId}` : `/chat/dir/recap/${channelId}`);
     }
   };
 
-  // Close side panel - navigate back to recap root
-  const handleCloseSidePanel = useCallback((): void => {
+  // Close the channel panel and return to recap root
+  const handleCloseThreadPanel = useCallback((): void => {
     void navigate('/chat/dir/recap');
   }, [navigate]);
 
@@ -294,133 +218,111 @@ const RecapPanel = (): ReactElement => {
     [zero],
   );
 
-  // Split cards into unread and read sections
-  const { unreadCards, readCards } = useMemo(() => {
-    if (!recapData) {
-      return { unreadCards: [], readCards: [] };
-    }
-
-    const unread: RecapCard[] = [];
-    const read: RecapCard[] = [];
-
-    for (const card of recapData.cards) {
-      if (markedAsReadChannels.has(card.channelId)) {
-        read.push(card);
-      } else {
-        unread.push(card);
-      }
-    }
-
-    return { unreadCards: unread, readCards: read };
-  }, [recapData, markedAsReadChannels]);
-
   // Render recap cards content (left/center panel)
   const renderRecapCards = (): ReactElement => {
     if (!recapData || recapData.cards.length === 0) {
       return (
         <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
-          <Clock className='text-gray-300 mb-4' size={48} />
-          <p className='text-gray-500 text-lg font-medium'>Nothing important happened yesterday.</p>
-          <p className='text-xs text-gray-400 text-center mt-4'>
+          <Clock className='text-muted-foreground mb-4' size={48} />
+          <p className='text-muted-foreground text-lg font-medium'>
+            Nothing important happened yesterday.
+          </p>
+          <p className='text-xs text-muted-foreground/60 text-center mt-4'>
             This tool uses AI to generate responses, so some information may be inaccurate.
           </p>
         </div>
       );
     }
 
-    // Check if this card is selected (channelId matches URL param)
-    const selectedChannelId = params.channelId;
-
     // Render a single recap card
-    const renderCard = (card: RecapCard, isSelected: boolean = false): ReactElement => (
-      <div
-        ref={isSelected ? selectedCardRef : null}
-        className={`border rounded-xl p-5 bg-white shadow-sm mb-5 transition-all duration-300 ${
-          isSelected
-            ? 'border-blue-500 ring-2 ring-blue-200 shadow-lg scale-[1.01]'
-            : 'border-gray-200 hover:shadow-md'
-        }`}
-      >
-        <div className='flex items-center gap-2 text-gray-700 font-semibold text-base mb-4'>
-          <Hash size={16} />
-          <span>{card.channelName}</span>
-          {isSelected && (
-            <span className='ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full'>
-              Viewing
-            </span>
-          )}
-        </div>
-        <div className='mb-5'>
-          <ul className='space-y-2'>
-            {card.summary.map((point: string, idx: number) => (
-              <li key={idx} className='flex items-start'>
-                <span
-                  className={`text-gray-800 ${isMobile ? 'text-xs' : 'text-sm'} leading-relaxed font-normal font-['Inter'] inline`}
-                >
-                  <span className='mr-2'>•</span>
+    const renderCard = (card: RecapCard): ReactElement => {
+      const isRead = markedAsReadChannels.has(card.channelId);
+      return (
+        <div
+          className={`border rounded-xl p-5 bg-card shadow-sm mb-5 transition-all duration-300 hover:shadow-md ${
+            isRead
+              ? 'border-l-[3px] border-l-green-500 border-border'
+              : 'border-l-[3px] border-l-blue-500 border-border'
+          }`}
+        >
+          {/* Card header: channel name */}
+          <div className='flex items-center justify-between mb-4'>
+            <div className='flex items-center gap-2 text-foreground font-semibold text-base'>
+              <Hash size={16} className='text-muted-foreground' />
+              <span>{card.channelName}</span>
+            </div>
+          </div>
+
+          {/* Summary points */}
+          <div className='mb-5'>
+            <ul className='space-y-2'>
+              {card.summary.map((point: string, idx: number) => (
+                <li key={idx} className='flex items-start'>
                   <span
-                    dangerouslySetInnerHTML={{
-                      __html: DOMPurify.sanitize(
-                        point.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'),
-                        { ALLOWED_TAGS: ['strong'] },
-                      ),
-                    }}
-                  />
-                  <button
-                    onClick={() =>
-                      handleCitationClick(
-                        card.channelId,
-                        idx + 1,
-                        card.citations,
-                        card.messageIds,
-                        card.channelName,
-                        card.drilldown,
-                        card.citationMetadata,
-                      )
-                    }
-                    className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-gray-200 text-gray-700 font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-gray-300 transition-colors cursor-pointer align-middle"
-                    title={`View source for point ${idx + 1}`}
-                    data-track-category='RECAP_PANEL'
-                    data-track-name='CLICK_CITATION'
+                    className={`text-foreground ${isMobile ? 'text-xs' : 'text-sm'} leading-relaxed font-normal font-['Inter'] inline`}
                   >
-                    {idx + 1}
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
+                    <span className='mr-2 text-muted-foreground'>•</span>
+                    <span
+                      dangerouslySetInnerHTML={{
+                        __html: DOMPurify.sanitize(
+                          point.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'),
+                          { ALLOWED_TAGS: ['strong'] },
+                        ),
+                      }}
+                    />
+                    <button
+                      onClick={() =>
+                        handleCitationClick(
+                          card.channelId,
+                          idx + 1,
+                          card.pointCitations,
+                          card.drilldown,
+                        )
+                      }
+                      className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-muted text-muted-foreground font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-accent transition-colors cursor-pointer align-middle"
+                      title={`View source for point ${idx + 1}`}
+                      data-track-category='RECAP_PANEL'
+                      data-track-name='CLICK_CITATION'
+                    >
+                      {card.citationIndices?.[`${idx + 1}`] ?? idx + 1}
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Card footer */}
+          <div className='flex items-center justify-between pt-4 border-t border-border'>
+            <span className={`text-muted-foreground ${isMobile ? 'text-xs' : 'text-sm'}`}>
+              {card.messageCount} {isMobile ? 'messages' : 'messages summarized'}
+            </span>
+            <button
+              onClick={() => void handleToggleRead(card.channelId, isRead)}
+              className={`flex items-center gap-1.5 text-xs font-medium transition-colors px-2.5 py-1 rounded-md border ${
+                isRead
+                  ? 'border-blue-500/30 text-blue-600 hover:bg-blue-500/10'
+                  : 'border-green-500/30 text-green-600 hover:bg-green-500/10'
+              }`}
+              data-track-category='RECAP_PANEL'
+              data-track-name={isRead ? 'MARK_AS_UNREAD' : 'MARK_AS_READ'}
+            >
+              {isRead ? (
+                <>
+                  <MailOpen size={13} />
+                  <span>Mark as unread</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle size={13} />
+                  <span>Mark as read</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
-        <div className='flex items-center justify-between pt-4 border-t border-gray-100'>
-          <span className='text-sm text-gray-500'>{card.messageCount} messages summarized</span>
-          <button
-            onClick={() =>
-              void handleToggleRead(card.channelId, markedAsReadChannels.has(card.channelId))
-            }
-            className={`flex items-center gap-1.5 text-sm font-medium transition-colors px-3 py-1.5 rounded-lg ${
-              markedAsReadChannels.has(card.channelId)
-                ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-                : 'text-green-600 hover:text-green-700 hover:bg-green-50'
-            }`}
-            data-track-category='RECAP_PANEL'
-            data-track-name={
-              markedAsReadChannels.has(card.channelId) ? 'MARK_AS_UNREAD' : 'MARK_AS_READ'
-            }
-          >
-            {markedAsReadChannels.has(card.channelId) ? (
-              <>
-                <Check size={16} className='text-gray-500' />
-                <span>Mark as unread</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle size={16} className='text-green-600' />
-                <span>Mark as read</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-    );
+      );
+    };
 
     // Render a section header
     const renderSectionHeader = (
@@ -430,8 +332,8 @@ const RecapPanel = (): ReactElement => {
     ): ReactElement => (
       <div className='flex items-center gap-2 mb-3 mt-2'>
         {icon}
-        <h3 className='text-sm font-semibold text-gray-700'>{title}</h3>
-        <span className='text-xs text-gray-400 font-medium'>({count})</span>
+        <h3 className='text-sm font-semibold text-foreground'>{title}</h3>
+        <span className='text-xs text-muted-foreground font-medium'>({count})</span>
       </div>
     );
 
@@ -439,10 +341,10 @@ const RecapPanel = (): ReactElement => {
       <div className='h-full flex flex-col overflow-hidden'>
         {/* Header Section - fixed at top */}
         <div className='text-center p-5 pb-4 flex-shrink-0'>
-          <h2 className={`${isMobile ? 'text-lg' : 'text-2xl'} font-semibold text-gray-900 mb-1`}>
+          <h2 className={`${isMobile ? 'text-lg' : 'text-2xl'} font-semibold text-foreground mb-1`}>
             {greeting}
           </h2>
-          <p className='text-sm text-gray-600'>
+          <p className='text-sm text-muted-foreground'>
             Recapping {recapData.meta.totalMessages} messages from {formatRecapDate(recapData.date)}
           </p>
         </div>
@@ -452,15 +354,27 @@ const RecapPanel = (): ReactElement => {
           {/* Unread Recap Section */}
           {unreadCards.length > 0 && (
             <div className='mb-6'>
-              {renderSectionHeader(
-                'Unread Recap',
-                unreadCards.length,
-                <Mail size={16} className='text-gray-400' />,
-              )}
-              {unreadCards.map(card => (
-                <div key={card.channelId}>
-                  {renderCard(card, card.channelId === selectedChannelId)}
+              <div className='flex items-center justify-between mb-3 mt-2'>
+                <div className='flex items-center gap-2'>
+                  <Mail size={16} className='text-muted-foreground' />
+                  <h3 className='text-sm font-semibold text-foreground'>Unread Recap</h3>
+                  <span className='text-xs text-muted-foreground font-medium'>
+                    ({unreadCards.length})
+                  </span>
                 </div>
+                <button
+                  onClick={handleMarkAllAsRead}
+                  className='flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-green-600 bg-green-500/10 hover:bg-green-500/20 rounded-md border border-green-500/30 transition-colors'
+                  title='Mark all as read'
+                  data-track-category='RECAP_PANEL'
+                  data-track-name='MARK_ALL_AS_READ'
+                >
+                  <CheckCheck size={12} />
+                  <span>Mark all as read</span>
+                </button>
+              </div>
+              {unreadCards.map(card => (
+                <div key={card.channelId}>{renderCard(card)}</div>
               ))}
             </div>
           )}
@@ -474,9 +388,7 @@ const RecapPanel = (): ReactElement => {
                 <MailOpen size={16} className='text-green-500' />,
               )}
               {readCards.map(card => (
-                <div key={card.channelId}>
-                  {renderCard(card, card.channelId === selectedChannelId)}
-                </div>
+                <div key={card.channelId}>{renderCard(card)}</div>
               ))}
             </div>
           )}
@@ -507,18 +419,18 @@ const RecapPanel = (): ReactElement => {
   if (isFirstTime && !isLoadingSubscriptions) {
     return (
       <>
-        <div className='flex flex-col items-center justify-center h-full p-8 text-center bg-white'>
-          <Clock className='text-gray-300 mb-4' size={48} />
-          <h2 className='text-xl font-semibold text-gray-900 mb-2'>
+        <div className='flex flex-col items-center justify-center h-full p-8 text-center bg-background'>
+          <Clock className='text-muted-foreground mb-4' size={48} />
+          <h2 className='text-xl font-semibold text-foreground mb-2'>
             Use AI recaps to focus in — without missing out
           </h2>
-          <p className='text-gray-500 text-sm mb-6 max-w-md'>
+          <p className='text-muted-foreground text-sm mb-6 max-w-md'>
             Get daily AI-powered summaries of conversations across your selected channels,
             highlighting key discussions, decisions, and important information.
           </p>
           <button
             onClick={handleOpenSettings}
-            className='px-6 py-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 font-medium cursor-pointer'
+            className='px-6 py-2.5 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors duration-200 font-medium cursor-pointer'
             data-track-category='RECAP_PANEL'
             data-track-name='OPEN_CHANNEL_SELECTION_FIRST_TIME'
             type='button'
@@ -535,60 +447,55 @@ const RecapPanel = (): ReactElement => {
     );
   }
 
-  // Main content - split layout when side panel is shown
+  // Main content — split when channel panel is open
   return (
     <>
-      <div className='flex flex-col h-full bg-white'>
-        {/* Header */}
-        <div className='p-4 bg-white border-b'>
-          <div className='flex items-center justify-between'>
-            <div className='flex items-center gap-2'>
-              <h3 className='font-bold text-gray-900 text-xl'>Recap</h3>
-              <Sparkles size={20} className='text-blue-500' />
-            </div>
-            <button
-              onClick={handleOpenSettings}
-              className='p-1.5 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors duration-200'
-              aria-label='Settings'
-              title='Manage channels'
-              data-track-category='RECAP_PANEL'
-              data-track-name='OPEN_SETTINGS'
-            >
-              <Settings size={18} />
-            </button>
-          </div>
-        </div>
-
-        {/* Split content area */}
-        <div className='flex-1 flex overflow-hidden'>
-          {/* Left: Recap cards panel */}
-          <div
-            className={`${showSidePanel ? 'w-1/2 border-r border-gray-200' : 'w-full'} min-w-0 bg-slate-50`}
-          >
-            {renderRecapCards()}
-          </div>
-
-          {/* Right: Side panel for cited thread */}
-          {showSidePanel && (
-            <div className='w-1/2 bg-white flex flex-col h-full relative'>
-              {/* Close button overlay */}
-              <button
-                onClick={handleCloseSidePanel}
-                className='absolute top-2 right-2 z-50 p-2 bg-white rounded-lg shadow-md border border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors'
-                aria-label='Close'
-                data-track-category='RECAP_PANEL'
-                data-track-name='CLOSE_SIDE_PANEL'
-              >
-                <X size={18} />
-              </button>
-
-              {/* Thread/Conversation View - renders via Outlet */}
-              <div className='flex-1 h-full overflow-hidden'>
-                <Outlet />
+      <div className='flex h-full bg-background'>
+        {/* Left: Recap cards (always visible) */}
+        <div
+          className={`flex flex-col ${showThreadPanel ? 'w-1/2' : 'w-full'} border-r border-border bg-background`}
+        >
+          {/* Header */}
+          <div className='p-4 bg-background border-b border-border flex-shrink-0'>
+            <div className='flex items-center justify-between'>
+              <div className='flex items-center gap-2'>
+                <h3 className='font-bold text-foreground text-xl'>Recap</h3>
+                <Sparkles size={20} className='text-blue-500' />
               </div>
+              <button
+                onClick={handleOpenSettings}
+                className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200'
+                aria-label='Settings'
+                title='Manage channels'
+                data-track-category='RECAP_PANEL'
+                data-track-name='OPEN_SETTINGS'
+              >
+                <Settings size={18} />
+              </button>
             </div>
-          )}
+          </div>
+
+          {/* Scrollable recap cards */}
+          <div className='flex-1 overflow-hidden bg-muted/30'>{renderRecapCards()}</div>
         </div>
+
+        {/* Right: Channel view panel (visible when citation is clicked) */}
+        {showThreadPanel && (
+          <div className='w-1/2 flex flex-col h-full relative bg-background'>
+            <button
+              onClick={handleCloseThreadPanel}
+              className='absolute top-2 right-2 z-50 p-2 bg-background rounded-lg shadow-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+              aria-label='Close'
+              data-track-category='RECAP_PANEL'
+              data-track-name='CLOSE_THREAD_PANEL'
+            >
+              <X size={18} />
+            </button>
+            <div className='flex-1 h-full overflow-hidden'>
+              <Outlet />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Settings Modal */}

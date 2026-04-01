@@ -8,7 +8,6 @@ export type {
   RecapSubscription,
   RecapData,
   RecapMeta,
-  CitationMetadata,
   YesterdayDateResult,
   UseRecapDataReturn,
   ChannelListItemProps,

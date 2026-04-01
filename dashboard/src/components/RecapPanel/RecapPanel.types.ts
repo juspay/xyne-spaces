@@ -1,17 +1,3 @@
-// Backend citationMetadata structure (from recapGenerationService)
-export interface CitationMetadata {
-  entityIdMapping: Record<number, string>;
-  entityTypeMapping: Record<
-    number,
-    'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search' | 'email'
-  >;
-  conversationIdMapping: Record<number, string>;
-  messageIdMapping: Record<number, string>;
-  canvasIdMapping: Record<number, string>;
-  callIdMapping: Record<number, string>;
-  ticketIdMapping: Record<number, string>;
-}
-
 export interface RecapCard {
   channelId: string;
   channelName: string;
@@ -21,9 +7,10 @@ export interface RecapCard {
     conversationId: string | null;
     messageId: string | null;
   };
-  citations: Record<string, string[]>; // Maps point number to message indices or conversationIds
-  messageIds: Record<string, string>; // Maps message index to message ID (legacy format)
-  citationMetadata?: CitationMetadata; // Mappings from message index to actual IDs
+  // Per-point citation data embedded directly (like ask AI) — new format
+  pointCitations?: Record<string, { conversationId?: string; messageId?: string }>;
+  // Source entity index per point (for citation button label, like ask AI's messageIndex)
+  citationIndices?: Record<string, number>;
 }
 
 export interface RecapSubscription {
