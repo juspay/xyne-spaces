@@ -1,5 +1,5 @@
-import { ReactElement, useState, useMemo, useEffect } from 'react';
-import { Globe, Pencil, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ReactElement, useMemo, useState, useEffect } from 'react';
+import { Download, Globe, Pencil, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +25,7 @@ import type {
   StreamingParsedContent,
   SummarizerKeyPoint,
   MessageAttachment,
+  ReportArtifact,
   UserTag,
   Participant,
   SelectionContext,
@@ -287,6 +288,34 @@ const AttachmentPreview = ({ attachment }: { attachment: MessageAttachment }): R
     </div>
   );
 };
+
+const ReportArtifactCard = ({ artifact }: { artifact: ReportArtifact }): ReactElement => (
+  <div className='rounded-xl border border-blue-200 bg-blue-50 p-3'>
+    <div className='flex items-start justify-between gap-3'>
+      <div className='min-w-0'>
+        <div className="truncate text-sm font-semibold text-blue-900 font-['Inter']">
+          {artifact.title}
+        </div>
+        <div className="truncate text-xs text-blue-700 font-['Inter']">{artifact.fileName}</div>
+      </div>
+      <a
+        href={artifact.downloadUrl}
+        target='_blank'
+        rel='noopener noreferrer'
+        className='inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100'
+        data-track-category='XyneAI'
+        data-track-name='DownloadTeamIntelligenceReport'
+        data-track-metadata={JSON.stringify({
+          reportId: artifact.reportId,
+          fileName: artifact.fileName,
+        })}
+      >
+        <Download className='h-4 w-4' />
+        Download PDF
+      </a>
+    </div>
+  </div>
+);
 
 // Selection context preview component
 const SelectionContextPreview = ({
@@ -753,6 +782,8 @@ const MessageContent = ({
 
   return (
     <div className='space-y-4 max-w-full'>
+      {message.reportArtifact && <ReportArtifactCard artifact={message.reportArtifact} />}
+
       {/* Tool Outputs */}
       {message.toolOutputs && message.toolOutputs.length > 0 && (
         <ToolOutputsSection toolOutputs={message.toolOutputs} />

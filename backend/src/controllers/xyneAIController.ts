@@ -51,6 +51,7 @@ const XyneAIRequestSchema = z.object({
   selection_contexts: z.array(SelectionContextSchema).optional(), // Selected text contexts from canvases
   create_canvas_enabled: z.boolean().optional().default(false), // Enable create canvas instruction
   web_search_enabled: z.boolean().optional().default(false), // Enable/disable web search tool, defaults to false
+  gmail_search_enabled: z.boolean().optional().default(false), // Enable/disable Gmail search tool, defaults to false
   research_context: ResearchContextSchema.optional().nullable(), // Selected product/repository from frontend
   attachments: z.array(z.object({
     data: z.string().min(1, 'Attachment data cannot be empty').refine(isValidBase64, {
@@ -95,7 +96,22 @@ export class XyneAIController {
       return;
     }
 
-    const { query, session_id, channel_ids, conversation_id, canvas_view_access_id, selection_contexts, create_canvas_enabled, web_search_enabled, research_context, attachments, message_attachment_ids, parent_message_id, is_regenerate } = parseResult.data;
+    const {
+      query,
+      session_id,
+      channel_ids,
+      conversation_id,
+      canvas_view_access_id,
+      selection_contexts,
+      create_canvas_enabled,
+      web_search_enabled,
+      gmail_search_enabled,
+      research_context,
+      attachments,
+      message_attachment_ids,
+      parent_message_id,
+      is_regenerate,
+    } = parseResult.data;
 
     const userId = (req as any).user?.id;
     if (!userId) {
@@ -154,12 +170,18 @@ export class XyneAIController {
         selectedText: ctx.selected_text,
         ...(ctx.canvas_title && { canvasTitle: ctx.canvas_title }),
       }));
+      const forwardedProto = req.get('x-forwarded-proto')?.split(',')[0]?.trim();
+      const protocol = forwardedProto || req.protocol;
+      const host = req.get('host');
+      const apiBaseUrl = host ? `${protocol}://${host}/api` : '/api';
 
       const agentRequest = {
         query,
         sessionId: session_id,
         channelIds: channel_ids,
         conversationId: conversation_id,
+        apiBaseUrl,
+        appRole: req.user?.role,
         canvasViewAccessId: canvas_view_access_id,
         selectionContexts: transformedSelectionContexts,
         createCanvasEnabled: create_canvas_enabled,
@@ -167,6 +189,7 @@ export class XyneAIController {
         attachments: attachments,
         userInfo,
         webSearchEnabled: web_search_enabled,
+        gmailSearchEnabled: gmail_search_enabled,
         researchContext: research_context || undefined,
         messageAttachmentIds: message_attachment_ids,
         agentsConfig,  // Pass CAC config to stream

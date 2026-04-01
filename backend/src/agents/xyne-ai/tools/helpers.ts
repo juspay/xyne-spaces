@@ -34,10 +34,12 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, createPpt] = await Promise.all([
+const [fetchChannel, fetchThread, searchMessages, searchGmail, generateTeamIntelligenceReport, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, createPpt] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_MESSAGES),
+    getPromptFromLangfuse(PROMPT_NAMES.SEARCH_GMAIL),
+    getPromptFromLangfuse(PROMPT_NAMES.GENERATE_TEAM_INTELLIGENCE_REPORT),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_TICKETS),
     getPromptFromLangfuse(PROMPT_NAMES.GENIUS),
     getPromptFromLangfuse(PROMPT_NAMES.XYNE_RCA),
@@ -55,6 +57,10 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     fetch_channel_messages: fetchChannel || 'Fetch messages from the current channel.',
     fetch_thread_messages: fetchThread || 'Fetch all content from the current thread including messages, attachments, and tickets.',
     search_relevant_messages: searchMessages || 'Search for relevant messages in the channel.',
+    search_gmail: searchGmail || 'Search indexed Gmail messages and attachments using the authenticated user email as the retrieval principal.',
+    generate_team_intelligence_report:
+      generateTeamIntelligenceReport ||
+      'Generate an org-scoped manager report across team members and provide a downloadable PDF artifact.',
     search_relevant_tickets: searchTickets || 'Search for relevant support tickets using semantic search.',
     genius: geniusQuery || 'Query Genius for analytics and data insights.',
     xyne_rca: xyneRcaQuery || 'Query the Xyne RCA Agent for Root Cause Analysis of production issues and errors.',

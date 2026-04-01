@@ -38,6 +38,7 @@ export interface StreamRecord {
   query: string;
   channelIds: string[];
   webSearchEnabled: boolean;
+  gmailSearchEnabled: boolean;
   attachments: MessageAttachment[];
 }
 
@@ -87,6 +88,7 @@ class XyneAIStreamStorage {
     query: string,
     channelIds: string[],
     webSearchEnabled: boolean,
+    gmailSearchEnabled: boolean,
     attachments: MessageAttachment[],
     initialMessages: Message[],
   ): Promise<void> {
@@ -111,6 +113,7 @@ class XyneAIStreamStorage {
         query,
         channelIds,
         webSearchEnabled,
+        gmailSearchEnabled,
         attachments,
       };
 

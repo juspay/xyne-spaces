@@ -16,7 +16,7 @@ export interface SummarizerCitation {
   isTicket?: boolean; // Distinguishes ticket citations from message citations (legacy)
 
   // NEW: Multi-entity support
-  entityType?: 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search';
+  entityType?: 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search' | 'email';
   entityId?: string;
   canvasId?: string;
   callId?: string;
@@ -52,6 +52,13 @@ export interface MessageAttachment {
   data: string; // base64 data
 }
 
+export interface ReportArtifact {
+  reportId: string;
+  title: string;
+  fileName: string;
+  downloadUrl: string;
+}
+
 // Selection context from canvas
 export interface SelectionContext {
   canvasViewAccessId: string;
@@ -85,6 +92,7 @@ export interface Message {
   traceId?: string; // Langfuse trace ID for feedback
   feedback?: 0 | 1 | 2; // 0 = no feedback, 1 = like, 2 = dislike
   attachments?: MessageAttachment[]; // Attachments sent with the message
+  reportArtifact?: ReportArtifact; // Generated report artifact for bot messages
   userTags?: Record<string, UserTag>; // Tag -> {name, userId} for user mentions
   participants?: Participant[]; // List of participants for Summarizer responses
   selectionContexts?: SelectionContext[]; // Canvas selection contexts

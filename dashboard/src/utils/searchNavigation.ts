@@ -142,9 +142,14 @@ export const navigateToMessage = (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
 ): void => {
-  const { channelId, messageId, conversationId, replyCount } = result.searchContext || {};
+  const { channelId, messageId, conversationId, replyCount, originalUrl } =
+    result.searchContext || {};
 
   if (!channelId) {
+    if (originalUrl) {
+      window.open(originalUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
     throw new Error('Cannot navigate to message: missing channel information');
   }
 

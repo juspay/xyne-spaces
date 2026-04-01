@@ -15,6 +15,7 @@ import {
   FileText,
   Lock,
   Globe,
+  Mail,
   Code2,
   Package,
   Search,
@@ -87,6 +88,8 @@ interface XyneAIInputBoxProps {
   webSearchEnabled?: boolean;
   webSearchAccessible?: boolean;
   onWebSearchToggle?: () => void;
+  gmailSearchEnabled?: boolean;
+  onGmailSearchToggle?: () => void;
   createCanvasEnabled?: boolean;
   onCreateCanvasToggle?: () => void;
   onUserTagsChange?: (userTags: Record<string, UserTag>) => void;
@@ -142,6 +145,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       webSearchEnabled = false,
       webSearchAccessible = false,
       onWebSearchToggle,
+      gmailSearchEnabled = false,
+      onGmailSearchToggle,
       createCanvasEnabled = false,
       onCreateCanvasToggle,
       onUserTagsChange,
@@ -1556,7 +1561,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               </button>
 
               {/* Divider line */}
-              {onWebSearchToggle && <div className='h-4 w-px bg-muted' />}
+              {(onWebSearchToggle || onGmailSearchToggle) && <div className='h-4 w-px bg-muted' />}
 
               {/* Web Search Toggle Button */}
               {onWebSearchToggle && (
@@ -1592,6 +1597,26 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   data-track-metadata={JSON.stringify({ enabled: webSearchEnabled })}
                 >
                   <Globe className='w-4 h-4' />
+                </button>
+              )}
+
+              {/* Gmail Search Toggle Button */}
+              {onGmailSearchToggle && (
+                <button
+                  type='button'
+                  onClick={onGmailSearchToggle}
+                  className={`p-1.5 rounded-lg transition-colors ${
+                    gmailSearchEnabled
+                      ? 'bg-[#FCE8E6] text-[#C5221F] hover:bg-[#F7D7D3]'
+                      : 'hover:bg-accent text-muted-foreground'
+                  }`}
+                  aria-label={gmailSearchEnabled ? 'Disable Gmail search' : 'Enable Gmail search'}
+                  title={gmailSearchEnabled ? 'Gmail search enabled' : 'Enable Gmail search'}
+                  data-track-category='XyneAI'
+                  data-track-name='TOGGLE_GMAIL_SEARCH'
+                  data-track-metadata={JSON.stringify({ enabled: gmailSearchEnabled })}
+                >
+                  <Mail className='w-4 h-4' />
                 </button>
               )}
 

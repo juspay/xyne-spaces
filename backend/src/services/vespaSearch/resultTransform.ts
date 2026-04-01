@@ -74,11 +74,37 @@ import { PrismaClient } from '@prisma/client';
        name: string;
      };
    }
-   
-   /**
-    * Main transformer function - transforms Vespa search hits to frontend format
-    */
-   export async function transformVespaResults(
+
+interface GmailChunkSummary {
+  chunk?: string;
+}
+
+   interface GmailMailDocument {
+     docId: string;
+     sddocname: 'mail';
+     subject?: string;
+     from?: string;
+     timestamp?: number;
+     threadId?: string;
+     mailId?: string;
+     chunks_summary?: Array<string | GmailChunkSummary>;
+   }
+
+   interface GmailMailAttachmentDocument {
+     docId: string;
+     sddocname: 'mail_attachment';
+     filename?: string;
+     fileType?: string | null;
+     timestamp?: number;
+     threadId?: string;
+     mailId?: string;
+     chunks_summary?: Array<string | GmailChunkSummary>;
+   }
+
+/**
+ * Main transformer function - transforms Vespa search hits to frontend format
+ */
+export async function transformVespaResults(
      hits: VespaSearchHit[],
      prisma: PrismaClient,
    ): Promise<TransformedSearchResult[]> {
@@ -197,7 +223,8 @@ import { PrismaClient } from '@prisma/client';
      userMap: UserMap,
    ): TransformedSearchResult {
      const doc = hit.fields;
-     const docType = doc.docType as string;
+     const docType = doc.docType as string | undefined;
+     const schemaName = 'sddocname' in doc ? String(doc.sddocname || '') : '';
    
    
      const debugInfo = ('matchfeatures' in doc || 'rankfeatures' in doc) ? {
@@ -211,7 +238,7 @@ import { PrismaClient } from '@prisma/client';
      // Vespa returns schema names like 'chat_message', not enum values like 'message'
      let result: TransformedSearchResult;
      
-     switch (docType) {
+     switch (docType || schemaName) {
        // case 'user':
        //   result = transformUser(hit, doc as VespaUserDocument);
        //   break;
@@ -232,6 +259,14 @@ import { PrismaClient } from '@prisma/client';
        case 'ticket':
          result = transformTicket(hit, doc as VespaTicketDocument & importedTicketFields, userMap);
          break;
+
+       case 'mail':
+         result = transformMail(hit, doc as unknown as GmailMailDocument);
+         break;
+
+       case 'mail_attachment':
+         result = transformMailAttachment(hit, doc as unknown as GmailMailAttachmentDocument);
+         break;
    
        // case 'channel':
        // case 'chat_container':
@@ -240,12 +275,12 @@ import { PrismaClient } from '@prisma/client';
    
        default:
          // Fallback for unknown types - log for debugging
-         logger.warn(`Unknown docType encountered: ${docType}`, { hitId: hit.id });
+         logger.warn(`Unknown docType encountered: ${docType || schemaName}`, { hitId: hit.id });
          result = {
            id: hit.id,
            type: 'conversation',
            title: 'Unknown Document',
-           subtitle: `Type: ${docType}`,
+           subtitle: `Type: ${docType || schemaName}`,
            context: JSON.stringify(doc),
            relevanceScore: hit.relevance,
            metadata: {
@@ -285,6 +320,21 @@ import { PrismaClient } from '@prisma/client';
      } catch {
        return timestamp;
      }
+   }
+
+   function getSummaryText(
+     chunksSummary?: Array<string | GmailChunkSummary>,
+   ): string | undefined {
+     if (!chunksSummary || chunksSummary.length === 0) {
+       return undefined;
+     }
+
+     const [firstChunk] = chunksSummary;
+     if (typeof firstChunk === 'string') {
+       return firstChunk;
+     }
+
+     return firstChunk?.chunk;
    }
    
    /**
@@ -395,7 +445,6 @@ import { PrismaClient } from '@prisma/client';
      hit: VespaSearchHit,
      doc: VespaFileDocument & Partial<importedChannelFields>,
    ): TransformedSearchResult {
-   
      // Handle potentially invalid createdAt timestamp
      let timestamp = '';
      try {
@@ -417,22 +466,22 @@ import { PrismaClient } from '@prisma/client';
        context: doc.fileName,
        relevanceScore: hit.relevance,
        avatar: doc.ownerId,
-       metadata: {
-         timestamp: timestamp || 'N/A',
-       },
-       searchContext: {
-         attachmentId: doc.docId,
-         fileName: doc.fileName,
-         originalUrl: doc.urlOriginal,
-         internalUrl: doc.urlInternal,
-         subApp: doc.subApp,
-         conversationId: doc.conversationId,
-         channelId: doc.channelId,
-         messageId: doc.messageId,
-         ticketId: doc.ticketId,
-       },
-     };
-   }
+      metadata: {
+        timestamp: timestamp || 'N/A',
+      },
+      searchContext: {
+        attachmentId: doc.docId,
+        fileName: doc.fileName,
+        originalUrl: doc.urlOriginal,
+        internalUrl: doc.urlInternal,
+        subApp: doc.subApp,
+        conversationId: doc.conversationId,
+        channelId: doc.channelId,
+        messageId: doc.messageId,
+        ticketId: doc.ticketId,
+      },
+    };
+  }
    
    /**
     * Transform ticket document
@@ -493,7 +542,78 @@ import { PrismaClient } from '@prisma/client';
        },
      };
    }
-   
+
+   function transformMail(
+     hit: VespaSearchHit,
+     doc: GmailMailDocument,
+   ): TransformedSearchResult {
+     const timestamp = doc.timestamp
+       ? formatTimestamp(new Date(doc.timestamp).toISOString())
+       : 'N/A';
+     const subject = doc.subject?.trim() || '(No subject)';
+     const sender = doc.from?.trim() || 'Unknown sender';
+     const summary = getSummaryText(doc.chunks_summary);
+     const originalUrl = doc.threadId
+       ? `https://mail.google.com/mail/u/0/#all/${doc.threadId}`
+       : undefined;
+
+     return {
+       id: doc.docId,
+       type: 'conversation',
+       title: subject,
+       subtitle: `Email from ${sender}`,
+       context: summary || subject,
+       relevanceScore: hit.relevance,
+       metadata: {
+         timestamp,
+         channelName: 'Gmail',
+       },
+       searchContext: {
+         channelTitle: 'Gmail',
+         conversationId: doc.threadId,
+         messageId: doc.mailId || doc.docId,
+         senderName: sender,
+         originalUrl,
+       },
+     };
+   }
+
+   function transformMailAttachment(
+     hit: VespaSearchHit,
+     doc: GmailMailAttachmentDocument,
+   ): TransformedSearchResult {
+     const timestamp = doc.timestamp
+       ? formatTimestamp(new Date(doc.timestamp).toISOString())
+       : 'N/A';
+     const filename = doc.filename?.trim() || 'Untitled attachment';
+     const summary = getSummaryText(doc.chunks_summary);
+     const mimeType = doc.fileType || undefined;
+     const originalUrl = doc.threadId
+       ? `https://mail.google.com/mail/u/0/#all/${doc.threadId}`
+       : undefined;
+
+     return {
+       id: doc.docId,
+       type: 'attachment',
+       title: filename,
+       subtitle: mimeType ? `Email attachment | ${mimeType}` : 'Email attachment',
+       context: summary || filename,
+       relevanceScore: hit.relevance,
+       metadata: {
+         timestamp,
+         channelName: 'Gmail',
+       },
+       searchContext: {
+         attachmentId: doc.docId,
+         fileName: filename,
+         mimeType,
+         conversationId: doc.threadId || doc.mailId,
+         messageId: doc.mailId || doc.docId,
+         originalUrl,
+       },
+     };
+   }
+
    /**
     * Transform channel document
     */
@@ -503,7 +623,7 @@ import { PrismaClient } from '@prisma/client';
    //   userMap: UserMap,
    // ): TransformedSearchResult {
    //   const scopeType = doc.isIm ? 'DM' : doc.isMpim ? 'GROUP_DM' : 'DEFAULT';
-     
+
    //   // Generate proper channel name for DMs
    //   const channelName = generateChannelTitle(
    //     doc.channelName,
@@ -511,7 +631,7 @@ import { PrismaClient } from '@prisma/client';
    //     userMap,
    //     scopeType,
    //   );
-   
+
    //   // Handle potentially invalid createdAt timestamp
    //   let timestamp = '';
    //   try {
@@ -524,7 +644,7 @@ import { PrismaClient } from '@prisma/client';
    //   } catch (error) {
    //     logger.warn('Invalid createdAt for channel:', doc.docId, doc.createdAt);
    //   }
-   
+
    //   return {
    //     id: doc.docId,
    //     type: 'channel',
@@ -543,5 +663,3 @@ import { PrismaClient } from '@prisma/client';
    //     },
    //   };
    // }
-
-   

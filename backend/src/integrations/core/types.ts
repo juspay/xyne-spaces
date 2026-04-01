@@ -4,6 +4,8 @@
  */
 
 import { ExternalSource } from '@prisma/client';
+import type { DownloadedAttachment } from '@/services/externalAttachmentService';
+import type { ExtractedEntityTags } from '@/services/entityTagExtractor';
 
 /**
  * Supported external source platforms
@@ -12,6 +14,7 @@ import { ExternalSource } from '@prisma/client';
 export enum ExternalSourcePlatform {
   ZOHO = 'zoho',
   SLACK = 'slack',
+  GOOGLE = 'google',
 }
 
 /**
@@ -54,6 +57,8 @@ export interface NormalizedData {
     size?: number;
   }>;
 
+  downloadedAttachments?: DownloadedAttachment[];
+
   // Email-specific fields (optional - for email-based integrations like Zoho)
   emailData?: {
     subject?: string;
@@ -83,8 +88,10 @@ export interface NormalizedData {
     hasAttachments?: boolean;
     attachmentCount?: number;
     isReply?: boolean; // true for Ticket_Thread_Add events
+    allowOrphanThreadBootstrap?: boolean; // allow reply-shaped payloads to seed a new thread when the root message is unavailable
+    entityTags?: ExtractedEntityTags;
     
-    [key: string]: string | number | boolean | Date | string[] | undefined; // Platform-specific metadata
+    [key: string]: string | number | boolean | Date | string[] | ExtractedEntityTags | undefined; // Platform-specific metadata
   };
 }
 

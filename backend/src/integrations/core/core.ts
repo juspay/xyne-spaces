@@ -88,13 +88,21 @@ export class ExternalSourceCore {
       throw new SourceNotFoundError(sourceName);
     }
 
+    const sourceChannelId = source.channelId;
+    if (!sourceChannelId) {
+      throw new Error(`External source ${sourceName} does not have a channel binding`);
+    }
+
     // Check channel type to determine which service to use
-    const channel = await this.channelRepo.findById(source.channelId);
+    const channel = await this.channelRepo.findById(sourceChannelId);
     if (!channel) {
-      throw new Error(`Channel ${source.channelId} not found`);
+      throw new Error(`Channel ${sourceChannelId} not found`);
     }
     const isEmailChannel = channel.type === ChannelType.EMAIL;
-
+    const allowOrphanReplyBootstrap =
+      isEmailChannel &&
+      source.sourceType === 'google' &&
+      normalizedData.metadata.allowOrphanThreadBootstrap === true;
     if (normalizedData.metadata.isReply) {
       const existingThread = await this.externalMessageRepo.findByThreadId(
         source.id,
@@ -102,18 +110,31 @@ export class ExternalSourceCore {
       );
       
       if (!existingThread) {
-        logger.warn(`Blocking orphan reply for thread ${normalizedData.externalThreadId} - no parent conversation found`, {
-          externalId: normalizedData.externalId,
-          externalThreadId: normalizedData.externalThreadId,
-          eventType: normalizedData.metadata.eventType,
-        });
-        throw new Error(`Orphan reply blocked: No parent conversation found for thread ${normalizedData.externalThreadId}`);
+        if (allowOrphanReplyBootstrap) {
+          logger.info(`Allowing orphan reply bootstrap for ${sourceName}`, {
+            externalId: normalizedData.externalId,
+            externalThreadId: normalizedData.externalThreadId,
+            eventType: normalizedData.metadata.eventType,
+            sourceType: source.sourceType,
+          });
+        } else {
+          logger.warn(`Blocking orphan reply for thread ${normalizedData.externalThreadId} - no parent conversation found`, {
+            externalId: normalizedData.externalId,
+            externalThreadId: normalizedData.externalThreadId,
+            eventType: normalizedData.metadata.eventType,
+          });
+          throw new Error(`Orphan reply blocked: No parent conversation found for thread ${normalizedData.externalThreadId}`);
+        }
       }
     }
 
     // 2. Download attachments if present
-    let downloadedAttachments: DownloadedAttachment[] = [];
-    if (normalizedData.attachments && normalizedData.attachments.length > 0) {
+    let downloadedAttachments: DownloadedAttachment[] = normalizedData.downloadedAttachments || [];
+    if (
+      downloadedAttachments.length === 0 &&
+      normalizedData.attachments &&
+      normalizedData.attachments.length > 0
+    ) {
       try {
         logger.info(
           `Downloading ${normalizedData.attachments.length} attachments for ${sourceName}`
@@ -229,6 +250,11 @@ export class ExternalSourceCore {
     downloadedAttachments: DownloadedAttachment[],
     isEmailChannel: boolean
   ) {
+    const sourceChannelId = source.channelId;
+    if (!sourceChannelId) {
+      throw new Error(`External source ${source.name} does not have a channel binding`);
+    }
+
     // Check if conversation exists for this external thread
     const existingExtMsg = await this.externalMessageRepo.findByThreadId(
       source.id,
@@ -275,6 +301,7 @@ export class ExternalSourceCore {
           emailBcc: normalizedData?.emailData?.bcc,
           externalThreadId: normalizedData.externalThreadId,
           externalMessageId: normalizedData.externalId,
+          entityTags: normalizedData.metadata.entityTags,
           uploadedFiles: uploadedFiles,
         });
         return { conversation, message: undefined, email, isNew: false };
@@ -302,13 +329,13 @@ export class ExternalSourceCore {
     // This handles cases where tickets were created manually (not via Zoho)
     if (isEmailChannel && !existingExtMsg && normalizedData.emailData) {
       logger.info(`[EMAIL_DUPLICATE_CHECK] Checking Vespa for duplicate email`, {
-        channelId: source.channelId,
+        channelId: sourceChannelId,
         emailFrom: normalizedData.emailData.from,
         emailSubject: normalizedData.emailData.subject,
       });
 
       const duplicateCheck = await findDuplicateEmailConversation(
-        source.channelId,
+        sourceChannelId,
         normalizedData.emailData.from || "",
         normalizedData.emailData.subject || ""
       );
@@ -351,6 +378,7 @@ export class ExternalSourceCore {
           externalThreadId: normalizedData.externalThreadId,
           externalMessageId: normalizedData.externalId,
           emailType: EmailType.DEFAULT,
+          entityTags: normalizedData.metadata.entityTags,
           uploadedFiles: uploadedFiles,
         });
 
@@ -369,7 +397,7 @@ export class ExternalSourceCore {
     }
 
     // Create new conversation with initial message
-    logger.info(`Creating new conversation in channel ${source.channelId}`);
+    logger.info(`Creating new conversation in channel ${sourceChannelId}`);
     logger.info(`Converting ${downloadedAttachments.length} downloaded attachments to uploaded format for new conversation`);
     const uploadedFiles = AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
     logger.info(`Converted to ${uploadedFiles.length} uploaded files for new conversation`);
@@ -381,7 +409,7 @@ export class ExternalSourceCore {
         );
       }
       const createResult = await emailService.createConversationWithEmail({
-        channelId: source.channelId,
+        channelId: sourceChannelId,
         boardId: source.boardId || undefined, // Pass boardId from ExternalSource for ticket creation
         userId: source.displayName,
         emailSubject: normalizedData.emailData.subject || "",
@@ -403,7 +431,7 @@ export class ExternalSourceCore {
       return { conversation, email, isNew: true };
     } else {
       const { conversation, message } = await conversationService.createConversationWithMessage({
-        channelId: source.channelId,
+        channelId: sourceChannelId,
         userId: source.displayName,
         content: normalizedData.content,
         msgType: 'BOT',

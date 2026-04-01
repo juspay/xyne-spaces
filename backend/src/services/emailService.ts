@@ -47,6 +47,12 @@ import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
 import { TicketIdService } from './ticketIdService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import {
+  coerceExtractedEntityTags,
+  isExtractedEntityTagsEmpty,
+  mergeExtractedEntityTags,
+  type ExtractedEntityTags,
+} from './entityTagExtractor';
 
 interface UserInfo {
   id: string;
@@ -83,6 +89,7 @@ export interface AddEmailToConversationParams {
   externalThreadId: string;
   externalMessageId: string;
   emailType?: EmailType;
+  entityTags?: ExtractedEntityTags;
   uploadedFiles?: UploadedFileResult[];
 }
 
@@ -223,6 +230,46 @@ export class EmailService {
     }));
 
     await this.messageAttachmentRepository.createMany(attachmentData);
+  }
+
+  private async mergeTicketEntityTags(
+    conversationId: string,
+    entityTags: ExtractedEntityTags | undefined
+  ): Promise<void> {
+    if (!entityTags || isExtractedEntityTagsEmpty(entityTags)) {
+      return;
+    }
+
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { conversationId },
+      select: {
+        id: true,
+        metadata: true,
+      },
+    });
+
+    if (!ticket) {
+      logger.warn('[EmailService] No ticket found while merging Gmail entity tags', {
+        conversationId,
+      });
+      return;
+    }
+
+    const existingMetadata = (ticket.metadata as Record<string, unknown> | null) || {};
+    const mergedEntityTags = mergeExtractedEntityTags(
+      coerceExtractedEntityTags(existingMetadata.entityTags),
+      entityTags
+    );
+
+    await this.prisma.ticket.update({
+      where: { id: ticket.id },
+      data: {
+        metadata: {
+          ...existingMetadata,
+          entityTags: mergedEntityTags,
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
   }
 
   /**
@@ -576,6 +623,7 @@ export class EmailService {
         externalThreadId,
         externalMessageId,
         emailType = EmailType.DEFAULT,
+        entityTags,
         uploadedFiles = [],
       } = params;
 
@@ -611,6 +659,7 @@ export class EmailService {
 
       // Create MessageAttachment entries for email attachments
       await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, uploadedFiles);
+      await this.mergeTicketEntityTags(conversationId, entityTags);
 
       // Process Google Meet links from reply email body and send to SAM service
       try {

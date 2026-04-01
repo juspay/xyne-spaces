@@ -5,6 +5,8 @@ import {
   Hash,
   Loader2,
   MessageSquare,
+  Mail,
+  RefreshCw,
   Users,
   FolderOpen,
   SquareDashedKanban,
@@ -73,6 +75,9 @@ import {
 import { SearchSummaryModal, SummaryModalState } from './SearchSummaryModal';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
+import { useAuth } from '../../../hooks/useAuth';
+import { googleMailService, type GoogleMailSource } from '../../../services/googleMailService';
+import { toast } from 'sonner';
 
 type BotChatState =
   | { status: 'idle' }
@@ -85,6 +90,24 @@ type BotChatState =
       toolOutputs: ToolOutput[];
     }
   | { status: 'error'; message: string };
+
+interface GmailTabActionState {
+  isConnecting: boolean;
+  isSyncing: boolean;
+}
+
+interface GmailSyncProgressView {
+  processed: number;
+  total: number;
+  percentage: number;
+  label: string;
+  isComplete: boolean;
+}
+
+const isGmailSearchResult = (result: DisplaySearchResult): boolean =>
+  result.metadata.channelName === 'Gmail' ||
+  result.searchContext?.channelTitle === 'Gmail' ||
+  result.searchContext?.originalUrl?.includes('mail.google.com') === true;
 
 function stripHtmlTags(html: string): string {
   const div = document.createElement('div');
@@ -164,6 +187,7 @@ const ChannelCommandMenu = ({
   const navigate = useNavigate();
   const channelData = useAllChannels();
   const commandRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
 
   useScope('command', open);
 
@@ -246,6 +270,25 @@ const ChannelCommandMenu = ({
     return result;
   }, [channels, starred, directMessages, usersById]);
 
+  const [gmailActionState, setGmailActionState] = useState<GmailTabActionState>({
+    isConnecting: false,
+    isSyncing: false,
+  });
+
+  const {
+    data: gmailSources = [],
+    refetch: refetchGmailSources,
+    isFetching: isFetchingGmailSources,
+  } = useReactQuery({
+    queryKey: ['google-mail-sources', user?.id],
+    queryFn: () => googleMailService.listSources(),
+    enabled: open && !!user?.id,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchInterval: query =>
+      query.state.data?.some(source => source.status === 'syncing') ? 1_000 : false,
+  });
+
   const {
     searchResults: backendResults,
     isSearching: isLoading,
@@ -286,6 +329,148 @@ const ChannelCommandMenu = ({
   // Aliases to match old usage if needed or just use new names
   const search = cleanedSearchText;
   const setSearch = setSearchText;
+
+  const preferredGmailSource = useMemo(() => {
+    const normalizedUserEmail = user?.email?.toLowerCase();
+    if (!gmailSources.length) {
+      return null;
+    }
+
+    if (normalizedUserEmail) {
+      const exactMailboxMatch = gmailSources.find(
+        source => source.mailboxEmail?.toLowerCase() === normalizedUserEmail,
+      );
+      if (exactMailboxMatch) {
+        return exactMailboxMatch;
+      }
+
+      return (
+        gmailSources.find(
+          source =>
+            !source.mailboxEmail &&
+            (source.status === 'pending_auth' ||
+              source.status === 'authenticated' ||
+              !source.hasRefreshToken),
+        ) || null
+      );
+    }
+
+    return (
+      gmailSources.find(
+        source =>
+          source.status === 'pending_auth' ||
+          source.status === 'authenticated' ||
+          (!source.mailboxEmail && !source.hasRefreshToken),
+      ) ||
+      gmailSources[0] ||
+      null
+    );
+  }, [gmailSources, user?.email]);
+
+  const gmailEmptyState = useMemo(() => {
+    if (isFetchingGmailSources && gmailSources.length === 0) {
+      return {
+        mode: 'syncing' as const,
+        title: 'Checking Gmail setup',
+        description: 'Looking for an existing Gmail source for this workspace.',
+        actionLabel: 'Refreshing status…',
+      };
+    }
+
+    if (preferredGmailSource?.status === 'syncing' || gmailActionState.isSyncing) {
+      return {
+        mode: 'syncing' as const,
+        title: 'Syncing Gmail',
+        description:
+          'We are indexing your mailbox. Gmail results will appear here once the sync completes.',
+        actionLabel: 'Refreshing status…',
+      };
+    }
+
+    if (preferredGmailSource) {
+      const needsOAuth =
+        preferredGmailSource.status === 'pending_auth' || !preferredGmailSource.hasRefreshToken;
+
+      return needsOAuth
+        ? {
+            mode: 'connect' as const,
+            title: 'Connect Gmail',
+            description: 'Connect your Gmail account to start searching your inbox here.',
+            actionLabel: gmailActionState.isConnecting ? 'Opening Google…' : 'Connect Gmail',
+          }
+        : preferredGmailSource.lastSyncedAt
+          ? {
+              mode: 'ready' as const,
+              title: 'Search email',
+              description:
+                searchText.trim().length > 0
+                  ? `No Gmail results found for "${searchText}". Try another sender, subject, or attachment name.`
+                  : 'Find emails by sender, subject, attachment, or key entities.',
+              actionLabel: 'Sync again',
+            }
+          : {
+              mode: 'sync' as const,
+              title: 'Sync Gmail',
+              description:
+                searchText.trim().length > 0
+                  ? `No Gmail results found for "${searchText}". Trigger a full sync to index the latest emails for this account.`
+                  : 'Search by sender, subject, attachments, or key entities. If you do not see anything yet, trigger a full sync to index recent mail.',
+              actionLabel: gmailActionState.isSyncing ? 'Starting sync…' : 'Start full sync',
+            };
+    }
+
+    return {
+      mode: 'connect' as const,
+      title: 'Connect Gmail',
+      description: 'Connect your Gmail account to start searching your inbox here.',
+      actionLabel: gmailActionState.isConnecting ? 'Opening Google…' : 'Connect Gmail',
+    };
+  }, [
+    gmailSources.length,
+    gmailActionState.isConnecting,
+    gmailActionState.isSyncing,
+    isFetchingGmailSources,
+    preferredGmailSource,
+    searchText,
+  ]);
+
+  const gmailSyncProgress = useMemo<GmailSyncProgressView | null>(() => {
+    const processed = preferredGmailSource?.syncProcessedMessages ?? null;
+    const total = preferredGmailSource?.syncTotalMessages ?? null;
+
+    if (typeof processed !== 'number' || typeof total !== 'number' || total <= 0) {
+      return null;
+    }
+
+    const clampedProcessed = Math.max(0, Math.min(processed, total));
+    const percentage = Math.max(0, Math.min((clampedProcessed / total) * 100, 100));
+
+    return {
+      processed: clampedProcessed,
+      total,
+      percentage,
+      label: `${clampedProcessed} / ${total} emails indexed`,
+      isComplete: preferredGmailSource?.status === 'connected' && clampedProcessed >= total,
+    };
+  }, [
+    preferredGmailSource?.status,
+    preferredGmailSource?.syncProcessedMessages,
+    preferredGmailSource?.syncTotalMessages,
+  ]);
+
+  useEffect(() => {
+    if (
+      gmailActionState.isConnecting &&
+      preferredGmailSource?.hasRefreshToken &&
+      preferredGmailSource.status !== 'pending_auth'
+    ) {
+      setGmailActionState(prev => ({ ...prev, isConnecting: false }));
+    }
+  }, [
+    gmailActionState.isConnecting,
+    preferredGmailSource?.hasRefreshToken,
+    preferredGmailSource?.status,
+  ]);
 
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
@@ -365,6 +550,104 @@ const ChannelCommandMenu = ({
     mimeType: string;
     fileSize: number;
   } | null>(null);
+
+  const openGoogleMailOAuthPopup = useCallback((source: GoogleMailSource): boolean => {
+    const popup = window.open(
+      googleMailService.resolveOAuthStartUrl(source),
+      'google-mail-oauth',
+      'width=560,height=760,menubar=no,toolbar=no,status=no',
+    );
+    return popup !== null;
+  }, []);
+
+  const handleStartGmailSync = useCallback(
+    async (sourceId?: string) => {
+      const nextSourceId = sourceId || preferredGmailSource?.id;
+      if (!nextSourceId) {
+        return;
+      }
+
+      setGmailActionState(prev => ({ ...prev, isSyncing: true }));
+      try {
+        await googleMailService.startIngestion(nextSourceId);
+        toast.success('Gmail full sync started');
+        await refetchGmailSources();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to start Gmail sync');
+      } finally {
+        setGmailActionState(prev => ({ ...prev, isSyncing: false }));
+      }
+    },
+    [preferredGmailSource?.id, refetchGmailSources],
+  );
+
+  const handleConnectGmail = useCallback(async () => {
+    if (!user) {
+      toast.error('You need to be signed in to connect Gmail');
+      return;
+    }
+
+    if (preferredGmailSource) {
+      setGmailActionState(prev => ({ ...prev, isConnecting: true }));
+      if (!openGoogleMailOAuthPopup(preferredGmailSource)) {
+        setGmailActionState(prev => ({ ...prev, isConnecting: false }));
+        toast.error('Popup blocked. Allow popups and try again.');
+      }
+      return;
+    }
+
+    setGmailActionState(prev => ({ ...prev, isConnecting: true }));
+
+    try {
+      const createdSource = await googleMailService.createSource({
+        displayName: `${user.name || user.email || 'My'} Gmail`,
+      });
+
+      await refetchGmailSources();
+      if (!openGoogleMailOAuthPopup(createdSource)) {
+        setGmailActionState(prev => ({ ...prev, isConnecting: false }));
+        toast.error('Popup blocked. Allow popups and try again.');
+      }
+    } catch (error) {
+      setGmailActionState(prev => ({ ...prev, isConnecting: false }));
+      toast.error(error instanceof Error ? error.message : 'Failed to create Gmail source');
+    }
+  }, [openGoogleMailOAuthPopup, preferredGmailSource, refetchGmailSources, user]);
+
+  useEffect(() => {
+    const onGoogleMailOAuthResult = (event: MessageEvent) => {
+      void (async () => {
+        const payload = event.data as
+          | {
+              type?: string;
+              sourceId?: string;
+              success?: boolean;
+            }
+          | undefined;
+
+        if (payload?.type !== 'google-mail-oauth-result') {
+          return;
+        }
+
+        setGmailActionState(prev => ({ ...prev, isConnecting: false }));
+        await refetchGmailSources();
+
+        if (!payload.success || !payload.sourceId) {
+          toast.error('Gmail connection failed');
+          return;
+        }
+
+        toast.success('Gmail connected successfully');
+        await handleStartGmailSync(payload.sourceId);
+      })();
+    };
+
+    window.addEventListener('message', onGoogleMailOAuthResult);
+
+    return () => {
+      window.removeEventListener('message', onGoogleMailOAuthResult);
+    };
+  }, [handleStartGmailSync, refetchGmailSources]);
 
   const DISPLAY_LIMIT = 5;
 
@@ -877,10 +1160,13 @@ const ChannelCommandMenu = ({
   const groupedBackendResults = useMemo(() => {
     const groups: Record<string, DisplaySearchResult[]> = {};
     backendResults.forEach(result => {
-      if (!groups[result.type]) {
-        groups[result.type] = [];
+      const groupKey = isGmailSearchResult(result) ? 'gmail' : result.type;
+      const group = groups[groupKey];
+      if (group) {
+        group.push(result);
+      } else {
+        groups[groupKey] = [result];
       }
-      groups[result.type]!.push(result);
     });
     return groups;
   }, [backendResults]);
@@ -903,6 +1189,7 @@ const ChannelCommandMenu = ({
     // { id: TabType.ALL, label: 'All' },
     { id: TabType.USERS, label: 'People', icon: <Users size={iconSize} /> },
     { id: TabType.MESSAGES, label: 'Messages', icon: <MessageSquare size={iconSize} /> },
+    { id: TabType.GMAIL, label: 'Gmail', icon: <Mail size={iconSize} /> },
     { id: TabType.CHANNELS, label: 'Channels', icon: <Hash size={iconSize} /> },
     { id: TabType.TICKETS, label: 'Tickets', icon: <SquareDashedKanban size={iconSize} /> },
     { id: TabType.ATTACHMENTS, label: 'Files', icon: <FolderOpen size={iconSize} /> },
@@ -930,6 +1217,8 @@ const ChannelCommandMenu = ({
         return 'Users';
       case 'channel':
         return 'Channels';
+      case 'gmail':
+        return 'Gmail';
       case 'conversation':
         return 'Messages';
       case 'ticket':
@@ -948,6 +1237,19 @@ const ChannelCommandMenu = ({
     (activeTab !== TabType.CHANNELS && activeTab !== TabType.USERS && backendResults.length > 0);
 
   const showEmptyState = searchText.trim() && !isLoading && !hasResults;
+  const showGmailOnboardingState =
+    activeTab === TabType.GMAIL &&
+    searchText.trim().length > 0 &&
+    !mentionSearchType &&
+    !error &&
+    !isLoading &&
+    backendResults.length === 0;
+  const showGmailIdleState =
+    activeTab === TabType.GMAIL &&
+    searchText.trim().length === 0 &&
+    !mentionSearchType &&
+    !error &&
+    !isLoading;
 
   return (
     <Command.Dialog
@@ -1525,7 +1827,207 @@ const ChannelCommandMenu = ({
                   </>
                 )}
 
-                {showEmptyState && !mentionSearchType && (
+                {showGmailOnboardingState && (
+                  <div className='px-4 py-6'>
+                    <div className='mx-auto max-w-md rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-blue-50 p-5 text-left shadow-sm'>
+                      <div className='mb-4 flex items-center gap-3'>
+                        <div className='flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm'>
+                          {gmailEmptyState.mode === 'syncing' || gmailActionState.isSyncing ? (
+                            <Loader2 size={18} className='animate-spin' />
+                          ) : (
+                            <Mail size={18} />
+                          )}
+                        </div>
+                        <div>
+                          <div className='text-sm font-semibold text-slate-900'>
+                            {gmailEmptyState.title}
+                          </div>
+                          <div className='text-xs text-slate-500'>Email search</div>
+                        </div>
+                      </div>
+                      <p className='mb-4 text-xs leading-5 text-slate-600'>
+                        {gmailEmptyState.description}
+                      </p>
+                      {gmailSyncProgress && (
+                        <div className='mb-4 space-y-2'>
+                          <div className='flex items-center justify-between text-[11px] font-medium text-slate-600'>
+                            <span>{gmailSyncProgress.label}</span>
+                            <span>
+                              {gmailSyncProgress.isComplete
+                                ? 'Ready'
+                                : `${Math.round(gmailSyncProgress.percentage)}%`}
+                            </span>
+                          </div>
+                          <div className='h-2 w-full overflow-hidden rounded-full bg-slate-100'>
+                            <div
+                              className={cn(
+                                'h-full rounded-full transition-[width] duration-300',
+                                gmailSyncProgress.isComplete ? 'bg-emerald-500' : 'bg-primary',
+                              )}
+                              style={{ width: `${gmailSyncProgress.percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {preferredGmailSource?.mailboxEmail && (
+                        <div className='mb-4 inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-[11px] font-medium text-slate-700'>
+                          {preferredGmailSource.mailboxEmail}
+                        </div>
+                      )}
+                      <div className='flex flex-wrap items-center gap-2'>
+                        {(gmailEmptyState.mode === 'connect' ||
+                          gmailEmptyState.mode === 'sync') && (
+                          <button
+                            onClick={() =>
+                              void (gmailEmptyState.mode === 'connect'
+                                ? handleConnectGmail()
+                                : handleStartGmailSync())
+                            }
+                            data-track-category='CHANNEL_SEARCH'
+                            data-track-name={
+                              gmailEmptyState.mode === 'connect'
+                                ? 'CONNECT_GMAIL_EMPTY_STATE'
+                                : 'START_GMAIL_SYNC_EMPTY_STATE'
+                            }
+                            disabled={gmailActionState.isConnecting || gmailActionState.isSyncing}
+                            className='inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60'
+                          >
+                            {(gmailActionState.isConnecting || gmailActionState.isSyncing) && (
+                              <Loader2 size={14} className='animate-spin' />
+                            )}
+                            {gmailEmptyState.mode === 'connect' ? (
+                              <Mail size={14} />
+                            ) : (
+                              <RefreshCw size={14} />
+                            )}
+                            {gmailEmptyState.actionLabel}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => void refetchGmailSources()}
+                          data-track-category='CHANNEL_SEARCH'
+                          data-track-name='REFRESH_GMAIL_STATUS_EMPTY_STATE'
+                          disabled={isFetchingGmailSources}
+                          className='inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60'
+                        >
+                          {isFetchingGmailSources ? (
+                            <Loader2 size={14} className='animate-spin' />
+                          ) : (
+                            <RefreshCw size={14} />
+                          )}
+                          Refresh status
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {showGmailIdleState && (
+                  <div className='px-4 py-6'>
+                    <div className='mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm'>
+                      <div className='mb-4 flex items-center gap-3'>
+                        <div className='flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm'>
+                          {gmailEmptyState.mode === 'syncing' || gmailActionState.isSyncing ? (
+                            <Loader2 size={18} className='animate-spin' />
+                          ) : (
+                            <Mail size={18} />
+                          )}
+                        </div>
+                        <div>
+                          <div className='text-sm font-semibold text-slate-900'>
+                            {gmailEmptyState.mode === 'ready'
+                              ? 'Search email'
+                              : gmailEmptyState.title}
+                          </div>
+                          <div className='text-xs text-slate-500'>
+                            {gmailEmptyState.mode === 'ready' ? 'Gmail results' : 'Email search'}
+                          </div>
+                        </div>
+                      </div>
+                      <p className='text-xs leading-5 text-slate-600'>
+                        {gmailEmptyState.mode === 'ready'
+                          ? 'Find emails by sender, subject, attachment, or key entities.'
+                          : gmailEmptyState.description}
+                      </p>
+                      {gmailSyncProgress && (
+                        <div className='mt-4 space-y-2'>
+                          <div className='flex items-center justify-between text-[11px] font-medium text-slate-600'>
+                            <span>{gmailSyncProgress.label}</span>
+                            <span>
+                              {gmailSyncProgress.isComplete
+                                ? 'Ready'
+                                : `${Math.round(gmailSyncProgress.percentage)}%`}
+                            </span>
+                          </div>
+                          <div className='h-2 w-full overflow-hidden rounded-full bg-slate-100'>
+                            <div
+                              className={cn(
+                                'h-full rounded-full transition-[width] duration-300',
+                                gmailSyncProgress.isComplete ? 'bg-emerald-500' : 'bg-primary',
+                              )}
+                              style={{ width: `${gmailSyncProgress.percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {preferredGmailSource?.mailboxEmail && (
+                        <div className='mt-4 inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-[11px] font-medium text-slate-700'>
+                          Connected as {preferredGmailSource.mailboxEmail}
+                        </div>
+                      )}
+                      {(gmailEmptyState.mode === 'connect' ||
+                        gmailEmptyState.mode === 'sync' ||
+                        gmailEmptyState.mode === 'syncing') && (
+                        <div className='mt-4 flex flex-wrap items-center gap-2'>
+                          {(gmailEmptyState.mode === 'connect' ||
+                            gmailEmptyState.mode === 'sync') && (
+                            <button
+                              onClick={() =>
+                                void (gmailEmptyState.mode === 'connect'
+                                  ? handleConnectGmail()
+                                  : handleStartGmailSync())
+                              }
+                              data-track-category='CHANNEL_SEARCH'
+                              data-track-name={
+                                gmailEmptyState.mode === 'connect'
+                                  ? 'CONNECT_GMAIL_IDLE_STATE'
+                                  : 'START_GMAIL_SYNC_IDLE_STATE'
+                              }
+                              disabled={gmailActionState.isConnecting || gmailActionState.isSyncing}
+                              className='inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60'
+                            >
+                              {(gmailActionState.isConnecting || gmailActionState.isSyncing) && (
+                                <Loader2 size={14} className='animate-spin' />
+                              )}
+                              {gmailEmptyState.mode === 'connect' ? (
+                                <Mail size={14} />
+                              ) : (
+                                <RefreshCw size={14} />
+                              )}
+                              {gmailEmptyState.actionLabel}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => void refetchGmailSources()}
+                            data-track-category='CHANNEL_SEARCH'
+                            data-track-name='REFRESH_GMAIL_STATUS_IDLE_STATE'
+                            disabled={isFetchingGmailSources}
+                            className='inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60'
+                          >
+                            {isFetchingGmailSources ? (
+                              <Loader2 size={14} className='animate-spin' />
+                            ) : (
+                              <RefreshCw size={14} />
+                            )}
+                            Refresh status
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {showEmptyState && !mentionSearchType && activeTab !== TabType.GMAIL && (
                   <Command.Empty className='py-6 text-center text-xs text-gray-500'>
                     No results found for &quot;{search}&quot;
                   </Command.Empty>
@@ -1533,347 +2035,33 @@ const ChannelCommandMenu = ({
 
                 {error && <div className='p-3 text-xs text-red-600'>{error}</div>}
 
-                {!showEmptyState && !error && !mentionSearchType && (
-                  <>
-                    {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
-                    {searchText.trim() || typeFilter ? (
-                      <>
-                        {/* 0. Starred (from local channels) - shown very first */}
-                        {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-                          showGroupedLocalResults &&
-                          groupedChannels['starred'] &&
-                          groupedChannels['starred'].length > 0 && (
-                            <div className='mb-4'>
-                              {(() => {
-                                const items = groupedChannels['starred'];
-                                const category = ChannelCategory.STARRED;
-                                const isExpanded = expandedCategories.has(category);
-                                const hasMore = items.length > DISPLAY_LIMIT;
-                                const displayItems =
-                                  !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-                                const hiddenCount = items.length - DISPLAY_LIMIT;
-
-                                return (
-                                  <Command.Group
-                                    heading={getCategoryLabel(category)}
-                                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                  >
-                                    {displayItems.map(({ channel }, index) => {
-                                      const unreadCount = unreadCounts[channel.id] ?? 0;
-                                      return (
-                                        <ChannelCommandItem
-                                          key={channel.id}
-                                          channel={channel}
-                                          currentUserID={currentUserID}
-                                          unreadCount={unreadCount}
-                                          search={search}
-                                          onSelect={displayName =>
-                                            handleChannelSelect(channel, displayName, index + 1)
-                                          }
-                                          getChannelIcon={getChannelIcon}
-                                          isSelected={contextItems.some(
-                                            c => c.id === `channel-${channel.id}`,
-                                          )}
-                                        />
-                                      );
-                                    })}
-                                    {hasMore && (
-                                      <button
-                                        onClick={() => toggleCategoryExpansion(category)}
-                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
-                                        data-track-category='CHANNEL_SEARCH'
-                                        data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
-                                        data-track-metadata={JSON.stringify({
-                                          category: category as string,
-                                          isExpanded,
-                                        })}
-                                      >
-                                        {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                                      </button>
-                                    )}
-                                  </Command.Group>
-                                );
-                              })()}
-                            </div>
-                          )}
-
-                        {/* 1. Users (from local) - shown first when searching, real-time updates */}
-                        {(activeTab === TabType.ALL || activeTab === TabType.USERS) &&
-                          showGroupedUsers &&
-                          filteredLocalUsers.length > 0 && (
-                            <div className='mb-4'>
-                              {(() => {
-                                // Map of DM User IDs for fast lookup (to prioritize active DMs)
-                                const dmUserIdSet = new Set<string>();
-                                groupedChannels['direct-messages']?.forEach(({ channel }) => {
-                                  if (isOneToOneDMChannel(channel.scopeType)) {
-                                    const participants = parseDMParticipantIds(channel);
-                                    const otherUserId = participants.find(
-                                      id => id !== currentUserID,
-                                    );
-                                    if (otherUserId) dmUserIdSet.add(otherUserId);
-                                  }
-                                });
-
-                                // Convert local users to DisplaySearchResult format
-                                const userItems: DisplaySearchResult[] = filteredLocalUsers.map(
-                                  user => ({
-                                    id: user.id,
-                                    type: 'user' as const,
-                                    title: user.name,
-                                    subtitle: user.email || '',
-                                    relevanceScore: 1,
-                                    metadata: {},
-                                  }),
-                                );
-
-                                // Prioritize users with active DMs
-                                const usersWithDM = userItems.filter(item =>
-                                  dmUserIdSet.has(item.id),
-                                );
-                                const usersNoDM = userItems.filter(
-                                  item => !dmUserIdSet.has(item.id),
-                                );
-                                const allItems = [...usersWithDM, ...usersNoDM];
-
-                                const totalItemsCount = allItems.length;
-                                const displayCount = totalItemsCount;
-
-                                const isExpanded = expandedCategories.has('user');
-                                const hasMore = totalItemsCount > DISPLAY_LIMIT;
-
-                                const displayItems =
-                                  !isExpanded && hasMore
-                                    ? allItems.slice(0, DISPLAY_LIMIT)
-                                    : allItems;
-
-                                const hiddenCount = totalItemsCount - DISPLAY_LIMIT;
-
-                                return (
-                                  <Command.Group
-                                    heading={`${getGroupLabel('user')} (${displayCount})`}
-                                    className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                  >
-                                    {displayItems.map((item, index) => (
-                                      <SearchResultItem
-                                        key={item.id}
-                                        result={item}
-                                        onSelect={res => handleBackendResultSelect(res, index + 1)}
-                                        isSelected={contextItems.some(
-                                          c => c.id === `${item.type}-${item.id}`,
-                                        )}
-                                      />
-                                    ))}
-                                    {hasMore && (
-                                      <button
-                                        onClick={() => toggleCategoryExpansion('user')}
-                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
-                                        style={{
-                                          WebkitTapHighlightColor: 'transparent',
-                                          userSelect: 'none',
-                                        }}
-                                        data-track-category='CHANNEL_SEARCH'
-                                        data-track-name='TOGGLE_CATEGORY_EXPANSION'
-                                        data-track-metadata={JSON.stringify({
-                                          category: 'user',
-                                          isExpanded,
-                                        })}
-                                      >
-                                        {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                                      </button>
-                                    )}
-                                  </Command.Group>
-                                );
-                              })()}
-                            </div>
-                          )}
-
-                        {/* 2. Group DMs (from local channels) - only show group DMs in search results, 1:1 DMs are in Users section */}
-                        {(() => {
-                          const groupDMs =
-                            groupedChannels['direct-messages']?.filter(({ channel }) =>
-                              isGroupDMChannel(channel.scopeType),
-                            ) || [];
-                          return (
-                            (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                {!showEmptyState &&
+                  !showGmailOnboardingState &&
+                  !showGmailIdleState &&
+                  !error &&
+                  !mentionSearchType && (
+                    <>
+                      {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
+                      {searchText.trim() || typeFilter ? (
+                        <>
+                          {/* 0. Starred (from local channels) - shown very first */}
+                          {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
                             showGroupedLocalResults &&
-                            groupDMs.length > 0 && (
+                            groupedChannels['starred'] &&
+                            groupedChannels['starred'].length > 0 && (
                               <div className='mb-4'>
-                                <Command.Group
-                                  heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
-                                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                >
-                                  {groupDMs.map(({ channel }, index) => {
-                                    const unreadCount = unreadCounts[channel.id] ?? 0;
-                                    return (
-                                      <ChannelCommandItem
-                                        key={channel.id}
-                                        channel={channel}
-                                        currentUserID={currentUserID}
-                                        unreadCount={unreadCount}
-                                        search={search}
-                                        onSelect={displayName =>
-                                          handleChannelSelect(channel, displayName, index + 1)
-                                        }
-                                        getChannelIcon={getChannelIcon}
-                                        isSelected={contextItems.some(
-                                          c => c.id === `channel-${channel.id}`,
-                                        )}
-                                      />
-                                    );
-                                  })}
-                                </Command.Group>
-                              </div>
-                            )
-                          );
-                        })()}
+                                {(() => {
+                                  const items = groupedChannels['starred'];
+                                  const category = ChannelCategory.STARRED;
+                                  const isExpanded = expandedCategories.has(category);
+                                  const hasMore = items.length > DISPLAY_LIMIT;
+                                  const displayItems =
+                                    !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+                                  const hiddenCount = items.length - DISPLAY_LIMIT;
 
-                        {/* 3. Channels (from local channels) */}
-                        {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
-                          showGroupedLocalResults &&
-                          groupedChannels['channels'] &&
-                          groupedChannels['channels'].length > 0 && (
-                            <div className='mb-4'>
-                              {(() => {
-                                const items = groupedChannels['channels'];
-                                const category = ChannelCategory.CHANNELS;
-                                const isExpanded = expandedCategories.has(category);
-                                const hasMore = items.length > DISPLAY_LIMIT;
-                                const displayItems =
-                                  !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-                                const hiddenCount = items.length - DISPLAY_LIMIT;
-
-                                return (
-                                  <Command.Group
-                                    heading={getCategoryLabel(category)}
-                                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                  >
-                                    {displayItems.map(({ channel }, index) => {
-                                      const unreadCount = unreadCounts[channel.id] ?? 0;
-                                      return (
-                                        <ChannelCommandItem
-                                          key={channel.id}
-                                          channel={channel}
-                                          currentUserID={currentUserID}
-                                          unreadCount={unreadCount}
-                                          search={search}
-                                          onSelect={displayName =>
-                                            handleChannelSelect(channel, displayName, index + 1)
-                                          }
-                                          getChannelIcon={getChannelIcon}
-                                          isSelected={contextItems.some(
-                                            c => c.id === `channel-${channel.id}`,
-                                          )}
-                                        />
-                                      );
-                                    })}
-                                    {hasMore && (
-                                      <button
-                                        onClick={() => toggleCategoryExpansion(category)}
-                                        className={`w-full px-2 py-1.5 mt-1 text-xs text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
-                                        style={{
-                                          WebkitTapHighlightColor: 'transparent',
-                                          userSelect: 'none',
-                                        }}
-                                        data-track-category='CHANNEL_SEARCH'
-                                        data-track-name='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
-                                        data-track-metadata={JSON.stringify({
-                                          category: category as string,
-                                          isExpanded,
-                                        })}
-                                      >
-                                        {isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                                      </button>
-                                    )}
-                                  </Command.Group>
-                                );
-                              })()}
-                            </div>
-                          )}
-
-                        {/* 4. Backend Results (Messages, Tickets, Attachments) */}
-                        {backendResults.length > 0 && (
-                          <>
-                            {['conversation', 'ticket', 'attachment']
-                              .filter(type => {
-                                if (activeTab === TabType.ALL) return true;
-                                if (activeTab === TabType.MESSAGES && type === 'conversation')
-                                  return true;
-                                if (activeTab === TabType.TICKETS && type === 'ticket') return true;
-                                if (activeTab === TabType.ATTACHMENTS && type === 'attachment')
-                                  return true;
-                                return false;
-                              })
-                              .map(type => {
-                                const items = groupedBackendResults[type];
-                                if (!items || items.length === 0) return null;
-
-                                const displayCount =
-                                  useVespaSearch && activeTab !== TabType.ALL
-                                    ? paginationState[activeTab].cumulativeCount
-                                    : items.length;
-
-                                return (
-                                  <div key={type} className='mb-4'>
+                                  return (
                                     <Command.Group
-                                      heading={`${getGroupLabel(type)} (${displayCount})`}
-                                      className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                                    >
-                                      {items.map((result, index) => (
-                                        <SearchResultItem
-                                          key={result.id}
-                                          result={result}
-                                          onSelect={res =>
-                                            handleBackendResultSelect(res, index + 1)
-                                          }
-                                          onPreview={handleFilePreview}
-                                          isSelected={contextItems.some(
-                                            c => c.id === `${result.type}-${result.id}`,
-                                          )}
-                                        />
-                                      ))}
-                                    </Command.Group>
-                                  </div>
-                                );
-                              })}
-
-                            {/* Infinite scroll trigger and loading indicator */}
-                            {paginationState[activeTab].hasMore && (
-                              <div ref={loadMoreRef} className='py-4 flex justify-center'>
-                                {isLoadingMore && (
-                                  <div className='flex items-center gap-2 text-xs text-gray-500'>
-                                    <Loader2 className='h-4 w-4 animate-spin' />
-                                    <span>Loading more results...</span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        {/* Local Channels Results - shown when no search/filter OR when type:channels */}
-                        {(activeTab === TabType.ALL ||
-                          activeTab === TabType.CHANNELS ||
-                          isChannelsType) &&
-                          filteredLocalChannels.length > 0 && (
-                            <>
-                              {Object.entries(groupedChannels).map(([category, items]) => {
-                                const typedCategory = category as ChannelCategory;
-                                const isExpanded = expandedCategories.has(category);
-                                const shouldLimit = !search.trim();
-                                const hasMore = items.length > DISPLAY_LIMIT;
-                                const displayItems =
-                                  shouldLimit && !isExpanded && hasMore
-                                    ? items.slice(0, DISPLAY_LIMIT)
-                                    : items;
-                                const hiddenCount = items.length - DISPLAY_LIMIT;
-
-                                return (
-                                  <div key={category} className='mb-4'>
-                                    <Command.Group
-                                      heading={getCategoryLabel(typedCategory)}
+                                      heading={getCategoryLabel(category)}
                                       className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                                     >
                                       {displayItems.map(({ channel }, index) => {
@@ -1895,18 +2083,14 @@ const ChannelCommandMenu = ({
                                           />
                                         );
                                       })}
-                                      {shouldLimit && hasMore && (
+                                      {hasMore && (
                                         <button
                                           onClick={() => toggleCategoryExpansion(category)}
                                           className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
-                                          style={{
-                                            WebkitTapHighlightColor: 'transparent',
-                                            userSelect: 'none',
-                                          }}
                                           data-track-category='CHANNEL_SEARCH'
-                                          data-track-name='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+                                          data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
                                           data-track-metadata={JSON.stringify({
-                                            category: category,
+                                            category: category as string,
                                             isExpanded,
                                           })}
                                         >
@@ -1914,99 +2098,436 @@ const ChannelCommandMenu = ({
                                         </button>
                                       )}
                                     </Command.Group>
-                                  </div>
-                                );
-                              })}
-                            </>
-                          )}
+                                  );
+                                })()}
+                              </div>
+                            )}
 
-                        {/* Backend Search Results */}
-                        {activeTab !== TabType.CHANNELS && backendResults.length > 0 && (
-                          <>
-                            {Object.entries(groupedBackendResults)
-                              .sort(([typeA], [typeB]) => {
-                                // Prioritize 'user' type to render first
-                                if (typeA === 'user') return -1;
-                                if (typeB === 'user') return 1;
-                                return 0;
-                              })
-                              .map(([type, items]) => {
-                                let displayCount: number;
-                                if (activeTab === TabType.ALL) {
-                                  displayCount = items.length;
-                                } else if (useVespaSearch) {
-                                  // For Vespa on individual tabs, use cumulative count
-                                  displayCount = paginationState[activeTab].cumulativeCount;
-                                } else {
-                                  // For PG search, use items length
-                                  displayCount = items.length;
-                                }
-                                // Apply limiting only to users
-                                const isUserType = type === 'user';
-                                const isExpanded = expandedCategories.has(type);
-                                const hasMore = items.length > DISPLAY_LIMIT;
-                                const displayItems =
-                                  isUserType && !isExpanded && hasMore
-                                    ? items.slice(0, DISPLAY_LIMIT)
-                                    : items;
-                                const hiddenCount = items.length - DISPLAY_LIMIT;
+                          {/* 1. Users (from local) - shown first when searching, real-time updates */}
+                          {(activeTab === TabType.ALL || activeTab === TabType.USERS) &&
+                            showGroupedUsers &&
+                            filteredLocalUsers.length > 0 && (
+                              <div className='mb-4'>
+                                {(() => {
+                                  // Map of DM User IDs for fast lookup (to prioritize active DMs)
+                                  const dmUserIdSet = new Set<string>();
+                                  groupedChannels['direct-messages']?.forEach(({ channel }) => {
+                                    if (isOneToOneDMChannel(channel.scopeType)) {
+                                      const participants = parseDMParticipantIds(channel);
+                                      const otherUserId = participants.find(
+                                        id => id !== currentUserID,
+                                      );
+                                      if (otherUserId) dmUserIdSet.add(otherUserId);
+                                    }
+                                  });
 
-                                return (
-                                  <div key={type} className='mb-4'>
+                                  // Convert local users to DisplaySearchResult format
+                                  const userItems: DisplaySearchResult[] = filteredLocalUsers.map(
+                                    user => ({
+                                      id: user.id,
+                                      type: 'user' as const,
+                                      title: user.name,
+                                      subtitle: user.email || '',
+                                      relevanceScore: 1,
+                                      metadata: {},
+                                    }),
+                                  );
+
+                                  // Prioritize users with active DMs
+                                  const usersWithDM = userItems.filter(item =>
+                                    dmUserIdSet.has(item.id),
+                                  );
+                                  const usersNoDM = userItems.filter(
+                                    item => !dmUserIdSet.has(item.id),
+                                  );
+                                  const allItems = [...usersWithDM, ...usersNoDM];
+
+                                  const totalItemsCount = allItems.length;
+                                  const displayCount = totalItemsCount;
+
+                                  const isExpanded = expandedCategories.has('user');
+                                  const hasMore = totalItemsCount > DISPLAY_LIMIT;
+
+                                  const displayItems =
+                                    !isExpanded && hasMore
+                                      ? allItems.slice(0, DISPLAY_LIMIT)
+                                      : allItems;
+
+                                  const hiddenCount = totalItemsCount - DISPLAY_LIMIT;
+
+                                  return (
                                     <Command.Group
-                                      heading={`${getGroupLabel(type)} (${displayCount})`}
+                                      heading={`${getGroupLabel('user')} (${displayCount})`}
                                       className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                                     >
-                                      {displayItems.map((result, index) => (
+                                      {displayItems.map((item, index) => (
                                         <SearchResultItem
-                                          key={result.id}
-                                          result={result}
+                                          key={item.id}
+                                          result={item}
                                           onSelect={res =>
                                             handleBackendResultSelect(res, index + 1)
                                           }
-                                          onPreview={handleFilePreview}
                                           isSelected={contextItems.some(
-                                            c => c.id === `${result.type}-${result.id}`,
+                                            c => c.id === `${item.type}-${item.id}`,
                                           )}
                                         />
                                       ))}
-                                      {isUserType && hasMore && (
+                                      {hasMore && (
                                         <button
-                                          onClick={() => toggleCategoryExpansion(type)}
+                                          onClick={() => toggleCategoryExpansion('user')}
                                           className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
                                           style={{
                                             WebkitTapHighlightColor: 'transparent',
                                             userSelect: 'none',
                                           }}
                                           data-track-category='CHANNEL_SEARCH'
-                                          data-track-name='TOGGLE_BACKEND_USER_EXPANSION'
-                                          data-track-metadata={JSON.stringify({ type, isExpanded })}
+                                          data-track-name='TOGGLE_CATEGORY_EXPANSION'
+                                          data-track-metadata={JSON.stringify({
+                                            category: 'user',
+                                            isExpanded,
+                                          })}
                                         >
                                           {isExpanded ? 'See less' : `See ${hiddenCount} more`}
                                         </button>
                                       )}
                                     </Command.Group>
-                                  </div>
-                                );
-                              })}
-
-                            {/* Infinite scroll trigger and loading indicator */}
-                            {paginationState[activeTab].hasMore && (
-                              <div ref={loadMoreRef} className='py-4 flex justify-center'>
-                                {isLoadingMore && (
-                                  <div className='flex items-center gap-2 text-xs text-gray-500'>
-                                    <Loader2 className='h-4 w-4 animate-spin' />
-                                    <span>Loading more results...</span>
-                                  </div>
-                                )}
+                                  );
+                                })()}
                               </div>
                             )}
-                          </>
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
+
+                          {/* 2. Group DMs (from local channels) - only show group DMs in search results, 1:1 DMs are in Users section */}
+                          {(() => {
+                            const groupDMs =
+                              groupedChannels['direct-messages']?.filter(({ channel }) =>
+                                isGroupDMChannel(channel.scopeType),
+                              ) || [];
+                            return (
+                              (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                              showGroupedLocalResults &&
+                              groupDMs.length > 0 && (
+                                <div className='mb-4'>
+                                  <Command.Group
+                                    heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
+                                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                  >
+                                    {groupDMs.map(({ channel }, index) => {
+                                      const unreadCount = unreadCounts[channel.id] ?? 0;
+                                      return (
+                                        <ChannelCommandItem
+                                          key={channel.id}
+                                          channel={channel}
+                                          currentUserID={currentUserID}
+                                          unreadCount={unreadCount}
+                                          search={search}
+                                          onSelect={displayName =>
+                                            handleChannelSelect(channel, displayName, index + 1)
+                                          }
+                                          getChannelIcon={getChannelIcon}
+                                          isSelected={contextItems.some(
+                                            c => c.id === `channel-${channel.id}`,
+                                          )}
+                                        />
+                                      );
+                                    })}
+                                  </Command.Group>
+                                </div>
+                              )
+                            );
+                          })()}
+
+                          {/* 3. Channels (from local channels) */}
+                          {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
+                            showGroupedLocalResults &&
+                            groupedChannels['channels'] &&
+                            groupedChannels['channels'].length > 0 && (
+                              <div className='mb-4'>
+                                {(() => {
+                                  const items = groupedChannels['channels'];
+                                  const category = ChannelCategory.CHANNELS;
+                                  const isExpanded = expandedCategories.has(category);
+                                  const hasMore = items.length > DISPLAY_LIMIT;
+                                  const displayItems =
+                                    !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
+                                  const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                                  return (
+                                    <Command.Group
+                                      heading={getCategoryLabel(category)}
+                                      className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                    >
+                                      {displayItems.map(({ channel }, index) => {
+                                        const unreadCount = unreadCounts[channel.id] ?? 0;
+                                        return (
+                                          <ChannelCommandItem
+                                            key={channel.id}
+                                            channel={channel}
+                                            currentUserID={currentUserID}
+                                            unreadCount={unreadCount}
+                                            search={search}
+                                            onSelect={displayName =>
+                                              handleChannelSelect(channel, displayName, index + 1)
+                                            }
+                                            getChannelIcon={getChannelIcon}
+                                            isSelected={contextItems.some(
+                                              c => c.id === `channel-${channel.id}`,
+                                            )}
+                                          />
+                                        );
+                                      })}
+                                      {hasMore && (
+                                        <button
+                                          onClick={() => toggleCategoryExpansion(category)}
+                                          className={`w-full px-2 py-1.5 mt-1 text-xs text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
+                                          style={{
+                                            WebkitTapHighlightColor: 'transparent',
+                                            userSelect: 'none',
+                                          }}
+                                          data-track-category='CHANNEL_SEARCH'
+                                          data-track-name='TOGGLE_GROUP_DM_CATEGORY_EXPANSION'
+                                          data-track-metadata={JSON.stringify({
+                                            category: category as string,
+                                            isExpanded,
+                                          })}
+                                        >
+                                          {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                        </button>
+                                      )}
+                                    </Command.Group>
+                                  );
+                                })()}
+                              </div>
+                            )}
+
+                          {/* 4. Backend Results (Messages, Tickets, Attachments) */}
+                          {backendResults.length > 0 && (
+                            <>
+                              {['gmail', 'conversation', 'ticket', 'attachment']
+                                .filter(groupKey => {
+                                  if (activeTab === TabType.ALL) return true;
+                                  if (activeTab === TabType.GMAIL && groupKey === 'gmail')
+                                    return true;
+                                  if (activeTab === TabType.MESSAGES && groupKey === 'conversation')
+                                    return true;
+                                  if (activeTab === TabType.TICKETS && groupKey === 'ticket')
+                                    return true;
+                                  if (
+                                    activeTab === TabType.ATTACHMENTS &&
+                                    groupKey === 'attachment'
+                                  )
+                                    return true;
+                                  return false;
+                                })
+                                .map(groupKey => {
+                                  const items = groupedBackendResults[groupKey];
+                                  if (!items || items.length === 0) return null;
+
+                                  const displayCount =
+                                    useVespaSearch && activeTab !== TabType.ALL
+                                      ? paginationState[activeTab].cumulativeCount
+                                      : items.length;
+
+                                  return (
+                                    <div key={groupKey} className='mb-4'>
+                                      <Command.Group
+                                        heading={`${getGroupLabel(groupKey)} (${displayCount})`}
+                                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                      >
+                                        {items.map((result, index) => (
+                                          <SearchResultItem
+                                            key={result.id}
+                                            result={result}
+                                            onSelect={res =>
+                                              handleBackendResultSelect(res, index + 1)
+                                            }
+                                            onPreview={handleFilePreview}
+                                            isSelected={contextItems.some(
+                                              c => c.id === `${result.type}-${result.id}`,
+                                            )}
+                                          />
+                                        ))}
+                                      </Command.Group>
+                                    </div>
+                                  );
+                                })}
+
+                              {/* Infinite scroll trigger and loading indicator */}
+                              {paginationState[activeTab].hasMore && (
+                                <div ref={loadMoreRef} className='py-4 flex justify-center'>
+                                  {isLoadingMore && (
+                                    <div className='flex items-center gap-2 text-xs text-gray-500'>
+                                      <Loader2 className='h-4 w-4 animate-spin' />
+                                      <span>Loading more results...</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {/* Local Channels Results - shown when no search/filter OR when type:channels */}
+                          {(activeTab === TabType.ALL ||
+                            activeTab === TabType.CHANNELS ||
+                            isChannelsType) &&
+                            filteredLocalChannels.length > 0 && (
+                              <>
+                                {Object.entries(groupedChannels).map(([category, items]) => {
+                                  const typedCategory = category as ChannelCategory;
+                                  const isExpanded = expandedCategories.has(category);
+                                  const shouldLimit = !search.trim();
+                                  const hasMore = items.length > DISPLAY_LIMIT;
+                                  const displayItems =
+                                    shouldLimit && !isExpanded && hasMore
+                                      ? items.slice(0, DISPLAY_LIMIT)
+                                      : items;
+                                  const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                                  return (
+                                    <div key={category} className='mb-4'>
+                                      <Command.Group
+                                        heading={getCategoryLabel(typedCategory)}
+                                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                      >
+                                        {displayItems.map(({ channel }, index) => {
+                                          const unreadCount = unreadCounts[channel.id] ?? 0;
+                                          return (
+                                            <ChannelCommandItem
+                                              key={channel.id}
+                                              channel={channel}
+                                              currentUserID={currentUserID}
+                                              unreadCount={unreadCount}
+                                              search={search}
+                                              onSelect={displayName =>
+                                                handleChannelSelect(channel, displayName, index + 1)
+                                              }
+                                              getChannelIcon={getChannelIcon}
+                                              isSelected={contextItems.some(
+                                                c => c.id === `channel-${channel.id}`,
+                                              )}
+                                            />
+                                          );
+                                        })}
+                                        {shouldLimit && hasMore && (
+                                          <button
+                                            onClick={() => toggleCategoryExpansion(category)}
+                                            className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                            style={{
+                                              WebkitTapHighlightColor: 'transparent',
+                                              userSelect: 'none',
+                                            }}
+                                            data-track-category='CHANNEL_SEARCH'
+                                            data-track-name='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+                                            data-track-metadata={JSON.stringify({
+                                              category: category,
+                                              isExpanded,
+                                            })}
+                                          >
+                                            {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                          </button>
+                                        )}
+                                      </Command.Group>
+                                    </div>
+                                  );
+                                })}
+                              </>
+                            )}
+
+                          {/* Backend Search Results */}
+                          {activeTab !== TabType.CHANNELS && backendResults.length > 0 && (
+                            <>
+                              {Object.entries(groupedBackendResults)
+                                .sort(([typeA], [typeB]) => {
+                                  const order = [
+                                    'gmail',
+                                    'conversation',
+                                    'ticket',
+                                    'attachment',
+                                    'user',
+                                  ];
+                                  return order.indexOf(typeA) - order.indexOf(typeB);
+                                })
+                                .map(([type, items]) => {
+                                  let displayCount: number;
+                                  if (activeTab === TabType.ALL) {
+                                    displayCount = items.length;
+                                  } else if (useVespaSearch) {
+                                    // For Vespa on individual tabs, use cumulative count
+                                    displayCount = paginationState[activeTab].cumulativeCount;
+                                  } else {
+                                    // For PG search, use items length
+                                    displayCount = items.length;
+                                  }
+                                  // Apply limiting only to users
+                                  const isUserType = type === 'user';
+                                  const isExpanded = expandedCategories.has(type);
+                                  const hasMore = items.length > DISPLAY_LIMIT;
+                                  const displayItems =
+                                    isUserType && !isExpanded && hasMore
+                                      ? items.slice(0, DISPLAY_LIMIT)
+                                      : items;
+                                  const hiddenCount = items.length - DISPLAY_LIMIT;
+
+                                  return (
+                                    <div key={type} className='mb-4'>
+                                      <Command.Group
+                                        heading={`${getGroupLabel(type)} (${displayCount})`}
+                                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                                      >
+                                        {displayItems.map((result, index) => (
+                                          <SearchResultItem
+                                            key={result.id}
+                                            result={result}
+                                            onSelect={res =>
+                                              handleBackendResultSelect(res, index + 1)
+                                            }
+                                            onPreview={handleFilePreview}
+                                            isSelected={contextItems.some(
+                                              c => c.id === `${result.type}-${result.id}`,
+                                            )}
+                                          />
+                                        ))}
+                                        {isUserType && hasMore && (
+                                          <button
+                                            onClick={() => toggleCategoryExpansion(type)}
+                                            className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                                            style={{
+                                              WebkitTapHighlightColor: 'transparent',
+                                              userSelect: 'none',
+                                            }}
+                                            data-track-category='CHANNEL_SEARCH'
+                                            data-track-name='TOGGLE_BACKEND_USER_EXPANSION'
+                                            data-track-metadata={JSON.stringify({
+                                              type,
+                                              isExpanded,
+                                            })}
+                                          >
+                                            {isExpanded ? 'See less' : `See ${hiddenCount} more`}
+                                          </button>
+                                        )}
+                                      </Command.Group>
+                                    </div>
+                                  );
+                                })}
+
+                              {/* Infinite scroll trigger and loading indicator */}
+                              {paginationState[activeTab].hasMore && (
+                                <div ref={loadMoreRef} className='py-4 flex justify-center'>
+                                  {isLoadingMore && (
+                                    <div className='flex items-center gap-2 text-xs text-gray-500'>
+                                      <Loader2 className='h-4 w-4 animate-spin' />
+                                      <span>Loading more results...</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </>
+                  )}
               </>
             )}
           </Command.List>

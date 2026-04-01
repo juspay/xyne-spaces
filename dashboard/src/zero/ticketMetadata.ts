@@ -41,6 +41,8 @@ export async function updateTicketMd(tx: Transaction<Schema>, ticketId: string):
 
   await tx.mutate.conversations.update({
     conversationId: ticket.conversationId,
+    // Zero mutation payloads follow the DB column naming.
+    // eslint-disable-next-line @typescript-eslint/naming-convention
     ticket_md: ticketMd,
   });
 }

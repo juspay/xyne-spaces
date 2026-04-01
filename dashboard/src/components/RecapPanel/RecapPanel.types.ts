@@ -3,7 +3,7 @@ export interface CitationMetadata {
   entityIdMapping: Record<number, string>;
   entityTypeMapping: Record<
     number,
-    'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search'
+    'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search' | 'email'
   >;
   conversationIdMapping: Record<number, string>;
   messageIdMapping: Record<number, string>;

@@ -6,6 +6,12 @@ import { transformVespaResults } from './resultTransform';
 import { db } from '@/database/client';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, VespaDocType, VespaSearchHit } from '@/vespa/src/types';
+import {
+  buildGmailTimeRange,
+  canSearchGmailForType,
+  googleMailSearchService,
+  mapSearchTypeToGmailDocumentType,
+} from './providers/gmail';
 
 
 // Create dependencies
@@ -16,6 +22,27 @@ const dependencies: VespaDependencies = {
 
 // Create vespa service instance
 const vespaService = createVespaService(dependencies);
+
+const normalizeQueryValues = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap(item => normalizeQueryValues(item))
+      .filter(Boolean);
+  }
+
+  if (typeof value !== 'string') {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+};
+
+const parseRequestedApps = (apps: unknown): string[] => {
+  return normalizeQueryValues(apps).map(app => app.toLowerCase());
+};
 
 /**
  * Parse Vespa grouped results structure
@@ -114,6 +141,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     } = req.query;
 
     const userId = (req as any).user?.id;
+    const userEmail = (req as any).user?.email;
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
@@ -281,6 +309,122 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (subApp) {
       options.file.subApp = (subApp as string).split(',');
+    }
+
+    const requestedApps = parseRequestedApps(apps);
+    const gmailRequested = requestedApps.includes('gmail');
+
+    if (gmailRequested) {
+      const localApps = requestedApps.filter(app => app !== 'gmail');
+      const requestedLimit = Number(limit);
+      const requestedOffset = Number(offset);
+
+      let localResults: Awaited<ReturnType<typeof transformVespaResults>> = [];
+      let localTotalCount = 0;
+
+      if (localApps.length > 0) {
+        const localResultsResponse = await vespaService.searchService.searchVespa(
+          q as string,
+          userId,
+          localApps,
+          {
+            ...options,
+            offset: 0,
+            limit: requestedLimit,
+          },
+          searchId as string
+        );
+
+        const matchFeaturesMap = new Map<string, MatchFeatures>();
+        (localResultsResponse.root.children || []).forEach((child: any) => {
+          if (child.fields?.docId && child.fields?.matchfeatures) {
+            matchFeaturesMap.set(child.fields.docId, child.fields.matchfeatures);
+          }
+        });
+
+        const parsedLocalResults = parseVespaResults(localResultsResponse.root.children || []);
+        if (parsedLocalResults.grouped && parsedLocalResults.groups) {
+          const groupedHits = parsedLocalResults.groups.flatMap(group =>
+            group.hits.map((hit: VespaSearchHit) => ({
+              ...hit,
+              fields: {
+                ...hit.fields,
+                matchfeatures: matchFeaturesMap.get(hit.fields?.docId) || null,
+              },
+            }))
+          );
+          localResults = await transformVespaResults(groupedHits, db);
+        } else {
+          localResults = await transformVespaResults(parsedLocalResults.hits || [], db);
+        }
+
+        localTotalCount = Number(localResultsResponse.root.fields?.totalCount || 0);
+      }
+
+      let gmailResults: Awaited<ReturnType<typeof googleMailSearchService.search>>['results'] = [];
+      let gmailTotalCount = 0;
+
+      if (canSearchGmailForType(type as string | undefined) && userEmail && gmailRequested) {
+        const fromValues = normalizeQueryValues(from);
+        const directEmailFilters = fromValues.filter(value => value.includes('@'));
+        const userIdsForEmailLookup = fromValues.filter(value => !value.includes('@'));
+        const resolvedUsers = userIdsForEmailLookup.length
+          ? await db.user.findMany({
+              where: {
+                id: {
+                  in: userIdsForEmailLookup,
+                },
+              },
+              select: {
+                email: true,
+              },
+            })
+          : [];
+        const participantEmails = Array.from(
+          new Set([
+            ...directEmailFilters,
+            ...resolvedUsers.map(user => user.email).filter(Boolean),
+          ])
+        );
+
+        const gmailSearchResponse = await googleMailSearchService.search({
+          email: userEmail,
+          query: q as string,
+          offset: 0,
+          limit: requestedLimit,
+          documentType: mapSearchTypeToGmailDocumentType(type as string | undefined),
+          participants: participantEmails.length
+            ? {
+                from: participantEmails,
+              }
+            : undefined,
+          timeRange: buildGmailTimeRange({
+            before: before as string | undefined,
+            after: after as string | undefined,
+            on: on as string | undefined,
+            range: range as string | undefined,
+          }),
+        });
+
+        gmailResults = gmailSearchResponse.results;
+        gmailTotalCount = gmailSearchResponse.totalCount;
+      }
+
+      const combinedResults = [...localResults, ...gmailResults]
+        .sort((left, right) => right.relevanceScore - left.relevanceScore)
+        .slice(requestedOffset, requestedOffset + requestedLimit);
+
+      res.json({
+        success: true,
+        data: {
+          grouped: false,
+          results: combinedResults,
+          totalCount: localTotalCount + gmailTotalCount,
+          offset: requestedOffset,
+          limit: requestedLimit,
+        },
+      });
+      return;
     }
 
     // Call vespa search

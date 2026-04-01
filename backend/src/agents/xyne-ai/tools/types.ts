@@ -52,6 +52,8 @@ export interface XyneAIAgentContext {
   conversationId?: string;
   userId: string;
   sessionId: string;
+  apiBaseUrl?: string;
+  appRole?: 'admin' | 'user';
   source: 'thread' | 'channel';
   timestamp: string;
   streamProvider?: StreamProvider;
@@ -60,6 +62,7 @@ export interface XyneAIAgentContext {
   contextChannelMap?: Map<string, string>;  // Pre-computed channel name→ID map
   contextChannelIdToName?: Map<string, string>;
   webSearchEnabled?: boolean;  // Flag to enable/disable web search functionality
+  gmailSearchEnabled?: boolean;  // Flag to enable/disable Gmail search tool availability
   requestMappings?: {  // Request-scoped mappings from FVD tool
     channelNameToId: Map<string, string>;
     userNameToId: Map<string, string>;
@@ -132,7 +135,7 @@ export interface ToolResultWithCapping extends ToolResult {
 /**
  * Entity type discriminator for different content types
  */
-export type EntityType = 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search';
+export type EntityType = 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search' | 'email';
 
 /**
  * Enhanced tool entity that can represent any content type
@@ -227,6 +230,8 @@ export interface ToolDescriptions {
   fetch_channel_messages: string;
   fetch_thread_messages: string;
   search_relevant_messages: string;
+  search_gmail: string;
+  generate_team_intelligence_report: string;
   search_relevant_tickets: string;
   genius: string;
   xyne_rca: string;
