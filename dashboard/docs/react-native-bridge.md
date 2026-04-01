@@ -44,6 +44,7 @@ Every message is JSON with this envelope:
 | `NATIVE_READY` | `{ platform?: 'ios' \| 'android'; version?: string }` | Optional handshake for logging; also flips `reactNativeBridge.isNativeReady()` to `true`. |
 | `GOOGLE_SIGN_IN_RESULT` | `{ success: boolean; sessionId?: string \| null; userId?: string; hasRefreshToken?: boolean; error?: string; errorMessage?: string }` | Required response to `REQUEST_GOOGLE_SIGN_IN`. `sessionId` **must** be populated once the native layer has exchanged Google credentials and injected the Secure/HttpOnly cookies; the dashboard refuses to continue without it. Tokens are exchanged and stored via cookies on native; the WebView should not receive raw tokens. On failure the `errorMessage` is shown to the user. |
 | `NATIVE_SIGN_OUT` | `{ reason?: string }` | Lets native force a logout (e.g., refresh token revoked). The web layer will clear all local state. |
+| REQUEST_NATIVE_SHELL | { reason?: string } | Lotus only: user asks to return to the native shell; host sets display mode to native and navigates. |
 
 ## Implementing on the Native Side
 1. Inject a small JS shim before the page loads that attaches your `postMessage` handler to `window.ReactNativeWebView`.

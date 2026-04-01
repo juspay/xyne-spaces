@@ -37,6 +37,7 @@ import { SelectedStatusData } from './SetStatusView';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useUserPresence } from '../../../hooks/usePresence';
 import { DateTimePicker } from '../../ui/DateTimePicker/DateTimePicker';
+import { detectReactNativeWebView, reactNativeBridge } from '../../../utils/reactNativeBridge';
 
 type ViewType = 'default' | 'status-suggestions' | 'status-edit';
 
@@ -609,6 +610,20 @@ const ProfileView = ({
             onCheckedChange={toggleSendIndicators}
             label='Show send indicators'
           />
+          {detectReactNativeWebView() && (
+            <Button
+              type='button'
+              variant='outline'
+              className='w-full rounded-3xl h-[44px] border-border'
+              onClick={() => {
+                reactNativeBridge.requestNativeShell('profile_menu');
+              }}
+              data-track-category='PROFILE'
+              data-track-name='RequestNativeShell'
+            >
+              Switch to native app
+            </Button>
+          )}
         </div>
       </div>
 
