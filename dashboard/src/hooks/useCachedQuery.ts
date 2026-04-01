@@ -147,21 +147,13 @@ export function useCachedQuery<
       return query;
     }
 
-    const originalFn = query.query.fn;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const modifiedFn = (params: { ctx: TContext; args: unknown }) => {
-      const originalQuery = originalFn(params as { ctx: TContext; args: TInput });
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
-      return (originalQuery as any).where('updatedAt', '>=', lastUpdatedAt);
-    };
+    // Add lastUpdatedAt to args - defineQuery will extract it and apply delta filter
+    const baseArgs = typeof query.args === 'object' && query.args !== null ? query.args : {};
 
     return {
       ...query,
-      query: {
-        ...query.query,
-        fn: modifiedFn as typeof query.query.fn,
-      },
-    };
+      args: Object.assign({}, baseArgs, { lastUpdatedAt }),
+    } as unknown;
   }, [query, shouldEnableDelta, lastUpdatedAt]);
 
   // Initial load when no cached data exists
@@ -190,7 +182,7 @@ export function useCachedQuery<
     }
   }, [updatedAtEnabled, hasCachedData, hash, zero, query]);
 
-  const [freshData, freshDetails] = useQuery(modifiedQueryRequest, options);
+  const [freshData, freshDetails] = useQuery(modifiedQueryRequest as typeof query, options);
 
   // Update cache when fresh data arrives
   useEffect(() => {

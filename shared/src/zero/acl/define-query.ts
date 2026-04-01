@@ -9,6 +9,24 @@ import type { TableName } from './core/types';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 
+const defaultValidator: StandardSchemaV1<undefined, { lastUpdatedAt?: number }> = {
+  '~standard': {
+    version: 1,
+    vendor: 'custom',
+    validate: (value: unknown): { value: { lastUpdatedAt?: number } } | { issues: Array<{ message: string; path: string[] }> } => {
+      if (value === undefined || value === null) {
+        return { value: { lastUpdatedAt: undefined } };
+      }
+      const val = value as Record<string, unknown>;
+      const lastUpdatedAt = val.lastUpdatedAt;
+      if (lastUpdatedAt !== undefined && typeof lastUpdatedAt !== 'number') {
+        return { issues: [{ message: 'lastUpdatedAt must be a number', path: ['lastUpdatedAt'] }] };
+      }
+      return { value: { lastUpdatedAt } as { lastUpdatedAt?: number } };
+    },
+  },
+};
+
 interface QueryWithAST {
   readonly ast: {
     readonly table: string;
@@ -81,21 +99,45 @@ export function defineQuery<
 ): QueryDefinition<TTable, TInput, TOutput, TReturn, Context> {
   if (typeof validatorOrQueryFn === 'function') {
     const queryFn = validatorOrQueryFn as QueryDefinitionFunctionNoArgs<TTable, TReturn>;
+    
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return zeroDefineQuery((params: any) => {
-      const query = queryFn(params);
-      return applyQueryACL(query, params.ctx);
+    return zeroDefineQuery(defaultValidator, (params: any) => {
+      const { lastUpdatedAt, ..._restArgs } = params.args || {};
+      const query = (queryFn as any)({ ctx: params.ctx });
+      const queryWithACL = applyQueryACL(query, params.ctx);
+      if (lastUpdatedAt && hasQueryAST(queryWithACL)) {
+        const tableName = getTableNameFromQuery(queryWithACL);
+        
+          
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (queryWithACL as any).where('updatedAt', '>=', lastUpdatedAt);
+        
+      }
+      
+      return queryWithACL;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }) as any;
   }
 
-  // With validator case
+  // With validator case - don't extend, just use original validator
+  // lastUpdatedAt will be passed in args but stripped before calling queryFn
   const validator = validatorOrQueryFn;
   const queryFn = maybeQueryFn!;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return zeroDefineQuery(validator, (params: any) => {
-    const query = queryFn(params);
-    return applyQueryACL(query, params.ctx);
+  return zeroDefineQuery(validator as any, (params: any) => {
+    // Extract lastUpdatedAt from args, pass rest to queryFn
+    const { lastUpdatedAt, ...restArgs } = params.args || {};
+    
+    const query = queryFn({ ctx: params.ctx, args: restArgs });
+    const queryWithACL = applyQueryACL(query, params.ctx);
+    
+    // Apply delta filter if lastUpdatedAt is provided and table has updatedAt column
+    if (lastUpdatedAt && hasQueryAST(queryWithACL)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (queryWithACL as any).where('updatedAt', '>=', lastUpdatedAt);
+    }
+    
+    return queryWithACL;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }) as any;
 }
