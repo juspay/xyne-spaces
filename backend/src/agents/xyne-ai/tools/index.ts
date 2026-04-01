@@ -69,6 +69,7 @@ import {
   getGenerateTeamIntelligenceReportTool,
 } from './generate_team_intelligence_report.js';
 import { createSearchRelevantTicketsTool, getSearchRelevantTicketsTool } from './search_relevant_tickets.js';
+import { createSearchMeetingInsightsTool, getSearchMeetingInsightsTool } from './search_meeting_insights.js';
 import { createFieldValueDiscoveryTool } from './field_value_discovery.js';
 import { createGeniusTool, getGeniusTool } from './genius.js';
 import { createXyneRcaTool, getXyneRcaTool } from './xyne_rca.js';
@@ -106,6 +107,9 @@ export {
 
 // Search Relevant Tickets
 export { createSearchRelevantTicketsTool, getSearchRelevantTicketsTool };
+
+// Search Meeting Insights
+export { createSearchMeetingInsightsTool, getSearchMeetingInsightsTool };
 
 // Field Value Discovery
 export { createFieldValueDiscoveryTool };
@@ -170,6 +174,7 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createSearchRelevantMessagesTool(),
     createGenerateTeamIntelligenceReportTool(),
     createSearchRelevantTicketsTool(),
+    createSearchMeetingInsightsTool(),
     createFieldValueDiscoveryTool(),
     createGeniusTool(),
     createXyneRcaTool(),

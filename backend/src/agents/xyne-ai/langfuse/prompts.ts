@@ -156,6 +156,7 @@ export const PROMPT_NAMES = {
   SEARCH_GMAIL: 'search_gmail',
   GENERATE_TEAM_INTELLIGENCE_REPORT: 'generate_team_intelligence_report',
   SEARCH_RELEVANT_TICKETS: 'search_relevant_tickets',
+  SEARCH_MEETING_INSIGHTS: 'search_meeting_insights',
   GENIUS: 'genius_as_tool',
   XYNE_RCA: 'xyne_rca',
   FIELD_VALUE_DISCOVERY: 'field_value_discovery',

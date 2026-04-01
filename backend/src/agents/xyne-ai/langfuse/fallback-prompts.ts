@@ -128,6 +128,34 @@ RESEARCH CONTEXT - {{research_context}}
 **Usage:** Generate a downloadable PowerPoint (.pptx) presentation.
 **Parameters:** 'query' (rich brief: topic, purpose, audience, tone), 'num_slides' (default 10, range 6-15).
 **Output Rule:** You MUST include the exact download URL verbatim in your 'summary', strictly formatted as: "Your presentation is ready! **[Download here](URL)**"
+
+13. <tool>search_meeting_insights</tool>
+**Usage:** For ANY question where the answer might come from a recorded online meeting or call — not just when "meeting" is explicitly mentioned.
+**Description:** Semantic search over AI-analyzed meeting data (Google Meet, Zoom, etc.) covering summaries, action items, pain points, merchant discussions, decisions, Q&A, and participant-level insights.
+**When to use — trigger on ANY of these signals:**
+- Questions about discussions, decisions, or topics (e.g., "do we have any discussion about X?", "was X raised?")
+- Questions about action items, follow-ups, or tasks from calls
+- Questions about pain points, blockers, concerns, or feedback raised in meetings
+- Questions about Q&A — specific questions asked or answered during a meeting
+- Questions about merchants, clients, or accounts discussed in calls
+- Questions about sales calls, pipeline reviews, onboarding sessions, deal reviews
+- Questions about what a participant said or committed to
+- Any query where the answer likely lives in a recorded call, not a chat message
+**Parameters:**
+- query: (required) Topic or question to search (e.g. "sales targets", "action items", "pain points", "merchant feedback")
+- platform: (optional) e.g. ["google-meet", "zoom"]
+- merchants: (optional) Merchant ID(s) e.g. ["merchant-123"]
+- participants: (optional) Participant email(s) e.g. ["user@example.com"]
+- type: (optional) Meeting type e.g. ["sales-call", "onboarding"]
+- createdBefore / createdAfter / createdOn / createdRange: (optional) Date filters
+**Examples:**
+- "do we have any discussion about sales targets?" → search_meeting_insights(query="sales targets")
+- "action items from this week's calls?" → search_meeting_insights(query="action items", createdRange="this week")
+- "pain points raised by merchants?" → search_meeting_insights(query="pain points merchants")
+- "all calls with merchant-123?" → search_meeting_insights(query="", merchants=["merchant-123"])
+- "what did merchant-123 say about integration?" → search_meeting_insights(query="integration", merchants=["merchant-123"])
+- "meetings with john@example.com about pipeline" → search_meeting_insights(query="pipeline", participants=["john@example.com"])
+**IMPORTANT:** Always prefer this over <tool>search_relevant_messages</tool> when the question is about meetings, calls, or anything discussed in a recorded session.
 </tools_definition>
 
 <behavior_guidelines>
@@ -138,11 +166,10 @@ RESEARCH CONTEXT - {{research_context}}
   - Data Queries: ASK user for a location name.
   - Global Search: Skip validation, omit location filters.
 
-## 2. SEARCH & RETRIEVAL
-- **BY vs FOR:** Use 'sender' only for messages *by* a user. Put names in 'query' for messages *about* a user.
-- **Multi-Channel:** Ask for clarification on similar matches. NO fuzzy matching.
-- **Evidence:** Always provide citations if user asks for links/references.
-**Email/Gmail Search:** Call <tool>search_gmail</tool> when the user is explicitly asking about emails, Gmail, inbox threads, or email attachments.
+## 2. SEARCH & RETRIEVAL WORKFLOW
+- **Meeting/Call Questions:** If the user asks about anything that could have been discussed in an online meeting — including discussions, decisions, action items, pain points, Q&A, merchant feedback, sales calls, pipeline reviews, or participant commitments — ALWAYS call <tool>search_meeting_insights</tool>. Do NOT route these to <tool>search_relevant_messages</tool>. Examples: "do we have any discussion about X?", "what are the action items?", "any pain points raised?", "what did merchant Y say?", "what was decided about Z?".
+- **Generic Search:** Call <tool>search_relevant_messages</tool>. Do not pass the 'channels' parameter unless specific channels were explicitly named by the user.
+- **Email/Gmail Search:** Call <tool>search_gmail</tool> when the user is explicitly asking about emails, Gmail, inbox threads, or email attachments.
 - **Team Intelligence Reports:** Call <tool>generate_team_intelligence_report</tool> when a manager/admin asks for a team report, manager report, overlap/conflict analysis across people, or a downloadable intelligence report PDF.
 
 ## 3. SUMMARIZATION 
@@ -495,6 +522,44 @@ EXAMPLES:
 - "tickets in xyne-support channel" → field_value_discovery(field="channel", value=["xyne-support"]) → search_relevant_tickets(query="bug", channels=["xyne-support"])
 
 DO NOT use for summarization (use fetch_thread_messages or fetch_channel_messages) or basic greetings.`;
+
+const SEARCH_MEETING_INSIGHTS_FALLBACK = `Search AI-analyzed meeting insights to answer questions about anything discussed, decided, or raised during online calls and meetings.
+
+Use this tool whenever a query could be answered by content from a recorded meeting — regardless of whether the user explicitly mentions "meeting" or "call". The tool searches across meeting summaries, action items, pain points, merchant discussions, decisions, Q&A, and participant-level details from Google Meet, Zoom, and other platforms.
+
+WHEN TO USE — trigger on ANY of these signals:
+- Questions about discussions, decisions, or topics (e.g., "do we have any discussion about X?", "was X mentioned?", "what was said about Y?")
+- Questions about action items, follow-ups, or tasks assigned during a call
+- Questions about pain points, blockers, concerns, or feedback raised in meetings
+- Questions about Q&A or specific questions asked/answered during a meeting
+- Questions about merchants, clients, or accounts (e.g., "what did merchant X say?", "any calls with merchant Y?")
+- Questions about sales calls, pipeline reviews, deal reviews, or onboarding sessions
+- Questions about what a participant said or committed to in a meeting
+- Any question where the answer might live in a recorded call rather than a chat message
+
+FILTERS:
+- platform: Filter by meeting platform (e.g., ["google-meet", "zoom"])
+- merchants: Filter by merchant ID(s) associated with the meeting (e.g., ["merchant-123"])
+- participants: Filter by participant email(s) (e.g., ["user@example.com"])
+- type: Filter by meeting type (e.g., ["sales-call", "onboarding"])
+- createdBefore: Filter meetings before this date (ISO format or dd/mm/yyyy)
+- createdAfter: Filter meetings after this date (ISO format or dd/mm/yyyy)
+- createdOn: Filter meetings on this specific date (ISO format or dd/mm/yyyy)
+- createdRange: Filter by time keyword (today, yesterday, this week, last week, last 7 days, this month, last month, last 30 days, recent, recently, new, current, currently, last, latest)
+
+EXAMPLES:
+- "do we have any discussion about sales targets?" → search_meeting_insights(query="sales targets")
+- "what are the action items from recent calls?" → search_meeting_insights(query="action items", createdRange="this week")
+- "any pain points raised by merchants?" → search_meeting_insights(query="pain points merchants")
+- "all calls with merchant-123?" → search_meeting_insights(query="", merchants=["merchant-123"])
+- "what did merchant-123 say about integration?" → search_meeting_insights(query="integration", merchants=["merchant-123"])
+- "meetings with john@example.com about payment issues" → search_meeting_insights(query="payment issues", participants=["john@example.com"])
+- "Google Meet calls from yesterday" → search_meeting_insights(query="", platform=["google-meet"], createdRange="yesterday")
+- "what was decided about the Q1 roadmap?" → search_meeting_insights(query="Q1 roadmap decisions")
+- "what questions were raised about pricing in calls?" → search_meeting_insights(query="pricing questions")
+- "any concerns raised by merchants about budget?" → search_meeting_insights(query="budget concerns")
+
+Returns: meeting metadata (code, platform, type, participants, date), summary, action items, Q&A exchanges, and other free-form insights (speaker observations, tags).`;
 
 const GENERATE_TEAM_INTELLIGENCE_REPORT_FALLBACK = `Use this tool when a manager or admin asks for a team-level intelligence report, team work summary, overlap detection, or a downloadable PDF report.
 
@@ -1130,6 +1195,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'search_gmail': SEARCH_GMAIL_FALLBACK,
   'generate_team_intelligence_report': GENERATE_TEAM_INTELLIGENCE_REPORT_FALLBACK,
   'search_relevant_tickets': SEARCH_RELEVANT_TICKETS_FALLBACK,
+  'search_meeting_insights': SEARCH_MEETING_INSIGHTS_FALLBACK,
   'genius_as_tool': GENIUS_FALLBACK,
   'xyne_rca': XYNE_RCA_FALLBACK,
   'field_value_discovery': FIELD_VALUE_DISCOVERY_FALLBACK,
