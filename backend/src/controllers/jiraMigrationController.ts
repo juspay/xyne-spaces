@@ -219,64 +219,122 @@ export class JiraMigrationController {
     };
   }
 
-  private formatMigrationReport(result: import('@/services/jiraMigrationImportService').JiraMigrationExecuteResult): string {
-    const { completedIssues, partialIssues, failedIssues } = this.getMigrationReportSummary(result);
-    const detailLines = result.issueResults
-      .filter(issue => issue.status !== 'completed')
-      .flatMap(issue => {
-        const base = `${issue.issueKey} [${issue.status}]${issue.failedStep ? ` step=${issue.failedStep}` : ''}: ${issue.summary}`;
-        if (issue.errors.length === 0) {
-          return [base];
-        }
-        return [base, ...issue.errors.map(error => `  - ${error}`)];
-      });
-    const warningLines = result.warnings.map(warning => `- ${warning}`);
-    const unresolvedUserLines = result.unresolvedUsers.map(user => {
-      const name = user.displayName || user.accountId || 'Unknown Jira user';
-      const suggestions = user.suggestedEmails.length > 0 ? ` -> ${user.suggestedEmails.join(', ')}` : '';
-      return `- ${name}${suggestions}`;
-    });
+  private buildMetricCard(label: string, value: string, tone: 'default' | 'success' | 'warning' | 'danger' = 'default') {
+    const backgroundColorByTone = {
+      default: '#F8FAFC',
+      success: '#ECFDF5',
+      warning: '#FFFBEB',
+      danger: '#FEF2F2',
+    } as const;
+
+    const textColorByTone = {
+      default: '#0F172A',
+      success: '#065F46',
+      warning: '#92400E',
+      danger: '#991B1B',
+    } as const;
+
+    return {
+      id: randomUUID(),
+      type: 'paragraph',
+      props: {
+        backgroundColor: backgroundColorByTone[tone],
+        textColor: textColorByTone[tone],
+      },
+      content: [
+        { type: 'text', text: `${label}\n`, styles: { bold: true } },
+        { type: 'text', text: value, styles: { textColor: textColorByTone[tone] } },
+      ],
+    };
+  }
+
+  private buildBulletListBlock(title: string, items: string[]) {
+    if (items.length === 0) {
+      return [];
+    }
 
     return [
-      `Jira migration completed for ${result.jiraProjectKey}.`,
-      '',
-      `Imported tickets: ${result.importedTickets}`,
-      `Skipped tickets: ${result.skippedTickets}`,
-      `Imported comments: ${result.importedComments}`,
-      `Imported attachments: ${result.importedAttachments}`,
-      `Created custom fields: ${result.createdBoardCustomFields}`,
-      `Reused custom fields: ${result.reusedBoardCustomFields}`,
-      `Linked tickets: ${result.linkedTickets}`,
-      `Created subtickets: ${result.createdSubTickets}`,
-      '',
-      `Completed issues: ${completedIssues}`,
-      `Partial issues: ${partialIssues}`,
-      `Failed issues: ${failedIssues}`,
-      `Warnings: ${result.warnings.length}`,
-      ...(unresolvedUserLines.length > 0 ? ['', 'Unresolved users:', ...unresolvedUserLines] : []),
-      ...(warningLines.length > 0 ? ['', 'Warnings detail:', ...warningLines] : []),
-      ...(detailLines.length > 0 ? ['', 'Issue error detail:', ...detailLines] : []),
-    ].join('\n');
+      {
+        id: randomUUID(),
+        type: 'heading',
+        props: { level: 2 },
+        content: [{ type: 'text', text: title, styles: {} }],
+      },
+      ...items.map(item => ({
+        id: randomUUID(),
+        type: 'bulletListItem',
+        content: [{ type: 'text', text: item, styles: {} }],
+      })),
+    ];
   }
 
   private buildMigrationReportCanvasBlocks(
     result: import('@/services/jiraMigrationImportService').JiraMigrationExecuteResult,
-    reportText: string,
   ) {
-    const paragraphs = reportText.split(/\n\n+/).map(section => section.trim()).filter(Boolean);
+    const { completedIssues, partialIssues, failedIssues } = this.getMigrationReportSummary(result);
+    const topWarnings = result.warnings.slice(0, 8);
+    const unresolvedUserItems = result.unresolvedUsers.slice(0, 8).map(user => {
+      const name = user.displayName || user.accountId || 'Unknown Jira user';
+      return user.suggestedEmails.length > 0
+        ? `${name} · ${user.suggestedEmails.join(', ')}`
+        : name;
+    });
+    const issueDetailItems = result.issueResults
+      .filter(issue => issue.status !== 'completed')
+      .slice(0, 12)
+      .map(issue => {
+        const base = `${issue.issueKey} · ${issue.status.toUpperCase()}${issue.failedStep ? ` · ${issue.failedStep}` : ''} · ${issue.summary}`;
+        return issue.errors.length > 0
+          ? `${base} · ${issue.errors.slice(0, 2).join(' | ')}`
+          : base;
+      });
 
     return [
       {
         id: randomUUID(),
         type: 'heading',
         props: { level: 1 },
-        content: [{ type: 'text', text: `Jira Migration Report: ${result.jiraProjectKey}`, styles: {} }],
+        content: [{ type: 'text', text: `Jira Migration Report · ${result.jiraProjectKey}`, styles: {} }],
       },
-      ...paragraphs.map(section => ({
+      {
         id: randomUUID(),
         type: 'paragraph',
-        content: [{ type: 'text', text: section, styles: {} }],
-      })),
+        content: [{ type: 'text', text: 'Execution summary for the latest Jira import run.', styles: {} }],
+      },
+      {
+        id: randomUUID(),
+        type: 'heading',
+        props: { level: 2 },
+        content: [{ type: 'text', text: 'Overview', styles: {} }],
+      },
+      this.buildMetricCard('Tickets', `${result.importedTickets} imported · ${result.skippedTickets} skipped`, 'success'),
+      this.buildMetricCard('Comments', `${result.importedComments} imported · ${result.skippedComments} skipped`),
+      this.buildMetricCard('Attachments', `${result.importedAttachments} imported · ${result.skippedAttachments} skipped`),
+      this.buildMetricCard('Custom Fields', `${result.createdBoardCustomFields} created · ${result.reusedBoardCustomFields} reused`),
+      this.buildMetricCard(
+        'Issue Status',
+        `${completedIssues} completed · ${partialIssues} partial · ${failedIssues} failed`,
+        failedIssues > 0 ? 'danger' : partialIssues > 0 ? 'warning' : 'success',
+      ),
+      this.buildMetricCard('Relationships', `${result.linkedTickets} links · ${result.createdSubTickets} subtickets`),
+      ...this.buildBulletListBlock(
+        topWarnings.length > 0
+          ? `Warnings${result.warnings.length > topWarnings.length ? ` (showing ${topWarnings.length} of ${result.warnings.length})` : ''}`
+          : 'Warnings',
+        topWarnings,
+      ),
+      ...this.buildBulletListBlock(
+        unresolvedUserItems.length > 0
+          ? `Unresolved Users${result.unresolvedUsers.length > unresolvedUserItems.length ? ` (showing ${unresolvedUserItems.length} of ${result.unresolvedUsers.length})` : ''}`
+          : 'Unresolved Users',
+        unresolvedUserItems,
+      ),
+      ...this.buildBulletListBlock(
+        issueDetailItems.length > 0
+          ? `Issue Details${result.issueResults.filter(issue => issue.status !== 'completed').length > issueDetailItems.length ? ` (showing ${issueDetailItems.length})` : ''}`
+          : 'Issue Details',
+        issueDetailItems,
+      ),
     ];
   }
 
@@ -289,14 +347,12 @@ export class JiraMigrationController {
     const canvasId = randomUUID();
     const viewAccessId = randomUUID();
     const participantId = randomUUID();
-    const reportText = this.formatMigrationReport(result);
-
     await db.$transaction(async tx => {
       await tx.canvas.create({
         data: {
           id: canvasId,
           title: `Jira Migration Report: ${result.jiraProjectKey}`,
-          content: this.buildMigrationReportCanvasBlocks(result, reportText) as any,
+          content: this.buildMigrationReportCanvasBlocks(result) as any,
           channelId,
           createdBy: actorUserId,
           viewAccessId,
@@ -350,10 +406,15 @@ export class JiraMigrationController {
     const canvasUrl = await this.createMigrationReportCanvas(channelId, actorUserId, result);
     const { completedIssues, partialIssues, failedIssues } = this.getMigrationReportSummary(result);
     const messageContent = [
-      `Jira migration completed for ${result.jiraProjectKey}.`,
-      `Imported tickets: ${result.importedTickets}, skipped tickets: ${result.skippedTickets}.`,
-      `Completed issues: ${completedIssues}, partial issues: ${partialIssues}, failed issues: ${failedIssues}.`,
-      `📄 View report canvas: ${canvasUrl}`,
+      `Jira migration report · ${result.jiraProjectKey}`,
+      '',
+      `Tickets: ${result.importedTickets} imported · ${result.skippedTickets} skipped`,
+      `Comments: ${result.importedComments} imported · ${result.skippedComments} skipped`,
+      `Attachments: ${result.importedAttachments} imported · ${result.skippedAttachments} skipped`,
+      `Issue status: ${completedIssues} completed · ${partialIssues} partial · ${failedIssues} failed`,
+      `Warnings: ${result.warnings.length}`,
+      '',
+      `View full report: ${canvasUrl}`,
     ].join('\n');
 
     await db.$transaction(async tx => {

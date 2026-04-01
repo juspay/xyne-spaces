@@ -253,15 +253,15 @@ const inferStatusMatch = (
 
 export class JiraMigrationPreviewService {
   private buildHeaders(): Record<string, string> {
-    const { eulerBotEmail, eulerBotAuthToken } = config.jira;
-    if (!config.jira.baseUrl || !eulerBotEmail || !eulerBotAuthToken) {
-      throw new Error('Jira migration preview requires JIRA base URL, email, and API token in backend config');
+    const { migrationBotEmail, migrationBotAuthToken } = config.jira;
+    if (!config.jira.baseUrl || !migrationBotEmail || !migrationBotAuthToken) {
+      throw new Error('Jira migration preview requires JUSPAY_JIRA_BASEURL, JIRA_MIGRATION_BOT_EMAIL, and JIRA_MIGRATION_BOT_AUTH_TOKEN');
     }
 
     return {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      Authorization: `Basic ${Buffer.from(`${eulerBotEmail}:${eulerBotAuthToken}`).toString('base64')}`,
+      Authorization: `Basic ${Buffer.from(`${migrationBotEmail}:${migrationBotAuthToken}`).toString('base64')}`,
     };
   }
 

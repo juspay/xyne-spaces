@@ -38,11 +38,12 @@ const PREVIEW_CUSTOM_FIELDS_PER_PAGE = 8;
 const PREVIEW_ISSUE_SAMPLES_PER_PAGE = 8;
 const ISSUE_EXECUTION_DETAILS_PER_PAGE = 10;
 
-type TicketRange = 'all' | 'last_6_months' | 'last_1_year';
+type TicketRange = 'all' | 'last_1_month' | 'last_6_months' | 'last_1_year';
 type PreviewSection = 'overview' | 'fields' | 'issues';
 
 const ticketRangeLabelMap: Record<TicketRange, string> = {
   all: 'All Time',
+  last_1_month: 'Last 1 Month',
   last_6_months: 'Last 6 Months',
   last_1_year: 'Last 1 Year',
 };
@@ -84,7 +85,9 @@ const readPersistedJiraMigrationJob = (): PersistedJiraMigrationJob | null => {
       targetBoardId: parsedValue.targetBoardId,
       targetChannelId: parsedValue.targetChannelId,
       ticketRange:
-        parsedValue.ticketRange === 'last_6_months' || parsedValue.ticketRange === 'last_1_year'
+        parsedValue.ticketRange === 'last_1_month' ||
+        parsedValue.ticketRange === 'last_6_months' ||
+        parsedValue.ticketRange === 'last_1_year'
           ? parsedValue.ticketRange
           : 'all',
       ...(typeof parsedValue.dateFrom === 'string' ? { dateFrom: parsedValue.dateFrom } : {}),
@@ -242,8 +245,10 @@ const JiraMigrationScreen = (): ReactElement => {
     const date = new Date();
     if (ticketRange === 'last_1_year') {
       date.setFullYear(date.getFullYear() - 1);
-    } else {
+    } else if (ticketRange === 'last_6_months') {
       date.setMonth(date.getMonth() - 6);
+    } else {
+      date.setMonth(date.getMonth() - 1);
     }
     return date.toISOString().slice(0, 10);
   }, [ticketRange]);
@@ -620,6 +625,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     className='w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground shadow-sm'
                   >
                     <option value='all'>All Time</option>
+                    <option value='last_1_month'>Last 1 Month</option>
                     <option value='last_6_months'>Last 6 Months</option>
                     <option value='last_1_year'>Last 1 Year</option>
                   </select>
