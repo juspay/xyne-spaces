@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { searchMemory, getMemoryById, updateMemory, deleteMemory, insertMemory } from '@/services/memoryService';
+import { vespaKnowledgeIngestionService } from '@/services/vespaKnowledgeIngestionService';
 import { VespaDocType, VespaMemoryDocument } from '@/vespa/src/types';
 import { DatabaseClient } from '@/database/client';
 import { redisService } from '@/services/redisService';
@@ -404,6 +405,80 @@ export class MemoryController {
       res.status(500).json({
         success: false,
         error: 'Failed to buffer messages',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
+  /**
+   * POST /api/memory/replaceSession
+   * Atomically replace all SOPs and Facts for a session.
+   *
+   * Flow:
+   *   1. Fetch one existing doc for the session → inherit repoUrl/commitId/ticketId
+   *   2. Delete all current docs for the session
+   *   3. Re-insert each provided doc with backend-derived fields
+   *
+   * Caller sends only the agent-editable fields:
+   *   docType, rawContent, userQuery, tags, filePointers
+   */
+  replaceSessionMemory = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const { sessionId, reviewStatus, docs } = req.body as {
+        sessionId: string;
+        reviewStatus: 'pending' | 'verified' | 'rejected';
+        docs: Array<{
+          docType: 'fact' | 'sop';
+          rawContent: string;
+          userQuery?: string;
+          tags: string[];
+          filePointers: string[];
+        }>;
+      };
+
+      const prisma = DatabaseClient.getInstance();
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        res.status(404).json({ success: false, error: 'User not found' });
+        return;
+      }
+
+      // Fetch one existing doc to inherit repoUrl/commitId/ticketId
+      const existing = await searchMemory(
+        { query: '', scope: 'all', limit: 1, offset: 0, sessionId },
+        userId,
+      );
+      const contextDoc = existing.documents[0];
+      const repoUrl  = contextDoc?.repoUrl  ?? '';
+      const commitId = contextDoc?.commitId ?? '';
+      const ticketId = contextDoc?.ticketId ?? '';
+
+      await vespaKnowledgeIngestionService.replaceSession(
+        sessionId,
+        user.email,
+        docs.map((d) => ({ ...d, repoUrl, commitId, ticketId, reviewStatus })),
+      );
+
+      res.status(200).json({
+        success: true,
+        sessionId,
+        count: docs.length,
+        message: `Replaced session memory with ${docs.length} document(s).`,
+      });
+    } catch (error) {
+      logger.error('Error replacing session memory', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to replace session memory',
         message: error instanceof Error ? error.message : 'Unknown error',
       });
     }

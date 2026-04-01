@@ -131,6 +131,8 @@ class AgentAuthService {
         await this.handleSessionHistory(req, res, url);
       } else if (req.method === 'PATCH' && url.pathname.startsWith('/memory/')) {
         await this.handleMemoryUpdate(req, res, url);
+      } else if (req.method === 'POST' && url.pathname === '/memory/replaceSession') {
+        await this.handleMemoryReplaceSession(req, res);
       } else if (req.method === 'GET' && url.pathname === '/health') {
         this.sendJson(res, 200, { status: 'ok' });
       } else {
@@ -548,6 +550,59 @@ class AgentAuthService {
       res.end(JSON.stringify(backendResponse.data));
     } catch (error: any) {
       log.error('[AgentAuth] Memory update request failed:', error);
+      this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
+    }
+  }
+
+  /**
+   * Handle POST /memory/replaceSession - Atomically replace all SOPs/Facts for a session
+   * Payload structure:
+   * {
+   *   sessionId: string;
+   *   docs: Array<{
+   *     docType: 'fact' | 'sop';
+   *     rawContent: string;
+   *     userQuery?: string;
+   *     tags: string[];
+   *     filePointers: string[];
+   *   }>;
+   * }
+   */
+  private async handleMemoryReplaceSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await this.parseBody(req);
+    if (!body || typeof body !== 'object') {
+      this.sendJson(res, 400, { error: 'Invalid request body' });
+      return;
+    }
+
+    if (!body.sessionId || !Array.isArray(body.docs) || body.docs.length === 0) {
+      this.sendJson(res, 400, { error: 'sessionId and non-empty docs array are required' });
+      return;
+    }
+
+    log.info(`[AgentAuth] replaceSession request: sessionId=${body.sessionId} docs=${body.docs.length}`);
+
+    try {
+      const cookies = await session.defaultSession.cookies.get({});
+      const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+      const backendUrl = `${config.BACKEND_URL}/api/memory/replaceSession`;
+      log.info(`[AgentAuth] Proxying POST memory/replaceSession to ${backendUrl}`);
+
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': cookieString,
+        },
+        data: body,
+      });
+
+      res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(backendResponse.data));
+    } catch (error: any) {
+      log.error('[AgentAuth] replaceSession request failed:', error);
       this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
     }
   }

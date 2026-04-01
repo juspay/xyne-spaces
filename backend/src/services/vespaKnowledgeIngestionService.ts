@@ -79,7 +79,65 @@ async function deleteAllForSession(sessionId: string): Promise<void> {
   logger.info(`[VESPA-KNOWLEDGE] Deleted all existing documents for session=${sessionId}`);
 }
 
+export interface ReplaceSessionDoc {
+  docType: 'fact' | 'sop';
+  rawContent: string;
+  userQuery?: string;
+  tags: string[];
+  filePointers: string[];
+  repoUrl: string;
+  commitId: string;
+  ticketId: string;
+  reviewStatus?: 'pending' | 'verified' | 'rejected';
+}
+
 export class VespaKnowledgeIngestionService {
+  /**
+   * Replace all SOPs and Facts for a session atomically.
+   * Deletes all existing docs for the session, then inserts the provided docs.
+   * repoUrl/commitId/ticketId should be fetched by the caller from an existing doc.
+   */
+  async replaceSession(
+    sessionId: string,
+    userId: string,
+    docs: ReplaceSessionDoc[],
+  ): Promise<void> {
+    logger.info(`[VESPA-KNOWLEDGE] replaceSession start session=${sessionId} docs=${docs.length}`);
+
+    await deleteAllForSession(sessionId);
+
+    const now = Date.now();
+    for (const doc of docs) {
+      const rawContent = doc.rawContent;
+      const chatSummary = chunkContent(removeMarkdown(rawContent));
+      const vespaDoc: VespaMemoryDocument = {
+        docId:        randomUUID(),
+        docType:      doc.docType === 'sop' ? VespaDocType.SOP : VespaDocType.FACT,
+        userId,
+        sessionId,
+        repoUrl:      doc.repoUrl,
+        commitId:     doc.commitId,
+        ticketId:     doc.ticketId,
+        userQuery:    doc.userQuery ?? '',
+        tags:         doc.tags,
+        filePointers: doc.filePointers,
+        rawContent,
+        chatSummary,
+        createdAt:    now,
+        updatedAt:    now,
+        committedAt:  now,
+        agentUsed:    AGENT_NAME,
+        modelUsed:    [],
+        parentRef:    '',
+        reviewStatus: doc.reviewStatus ?? 'pending',
+      };
+      await insertMemory(vespaDoc);
+      logger.info(`[VESPA-KNOWLEDGE] replaceSession inserted docId=${vespaDoc.docId} docType=${doc.docType}`);
+    }
+
+    logger.info(`[VESPA-KNOWLEDGE] replaceSession done session=${sessionId} inserted=${docs.length}`);
+  }
+
   /**
    * Ingest all SOPs and Facts - completely replacing existing knowledge for this session
    */

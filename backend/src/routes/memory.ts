@@ -98,6 +98,33 @@ router.post('/turn', authMiddleware.authenticate, memoryController.bufferSession
 router.post('/index', authMiddleware.authenticate, memoryController.indexMemoryDocument);
 
 /**
+  * Validation schema for POST /memory/replaceSession
+  * Backend derives: docId, userId, repoUrl, commitId, ticketId, chatSummary,
+  * timestamps, agentUsed, modelUsed, parentRef, reviewStatus.
+  * Caller sends only the agent-editable fields.
+  */
+const replaceSessionSchema = z.object({
+  sessionId: z.string().min(1),
+  reviewStatus: z.enum(['pending', 'verified', 'rejected']).default('pending'),
+  docs: z.array(z.object({
+    docType: z.enum(['fact', 'sop']),
+    rawContent: z.string(),
+    userQuery: z.string().optional().default(''),
+    tags: z.array(z.string()).default([]),
+    filePointers: z.array(z.string()).default([]),
+  })).min(1),
+});
+
+/**
+  * @route POST /api/memory/replaceSession
+  * @desc Atomically replace all SOPs and Facts for a session.
+  *       Inherits repoUrl/commitId/ticketId from one existing doc,
+  *       deletes all current docs, then re-inserts the provided docs.
+  * @access Private (requires authentication)
+  */
+router.post('/replaceSession', authMiddleware.authenticate, validateZod(replaceSessionSchema), memoryController.replaceSessionMemory);
+
+/**
   * @route GET /api/memory/sessionHistory
   * @desc Get normalized session history for a given sessionId
   * @access Private (requires authentication)
