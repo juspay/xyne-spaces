@@ -114,6 +114,7 @@ export function useDraftAttachments() {
       const fileProcessingPromises = filesArray.map(async (file, index) => {
         let width: number | undefined;
         let height: number | undefined;
+        let duration: number | undefined;
         let thumbnailBlob: Blob | undefined;
 
         // Generate thumbnail and get dimensions for video files
@@ -122,6 +123,7 @@ export function useDraftAttachments() {
             const thumbnailResult = await generateWebThumbnail(file);
             width = thumbnailResult.width;
             height = thumbnailResult.height;
+            duration = thumbnailResult.duration;
             thumbnailBlob = thumbnailResult.blob;
           } catch (error) {
             console.warn('Failed to generate thumbnail for video:', file.name, error);
@@ -149,20 +151,31 @@ export function useDraftAttachments() {
           }
         }
 
-        return { index, file, attachmentId: attachmentIds[index]!, width, height, thumbnailBlob };
+        return {
+          index,
+          file,
+          attachmentId: attachmentIds[index]!,
+          width,
+          height,
+          duration,
+          thumbnailBlob,
+        };
       });
 
       const processedFiles = await Promise.all(fileProcessingPromises);
 
       // Prepare attachments array for mutator
-      const attachmentsData = processedFiles.map(({ attachmentId, file, width, height }) => ({
-        attachmentId: attachmentId,
-        originalFilename: file.name,
-        mimetype: file.type,
-        size: file.size,
-        width,
-        height,
-      }));
+      const attachmentsData = processedFiles.map(
+        ({ attachmentId, file, width, height, duration }) => ({
+          attachmentId: attachmentId,
+          originalFilename: file.name,
+          mimetype: file.type,
+          size: file.size,
+          width,
+          height,
+          duration,
+        }),
+      );
 
       // Create draft and attachment entries via mutator (batch operation)
       zero.mutate(
@@ -200,13 +213,16 @@ export function useDraftAttachments() {
         });
 
         // Add fileMetadata JSON with complete information for all files
-        const fileMetadataArray = processedFiles.map(({ index, thumbnailBlob, width, height }) => ({
-          fileIndex: index,
-          hasThumbnail: !!thumbnailBlob,
-          thumbnailIndex: processedFiles.findIndex(f => f.index === index && f.thumbnailBlob),
-          width,
-          height,
-        }));
+        const fileMetadataArray = processedFiles.map(
+          ({ index, thumbnailBlob, width, height, duration }) => ({
+            fileIndex: index,
+            hasThumbnail: !!thumbnailBlob,
+            thumbnailIndex: processedFiles.findIndex(f => f.index === index && f.thumbnailBlob),
+            width,
+            height,
+            duration,
+          }),
+        );
         formData.append('fileMetadata', JSON.stringify(fileMetadataArray));
 
         formData.append('attachmentIds', JSON.stringify(attachmentIds));

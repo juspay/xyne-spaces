@@ -216,6 +216,7 @@ export class ConversationService {
           thumbnailIndex?: number;
           width?: number;
           height?: number;
+          duration?: number;
         }> = [];
 
         let thumbnailIndex = 0;
@@ -247,6 +248,7 @@ export class ConversationService {
               hasThumbnail: true,
               thumbnailIndex,
               ...(dimensions && { width: dimensions.width, height: dimensions.height }),
+              ...(dimensions?.duration && { duration: dimensions.duration }),
             });
 
             thumbnailIndex++;
@@ -256,6 +258,7 @@ export class ConversationService {
               fileIndex,
               hasThumbnail: false,
               ...(dimensions && { width: dimensions.width, height: dimensions.height }),
+              ...(dimensions?.duration && { duration: dimensions.duration }),
             });
           }
         });
@@ -344,6 +347,7 @@ export class ConversationService {
           thumbnailIndex?: number;
           width?: number;
           height?: number;
+          duration?: number;
         }> = [];
 
         let thumbnailIndex = 0;
@@ -366,6 +370,7 @@ export class ConversationService {
               hasThumbnail: true,
               thumbnailIndex,
               ...(dimensions && { width: dimensions.width, height: dimensions.height }),
+              ...(dimensions?.duration && { duration: dimensions.duration }),
             });
 
             thumbnailIndex++;
@@ -375,6 +380,7 @@ export class ConversationService {
               fileIndex,
               hasThumbnail: false,
               ...(dimensions && { width: dimensions.width, height: dimensions.height }),
+              ...(dimensions?.duration && { duration: dimensions.duration }),
             });
           }
         });

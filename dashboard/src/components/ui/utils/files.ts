@@ -209,6 +209,7 @@ export const formatFileSize = (bytes: number): string => {
 export interface FileDimensions {
   width: number;
   height: number;
+  duration?: number;
 }
 
 /**
@@ -249,6 +250,7 @@ const getVideoDimensions = (file: File): Promise<FileDimensions> => {
       const dimensions: FileDimensions = {
         width: video.videoWidth,
         height: video.videoHeight,
+        ...(video.duration && isFinite(video.duration) && { duration: video.duration }),
       };
       URL.revokeObjectURL(objectUrl);
       resolve(dimensions);

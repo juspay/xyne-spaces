@@ -2164,6 +2164,7 @@ export const mutators = defineMutators({
             size: z.number(),
             width: z.number().optional(),
             height: z.number().optional(),
+            duration: z.number().optional(),
           }),
         ),
         channelId: z.string(),
@@ -2220,7 +2221,10 @@ export const mutators = defineMutators({
 
         // 3. Create or update all attachments
         for (const attachment of attachments) {
-          const { attachmentId, originalFilename, mimetype, size, width, height } = attachment;
+          const { attachmentId, originalFilename, mimetype, size, width, height, duration } =
+            attachment;
+
+          const attachmentMetadata = duration ? { duration } : null;
 
           const existingAttachment = await tx.run(
             zql.message_attachments.where('id', attachmentId).one(),
@@ -2237,6 +2241,7 @@ export const mutators = defineMutators({
               size,
               width,
               height,
+              ...(attachmentMetadata && { metadata: attachmentMetadata }),
             });
           } else {
             await tx.mutate.message_attachments.insert({
@@ -2253,7 +2258,7 @@ export const mutators = defineMutators({
               createdAt: existingDraft?.createdAt || timestamp,
               createdBy: ctx.userID,
               url: '', // Will be populated after upload completes
-              metadata: null,
+              metadata: attachmentMetadata,
               conversationId: conversationId || null,
             });
           }
