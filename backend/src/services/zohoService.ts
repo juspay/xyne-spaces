@@ -27,6 +27,9 @@ interface SendReplyResponse {
   threadId: string;
 }
 
+// Module-level cache survives across instances since fromEncryptedCredentials creates a new ZohoService per request
+const tokenCache = new Map<string, { token: string; expiresAt: Date }>();
+
 export class ZohoService {
   private client: AxiosInstance;
   private credentials: ZohoCredentials;
@@ -50,6 +53,13 @@ export class ZohoService {
    * Exchange refresh token for access token
    */
   private async getAccessToken(scope: string = 'Desk.tickets.UPDATE'): Promise<string> {
+    const cacheKey = `${this.sourceId}:${scope}`;
+    const cached = tokenCache.get(cacheKey);
+    if (cached && new Date() < cached.expiresAt) {
+      logger.info('[ZohoService] Using cached access token');
+      return cached.token;
+    }
+
     try {
       logger.info('[ZohoService] Exchanging refresh token for access token');
 
@@ -70,8 +80,12 @@ export class ZohoService {
         }
       );
 
+      const token: string = response.data.access_token;
+      const expiresIn: number = response.data.expires_in ?? 3600;
+      tokenCache.set(cacheKey, { token, expiresAt: new Date(Date.now() + (expiresIn - 300) * 1000) });
+
       logger.info('[ZohoService] Access token obtained successfully');
-      return response.data.access_token;
+      return token;
     } catch (error) {
       logger.error('[ZohoService] Failed to get access token', { error });
       throw new Error('Failed to refresh Zoho access token');
