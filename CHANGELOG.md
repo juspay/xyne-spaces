@@ -1,3 +1,31 @@
+## [1.103.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.102.0...v1.103.0) (2026-04-01)
+
+
+### Features
+
+* added email source and report gen ([aeaa5b8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aeaa5b8851d7082aa9b24368b152eaabec89909a)), closes [#4542](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4542)
+* adding duration overlay on the video thumbnail like slack ([c0372b3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c0372b3e14a60ec1bcaa53a16c68c1377de40852)), closes [#4016](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4016)
+* adding helper fn to sync ticket_md with prisma updates ([7ff235d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7ff235d25966824ed0ef4daebf8cf99574f8bc87)), closes [#4526](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4526)
+* build step disabled ([0254b4d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0254b4d4f5f106afd2782334d51206bd4b5d2775)), closes [#4588](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4588)
+* fixed usecachedquery hook for updatedAt ([954ecb2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/954ecb229de1a7f747b734e812b7001fba88d590))
+* Jira Migration phase 2 ([4fc287d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4fc287db0c5a72d06ddff1dcdcdaa7f46af46f88)), closes [#4589](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4589)
+* log only initial zero query completion ([9ae8f84](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9ae8f84f4270504fffb21c7b32c8fc437198a309)), closes [#4507](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4507)
+* replace session api ([b7ef2a6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b7ef2a6adfe7824d1ee1a572407fd7feb8da7631)), closes [#4574](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4574)
+* SAM transcript ingestion and meeting insights search tool ([52f24b7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/52f24b7f15326ceee1833ddcb69565d087426428)), closes [#4596](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4596)
+* User Display Name ([a23c698](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a23c69867825d0feaee3e96dfdc48b6aa3834ad4)), closes [#4592](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4592)
+
+
+### Bug Fixes
+
+* added switch functionality between native and webview ([7cfec0d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7cfec0d16f813695a89c99d5a7a82ddf1019c830)), closes [#4552](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4552)
+* Added vespa push for channelParticipants also ([3e4f0ca](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3e4f0ca9e85f429002cef60ece603e12f43267fa)), closes [#4576](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4576)
+* baseUI compatability fix ([8cc4793](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8cc479315b6e67bdd7144e21da48c47bb912cc33)), closes [#4048](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4048)
+* Fix UserTags and Copy Button in Ask AI ([6d47754](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6d47754245436dd99baa06936b4574c66311362e))
+* Fixing Recap Citation and Improved UI ([bfb0fb6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bfb0fb6a34d18136749bf3a260f29792024e37a2))
+* fixing the inline video player still playing when modal opens ([930b6b8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/930b6b81dde75ca52df062d199529f49f01641a0))
+* remove contentFormat field from messages ([d5c9b6f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d5c9b6f6cb843df439b342e43b79aea509df4a3d)), closes [#4608](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4608)
+* replaced db message, channel db calls with api ([c65db0c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c65db0c736f6bcf3141140300a26967f26343236)), closes [#4530](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4530)
+
 ## [1.102.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.101.0...v1.102.0) (2026-03-31)
 
 
