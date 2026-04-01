@@ -718,6 +718,26 @@ const InlineVideoPlayer: React.FC<{
   const [loading, setLoading] = useState(true);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // check if the video is open in modal
+  const { isOpenInModal, modalVideoTime } = useSelector(
+    attachmentViewerActor,
+    (s: AttachmentViewerState) => {
+      const current = s.context.attachments[s.context.currentIndex];
+      const isOpen = s.value !== 'closed' && current?.attachmentId === attachmentId;
+      return { isOpenInModal: isOpen, modalVideoTime: s.context.currentVideoTime };
+    },
+  );
+
+  // pause inline player when modal opens and resume from exact time when close
+  useEffect(() => {
+    if (isOpenInModal) {
+      videoRef.current?.pause();
+    } else if (modalVideoTime !== undefined && videoRef.current) {
+      videoRef.current.currentTime = modalVideoTime;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [isOpenInModal, modalVideoTime]);
+
   const { canDelete, handleDelete } = useAttachmentDelete(attachmentId, fileName, uploadedBy);
 
   const openModal = () => {
@@ -848,17 +868,10 @@ const InlineVideoPlayer: React.FC<{
           ) : !hasClickedPlay || isMobile ? (
             <div className='relative h-full'>
               {thumbnailBlobUrl && !thumbnailError ? (
-                <img
-                  style={{
-                    objectFit: 'cover',
-                  }}
-                  src={thumbnailBlobUrl}
-                  alt={fileName}
-                  className='w-full h-full object-cover'
-                />
+                <img src={thumbnailBlobUrl} alt={fileName} className='w-full h-full object-cover' />
               ) : (
                 // Show video icon if no thumbnail
-                <div className={cn('flex items-center justify-center bg-gray-900 h-64 min-w-64')}>
+                <div className={cn('flex items-center justify-center bg-gray-900 h-full min-w-64')}>
                   {!isMobile && <Video size={64} className='text-muted-foreground' />}
                 </div>
               )}
@@ -908,16 +921,18 @@ const InlineVideoPlayer: React.FC<{
             </div>
           ) : (
             // Load actual video player only after user clicks (desktop only)
-            <VideoViewer
-              attachmentId={attachmentId}
-              source={null}
-              fileName={fileName}
-              width={dimensions.width}
-              height={dimensions.height}
-              onExpand={openModal}
-              menuContent={inlineMenuContent}
-              ref={videoRef}
-            />
+            <div className={cn('h-full', isOpenInModal && 'invisible absolute')}>
+              <VideoViewer
+                attachmentId={attachmentId}
+                source={null}
+                fileName={fileName}
+                width={dimensions.width}
+                height={dimensions.height}
+                onExpand={openModal}
+                menuContent={inlineMenuContent}
+                ref={videoRef}
+              />
+            </div>
           )}
         </div>
       </div>

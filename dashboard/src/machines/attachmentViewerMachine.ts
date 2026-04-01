@@ -23,6 +23,7 @@ interface AttachmentViewerContext {
   status: 'idle' | 'loading' | 'success' | 'error';
   error: string | null;
   retryCount: number;
+  currentVideoTime?: number | undefined;
 }
 
 type AttachmentViewerEvent =
@@ -31,7 +32,8 @@ type AttachmentViewerEvent =
   | { type: 'NEXT' }
   | { type: 'PREV' }
   | { type: 'CLOSE' }
-  | { type: 'RETRY' };
+  | { type: 'RETRY' }
+  | { type: 'SET_VIDEO_TIME'; time: number };
 
 const initialContext: AttachmentViewerContext = {
   attachments: [],
@@ -112,7 +114,10 @@ export const attachmentViewerMachine = createMachine(
         on: {
           CLOSE: {
             target: 'closed',
-            actions: assign(() => initialContext),
+            actions: assign(({ context }) => ({
+              ...initialContext,
+              currentVideoTime: context.currentVideoTime,
+            })),
           },
           UPDATE: {
             target: 'opening',
@@ -148,6 +153,11 @@ export const attachmentViewerMachine = createMachine(
                 error: null,
               }),
             ],
+          },
+          SET_VIDEO_TIME: {
+            actions: assign({
+              currentVideoTime: ({ event }) => event.time,
+            }),
           },
         },
       },
