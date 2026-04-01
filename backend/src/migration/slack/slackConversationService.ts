@@ -17,6 +17,40 @@ import { ChannelParticipantRepository } from '../../database/repositories/channe
 import { UserRepository } from '../../database/repositories/users';
 import { WebClient } from '@slack/web-api';
 import { config } from '../../config/env';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { channelSchema } from '@/vespa/src/types';
+import { db } from '@/database/client';
+import { NAMESPACE } from '@/vespa/vespaConfig';
+
+async function pushVespaJobForChannel(channelId: string, userId: string): Promise<void> {
+  vespaQueue.addJob({
+    schema: channelSchema,
+    jobType: 'feed',
+    docId: channelId,
+  }).catch(async (error) => {
+    logger.error(`[SlackMigration] Error queuing Vespa job for channel ${channelId}:`, error);
+    // Log failed insertion to Postgres for later retry
+    try {
+      if (db.vespaInsertionLogs) {
+        await db.vespaInsertionLogs.create({
+          data: {
+            status: 'FAILED',
+            type: 'INSERT',
+            entityId: channelId,
+            entityType: channelSchema,
+            namespace: NAMESPACE,
+            errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+            errorDetails: JSON.stringify(error),
+            userId,
+            createdAt: new Date(),
+          },
+        });
+      }
+    } catch (dbError) {
+      logger.error('[SlackMigration] Failed to log Vespa channel insertion error to database:', dbError);
+    }
+  });
+}
 
 // ============================================================================
 // Types
@@ -352,6 +386,8 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
             if (resolvedUserId) {
               const channelParticipantRepo = new ChannelParticipantRepository();
               await channelParticipantRepo.addParticipant(input.xyneSpaceChannelId!, resolvedUserId, 'MEMBER');
+              // Re-index channel in Vespa so permissions/memberCount reflect the new participant
+              await pushVespaJobForChannel(input.xyneSpaceChannelId!, resolvedUserId);
             }
           }
         } catch (error) {
