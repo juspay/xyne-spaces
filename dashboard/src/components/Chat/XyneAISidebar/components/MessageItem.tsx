@@ -437,15 +437,24 @@ export const MessageItem = ({
 
     // Get summary/content
     if (message.agentType === 'summarizer' && message.summarizerOutput?.summary) {
-      textToCopy = message.summarizerOutput.summary;
+      // Process summary to replace user tags with plain text names
+      textToCopy = processTextForCopy(message.summarizerOutput.summary, message.userTags);
       // Add key points
       if (message.summarizerOutput.keyPoints && message.summarizerOutput.keyPoints.length > 0) {
         textToCopy += '\n\nKey Points:\n';
-        textToCopy += message.summarizerOutput.keyPoints.map(kp => `• ${kp.point}`).join('\n');
+        textToCopy += message.summarizerOutput.keyPoints
+          .map(kp => {
+            // Process key points to replace user tags with plain text names
+            return `• ${processTextForCopy(kp.point, message.userTags)}`;
+          })
+          .join('\n');
       }
     } else {
-      // Genius or generic message
-      textToCopy = message.content || message.streamingContent || '';
+      // Genius or generic message - process content to replace user tags with plain text names
+      textToCopy = processTextForCopy(
+        message.content || message.streamingContent || '',
+        message.userTags,
+      );
       // Add key points from parsed content
       if (message.parsedContent && message.parsedContent.keypoints.length > 0) {
         textToCopy += '\n\nKey Points:\n';
@@ -796,6 +805,10 @@ const MessageContent = ({
             remarkPlugins={[remarkGfm]}
             components={{
               ...markdownComponents,
+              p: ({ children }) => {
+                const processed = processNodeForUserTags(children, message.userTags);
+                return <span>{processed}</span>;
+              },
               a: ({ href, children, ...props }) => {
                 // Check if URL is external
                 const isExternal = (() => {
@@ -991,6 +1004,10 @@ const SummarizerContent = ({
               remarkPlugins={[remarkGfm]}
               components={{
                 ...markdownComponents,
+                p: ({ children }) => {
+                  const processed = processNodeForUserTags(children, message.userTags);
+                  return <span>{processed}</span>;
+                },
                 a: ({ href, children, ...props }) => {
                   // Check if URL is external
                   const isExternal = (() => {

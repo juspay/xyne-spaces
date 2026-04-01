@@ -15,6 +15,8 @@ import type {
   Message,
   MessageAttachment,
   ReportArtifact,
+  Participant,
+  UserTag,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import type { ResearchContext } from '@xyne/shared';
@@ -68,6 +70,40 @@ const clearStatusMessage = <T extends { statusMessage?: string | string[] }>(
   return rest;
 };
 
+/**
+ * Convert userTags to participants format
+ * Transforms {tag: {name, userId}} to [{id, name, email, picture}]
+ */
+function convertUserTagsToParticipants(userTags?: Record<string, UserTag>): Participant[] {
+  if (!userTags || Object.keys(userTags).length === 0) return [];
+
+  return Object.values(userTags).map(userTag => ({
+    id: userTag.userId,
+    name: userTag.name,
+    email: '', // Not available from userTags
+    picture: '', // Will be handled by ParticipantsDropdown's getAvatarUrl helper
+  }));
+}
+
+// Generic helper to extract a value from root level or nested in output object
+function extractNestedValue<T>(data: Record<string, unknown>, key: string): T | undefined {
+  return (data[key] ?? (data['output'] as Record<string, unknown> | undefined)?.[key]) as
+    | T
+    | undefined;
+}
+
+// Extract userTags from data (root level or nested in output)
+const extractUserTags = (
+  data: Record<string, unknown>,
+): Record<string, { name: string; userId: string }> | undefined =>
+  extractNestedValue<Record<string, { name: string; userId: string }>>(data, 'userTags');
+
+// Extract participants from data (root level or nested in output)
+const extractParticipants = (data: Record<string, unknown>): Participant[] | undefined => {
+  const participants = extractNestedValue<unknown>(data, 'participants');
+  return Array.isArray(participants) ? (participants as Participant[]) : undefined;
+};
+
 class XyneAIStreamManager {
   private static instance: XyneAIStreamManager;
 
@@ -90,7 +126,12 @@ class XyneAIStreamManager {
   // Map to track raw content, tool outputs, and local message IDs for each stream
   private streamDataMap: Map<
     string,
-    { rawContent: string; toolOutputs: GeniusToolOutput[]; localUserMessageId?: string }
+    {
+      rawContent: string;
+      toolOutputs: GeniusToolOutput[];
+      localUserMessageId?: string;
+      participants: Participant[];
+    }
   > = new Map();
 
   private constructor() {
@@ -198,7 +239,7 @@ class XyneAIStreamManager {
     // Get or initialize stream data
     let streamData = this.streamDataMap.get(streamId);
     if (!streamData) {
-      streamData = { rawContent: '', toolOutputs: [] };
+      streamData = { rawContent: '', toolOutputs: [], participants: [] };
       this.streamDataMap.set(streamId, streamData);
     }
 
@@ -456,6 +497,7 @@ class XyneAIStreamManager {
     this.streamDataMap.set(streamId, {
       rawContent: '',
       toolOutputs: [],
+      participants: [],
       ...(request.localUserMessageId && { localUserMessageId: request.localUserMessageId }),
     });
 
@@ -538,6 +580,18 @@ class XyneAIStreamManager {
                 : msg,
             ),
           );
+        }
+        // Capture participants from start event
+        if (data['participants'] && Array.isArray(data['participants'])) {
+          const streamData = this.streamDataMap.get(streamId);
+          if (streamData) {
+            streamData.participants = data['participants'] as Participant[];
+            updateMessages(prev =>
+              prev.map(msg =>
+                msg.id === botMessageId ? { ...msg, participants: streamData.participants } : msg,
+              ),
+            );
+          }
         }
         break;
 
@@ -647,7 +701,14 @@ class XyneAIStreamManager {
 
       case 'complete':
       case 'done':
-        this.handleCompletionEvent(data, botMessageId, rawContent, toolOutputs, updateMessages);
+        this.handleCompletionEvent(
+          data,
+          botMessageId,
+          rawContent,
+          toolOutputs,
+          updateMessages,
+          streamId,
+        );
         if (data['sessionId'] && typeof data['sessionId'] === 'string') {
           result.sessionId = data['sessionId'];
         }
@@ -856,7 +917,21 @@ class XyneAIStreamManager {
     rawContent: string,
     toolOutputs: GeniusToolOutput[],
     updateMessages: (updater: (messages: Message[]) => Message[]) => void,
+    streamId?: string,
   ): void {
+    // Extract userTags and participants from completion data
+    const userTags = extractUserTags(data);
+    const streamData = streamId ? this.streamDataMap.get(streamId) : undefined;
+
+    // Determine participants: from completion data, userTags conversion, or stored from start event
+    let participants = extractParticipants(data);
+    if (!participants?.length && userTags && Object.keys(userTags).length > 0) {
+      participants = convertUserTagsToParticipants(userTags);
+    }
+    if (!participants?.length && streamData?.participants?.length) {
+      participants = streamData.participants;
+    }
+
     // Check if this is a Summarizer response
     if (data['output'] && typeof data['output'] === 'object') {
       const output = data['output'] as Record<string, unknown>;
@@ -872,6 +947,8 @@ class XyneAIStreamManager {
                 output as unknown as import('../../components/Chat/XyneAISidebar/utils/XyneAITypes').SummarizerOutput,
               isStreaming: false,
               agentType: 'summarizer',
+              ...(userTags && { userTags }),
+              ...(participants && participants.length > 0 && { participants }),
             };
             if (traceId) updatedMsg.traceId = traceId;
             return updatedMsg;
@@ -896,6 +973,8 @@ class XyneAIStreamManager {
           parsedContent: finalParsed,
           ...(!msg.agentType && { agentType: 'genius' as const }),
           ...(toolOutputs.length > 0 && { toolOutputs }),
+          ...(userTags && { userTags }),
+          ...(participants && participants.length > 0 && { participants }),
         };
         if (traceId) updatedMsg.traceId = traceId;
         return updatedMsg;
