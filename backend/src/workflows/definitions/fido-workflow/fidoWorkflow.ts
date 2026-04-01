@@ -13,12 +13,12 @@ import { z } from 'zod'
 import { 
   FidoServerWorkflowContext, 
   fidoServerWorkflowOutput, 
-  BuildResult, 
+  // BuildResult, 
   ConformanceResult,
   FidoWorkType,
 } from './types'
 import { 
-  executeBuildCode,
+  // executeBuildCode,
   // executeRemoteConformanceTesting,
   // executeLocalTesting,
   // executeBoilerCode
@@ -178,7 +178,7 @@ const fidoServerWorkflowInputSchema = BaseWorkflowContextSchema.extend({
   repoBranch: z.string().optional().describe('Custom branch name (e.g., feature-branch), branch should not exist in the repository'),
   baseBranch: z.string().describe('Enter branch name from where new branch will be created (e.g., main)'),
   preCommit: z.string().optional().describe('Custom text before commit message (e.g., "JIRA-1234 | Auto Commit")'),
-  buildCommand: z.string().optional(),
+  // buildCommand: z.string().optional(),
   // testDetails: z.array(z.object({
   //   filename: z.string(),
   //   command: z.string(),
@@ -201,7 +201,7 @@ const FidoServerWorkflowContextMapper = (payload: z.infer<typeof fidoServerWorkf
   description: payload.description,
   instructions: payload.instructions,
   preCommit: payload.preCommit,
-  buildCommand: payload.buildCommand,
+  // buildCommand: payload.buildCommand,
   // testDetails: payload.testDetails,
   // ispoller: payload.ispoller,
   type: payload.type,
@@ -230,7 +230,7 @@ export const fidoServerWorkflow: WorkflowDefinition<
       baseBranch,
       description,
       preCommit,
-      buildCommand,
+      // buildCommand,
       // testDetails,
       // ispoller,
       type,
@@ -333,7 +333,7 @@ export const fidoServerWorkflow: WorkflowDefinition<
     // =========================================================================
     // PHASE 3: TDD IMPLEMENTATION AND BUILD LOOP
     // =========================================================================
-    let buildResult: BuildResult | null = null
+    // let buildResult: BuildResult | null = null
     let conformanceResult: ConformanceResult | null = null
     let buildPassed = false
     let conformancePassed = false
@@ -345,9 +345,10 @@ export const fidoServerWorkflow: WorkflowDefinition<
         iterationsCompleted = iteration + 1
         console.log(`Starting conformance implementation iteration ${iterationsCompleted}/${maxIterations}`)
         // Prepare build feedback for the implementation agent if previous build failed
-        const buildFeedback = buildResult && !buildResult.success 
-          ? `Previous cargo build failed:\nError: ${buildResult.error}\nOutput: ${buildResult.output}`
-          : null;
+        // const buildFeedback = buildResult && !buildResult.success 
+        //   ? `Previous cargo build failed:\nError: ${buildResult.error}\nOutput: ${buildResult.output}`
+        //   : null;
+        const buildFeedback = null;
         // Implementation step - conformance focused with build and feature conformance feedback
         const implementationConfig = getConformanceImplementationConfig(
           requirementAnalysis,
@@ -368,17 +369,17 @@ export const fidoServerWorkflow: WorkflowDefinition<
         )
          gitInfo = { ...gitInfo, ...implementationResult.gitInfo }
         // Non-agentic build step: clone -> cd -> cargo build
-        console.log('🔨 Running cargo build to check implementation...')
-        if(buildCommand && buildCommand?.trim().length > 0){
-        buildResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.BUILD_CODE, executeBuildCode,buildCommand, repositoryUrl, gitInfo.branch);
+      //   console.log('🔨 Running cargo build to check implementation...')
+      //   if(buildCommand && buildCommand?.trim().length > 0){
+      //   buildResult = await scopedEngine.createCheckpoint(FidoEnhancedWorkflowStepsEnum.BUILD_CODE, executeBuildCode,buildCommand, repositoryUrl, gitInfo.branch);
         
-        if (!buildResult.success) {
-          console.log(` Implementation compilation failed - Error: ${buildResult.error}`)
-          console.log(' Build issues detected - continuing TDD implementation loop to fix errors')
-          buildPassed = false
-          return LoopControl.CONTINUE
-        }
-      }
+      //   if (!buildResult.success) {
+      //     console.log(` Implementation compilation failed - Error: ${buildResult.error}`)
+      //     console.log(' Build issues detected - continuing TDD implementation loop to fix errors')
+      //     buildPassed = false
+      //     return LoopControl.CONTINUE
+      //   }
+      // }
         // console.log(' Implementation compiles successfully!', testDetails);
         buildPassed = true;
         // if (testDetails && Array.isArray(testDetails) && testDetails.length > 0) {

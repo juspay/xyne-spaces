@@ -17,7 +17,7 @@ export interface FidoServerWorkflowContext extends BaseWorkflowContext {
   baseBranch?: string;
   description?: string;
   preCommit?: string;
-  buildCommand?: string;
+  // buildCommand?: string;
   // testDetails?: TestDetail[];
   // ispoller?: boolean;
   instructions?: string;
