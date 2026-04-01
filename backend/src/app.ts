@@ -97,8 +97,8 @@ import userActivityRoutes from '@/routes/userActivity';
 import activityAliasesRoutes from '@/routes/activityAliases';
 import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
+import samRoutes from '@/routes/sam';
 import memoryRoutes from '@/routes/memory';
-import { verifySamCallback } from '@/middleware/samCallbackAuth';
 import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
@@ -214,7 +214,10 @@ export class App {
     this.app.use('/api/org-intelligence-reports', teamIntelligenceReportRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
-    this.app.use('/api/meet', verifySamCallback, meetCallbackRoutes);
+    this.app.use('/api/meet', meetCallbackRoutes);
+
+    // SAM transcript ingestion route (API key auth - called by SAM/Pragati service)
+    this.app.use('/api/sam/', samRoutes);
 
     // Bundle serving routes (public, no auth required - frontend static assets)
     this.app.use('/api/bundles', bundleRoutes);

@@ -233,6 +233,7 @@ export interface ToolDescriptions {
   search_gmail: string;
   generate_team_intelligence_report: string;
   search_relevant_tickets: string;
+  search_meeting_insights: string;
   genius: string;
   xyne_rca: string;
   field_value_discovery: string;

@@ -1,5 +1,5 @@
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
-import { channelSchema, InsertDocument, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument } from '@/vespa/src/types';
+import { channelSchema, InsertDocument, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import { ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
@@ -963,6 +963,8 @@ export const mapBySchema = async (
           default:
             throw new Error(`No mapper defined for sub-app: ${app}`);
         }
+      case samTranscriptSchema:
+        throw new Error(`${schemaName}: SAM transcripts must be queued with pre-transformed data. Pass the document via vespaQueue.addJob({ data: vespaDocument }).`);
       default:
         throw new Error(`Unknown schema: ${schemaName}`);
     }
@@ -1042,6 +1044,9 @@ export const fetchDataBySchema = async (
         default:
           throw new Error(`No fetcher defined for sub-app: ${app}`);
       }
+
+    case samTranscriptSchema:
+      throw new Error(`${schema}: SAM transcripts have no DB table. Pass pre-transformed data via vespaQueue.addJob({ data: vespaDocument }).`);
 
     default:
       throw new Error(`Unknown schema: ${schema}`);

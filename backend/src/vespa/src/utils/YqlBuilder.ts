@@ -7,10 +7,11 @@ import {
   userSchema,
   channelSchema,
   fileSchema,
+  samTranscriptSchema,
 } from '../types';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
-type AppName = 'chat' | 'ticket' | 'user' | 'file';
+type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'transcript';
 
 export interface SlackFilters {
   channelId?: string[];
@@ -51,6 +52,17 @@ export interface FileFilters {
   createdRange?: string;
 }
 
+export interface MeetingFilters {
+  platform?: string[];
+  merchants?: string[];
+  type?: string[];
+  participants?: string[];
+  createdBefore?: string;
+  createdAfter?: string;
+  createdOn?: string;
+  createdRange?: string;
+}
+
 export class YqlBuilder {
   constructor() {}
 
@@ -63,6 +75,7 @@ buildYql(
   slackFilters: SlackFilters,
   ticketFilters: TicketFilters,
   fileFilters: FileFilters,
+  meetingFilters: MeetingFilters,
   userId: string,
   useFuzzy: boolean = false,
 ): string {
@@ -70,6 +83,7 @@ buildYql(
   const whereConditions: string[] = [];
 
   //Build search condition
+  const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
   if (query && query.trim() && query !== '*') {
       if (useFuzzy) {
         // Fuzzy: use text_fuzzy index
@@ -102,6 +116,16 @@ buildYql(
       or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
       or ({targetHits:${limit}} nearestNeighbor(chunk_embeddings, e))
     )`);
+      } else if (isTranscriptOnly) {
+        // sam_transcript schema uses its own embedding fields; text_embeddings/chunk_embeddings don't exist on it
+        whereConditions.push(`(
+        (userInput(@query))
+      or ({targetHits:${limit}} nearestNeighbor(meetingSummary_embeddings, e))
+      or ({targetHits:${limit}} nearestNeighbor(chapters_embeddings, e))
+      or ({targetHits:${limit}} nearestNeighbor(actionItems_embeddings, e))
+      or ({targetHits:${limit}} nearestNeighbor(others_embeddings, e))
+      or ({targetHits:${limit}} nearestNeighbor(qna_embeddings, e))
+    )`);
       } else {
         // Standard: no defaultIndex
         whereConditions.push(`(
@@ -127,6 +151,10 @@ buildYql(
     }
     if (apps.some(a => a.toLowerCase() === 'file')) {
       appConditions.push(this.buildFileConditions(fileFilters, userId));
+    }
+
+    if (apps.some(a => a.toLowerCase() === 'transcript')) {
+      appConditions.push(this.buildMeetingConditions(meetingFilters));
     }
      // Combine app conditions
     if (appConditions.length > 0) {
@@ -377,6 +405,70 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
   }
 
   /**
+   * Build YQL condition for SAM Transcript search
+   * Applies to sam_transcript schema only
+   */
+  private buildMeetingConditions(filters: MeetingFilters): string {
+    const conditions: string[] = [];
+
+    // DocType filter (always sam_transcript)
+    conditions.push(`docType contains "sam_transcript"`);
+
+    // Platform filter
+    if (filters.platform && filters.platform.length > 0) {
+      const platforms = filters.platform.map(p => `platform contains "${p.trim()}"`).join(' or ');
+      conditions.push(`(${platforms})`);
+    }
+
+    // Merchants filter
+    if (filters.merchants && filters.merchants.length > 0) {
+      const merchantConditions = filters.merchants.map(m => `merchants contains "${m.trim()}"`).join(' or ');
+      conditions.push(`(${merchantConditions})`);
+    }
+
+    // Type filter
+    if (filters.type && filters.type.length > 0) {
+      const types = filters.type.map(t => `type contains "${t.trim()}"`).join(' or ');
+      conditions.push(`(${types})`);
+    }
+
+    // Participants filter
+    if (filters.participants && filters.participants.length > 0) {
+      const participantConditions = filters.participants.map(p => `participants contains "${p.trim()}"`).join(' or ');
+      conditions.push(`(${participantConditions})`);
+    }
+
+    // Date filters
+    if (filters.createdBefore) {
+      const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');
+      if (timestamp) conditions.push(`dateTime < ${timestamp}`);
+    }
+
+    if (filters.createdAfter) {
+      const timestamp = parseDateToTimestamp(filters.createdAfter, 'end');
+      if (timestamp) conditions.push(`dateTime > ${timestamp}`);
+    }
+
+    if (filters.createdOn) {
+      const rangeStart = parseDateToTimestamp(filters.createdOn, 'start');
+      const rangeEnd = parseDateToTimestamp(filters.createdOn, 'end');
+      if (rangeStart && rangeEnd) {
+        conditions.push(`(dateTime >= ${rangeStart} and dateTime <= ${rangeEnd})`);
+      }
+    }
+
+    // Time keyword filter (today, yesterday, this week, last 7 days, etc.)
+    if (filters.createdRange) {
+      const timeRange = parseTimeKeyword(filters.createdRange);
+      if (timeRange) {
+        conditions.push(`(dateTime >= ${timeRange.from} and dateTime <= ${timeRange.to})`);
+      }
+    }
+
+    return conditions.join(' and ');
+  }
+
+  /**
    * Maps app names to their schemas and returns a mapping
    * @param apps - Array of app names
    * @returns Object mapping app names to their schemas
@@ -387,7 +479,7 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
       ticket: [ticketSchema],
       user: [userSchema],
       file: [fileSchema],
-
+      transcript: [samTranscriptSchema],
     };
 
     const result: Record<string, VespaSchema[]> = {};

@@ -1,7 +1,7 @@
 import Bull from 'bull';
 import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
-import { InsertDocument, VespaSchema } from '@/vespa/src/types';
+import { InsertDocument, samTranscriptSchema, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
@@ -167,8 +167,23 @@ export class VespaWorker {
 		);
 
 		try {
-			logger.info(`[VESPA_WORKER] Fetching data from database for ${schema}/${docId}`);
-			const mappedData = await fetchAndMapBySchema(schema, docId, jobType, app);
+			let mappedData: InsertDocument | Partial<InsertDocument>;
+
+			const isSamTranscript = schema === samTranscriptSchema;
+			const preTransformedData = job.data.data;
+
+			if (jobType === 'delete') {
+				mappedData = {};
+			} else if (isSamTranscript) {
+				if (!preTransformedData) {
+					throw new Error(`SAM transcript job ${job.id} is missing pre-transformed data. Expected job.data.data to be populated.`);
+				}
+				logger.info(`[VESPA_WORKER] Using pre-transformed data for SAM transcript ${docId}`);
+				mappedData = preTransformedData as InsertDocument;
+			} else {
+				logger.info(`[VESPA_WORKER] Fetching data from database for ${schema}/${docId}`);
+				mappedData = await fetchAndMapBySchema(schema, docId, jobType, app);
+			}
 
 			const handlers: Record<VespaJobType, () => Promise<void>> = {
 				feed: () => this.handleFeed(schema, mappedData as InsertDocument),

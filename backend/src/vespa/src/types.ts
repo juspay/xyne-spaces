@@ -8,6 +8,7 @@ export const projectSchema = 'project';
 export const userSchema = 'user';
 export const fileSchema = 'file'
 export const memorySchema = 'memory';
+export const samTranscriptSchema = 'sam_transcript';
 export type VespaSchema =
   | typeof ticketSchema
   | typeof messageSchema
@@ -17,6 +18,7 @@ export type VespaSchema =
   | typeof projectSchema
   | typeof fileSchema
   | typeof memorySchema
+  | typeof samTranscriptSchema
 
 export const VESPA_SCHEMAS: VespaSchema[] = [
   ticketSchema,
@@ -26,7 +28,8 @@ export const VESPA_SCHEMAS: VespaSchema[] = [
   projectSchema,
   userSchema,
   fileSchema,
-  memorySchema
+  memorySchema,
+  samTranscriptSchema
 ];
 
 export const MemoryScope = {
@@ -35,6 +38,59 @@ export const MemoryScope = {
 } as const;
 
 export type MemoryScope = (typeof MemoryScope)[keyof typeof MemoryScope];
+
+export interface TranscriptEntry {
+  timestamp: string;
+  speaker: string;
+  content: string;
+}
+
+export interface Chapter {
+  timestamp: string;
+  topic: string;
+  content: string;
+}
+
+export interface ActionItem {
+  timestamp: string;
+  assignee: string;
+  content: string;
+  deadLine?: string;
+}
+
+export interface QnA {
+  timestamp: string;
+  questioner: string;
+  answerer: string;
+  question: string;
+  answer: string;
+}
+
+export interface OtherItem {
+  content: string;
+  speaker: string;
+  tags: string[];
+}
+
+export interface AIAnalysis {
+  summary: string;
+  chapters: Chapter[];
+  action_items: ActionItem[];
+  q_n_a: QnA[];
+  others?: OtherItem[];
+}
+
+export interface SamTranscriptInput {
+  meetCode: string;
+  participants: string[];
+  platform: string;
+  type: string;
+  duration: string;
+  aiAnalysedData: AIAnalysis;
+  dateTime: string;
+  merchants: string[];
+}
+
 // Deprecated: Use VESPA_SCHEMAS instead
 export const AllSources: VespaSchema[] = VESPA_SCHEMAS;
 
@@ -48,8 +104,8 @@ export enum VespaDocType {
   FILE = 'file',
   MEMORY = 'memory',
   FACT = 'fact',
-  SOP = 'sop'
-
+  SOP = 'sop',
+  SAM_TRANSCRIPT = 'sam_transcript'
 }
 
 export enum SubApp {
@@ -293,6 +349,21 @@ export interface VespaMemoryDocument extends VespaDocument {
   pullRequests?: PullRequestReference[];
 }
 
+export interface VespaSamTranscriptDocument extends VespaDocument {
+  meetCode: string;
+  participants: string[];
+  platform: string;
+  type: string;
+  duration: string;
+  meetingSummary: string; // Extracted for Vespa-native embedding generation (renamed from 'summary' - reserved in Vespa)
+  chapters?: string;      // JSON.stringify'd Chapter[]
+  actionItems?: string;   // JSON.stringify'd ActionItem[]
+  others?: string;        // JSON.stringify'd OtherItem[] — free-form insights (speaker, content, tags)
+  qna?: string;           // JSON.stringify'd QnA[] — questions and answers from the meeting
+  dateTime: number;
+  merchants: string[];
+}
+
 export type VespaSearchResult =
   | VespaChatContainerDocument
   | VespaChatAttachmentDocument
@@ -302,6 +373,7 @@ export type VespaSearchResult =
   | VespaUserDocument
   | VespaFileDocument
   | VespaMemoryDocument
+  | VespaSamTranscriptDocument
 
 export interface VespaSearchHit {
   id: string;
@@ -347,6 +419,7 @@ export type InsertDocument =
   | VespaUserDocument
   | VespaFileDocument
   | VespaMemoryDocument
+  | VespaSamTranscriptDocument
 
 export type SchemaDataMap = {
   [messageSchema]: VespaChatMessageDocument;
@@ -357,6 +430,7 @@ export type SchemaDataMap = {
   [userSchema]: VespaUserDocument;
   [fileSchema]: VespaFileDocument;
   [memorySchema]: VespaMemoryDocument;
+  [samTranscriptSchema]: VespaSamTranscriptDocument;
 };
 
 export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
@@ -367,6 +441,7 @@ export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
   [userSchema]: VespaDocType.USER,
   [attachmentSchema]: VespaDocType.ATTACHMENT,
   [fileSchema]: VespaDocType.FILE,
+  [samTranscriptSchema]: VespaDocType.SAM_TRANSCRIPT,
 };
 
 export interface MatchFeatures {
