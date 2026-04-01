@@ -11,6 +11,7 @@ import UserAvatar from '../../UserAvatar/UserAvatar';
 import { useUsers } from '../../../hooks/useUsers';
 import { MultiSelect } from '../../ui/MultiSelect';
 import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 interface EditableFormFieldProps {
   fieldName: string;
@@ -356,7 +357,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                 className='flex items-center gap-1.5 bg-muted rounded-full px-2 py-0.5 border border-border'
               >
                 <UserAvatar userId={user.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />
-                <span className='text-sm text-muted-foreground'>{user.name || 'Unknown'}</span>
+                <span className='text-sm text-muted-foreground'>{getUserDisplayName(user)}</span>
               </div>
             ))
           ) : (

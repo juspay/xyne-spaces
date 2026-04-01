@@ -8,6 +8,7 @@ import Avatar from '../Avatar/Avatar';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { AnimatePresence, motion, Variants } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 type ActivationDirection = 'left' | 'right' | 'none';
 
@@ -81,7 +82,7 @@ export default function MobileReactionDrawer({
   const usersById = useMemo(() => {
     const map = new Map<string, { name: string }>();
     for (const u of users) {
-      map.set(u.id, { name: u.name });
+      map.set(u.id, { name: getUserDisplayName(u) });
     }
     return map;
   }, [users]);

@@ -23,6 +23,7 @@ import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
 import Button from '../../ui/Button';
 import { useDmsPaginatedMessages } from '../../../hooks/useDmsPaginatedMessages';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 // Hardcoded item heights derived from CSS (avoids DOM measurement via ref)
 // Desktop: py-3 (24px) + size-[48px] avatar + 1px border-bottom = 73px
@@ -80,7 +81,8 @@ const DmsPage = (): ReactElement => {
   const userMap = useMemo(() => {
     const map = new Map<string, string>();
     allUsers.forEach(user => {
-      if (user.name) map.set(user.id, user.name.toLowerCase());
+      const displayName = getUserDisplayName(user);
+      map.set(user.id, displayName.toLowerCase());
     });
     return map;
   }, [allUsers]);

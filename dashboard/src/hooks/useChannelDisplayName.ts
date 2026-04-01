@@ -6,6 +6,7 @@ import {
   parseDMParticipantIds,
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 import { useUsers } from './useUsers';
+import { getUserDisplayName } from '../utils/userDisplayName';
 
 interface ChannelDisplay {
   displayName: string;
@@ -69,7 +70,7 @@ export const useChannelDisplayName = (
         allIds[0] === currentUserId;
 
       if (isSelfDm) {
-        const userName = `${currentUser?.name} (you)` || 'You';
+        const userName = currentUser ? `${getUserDisplayName(currentUser)} (you)` : 'You';
         return {
           displayName: userName,
           avatarUserId: currentUserId,
@@ -87,14 +88,14 @@ export const useChannelDisplayName = (
     if (safeChannel.scopeType === ChannelScopeType.DM) {
       const user = users[0];
       return {
-        displayName: user?.name || 'Unknown User',
+        displayName: user ? getUserDisplayName(user) : 'Unknown User',
         avatarUserId: user?.id || null,
         isLoading: false,
       };
     }
 
     if (safeChannel.scopeType === ChannelScopeType.GROUP_DM) {
-      const userNames = users.map(u => u.name).filter(Boolean);
+      const userNames = users.map(u => getUserDisplayName(u)).filter(Boolean);
 
       if (userNames.length === 0) {
         return {

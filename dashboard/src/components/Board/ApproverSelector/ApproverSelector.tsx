@@ -4,6 +4,7 @@ import { type User } from '@xyne/shared';
 import { useUserSearch } from '../../../hooks/useUsers';
 import Avatar from '../../ui/Avatar/Avatar';
 import { type ApproverSelectorProps } from './ApproverSelector.types';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export const ApproverSelector = ({
   selectedApprovers,
@@ -61,7 +62,7 @@ export const ApproverSelector = ({
                   <Avatar userId={user.id} size='sm' />
                   <div className='flex flex-col min-w-0'>
                     <span className='text-sm font-medium text-foreground truncate'>
-                      {user.name}
+                      {getUserDisplayName(user)}
                     </span>
                     <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
                   </div>
@@ -94,7 +95,9 @@ export const ApproverSelector = ({
                 >
                   <Avatar userId={user.id} size='sm' />
                   <div className='flex flex-col'>
-                    <span className='text-[14px] font-medium text-foreground'>{user.name}</span>
+                    <span className='text-[14px] font-medium text-foreground'>
+                      {getUserDisplayName(user)}
+                    </span>
                     <span className='text-[12px] text-muted-foreground'>{user.email}</span>
                   </div>
                 </button>

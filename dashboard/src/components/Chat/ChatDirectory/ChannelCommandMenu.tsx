@@ -55,6 +55,7 @@ import { useAllChannels } from '../../../hooks/useChannels';
 import { useUsers } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import {
   mixpanelService,
   EVENTS,
@@ -1360,7 +1361,7 @@ const ChannelCommandMenu = ({
             const user = availableUsers[selectedMentionIndex];
             handleMentionSelect({
               id: user.id,
-              name: user.name,
+              name: getUserDisplayName(user),
               type: MentionType.USER,
               ...(user.email ? { email: user.email } : {}),
             });
@@ -1735,7 +1736,7 @@ const ChannelCommandMenu = ({
                             onSelect={() => {
                               handleMentionSelect({
                                 id: user.id,
-                                name: user.name,
+                                name: getUserDisplayName(user),
                                 type: MentionType.USER,
                                 ...(user.email ? { email: user.email } : {}),
                               });
@@ -1753,7 +1754,7 @@ const ChannelCommandMenu = ({
                             <Avatar userId={user.id} size='sm' />
                             <div className='flex-1 min-w-0'>
                               <div className='font-semibold text-xs text-gray-800 truncate'>
-                                {user.name}
+                                {getUserDisplayName(user)}
                               </div>
                               {user.email && (
                                 <div className='text-[11px] text-gray-500 truncate'>
@@ -2126,7 +2127,7 @@ const ChannelCommandMenu = ({
                                     user => ({
                                       id: user.id,
                                       type: 'user' as const,
-                                      title: user.name,
+                                      title: getUserDisplayName(user),
                                       subtitle: user.email || '',
                                       relevanceScore: 1,
                                       metadata: {},

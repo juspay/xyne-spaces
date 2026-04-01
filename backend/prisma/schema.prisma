@@ -886,6 +886,7 @@ model User {
   status         UserStatus   @default(ACTIVE)
   userType       UserType     @default(USER) // USER or BOT
   metadata       Json? // Flexible user metadata
+  displayName    String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -1080,7 +1081,7 @@ model UserProfile {
   userId        String    @unique // One-to-one with User
   dob           DateTime? // Date of birth (optional)
   phoneNumber   String?   // Phone number (optional)
-  displayName   String?   // Display name (optional)
+  displayName   String?   // Display name (optional) Deprecated - use displayName in User Table 
   team          String?   // Team name/identifier (optional)
   pronunciation String?   // Name pronunciation guide (optional)
   manager       String?   // Manager userId (optional)

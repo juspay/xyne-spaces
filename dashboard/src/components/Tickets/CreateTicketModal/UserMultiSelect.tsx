@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { MultiSelect } from '../../ui/MultiSelect';
 import { useUsers } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import Avatar from '../../ui/Avatar/Avatar';
 
 interface UserMultiSelectProps {
@@ -35,7 +36,7 @@ export const UserMultiSelect: React.FC<UserMultiSelectProps> = ({
 
     return users.map(user => ({
       value: user.id,
-      label: user.name ?? 'Unnamed User',
+      label: getUserDisplayName(user),
       icon: <Avatar userId={user.id} size='sm' showActiveStatus={false} />,
       subtitle: user.email ?? '',
     }));

@@ -6,6 +6,7 @@ import { SearchUser } from '../../ui/SearchUser/SearchUser';
 import Textarea from '../../ui/Textarea';
 import { User } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export interface CreateDmFormData {
   participants: User[];
@@ -43,15 +44,16 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
     if (selectedUsers.length === 1) {
       const user = selectedUsers[0];
       if (!user) return 'Select people to message';
-      if (user.id === context.userID) return `${user.name} (you)`;
-      return `Message ${user.name || 'Unknown'}`;
+      const displayName = getUserDisplayName(user);
+      if (user.id === context.userID) return `${displayName} (you)`;
+      return `Message ${displayName}`;
     }
     if (selectedUsers.length <= 3) {
-      return selectedUsers.map(u => u.name).join(', ');
+      return selectedUsers.map(u => getUserDisplayName(u)).join(', ');
     }
     const firstTwo = selectedUsers
       .slice(0, 2)
-      .map(u => u.name)
+      .map(u => getUserDisplayName(u))
       .join(', ');
     const remaining = selectedUsers.length - 2;
     return `${firstTwo} + ${remaining} others`;

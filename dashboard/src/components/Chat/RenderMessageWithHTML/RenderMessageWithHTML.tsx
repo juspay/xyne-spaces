@@ -11,6 +11,7 @@ import { ALLOWED_TAGS, isValidURL, sanitizeDomTree } from '../../../utils/saniti
 import { tokenizeMessage, isEmojiOnly } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
 import { GroupHoverWrapper } from '../../ui/GroupMentionPopover/GroupMentionPopover';
+import { getUserDisplayNameById } from '../../../utils/userDisplayName';
 import { ToolOutputRenderer, type ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import { cn } from '../../../utils/classNames';
 import { isElectronApp, isElectronStandaloneWindow } from '../../../utils/electronApp';
@@ -85,19 +86,10 @@ const CanvasLink = ({
   );
 };
 
-function MentionRenderer({
-  userId,
-  children,
-}: {
-  userId: string;
-  children: React.ReactNode;
-}): JSX.Element {
+function MentionRenderer({ userId }: { userId: string }): JSX.Element {
   const context = useAuthContextValues();
-  const user = useUsers();
-
-  if (!user) {
-    return <>{children}</>;
-  }
+  const users = useUsers();
+  const displayName = getUserDisplayNameById(users, userId);
 
   const isCurrentUser = context.userID === userId;
 
@@ -110,7 +102,7 @@ function MentionRenderer({
             : 'mention-text'
         }
       >
-        {children}
+        {displayName}
       </span>
     </UserHoverWrapper>
   );
@@ -552,13 +544,8 @@ const parseNode = (
 
   if (el.hasAttribute('data-mention') && el.getAttribute('data-mention-type') === 'user') {
     const userId = el.getAttribute('data-user-id') || '';
-    const username = el.getAttribute('data-username') || '';
 
-    return (
-      <MentionRenderer key={`${keyPrefix}-mention-${idx}`} userId={userId}>
-        {username}
-      </MentionRenderer>
-    );
+    return <MentionRenderer key={`${keyPrefix}-mention-${idx}`} userId={userId} />;
   }
 
   if (el.getAttribute('data-mention-type') === 'group') {

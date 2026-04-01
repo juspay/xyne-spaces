@@ -3,6 +3,7 @@ import { Search, Check } from 'lucide-react';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
 import { useUsers, useUserSearch } from '../../../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../../../utils/userDisplayName';
 
 interface UserSubmenuProps {
   selectedUsers: string[];
@@ -51,9 +52,14 @@ export const UserSubmenu = ({
     let list = [...availableUsersData];
     if (availableUserIds && availableUserIds.length > 0 && searchTerm.trim()) {
       const lower = searchTerm.toLowerCase();
-      list = list.filter(
-        u => u.name.toLowerCase().includes(lower) || u.email?.toLowerCase().includes(lower),
-      );
+      list = list.filter(u => {
+        const displayName = getUserDisplayName(u).toLowerCase();
+        return (
+          displayName.includes(lower) ||
+          u.name.toLowerCase().includes(lower) ||
+          u.email?.toLowerCase().includes(lower)
+        );
+      });
     }
 
     const selectedSet = new Set(selectedUsers);
@@ -95,6 +101,7 @@ export const UserSubmenu = ({
           <div className='space-y-0.5'>
             {finalResults.map(user => {
               const isSelected = selectedUsers.includes(user.id);
+              const displayName = getUserDisplayName(user);
               return (
                 <button
                   key={user.id}
@@ -109,13 +116,13 @@ export const UserSubmenu = ({
                   data-track-name='ToggleUserFilter'
                   data-track-metadata={JSON.stringify({
                     userId: user.id,
-                    userName: user.name,
+                    userName: displayName,
                     selected: !isSelected,
                   })}
                 >
                   <Avatar userId={user.id} size='sm' className='shrink-0' />
                   <div className='flex-1 text-left min-w-0'>
-                    <p className='text-sm font-medium truncate'>{user.name}</p>
+                    <p className='text-sm font-medium truncate'>{displayName}</p>
                   </div>
                   {isSelected && <Check className='w-4 h-4 text-muted-foreground shrink-0' />}
                 </button>

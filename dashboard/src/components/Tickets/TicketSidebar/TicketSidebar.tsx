@@ -28,6 +28,7 @@ import { useChannelsByProjectId } from '../../../hooks/useChannels';
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { mutators } from '../../../zero/mutators';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 type TabType = 'overview' | 'threads';
 
@@ -267,9 +268,14 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
     if (!users) return [];
     if (!assigneeSearch.trim()) return users;
     const search = assigneeSearch.toLowerCase();
-    return users.filter(
-      u => u.name.toLowerCase().includes(search) || u.email.toLowerCase().includes(search),
-    );
+    return users.filter(u => {
+      const displayName = getUserDisplayName(u).toLowerCase();
+      return (
+        displayName.includes(search) ||
+        u.name.toLowerCase().includes(search) ||
+        u.email.toLowerCase().includes(search)
+      );
+    });
   }, [users, assigneeSearch]);
 
   // Close dropdown when clicking outside
@@ -544,7 +550,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                     <InfoField
                       label='Created By'
                       icon={User}
-                      value={createdByUser?.name || 'Unknown'}
+                      value={getUserDisplayName(createdByUser)}
                     />
 
                     <InfoField
@@ -563,7 +569,7 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                     <InfoField
                       label='Assignee'
                       icon={User}
-                      value={assignedUser?.name || 'Unassigned'}
+                      value={getUserDisplayName(assignedUser)}
                       config={
                         assignedUser
                           ? { bg: 'bg-blue-50', border: 'border-blue-200', color: 'text-blue-700' }
@@ -621,8 +627,9 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                       showActiveStatus={false}
                                     />
                                     <span className='text-sm text-foreground'>
-                                      {users?.find(u => u.id === field.state.value)?.name ||
-                                        'Unknown User'}
+                                      {getUserDisplayName(
+                                        users?.find(u => u.id === field.state.value),
+                                      )}
                                     </span>
                                   </>
                                 ) : (
@@ -686,7 +693,9 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                     >
                                       <UserAvatar userId={user.id} showActiveStatus={false} />
                                       <div className='flex-1 min-w-0'>
-                                        <div className='text-foreground truncate'>{user.name}</div>
+                                        <div className='text-foreground truncate'>
+                                          {getUserDisplayName(user)}
+                                        </div>
                                         <div className='text-xs text-muted-foreground truncate'>
                                           {user.email}
                                         </div>

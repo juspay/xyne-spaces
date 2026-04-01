@@ -13,7 +13,8 @@ const shallowEqualUsers = (a: User[], b: User[]): boolean => {
       user.id === otherUser.id &&
       user.name === otherUser.name &&
       user.email === otherUser.email &&
-      user.status === otherUser.status
+      user.status === otherUser.status &&
+      user.displayName === otherUser.displayName
     );
   });
 };
@@ -21,6 +22,7 @@ const shallowEqualUsers = (a: User[], b: User[]): boolean => {
 export type SearchPriorities = {
   name?: number;
   email?: number;
+  displayName?: number;
 };
 
 export function searchUsers(users: User[], query: string, limit = 10): User[] {
@@ -32,6 +34,7 @@ export function searchUsers(users: User[], query: string, limit = 10): User[] {
     keys: [
       { name: 'name', weight: 2 },
       { name: 'email', weight: 1 },
+      { name: 'displayName', weight: 1.5 },
     ],
 
     threshold: 0.2,
@@ -46,6 +49,7 @@ export function searchUsers(users: User[], query: string, limit = 10): User[] {
   const rescored = results.map(r => {
     const name = r.item.name.toLowerCase();
     const email = r.item.email.toLowerCase();
+    const displayName = r.item.displayName?.toLowerCase() || '';
 
     // Base score is between 0 (perfect) and 1 (bad)
     let finalScore = r.score ?? 1;
@@ -54,6 +58,10 @@ export function searchUsers(users: User[], query: string, limit = 10): User[] {
       finalScore -= 10;
     } else if (name.includes(' ' + q)) {
       finalScore -= 5;
+    } else if (displayName.startsWith(q)) {
+      finalScore -= 8;
+    } else if (displayName.includes(' ' + q)) {
+      finalScore -= 4;
     } else if (email.startsWith(q)) {
       finalScore -= 2;
     }

@@ -10,6 +10,7 @@ import { InvitationResponse } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { InviteToCallModal } from '../CallModals/InviteToCallModal';
 import { callService } from '../../../services/Call/callService';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 // Speaking indicator component (animated bars like Google Meet)
 function SpeakingIndicator(): React.ReactElement {
@@ -177,7 +178,7 @@ export function ParticipantsSidebar({
         </div>
         <div className='flex-1 min-w-0'>
           <p className='text-sm font-medium text-foreground truncate'>
-            {participantUser?.name || 'Unknown User'}
+            {getUserDisplayName(participantUser)}
           </p>
           {response === InvitationResponse.LEFT && (
             <p className='text-xs text-muted-foreground'>Left the call</p>
@@ -214,8 +215,8 @@ export function ParticipantsSidebar({
             data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
             title={
               !isMicrophoneEnabled
-                ? `${participantUser?.name || 'Participant'} is muted`
-                : `Mute ${participantUser?.name || 'participant'}`
+                ? `${getUserDisplayName(participantUser)} is muted`
+                : `Mute ${getUserDisplayName(participantUser)}`
             }
           >
             {isMutingThis ? (

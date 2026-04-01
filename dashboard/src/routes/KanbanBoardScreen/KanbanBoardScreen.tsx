@@ -45,6 +45,7 @@ import type { TicketFilters } from '../../components/Tickets/TicketFilters/types
 import { KanbanColumns } from '../../components/Tickets/KanbanColumns/KanbanColumns';
 import { useDragAndDrop } from '../../hooks/useDragAndDrop';
 import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import type { Ticket, FormEntityValues, TicketStageRequest, TicketAssignment } from '@xyne/shared';
@@ -1071,7 +1072,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     const map = new Map<string, string>();
     if (allUsers) {
       allUsers.forEach(user => {
-        map.set(user.id, user.name || user.email || 'Unknown User');
+        map.set(user.id, getUserDisplayName(user));
       });
     }
     return map;

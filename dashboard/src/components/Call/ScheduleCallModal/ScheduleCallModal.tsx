@@ -24,6 +24,7 @@ import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchPart
 import { useUserSearch } from '../../../hooks/useUsers';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Controller, useForm } from 'react-hook-form';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { toast } from 'sonner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
@@ -199,7 +200,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     formState: { errors, isSubmitting },
   } = useForm<ScheduleCallFormData>({
     defaultValues: {
-      title: user?.name ? `${user.name.split(' ')[0]}'s Call` : '',
+      title: (() => {
+        const displayName = getUserDisplayName(user);
+        return displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '';
+      })(),
       startsAt: defaultStart,
       endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000), // Default 1 hours after start time
       participants: [],
@@ -358,14 +362,17 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       setEditEntireSeries(false);
       // Set isRecurring based on whether this is a recurring series call
       setIsRecurring(!!initialCall.recurringSeriesId);
-    } else if (!isEditMode && user?.name) {
-      const firstName = user.name.split(' ')[0];
-      reset({
-        title: `${firstName}'s Call`,
-        startsAt: defaultStart,
-        endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
-        participants: [],
-      });
+    } else {
+      const displayName = getUserDisplayName(user);
+      if (displayName !== 'Unknown') {
+        const firstName = displayName.split(' ')[0];
+        reset({
+          title: `${firstName}'s Call`,
+          startsAt: defaultStart,
+          endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
+          participants: [],
+        });
+      }
     }
   }, [isOpen]);
 
@@ -404,15 +411,18 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Legacy: keep default title in sync on first load (create mode)
   useEffect(() => {
-    if (isEditMode || !user?.name) return;
-    const firstName = user.name.split(' ')[0];
-    reset({
-      title: `${firstName}'s Call`,
-      startsAt: defaultStart,
-      endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
-      participants: [],
-    });
-  }, [user?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (isEditMode) return;
+    const displayName = getUserDisplayName(user);
+    if (displayName !== 'Unknown') {
+      const firstName = displayName.split(' ')[0];
+      reset({
+        title: `${firstName}'s Call`,
+        startsAt: defaultStart,
+        endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
+        participants: [],
+      });
+    }
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initialize default day when custom panel opens for WEEK frequency
   useEffect(() => {
@@ -434,7 +444,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         .filter(u => u.id !== user?.id) // filter the current user from the list
         .map(user => ({
           ...user,
-          label: user.name ?? user.email,
+          label: getUserDisplayName(user),
           value: `user:${user.id}`,
           icon: (
             <Avatar
@@ -453,13 +463,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 className='rounded-md size-[18px] flex items-center justify-center bg-white'
               />
               <div className='flex-1 w-full flex items-center gap-1.5'>
-                <span className='text-sm'>{user.name.split(' ')[0]}</span>
+                <span className='text-sm'>{getUserDisplayName(user).split(' ')[0]}</span>
                 {user.status === UserStatus.ACTIVE ? (
                   <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
                 ) : (
                   <span className='w-[5px] h-[5px] border border-gray-500 rounded-full'></span>
                 )}
-                <span className='text-sm text-gray-500'>{user.name}</span>
+                <span className='text-sm text-gray-500'>{getUserDisplayName(user)}</span>
               </div>
             </div>
           ),
@@ -904,8 +914,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Reset form and close modal
   const handleClose = useCallback((): void => {
+    const displayName = getUserDisplayName(user);
     reset({
-      title: user?.name ? `${user.name.split(' ')[0]}'s Call` : '',
+      title: displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '',
       startsAt: defaultStart,
       endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
       participants: [],
@@ -924,7 +935,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     setShowCustomPanel(false);
     setEditEntireSeries(false);
     onClose();
-  }, [reset, onClose, user?.name]);
+  }, [reset, onClose, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Dialog

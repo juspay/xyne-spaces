@@ -11,6 +11,7 @@ import {
   Edit2,
   Check,
   Camera,
+  User as UserIcon,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../Avatar/Avatar';
@@ -61,7 +62,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
 
   // Edit mode states
   const [editingField, setEditingField] = useState<
-    'team' | 'phoneNumber' | 'dob' | 'manager' | null
+    'team' | 'phoneNumber' | 'dob' | 'manager' | 'displayName' | null
   >(null);
   const [editValue, setEditValue] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
@@ -146,12 +147,15 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
 
   // Handle edit field
   const handleStartEdit = (
-    field: 'team' | 'phoneNumber' | 'dob',
+    field: 'team' | 'phoneNumber' | 'dob' | 'displayName',
     currentValue?: string | number | null,
   ): void => {
     setEditingField(field);
     setEditError(null);
-    if (currentValue !== undefined && currentValue !== null) {
+    if (field === 'displayName') {
+      // For displayName, use userProfile.displayName as the source
+      setEditValue(userProfile?.displayName || '');
+    } else if (currentValue !== undefined && currentValue !== null) {
       if (field === 'dob' && typeof currentValue === 'number') {
         const date = new Date(currentValue);
         setEditValue(date.toISOString().split('T')[0] || '');
@@ -169,7 +173,10 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
     setEditError(null);
   };
 
-  const validateField = (field: 'team' | 'phoneNumber' | 'dob', value: string): boolean => {
+  const validateField = (
+    field: 'team' | 'phoneNumber' | 'dob' | 'displayName',
+    value: string,
+  ): boolean => {
     setEditError(null);
 
     if (!value.trim()) {
@@ -205,6 +212,11 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
       return false;
     }
 
+    if (field === 'displayName' && value.length > 50) {
+      setEditError('Display name must be less than 50 characters');
+      return false;
+    }
+
     return true;
   };
 
@@ -216,12 +228,15 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
     }
 
     const updateParams: {
+      displayName?: string | null;
       team?: string | null;
       phoneNumber?: string | null;
       dob?: number | null;
     } = {};
 
-    if (editingField === 'team') {
+    if (editingField === 'displayName') {
+      updateParams.displayName = editValue.trim() || null;
+    } else if (editingField === 'team') {
       updateParams.team = editValue.trim() || null;
     } else if (editingField === 'phoneNumber') {
       updateParams.phoneNumber = editValue.trim() || null;
@@ -550,9 +565,9 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                 </button>
                 <button
                   onClick={() => {
-                    const managerId =
-                      selectedManagerUsers.length > 0
-                        ? (selectedManagerUsers[0]?.id ?? null)
+                    const managerId: string | null =
+                      selectedManagerUsers.length > 0 && selectedManagerUsers[0]
+                        ? selectedManagerUsers[0].id
                         : null;
                     zero.mutate(
                       mutators.userProfile.upsert({
@@ -607,6 +622,71 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
               <div className='text-sm text-foreground mt-1'>{user.email}</div>
             </div>
           </div>
+
+          {/* Display Name */}
+          {userProfile?.displayName || isOwnProfile ? (
+            <div className='flex items-start gap-3'>
+              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+                <UserIcon className='size-4 text-muted-foreground' />
+              </div>
+              <div className='flex-1'>
+                <div className='text-sm font-semibold text-foreground leading-tight flex items-center gap-2'>
+                  Display Name
+                  {isOwnProfile && userProfile?.displayName && editingField !== 'displayName' && (
+                    <button
+                      onClick={() => handleStartEdit('displayName', userProfile.displayName)}
+                      className='text-muted-foreground hover:text-muted-foreground'
+                      title='Edit display name'
+                    >
+                      <Edit2 className='size-3' />
+                    </button>
+                  )}
+                </div>
+                {editingField === 'displayName' && isOwnProfile ? (
+                  <div className='mt-1 space-y-1'>
+                    <div className='flex items-center gap-2'>
+                      <input
+                        type='text'
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') handleSaveEdit();
+                          if (e.key === 'Escape') handleCancelEdit();
+                        }}
+                        placeholder='Enter display name'
+                        maxLength={50}
+                        className='flex-1 px-2 py-1 text-sm border border-input rounded focus:outline-none focus:border-ring'
+                      />
+                      <button
+                        onClick={handleSaveEdit}
+                        className='p-1 text-green-600 hover:bg-green-50 rounded'
+                        title='Save'
+                      >
+                        <Check className='size-4' />
+                      </button>
+                      <button
+                        onClick={handleCancelEdit}
+                        className='p-1 text-muted-foreground hover:bg-accent rounded'
+                        title='Cancel'
+                      >
+                        <X className='size-4' />
+                      </button>
+                    </div>
+                    {editError && <p className='text-xs text-red-600'>{editError}</p>}
+                  </div>
+                ) : userProfile?.displayName ? (
+                  <div className='text-sm text-foreground mt-1'>{userProfile.displayName}</div>
+                ) : isOwnProfile ? (
+                  <button
+                    onClick={() => handleStartEdit('displayName', userProfile?.displayName)}
+                    className='mt-1 text-sm text-blue-600 hover:text-blue-700'
+                  >
+                    + Add Display Name
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           {/* Phone Number */}
           {userProfile?.phoneNumber || isOwnProfile ? (

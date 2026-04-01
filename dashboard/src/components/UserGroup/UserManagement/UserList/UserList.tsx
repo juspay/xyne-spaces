@@ -11,6 +11,7 @@ import { mutators } from '../../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { Search, Trash2 } from 'lucide-react';
 import { useUserSearch } from '../../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../../utils/userDisplayName';
 
 interface UserListProps {
   users: User[];
@@ -58,7 +59,7 @@ export const UserList = ({
     const searchLower = searchTerm.toLowerCase();
     return users.filter(
       user =>
-        user.name?.toLowerCase().includes(searchLower) ||
+        getUserDisplayName(user).toLowerCase().includes(searchLower) ||
         user.email?.toLowerCase().includes(searchLower),
     );
   }, [users, searchTerm]);
@@ -168,7 +169,7 @@ export const UserList = ({
                         <Avatar userId={user.id} size='sm' showActiveStatus={true} />
                         <div className='flex flex-col min-w-0'>
                           <span className='text-sm font-medium text-foreground truncate'>
-                            {user.name}
+                            {getUserDisplayName(user)}
                           </span>
                           <span className='text-xs text-muted-foreground truncate'>
                             {user.email}
@@ -231,7 +232,7 @@ export const UserList = ({
                         <Avatar userId={user.id} size='sm' showActiveStatus={false} />
                         <div className='flex flex-col min-w-0'>
                           <span className='text-sm font-medium text-foreground truncate'>
-                            {user.name}
+                            {getUserDisplayName(user)}
                           </span>
                           <span className='text-xs text-muted-foreground truncate'>
                             {user.email}

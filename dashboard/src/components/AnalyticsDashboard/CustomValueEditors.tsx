@@ -9,6 +9,7 @@ import { Badge } from '../../components/ui/Badge';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { X, Users, LayoutGrid } from 'lucide-react';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 function getSelectedItems(value: unknown): Array<{ id: string; name: string }> {
   if (!value) return [];
@@ -21,10 +22,15 @@ function getSelectedItems(value: unknown): Array<{ id: string; name: string }> {
   return [];
 }
 
-function getOptionFromUser(user: { id: string; name: string; email?: string }) {
+function getOptionFromUser(user: {
+  id: string;
+  name: string;
+  email?: string;
+  displayName?: string | null;
+}) {
   return {
     value: user.id,
-    label: user.name,
+    label: getUserDisplayName(user),
     ...(user.email && { subtitle: user.email }),
     icon: <Avatar userId={user.id} size='sm' showActiveStatus={false} />,
   };

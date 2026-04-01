@@ -5,6 +5,7 @@ import type { User as UserType } from '../../../machines/stateMachine';
 import { useUsers } from '../../../hooks/useUsers';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { queries } from '../../../zero/queries';
 import type { QueryResultType } from '@rocicorp/zero';
 
@@ -42,7 +43,9 @@ const UserRow = ({
       <div className='flex items-center gap-3 flex-1 min-w-0'>
         <Avatar userId={user.id} size='sm' />
         <div className='min-w-0'>
-          <div className='text-sm font-medium text-foreground truncate'>{user.name}</div>
+          <div className='text-sm font-medium text-foreground truncate'>
+            {getUserDisplayName(user)}
+          </div>
           <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
         </div>
       </div>

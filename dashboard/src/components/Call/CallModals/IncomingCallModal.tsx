@@ -12,6 +12,8 @@ import { mutators } from '../../../zero/mutators';
 import { InvitationResponse, ChannelScopeType } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
+
 import {
   Button,
   ButtonType,
@@ -154,7 +156,7 @@ export function IncomingCallModal(): React.ReactElement | null {
           callId,
           caller: {
             id: inviterUserId ?? '',
-            name: inviterUser?.name ?? 'Unknown',
+            name: getUserDisplayName(inviterUser),
             email: inviterUser?.email ?? '',
             picture: inviterUser?.picture ?? '',
           },
