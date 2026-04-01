@@ -31,7 +31,7 @@ import { redisService } from './redisService';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
 import { config } from '@/config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { messageSchema, fileSchema, SubApp } from '@/vespa/src/types';
+import { messageSchema, fileSchema, SubApp, channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { v4 as uuidv4 } from 'uuid';
@@ -184,6 +184,39 @@ export class ConversationService {
     });
   }
 
+  private async pushVespaJobForChannel(
+    channelId: string,
+    userId: string,
+  ): Promise<void> {
+    vespaQueue.addJob({
+      schema: channelSchema,
+      jobType: 'feed',
+      docId: channelId,
+    }).catch(async (error) => {
+      logger.error(`[ConversationService] Error queuing Vespa job for channel ${channelId}:`, error);
+      // Log failed insertion to Postgres for later retry
+      try {
+        if (db.vespaInsertionLogs) {
+          await db.vespaInsertionLogs.create({
+            data: {
+              status: 'FAILED',
+              type: 'INSERT',
+              entityId: channelId,
+              entityType: channelSchema,
+              namespace: NAMESPACE,
+              errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+              errorDetails: JSON.stringify(error),
+              userId,
+              createdAt: new Date(),
+            },
+          });
+        }
+      } catch (dbError) {
+        logger.error('[ConversationService] Failed to log Vespa channel insertion error to database:', dbError);
+      }
+    });
+  }
+
   private async pushVespaJobForAttachments(
     attachmentIds: string[],
     userId: string
@@ -251,6 +284,10 @@ export class ConversationService {
     if (!isParticipant && !isBot) {
       // Auto-add user as participant when they send first message
       await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+      // Re-index channel in Vespa so permissions/memberCount reflect the new participant
+      this.pushVespaJobForChannel(channelId, userId).catch((error) => {
+        logger.error(`[ConversationService] Error pushing Vespa job for channel ${channelId} after adding participant:`, error);
+      });
     }
 
     // Handle file uploads - either from raw files or pre-uploaded files
@@ -435,6 +472,10 @@ export class ConversationService {
         userId,
         'MEMBER'
       );
+      // Re-index channel in Vespa so permissions/memberCount reflect the new participant
+      this.pushVespaJobForChannel(conversation.channelId, userId).catch((error) => {
+        logger.error(`[ConversationService] Error pushing Vespa job for channel ${conversation.channelId} after adding participant:`, error);
+      });
     }
 
     // Handle file uploads - either from raw files or pre-uploaded files
