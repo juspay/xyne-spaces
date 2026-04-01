@@ -28,6 +28,7 @@ import { DatabaseClient } from '@/database/client';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import {logger} from '@/utils/logger';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -427,13 +428,14 @@ export const initiateInvestigationAndWaitForWebhook = async (
       create: { mid: result.merchant_id },
     });
     
-    await prisma.ticket.update({
+    const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
       data: {
         merchantId: result.merchant_id,
         updatedAt: new Date(),
       },
     });
+    await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
     await storeMerchantIdInForm(ticketId, result.merchant_id);
   }
 
@@ -824,7 +826,7 @@ export const categorizateAndUpdateTicket = async (
     });
   }
 
-  await prisma.ticket.update({
+  const updatedTicket = await prisma.ticket.update({
     where: { id: ticketId },
     data: {
       merchantId: newMerchantId, // Update merchantId from categorization, fallback to existing
@@ -832,6 +834,7 @@ export const categorizateAndUpdateTicket = async (
       updatedAt: new Date(),
     },
   });
+  await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
   if (newPriority) {
     logger.info(`[categorizateAndUpdateTicket] Updated ticket priority to ${newPriority} from severity: ${categorization.Severity}`);
@@ -895,13 +898,14 @@ export const assignTicketByQueryType = async (
     }
 
     // Update ticket with assignedTo
-    await prisma.ticket.update({
+    const updatedTicket = await prisma.ticket.update({
       where: { id: ticketId },
       data: { 
         assignedTo: assignmentResult.assignedUserId,
         userGroupId: userGroup.id,
       },
     });
+    await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
     // Sync workload mapping for the assigned user
     try {

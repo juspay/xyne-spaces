@@ -22,6 +22,7 @@ import {
   deleteExecutionState,
   WorkflowExecutionWithState,
 } from './workflowExecutionStateUtils';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 function buildClaimQuery(workflowType?: string, tags?: string[]): string {
   const tagFilter = tags && tags.length > 0
@@ -86,10 +87,13 @@ export class TicketRepository extends BaseRepository<Ticket, CreateTicketInput, 
   }
 
   async update(id: string, data: UpdateTicketInput): Promise<Ticket> {
-    return await this.db.ticket.update({
+    const updatedTicket = await this.db.ticket.update({
       where: { id },
       data,
     });
+
+    await syncConversationTicketMdFromPrismaTicket(this.db, updatedTicket);
+    return updatedTicket;
   }
 
   async delete(id: string): Promise<Ticket> {

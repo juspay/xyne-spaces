@@ -53,7 +53,7 @@ import {
   isChatMessageType,
   updateReactionsMd,
 } from './messageMetadata';
-import { updateTicketMd } from './ticketMetadata';
+import { updateTicketMdFromZero } from '@xyne/shared';
 
 export type AuthData = {
   sub: string;
@@ -2655,7 +2655,7 @@ export const mutators = defineMutators({
           ...updateData,
         });
 
-        await updateTicketMd(tx, id);
+        await updateTicketMdFromZero(tx, zql, id);
       },
     ),
     updateAssignment: defineMutator(
@@ -2668,7 +2668,7 @@ export const mutators = defineMutators({
           updatedAt: timestamp,
         });
 
-        await updateTicketMd(tx, ticketId);
+        await updateTicketMdFromZero(tx, zql, ticketId);
       },
     ),
   },
@@ -3561,7 +3561,7 @@ export const mutators = defineMutators({
             updatedAt,
           });
 
-          await updateTicketMd(tx, ticket.id);
+          await updateTicketMdFromZero(tx, zql, ticket.id);
 
           // Create message for approval
           const actorName = actor?.name || 'Someone';

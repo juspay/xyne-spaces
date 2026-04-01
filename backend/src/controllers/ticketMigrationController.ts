@@ -3,6 +3,7 @@ import { db } from '@/database/client';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 interface ProjectCodeMapping {
   [projectName: string]: string;
@@ -82,10 +83,12 @@ export class TicketMigrationController {
             const ticket = tickets[i];
             const newId = `${projectCode}-${String(i + 1).padStart(4, '0')}`;
 
-            await db.ticket.update({
+            const updatedTicket = await db.ticket.update({
               where: { id: ticket.id },
               data: { xyneId: newId }
             });
+
+            await syncConversationTicketMdFromPrismaTicket(db, updatedTicket);
 
             // 3. Queue for Search Indexing (Vespa)
             try {

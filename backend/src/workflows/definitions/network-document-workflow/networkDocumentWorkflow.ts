@@ -21,6 +21,7 @@ import { GCSService } from '@/services/gcsService';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
 import { TicketController } from '@/controllers/ticketController';
 import { conversationService } from '@/services/conversationService';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { PDFParse } from 'pdf-parse';
 
 // Typed metadata for network document workflow
@@ -295,13 +296,15 @@ async function autoAssignTicket(
       return { assignedUserId: null, assignmentReason: 'No team members found' };
     }
 
-    await db.ticket.update({
+    const updatedTicket = await db.ticket.update({
       where: { id: ticketResult.ticketId },
       data: { 
         assignedTo: assignmentResult.assignedUserId,
         updatedBy: context.metadata?.systemUserId,
       },
     });
+
+    await syncConversationTicketMdFromPrismaTicket(db, updatedTicket);
 
     return { assignedUserId: assignmentResult.assignedUserId, assignmentReason: assignmentResult.reason };
   } catch (error) {

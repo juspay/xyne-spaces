@@ -7,6 +7,7 @@ import { ticketService } from '@/services/ticketService';
 import { logger } from '@/utils/logger'
 import { TicketStatusV2 } from '@prisma/client'
 import { DatabaseClient } from '@/database/client'
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -123,6 +124,7 @@ export class TicketStatusSyncService {
             updatedAt: new Date()
           }
         })
+        await syncConversationTicketMdFromPrismaTicket(prisma, result)
         logger.info(`[DEBUG] Ticket update completed successfully:`, result)
 
         logger.info(`Ticket ${ticketId} status updated to ${newTicketStatus}`, {

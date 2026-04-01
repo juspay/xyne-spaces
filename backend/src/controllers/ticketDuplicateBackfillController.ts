@@ -7,6 +7,7 @@ import { vespaService } from '@/services/vespaSearch';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import type { TicketDuplicateCandidate, TicketDuplicateCheckAnalysis } from '@/types/ticket';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
 const prisma = DatabaseClient.getInstance();
 const logger = baseLogger.child({ module: 'TicketDuplicateBackfill' });
@@ -339,10 +340,11 @@ export class TicketDuplicateBackfillController {
             stats.duplicatesFound += 1;
             if (!dryRun) {
               try {
-                await prisma.ticket.update({
+                const updatedTicket = await prisma.ticket.update({
                   where: { id: ticket.id },
                   data: { eta: DUPLICATE_DUE_DATE },
                 });
+                await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
                 stats.dueDatesUpdated += 1;
               } catch (error) {
                 logger.error(`Failed to update due date for ticket ${ticket.id}:`, error);
