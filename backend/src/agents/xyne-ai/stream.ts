@@ -412,7 +412,20 @@ const {
 
   logger.info(`[XyneAI] [${session.sessionId}] Using model: ${modelName} (hasImageAttachment: ${hasImageAttachment}, tracingEnabled: ${cacConfig.xyneAiTracingEnabled}, maskingEnabled: ${cacConfig.xyneAiMaskingEnabled})`);
 
-  const onEventHandler = createOnEventHandler(cacConfig);
+  const langfuseHandler = createOnEventHandler(cacConfig);
+  const onEventHandler = (event: Parameters<typeof langfuseHandler>[0]): unknown => {
+    // Coerce double-encoded JSON string args to object before JAF's safeParse runs.
+    // JAF replaces rawArgs with the return value of this callback when non-null/undefined.
+    if (event.type === 'before_tool_execution') {
+      const args = (event.data as { args: unknown }).args;
+      langfuseHandler(event);
+      if (typeof args === 'string') {
+        try { return JSON.parse(args); } catch { /* unparseable — let validation fail normally */ }
+      }
+      return undefined;
+    }
+    return langfuseHandler(event);
+  };
   const runStream = await createAgentRunner(source, agentContext, messages, modelName, apiKey, onEventHandler);
   
   let accumulatedContent = '';
