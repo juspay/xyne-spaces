@@ -49,6 +49,7 @@ const fileMetadataSchema = z.array(z.object({
   thumbnailIndex: z.number().optional(),
   width: z.number().optional(), // Width in pixels (for images/videos)
   height: z.number().optional(), // Height in pixels (for images/videos)
+  duration: z.number().optional(), // Duration in seconds (for videos)
 }));
 
 export class ConversationController {

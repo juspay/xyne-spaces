@@ -456,11 +456,11 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
                 >
                   {isPlaying ? (
                     <Pause
-                      className={`${isImmersiveMode || !isCompactControls ? 'h-5 w-5' : 'h-4 w-4'}`}
+                      className={`${isImmersiveMode || !isCompactControls ? 'h-5 w-5' : 'h-4 w-4'} fill-white`}
                     />
                   ) : (
                     <Play
-                      className={`${isImmersiveMode || !isCompactControls ? 'h-5 w-5' : 'h-4 w-4'}`}
+                      className={`${isImmersiveMode || !isCompactControls ? 'h-5 w-5' : 'h-4 w-4'} fill-white`}
                     />
                   )}
                 </button>

@@ -140,6 +140,7 @@ export class DraftAttachmentController {
         thumbnailIndex: metadata.hasThumbnail ? index : undefined,
         width: metadata.width,
         height: metadata.height,
+        duration: (metadata as { duration?: number }).duration,
       }));
 
       // Use fileUploadService to upload all files
@@ -173,6 +174,7 @@ export class DraftAttachmentController {
             ...(metadata.hasThumbnail && { thumbnailGenerated: true }),
             ...(metadata.width !== undefined && { width: metadata.width }),
             ...(metadata.height !== undefined && { height: metadata.height }),
+            ...((metadata as { duration?: number }).duration !== undefined && { duration: (metadata as { duration?: number }).duration }),
           };
 
           // Use dimensions from fileMetadata first, then from uploadFiles result, then legacy fields

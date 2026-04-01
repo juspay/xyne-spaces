@@ -15,6 +15,7 @@ export interface ThumbnailResult {
   width: number;
   height: number;
   dataUrl: string;
+  duration?: number;
 }
 
 /**
@@ -59,7 +60,13 @@ export async function generateVideoThumbnail(
     };
 
     // Handle video metadata loaded
+    let videoDuration: number | undefined;
     video.onloadedmetadata = (): void => {
+      // Capture duration for metadata
+      if (video.duration && isFinite(video.duration)) {
+        videoDuration = video.duration;
+      }
+
       // Ensure timeOffset is within video duration
       const seekTime = Math.min(timeOffset, video.duration || 0);
 
@@ -103,6 +110,7 @@ export async function generateVideoThumbnail(
               width,
               height,
               dataUrl,
+              ...(videoDuration !== undefined && { duration: videoDuration }),
             });
           },
           'image/jpeg',

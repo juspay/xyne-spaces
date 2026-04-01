@@ -680,6 +680,19 @@ const InlineCodeFile: React.FC<{
 };
 
 /**
+ * Format video duration in seconds to M:SS or H:MM:SS
+ */
+const formatDuration = (seconds: number): string => {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
+/**
  * Inline Video Player with fullscreen option
  * Shows thumbnail first, loads video only when user clicks play
  * On mobile: Opens expanded modal directly instead of inline player
@@ -697,6 +710,7 @@ const InlineVideoPlayer: React.FC<{
   conversationId?: string;
   channelId?: string;
   replyCount?: number;
+  duration?: number | undefined;
 }> = ({
   attachmentId,
   fileName,
@@ -710,6 +724,7 @@ const InlineVideoPlayer: React.FC<{
   conversationId,
   channelId,
   replyCount,
+  duration,
 }) => {
   const [hasClickedPlay, setHasClickedPlay] = useState(false);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
@@ -791,7 +806,7 @@ const InlineVideoPlayer: React.FC<{
       <Menu.Trigger>
         <button
           type='button'
-          className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white group-hover:bg-black/80 transition-colors opacity-0 group-hover:opacity-100'
+          className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white transition-colors opacity-0 group-hover:opacity-100'
           title='More options'
           aria-label='More options'
         >
@@ -892,14 +907,17 @@ const InlineVideoPlayer: React.FC<{
                     }
                   }}
                   onTouchStart={e => e.stopPropagation()}
-                  className='p-1 flex items-center justify-center rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
+                  className='p-1 flex items-center justify-center gap-1 rounded-md bg-black/60 backdrop-blur-sm text-white hover:bg-black/80 transition-colors'
                   title='Play video'
                   aria-label='Play video'
                   data-track-category='MESSAGE_ATTACHMENT'
                   data-track-name='PlayVideoAttachment'
                   data-track-metadata={JSON.stringify({ attachmentId, fileName })}
                 >
-                  <Play className='h-5 w-5' />
+                  <Play className='h-4 w-4 fill-white' />
+                  <span className='font-semibold'>
+                    {duration ? formatDuration(duration) : 'VIDEO'}
+                  </span>
                 </button>
               </div>
               {/* Expand button for desktop */}
@@ -1053,6 +1071,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
 
   // Render inline video player for video files (Slack-like behavior)
   if (isVideo && !compact) {
+    const metadata = attachment.metadata as { duration?: number } | null;
     return (
       <InlineVideoPlayer
         attachmentId={attachment.id}
@@ -1063,6 +1082,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         fileSize={attachment.size}
         height={attachment.height ?? undefined}
         width={attachment.width ?? undefined}
+        duration={metadata?.duration}
         isInGrid={isInGrid}
         {...(conversationId && { conversationId })}
         {...(channelId && { channelId })}

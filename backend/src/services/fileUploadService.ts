@@ -20,6 +20,7 @@ interface FileMetadata {
   thumbnailIndex?: number;
   width?: number; // Width in pixels (from frontend)
   height?: number; // Height in pixels (from frontend)
+  duration?: number; // Duration in seconds (for videos, from frontend)
 }
 
 /**
@@ -152,7 +153,8 @@ export async function uploadFiles(
           gcsPath: gcsResult.gcsPath,
           sanitized: validationResult.sanitizedFilename !== file.originalname,
           validationWarnings: validationResult.warnings,
-          ...(thumbnailUrl && { thumbnailGenerated: true })
+          ...(thumbnailUrl && { thumbnailGenerated: true }),
+          ...(metadata?.duration && { duration: metadata.duration }),
         }
       };
 
