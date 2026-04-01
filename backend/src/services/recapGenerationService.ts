@@ -2,43 +2,41 @@ import { db } from '../database/client';
 import { logger } from '../utils/logger';
 import { redisService } from './redisService';
 import { stripHtml } from '../agents/xyne-ai/tools/helpers';
-import { summarizeThread, type ThreadSummaryInput, type SummarizerContext, type SummaryOutput, type EnhancedEntityMetadata } from '../agents/summariser';
+import {
+  summarizeThread,
+  type ThreadSummaryInput,
+  type SummarizerContext,
+  type SummaryOutput,
+  type EnhancedEntityMetadata,
+} from '../agents/summariser';
 import { calculateUnreadCount } from '../utils/recapUtils';
 
 interface RecapSummary {
   points: Array<{
     text: string;
-    citations: string[]; // Array of message IDs (for direct linking to specific messages)
-    conversationIds?: string[]; // Array of conversation IDs (for navigation context)
+    messageId?: string; // Resolved message ID for direct linking
+    conversationId?: string; // Resolved conversation ID for navigation
+    citationIndex?: number; // The source entity index returned by the agent (for display)
   }>;
   messageCount: number;
-  citationMetadata?: {
-    entityIdMapping: Record<number, string>;
-    entityTypeMapping: Record<number, 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search' | 'email'>;
-    conversationIdMapping: Record<number, string>;
-    messageIdMapping: Record<number, string>;
-    canvasIdMapping: Record<number, string>;
-    callIdMapping: Record<number, string>;
-    ticketIdMapping: Record<number, string>;
-  };
 }
 
-  /**
-   * Get the start and end of day for a given date in IST
-   * @param date - The date in IST
-   * @returns Object with startOfDay (00:00:00) and endOfDay (23:59:59.999) in IST
-   */
-  function getDateRangeInTimezone(date: Date): { startOfDay: Date; endOfDay: Date } {
-    // Create date strings in IST timezone
-    const dateStr = date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD format
-    
-    // Parse as UTC to get the correct IST boundaries
-    // IST is UTC+5:30, so we need to offset by 5:30 hours
-    const startOfDay = new Date(`${dateStr}T00:00:00+05:30`);
-    const endOfDay = new Date(`${dateStr}T23:59:59.999+05:30`);
-    
-    return { startOfDay, endOfDay };
-  }
+/**
+ * Get the start and end of day for a given date in IST
+ * @param date - The date in IST
+ * @returns Object with startOfDay (00:00:00) and endOfDay (23:59:59.999) in IST
+ */
+function getDateRangeInTimezone(date: Date): { startOfDay: Date; endOfDay: Date } {
+  // Create date strings in IST timezone
+  const dateStr = date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD format
+
+  // Parse as UTC to get the correct IST boundaries
+  // IST is UTC+5:30, so we need to offset by 5:30 hours
+  const startOfDay = new Date(`${dateStr}T00:00:00+05:30`);
+  const endOfDay = new Date(`${dateStr}T23:59:59.999+05:30`);
+
+  return { startOfDay, endOfDay };
+}
 
 interface ChannelRecapResult {
   channelId: string;
@@ -49,7 +47,7 @@ interface ChannelRecapResult {
 
 /**
  * Recap Generation Service
- * 
+ *
  * Uses the summarizer agent to generate recaps for channels.
  * Recaps are generated daily by the scheduler and stored in the database.
  */
@@ -57,54 +55,19 @@ export class RecapGenerationService {
   /**
    * Convert SummaryOutput to RecapSummary format with enhanced citation metadata
    */
-  private convertToRecapSummary(output: SummaryOutput, entityMapping?: Map<number, EnhancedEntityMetadata>): RecapSummary {
-    const points = output.keyPoints.map(kp => ({
+  private convertToRecapSummary(output: SummaryOutput): RecapSummary {
+    // Like ask AI: embed resolved IDs directly per point — no separate lookup table needed
+    const points = output.keyPoints.map((kp) => ({
       text: kp.point,
-      // Store messageId in citations for direct linking to specific messages
-      citations: kp.citation.messageId ? [kp.citation.messageId] : [],
-      // Store conversationId separately for navigation context
-      conversationIds: kp.citation.conversationId ? [kp.citation.conversationId] : [],
+      messageId: kp.citation.messageId || undefined,
+      conversationId: kp.citation.conversationId || undefined,
+      citationIndex: kp.citation.messageIndex,
     }));
 
-    const result: RecapSummary = {
+    return {
       points,
       messageCount: output.messageCount,
     };
-
-    // Add enhanced citation metadata if available
-    if (entityMapping && entityMapping.size > 0) {
-      result.citationMetadata = {
-        entityIdMapping: {},
-        entityTypeMapping: {},
-        conversationIdMapping: {},
-        messageIdMapping: {},
-        canvasIdMapping: {},
-        callIdMapping: {},
-        ticketIdMapping: {},
-      };
-
-      for (const [idx, entity] of entityMapping.entries()) {
-        result.citationMetadata.entityIdMapping[idx] = entity.entityId;
-        result.citationMetadata.entityTypeMapping[idx] = entity.entityType;
-        if (entity.conversationId) {
-          result.citationMetadata.conversationIdMapping[idx] = entity.conversationId;
-        }
-        if (entity.messageId) {
-          result.citationMetadata.messageIdMapping[idx] = entity.messageId;
-        }
-        if (entity.canvasId) {
-          result.citationMetadata.canvasIdMapping[idx] = entity.canvasId;
-        }
-        if (entity.callId) {
-          result.citationMetadata.callIdMapping[idx] = entity.callId;
-        }
-        if (entity.ticketId) {
-          result.citationMetadata.ticketIdMapping[idx] = entity.ticketId;
-        }
-      }
-    }
-
-    return result;
   }
 
   /**
@@ -116,11 +79,11 @@ export class RecapGenerationService {
     failed: number;
     results: ChannelRecapResult[];
   }> {
-    const istDate = targetDate.toLocaleDateString('en-IN', { 
+    const istDate = targetDate.toLocaleDateString('en-IN', {
       timeZone: 'Asia/Kolkata',
       year: 'numeric',
       month: '2-digit',
-      day: '2-digit'
+      day: '2-digit',
     });
     logger.info(`Starting recap generation for date: ${istDate} (IST)`);
 
@@ -160,7 +123,7 @@ export class RecapGenerationService {
           const result = await this.generateRecapForChannel(channelId, targetDate);
 
           // Update the result in the array
-          const existingIndex = results.findIndex(r => r.channelId === channelId);
+          const existingIndex = results.findIndex((r) => r.channelId === channelId);
           if (existingIndex !== -1) {
             results[existingIndex] = result;
           }
@@ -170,8 +133,8 @@ export class RecapGenerationService {
       }
     }
 
-    const successful = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
+    const successful = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
 
     logger.info(`Recap generation complete: ${successful} successful, ${failed} failed`);
 
@@ -204,7 +167,7 @@ export class RecapGenerationService {
         distinct: ['userId'],
       });
 
-      const userIds = subscriptions.map(s => s.userId);
+      const userIds = subscriptions.map((s) => s.userId);
       logger.info(`Broadcasting unread count updates to ${userIds.length} subscribed users`);
 
       // Broadcast to each user via Redis pub/sub
@@ -215,7 +178,7 @@ export class RecapGenerationService {
           type: 'recap_unread_count_updated',
           userId,
           data: { count: unreadCount },
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     } catch (error) {
@@ -250,7 +213,7 @@ export class RecapGenerationService {
       },
     });
 
-    return channels.map(c => c.id);
+    return channels.map((c) => c.id);
   }
 
   /**
@@ -284,11 +247,11 @@ export class RecapGenerationService {
       );
 
       if (messages.length === 0) {
-        const istDate = targetDate.toLocaleDateString('en-IN', { 
+        const istDate = targetDate.toLocaleDateString('en-IN', {
           timeZone: 'Asia/Kolkata',
           year: 'numeric',
           month: '2-digit',
-          day: '2-digit'
+          day: '2-digit',
         });
         logger.info(`[Recap] No messages found for channel ${channelId} on ${istDate} (IST)`);
         return {
@@ -312,7 +275,7 @@ export class RecapGenerationService {
       };
 
       const output = await summarizeThread(input, context);
-      const summary = this.convertToRecapSummary(output, entityMapping);
+      const summary = this.convertToRecapSummary(output);
 
       // Persist recap and broadcast to subscribers
       await this.persistRecap(channelId, targetDate, summary);
@@ -347,22 +310,24 @@ export class RecapGenerationService {
         select: { userId: true },
       });
 
-      const userIds = subscriptions.map(s => s.userId);
+      const userIds = subscriptions.map((s) => s.userId);
 
       if (userIds.length === 0) {
         return;
       }
 
-      logger.info(`Broadcasting recap generated event to ${userIds.length} subscribed users for channel ${channelId}`);
+      logger.info(
+        `Broadcasting recap generated event to ${userIds.length} subscribed users for channel ${channelId}`
+      );
 
       // Broadcast to each user via Redis pub/sub
       // The main API server will receive this and emit via WebSocket to connected clients
       for (const userId of userIds) {
-        const istDate = recapDate.toLocaleDateString('en-IN', { 
+        const istDate = recapDate.toLocaleDateString('en-IN', {
           timeZone: 'Asia/Kolkata',
           year: 'numeric',
           month: '2-digit',
-          day: '2-digit'
+          day: '2-digit',
         });
         await redisService.broadcastUserEvent(userId, {
           type: 'recap_generated',
@@ -371,7 +336,7 @@ export class RecapGenerationService {
             channelId,
             date: istDate,
           },
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     } catch (error) {
@@ -397,11 +362,11 @@ export class RecapGenerationService {
     const normalizedDate = new Date(`${dateStr}T00:00:00Z`);
 
     // Display IST date directly
-    const istDisplayDate = normalizedDate.toLocaleDateString('en-IN', { 
+    const istDisplayDate = normalizedDate.toLocaleDateString('en-IN', {
       timeZone: 'Asia/Kolkata',
       year: 'numeric',
       month: '2-digit',
-      day: '2-digit'
+      day: '2-digit',
     });
 
     logger.info(`Persisted recap for channel ${channelId} on ${istDisplayDate} (IST)`);
@@ -440,7 +405,9 @@ export class RecapGenerationService {
     channelId: string;
     channelName: string;
   }> {
-    logger.info(`[Recap] Fetching entities for channel ${channelId} from ${startOfDay.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' })} to ${endOfDay.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' })}`);
+    logger.info(
+      `[Recap] Fetching entities for channel ${channelId} from ${startOfDay.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' })} to ${endOfDay.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' })}`
+    );
 
     // Get all conversations from the channel
     const conversations = await db.conversation.findMany({
@@ -448,7 +415,7 @@ export class RecapGenerationService {
       select: { conversationId: true, channelId: true },
     });
 
-    const conversationIds = conversations.map(c => c.conversationId);
+    const conversationIds = conversations.map((c) => c.conversationId);
 
     if (conversationIds.length === 0) {
       return {
@@ -533,12 +500,12 @@ export class RecapGenerationService {
     });
 
     // Collect all unique user IDs
-    const allUserIds = new Set<string>(allMessages.map(m => m.senderId));
+    const allUserIds = new Set<string>(allMessages.map((m) => m.senderId));
     const users = await db.user.findMany({
       where: { id: { in: Array.from(allUserIds) } },
       select: { id: true, name: true, email: true },
     });
-    const userMap = new Map(users.map(u => [u.id, u]));
+    const userMap = new Map(users.map((u) => [u.id, u]));
 
     // Transform messages to ThreadMessage format
     const threadMessages: any[] = allMessages.map((msg) => {
@@ -598,7 +565,7 @@ export class RecapGenerationService {
 
     // Add messages to entity mapping
     for (const msg of threadMessages) {
-      const originalMsg = allMessages.find(m => m.messageId === msg.id);
+      const originalMsg = allMessages.find((m) => m.messageId === msg.id);
       entityMapping.set(entityIndex++, {
         entityType: 'message',
         entityId: msg.id,
@@ -648,7 +615,9 @@ export class RecapGenerationService {
       });
     }
 
-    logger.info(`[Recap] Fetched ${threadMessages.length} messages, ${attachments.length} attachments, ${canvases.length} canvases, ${calls.length} calls, ${tickets.length} tickets for channel ${channelId}`);
+    logger.info(
+      `[Recap] Fetched ${threadMessages.length} messages, ${attachments.length} attachments, ${canvases.length} canvases, ${calls.length} calls, ${tickets.length} tickets for channel ${channelId}`
+    );
 
     return {
       messages: threadMessages,

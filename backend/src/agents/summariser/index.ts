@@ -226,23 +226,37 @@ function parseAgentOutput(
   
   try {
     const parsed = JSON.parse(jsonContent) as AgentRawOutput;
-    
-    // Parse keypoints from newline-separated string
+
     let keyPoints: KeyPointWithCitation[] = [];
-    if (parsed.keypoints && typeof parsed.keypoints === 'string') {
-      const points = parsed.keypoints
-        .split('\n')
-        .map(p => p.replace(/^[•\-*]\s*/, '').trim())
-        .filter(p => p.length > 0);
-      
-      const citations = parsed.citations || {};
-      
-      keyPoints = points.map((point, index) => {
+
+    // Support both formats:
+    //  - "points": [...] array  (recap prompt format)
+    //  - "keypoints": "..."     newline-separated string (legacy format)
+    const rawPointsArray: string[] = (() => {
+      const anyParsed = parsed as any;
+      if (Array.isArray(anyParsed.points) && anyParsed.points.length > 0) {
+        return anyParsed.points as string[];
+      }
+      if (anyParsed.keypoints && typeof anyParsed.keypoints === 'string') {
+        return anyParsed.keypoints
+          .split('\n')
+          .map((p: string) => p.trim())
+          .filter((p: string) => p.length > 0);
+      }
+      return [];
+    })();
+
+    if (rawPointsArray.length > 0) {
+      const citations = (parsed as any).citations || {};
+
+      keyPoints = rawPointsArray.map((rawPoint: string, index: number) => {
+        // Strip leading bullet characters (•, -, *)
+        const point = rawPoint.replace(/^[•\-*]\s*/, '').trim();
+
         const pointNum = index + 1;
-        const rawCitation = citations[pointNum];
+        const rawCitation = citations[pointNum] ?? citations[String(pointNum)];
         const citationMsgIndex = typeof rawCitation === 'number' ? rawCitation : (typeof rawCitation === 'string' ? parseInt(rawCitation, 10) : 1);
 
-        // NEW: Check for enhanced entity mapping first
         if (entityMapping && entityMapping.has(citationMsgIndex)) {
           const entity = entityMapping.get(citationMsgIndex)!;
           return {
@@ -252,19 +266,16 @@ function parseAgentOutput(
               messageId: entity.messageId || '',
               conversationId: entity.conversationId,
               channelId: entity.channelId,
-
-              // Multi-entity fields
               entityType: entity.entityType,
               entityId: entity.entityId,
               canvasId: entity.canvasId,
               callId: entity.callId,
               ticketId: entity.ticketId,
-              isTicket: entity.entityType === 'ticket',  // Backwards compatibility
+              isTicket: entity.entityType === 'ticket',
             },
           };
         }
 
-        // FALLBACK: Use legacy messageIdMapping
         return {
           point,
           citation: {
@@ -274,12 +285,12 @@ function parseAgentOutput(
         };
       });
     }
-    
+
     return {
       summary: parsed.summary || '',
       keyPoints,
-      participantCount, // Deterministic from input
-      messageCount,     // Deterministic from input
+      participantCount,
+      messageCount,
     };
   } catch (error) {
     throw new Error(`Failed to parse agent output: ${error instanceof Error ? error.message : 'Unknown error'}`);

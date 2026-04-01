@@ -1,31 +1,25 @@
 import { useMemo } from 'react';
-import { CitationMetadata, RecapCard, RecapData } from '../components/RecapPanel/RecapPanel.types';
+import { RecapCard, RecapData } from '../components/RecapPanel/RecapPanel.types';
 import { useCachedQuery } from './useCachedQuery';
 import { queries } from '../zero/queries';
 import { useAllChannels, useUserChannelStatuses } from './useChannels';
 import { ChannelUserStatus, ChannelDailyRecap } from '@xyne/shared';
 
 // Type definitions for recap summary data structure
+// New format: per-point citation data embedded directly (like ask AI)
 interface SummaryPoint {
   text: string;
+  messageId?: string;
+  conversationId?: string;
+  citationIndex?: number;
+  // Legacy fields kept for backwards compat with old DB records
   citations?: string[];
-}
-
-interface LegacySummaryData {
-  messageCount?: number;
-  points?: SummaryPoint[];
-  response?: string;
-  citations?: Record<string, string[]>;
-  messageIds?: Record<string, string>;
-  bullets?: string[];
-  firstMessageId?: string;
-  citationMetadata?: CitationMetadata;
+  conversationIds?: string[];
 }
 
 interface NewFormatSummaryData {
   messageCount?: number;
   points?: SummaryPoint[];
-  citationMetadata?: CitationMetadata;
 }
 
 interface OldFormatSummaryData {
@@ -41,11 +35,7 @@ interface LegacyFormatSummaryData {
   firstMessageId?: string;
 }
 
-type SummaryData =
-  | LegacySummaryData
-  | NewFormatSummaryData
-  | OldFormatSummaryData
-  | LegacyFormatSummaryData;
+type SummaryData = NewFormatSummaryData | OldFormatSummaryData | LegacyFormatSummaryData;
 
 // Get yesterday's date info in IST (optimized single calculation)
 // IMPORTANT: Zero syncs PostgreSQL DateTime as milliseconds, not seconds
@@ -119,57 +109,67 @@ const processRecapCards = (
         totalMessages += summaryData.messageCount || 0;
 
         let summaryPoints: string[] = [];
-        let citations: Record<string, string[]> = {};
-        let messageIds: Record<string, string> = {};
+        // Per-point citation data (like ask AI): point key → { conversationId, messageId }
+        const pointCitations: Record<string, { conversationId?: string; messageId?: string }> = {};
+        const citationIndices: Record<string, number> = {};
         let drilldownInfo: { conversationId: string | null; messageId: string | null } = {
           conversationId: null,
           messageId: null,
         };
-        let citationMetadata: CitationMetadata | undefined = undefined;
 
         if (isNewFormatSummary(summaryData)) {
-          // New format: points array with text and citations
+          // New format: per-point citation data embedded directly (like ask AI)
           summaryPoints = summaryData.points.map(p => p.text || '');
 
-          // Count words in points
           const recapWords = summaryPoints
             .join(' ')
             .split(/\s+/)
             .filter(word => word.length > 0).length;
           totalRecapWords += recapWords;
 
-          // Build citations map from points
           summaryData.points.forEach((p, idx: number) => {
-            if (p.citations && Array.isArray(p.citations)) {
-              citations[`${idx + 1}`] = p.citations;
+            const key = `${idx + 1}`;
+            // New format: messageId/conversationId flat on point
+            // Legacy DB records: messageId in citations[0], conversationId in conversationIds[0]
+            const messageId = p.messageId ?? p.citations?.[0];
+            const conversationId = p.conversationId ?? p.conversationIds?.[0];
+            if (messageId || conversationId) {
+              pointCitations[key] = {
+                ...(messageId && { messageId }),
+                ...(conversationId && { conversationId }),
+              };
+            }
+            if (p.citationIndex !== undefined) {
+              citationIndices[key] = p.citationIndex;
             }
           });
-
-          // Include citationMetadata if available
-          if (summaryData.citationMetadata) {
-            citationMetadata = summaryData.citationMetadata;
-          }
         } else if (isOldFormatSummary(summaryData)) {
-          // Old format: response string with citations
+          // Old format: response string with separate citation/messageId maps
           summaryPoints = summaryData.response
             .split('\n')
             .map(line => line.trim())
             .filter(line => line.match(/^\d+\./))
             .map(line => line.replace(/^\d+\.\s*/, '').trim());
 
-          // Count words in response
           const recapWords = summaryData.response
             .split(/\s+/)
             .filter(word => word.length > 0).length;
           totalRecapWords += recapWords;
 
-          citations = summaryData.citations || {};
-          messageIds = summaryData.messageIds || {};
+          // Map old citation format into pointCitations
+          const oldCitations = summaryData.citations || {};
+          const oldMessageIds = summaryData.messageIds || {};
+          summaryPoints.forEach((_p, idx) => {
+            const key = `${idx + 1}`;
+            const messageId = oldCitations[key]?.[0] ?? oldMessageIds[key];
+            if (messageId) {
+              pointCitations[key] = { messageId };
+            }
+          });
         } else if (isLegacyFormatSummary(summaryData)) {
           // Legacy format
           summaryPoints = summaryData.bullets || [];
 
-          // Count words in recap bullets
           const recapWords = summaryPoints
             .join(' ')
             .split(/\s+/)
@@ -188,12 +188,9 @@ const processRecapCards = (
           summary: summaryPoints,
           messageCount: summaryData.messageCount || 0,
           drilldown: drilldownInfo,
-          citations,
-          messageIds,
+          ...(Object.keys(pointCitations).length > 0 && { pointCitations }),
+          ...(Object.keys(citationIndices).length > 0 && { citationIndices }),
         };
-        if (citationMetadata) {
-          card.citationMetadata = citationMetadata;
-        }
         return card;
       } catch {
         return null;
