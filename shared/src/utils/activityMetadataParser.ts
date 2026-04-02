@@ -1,4 +1,4 @@
-import type { TicketPriority, TicketStatusV2 } from '../zero/schema';
+import type { TicketPriority, TicketStatusV2, MessageType } from '../zero/schema';
 
 /**
  * Unified Parser/Serializer for activity metadata in Markdown format
@@ -406,4 +406,216 @@ export function getUniqueReplierCount(data: RepliesData): number {
  */
 export function getMostRecentReplier(data: RepliesData): string | null {
   return data.repliers[data.repliers.length - 1] || null;
+}
+
+// ==========================================================================
+// INITIAL MESSAGE SNAPSHOT
+// ==========================================================================
+
+export interface InitialMessageSummary {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  msgType: MessageType;
+  hasAttachment: boolean;
+  edited: boolean;
+  isDeleted: boolean;
+  showInChannel: boolean;
+  visibleTo?: string | null;
+  createdAt: number;
+  metadata?: string | null; // JSON stringified
+  nudgeCount?: number | null;
+  isSent: boolean;
+  reactions_md?: string | null;
+  link_preview_md?: string | null;
+  childConversationId?: string | null;
+}
+
+const INITIAL_MESSAGE_BLOCK_START = ':::initialMessage';
+const INITIAL_MESSAGE_BLOCK_END = ':::';
+
+const escapeMessageMdValue = (value: string): string => {
+  return value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+};
+
+const unescapeMessageMdValue = (value: string): string => {
+  return value.replace(/\\(\\|n|r)/g, (_, ch) => {
+    if (ch === '\\') return '\\';
+    if (ch === 'n') return '\n';
+    if (ch === 'r') return '\r';
+    return ch;
+  });
+};
+
+export function parseInitialMessageMd(md: string | null | undefined): InitialMessageSummary | null {
+  if (!md) return null;
+
+  const lines = md.split('\n');
+  let inBlock = false;
+  const summary: Record<string, string> = {};
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === INITIAL_MESSAGE_BLOCK_START) {
+      inBlock = true;
+      continue;
+    }
+
+    if (trimmed === INITIAL_MESSAGE_BLOCK_END) {
+      inBlock = false;
+      continue;
+    }
+
+    if (!inBlock || !trimmed.includes(':')) {
+      continue;
+    }
+
+    const colonIndex = trimmed.indexOf(':');
+    const key = trimmed.slice(0, colonIndex).trim();
+    const rawValue = trimmed.slice(colonIndex + 1).trim();
+    summary[key] = unescapeMessageMdValue(rawValue);
+  }
+
+  if (!summary['messageId']) return null;
+
+  return {
+    messageId: summary['messageId'],
+    conversationId: summary['conversationId'] ?? '',
+    senderId: summary['senderId'] ?? '',
+    content: summary['content'] ?? '',
+    msgType: (summary['msgType'] as MessageType) ?? 'USER',
+    hasAttachment: summary['hasAttachment'] === 'true',
+    edited: summary['edited'] === 'true',
+    isDeleted: summary['isDeleted'] === 'true',
+    showInChannel: summary['showInChannel'] === 'true',
+    visibleTo: summary['visibleTo'] || null,
+    createdAt: Number(summary['createdAt']) || 0,
+    metadata: summary['metadata'] || null,
+    nudgeCount: summary['nudgeCount'] ? Number(summary['nudgeCount']) : null,
+    isSent: summary['isSent'] !== 'false',
+    reactions_md: summary['reactions_md'] || null,
+    link_preview_md: summary['link_preview_md'] || null,
+    childConversationId: summary['childConversationId'] || null,
+  };
+}
+
+export function serializeInitialMessageMd(
+  summary: InitialMessageSummary | null | undefined,
+): string | null {
+  if (!summary || !summary.messageId) return null;
+
+  const lines: string[] = [INITIAL_MESSAGE_BLOCK_START];
+  const entries: Array<[string, string | number | boolean | null | undefined]> = [
+    ['messageId', summary.messageId],
+    ['conversationId', summary.conversationId],
+    ['senderId', summary.senderId],
+    ['content', summary.content],
+    ['msgType', summary.msgType],
+    ['hasAttachment', summary.hasAttachment],
+    ['edited', summary.edited],
+    ['isDeleted', summary.isDeleted],
+    ['showInChannel', summary.showInChannel],
+    ['visibleTo', summary.visibleTo],
+    ['createdAt', summary.createdAt],
+    ['metadata', summary.metadata],
+    ['nudgeCount', summary.nudgeCount],
+    ['isSent', summary.isSent],
+    ['reactions_md', summary.reactions_md],
+    ['link_preview_md', summary.link_preview_md],
+    ['childConversationId', summary.childConversationId],
+  ];
+
+  for (const [key, value] of entries) {
+    if (value === undefined || value === null) continue;
+    const valueString = escapeMessageMdValue(String(value));
+    lines.push(`${key}: ${valueString}`);
+  }
+
+  lines.push(INITIAL_MESSAGE_BLOCK_END);
+  return lines.join('\n');
+}
+
+// ==========================================================================
+// PARENT MESSAGE SNAPSHOT
+// ==========================================================================
+
+export interface ParentMessageSummary {
+  messageId: string;
+  conversationId?: string | null;
+  senderId: string;
+  content: string;
+  msgType: MessageType;
+  createdAt: number;
+}
+
+const PARENT_MESSAGE_BLOCK_START = ':::parentMessage';
+const PARENT_MESSAGE_BLOCK_END = ':::';
+
+export function parseParentMessageMd(md: string | null | undefined): ParentMessageSummary | null {
+  if (!md) return null;
+
+  const lines = md.split('\n');
+  let inBlock = false;
+  const summary: Record<string, string> = {};
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === PARENT_MESSAGE_BLOCK_START) {
+      inBlock = true;
+      continue;
+    }
+
+    if (trimmed === PARENT_MESSAGE_BLOCK_END) {
+      inBlock = false;
+      continue;
+    }
+
+    if (!inBlock || !trimmed.includes(':')) {
+      continue;
+    }
+
+    const colonIndex = trimmed.indexOf(':');
+    const key = trimmed.slice(0, colonIndex).trim();
+    const rawValue = trimmed.slice(colonIndex + 1).trim();
+    summary[key] = unescapeMessageMdValue(rawValue);
+  }
+
+  if (!summary['messageId']) return null;
+
+  return {
+    messageId: summary['messageId'],
+    conversationId: summary['conversationId'] || null,
+    senderId: summary['senderId'] ?? '',
+    content: summary['content'] ?? '',
+    msgType: (summary['msgType'] as MessageType) ?? 'USER',
+    createdAt: Number(summary['createdAt']) || 0,
+  };
+}
+
+export function serializeParentMessageMd(
+  summary: ParentMessageSummary | null | undefined,
+): string | null {
+  if (!summary || !summary.messageId) return null;
+
+  const lines: string[] = [PARENT_MESSAGE_BLOCK_START];
+  const entries: Array<[string, string | number | null | undefined]> = [
+    ['messageId', summary.messageId],
+    ['conversationId', summary.conversationId],
+    ['senderId', summary.senderId],
+    ['content', summary.content],
+    ['msgType', summary.msgType],
+    ['createdAt', summary.createdAt],
+  ];
+
+  for (const [key, value] of entries) {
+    if (value === undefined || value === null) continue;
+    const valueString = escapeMessageMdValue(String(value));
+    lines.push(`${key}: ${valueString}`);
+  }
+
+  lines.push(PARENT_MESSAGE_BLOCK_END);
+  return lines.join('\n');
 }

@@ -1459,6 +1459,8 @@ model Conversation {
   callId            String?  
   replies_md        String?
   ticket_md         String?
+  initial_message_md String?
+  parent_message_md  String?
   createdAt         DateTime @default(now())
 
   // Relations

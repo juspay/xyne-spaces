@@ -9,7 +9,10 @@ import {
   parseRepliesMd,
   serializeRepliesMd,
   addReplyToData,
+  serializeInitialMessageMd,
+  serializeParentMessageMd,
 } from '@xyne/shared';
+import type { InitialMessageSummary, ParentMessageSummary } from '@xyne/shared';
 
 export class MessageMetadataService {
   constructor(private prisma: PrismaClient) {}
@@ -145,6 +148,98 @@ export class MessageMetadataService {
       latestReplyMessageId: latestReply?.messageId ?? null,
       latestReplierId: latestReply?.senderId ?? null
     };
+  }
+  /**
+   * Sync initial_message_md on a conversation from the initial message
+   */
+  async syncInitialMessageMd(conversationId: string): Promise<void> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { conversationId },
+      select: { initialMessageId: true, initial_message_md: true },
+    });
+
+    if (!conversation?.initialMessageId) return;
+
+    const message = await this.prisma.message.findUnique({
+      where: { messageId: conversation.initialMessageId },
+    });
+
+    if (!message) return;
+
+    const summary: InitialMessageSummary = {
+      messageId: message.messageId,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      content: message.content,
+      msgType: message.msgType as InitialMessageSummary['msgType'],
+      hasAttachment: message.hasAttachment,
+      edited: message.edited,
+      isDeleted: message.isDeleted,
+      showInChannel: message.showInChannel,
+      visibleTo: message.visibleTo,
+      createdAt: message.createdAt.getTime(),
+      metadata: message.metadata ? JSON.stringify(message.metadata) : null,
+      nudgeCount: message.nudgeCount,
+      isSent: message.isSent,
+      reactions_md: message.reactions_md,
+      link_preview_md: message.link_preview_md,
+      childConversationId: message.childConversationId,
+    };
+
+    const md = serializeInitialMessageMd(summary);
+    if (conversation.initial_message_md === md) return;
+
+    await this.prisma.conversation.update({
+      where: { conversationId },
+      data: { initial_message_md: md },
+    });
+
+    logger.info('[MessageMetadataService] Synced initial_message_md', { conversationId });
+  }
+
+  /**
+   * Sync parent_message_md on a conversation from the parent message
+   */
+  async syncParentMessageMd(conversationId: string): Promise<void> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { conversationId },
+      select: { parentMessageId: true, parent_message_md: true },
+    });
+
+    if (!conversation?.parentMessageId) return;
+
+    const message = await this.prisma.message.findUnique({
+      where: { messageId: conversation.parentMessageId },
+      select: {
+        messageId: true,
+        conversationId: true,
+        senderId: true,
+        content: true,
+        msgType: true,
+        createdAt: true,
+      },
+    });
+
+    if (!message) return;
+
+    const summary: ParentMessageSummary = {
+      messageId: message.messageId,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      content: message.content,
+      msgType: message.msgType as ParentMessageSummary['msgType'],
+      createdAt: message.createdAt.getTime(),
+    };
+
+    const md = serializeParentMessageMd(summary);
+    if (conversation.parent_message_md === md) return;
+
+    await this.prisma.conversation.update({
+      where: { conversationId },
+      data: { parent_message_md: md },
+    });
+
+    logger.info('[MessageMetadataService] Synced parent_message_md', { conversationId });
   }
 }
 

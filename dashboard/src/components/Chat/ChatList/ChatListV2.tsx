@@ -20,6 +20,7 @@ import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { queryCacheActor } from '../../../machines/queryCacheMachine';
+import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 export type ChatListProps = {
   channelId: string;
@@ -109,11 +110,13 @@ const ChatListV2: React.FC<ChatListProps> = ({
   );
 
   const handleEditLastMessage = useCallback(() => {
-    const result = findLastEditableMessage(conversations, user?.id, conv => conv.initialMessage);
+    const result = findLastEditableMessage(conversations, user?.id, conv =>
+      getInitialMessageFromConversation(conv),
+    );
     if (!result) return;
 
     const { item: conversation, index } = result;
-    const message = conversation.initialMessage;
+    const message = getInitialMessageFromConversation(conversation);
     if (!message) return;
 
     const scrollToConversation = (): void => {
@@ -280,9 +283,10 @@ const ChatListV2: React.FC<ChatListProps> = ({
     if (!scrollState.isAtPosition) return;
 
     const currentLastConversation = conversations[conversations.length - 1];
-    const isLastMessegeMine = currentLastConversation
-      ? currentLastConversation.initialMessage?.senderId === user?.id
-      : false;
+    const lastConvInitMsg = currentLastConversation
+      ? getInitialMessageFromConversation(currentLastConversation)
+      : null;
+    const isLastMessegeMine = lastConvInitMsg ? lastConvInitMsg.senderId === user?.id : false;
     if (isNearBottomRef.current || isLastMessegeMine) {
       setTimeout(() => {
         if (virtuosoRef.current) {
@@ -347,12 +351,11 @@ const ChatListV2: React.FC<ChatListProps> = ({
       if (item.type !== 'conversation') return false;
       if (item.createdAt.getTime() <= lastViewedAt) return false;
       if (item.data.createdBy === user?.id) return false;
-      if (item.data.initialMessage?.senderId === user?.id) return false;
-
-      const message = item.data.initialMessage;
+      const initMsg = getInitialMessageFromConversation(item.data);
+      if (initMsg?.senderId === user?.id) return false;
 
       // For system messages, only show indicator for ticket creation messages
-      if (message?.msgType === MessageType.SYSTEM) {
+      if (initMsg?.msgType === MessageType.SYSTEM) {
         const isTicketMessage = item.data.ticketId !== null;
         if (!isTicketMessage) return false;
       }
@@ -437,7 +440,8 @@ const ChatListV2: React.FC<ChatListProps> = ({
       const conversation = conversations.find(c => c.conversationId === conversationId);
 
       const conversationMetadata = conversation?.metadata as { ticketId?: string } | null;
-      const messageMetadata = conversation?.initialMessage?.metadata as {
+      const convInitMsg = conversation ? getInitialMessageFromConversation(conversation) : null;
+      const messageMetadata = convInitMsg?.metadata as {
         ticketId?: string;
       } | null;
       const ticketId = conversationMetadata?.ticketId || messageMetadata?.ticketId;

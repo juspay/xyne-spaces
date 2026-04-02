@@ -42,6 +42,8 @@ export interface ConversationWithTicket extends Conversation {
         [key: string]: unknown;
       }
     | undefined;
+  initialMessageAttachments?: readonly MessageAttachment[] | undefined;
+  initialMessageNudgeCounts?: readonly MessageNudgeCountRow[] | undefined;
 }
 
 export interface MessageBubbleProps {

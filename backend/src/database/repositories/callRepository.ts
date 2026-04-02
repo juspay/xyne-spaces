@@ -4,6 +4,7 @@ import { CallOrigin, CallStatus, CallType, InvitationResponse, type Call, type C
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
+import { messageMetadataService } from '@/services/messageMetadataService';
 
 export type { Call, CallParticipant };
 
@@ -678,6 +679,8 @@ export class CallRepository {
   }): Promise<void> {
     const { call: callParam, initiatorName, now } = params;
 
+    let newConversationId: string | null = null;
+
     await DatabaseClient.getInstance().$transaction(async (tx) => {
       // Re-read the call inside the transaction to ensure fresh data
       const call = await tx.call.findUnique({
@@ -697,6 +700,7 @@ export class CallRepository {
         // First join: create conversation + system message, then activate
         const conversationId = uuidv4();
         const messageId = uuidv4();
+        newConversationId = conversationId;
 
         await this.createConversationAndSystemMessage(tx, {
           conversationId,
@@ -744,6 +748,10 @@ export class CallRepository {
         }
       }
     });
+
+    if (newConversationId) {
+      await messageMetadataService.syncInitialMessageMd(newConversationId);
+    }
   }
 
   /**
@@ -784,7 +792,7 @@ export class CallRepository {
 
     const isHeadless = callType === CallType.HEADLESS;
 
-    return await DatabaseClient.getInstance().$transaction(async (tx) => {
+    const result = await DatabaseClient.getInstance().$transaction(async (tx) => {
       // Create the call record with ACTIVE status
       const call = await tx.call.create({
         data: {
@@ -901,6 +909,11 @@ export class CallRepository {
 
       return { call, invitedParticipantIds };
     });
+
+    // Sync initial_message_md after transaction commits (conversation + message now visible)
+    await messageMetadataService.syncInitialMessageMd(conversationId);
+
+    return result;
   }
 
   /**

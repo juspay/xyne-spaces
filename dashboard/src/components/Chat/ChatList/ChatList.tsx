@@ -15,6 +15,7 @@ import Button from '../../ui/Button';
 import { ArrowDown } from 'lucide-react';
 import { ChannelScopeType } from '@xyne/shared';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 type ChatListProps = {
   channelId: string;
@@ -53,7 +54,14 @@ const ChatList = ({
     queries.channelAndThreadMessagesV2({ channelId }),
   );
   const combinedMessages = useMemo((): CombinedMessageItem[] => {
-    return combineMessages(messages, replyToChannelThreadMessages);
+    // messages comes from channelConversationsV2 but combineMessages expects channelConversationsPaginatedV2;
+    // the two types share all fields used by combineMessages, so the cast is safe.
+    return combineMessages(
+      messages as unknown as
+        | QueryResultType<typeof queries.channelConversationsPaginatedV2>
+        | undefined,
+      replyToChannelThreadMessages,
+    );
   }, [messages, replyToChannelThreadMessages]);
 
   const messagesWithDateSeparators = useMemo((): ChatListItemWithSeparator[] => {
@@ -175,11 +183,15 @@ const ChatList = ({
       isFromCurrentUser = latestMessage.data.createdBy === user?.id;
       isSystemMessageForMentions =
         latestMessage.data.createdBy === 'user' &&
-        typeof latestMessage.data.initialMessage?.metadata === 'object' &&
-        latestMessage.data.initialMessage?.metadata !== null &&
-        (latestMessage.data.initialMessage.metadata as Record<string, unknown>)[
-          'messageSubtype'
-        ] === 'user_not_in_channel';
+        (() => {
+          const initMsg = getInitialMessageFromConversation(latestMessage.data);
+          return (
+            typeof initMsg?.metadata === 'object' &&
+            initMsg?.metadata !== null &&
+            (initMsg.metadata as Record<string, unknown>)['messageSubtype'] ===
+              'user_not_in_channel'
+          );
+        })();
     } else {
       isFromCurrentUser = latestMessage.data.senderId === user?.id;
     }

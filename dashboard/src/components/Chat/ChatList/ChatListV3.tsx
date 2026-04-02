@@ -25,6 +25,7 @@ import { queryCacheActor } from '../../../machines/queryCacheMachine';
 import LoadingAnimation from '../Loader/Loader';
 import { getDraft } from '../../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
+import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 export type ChatListProps = {
   channelId: string;
@@ -130,9 +131,9 @@ function computeNewConvIdx(
     if (item.type !== 'conversation') return false;
     if (item.createdAt.getTime() <= lastViewedAt) return false;
     if (item.data.createdBy === userId) return false;
-    if (item.data.initialMessage?.senderId === userId) return false;
-    const msg = item.data.initialMessage;
-    if (msg?.msgType === MessageType.SYSTEM && item.data.ticketId === null) return false;
+    const initMsg = getInitialMessageFromConversation(item.data);
+    if (initMsg?.senderId === userId) return false;
+    if (initMsg?.msgType === MessageType.SYSTEM && item.data.ticketId === null) return false;
     return true;
   });
 }
@@ -468,7 +469,8 @@ const ChatListV3: React.FC<ChatListProps> = ({
     if (!isInitialLoadComplete) return;
     const last = conversations[conversations.length - 1];
     if (!last || last.conversationId === lastAutoScrolledIdRef.current) return;
-    const isOwnMessage = last.initialMessage?.senderId === user?.id;
+    const lastInitMsg = getInitialMessageFromConversation(last);
+    const isOwnMessage = lastInitMsg?.senderId === user?.id;
     if (isNearBottomRef.current || isOwnMessage) {
       lastAutoScrolledIdRef.current = last.conversationId;
       setTimeout(() => {
@@ -582,7 +584,8 @@ const ChatListV3: React.FC<ChatListProps> = ({
       const conversation = conversations.find(c => c.conversationId === conversationId);
 
       const conversationMetadata = conversation?.metadata as { ticketId?: string } | null;
-      const messageMetadata = conversation?.initialMessage?.metadata as {
+      const initMsg = conversation ? getInitialMessageFromConversation(conversation) : null;
+      const messageMetadata = initMsg?.metadata as {
         ticketId?: string;
       } | null;
       const ticketId = conversationMetadata?.ticketId || messageMetadata?.ticketId;
@@ -606,11 +609,13 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 
   const handleEditLastMessage = useCallback(() => {
-    const result = findLastEditableMessage(conversations, user?.id, conv => conv.initialMessage);
+    const result = findLastEditableMessage(conversations, user?.id, conv =>
+      getInitialMessageFromConversation(conv),
+    );
     if (!result) return;
 
     const { item: conversation, index } = result;
-    const message = conversation.initialMessage;
+    const message = getInitialMessageFromConversation(conversation);
     if (!message) return;
 
     const scrollToConversation = (): void => {

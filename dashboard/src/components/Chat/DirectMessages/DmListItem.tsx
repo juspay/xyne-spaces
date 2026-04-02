@@ -17,6 +17,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { Conversation } from '../../../machines/stateMachine';
+import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 interface DmListItemProps {
   channel: Channel;
@@ -46,7 +47,14 @@ export const DmListItem = ({
 
   // Use the provided latestConversation prop (from batched query in parent)
   // instead of making individual queries per DM channel
-  const lastMessage = latestConversation?.initialMessage;
+  const lastMessage = latestConversation
+    ? (getInitialMessageFromConversation(latestConversation) ??
+      (
+        latestConversation as {
+          initialMessage?: { content: string; senderId: string; createdAt: number };
+        }
+      )?.initialMessage)
+    : undefined;
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
 
@@ -69,6 +77,7 @@ export const DmListItem = ({
 
     // Handle forwarded messages - content is XML, need to parse it
     if (
+      'msgType' in lastMessage &&
       lastMessage.msgType === MessageType.FORWARDED &&
       isForwardedMessageXml(lastMessage.content)
     ) {
@@ -80,7 +89,10 @@ export const DmListItem = ({
     }
 
     let content =
-      lastMessage.content || (lastMessage.attachments?.length ? 'Sent an attachment' : 'Message');
+      lastMessage.content ||
+      ('attachments' in lastMessage && lastMessage.attachments?.length
+        ? 'Sent an attachment'
+        : 'Message');
 
     // Clean any HTML tags from the message
     content = stripHtml(content);

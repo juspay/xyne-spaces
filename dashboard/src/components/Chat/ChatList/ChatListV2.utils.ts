@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { CombinedMessageItem, shouldShowAvatar } from './ChatListUtils';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { MessageType, parseReactionsMd } from '@xyne/shared';
+import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 type CombinedMesseges = {
   combinedMessages: CombinedMessageItem[];
@@ -115,7 +116,7 @@ export function estimateMessageHeight(
   // useCombinedMesseges – those come from GroupedVirtuoso group headers).
   if (item.type !== 'conversation') return 60;
 
-  const message = item.data.initialMessage;
+  const message = getInitialMessageFromConversation(item.data);
   if (!message) return 40;
 
   const metadata = message.metadata as MessageMetadata | null;

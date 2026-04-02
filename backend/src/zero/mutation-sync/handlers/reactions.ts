@@ -6,7 +6,9 @@ import {
   parseReactionsMd,
   removeReactionFromData,
   serializeReactionsMd,
+  serializeInitialMessageMd,
 } from '@xyne/shared';
+import type { InitialMessageSummary } from '@xyne/shared';
 import type { ReactionPreviousValue } from '../types';
 import { BaseMutationSyncHandler } from '../base-handler';
 
@@ -22,6 +24,49 @@ export class ReactionsMutationSyncHandler extends BaseMutationSyncHandler {
   ): Promise<void> {
     await handleReactionDelete(args, tx, previousValue);
   }
+}
+
+async function syncInitialMessageMdAfterReaction(
+  messageId: string,
+  updatedReactionsMd: string | null,
+  tx: Transaction<Schema>,
+): Promise<void> {
+  const message = await tx.run(zql.messages.where('messageId', messageId).one());
+  if (!message) return;
+
+  const conversation = await tx.run(
+    zql.conversations.where('conversationId', message.conversationId).one()
+  );
+
+  if (!conversation || conversation.initialMessageId !== message.messageId) return;
+
+  const summary: InitialMessageSummary = {
+    messageId: message.messageId,
+    conversationId: message.conversationId,
+    senderId: message.senderId,
+    content: message.content,
+    msgType: message.msgType,
+    hasAttachment: message.hasAttachment,
+    edited: message.edited,
+    isDeleted: message.isDeleted,
+    showInChannel: message.showInChannel,
+    visibleTo: message.visibleTo,
+    createdAt: message.createdAt,
+    metadata: message.metadata ? JSON.stringify(message.metadata) : null,
+    nudgeCount: message.nudgeCount,
+    isSent: message.isSent,
+    reactions_md: updatedReactionsMd,
+    link_preview_md: message.link_preview_md,
+    childConversationId: message.childConversationId,
+  };
+
+  const md = serializeInitialMessageMd(summary);
+  if (conversation.initial_message_md === md) return;
+
+  await tx.mutate.conversations.update({
+    conversationId: conversation.conversationId,
+    initial_message_md: md,
+  });
 }
 
 async function handleReactionInsert(
@@ -56,6 +101,9 @@ async function handleReactionInsert(
     reactions_md: updatedMd,
   });
 
+  // Sync initial_message_md if this is the initial message
+  await syncInitialMessageMdAfterReaction(messageId, updatedMd, tx);
+
   return;
 }
 
@@ -82,6 +130,9 @@ async function handleReactionDelete(
     messageId: reaction.messageId,
     reactions_md: updatedMd,
   });
+
+  // Sync initial_message_md if this is the initial message
+  await syncInitialMessageMdAfterReaction(reaction.messageId, updatedMd, tx);
 
   return;
 }

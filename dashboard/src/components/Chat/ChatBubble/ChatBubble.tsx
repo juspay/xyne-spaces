@@ -67,6 +67,10 @@ import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
 import DOMPurify from 'dompurify';
 import { CallParticipantsSelectionModal } from '../../Call/CallParticipantsSelectionModal';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
+import {
+  getInitialMessageFromConversation,
+  getParentMessageFromConversation,
+} from '../../../utils/conversationMessageHelpers';
 
 export interface ThreadData {
   replyCount: number;
@@ -622,10 +626,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const SHOW_IN_CHANNEL_REPLY_COUNT_CHECK = 1;
 
-  // Access parent message through conversation relationship
-  const parentMessage = (
-    conversation as { parentMessage?: { content: string; conversationId?: string } } | undefined
-  )?.parentMessage;
+  // Access parent message through denormalized parent_message_md
+  const parentMessage = conversation
+    ? (getParentMessageFromConversation(conversation) ??
+      (conversation as { parentMessage?: { content: string; conversationId?: string } })
+        ?.parentMessage)
+    : undefined;
 
   const threadPreviewText =
     isShowInChannel && parentMessage?.content ? createMessagePreview(parentMessage.content) : null;
@@ -959,11 +965,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         <SubTicketModal
           isOpen={isSubTicketModalOpen}
           onClose={() => setIsSubTicketModalOpen(false)}
-          ticketId={
-            ((conversation.initialMessage?.metadata as Record<string, unknown>)?.[
-              'ticketId'
-            ] as string) || ''
-          }
+          ticketId={(() => {
+            const initMsg =
+              getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
+            return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
+          })()}
           conversationId={conversation.conversationId}
         />
       )}

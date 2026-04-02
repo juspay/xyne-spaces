@@ -4,6 +4,7 @@
 import { Bucket } from '@google-cloud/storage';
 import { config } from '@/config/env.js';
 import { logger } from '@/utils/logger.js';
+import { messageMetadataService } from '@/services/messageMetadataService';
 import { ChannelRepository } from '@/database/repositories/channelRepository.js';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository.js';
 import { ConversationRepository } from '@/database/repositories/conversationRepository.js';
@@ -595,6 +596,7 @@ export class DocsService {
                 channelId,
             },
         });
+        await messageMetadataService.syncInitialMessageMd(conversationId);
 
         logger.info(`[DocsService] Created docs notification for user ${userId}`);
     }
@@ -817,6 +819,7 @@ export class DocsService {
                     title,
                 },
             });
+            await messageMetadataService.syncInitialMessageMd(conversationId);
 
             logger.info(`[DocsService] Shared doc to channel ${targetChannelId}`);
 

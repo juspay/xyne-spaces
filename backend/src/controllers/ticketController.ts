@@ -27,6 +27,7 @@ import { randomUUID } from 'crypto';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
@@ -587,6 +588,7 @@ export class TicketController {
             msgType: 'SYSTEM',
             metadata: { ticketId: ticket.id },
           }, initialMessageId);
+          await messageMetadataService.syncInitialMessageMd(conversationId);
 
           const ticketMd = serializeTicketMd({
             id: ticket.id,

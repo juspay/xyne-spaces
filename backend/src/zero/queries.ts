@@ -1274,26 +1274,15 @@ export const queries = defineQueries({
     ({ ctx, args: { channelId, limit, start, direction } }) => {
       let query = zql.conversations
         .where('channelId', channelId)
-        .related('initialMessage', initialMessageQuery =>
-          initialMessageQuery
-            .where(helpers => {
-              return helpers.or(
-                helpers.cmp('visibleTo', 'IS', null),
-                helpers.cmp('visibleTo', '=', ctx.userID),
-              );
-            })
-            .related('attachments')
-            .related('nudgeCounts', nudgeCountsQuery =>
-              nudgeCountsQuery
-                .where(helpers =>
-                  helpers.or(
-                    helpers.cmp('userId', '=', ctx.userID),
-                    helpers.cmp('channelId', '=', channelId),
-                  ),
-                )
+        .related('initialMessageAttachments')
+        .related('initialMessageNudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', '=', channelId),
             ),
-        )
-        .related('parentMessage');
+          ),
+        );
 
       // Apply ordering based on direction
       const orderDirection = direction === 'forward' ? 'desc' : 'asc';
@@ -1345,18 +1334,15 @@ export const queries = defineQueries({
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
-        .related('initialMessage', initialMessageQuery =>
-          initialMessageQuery
-            .where(helpers => {
-              return helpers.or(
-                helpers.cmp('visibleTo', 'IS', null),
-                helpers.cmp('visibleTo', '=', ctx.userID),
-              );
-            })
-            .related('attachments'),
+        .related('initialMessageAttachments')
+        .related('initialMessageNudgeCounts', nudgeCountsQuery =>
+          nudgeCountsQuery.where(helpers =>
+            helpers.or(
+              helpers.cmp('userId', '=', ctx.userID),
+              helpers.cmp('channelId', '=', channelId),
+            ),
+          ),
         )
-        .related('parentMessage')
-        .related('ticket')
         .orderBy('createdAt', 'desc')
         .limit(limit);
     },

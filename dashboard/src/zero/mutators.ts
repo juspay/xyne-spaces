@@ -45,14 +45,73 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  serializeInitialMessageMd,
+  serializeParentMessageMd,
 } from '@xyne/shared';
+import type { MessageType as MessageTypeEnum } from '@xyne/shared';
 import { extractAllMentions } from '../utils/mentionParser';
 import { z } from 'zod';
+
+/** Build initial_message_md from message data. Single helper for all conversation creation sites. */
+function buildInitialMessageMd(msg: {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  msgType: MessageTypeEnum;
+  hasAttachment?: boolean;
+  showInChannel?: boolean;
+  visibleTo?: string | null;
+  createdAt: number;
+  metadata?: unknown;
+  childConversationId?: string | null;
+}): string | null {
+  return serializeInitialMessageMd({
+    messageId: msg.messageId,
+    conversationId: msg.conversationId,
+    senderId: msg.senderId,
+    content: msg.content,
+    msgType: msg.msgType,
+    hasAttachment: msg.hasAttachment ?? false,
+    edited: false,
+    isDeleted: false,
+    showInChannel: msg.showInChannel ?? false,
+    visibleTo: msg.visibleTo ?? null,
+    createdAt: msg.createdAt,
+    metadata: msg.metadata ? JSON.stringify(msg.metadata) : null,
+    nudgeCount: null,
+    isSent: false,
+    reactions_md: null,
+    link_preview_md: null,
+    childConversationId: msg.childConversationId ?? null,
+  });
+}
+
+/** Build parent_message_md from an existing message row. */
+function buildParentMessageMd(msg: {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  msgType: MessageTypeEnum;
+  createdAt: number;
+}): string | null {
+  return serializeParentMessageMd({
+    messageId: msg.messageId,
+    conversationId: msg.conversationId,
+    senderId: msg.senderId,
+    content: msg.content,
+    msgType: msg.msgType,
+    createdAt: msg.createdAt,
+  });
+}
 import { zql } from './queries';
 import {
   buildRepliesMdFromMessages,
   isChatMessageType,
   updateReactionsMd,
+  updateInitialMessageMdField,
+  updateInitialMessageMdReaction,
 } from './messageMetadata';
 import { updateTicketMdFromZero } from '@xyne/shared';
 
@@ -814,6 +873,7 @@ export const mutators = defineMutators({
         });
 
         const now = timestamp;
+        const systemMessageContent = `set the channel description to: ${description}`;
 
         // Create conversation for the system message
         await tx.mutate.conversations.insert({
@@ -826,10 +886,15 @@ export const mutators = defineMutators({
           pinned: false,
           metadata: undefined,
           createdAt: now,
+          initial_message_md: buildInitialMessageMd({
+            messageId,
+            conversationId,
+            senderId: ctx.userID,
+            content: systemMessageContent,
+            msgType: MessageType.SYSTEM,
+            createdAt: now,
+          }),
         });
-
-        // Create the system message
-        const systemMessageContent = `set the channel description to: ${description}`;
 
         await tx.mutate.messages.insert({
           messageId,
@@ -948,6 +1013,7 @@ export const mutators = defineMutators({
         }
 
         const now = timestamp;
+        const systemMessageContent = `changed ${targetUser.name}'s role to ${newRole}`;
 
         // Create conversation for the system message
         await tx.mutate.conversations.insert({
@@ -960,10 +1026,15 @@ export const mutators = defineMutators({
           pinned: false,
           metadata: undefined,
           createdAt: now,
+          initial_message_md: buildInitialMessageMd({
+            messageId,
+            conversationId,
+            senderId: ctx.userID,
+            content: systemMessageContent,
+            msgType: MessageType.SYSTEM,
+            createdAt: now,
+          }),
         });
-
-        // Create the system message
-        const systemMessageContent = `changed ${targetUser.name}'s role to ${newRole}`;
 
         await tx.mutate.messages.insert({
           messageId,
@@ -1056,27 +1127,12 @@ export const mutators = defineMutators({
 
         const now = timestamp;
 
-        await tx.mutate.conversations.insert({
-          conversationId,
-          channelId,
-          createdBy: ctx.userID,
-          initialMessageId: messageId,
-          lastActivityAt: now,
-          replyCount: 0,
-          pinned: false,
-          metadata: {},
-          createdAt: now,
-        });
-
-        // Query for drafts in this channel for this user (follows backend logic)
+        // Query for drafts first to determine hasAttachments before conversation insert
         const channelDrafts = await tx.run(
           zql.draft_messages.where('channelId', channelId).where('userId', ctx.userID),
         );
-
-        // Find the channel-level draft (conversationId === null)
         const draft = channelDrafts.find(d => d.conversationId === null);
 
-        // Transfer attachments from draft to message if found
         let hasAttachments = false;
         if (draft) {
           const draftAttachments = await tx.run(
@@ -1103,6 +1159,27 @@ export const mutators = defineMutators({
             id: draft.id,
           });
         }
+
+        await tx.mutate.conversations.insert({
+          conversationId,
+          channelId,
+          createdBy: ctx.userID,
+          initialMessageId: messageId,
+          lastActivityAt: now,
+          replyCount: 0,
+          pinned: false,
+          metadata: {},
+          createdAt: now,
+          initial_message_md: buildInitialMessageMd({
+            messageId,
+            conversationId,
+            senderId: ctx.userID,
+            content: content.trim(),
+            msgType: type,
+            hasAttachment: hasAttachments,
+            createdAt: now,
+          }),
+        });
 
         await tx.mutate.messages.insert({
           messageId,
@@ -1150,6 +1227,7 @@ export const mutators = defineMutators({
           content: content,
           edited: true,
         });
+        await updateInitialMessageMdField(tx, { messageId }, { content, edited: true });
       },
     ),
     togglePin: defineMutator(
@@ -1258,6 +1336,18 @@ export const mutators = defineMutators({
 
         const now = timestamp;
 
+        // Create XML content for the forwarded message
+        const xmlContent = createForwardedMessageXml({
+          originalMessageId,
+          originalSenderId: originalMessage.senderId,
+          originalSenderName: originalSender?.name || 'Unknown User',
+          originalCreatedAt: originalMessage.createdAt,
+          originalChannelId: originalConversation?.channelId || null,
+          originalConversationId: originalMessage.conversationId,
+          optionalText: optionalMessage || null,
+          content: forwardedContent,
+        });
+
         // Create conversation for the forwarded message
         await tx.mutate.conversations.insert({
           conversationId,
@@ -1269,18 +1359,15 @@ export const mutators = defineMutators({
           pinned: false,
           metadata: {},
           createdAt: now,
-        });
-
-        // Create XML content for the forwarded message
-        const xmlContent = createForwardedMessageXml({
-          originalMessageId,
-          originalSenderId: originalMessage.senderId,
-          originalSenderName: originalSender?.name || 'Unknown User',
-          originalCreatedAt: originalMessage.createdAt,
-          originalChannelId: originalConversation?.channelId || null,
-          originalConversationId: originalMessage.conversationId,
-          optionalText: optionalMessage || null,
-          content: forwardedContent,
+          initial_message_md: buildInitialMessageMd({
+            messageId,
+            conversationId,
+            senderId: ctx.userID,
+            content: xmlContent,
+            msgType: MessageType.FORWARDED,
+            hasAttachment: forwardedHasAttachment,
+            createdAt: now,
+          }),
         });
 
         // Update user's last viewed time
@@ -1616,6 +1703,10 @@ export const mutators = defineMutators({
             throw new Error('Child conversation ID is required when showInChannel is true');
           }
 
+          const parentMsg = await tx.run(
+            zql.messages.where('messageId', conversation.initialMessageId).one(),
+          );
+
           await tx.mutate.conversations.insert({
             conversationId: childConversationId,
             channelId: conversation.channelId,
@@ -1626,6 +1717,18 @@ export const mutators = defineMutators({
             replyCount: 0,
             pinned: false,
             createdAt: timestamp,
+            initial_message_md: buildInitialMessageMd({
+              messageId,
+              conversationId,
+              senderId: ctx.userID,
+              content: content.trim(),
+              msgType: type,
+              hasAttachment: hasAttachments,
+              showInChannel: true,
+              createdAt: timestamp,
+              childConversationId,
+            }),
+            parent_message_md: parentMsg ? buildParentMessageMd(parentMsg) : null,
           });
         }
 
@@ -1693,6 +1796,11 @@ export const mutators = defineMutators({
                 content: updatedXmlContent,
                 edited: true,
               });
+              await updateInitialMessageMdField(
+                tx,
+                { messageId },
+                { content: updatedXmlContent, edited: true },
+              );
             }
           } else {
             // For regular messages, update the content directly
@@ -1701,6 +1809,7 @@ export const mutators = defineMutators({
               content,
               edited: true,
             });
+            await updateInitialMessageMdField(tx, { messageId }, { content, edited: true });
           }
         }
       },
@@ -1761,6 +1870,10 @@ export const mutators = defineMutators({
 
         const hasNewerReplies = messagesAfterThis.length > 0;
 
+        const parentMsgRow = await tx.run(
+          zql.messages.where('messageId', conversation.initialMessageId).one(),
+        );
+
         // Create a new conversation for this message in the channel (like send does)
         await tx.mutate.conversations.insert({
           conversationId: childConversationId,
@@ -1772,6 +1885,18 @@ export const mutators = defineMutators({
           replyCount: hasNewerReplies ? 1 : 0,
           pinned: false,
           createdAt: timestamp,
+          initial_message_md: buildInitialMessageMd({
+            messageId,
+            conversationId: message.conversationId,
+            senderId: message.senderId,
+            content: message.content,
+            msgType: message.msgType,
+            hasAttachment: message.hasAttachment,
+            showInChannel: true,
+            createdAt: message.createdAt,
+            childConversationId,
+          }),
+          parent_message_md: parentMsgRow ? buildParentMessageMd(parentMsgRow) : null,
         });
 
         // Update the message with the child conversation ID
@@ -1779,6 +1904,7 @@ export const mutators = defineMutators({
           messageId,
           childConversationId: childConversationId,
         });
+        await updateInitialMessageMdField(tx, { messageId }, { childConversationId });
       },
     ),
     react: defineMutator(
@@ -1836,6 +1962,8 @@ export const mutators = defineMutators({
           }
 
           await updateReactionsMd(tx, messageId, decodedEmoji, ctx.userID, 'add');
+          // Sync initial_message_md — compute new reactions_md from the conversation's existing md
+          await updateInitialMessageMdReaction(tx, messageId, decodedEmoji, ctx.userID, 'add');
         } else if (action === 'remove') {
           const reactionRow = await tx.run(
             zql.reactions
@@ -1847,7 +1975,7 @@ export const mutators = defineMutators({
 
           if (!reactionRow) {
             await updateReactionsMd(tx, messageId, decodedEmoji, ctx.userID, 'remove');
-
+            await updateInitialMessageMdReaction(tx, messageId, decodedEmoji, ctx.userID, 'remove');
             return;
           }
 
@@ -1865,6 +1993,7 @@ export const mutators = defineMutators({
           }
 
           await updateReactionsMd(tx, messageId, decodedEmoji, ctx.userID, 'remove');
+          await updateInitialMessageMdReaction(tx, messageId, decodedEmoji, ctx.userID, 'remove');
         }
       },
     ),
@@ -2064,6 +2193,11 @@ export const mutators = defineMutators({
             hasAttachment: false,
             edited: false,
           });
+          await updateInitialMessageMdField(
+            tx,
+            { messageId },
+            { isDeleted: true, content: '', hasAttachment: false, edited: false },
+          );
         } else {
           // SCENARIO 2: Hard Delete (Reply OR Root with no replies)
           await tx.mutate.messages.delete({ messageId });
@@ -2141,6 +2275,11 @@ export const mutators = defineMutators({
                 messageId: attachment.entityId,
                 hasAttachment: false,
               });
+              await updateInitialMessageMdField(
+                tx,
+                { messageId: attachment.entityId },
+                { hasAttachment: false },
+              );
             }
           }
         } else {
@@ -2178,6 +2317,11 @@ export const mutators = defineMutators({
                 messageId: attachment.entityId,
                 hasAttachment: false,
               });
+              await updateInitialMessageMdField(
+                tx,
+                { messageId: attachment.entityId },
+                { hasAttachment: false },
+              );
             } else {
               await tx.mutate.draft_messages.update({
                 id: attachment.entityId,

@@ -1161,6 +1161,8 @@ export const conversationTable = table("conversations")
     callId: string().optional(),
     replies_md: string().optional(), // Markdown format replies data
     ticket_md: string().optional(), // Markdown format ticket card data
+    initial_message_md: string().optional(), // Markdown format initial message data
+    parent_message_md: string().optional(), // Markdown format parent message data
     createdAt: number(),
   })
   .primaryKey("conversationId");
@@ -2552,6 +2554,16 @@ export const conversationTableRelationships = relationships(conversationTable, (
     sourceField: ['callId'],
     destField: ['externalId'],
     destSchema: callTable,
+  }),
+  initialMessageAttachments: many({
+    sourceField: ['initialMessageId'],
+    destField: ['entityId'],
+    destSchema: messageAttachmentTable,
+  }),
+  initialMessageNudgeCounts: many({
+    sourceField: ['initialMessageId'],
+    destField: ['messageId'],
+    destSchema: surfaceNudgeCountTable,
   }),
 }));
 

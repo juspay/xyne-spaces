@@ -16,6 +16,7 @@ import { ConversationRepository } from '@/database/repositories/conversationRepo
 import { MessageRepository } from '@/database/repositories/messageRepository';
 import { MessageType } from '@prisma/client';
 import {logger} from '@/utils/logger';
+import { messageMetadataService } from '@/services/messageMetadataService';
 
 const conversationRepository = new ConversationRepository();
 const messageRepository = new MessageRepository();
@@ -157,6 +158,7 @@ export async function chatWithBot(req: Request, res: Response): Promise<void> {
     await conversationRepository.update(conversation.conversationId, {
       initialMessageId: userMessage.messageId,
     });
+    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
     // Set up SSE response
     res.setHeader('Content-Type', 'text/event-stream');
