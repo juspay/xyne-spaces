@@ -54,7 +54,6 @@ const XyneAISidebar = ({
 }: XyneAISidebarProps): ReactElement => {
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
-  const [visibleCharsMap, setVisibleCharsMap] = useState<Record<string, number>>({});
   const [conversationId, setConversationId] = useState<string>('');
   const [currentTraceId, setCurrentTraceId] = useState<string | undefined>();
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
@@ -261,7 +260,6 @@ const XyneAISidebar = ({
       setInputValue('');
       setAttachments([]);
       setSelectedActivities([]);
-      setVisibleCharsMap({});
       setShowHistorySidebar(false);
       setShowUserActivityPanel(false);
 
@@ -470,47 +468,6 @@ const XyneAISidebar = ({
     branchSelections,
   ]);
 
-  // Character reveal animation for streaming messages
-  useEffect(() => {
-    const streamingMessages = messages.filter(m => {
-      if (!m.isStreaming) return false;
-
-      // For Genius (or undefined agentType), check streamingContent
-      if ((!m.agentType || m.agentType === 'genius') && m.streamingContent) return true;
-
-      // For Summarizer, check summarizerOutput.summary
-      if (m.agentType === 'summarizer' && m.summarizerOutput?.summary) return true;
-
-      return false;
-    });
-
-    if (streamingMessages.length === 0) return;
-
-    const timer = setTimeout(() => {
-      setVisibleCharsMap(prev => {
-        const updated = { ...prev };
-        for (const msg of streamingMessages) {
-          // Get the text content to reveal
-          const content =
-            msg.agentType === 'summarizer'
-              ? msg.summarizerOutput?.summary || ''
-              : msg.streamingContent || '';
-
-          const currentVisible = prev[msg.id] || 0;
-          if (currentVisible < content.length) {
-            const charsToReveal = Math.min(5, content.length - currentVisible);
-            updated[msg.id] = currentVisible + charsToReveal;
-          }
-        }
-        return updated;
-      });
-    }, 10);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [messages, visibleCharsMap]);
-
   const handleSuggestionClick = (query: string): void => {
     setInputValue(query);
   };
@@ -645,7 +602,6 @@ const XyneAISidebar = ({
     setSelectedActivities([]);
     setActiveSelectionInfos([]);
     setEditingMessageId(null);
-    setVisibleCharsMap({});
     setShowHistorySidebar(false);
     setShowUserActivityPanel(false);
 
@@ -1130,7 +1086,6 @@ const XyneAISidebar = ({
                         <MessageItem
                           key={message.id}
                           message={message}
-                          visibleChars={visibleCharsMap[message.id] || 0}
                           onFeedback={(id, type) => void handleFeedback(id, type)}
                           onCitationClick={handleCitationClick}
                           onSummarizerCitationClick={handleSummarizerCitationClick}

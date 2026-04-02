@@ -26,12 +26,17 @@ export function parsePartialSummarizerJSON(content: string): PartialSummarizerOu
     return null;
   }
 
-  try {
-    // Try to parse as complete JSON first
-    const parsed = JSON.parse(content) as PartialSummarizerOutput;
-    return parsed;
-  } catch {
-    // JSON is incomplete, try to extract partial data
+  const trimmed = content.trim();
+
+  // Only attempt full JSON parse if the content looks complete (ends with closing brace)
+  // This avoids expensive exception throwing on every partial chunk during streaming
+  if (trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed) as PartialSummarizerOutput;
+      return parsed;
+    } catch {
+      // JSON is incomplete despite ending with }, try to extract partial data
+    }
   }
 
   const result: PartialSummarizerOutput = {
@@ -40,9 +45,9 @@ export function parsePartialSummarizerJSON(content: string): PartialSummarizerOu
   };
 
   try {
-    // Extract summary using regex
-    const summaryMatch = content.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-    if (summaryMatch && summaryMatch[1]) {
+    // Extract summary using regex — closing quote is optional to handle partial/streaming JSON
+    const summaryMatch = content.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"?/);
+    if (summaryMatch && summaryMatch[1] !== undefined) {
       result.summary = summaryMatch[1]
         .replace(/\\n/g, '\n')
         .replace(/\\"/g, '"')
@@ -144,20 +149,26 @@ export function extractStreamingText(content: string): string {
     return '';
   }
 
-  try {
-    // Try to parse as complete JSON and extract summary
-    const parsed = JSON.parse(content) as { summary?: string };
-    return parsed.summary || '';
-  } catch {
-    // Extract summary text from incomplete JSON
-    const summaryMatch = content.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)(?:")?/);
-    if (summaryMatch && summaryMatch[1] !== undefined) {
-      return summaryMatch[1]
-        .replace(/\\n/g, '\n')
-        .replace(/\\"/g, '"')
-        .replace(/\\`/g, '`')
-        .replace(/\\\\/g, '\\');
+  const trimmed = content.trim();
+
+  // Only attempt full parse if JSON looks complete
+  if (trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { summary?: string };
+      return parsed.summary || '';
+    } catch {
+      // Fall through to partial extraction
     }
-    return '';
   }
+
+  // Extract summary text from incomplete JSON
+  const summaryMatch = content.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"?/);
+  if (summaryMatch && summaryMatch[1] !== undefined) {
+    return summaryMatch[1]
+      .replace(/\\n/g, '\n')
+      .replace(/\\"/g, '"')
+      .replace(/\\`/g, '`')
+      .replace(/\\\\/g, '\\');
+  }
+  return '';
 }
