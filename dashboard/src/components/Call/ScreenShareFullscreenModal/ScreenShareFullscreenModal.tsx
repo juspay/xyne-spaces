@@ -7,6 +7,9 @@ import {
 } from 'react-zoom-pan-pinch';
 import { VideoTrack, type TrackReference } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
+import { DrawingCanvas, DrawingToolbar } from '../DrawingCanvas';
+import type { DrawingCanvasHandle } from '../DrawingCanvas';
+import { useDrawStore } from '../../../hooks/useDrawStore';
 
 interface ScreenShareFullscreenModalProps {
   trackRef: TrackReference | undefined;
@@ -24,6 +27,8 @@ export function ScreenShareFullscreenModal({
   const transformRef = useRef<ReactZoomPanPinchContentRef>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [isPanning, setIsPanning] = useState(false);
+  const drawingCanvasRef = useRef<DrawingCanvasHandle>(null);
+  const isDrawingEnabled = useDrawStore(s => s.isDrawingEnabled);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback(
@@ -110,12 +115,14 @@ export function ScreenShareFullscreenModal({
 
   const handleBackdropClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      // Don't close when drawing mode is active (clicks go to the drawing canvas)
+      if (isDrawingEnabled) return;
       // Only close if clicking the backdrop itself, not during pan
       if (e.target === e.currentTarget && !isPanning) {
         onClose();
       }
     },
-    [onClose, isPanning],
+    [onClose, isPanning, isDrawingEnabled],
   );
 
   const handlePanStart = useCallback((): void => {
@@ -136,7 +143,7 @@ export function ScreenShareFullscreenModal({
     <div
       className={cn(
         'fixed inset-0 z-50 bg-black/95 backdrop-blur-sm',
-        'cursor-grab active:cursor-grabbing',
+        !isDrawingEnabled && 'cursor-grab active:cursor-grabbing',
       )}
       onClick={handleBackdropClick}
       onKeyDown={(e): void => {
@@ -186,16 +193,18 @@ export function ScreenShareFullscreenModal({
         <span className='text-white font-medium text-sm'>{participantName}&apos;s Screen</span>
       </div>
 
-      {/* Zoom/Pan Container */}
+      {/* Zoom/Pan Container — disabled while drawing so gestures don't interfere */}
 
       <TransformWrapper
         ref={transformRef}
         minScale={1}
         maxScale={5}
         limitToBounds
+        disabled={isDrawingEnabled}
         doubleClick={{ mode: 'reset' }}
-        wheel={{ step: 0.2 }}
-        pinch={{ step: 5 }}
+        wheel={{ step: 0.2, disabled: isDrawingEnabled }}
+        pinch={{ step: 5, disabled: isDrawingEnabled }}
+        panning={{ disabled: isDrawingEnabled }}
         onPanningStart={handlePanStart}
         onPanningStop={handlePanStop}
       >
@@ -206,6 +215,17 @@ export function ScreenShareFullscreenModal({
         </TransformComponent>
       </TransformWrapper>
 
+      {/* Drawing overlay — sits outside TransformWrapper so it's not affected by zoom/pan */}
+      <DrawingCanvas ref={drawingCanvasRef} />
+
+      {/* Drawing toolbar — only shown when drawing mode is active */}
+      {isDrawingEnabled && (
+        <DrawingToolbar
+          onClearAll={() => drawingCanvasRef.current?.clearAll()}
+          onUndo={() => drawingCanvasRef.current?.undo()}
+        />
+      )}
+
       {/* Hint Text - Positioned at top center, below the participant label */}
       <div
         className={cn(
@@ -213,6 +233,7 @@ export function ScreenShareFullscreenModal({
           'bg-black/50 backdrop-blur-sm',
           'rounded-full px-4 py-2',
           'border border-white/10',
+          isDrawingEnabled && 'hidden', // hide hints while drawing to reduce visual noise
         )}
         role='status'
         aria-live='polite'

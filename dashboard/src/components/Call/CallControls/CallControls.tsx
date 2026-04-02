@@ -14,11 +14,13 @@ import {
   Volume2,
   ChevronUp,
   Bot,
+  Pencil,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import { roomActor } from '../../../machines/roomMachine';
+import { useDrawStore, sendDrawEvent } from '../../../hooks/useDrawStore';
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById } from '../../../shortcuts';
@@ -27,6 +29,8 @@ interface CallControlsProps {
   isMicEnabled: boolean;
   isCameraEnabled: boolean;
   isScreenSharing: boolean;
+  /** True when any participant (local or remote) is sharing their screen */
+  isAnySharingScreen?: boolean;
   isChatOpen: boolean;
   isParticipantsSidebarOpen: boolean;
   isAIAssistantEnabled: boolean;
@@ -56,6 +60,7 @@ export function CallControls({
   isMicEnabled,
   isCameraEnabled,
   isScreenSharing,
+  isAnySharingScreen = false,
   isChatOpen,
   isParticipantsSidebarOpen,
   isAIAssistantEnabled,
@@ -87,6 +92,7 @@ export function CallControls({
   const cameraMenuRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const room = useSelector(roomActor, state => state.context.room);
+  const isDrawingEnabled = useDrawStore(s => s.isDrawingEnabled);
 
   // Keyboard shortcut for mute toggle
   useShortcutById('huddle.toggleMute', onToggleMic);
@@ -411,9 +417,33 @@ export function CallControls({
           )}
         </button>
 
-        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-gray-700/50 mx-0.5'></div>}
+        {/* Annotate (Draw) Toggle — only shown when a screen share is active */}
+        {isAnySharingScreen && (
+          <button
+            onClick={() => sendDrawEvent({ type: 'toggleDrawMode' })}
+            className={cn(
+              buttonClasses,
+              isDrawingEnabled
+                ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/50'
+                : 'bg-gray-700 hover:bg-gray-600 text-white',
+            )}
+            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            title={isDrawingEnabled ? 'Stop annotating' : 'Annotate screen share'}
+            data-track-event='BUTTON_CLICK'
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_DRAW_MODE'
+            data-track-metadata={JSON.stringify({ callId, enabled: isDrawingEnabled })}
+          >
+            <Pencil
+              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+              style={
+                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+              }
+            />
+          </button>
+        )}
 
-        {/* Participants Button */}
+        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-gray-700/50 mx-0.5'></div>}
         <button
           onClick={onToggleParticipantsSidebar}
           className={cn(

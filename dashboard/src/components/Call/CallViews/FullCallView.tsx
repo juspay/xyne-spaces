@@ -14,6 +14,7 @@ import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
+import { sendDrawEvent } from '../../../hooks/useDrawStore';
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -119,6 +120,13 @@ export function FullCallView({
     p => p.identity === focusedScreenShareIdentity,
   );
 
+  // Auto-disable drawing mode when screen share ends (no one sharing anymore)
+  useEffect(() => {
+    if (!focusedScreenShare) {
+      sendDrawEvent({ type: 'disableDrawMode' });
+    }
+  }, [focusedScreenShare]);
+
   // Handle clicking on a screen share to focus it
   const handleScreenShareClick = useCallback((identity: string): void => {
     setFocusedScreenShareIdentity(identity);
@@ -181,6 +189,7 @@ export function FullCallView({
               onScreenShareClick={handleScreenShareClick}
               className='h-full'
               showSidebar={true}
+              showDrawingTools={true}
               aiController={aiController}
               requestedAiController={requestedAiController}
             />
@@ -244,6 +253,7 @@ export function FullCallView({
             isMicEnabled={isMicEnabled}
             isCameraEnabled={isCameraEnabled}
             isScreenSharing={isScreenSharing}
+            isAnySharingScreen={!!focusedScreenShare}
             isChatOpen={isChatOpen}
             isParticipantsSidebarOpen={isParticipantsSidebarOpen}
             isAIAssistantEnabled={isAIAssistantEnabled}
