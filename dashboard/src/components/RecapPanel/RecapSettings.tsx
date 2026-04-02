@@ -4,9 +4,10 @@ import Input from '../ui/Input/Input';
 import { toast } from 'sonner';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
-import { Check, Search, Lock, Hash, X } from 'lucide-react';
+import { Check, Search, Lock, Hash, X, Sparkles, Clock, Inbox } from 'lucide-react';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import type { Channel } from '@xyne/shared';
+import type { VisibleChannel } from '../../machines/stateMachine';
 import { useRecapData } from '../../hooks/useRecapData';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuth } from '../../hooks/useAuth';
@@ -15,6 +16,32 @@ import { useAllVisibleChannels, searchChannels } from '../../hooks/useChannels';
 
 const DISPLAY_LIMIT = 5;
 
+// Recap status indicator - shows based on lastRecapHadMessages from channelStats
+const RecapStatusIndicator = ({
+  isSelected,
+  lastRecapHadMessages,
+}: {
+  isSelected: boolean;
+  lastRecapHadMessages?: boolean | null | undefined;
+}): ReactElement | null => {
+  if (!isSelected) return null;
+
+  const status =
+    lastRecapHadMessages === true
+      ? { icon: Sparkles, text: 'Recap Available', className: 'text-green-500' }
+      : lastRecapHadMessages === false
+        ? { icon: Inbox, text: 'No messages yet', className: 'text-gray-400' }
+        : { icon: Clock, text: 'Pending', className: 'text-yellow-500' };
+
+  const Icon = status.icon;
+  return (
+    <div className={`flex items-center gap-1 ${status.className}`}>
+      <Icon size={12} />
+      <span className='text-xs'>{status.text}</span>
+    </div>
+  );
+};
+
 const ChannelListItem = ({
   channel,
   isSelected,
@@ -22,6 +49,7 @@ const ChannelListItem = ({
   currentUserId,
 }: ChannelListItemProps): ReactElement => {
   const { displayName } = useChannelDisplayName(channel, currentUserId || '');
+  const channelStats = (channel as VisibleChannel).channelStats;
 
   const getIcon = (): ReactElement => {
     return channel.visibility === ChannelVisibility.PRIVATE ? (
@@ -56,6 +84,12 @@ const ChannelListItem = ({
           {displayName}
         </span>
       </div>
+
+      {/* Recap Status Indicator */}
+      <RecapStatusIndicator
+        isSelected={isSelected}
+        lastRecapHadMessages={channelStats?.lastRecapHadMessages}
+      />
     </button>
   );
 };

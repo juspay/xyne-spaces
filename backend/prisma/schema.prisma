@@ -1375,6 +1375,7 @@ model ChannelStats {
   lastActivityAt   DateTime              
   participantCount Int                   @default(0)
   addUserPolicy    ChannelAddUserPolicy? @default(EVERYONE)
+  lastRecapHadMessages   Boolean?             // null = not processed, true = recap with messages, false = recap with 0 messages
 
   // Relations
   channel          Channel               @relation(fields: [channelId], references: [id])

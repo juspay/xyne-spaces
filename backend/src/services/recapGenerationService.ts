@@ -254,6 +254,13 @@ export class RecapGenerationService {
           day: '2-digit',
         });
         logger.info(`[Recap] No messages found for channel ${channelId} on ${istDate} (IST)`);
+
+        // Update lastRecapHadMessages to false (processed but no messages)
+        await db.channelStats.update({
+          where: { channelId },
+          data: { lastRecapHadMessages: false },
+        });
+
         return {
           channelId,
           success: true,
@@ -386,6 +393,11 @@ export class RecapGenerationService {
         recapDate: normalizedDate,
         summary: summaryData,
       },
+    });
+    // Update lastRecapHadMessages to true (recap generated with messages)
+    await db.channelStats.update({
+      where: { channelId },
+      data: { lastRecapHadMessages: true },
     });
   }
 
