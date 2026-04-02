@@ -97,6 +97,8 @@ const nativeInboundMessageTypeValues = {
   SHARE_RECORDING: 'SHARE_RECORDING',
   // Call from Phone app Recents
   START_CALL_FROM_RECENTS: 'START_CALL_FROM_RECENTS',
+  // App lifecycle events
+  NATIVE_APP_FOREGROUND: 'NATIVE_APP_FOREGROUND',
 } as const;
 
 export type NativeInboundMessageType = keyof typeof nativeInboundMessageTypeValues;
@@ -299,6 +301,8 @@ type ReactNativeInboundPayloadMap = {
     callType?: 'AUDIO' | 'VIDEO';
     source?: string;
   };
+  // App lifecycle events
+  NATIVE_APP_FOREGROUND: undefined;
 };
 type ReactNativeOutboundPayloadMap = {
   WEB_APP_READY: {
