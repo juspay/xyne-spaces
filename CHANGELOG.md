@@ -1,3 +1,16 @@
+## [1.104.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.103.0...v1.104.0) (2026-04-02)
+
+
+### Features
+
+* channel archive ([b5881e9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b5881e94bce88d06ffaf3deb88b15ea451188115)), closes [#4160](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4160)
+
+
+### Bug Fixes
+
+* suppress hover highlight on Cmd+K dialog open ([398596d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/398596ded58e6a859e34653a0c2339f45a4720dc)), closes [#4531](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4531)
+* using xyne id ([a79f2dc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a79f2dcbb2ceee748eba2b6607b77230de8daddf)), closes [#4611](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4611)
+
 ## [1.103.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.102.0...v1.103.0) (2026-04-01)
 
 
