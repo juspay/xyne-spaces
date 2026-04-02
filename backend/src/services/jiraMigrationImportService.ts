@@ -546,7 +546,7 @@ export class JiraMigrationImportService {
       this.cachedTicketsByIssueId.set(issueId, ticket);
     }
 
-    const resolvedIssueKey = issueKey || ((ticket.metadata as Record<string, any> | null)?.source?.jira?.issueKey as string | undefined) || ticket.xyneId;
+    const resolvedIssueKey = issueKey || ((ticket.metadata as Record<string, any> | null)?.source?.issueKey as string | undefined) || ticket.xyneId;
     if (resolvedIssueKey) {
       this.cachedTicketsByIssueKey.set(resolvedIssueKey, ticket);
     }
@@ -578,7 +578,7 @@ export class JiraMigrationImportService {
         where: {
           conversationId,
           OR: commentIdChunk.map(commentId => ({
-            metadata: { path: ['source', 'jira', 'commentId'], equals: commentId },
+            metadata: { path: ['source', 'commentId'], equals: commentId },
           })),
         },
         select: {
@@ -588,7 +588,7 @@ export class JiraMigrationImportService {
       });
 
       for (const message of existingMessages) {
-        const commentId = (message.metadata as Record<string, any> | null)?.source?.jira?.commentId as string | undefined;
+        const commentId = (message.metadata as Record<string, any> | null)?.source?.commentId as string | undefined;
         if (!commentId) continue;
         this.existingCommentMessagesByKey.set(
           this.buildCommentMessageCacheKey(conversationId, commentId),
@@ -608,7 +608,7 @@ export class JiraMigrationImportService {
         where: {
           entityId,
           OR: attachmentIdChunk.map(attachmentId => ({
-            metadata: { path: ['source', 'jira', 'attachmentId'], equals: attachmentId },
+            metadata: { path: ['source', 'attachmentId'], equals: attachmentId },
           })),
         },
         select: {
@@ -621,7 +621,7 @@ export class JiraMigrationImportService {
       });
 
       for (const attachment of existingAttachments) {
-        const attachmentId = (attachment.metadata as Record<string, any> | null)?.source?.jira?.attachmentId as string | undefined;
+        const attachmentId = (attachment.metadata as Record<string, any> | null)?.source?.attachmentId as string | undefined;
         if (!attachmentId) continue;
         this.existingAttachmentsByKey.set(this.buildAttachmentCacheKey(entityId, attachmentId), {
           id: attachment.id,
@@ -645,7 +645,7 @@ export class JiraMigrationImportService {
           where: {
             entityId: { in: entityIdChunk },
             OR: attachmentIdChunk.map(attachmentId => ({
-              metadata: { path: ['source', 'jira', 'attachmentId'], equals: attachmentId },
+              metadata: { path: ['source', 'attachmentId'], equals: attachmentId },
             })),
           },
           select: {
@@ -659,7 +659,7 @@ export class JiraMigrationImportService {
         });
 
         for (const attachment of existingAttachments) {
-          const attachmentId = (attachment.metadata as Record<string, any> | null)?.source?.jira?.attachmentId as string | undefined;
+          const attachmentId = (attachment.metadata as Record<string, any> | null)?.source?.attachmentId as string | undefined;
           if (!attachmentId) continue;
           this.existingAttachmentsByKey.set(this.buildAttachmentCacheKey(attachment.entityId, attachmentId), {
             id: attachment.id,
@@ -686,8 +686,8 @@ export class JiraMigrationImportService {
       const issueIdsBatch = issueIdChunks[index] || [];
       const issueKeysBatch = issueKeyChunks[index] || [];
       const whereClauses = [
-        ...issueIdsBatch.map(issueId => ({ metadata: { path: ['source', 'jira', 'issueId'], equals: issueId } })),
-        ...issueKeysBatch.map(issueKey => ({ metadata: { path: ['source', 'jira', 'issueKey'], equals: issueKey } })),
+        ...issueIdsBatch.map(issueId => ({ metadata: { path: ['source', 'issueId'], equals: issueId } })),
+        ...issueKeysBatch.map(issueKey => ({ metadata: { path: ['source', 'issueKey'], equals: issueKey } })),
       ];
 
       if (whereClauses.length === 0) {
@@ -730,8 +730,8 @@ export class JiraMigrationImportService {
 
       this.cacheTicketRecord(
         cachedTicket,
-        metadata?.source?.jira?.issueId || null,
-        metadata?.source?.jira?.issueKey || ticket.xyneId || null,
+        metadata?.source?.issueId || null,
+        metadata?.source?.issueKey || ticket.xyneId || null,
       );
     }
   }
@@ -1100,8 +1100,8 @@ export class JiraMigrationImportService {
     const byId = await db.ticket.findFirst({
       where: {
         OR: [
-          { metadata: { path: ['source', 'jira', 'issueId'], equals: issueId } },
-          { metadata: { path: ['source', 'jira', 'issueKey'], equals: issueKey } },
+          { metadata: { path: ['source', 'issueId'], equals: issueId } },
+          { metadata: { path: ['source', 'issueKey'], equals: issueKey } },
         ],
       },
       select: {
@@ -1145,7 +1145,7 @@ export class JiraMigrationImportService {
     const existing = await db.messageAttachment.findFirst({
       where: {
         entityId,
-        metadata: { path: ['source', 'jira', 'attachmentId'], equals: attachmentId },
+        metadata: { path: ['source', 'attachmentId'], equals: attachmentId },
       },
       select: {
         id: true,
@@ -1965,7 +1965,7 @@ export class JiraMigrationImportService {
       const parentTicket = await db.ticket.findFirst({
         where: {
           OR: [
-            { metadata: { path: ['source', 'jira', 'issueKey'], equals: parentIssueKey } },
+            { metadata: { path: ['source', 'issueKey'], equals: parentIssueKey } },
           ],
         },
       });
