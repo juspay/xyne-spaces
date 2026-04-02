@@ -1,0 +1,267 @@
+import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { Plus, AlertCircle, Trash2 } from 'lucide-react';
+import { Button } from '../../ui/Button/Button';
+import Avatar from '../../ui/Avatar/Avatar';
+import type { User } from '../../../machines/stateMachine';
+
+interface OnCallRotationModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  groupName: string;
+  users: User[];
+  userGroupMembers: Array<{ userId: string; onCallSetNumber: number }>;
+  activeSet: number;
+  onSetsChange?: (sets: Map<string, number>) => void;
+}
+
+interface SetData {
+  setNumber: number;
+  users: User[];
+  isActive: boolean;
+}
+
+export const OnCallRotationModal = ({
+  isOpen,
+  onClose,
+  groupName,
+  users,
+  userGroupMembers,
+  activeSet,
+  onSetsChange,
+}: OnCallRotationModalProps): ReactElement | null => {
+  const [userSets, setUserSets] = useState<Map<string, number>>(new Map());
+  const [maxSetNumber, setMaxSetNumber] = useState<number>(1);
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Initialize from props when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const setsMap = new Map<string, number>();
+      let maxSet = 1;
+      for (const member of userGroupMembers) {
+        const setNumber = member.onCallSetNumber ?? 1;
+        setsMap.set(member.userId, setNumber);
+        if (setNumber > maxSet) maxSet = setNumber;
+      }
+      setUserSets(setsMap);
+      setMaxSetNumber(maxSet);
+      setHasChanges(false);
+    }
+  }, [isOpen]);
+
+  // Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+
+  const usersById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
+
+  // Derived: sets array
+  const sets = useMemo<SetData[]>(() => {
+    return Array.from({ length: maxSetNumber }, (_, i) => {
+      const setNumber = i + 1;
+      const setUsers = Array.from(userSets.entries())
+        .filter(([, s]) => s === setNumber)
+        .map(([uid]) => usersById.get(uid))
+        .filter((u): u is User => Boolean(u));
+      return { setNumber, users: setUsers, isActive: setNumber === activeSet };
+    });
+  }, [userSets, maxSetNumber, usersById, activeSet]);
+
+  // Validation: true if any set has 0 users
+  const hasEmptySet = useMemo(() => sets.some(s => s.users.length === 0), [sets]);
+
+  const handleMoveUser = (userId: string, newSetNumber: number): void => {
+    setUserSets(prev => new Map(prev).set(userId, newSetNumber));
+    setHasChanges(true);
+  };
+
+  const handleCreateSet = (): void => {
+    setMaxSetNumber(prev => prev + 1);
+    setHasChanges(true);
+  };
+
+  /**
+   * Delete an empty set and renumber all subsequent sets.
+   * When deleting Set N, all users in sets N+1, N+2, etc. have their onCallSetNumber decremented by 1.
+   *
+   * Example:
+   * - Before: Set 1 [A,B], Set 2 [], Set 3 [C,D], Set 4 [E]
+   * - Delete Set 2 (must be empty first)
+   * - After: Set 1 [A,B], Set 2 [C,D], Set 3 [E]
+   */
+  const handleDeleteSet = (setNumberToDelete: number): void => {
+    // Only allow deleting empty sets
+    const setToDelete = sets.find(s => s.setNumber === setNumberToDelete);
+    if (!setToDelete || setToDelete.users.length > 0) {
+      return; // Can only delete empty sets
+    }
+
+    setUserSets(prev => {
+      const newMap = new Map<string, number>();
+      for (const [userId, userSetNum] of prev.entries()) {
+        if (userSetNum < setNumberToDelete) {
+          // Users in sets before the deleted one stay the same
+          newMap.set(userId, userSetNum);
+        } else if (userSetNum > setNumberToDelete) {
+          // Users in sets after the deleted one get decremented by 1
+          newMap.set(userId, userSetNum - 1);
+        }
+        // Users in the deleted set are simply not added to the new map
+      }
+      return newMap;
+    });
+
+    setMaxSetNumber(prev => prev - 1);
+    setHasChanges(true);
+  };
+
+  const handleDone = (): void => {
+    // Pass the set changes to the parent component
+    if (hasChanges && onSetsChange) {
+      onSetsChange(userSets);
+    }
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
+      <div className='flex flex-col w-[90vw] h-[85vh] bg-background rounded-lg shadow-xl overflow-hidden border border-border'>
+        {/* Header */}
+        <div className='flex items-center justify-between px-6 py-4 border-b border-border'>
+          <div>
+            <h2 className='text-[16px] font-semibold leading-[24px] text-foreground'>
+              Configure On-Call Sets
+            </h2>
+            <p className='text-xs text-muted-foreground mt-0.5'>{groupName}</p>
+          </div>
+          <div className='flex items-center gap-2'>
+            <Button variant='secondary' size='sm' onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant='default'
+              size='sm'
+              onClick={handleDone}
+              disabled={hasEmptySet}
+              className='bg-[#6276BE] hover:bg-[#5060A0]'
+            >
+              Done
+            </Button>
+          </div>
+        </div>
+
+        {/* Action Bar */}
+        <div className='px-6 py-4 bg-muted/30 border-b border-border flex items-end justify-end'>
+          <Button variant='outline' size='sm' onClick={handleCreateSet}>
+            <Plus className='w-4 h-4' />
+            Create New Set
+          </Button>
+        </div>
+
+        {/* Main Content - Horizontal Scroll */}
+        <div className='flex-1 overflow-x-auto overflow-y-hidden flex flex-row p-6 gap-6 bg-[#F9FAFB] dark:bg-transparent'>
+          {sets.map(set => (
+            <div
+              key={set.setNumber}
+              className={`flex-shrink-0 w-[350px] flex flex-col rounded-xl shadow-sm bg-background transition-all ${
+                set.isActive ? 'ring-2 ring-[#6276BE] border-transparent' : 'border border-border'
+              }`}
+            >
+              {/* Card Header */}
+              <div className='p-4 border-b rounded-t-xl flex items-center justify-between'>
+                <div>
+                  <span className='text-xs font-bold text-muted-foreground tracking-widest uppercase'>
+                    Set {set.setNumber}
+                  </span>
+                  <p className='text-xs text-muted-foreground mt-0.5'>
+                    {set.users.length} participant{set.users.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <div className='flex items-center gap-2'>
+                  {set.users.length === 0 && maxSetNumber > 1 && (
+                    <button
+                      onClick={() => handleDeleteSet(set.setNumber)}
+                      className='p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded transition-colors'
+                      title='Delete empty set'
+                      data-track-category='UserGroups'
+                      data-track-name='DeleteEmptySet'
+                      data-track-metadata={JSON.stringify({ setNumber: set.setNumber })}
+                    >
+                      <Trash2 className='w-4 h-4' />
+                    </button>
+                  )}
+                  {set.isActive && (
+                    <div className='flex items-center gap-1.5 px-2 py-1 bg-[#6276BE] text-white rounded text-[10px] font-bold'>
+                      <span className='relative flex h-2 w-2'>
+                        <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75' />
+                        <span className='relative inline-flex rounded-full h-2 w-2 bg-white' />
+                      </span>
+                      ACTIVE
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Card Body */}
+              <div className='flex-1 overflow-y-auto p-3 space-y-3'>
+                {set.users.length === 0 ? (
+                  <div className='text-xs text-muted-foreground text-center py-6'>
+                    No users in this set
+                  </div>
+                ) : (
+                  set.users.map(user => (
+                    <div
+                      key={user.id}
+                      className='group p-3 border border-border rounded-lg bg-background flex items-center justify-between'
+                    >
+                      <div className='flex items-center gap-2 min-w-0'>
+                        <Avatar userId={user.id} size='sm' showActiveStatus={false} />
+                        <span className='text-sm text-foreground truncate max-w-[150px]'>
+                          {user.name}
+                        </span>
+                      </div>
+                      <select
+                        value=''
+                        onChange={e => handleMoveUser(user.id, parseInt(e.target.value))}
+                        className='text-[11px] border border-border rounded-md p-1.5 bg-muted/20 flex-shrink-0 ml-2'
+                        data-track-category='UserGroups'
+                        data-track-name='MoveUserToSet'
+                        data-track-metadata={JSON.stringify({ userId: user.id })}
+                      >
+                        <option value='' disabled>
+                          Move to
+                        </option>
+                        {Array.from({ length: maxSetNumber }, (_, i) => i + 1)
+                          .filter(n => n !== set.setNumber)
+                          .map(n => (
+                            <option key={n} value={n}>
+                              Move to {n}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Error Toast */}
+        {hasEmptySet && (
+          <div className='mx-6 mb-4 p-3 bg-red-600 text-white rounded-lg flex items-center justify-center gap-2 text-sm font-medium shadow-lg'>
+            <AlertCircle className='w-4 h-4 flex-shrink-0' />
+            Every set must have at least one user assigned.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

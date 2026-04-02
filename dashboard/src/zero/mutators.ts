@@ -25,6 +25,7 @@ import {
   UserResponsibility,
   DocType,
   PRStatusEvent,
+  RotationInterval,
   createForwardedMessageXml,
   parseForwardedMessageXml,
   ActivityClassification,
@@ -3211,6 +3212,7 @@ export const mutators = defineMutators({
             userGroupId,
             userId,
             responsibility: UserResponsibility.MEMBER, // New users added get MEMBER role by default
+            onCallSetNumber: null, // Will be set when rotation is enabled and configured
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -4700,6 +4702,14 @@ export const mutators = defineMutators({
             isActive: z.boolean(),
           }),
         ),
+        userMappings: z
+          .array(
+            z.object({
+              userId: z.string(),
+              onCallSetNumber: z.number().nullable(),
+            }),
+          )
+          .optional(),
         boardWeight: z
           .object({
             boardId: z.string(),
@@ -4721,7 +4731,7 @@ export const mutators = defineMutators({
           })
           .optional(),
         timestamp: z.number(),
-        stateIds: z.record(z.string(), z.string()), // Map userId -> stateId
+        stateIds: z.record(z.string(), z.string()).optional(), // Map userId -> stateId
         complexityScoreId: z.string().optional(),
         mappingIds: z.record(z.string(), z.string()).optional(), // Map userId -> mappingId
       }),
@@ -4731,6 +4741,7 @@ export const mutators = defineMutators({
         args: {
           userGroupId,
           userStates,
+          userMappings,
           boardWeight,
           expertiseMappings,
           timestamp,
@@ -4775,6 +4786,26 @@ export const mutators = defineMutators({
           };
 
           await tx.mutate.user_assignment_states.upsert(stateData);
+        }
+
+        // Update user group mappings (set numbers) if provided
+        if (userMappings) {
+          for (const mapping of userMappings) {
+            const existingMapping = await tx.run(
+              zql.user_group_mappings
+                .where('userId', mapping.userId)
+                .where('userGroupId', userGroupId)
+                .one(),
+            );
+
+            if (existingMapping) {
+              await tx.mutate.user_group_mappings.update({
+                id: existingMapping.id,
+                onCallSetNumber: mapping.onCallSetNumber,
+                updatedAt: now,
+              });
+            }
+          }
         }
 
         // Update board complexity score if provided
@@ -4861,6 +4892,41 @@ export const mutators = defineMutators({
             }
           }
         }
+      },
+    ),
+    toggleGroupAutoRotation: defineMutator(
+      z.object({
+        userGroupId: z.string(),
+        autoRotationEnabled: z.boolean(),
+        rotationInterval: z.nativeEnum(RotationInterval).optional(),
+        rotationStartDate: z.number().optional(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        args: { userGroupId, autoRotationEnabled, rotationInterval, rotationStartDate, timestamp },
+      }) => {
+        // Validate user group exists
+        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+        if (!userGroup) {
+          throw new Error('User group not found');
+        }
+
+        // When enabling rotation, require interval and start date
+        if (autoRotationEnabled && (!rotationInterval || !rotationStartDate)) {
+          throw new Error(
+            'rotationInterval and rotationStartDate are required when enabling rotation',
+          );
+        }
+
+        // Update user group with rotation settings
+        await tx.mutate.user_groups.update({
+          id: userGroupId,
+          autoRotationEnabled,
+          rotationInterval: autoRotationEnabled ? rotationInterval : null,
+          rotationStartDate: autoRotationEnabled ? rotationStartDate : null,
+          updatedAt: timestamp,
+        });
       },
     ),
   },

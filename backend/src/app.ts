@@ -107,6 +107,7 @@ import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
+import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
 
 import queryRoutes from '@/routes/query';
@@ -486,6 +487,10 @@ export class App {
     logger.info('Initializing assignment reactivation queue...');
     await assignmentReactivationQueue.initialize();
 
+    // Initialize on-call rotation queue (Bull-based scheduling)
+    logger.info('Initializing on-call rotation queue...');
+    await onCallRotationQueue.initialize();
+
     // Initialize WebSocket server
     logger.info('Initializing WebSocket server...');
     websocketService.initialize(this.httpServer);
@@ -582,6 +587,9 @@ export class App {
 
       // Close assignment reactivation queue
       await assignmentReactivationQueue.close();
+
+      // Close on-call rotation queue
+      await onCallRotationQueue.close();
 
       // Shutdown notification service
       await notificationService.shutdown();

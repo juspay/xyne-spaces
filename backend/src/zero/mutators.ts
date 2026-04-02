@@ -40,6 +40,7 @@ import {
   NudgeState,
   SurfaceAreaType,
   SurfaceLinkKind,
+  RotationInterval,
   parseReactionsMd,
   removeReactionFromData,
   serializeReactionsMd,
@@ -64,6 +65,7 @@ import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { nudgeRegistry } from '@/nudges/registry';
+import { initializeRotationForGroup } from '@/utils/rotationEngine';
 import { livekitService } from '@/services/liveKitService';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
@@ -5041,6 +5043,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userGroupId,
               userId,
               responsibility: UserResponsibility.MEMBER,
+              onCallSetNumber: null, // Will be set when rotation is enabled and configured
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -6345,6 +6348,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               isActive: z.boolean(),
             })
           ),
+          userMappings: z.array(
+            z.object({
+              userId: z.string(),
+              onCallSetNumber: z.number().nullable(),
+            })
+          ).optional(),
           boardWeight: z.object({
             boardId: z.string(),
             weight: z.number(),
@@ -6366,7 +6375,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           complexityScoreId: z.string().optional(),
           mappingIds: z.record(z.string(), z.string()).optional(),
         }),
-        async ({ tx, args: { userGroupId, userStates, boardWeight, expertiseMappings, timestamp, stateIds = {}, complexityScoreId, mappingIds = {} } }) => {
+        async ({ tx, args: { userGroupId, userStates, userMappings, boardWeight, expertiseMappings, timestamp, stateIds = {}, complexityScoreId, mappingIds = {} } }) => {
           const now = timestamp;
 
           // Validate user group exists
@@ -6402,6 +6411,26 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             };
 
             await tx.mutate.user_assignment_states.upsert(stateData);
+          }
+
+          // Update user group mappings (set numbers) if provided
+          if (userMappings) {
+            for (const mapping of userMappings) {
+              const existingMapping = await tx.run(
+                zql.user_group_mappings
+                  .where('userId', mapping.userId)
+                  .where('userGroupId', userGroupId)
+                  .one()
+              );
+
+              if (existingMapping) {
+                await tx.mutate.user_group_mappings.update({
+                  id: existingMapping.id,
+                  onCallSetNumber: mapping.onCallSetNumber,
+                  updatedAt: now,
+                });
+              }
+            }
           }
 
           // Update board complexity score if provided
@@ -6484,6 +6513,65 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 });
               }
             }
+          }
+        },
+      ),
+      toggleGroupAutoRotation: defineMutator(
+        z.object({
+          userGroupId: z.string(),
+          autoRotationEnabled: z.boolean(),
+          rotationInterval: z.nativeEnum(RotationInterval).optional(),
+          rotationStartDate: z.number().optional(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: { userGroupId, autoRotationEnabled, rotationInterval, rotationStartDate, timestamp },
+        }) => {
+          // Validate user group exists
+          const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+          if (!userGroup) {
+            throw new Error('User group not found');
+          }
+
+          // When enabling rotation, require interval and start date
+          if (autoRotationEnabled && (!rotationInterval || !rotationStartDate)) {
+            throw new Error('rotationInterval and rotationStartDate are required when enabling rotation');
+          }
+
+          // Update user group with rotation settings
+          await tx.mutate.user_groups.update({
+            id: userGroupId,
+            autoRotationEnabled,
+            rotationInterval: autoRotationEnabled ? rotationInterval : null,
+            rotationStartDate: autoRotationEnabled ? rotationStartDate : null,
+            updatedAt: timestamp,
+          });
+
+          logger.info(
+            `[TOGGLE-ROTATION] ${autoRotationEnabled ? 'Enabled' : 'Disabled'} rotation for group ${userGroupId}${autoRotationEnabled ? ` with interval ${rotationInterval}` : ''}.`
+          );
+
+          // If enabling rotation, immediately set set 1 as active
+          if (autoRotationEnabled) {
+            asyncTasks.push(async () => {
+              try {
+                await initializeRotationForGroup(userGroupId);
+              } catch (error) {
+                logger.error(`[TOGGLE-ROTATION] Failed to initialize rotation for group ${userGroupId}:`, error);
+              }
+            });
+          } else {
+            // When disabling rotation, clean up onCallSetNumber in all user group mappings
+            const mappings = await tx.run(zql.user_group_mappings.where('userGroupId', userGroupId));
+            for (const mapping of mappings) {
+              await tx.mutate.user_group_mappings.update({
+                id: mapping.id,
+                onCallSetNumber: null,
+                updatedAt: timestamp,
+              });
+            }
+            logger.info(`[TOGGLE-ROTATION] Cleaned up onCallSetNumber for ${mappings.length} users in group ${userGroupId}`);
           }
         },
       ),
