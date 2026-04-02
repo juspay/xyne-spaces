@@ -1,3 +1,24 @@
+## [1.105.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.104.0...v1.105.0) (2026-04-02)
+
+
+### Features
+
+* added local testing using opencode ([3288063](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/32880630aeb0ffaf057326e0ee29cfd30e50bde1)), closes [#4579](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4579)
+* auto-rotation-between userGroup(sets) for auto-assignment ([28bdf8b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/28bdf8bd066147ac9166c00603c0c19014a4a1fd)), closes [#4619](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4619)
+* calls history machine ([6a56fc8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6a56fc83e4ea34a5a15b2406dfa875b94b155f7b)), closes [#4554](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4554)
+* Denormalize messages ([8c29e4a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8c29e4a7e701f167379ede5478ef90fb03f74468)), closes [#4515](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4515)
+* draw on screen share ([bc9b75d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bc9b75d797f92bdef089ae56d135b5f04e8379e6)), closes [#4587](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4587)
+* Feature to create recurring call series instance upto 60 Day ([15025b0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/15025b0c6d9fc1b424b6cd05fa4e6691333299d4)), closes [#4561](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4561)
+* lotus app login page re-design ([6af565d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6af565d80dc0fd8577149ed3f578665b5f8c3c26)), closes [#4594](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4594)
+
+
+### Bug Fixes
+
+* Add Grafana alerts and logs for Xyne Call ([ddfd14f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ddfd14f5aa3fe0dcd8448a16b0e40be2b6eaf9e4)), closes [#4563](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4563)
+* adding channelstatus in recap ([b84179e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b84179e61c77f67e05832aef3d5f190e3d9c47f5)), closes [#4584](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4584)
+* changed metadata ([861208c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/861208cae3b02d345fbb2bde01f1639efdf8dfff)), closes [#4623](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4623)
+* removed contentFormat ([4dbabcb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4dbabcb7998d4e5696de43cb212e490bd0dd4910)), closes [#4635](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4635)
+
 ## [1.104.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.103.0...v1.104.0) (2026-04-02)
 
 
