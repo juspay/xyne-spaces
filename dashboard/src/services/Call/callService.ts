@@ -418,6 +418,50 @@ export class CallService {
   }
 
   /**
+   * Cancel a single scheduled call instance.
+   * Marks the instance as CANCELLED and triggers buffer replenishment for recurring series.
+   */
+  async cancelScheduledCall(callId: string): Promise<void> {
+    try {
+      await apiInstance.delete(`/calls/${callId}`);
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Cancel an entire recurring call series.
+   * Marks all future instances as CANCELLED and removes their Bull jobs.
+   */
+  async cancelRecurringSeries(seriesId: string): Promise<void> {
+    try {
+      await apiInstance.delete(`/calls/series/${seriesId}`);
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Update a single scheduled call instance (title, time, participants).
    */
   async updateScheduledCall(callId: string, data: UpdateScheduleCallRequest): Promise<void> {

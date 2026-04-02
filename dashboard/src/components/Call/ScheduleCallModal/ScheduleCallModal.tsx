@@ -1693,7 +1693,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             <Checkbox
               checked={editEntireSeries}
               onChange={setEditEntireSeries}
-              label='Apply to all upcoming calls in this series'
+              label='Apply to all calls in this series'
             />
           )}
 

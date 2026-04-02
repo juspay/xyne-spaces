@@ -7,6 +7,7 @@ const router = Router();
 // Call management endpoints
 router.post('/series', scheduleCallController.createRecurringSeries);
 router.patch('/series/:seriesId', scheduleCallController.updateRecurringSeries);
+router.delete('/series/:seriesId', scheduleCallController.cancelRecurringSeries);
 router.post('/initiate', callController.initiateCall);
 router.post('/join', callController.joinCall);
 router.post('/schedule', scheduleCallController.scheduleCall);
@@ -22,6 +23,7 @@ router.get('/pulse-orgs', callController.getPulseOrgs);
 
 // Edit a single scheduled call instance (must come after all static /... routes)
 router.patch('/:callId', scheduleCallController.updateScheduledCall);
+router.delete('/:callId', scheduleCallController.cancelScheduledCall);
 
 // Manual endpoint to process transcript (triggered by user clicking "View Transcript" button)
 router.post('/:callId/process-transcript', callController.processTranscript);

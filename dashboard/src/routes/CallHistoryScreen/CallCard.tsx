@@ -53,6 +53,22 @@ interface UpcomingCallCardProps {
   onEditClick?: (e: React.MouseEvent) => void;
 }
 
+/**
+ * Small "Repeat" badge for recurring upcoming calls.
+ * Placed at the top-left corner of the call card.
+ */
+const RepeatBadge: React.FC = () => (
+  <span
+    className={cn(
+      'absolute top-2.5 left-2.5 z-10 flex items-center gap-1 rounded-full px-2 py-0.5',
+      'text-[10px] font-semibold uppercase tracking-wide',
+      'bg-primary/10 text-primary dark:bg-primary/15',
+    )}
+  >
+    Repeat
+  </span>
+);
+
 interface CallHistoryItemProps {
   call: Call;
   currentUserId: string | undefined;
@@ -64,6 +80,9 @@ interface CallHistoryItemProps {
 }
 
 const MAX_AVATARS_TO_SHOW = 3;
+
+/** Checks if a call belongs to a recurring series. */
+const isRecurringCall = (call: Call): boolean => Boolean(call.recurringSeriesId);
 
 export const UpcomingCallCard = ({
   call,
@@ -115,6 +134,7 @@ export const UpcomingCallCard = ({
         !isLastItem && 'border-b ',
       )}
     >
+      {isRecurringCall(call) && <RepeatBadge />}
       <div className='relative md:py-8 flex md:flex-col gap-4 items-center justify-start md:justify-center md:bg-card rounded-lg '>
         <div className='hidden md:block absolute top-3 right-3'>
           <DropdownMenu>
@@ -410,11 +430,12 @@ export const CallCard = ({
   return (
     <div
       className={cn(
-        'flex items-center justify-between p-4 hover:bg-card',
+        'relative flex items-center justify-between p-4 hover:bg-card',
         !isLastItem && 'border-b border-border',
         isActiveState && 'bg-primary/10 hover:bg-primary/20',
       )}
     >
+      {isRecurringCall(call) && <RepeatBadge />}
       {/* Huddle Icon with Indication */}
       <div className='flex items-center justify-start gap-4 w-full'>
         {/* Headphones Icon */}
