@@ -23,6 +23,7 @@ import { serializeTicketMd, type TicketCardSummary } from '@xyne/shared';
 import { adfToHtmlAsync, adfToText } from '@/services/jira/adfHtml';
 import { JiraMigrationClient } from '@/services/jira/client';
 import { JiraUserResolver } from '@/services/jira/userResolver';
+import { TicketIdService } from '@/services/ticketIdService';
 import {
   queueJiraImportAttachmentVespaJob,
   queueJiraImportMessageVespaJob,
@@ -687,7 +688,6 @@ export class JiraMigrationImportService {
       const whereClauses = [
         ...issueIdsBatch.map(issueId => ({ metadata: { path: ['source', 'jira', 'issueId'], equals: issueId } })),
         ...issueKeysBatch.map(issueKey => ({ metadata: { path: ['source', 'jira', 'issueKey'], equals: issueKey } })),
-        ...(issueKeysBatch.length > 0 ? [{ xyneId: { in: issueKeysBatch } }] : []),
       ];
 
       if (whereClauses.length === 0) {
@@ -1102,7 +1102,6 @@ export class JiraMigrationImportService {
         OR: [
           { metadata: { path: ['source', 'jira', 'issueId'], equals: issueId } },
           { metadata: { path: ['source', 'jira', 'issueKey'], equals: issueKey } },
-          { xyneId: issueKey },
         ],
       },
       select: {
@@ -1967,7 +1966,6 @@ export class JiraMigrationImportService {
         where: {
           OR: [
             { metadata: { path: ['source', 'jira', 'issueKey'], equals: parentIssueKey } },
-            { xyneId: parentIssueKey },
           ],
         },
       });
@@ -2389,6 +2387,8 @@ export class JiraMigrationImportService {
                 },
               });
 
+              const xyneId = await TicketIdService.generateTicketId(tx as any, project.id);
+
               const createdTicket = await this.ticketRepository.createTicket(
                 {
                   title: summary,
@@ -2402,7 +2402,7 @@ export class JiraMigrationImportService {
                   boardId: board.id,
                   statusV2: stageMatch.statusV2,
                   priority: mapPriority(issue.fields.priority?.name),
-                  xyneId: issue.key,
+                  xyneId,
                   ticketType: issue.fields.issuetype?.name || undefined,
                   stageName: stageMatch.stageName,
                   createdAt: createdAt.toISOString(),
