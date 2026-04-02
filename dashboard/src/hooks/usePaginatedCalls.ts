@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSelector } from '@xstate/react';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
 import { useCachedQuery } from './useCachedQuery';
+import { queryCacheActor, type CallHistoryEntry } from '../machines/queryCacheMachine';
 
 type CallHistoryResult = QueryResultType<typeof queries.userCallHistory>;
 
@@ -24,10 +26,12 @@ export function usePaginatedCalls(options: UsePaginatedCallsOptions = {}): UsePa
   const { enabled = true } = options;
 
   const [cursor, setCursor] = useState<{ id: string; startedAt: number } | null>(null);
-  const [accumulatedCalls, setAccumulatedCalls] = useState<CallHistoryResult>([]);
-  const [hasMoreCalls, setHasMoreCalls] = useState(true);
   const cursorIndexRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Accumulated state lives in queryCacheMachine (XState + IndexedDB) — survives unmount/remount
+  const accumulatedCalls = useSelector(queryCacheActor, s => s.context.callHistory.calls);
+  const hasMoreCalls = useSelector(queryCacheActor, s => s.context.callHistory.hasMore);
 
   const [page, queryDetails] = useCachedQuery(
     queries.userCallHistory({ limit: FETCH_LIMIT, start: cursor }),
@@ -36,20 +40,11 @@ export function usePaginatedCalls(options: UsePaginatedCallsOptions = {}): UsePa
 
   useEffect(() => {
     if (!page) return;
-    if (page.length === 0) {
-      setHasMoreCalls(false);
-      return;
-    }
-
-    setAccumulatedCalls(prev => {
-      const map = new Map(prev.map(c => [c.id, c]));
-      for (const call of page) map.set(call.id, call);
-      return [...map.values()].sort(
-        (a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id),
-      );
+    queryCacheActor.send({
+      type: 'MERGE_CALL_HISTORY_PAGE',
+      page: page as CallHistoryEntry[],
+      hasMore: page.length === FETCH_LIMIT,
     });
-
-    setHasMoreCalls(page.length === FETCH_LIMIT);
   }, [page]);
 
   const onVisibleRangeChanged = useCallback(
