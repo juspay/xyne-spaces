@@ -22,6 +22,7 @@ export interface FidoServerWorkflowContext extends BaseWorkflowContext {
   // ispoller?: boolean;
   instructions?: string;
   type?: FidoWorkType;
+  testing_url?: string;
   // connectorName?: string;
   // connectorBaseUrl?: string;
   // custom?: WorkflowCustomConfig

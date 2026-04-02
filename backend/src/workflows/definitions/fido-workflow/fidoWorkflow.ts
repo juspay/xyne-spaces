@@ -21,7 +21,8 @@ import {
   // executeBuildCode,
   // executeRemoteConformanceTesting,
   // executeLocalTesting,
-  // executeBoilerCode
+  // executeBoilerCode,
+  executeFinalLocalTesting,
 } from './utils'
 import { createRequirementAnalysisTemplate } from './templates/requirement-analysis-template'
 import {logger} from '@/utils/logger';
@@ -36,6 +37,7 @@ export enum FidoEnhancedWorkflowStepsEnum{
   BUILD_CODE = 'build_code',
   POST_IMPLEMENTATION = 'post_implementation',
   PRE_REQUIREMENT_STEP = 'pre_requirement_step',
+  LOCAL_TESTING = 'local_testing',
 }
 /**
  * Extract the last message content from a conversation result
@@ -189,6 +191,7 @@ const fidoServerWorkflowInputSchema = BaseWorkflowContextSchema.extend({
   // ispoller: z.boolean().default(false),
   // connectorName: z.string().optional(),
   // connectorBaseUrl: z.string().optional(),
+  testing_url: z.string().optional(),
   type: z.nativeEnum(FidoWorkType).optional(),
   // custom: z.record(z.string(), z.unknown()).optional()
 })
@@ -205,6 +208,7 @@ const FidoServerWorkflowContextMapper = (payload: z.infer<typeof fidoServerWorkf
   // testDetails: payload.testDetails,
   // ispoller: payload.ispoller,
   type: payload.type,
+  testing_url: payload.testing_url,
   // connectorName: payload.connectorName,
   // connectorBaseUrl: payload.connectorBaseUrl,
   // custom: payload.custom,
@@ -234,6 +238,7 @@ export const fidoServerWorkflow: WorkflowDefinition<
       // testDetails,
       // ispoller,
       type,
+      testing_url,
       // connectorName,
       instructions,
       // connectorBaseUrl,
@@ -443,6 +448,16 @@ export const fidoServerWorkflow: WorkflowDefinition<
         FidoEnhancedWorkflowStepsEnum.POST_IMPLEMENTATION,
         removeFileConfig.agentName,
         removeFileConfig.config
+      );
+    }
+     if(testing_url){
+      await workflow.createCheckpoint(
+      FidoEnhancedWorkflowStepsEnum.LOCAL_TESTING,
+        executeFinalLocalTesting,
+        repositoryUrl,
+        gitInfo.branch,
+        requirementAnalysis,
+        testing_url,
       );
     }
     // =========================================================================
