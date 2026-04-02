@@ -927,3 +927,32 @@ export async function executeFIDOAutomationScript(
       'Local FIDO automation not implemented - use distributed execution via executeRemoteConformanceTesting',
   };
 }
+export async function executeFinalLocalTesting(gitrepoUrl: string, gitBranch: string, requirementAnalysis: string,testing_url: string): Promise<ConformanceResult> {
+  logger.info(`🚀 Starting final local testing with repo: ${gitrepoUrl} and branch: ${gitBranch}`);
+  const testURL = testing_url || 'http://localhost:3000';
+
+  try {
+    const response = await fetch(`${testURL}/run-local`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'Xyne-FIDO-Workflow/1.0' },
+      body: JSON.stringify({ gitrepoUrl, gitBranch, requirementAnalysis }),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { success: false, output: `HTTP ${response.status}: ${errorText}` };
+    }
+
+    const data = await response.json() as { msg?: string; error?: string };
+
+    if (data.msg === 'start') {
+      return { success: true, output: 'Local testing started successfully' };
+    } else {
+      return { success: false, output: data.error || data.msg || 'Unexpected response from /run-local' };
+    }
+  } catch (err: any) {
+    logger.error(`Final local testing failed: ${err.message}`);
+    return { success: false, output: `Final local testing failed: ${err.message}` };
+  }
+}
