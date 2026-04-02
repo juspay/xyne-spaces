@@ -24,6 +24,22 @@ interface UseXyneAIStreamParams {
   channelId?: string | undefined; // Added for thread ID construction
 }
 
+// Canvas creation instruction appended when createCanvasEnabled is true
+const CANVAS_CREATION_INSTRUCTION = `
+<mandatory_final_step>
+You MUST perform these steps after completing your analysis:
+
+1. Call the <tool>create_canvas</tool> tool with:
+   - title: A descriptive title for the document
+   - markdown: Your complete response formatted in markdown with proper headings, sections, and structure
+
+2. After the tool returns, you MUST include the canvas URL from the tool output in your response.
+   The tool will return: "Canvas created successfully! Title: ... URL: https://spaces.xyne.juspay.net/chat/canvas/..."
+   Extract and display this URL so the user can click on it.
+
+This is MANDATORY - the user requires the output in a canvas document with a clickable link.
+</mandatory_final_step>`;
+
 export const useXyneAIStream = ({
   channelIds,
   conversationId,
@@ -139,6 +155,31 @@ export const useXyneAIStream = ({
       // Allow empty query if there are selection contexts
       if (!query.trim() && (!selectionContexts || selectionContexts.length === 0)) return;
 
+      // Build internal query with selection context format
+      // Format: from canvas(canvas_view_access_id) ```selected_text```
+      let internalQuery = query;
+      if (selectionContexts && selectionContexts.length > 0) {
+        const selectionFormatted = selectionContexts
+          .map(
+            ctx =>
+              `\n\nfrom canvas(${ctx.canvasViewAccessId})\n\`\`\`\n${ctx.selectedText}\n\`\`\``,
+          )
+          .join('');
+        internalQuery = query + selectionFormatted;
+      }
+
+      // Append canvas context hint for better accuracy when Ask AI is triggered from a canvas
+      if (canvasViewAccessId) {
+        const canvasContextHint = `\n\ncanvas view_access_id: ${canvasViewAccessId}`;
+        internalQuery = internalQuery + canvasContextHint;
+      }
+
+      // Append hidden canvas instruction when create canvas is enabled
+      // This forces the LLM to create a canvas with the output at the end
+      if (createCanvasEnabled) {
+        internalQuery = internalQuery + '\n\n' + CANVAS_CREATION_INSTRUCTION;
+      }
+
       // Get current messages synchronously
       // Strip any still-streaming messages — they may not have been cleared yet if abortCurrentRequest
       // was called just before submitQuery (React batches the state update, so prev still shows them).
@@ -201,7 +242,7 @@ export const useXyneAIStream = ({
       const streamId = await xyneAIStreamManager.startStream(
         threadId,
         {
-          query,
+          query: internalQuery,
           channelIds,
           conversationId,
           threadConversationId,
