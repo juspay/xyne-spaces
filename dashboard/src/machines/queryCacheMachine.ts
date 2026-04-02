@@ -16,6 +16,15 @@ import { QueryResult } from '@rocicorp/zero/react';
 
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV2>[number];
 
+export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistory>[number];
+
+export const CALL_HISTORY_KEY = 'callHistory';
+
+export interface CallHistoryState {
+  calls: CallHistoryEntry[];
+  hasMore: boolean;
+}
+
 export interface CacheEntry<T> {
   data: QueryResult<T>;
   lastUpdatedAt?: number;
@@ -27,6 +36,7 @@ export interface QueryCacheContext {
   channelConversations: {
     [channelId: string]: Conversation[];
   };
+  callHistory: CallHistoryState;
 }
 
 export type QueryCacheEvent =
@@ -48,7 +58,9 @@ export type QueryCacheEvent =
         [channelId: string]: Conversation[];
       };
     }
-  | { type: 'SET_CONVERSATIONS'; channelId: string; conversations: Conversation[] };
+  | { type: 'SET_CONVERSATIONS'; channelId: string; conversations: Conversation[] }
+  | { type: 'MERGE_CALL_HISTORY_PAGE'; page: CallHistoryEntry[]; hasMore: boolean }
+  | { type: 'HYDRATE_CALL_HISTORY'; data: CallHistoryState };
 
 /* -------------------------- STATE MACHINE -------------------------- */
 
@@ -129,12 +141,36 @@ export const queryCacheMachine = setup({
         channelConversations: wrappedConversations,
       };
     }),
+    mergeCallHistoryPage: assign({
+      callHistory: ({ context, event }) => {
+        if (event.type !== 'MERGE_CALL_HISTORY_PAGE') return context.callHistory;
+        const map = new Map(context.callHistory.calls.map(c => [c.id, c]));
+        for (const call of event.page) map.set(call.id, call);
+        const calls = [...map.values()].sort(
+          (a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id),
+        );
+        // Only allow hasMore to flip false→true on a fresh (empty cache) load
+        const hasMore = !event.hasMore
+          ? false
+          : context.callHistory.calls.length === 0
+            ? true
+            : context.callHistory.hasMore;
+        return { calls, hasMore };
+      },
+    }),
+    hydrateCallHistory: assign({
+      callHistory: ({ event }) => {
+        if (event.type !== 'HYDRATE_CALL_HISTORY') return { calls: [], hasMore: true };
+        return event.data;
+      },
+    }),
   },
 }).createMachine({
   id: 'queryCache',
   context: {
     cache: new Map(),
     channelConversations: {},
+    callHistory: { calls: [], hasMore: true },
   },
   on: {
     SET_KEY: {
@@ -148,6 +184,12 @@ export const queryCacheMachine = setup({
     },
     SET_CONVERSATIONS: {
       actions: 'setConversations',
+    },
+    MERGE_CALL_HISTORY_PAGE: {
+      actions: 'mergeCallHistoryPage',
+    },
+    HYDRATE_CALL_HISTORY: {
+      actions: 'hydrateCallHistory',
     },
   },
 });
@@ -184,6 +226,25 @@ export const getChannelConversationsQueryHash = (context: { userID: string }): s
 };
 
 /**
+ * Get the AST-based hash for the userCallHistory query.
+ * This hash changes automatically when the query structure changes.
+ * Uses dummy args since the query shape does not depend on runtime arg values.
+ */
+export const getCallHistoryQueryHash = (): string => {
+  try {
+    const query = queries.userCallHistory.fn({
+      args: { limit: 1, start: null },
+      ctx: {} as { userID: string },
+    });
+    // @ts-expect-error - hash() is part of QueryImpl, not public Query interface
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return query.hash() as string;
+  } catch {
+    return '';
+  }
+};
+
+/**
  * Setup persistence middleware for query cache
  * Initializes IndexedDB and subscribes to state changes.
  */
@@ -201,7 +262,7 @@ export const setupQueryCachePersistence = (userId: string, schemaVersion: string
 
         // Debounce the persistence operation
         persistTimeout = setTimeout(() => {
-          const { cache, channelConversations } = snapshot.context;
+          const { cache, channelConversations, callHistory } = snapshot.context;
 
           // Save each cache entry as individual key in IndexedDB
           cache.forEach((value, key) => {
@@ -221,6 +282,15 @@ export const setupQueryCachePersistence = (userId: string, schemaVersion: string
           indexedDBService.saveContextProperty('channelConversations', payload).catch(error => {
             console.error('Failed to persist conversations to IndexedDB:', error);
           });
+
+          indexedDBService
+            .saveContextProperty(CALL_HISTORY_KEY, {
+              ...callHistory,
+              [FINGERPRINT_FIELD]: getCallHistoryQueryHash(),
+            })
+            .catch(error => {
+              console.error('Failed to persist call history to IndexedDB:', error);
+            });
         }, PERSIST_DEBOUNCE_MS);
       }),
     )
@@ -255,6 +325,7 @@ export const hydrateQueryCacheFromIndexedDB = async (
     //eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cacheData: Record<string, CacheEntry<any>> = {};
     const conversationsData: Record<string, Conversation[]> = {};
+    let callHistoryHydrated = false;
 
     // Get current hash for channelConversations query
     const currentConversationHash = getChannelConversationsQueryHash({ userID: userId });
@@ -279,6 +350,26 @@ export const hydrateQueryCacheFromIndexedDB = async (
           if (Array.isArray(conversations) && conversations.length > 0) {
             conversationsData[channelId] = conversations as Conversation[];
           }
+        }
+      } else if (key === CALL_HISTORY_KEY) {
+        const raw = value as CallHistoryState & { [FINGERPRINT_FIELD]?: string };
+
+        // Discard if the query AST has changed since the data was saved
+        const storedHash = raw[FINGERPRINT_FIELD];
+        const currentCallHistoryHash = getCallHistoryQueryHash();
+
+        if (storedHash !== undefined && storedHash !== currentCallHistoryHash) {
+          console.log(
+            'callHistory discarded: query has changed since last save ' +
+              `(stored hash: ${storedHash}, current: ${currentCallHistoryHash}).`,
+          );
+        } else if (Array.isArray(raw?.calls) && raw.calls.length > 0) {
+          queryCacheActor.send({
+            type: 'HYDRATE_CALL_HISTORY',
+            data: { calls: raw.calls, hasMore: raw.hasMore },
+          });
+          callHistoryHydrated = true;
+          console.log(`Hydrated ${raw.calls.length} call history entries from IndexedDB`);
         }
       } else {
         // Regular cache entry
@@ -309,7 +400,11 @@ export const hydrateQueryCacheFromIndexedDB = async (
     }
 
     // Return true if we hydrated anything
-    return Object.keys(cacheData).length > 0 || Object.keys(conversationsData).length > 0;
+    return (
+      Object.keys(cacheData).length > 0 ||
+      Object.keys(conversationsData).length > 0 ||
+      callHistoryHydrated
+    );
   } catch (error) {
     console.error('Failed to hydrate query cache from IndexedDB:', error);
     return false;
