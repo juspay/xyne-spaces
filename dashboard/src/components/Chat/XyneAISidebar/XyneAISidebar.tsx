@@ -270,15 +270,16 @@ const XyneAISidebar = ({
       // Abort any existing streams for this thread
       abortCurrentRequest();
 
-      // Reset the flag in the machine after handling it
+      // Reset the flag in the machine after handling it, preserving canvasInfo
       xyneAIActor.send({
         type: 'OPEN',
         ...(channelId && { channelId }),
         ...(threadInfo && { threadInfo }),
+        ...(canvasInfo && { canvasInfo }),
         startFreshChat: false,
       });
     }
-  }, [startFreshChat, channelId, threadInfo, abortCurrentRequest]);
+  }, [startFreshChat, channelId, threadInfo, canvasInfo, abortCurrentRequest]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {

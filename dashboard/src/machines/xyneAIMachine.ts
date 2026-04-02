@@ -356,13 +356,22 @@ export const xyneAIMachine = setup({
           event.canvasInfo,
         );
 
+        // When opening from closed state with canvas context (Ask AI on canvas),
+        // always start a fresh chat unless explicitly overridden
+        const startFreshChat =
+          event.startFreshChat !== undefined
+            ? event.startFreshChat
+            : event.canvasInfo !== null && event.canvasInfo !== undefined
+              ? true
+              : false;
+
         const newContext = {
           xyneAIState: 'open' as XyneAIState,
           contextType,
           contextId,
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
           threadInfo: event.threadInfo ?? null,
-          startFreshChat: event.startFreshChat ?? false,
+          startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
         };
@@ -396,12 +405,21 @@ export const xyneAIMachine = setup({
           event.canvasInfo,
         );
 
+        // When already open and canvas context is provided (Ask AI on canvas),
+        // always start a fresh chat unless explicitly overridden
+        const startFreshChat =
+          event.startFreshChat !== undefined
+            ? event.startFreshChat
+            : event.canvasInfo !== null && event.canvasInfo !== undefined
+              ? true
+              : false;
+
         const newContext = {
           contextType,
           contextId,
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
           threadInfo: event.threadInfo ?? null,
-          startFreshChat: event.startFreshChat ?? false,
+          startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
         };
