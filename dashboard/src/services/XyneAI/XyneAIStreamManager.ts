@@ -30,6 +30,7 @@ import { toast } from 'sonner';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import XyneAIStreamWorker from './xyneAIStream.worker?worker';
 import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './xyneAIStream.worker';
+import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
 
 export interface StreamState {
   streamId: string;
@@ -123,6 +124,11 @@ class XyneAIStreamManager {
   // Web Worker instance
   private worker: Worker;
 
+  // Streams that the worker is actively sending chunks for.
+  // A stream is added on first STREAM_CHUNK and removed on STREAM_COMPLETE / STREAM_ERROR.
+  // Used to detect silently-dropped connections after Android backgrounding.
+  private workerActiveStreams: Set<string> = new Set();
+
   // Map to track raw content, tool outputs, and local message IDs for each stream
   private streamDataMap: Map<
     string,
@@ -144,6 +150,12 @@ class XyneAIStreamManager {
     this.worker.addEventListener('message', this.handleWorkerMessage.bind(this));
     this.worker.addEventListener('error', this.handleWorkerError.bind(this));
 
+    // Re-execute interrupted streams when the native app returns to foreground
+    // (Android aborts fetch/SSE connections when the app goes to background)
+    reactNativeBridge.on(NativeInboundMessageType.NATIVE_APP_FOREGROUND, () => {
+      void this.handleAppForeground();
+    });
+
     // Initialize by loading any persisted active streams
     void this.initializeFromStorage();
 
@@ -161,6 +173,67 @@ class XyneAIStreamManager {
       XyneAIStreamManager.instance = new XyneAIStreamManager();
     }
     return XyneAIStreamManager.instance;
+  }
+
+  /**
+   * Re-execute any streams that were interrupted when the app went to background.
+   * The OS aborts fetch/SSE connections on Android when backgrounded, so we
+   * restart the worker request for every stream still marked as 'streaming'.
+   */
+  private async handleAppForeground(): Promise<void> {
+    for (const [threadId, state] of this.activeStreams.entries()) {
+      if (state.status !== 'streaming') continue;
+
+      // If the worker is still sending chunks for this stream, it survived backgrounding — skip.
+      if (this.workerActiveStreams.has(state.streamId)) continue;
+
+      const record = await xyneAIStreamStorage.getActiveStreamForThread(threadId);
+      if (!record) continue;
+
+      console.info(
+        '[XyneAIStreamManager] App foregrounded — restarting interrupted stream',
+        state.streamId,
+      );
+
+      // Reset the streaming bot message so it shows a reconnecting indicator
+      state.messages = state.messages.map(msg =>
+        msg.isStreaming ? { ...msg, streamingContent: '', statusMessage: 'Reconnecting…' } : msg,
+      );
+      this.notifySubscribers({ ...state });
+
+      // Re-initialize stream data buffer
+      this.streamDataMap.set(state.streamId, {
+        rawContent: record.rawContent ?? '',
+        toolOutputs: record.toolOutputs ?? [],
+        participants: [],
+      });
+
+      // Re-send START_STREAM to worker with a fresh request
+      const message: WorkerIncomingMessage = {
+        type: 'START_STREAM',
+        payload: {
+          streamId: state.streamId,
+          url: `${BASE_URL}/xyne-ai`,
+          requestBody: {
+            query: record.query,
+            channelIds: record.channelIds,
+            conversationId: record.sessionId,
+            sessionId: record.sessionId,
+            webSearchEnabled: record.webSearchEnabled,
+            gmailSearchEnabled: record.gmailSearchEnabled,
+            researchContext: null,
+            ...(record.attachments.length > 0 && {
+              attachments: record.attachments.map(att => ({
+                data: att.data,
+                mimeType: att.mimeType,
+                filename: att.filename,
+              })),
+            }),
+          },
+        },
+      };
+      this.worker.postMessage(message);
+    }
   }
 
   /**
@@ -196,14 +269,17 @@ class XyneAIStreamManager {
 
     switch (type) {
       case 'STREAM_CHUNK':
+        this.workerActiveStreams.add(payload.streamId);
         this.handleWorkerStreamChunk(payload.streamId, payload.data);
         break;
 
       case 'STREAM_COMPLETE':
+        this.workerActiveStreams.delete(payload.streamId);
         this.handleWorkerStreamComplete(payload.streamId);
         break;
 
       case 'STREAM_ERROR':
+        this.workerActiveStreams.delete(payload.streamId);
         this.handleWorkerStreamError(payload.streamId, payload.error);
         break;
 
@@ -1172,6 +1248,7 @@ class XyneAIStreamManager {
         // Cleanup
         this.activeStreams.delete(threadId);
         this.streamDataMap.delete(streamId);
+        this.workerActiveStreams.delete(streamId);
         this.pendingDeltaMap.delete(streamId);
         const rafId = this.rafIdMap.get(streamId);
         if (rafId !== undefined) {
