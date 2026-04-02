@@ -7,22 +7,26 @@ import { zql } from '../../queries';
 export class ConversationParticipantsACL extends BaseACL<'conversation_participants'> {
 
   async canInsert(args: InsertValue<TableSchema<'conversation_participants'>>, tx: Transaction<Schema>): Promise<void> {
-    const channel = await tx
+    const conversation = await tx
       .run(
       zql.conversations
       .where('conversationId', args.conversationId)
       .related('channel')
       .one());
 
-    if (!channel) {
+    if (!conversation || !conversation.channel) {
       throw new MutationACLError('Conversation participant insert failed: the conversation or its channel does not exist', 'conversation_participants')
+    }
+
+    if (conversation.channel.isArchived) {
+      throw new MutationACLError('Conversation participant insert failed: cannot join conversations in archived channel', 'conversation_participants')
     }
 
     const isParticipant = await tx
       .run(
       zql.channel_participants
       .where('userId', this.ctx.userID)
-      .where('channelId', channel.channelId)
+      .where('channelId', conversation.channelId)
       .one());
 
     if (!isParticipant) {

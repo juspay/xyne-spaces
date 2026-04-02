@@ -279,6 +279,7 @@ const ConversationHeaderMobile = ({
               callDisplayName={displayName}
               isMember={!!channelUserStatus}
               className='rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
+              disabled={channel.isArchived}
             />
           </div>
         </div>

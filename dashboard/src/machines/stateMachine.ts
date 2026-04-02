@@ -136,7 +136,9 @@ type StateMachineEvent =
   | { type: 'SET_FILTERED_TICKET_IDS'; ids: string[] }
   | { type: 'SET_ONLINE_USERS'; onlineUsers: OnlineUser[] }
   | { type: 'PUSH_OVERLAY' }
-  | { type: 'POP_OVERLAY' };
+  | { type: 'POP_OVERLAY' }
+  | { type: 'ARCHIVE_CHANNEL'; channelId: string }
+  | { type: 'UNARCHIVE_CHANNEL'; channelId: string };
 
 export const stateMachine = setup({
   types: {
@@ -242,6 +244,44 @@ export const stateMachine = setup({
           };
         }
         return context.watermark;
+      },
+    }),
+    archiveChannel: assign({
+      visibleChannels: ({ context, event }) => {
+        if (event.type === 'ARCHIVE_CHANNEL') {
+          return context.visibleChannels.filter(c => c.id !== event.channelId);
+        }
+        return context.visibleChannels;
+      },
+      allChannels: ({ context, event }) => {
+        if (event.type === 'ARCHIVE_CHANNEL') {
+          return context.allChannels.map(c =>
+            c.id === event.channelId ? { ...c, isArchived: true } : c,
+          );
+        }
+        return context.allChannels;
+      },
+    }),
+    unarchiveChannel: assign({
+      visibleChannels: ({ context, event }) => {
+        if (event.type === 'UNARCHIVE_CHANNEL') {
+          const channel = context.allChannels.find(c => c.id === event.channelId);
+          if (channel && !context.visibleChannels.some(c => c.id === event.channelId)) {
+            return [
+              ...context.visibleChannels,
+              { ...channel, isArchived: false },
+            ] as VisibleChannel[];
+          }
+        }
+        return context.visibleChannels;
+      },
+      allChannels: ({ context, event }) => {
+        if (event.type === 'UNARCHIVE_CHANNEL') {
+          return context.allChannels.map(c =>
+            c.id === event.channelId ? { ...c, isArchived: false } : c,
+          );
+        }
+        return context.allChannels;
       },
     }),
     setUserPermissions: assign({
@@ -477,6 +517,12 @@ export const stateMachine = setup({
         },
         POP_OVERLAY: {
           actions: 'popOverlay',
+        },
+        ARCHIVE_CHANNEL: {
+          actions: 'archiveChannel',
+        },
+        UNARCHIVE_CHANNEL: {
+          actions: 'unarchiveChannel',
         },
       },
     },

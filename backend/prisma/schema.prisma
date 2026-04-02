@@ -1350,6 +1350,7 @@ model Channel {
   participantCount Int                    @default(0)
   isMigrated      Boolean?                @default(false)
   addUserPolicy   ChannelAddUserPolicy?  @default(EVERYONE)
+  isArchived      Boolean                @default(false)
 
   // Relations
   conversations      Conversation[]
@@ -1364,6 +1365,7 @@ model Channel {
   @@index([projectId])
   @@index([createdBy])
   @@index([visibility, id]) // for userAllChannels
+  @@index([isArchived])
   @@map("channels")
   @@schema("public")
 }

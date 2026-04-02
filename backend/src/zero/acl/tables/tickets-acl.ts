@@ -14,6 +14,12 @@ export class TicketACl extends BaseACL<'tickets'> {
         if (!project) {
             throw new MutationACLError('Ticket insert failed: the specified project does not exist', 'tickets');
         }
+
+        const channel = await tx.run(zql.channels.where('id', args.channelId).one());
+        if (channel?.isArchived) {
+            throw new MutationACLError('Ticket insert failed: cannot create tickets in archived channel', 'tickets');
+        }
+
         const isParticipant = await tx
             .run(
             zql.channels

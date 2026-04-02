@@ -1097,6 +1097,7 @@ export const channelTable = table('channels')
     participantCount: number(),
     isMigrated: boolean().optional(),
     addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
+    isArchived: boolean(),
   })
   .primaryKey('id');
 

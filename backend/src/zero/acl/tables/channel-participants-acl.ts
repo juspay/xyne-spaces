@@ -8,6 +8,11 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
 
   async canInsert(args: InsertValue<TableSchema<'channel_participants'>>, tx: Transaction<Schema>): Promise<void> {
     const channel = await tx.run(zql.channels.where('id', '=', args.channelId).one());
+
+    if (channel?.isArchived) {
+      throw new MutationACLError('Channel participant insert failed: cannot join archived channel', 'channel_participants');
+    }
+
     const existingParticipant = await tx.run(zql.channel_participants
       .where('channelId', '=', args.channelId)
       .where('userId', '=', this.ctx.userID)
@@ -20,10 +25,15 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'channel_participants'>>, tx: Transaction<Schema>): Promise<void> {
-    const participant = await tx.run(zql.channel_participants.where('id', '=', args.id).one());
-    if (!participant) {
+    const participant = await tx.run(zql.channel_participants.where('id', '=', args.id).related('channel').one());
+    if (!participant || !participant.channel) {
       throw new MutationACLError('Channel participant update failed: participant record does not exist', 'channel_participants');
     }
+
+    if (participant.channel.isArchived) {
+      throw new MutationACLError('Channel participant update failed: cannot update participants in archived channel', 'channel_participants');
+    }
+
     const userParticipationData = await tx.run(zql.channel_participants.where('channelId', '=', participant.channelId).where('userId', '=', this.ctx.userID).one());
 
     if (userParticipationData?.role === ChannelRole.ADMIN || userParticipationData?.userId === this.ctx.userID) {
@@ -33,17 +43,21 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'channel_participants'>>, tx: Transaction<Schema>): Promise<void> {
-    const participant = await tx.run(zql.channel_participants.where('id', '=', args.id).one());
+    const participant = await tx.run(zql.channel_participants.where('id', '=', args.id).related('channel').one());
 
-    if (!participant) {
+    if (!participant || !participant.channel) {
       throw new MutationACLError('Channel participant delete failed: participant record does not exist', 'channel_participants');
     }
 
-    if (participant?.userId === this.ctx.userID) {
+    if (participant.channel.isArchived) {
+      throw new MutationACLError('Channel participant delete failed: cannot delete participants in archived channel', 'channel_participants');
+    }
+
+    if (participant.userId === this.ctx.userID) {
       return;
     }
 
-    const userParticipationData = await tx.run(zql.channel_participants.where('channelId', '=', participant?.channelId).where('userId', '=', this.ctx.userID).one());
+    const userParticipationData = await tx.run(zql.channel_participants.where('channelId', '=', participant.channelId).where('userId', '=', this.ctx.userID).one());
     if (userParticipationData?.role === ChannelRole.ADMIN) {
       return;
     }

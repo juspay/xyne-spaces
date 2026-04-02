@@ -218,6 +218,7 @@ const ConversationHeader = ({
             participantCount={channel.channelStats?.participantCount ?? 0}
             callDisplayName={displayName}
             isMember={!!channelUserStatus}
+            disabled={channel.isArchived}
           />
         </div>
       </div>

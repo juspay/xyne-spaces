@@ -64,6 +64,7 @@ interface HoverActionsToolbarProps {
   onMarkAsUnread?: () => void;
   onInitiateCall?: () => void;
   isCallDisabled?: boolean;
+  isChannelArchived?: boolean;
 }
 
 export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
@@ -93,6 +94,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onMarkAsUnread,
   onInitiateCall,
   isCallDisabled = false,
+  isChannelArchived = false,
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -194,7 +196,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
       )}
 
       {/* Create Ticket */}
-      {onCreateTicket && canCreateTicket && (
+      {onCreateTicket && canCreateTicket && !isChannelArchived && (
         <Tooltip content='Create ticket' side='top'>
           <Button
             variant='ghost'
@@ -230,7 +232,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
       )}
 
       {/* Start Call */}
-      {onInitiateCall && messageId === initialMessageId && (
+      {onInitiateCall && messageId === initialMessageId && !isChannelArchived && (
         <Tooltip content={isCallDisabled ? 'Call in progress' : 'Start call'} side='top'>
           <Button
             variant='ghost'
@@ -291,7 +293,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               return (
                 <>
                   {/* Edit Message */}
-                  {showEditAction && onEditMessage && (
+                  {showEditAction && onEditMessage && !isChannelArchived && (
                     <DropdownMenuItem
                       onClick={onEditMessage}
                       data-track-category='HOVER_ACTIONS_TOOLBAR'

@@ -1368,7 +1368,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
         {/* Create Ticket Button - Right Side */}
         <div className='flex flex-wrap lg:flex-col md:items-end gap-3 ml-auto md:ml-0'>
-          {canCreateTicket && channel && (
+          {canCreateTicket && channel && !channel.isArchived && (
             <button
               data-testid='kanban-create-ticket-button'
               data-track-event='BUTTON_CLICK'
