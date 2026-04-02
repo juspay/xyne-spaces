@@ -1283,6 +1283,7 @@ Output ONLY the processed transcript, nothing else.`;
   ): Promise<void> {
     try {
       if (!hasTranscript) {
+        logger.warn(`transcript_processing_skipped | call_id=${callId} reason=agent_reported_no_transcript`);
         return;
       }
 

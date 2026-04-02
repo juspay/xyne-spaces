@@ -30,14 +30,20 @@ class CallSideEffectService {
             p => p.response === InvitationResponse.INVITED && p.joinedAt === null && p.userId !== p.invitedBy
         );
 
-        if (invitedParticipants.length === 0) return;
+        if (invitedParticipants.length === 0) {
+            this.logger.debug(`No invited participants pending for call ${callId} — skipping missed call notifications`);
+            return;
+        }
 
         const call = await db.call.findUnique({
             where: { id: callId },
             select: { externalId: true, channelId: true, callType: true }
         });
 
-        if (!call) return;
+        if (!call) {
+            this.logger.warn(`Call record not found for ${callId} — skipping missed call notifications`);
+            return;
+        }
 
         const channel = await db.channel.findUnique({
             where: { id: call.channelId },
@@ -128,11 +134,22 @@ class CallSideEffectService {
             });
 
             if (!participant || participant.response !== InvitationResponse.INVITED) {
+                this.logger.warn(`Participant ${participantId} not found or not in INVITED state — skipping invite side effects`, {
+                    found: !!participant,
+                    response: participant?.response,
+                });
                 return;
             }
 
             const { callId, userId: recipientId, invitedBy } = participant;
-            if (!callId || !recipientId || !invitedBy) return;
+            if (!callId || !recipientId || !invitedBy) {
+                this.logger.warn(`Missing callId/recipientId/invitedBy for participant ${participantId} — skipping invite side effects`, {
+                    callId,
+                    recipientId,
+                    invitedBy,
+                });
+                return;
+            }
             if (recipientId === invitedBy) return;
 
             const call = await db.call.findUnique({
@@ -140,7 +157,13 @@ class CallSideEffectService {
                 select: { externalId: true, callType: true, roomLink: true, channelId: true }
             });
 
-            if (!call) return;
+            if (!call) {
+                this.logger.warn(`Call not found for participant ${participantId} — skipping invite side effects`, {
+                    participantId,
+                    callId,
+                });
+                return;
+            }
 
             const channel = await db.channel.findUnique({
                 where: { id: call.channelId },
@@ -262,13 +285,22 @@ class CallSideEffectService {
                 where: { id: participantId },
             });
 
-            if (!participant) return;
+            if (!participant) {
+                this.logger.warn(`Participant ${participantId} not found after response change — skipping CALL_DISMISS`);
+                return;
+            }
 
             const call = await db.call.findUnique({
                 where: { id: participant.callId }
             });
 
-            if (!call) return;
+            if (!call) {
+                this.logger.warn(`Call not found for participant ${participantId} — skipping CALL_DISMISS`, {
+                    participantId,
+                    callId: participant.callId,
+                });
+                return;
+            }
 
             await notificationService.createFCMNotification(participant.userId, {
                 title: 'Call Dismissed',

@@ -182,6 +182,23 @@ export class CallController {
 
       logger.info(`[${callExternalId}] livekit_room_created | user_id=${userId}`);
 
+      setTimeout(async () => {
+        try {
+          const room = await livekitService.getRoomInfo(callExternalId!);
+          if (!room) {
+            logger.info(`[${callExternalId}] reason=room_not_active`);
+            return;
+          }
+          const participants = await livekitService.listParticipants(callExternalId!);
+          const hasAgent = participants.some(p => p.identity.startsWith('agent-'));
+          if (!hasAgent) {
+            logger.error(`[${callExternalId}] agent_failed_to_join | reason=timeout_30s`);
+          }
+        } catch (error) {
+          // Room might already be closed or API error, ignore as it's a best-effort diagnostic log
+        }
+      }, 30000);
+
       // Generate access token for initiator
       const initiator = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
       const token = await livekitService.generateAccessToken({
@@ -343,7 +360,7 @@ export class CallController {
    * Private helper method to process transcript for a call
    * Shared logic between webhook and manual endpoints
    */
-  private async _processCallTranscript(callId: string, messageId?: string): Promise<{ success: boolean; message?: string; attachmentId?: string; error?: string; statusCode?: number }> {
+  private async _processCallTranscript(callId: string, messageId?: string, hasTranscript: boolean = true): Promise<{ success: boolean; message?: string; attachmentId?: string; error?: string; statusCode?: number }> {
     try {
       // 1. Verify the call exists
       const call = await repositories.calls.findByExternalId(callId);
@@ -403,7 +420,7 @@ export class CallController {
       }
 
       // 4. Process the transcript and generate AI summary
-      await transcriptService.processCallWithSummary(callId, callMessage.messageId);
+      await transcriptService.processCallWithSummary(callId, callMessage.messageId, hasTranscript);
 
       logger.info(`Successfully processed transcript and AI summary for call ${callId}`);
       return { success: true, message: 'Transcript and summary processed successfully' };
@@ -420,6 +437,7 @@ export class CallController {
    */
   transcriptReady = async (req: Request, res: Response): Promise<void> => {
     const { callId } = req.params;
+    const hasTranscript = req.body.hasTranscript ?? true;
 
     if (!callId) {
       res.status(400).json({ success: false, error: 'Call ID is required' });
@@ -427,8 +445,8 @@ export class CallController {
     }
 
     logger.info(`[${callId}] transcript_ready_webhook_received | webhook_source=python_agent`);
-
-    const result = await this._processCallTranscript(callId);
+    
+    const result = await this._processCallTranscript(callId, undefined, hasTranscript);
 
     if (result.statusCode) {
       res.status(result.statusCode).json(result);
