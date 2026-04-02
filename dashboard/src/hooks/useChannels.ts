@@ -19,7 +19,8 @@ const shallowEqualVisibleChannels = (a: VisibleChannel[], b: VisibleChannel[]): 
       channel.visibility === otherChannel.visibility &&
       channel.channelStats?.lastActivityAt === otherChannel.channelStats?.lastActivityAt &&
       channel.channelStats?.participantCount === otherChannel.channelStats?.participantCount &&
-      channel.channelStats?.addUserPolicy === otherChannel.channelStats?.addUserPolicy
+      channel.channelStats?.addUserPolicy === otherChannel.channelStats?.addUserPolicy &&
+      channel.channelStats?.lastRecapHadMessages === otherChannel.channelStats?.lastRecapHadMessages
     );
   });
 };

@@ -1107,6 +1107,7 @@ export const channelStatsTable = table('channel_stats')
     lastActivityAt: number(),
     participantCount: number(),
     addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
+    lastRecapHadMessages: boolean().optional(),
   })
   .primaryKey('channelId');
 
