@@ -188,12 +188,14 @@ export function parseStreamingContent(content: string): StreamingParsedContent {
   let citations: Record<number, number> = {};
 
   // Try to detect format: JSON vs plain text/markdown
-  const isJsonFormat = cleaned.includes('"summary"') || cleaned.includes('"keypoints"');
+  // Also detect early JSON by checking if content starts with '{' to avoid showing raw JSON fragments
+  const isJsonFormat =
+    cleaned.startsWith('{') || cleaned.includes('"summary"') || cleaned.includes('"keypoints"');
 
   if (isJsonFormat) {
     // JSON format parsing (legacy)
-    const summaryMatch = cleaned.match(/"summary"\s*:\s*"([^"]*)(")?/);
-    if (summaryMatch && summaryMatch[1]) {
+    const summaryMatch = cleaned.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"?/);
+    if (summaryMatch && summaryMatch[1] !== undefined) {
       summary = summaryMatch[1]
         .replace(/\\n/g, '\n')
         .replace(/\\"/g, '"')
@@ -201,7 +203,7 @@ export function parseStreamingContent(content: string): StreamingParsedContent {
         .replace(/\\\\/g, '\\');
     }
 
-    const keypointsMatch = cleaned.match(/"keypoints"\s*:\s*"([^"]*)(")?/);
+    const keypointsMatch = cleaned.match(/"keypoints"\s*:\s*"((?:[^"\\]|\\.)*)"?/);
     if (keypointsMatch && keypointsMatch[1]) {
       const keypointsStr = keypointsMatch[1]
         .replace(/\\n/g, '\n')

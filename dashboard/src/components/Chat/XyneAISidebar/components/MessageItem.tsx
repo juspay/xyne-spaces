@@ -4,6 +4,7 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
 import {
   SingleStat,
@@ -161,16 +162,6 @@ const processNodeForUserTags = (
   return node;
 };
 
-// Sanitize text to prevent XSS attacks
-const sanitizeText = (text: string): string => {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .replace(/\//g, '&#x2F;');
-};
 /**
  * Process a string to replace user tags with actual user names for copying
  * Returns plain text with user names instead of <Full Name> tags
@@ -191,7 +182,6 @@ interface MessageContentProps {
   displayContent: string;
   hasKeypoints: boolean | undefined;
   parsedContent: StreamingParsedContent | undefined;
-  visibleChars: number;
   onCitationClick: (
     messageNumber: number,
     conversationIdMapping: Record<string, string>,
@@ -212,7 +202,6 @@ interface SingleStatSectionProps {
 
 interface SummarizerContentProps {
   message: Message;
-  visibleChars: number;
   onSummarizerCitationClick: (citation: SummarizerCitation) => void;
 }
 
@@ -238,7 +227,6 @@ interface MessageActionsProps {
 
 interface MessageItemProps {
   message: Message;
-  visibleChars: number;
   onFeedback: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
   onCitationClick: (
     messageNumber: number,
@@ -382,399 +370,422 @@ const BranchNavigator = ({
   </div>
 );
 
-export const MessageItem = ({
-  message,
-  visibleChars,
-  onFeedback,
-  onCitationClick,
-  onSummarizerCitationClick,
-  feedbackValue,
-  onRegenerate,
-  onEditSubmit,
-  onEditMobile,
-  isLatestBotMessage,
-  branchInfo,
-  onBranchNavigate,
-}: MessageItemProps): ReactElement => {
-  const [copied, setCopied] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState('');
-  const editTextareaRef = React.useRef<HTMLTextAreaElement>(null);
-  const navigate = useNavigate();
+export const MessageItem = React.memo(
+  ({
+    message,
+    onFeedback,
+    onCitationClick,
+    onSummarizerCitationClick,
+    feedbackValue,
+    onRegenerate,
+    onEditSubmit,
+    onEditMobile,
+    isLatestBotMessage,
+    branchInfo,
+    onBranchNavigate,
+  }: MessageItemProps): ReactElement => {
+    const [copied, setCopied] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editText, setEditText] = useState('');
+    const editTextareaRef = React.useRef<HTMLTextAreaElement>(null);
+    const navigate = useNavigate();
 
-  // Rotating status for long-running tools (research_agent, create_ppt)
-  const [rotatingIndex, setRotatingIndex] = useState(0);
-  const statusPhrases = Array.isArray(message.statusMessage) ? message.statusMessage : null;
-  const displayStatus = statusPhrases
-    ? statusPhrases[rotatingIndex % statusPhrases.length]
-    : (message.statusMessage as string | undefined);
+    // Rotating status for long-running tools (research_agent, create_ppt)
+    const [rotatingIndex, setRotatingIndex] = useState(0);
+    const statusPhrases = Array.isArray(message.statusMessage) ? message.statusMessage : null;
+    const displayStatus = statusPhrases
+      ? statusPhrases[rotatingIndex % statusPhrases.length]
+      : (message.statusMessage as string | undefined);
 
-  useEffect(() => {
-    if (!statusPhrases || !message.isStreaming) return;
-    setRotatingIndex(0);
-    const interval = setInterval(() => {
-      setRotatingIndex(prev => (prev + 1) % statusPhrases.length);
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [statusPhrases, message.isStreaming]);
+    useEffect(() => {
+      if (!statusPhrases || !message.isStreaming) return;
+      setRotatingIndex(0);
+      const interval = setInterval(() => {
+        setRotatingIndex(prev => (prev + 1) % statusPhrases.length);
+      }, 4000);
+      return () => clearInterval(interval);
+    }, [statusPhrases, message.isStreaming]);
 
-  // Handle clicking selection context to navigate to canvas
-  const handleSelectionContextClick = (canvasViewAccessId: string): void => {
-    void navigate(`/chat/canvas/${canvasViewAccessId}`);
-  };
+    // Handle clicking selection context to navigate to canvas
+    const handleSelectionContextClick = (canvasViewAccessId: string): void => {
+      void navigate(`/chat/canvas/${canvasViewAccessId}`);
+    };
 
-  // Calculate display content for bot messages
-  const displayContent =
-    message.type === 'bot' && message.isStreaming && message.streamingContent
-      ? message.streamingContent.slice(0, visibleChars || 0)
-      : message.content || message.streamingContent || '';
+    // Display streaming content directly without character reveal slicing
+    const displayContent = useMemo(
+      () =>
+        message.type === 'bot' && message.isStreaming && message.streamingContent
+          ? message.streamingContent
+          : message.content || message.streamingContent || '',
+      [message.type, message.isStreaming, message.streamingContent, message.content],
+    );
 
-  const parsedContent = message.parsedContent;
-  const hasKeypoints = parsedContent && parsedContent.keypoints.length > 0;
+    const parsedContent = message.parsedContent;
+    const hasKeypoints = parsedContent && parsedContent.keypoints.length > 0;
 
-  const handleCopy = (): void => {
-    let textToCopy = '';
+    const handleCopy = (): void => {
+      let textToCopy = '';
 
-    // Get summary/content
-    if (message.agentType === 'summarizer' && message.summarizerOutput?.summary) {
-      // Process summary to replace user tags with plain text names
-      textToCopy = processTextForCopy(message.summarizerOutput.summary, message.userTags);
-      // Add key points
-      if (message.summarizerOutput.keyPoints && message.summarizerOutput.keyPoints.length > 0) {
-        textToCopy += '\n\nKey Points:\n';
-        textToCopy += message.summarizerOutput.keyPoints
-          .map(kp => {
-            // Process key points to replace user tags with plain text names
-            return `• ${processTextForCopy(kp.point, message.userTags)}`;
-          })
-          .join('\n');
-      }
-    } else {
-      // Genius or generic message - process content to replace user tags with plain text names
-      textToCopy = processTextForCopy(
-        message.content || message.streamingContent || '',
-        message.userTags,
-      );
-      // Add key points from parsed content
-      if (message.parsedContent && message.parsedContent.keypoints.length > 0) {
-        textToCopy += '\n\nKey Points:\n';
-        textToCopy += message.parsedContent.keypoints
-          .map(point => {
-            // Remove markdown bold markers (**text**) and replace user tags
-            const cleanedPoint = point.replace(/\*\*([^*]+)\*\*/g, '$1');
-            return `• ${processTextForCopy(cleanedPoint, message.userTags)}`;
-          })
-          .join('\n');
-      }
-    }
-
-    void navigator.clipboard.writeText(textToCopy).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  return (
-    <div
-      className={`group/message flex gap-3 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-    >
-      {message.type === 'bot' && (
-        <div className='flex-shrink-0 mt-1'>
-          <img src='/svgs/icons/ai-bot-gradient-star.svg' alt='AI' width='16' height='16' />
-        </div>
-      )}
-
-      {/* Edit button for user messages - appears on hover to the left of the bubble */}
-      {message.type === 'user' && (onEditSubmit || onEditMobile) && !isEditing && (
-        <button
-          onClick={() => {
-            if (onEditMobile) {
-              onEditMobile();
-            } else {
-              setEditText(message.content);
-              setIsEditing(true);
-              setTimeout(() => editTextareaRef.current?.focus(), 0);
-            }
-          }}
-          className='self-start mt-2 p-1 rounded opacity-0 group-hover/message:opacity-100 transition-opacity hover:bg-accent flex-shrink-0'
-          title='Edit message'
-          data-track-category='XyneAI'
-          data-track-name='EDIT_MESSAGE'
-        >
-          <Pencil size={14} className='text-muted-foreground' />
-        </button>
-      )}
-
-      <div
-        className={
-          message.type === 'user'
-            ? isEditing
-              ? 'max-w-[90%] w-full overflow-hidden'
-              : 'max-w-[80%] overflow-hidden'
-            : 'flex-1 max-w-full overflow-hidden'
+      // Get summary/content
+      if (message.agentType === 'summarizer' && message.summarizerOutput?.summary) {
+        // Process summary to replace user tags with plain text names
+        textToCopy = processTextForCopy(message.summarizerOutput.summary, message.userTags);
+        // Add key points
+        if (message.summarizerOutput.keyPoints && message.summarizerOutput.keyPoints.length > 0) {
+          textToCopy += '\n\nKey Points:\n';
+          textToCopy += message.summarizerOutput.keyPoints
+            .map(kp => {
+              // Process key points to replace user tags with plain text names
+              return `• ${processTextForCopy(kp.point, message.userTags)}`;
+            })
+            .join('\n');
         }
+      } else {
+        // Genius or generic message
+        textToCopy = message.content || message.streamingContent || '';
+        // Add key points from parsed content
+        if (message.parsedContent && message.parsedContent.keypoints.length > 0) {
+          textToCopy += '\n\nKey Points:\n';
+          textToCopy += message.parsedContent.keypoints
+            .map(point => {
+              // Remove markdown bold markers (**text**) and replace user tags
+              const cleanedPoint = point.replace(/\*\*([^*]+)\*\*/g, '$1');
+              return `• ${processTextForCopy(cleanedPoint, message.userTags)}`;
+            })
+            .join('\n');
+        }
+      }
+
+      void navigator.clipboard.writeText(textToCopy).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      });
+    };
+
+    return (
+      <div
+        className={`group/message flex gap-3 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
       >
-        {/* Streaming status indicator - shows inline with icon when no content */}
-        {message.type === 'bot' && message.isStreaming && displayStatus && !displayContent ? (
-          <div className='flex items-center gap-0.5 mt-1'>
-            <span className="text-xs text-muted-foreground font-['Inter'] italic">
-              {sanitizeText(displayStatus)}
-            </span>
-            <span className='inline-flex gap-0.5'>
-              <span
-                className='animate-bounce text-xs text-muted-foreground'
-                style={{ animationDelay: '0ms', animationDuration: '1s' }}
-              >
-                .
-              </span>
-              <span
-                className='animate-bounce text-xs text-muted-foreground'
-                style={{ animationDelay: '200ms', animationDuration: '1s' }}
-              >
-                .
-              </span>
-              <span
-                className='animate-bounce text-xs text-muted-foreground'
-                style={{ animationDelay: '400ms', animationDuration: '1s' }}
-              >
-                .
-              </span>
-            </span>
+        {message.type === 'bot' && (
+          <div className='flex-shrink-0 mt-1'>
+            <img src='/svgs/icons/ai-bot-gradient-star.svg' alt='AI' width='16' height='16' />
           </div>
-        ) : (
-          <>
-            <div
-              className={`${
-                message.type === 'user'
-                  ? isEditing
-                    ? 'rounded-2xl bg-muted p-3'
-                    : 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[var(--chat-mobile-my-bubble)] text-foreground md:block md:rounded-2xl md:bg-muted md:text-foreground md:px-4 md:py-2 md:w-fit'
-                  : 'rounded-2xl bg-transparent text-foreground max-w-full'
-              }`}
-            >
-              {message.type === 'user' && isEditing ? (
-                /* Inline edit mode */
-                <div className='flex flex-col gap-2'>
-                  <textarea
-                    ref={editTextareaRef}
-                    value={editText}
-                    onChange={e => setEditText(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        if (editText.trim()) {
-                          onEditSubmit?.(editText.trim());
-                          setIsEditing(false);
-                        }
-                      }
-                      if (e.key === 'Escape') {
-                        setIsEditing(false);
-                      }
-                    }}
-                    className="w-full bg-transparent text-sm font-['Inter'] font-[450] text-foreground resize-none outline-none min-h-[60px] leading-relaxed"
-                    rows={Math.max(2, editText.split('\n').length)}
-                    data-track-category='XyneAI'
-                    data-track-name='EDIT_TEXTAREA'
-                  />
-                  <div className='flex justify-end gap-2'>
-                    <button
-                      onClick={() => setIsEditing(false)}
-                      className="px-3 py-1.5 text-xs font-medium rounded-full border border-border bg-background hover:bg-accent transition-colors font-['Inter']"
-                      data-track-category='XyneAI'
-                      data-track-name='EDIT_CANCEL'
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (editText.trim()) {
-                          onEditSubmit?.(editText.trim());
-                          setIsEditing(false);
-                        }
-                      }}
-                      disabled={!editText.trim()}
-                      className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
-                      data-track-category='XyneAI'
-                      data-track-name='EDIT_SUBMIT'
-                    >
-                      Send
-                    </button>
-                  </div>
-                </div>
-              ) : message.type === 'user' ? (
-                <>
-                  {/* Selection context previews */}
-                  {message.selectionContexts && message.selectionContexts.length > 0 && (
-                    <div className='mb-3 space-y-2'>
-                      {message.selectionContexts.map((selection, index) => (
-                        <SelectionContextPreview
-                          key={index}
-                          selection={selection}
-                          onClick={() => handleSelectionContextClick(selection.canvasViewAccessId)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {/* Attachment previews */}
-                  {message.attachments && message.attachments.length > 0 && (
-                    <div className='mb-3 space-y-2'>
-                      {message.attachments.map((attachment, index) => (
-                        <AttachmentPreview key={index} attachment={attachment} />
-                      ))}
-                    </div>
-                  )}
-                  <div className="text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        p: ({ children }) => {
-                          const processed = processNodeForUserTags(children, message.userTags);
-                          return <span>{processed}</span>;
-                        },
-                        a: ({ href, children, ...props }) => {
-                          // Check if URL is external
-                          const isExternal = (() => {
-                            if (!href) return false;
-                            try {
-                              const urlObj = new URL(href, window.location.origin);
-                              return urlObj.origin !== window.location.origin;
-                            } catch {
-                              return true;
-                            }
-                          })();
+        )}
 
-                          // API paths (e.g. /api/attachments/.../download) should bypass React Router
-                          const isApiPath = href?.startsWith('/api/');
+        {/* Edit button for user messages - appears on hover to the left of the bubble */}
+        {message.type === 'user' && (onEditSubmit || onEditMobile) && !isEditing && (
+          <button
+            onClick={() => {
+              if (onEditMobile) {
+                onEditMobile();
+              } else {
+                setEditText(message.content);
+                setIsEditing(true);
+                setTimeout(() => editTextareaRef.current?.focus(), 0);
+              }
+            }}
+            className='self-start mt-2 p-1 rounded opacity-0 group-hover/message:opacity-100 transition-opacity hover:bg-accent flex-shrink-0'
+            title='Edit message'
+            data-track-category='XyneAI'
+            data-track-name='EDIT_MESSAGE'
+          >
+            <Pencil size={14} className='text-muted-foreground' />
+          </button>
+        )}
 
-                          if (isExternal) {
-                            return (
-                              <a
-                                href={href}
-                                target='_blank'
-                                rel='noopener noreferrer'
-                                className='text-blue-600 hover:text-blue-700 underline'
-                                {...props}
-                              >
-                                {children}
-                              </a>
-                            );
-                          }
-
-                          if (isApiPath) {
-                            return (
-                              <a
-                                href={href}
-                                className='text-blue-600 hover:text-blue-700 underline'
-                                data-track-category='xyne-ai'
-                                data-track-name='api-download'
-                                onClick={e => {
-                                  e.preventDefault();
-                                  window.location.href = href!;
-                                }}
-                                {...props}
-                              >
-                                {children}
-                              </a>
-                            );
-                          }
-
-                          return (
-                            <a
-                              href={href}
-                              className='text-blue-600 hover:text-blue-700 underline'
-                              {...props}
-                            >
-                              {children}
-                            </a>
-                          );
-                        },
-                      }}
-                    >
-                      {displayContent}
-                    </ReactMarkdown>
-                  </div>
-                </>
-              ) : (
-                <MessageContent
-                  message={message}
-                  displayContent={displayContent}
-                  hasKeypoints={hasKeypoints}
-                  parsedContent={parsedContent}
-                  visibleChars={visibleChars}
-                  onCitationClick={onCitationClick}
-                  onSummarizerCitationClick={onSummarizerCitationClick}
-                />
-              )}
-            </div>
-
-            {/* Branch navigator for user messages (edit branches) - below the bubble */}
-            {message.type === 'user' && branchInfo && onBranchNavigate && (
-              <div className='flex justify-end mt-1'>
-                <BranchNavigator
-                  index={branchInfo.index}
-                  total={branchInfo.total}
-                  onNavigate={onBranchNavigate}
-                />
-              </div>
-            )}
-
-            {/* Streaming status indicator - shows below content when there's content */}
-            {message.type === 'bot' && message.isStreaming && displayStatus && displayContent && (
-              <div className='mt-2'>
-                <span className="text-xs text-muted-foreground font-['Inter'] italic flex items-center gap-0.5">
-                  {sanitizeText(displayStatus)}
-                  <span className='inline-flex gap-0.5'>
-                    <span
-                      className='animate-bounce'
-                      style={{ animationDelay: '0ms', animationDuration: '1s' }}
-                    >
-                      .
-                    </span>
-                    <span
-                      className='animate-bounce'
-                      style={{ animationDelay: '200ms', animationDuration: '1s' }}
-                    >
-                      .
-                    </span>
-                    <span
-                      className='animate-bounce'
-                      style={{ animationDelay: '400ms', animationDuration: '1s' }}
-                    >
-                      .
-                    </span>
-                  </span>
+        <div
+          className={
+            message.type === 'user'
+              ? isEditing
+                ? 'max-w-[90%] w-full overflow-hidden'
+                : 'max-w-[80%] overflow-hidden'
+              : 'flex-1 max-w-full overflow-hidden'
+          }
+        >
+          {/* Streaming status indicator - shows inline with icon when no content */}
+          {message.type === 'bot' && message.isStreaming && displayStatus && !displayContent ? (
+            <div className='flex items-center gap-0.5 mt-1'>
+              <span className="text-xs text-muted-foreground font-['Inter'] italic">
+                {displayStatus}
+              </span>
+              <span className='inline-flex gap-0.5'>
+                <span
+                  className='animate-bounce text-xs text-muted-foreground'
+                  style={{ animationDelay: '0ms', animationDuration: '1s' }}
+                >
+                  .
                 </span>
-              </div>
-            )}
+                <span
+                  className='animate-bounce text-xs text-muted-foreground'
+                  style={{ animationDelay: '200ms', animationDuration: '1s' }}
+                >
+                  .
+                </span>
+                <span
+                  className='animate-bounce text-xs text-muted-foreground'
+                  style={{ animationDelay: '400ms', animationDuration: '1s' }}
+                >
+                  .
+                </span>
+              </span>
+            </div>
+          ) : (
+            <>
+              <div
+                className={`${
+                  message.type === 'user'
+                    ? isEditing
+                      ? 'rounded-2xl bg-muted p-3'
+                      : 'flex flex-col items-start gap-3 p-2 [border-radius:16px_4px_16px_16px] bg-[var(--chat-mobile-my-bubble)] text-foreground md:block md:rounded-2xl md:bg-muted md:text-foreground md:px-4 md:py-2 md:w-fit'
+                    : 'rounded-2xl bg-transparent text-foreground max-w-full'
+                }`}
+              >
+                {message.type === 'user' && isEditing ? (
+                  /* Inline edit mode */
+                  <div className='flex flex-col gap-2'>
+                    <textarea
+                      ref={editTextareaRef}
+                      value={editText}
+                      onChange={e => setEditText(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (editText.trim()) {
+                            onEditSubmit?.(editText.trim());
+                            setIsEditing(false);
+                          }
+                        }
+                        if (e.key === 'Escape') {
+                          setIsEditing(false);
+                        }
+                      }}
+                      className="w-full bg-transparent text-sm font-['Inter'] font-[450] text-foreground resize-none outline-none min-h-[60px] leading-relaxed"
+                      rows={Math.max(2, editText.split('\n').length)}
+                      data-track-category='XyneAI'
+                      data-track-name='EDIT_TEXTAREA'
+                    />
+                    <div className='flex justify-end gap-2'>
+                      <button
+                        onClick={() => setIsEditing(false)}
+                        className="px-3 py-1.5 text-xs font-medium rounded-full border border-border bg-background hover:bg-accent transition-colors font-['Inter']"
+                        data-track-category='XyneAI'
+                        data-track-name='EDIT_CANCEL'
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (editText.trim()) {
+                            onEditSubmit?.(editText.trim());
+                            setIsEditing(false);
+                          }
+                        }}
+                        disabled={!editText.trim()}
+                        className="px-3 py-1.5 text-xs font-medium rounded-full bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-50 font-['Inter']"
+                        data-track-category='XyneAI'
+                        data-track-name='EDIT_SUBMIT'
+                      >
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                ) : message.type === 'user' ? (
+                  <>
+                    {/* Selection context previews */}
+                    {message.selectionContexts && message.selectionContexts.length > 0 && (
+                      <div className='mb-3 space-y-2'>
+                        {message.selectionContexts.map((selection, index) => (
+                          <SelectionContextPreview
+                            key={index}
+                            selection={selection}
+                            onClick={() =>
+                              handleSelectionContextClick(selection.canvasViewAccessId)
+                            }
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {/* Attachment previews */}
+                    {message.attachments && message.attachments.length > 0 && (
+                      <div className='mb-3 space-y-2'>
+                        {message.attachments.map((attachment, index) => (
+                          <AttachmentPreview key={index} attachment={attachment} />
+                        ))}
+                      </div>
+                    )}
+                    <div className="text-sm font-['Inter'] whitespace-pre-wrap break-words font-[450] tracking-[0] md:leading-relaxed">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({ children }) => {
+                            const processed = processNodeForUserTags(children, message.userTags);
+                            return <span>{processed}</span>;
+                          },
+                          a: ({ href, children, ...props }) => {
+                            // Check if URL is external
+                            const isExternal = (() => {
+                              if (!href) return false;
+                              try {
+                                const urlObj = new URL(href, window.location.origin);
+                                return urlObj.origin !== window.location.origin;
+                              } catch {
+                                return true;
+                              }
+                            })();
 
-            {/* Branch navigator + Copy/Regenerate/Like/Dislike Buttons */}
-            {message.type === 'bot' && !message.isStreaming && !message.isAborted && (
-              <div className='flex items-center justify-between mt-4'>
-                {branchInfo && onBranchNavigate ? (
+                            // API paths (e.g. /api/attachments/.../download) should bypass React Router
+                            const isApiPath = href?.startsWith('/api/');
+
+                            if (isExternal) {
+                              return (
+                                <a
+                                  href={href}
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  className='text-blue-600 hover:text-blue-700 underline'
+                                  {...props}
+                                >
+                                  {children}
+                                </a>
+                              );
+                            }
+
+                            if (isApiPath) {
+                              return (
+                                <a
+                                  href={href}
+                                  className='text-blue-600 hover:text-blue-700 underline'
+                                  data-track-category='xyne-ai'
+                                  data-track-name='api-download'
+                                  onClick={e => {
+                                    e.preventDefault();
+                                    window.location.href = href!;
+                                  }}
+                                  {...props}
+                                >
+                                  {children}
+                                </a>
+                              );
+                            }
+
+                            return (
+                              <a
+                                href={href}
+                                className='text-blue-600 hover:text-blue-700 underline'
+                                {...props}
+                              >
+                                {children}
+                              </a>
+                            );
+                          },
+                        }}
+                      >
+                        {displayContent}
+                      </ReactMarkdown>
+                    </div>
+                  </>
+                ) : (
+                  <MessageContent
+                    message={message}
+                    displayContent={displayContent}
+                    hasKeypoints={hasKeypoints}
+                    parsedContent={parsedContent}
+                    onCitationClick={onCitationClick}
+                    onSummarizerCitationClick={onSummarizerCitationClick}
+                  />
+                )}
+              </div>
+
+              {/* Branch navigator for user messages (edit branches) - below the bubble */}
+              {message.type === 'user' && branchInfo && onBranchNavigate && (
+                <div className='flex justify-end mt-1'>
                   <BranchNavigator
                     index={branchInfo.index}
                     total={branchInfo.total}
                     onNavigate={onBranchNavigate}
                   />
-                ) : (
-                  <div />
-                )}
-                <MessageActions
-                  message={message}
-                  copied={copied}
-                  onCopy={handleCopy}
-                  onFeedback={onFeedback}
-                  feedbackValue={feedbackValue}
-                  onRegenerate={isLatestBotMessage ? onRegenerate : undefined}
-                />
-              </div>
-            )}
-          </>
-        )}
+                </div>
+              )}
+
+              {/* Streaming status indicator - shows below content when there's content */}
+              {message.type === 'bot' && message.isStreaming && displayStatus && displayContent && (
+                <div className='mt-2'>
+                  <span className="text-xs text-muted-foreground font-['Inter'] italic flex items-center gap-0.5">
+                    {displayStatus}
+                    <span className='inline-flex gap-0.5'>
+                      <span
+                        className='animate-bounce'
+                        style={{ animationDelay: '0ms', animationDuration: '1s' }}
+                      >
+                        .
+                      </span>
+                      <span
+                        className='animate-bounce'
+                        style={{ animationDelay: '200ms', animationDuration: '1s' }}
+                      >
+                        .
+                      </span>
+                      <span
+                        className='animate-bounce'
+                        style={{ animationDelay: '400ms', animationDuration: '1s' }}
+                      >
+                        .
+                      </span>
+                    </span>
+                  </span>
+                </div>
+              )}
+
+              {/* Branch navigator + Copy/Regenerate/Like/Dislike Buttons */}
+              {message.type === 'bot' && !message.isStreaming && !message.isAborted && (
+                <div className='flex items-center justify-between mt-4'>
+                  {branchInfo && onBranchNavigate ? (
+                    <BranchNavigator
+                      index={branchInfo.index}
+                      total={branchInfo.total}
+                      onNavigate={onBranchNavigate}
+                    />
+                  ) : (
+                    <div />
+                  )}
+                  <MessageActions
+                    message={message}
+                    copied={copied}
+                    onCopy={handleCopy}
+                    onFeedback={onFeedback}
+                    feedbackValue={feedbackValue}
+                    onRegenerate={isLatestBotMessage ? onRegenerate : undefined}
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </div>
-  );
-};
+    );
+  },
+  (prev, next) => {
+    if (prev.message === next.message && prev.feedbackValue === next.feedbackValue) return true;
+    if (!next.message.isStreaming && !prev.message.isStreaming) {
+      return (
+        prev.message.id === next.message.id &&
+        prev.message.content === next.message.content &&
+        prev.feedbackValue === next.feedbackValue
+      );
+    }
+    return (
+      prev.message.id === next.message.id &&
+      prev.message.streamingContent === next.message.streamingContent &&
+      prev.message.statusMessage === next.message.statusMessage &&
+      prev.message.isStreaming === next.message.isStreaming &&
+      prev.message.toolOutputs === next.message.toolOutputs &&
+      prev.message.summarizerOutput === next.message.summarizerOutput &&
+      prev.feedbackValue === next.feedbackValue
+    );
+  },
+);
+
+MessageItem.displayName = 'MessageItem';
 
 // Message content rendering component
 const MessageContent = ({
@@ -782,7 +793,6 @@ const MessageContent = ({
   displayContent,
   hasKeypoints,
   parsedContent,
-  visibleChars,
   onCitationClick,
   onSummarizerCitationClick,
 }: MessageContentProps): ReactElement => {
@@ -802,7 +812,7 @@ const MessageContent = ({
       {(!message.agentType || message.agentType === 'genius') && displayContent && (
         <div className="text-sm font-['Inter'] leading-6 font-normal">
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
               ...markdownComponents,
               p: ({ children }) => {
@@ -866,7 +876,6 @@ const MessageContent = ({
       {message.agentType === 'summarizer' && message.summarizerOutput && (
         <SummarizerContent
           message={message}
-          visibleChars={visibleChars}
           onSummarizerCitationClick={onSummarizerCitationClick}
         />
       )}
@@ -988,7 +997,6 @@ const SingleStatSection = ({ singleStat }: SingleStatSectionProps): ReactElement
 // Summarizer content rendering
 const SummarizerContent = ({
   message,
-  visibleChars,
   onSummarizerCitationClick,
 }: SummarizerContentProps): ReactElement => {
   // Memoize markdown components to prevent re-renders on parent updates
@@ -1001,7 +1009,7 @@ const SummarizerContent = ({
         <div className='relative'>
           <div className="text-sm font-['Inter'] leading-6 font-normal">
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={[remarkGfm, remarkBreaks]}
               components={{
                 ...markdownComponents,
                 p: ({ children }) => {
@@ -1056,9 +1064,7 @@ const SummarizerContent = ({
                 },
               }}
             >
-              {message.isStreaming
-                ? message.summarizerOutput.summary.slice(0, visibleChars || 0)
-                : message.summarizerOutput.summary}
+              {message.summarizerOutput.summary}
             </ReactMarkdown>
           </div>
           {message.isStreaming && <span className='animate-pulse ml-1'>▋</span>}

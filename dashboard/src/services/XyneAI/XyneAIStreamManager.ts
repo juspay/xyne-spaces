@@ -134,6 +134,10 @@ class XyneAIStreamManager {
     }
   > = new Map();
 
+  // rAF-based batching: accumulate delta content per stream and flush once per frame
+  private pendingDeltaMap: Map<string, string> = new Map();
+  private rafIdMap: Map<string, number> = new Map();
+
   private constructor() {
     // Initialize the Web Worker
     this.worker = new XyneAIStreamWorker();
@@ -216,6 +220,103 @@ class XyneAIStreamManager {
   }
 
   /**
+   * Flush pending delta content for a stream (called via rAF)
+   */
+  private flushDeltaContent(streamId: string): void {
+    this.rafIdMap.delete(streamId);
+
+    const pendingDelta = this.pendingDeltaMap.get(streamId);
+    if (!pendingDelta) return;
+    this.pendingDeltaMap.delete(streamId);
+
+    // Find thread and state
+    let threadId: string | undefined;
+    let streamState: StreamState | undefined;
+    for (const [tid, state] of this.activeStreams.entries()) {
+      if (state.streamId === streamId) {
+        threadId = tid;
+        streamState = state;
+        break;
+      }
+    }
+    if (!threadId || !streamState) return;
+
+    const streamData = this.streamDataMap.get(streamId);
+    if (!streamData) return;
+
+    const botMessageId = [...streamState.messages]
+      .reverse()
+      .find(m => m.type === 'bot' && m.isStreaming)?.id;
+    if (!botMessageId) return;
+
+    // Accumulate into rawContent
+    streamData.rawContent += pendingDelta;
+    const currentRawContent = streamData.rawContent;
+
+    const updateMessages = (updater: (messages: Message[]) => Message[]): void => {
+      streamState.messages = updater(streamState.messages);
+      this.notifySubscribers({ ...streamState });
+      void xyneAIStreamStorage.updateMessages(streamId, streamState.messages);
+    };
+
+    updateMessages(prev =>
+      prev.map(msg => {
+        if (msg.id !== botMessageId) return msg;
+
+        const shouldClearStatus = currentRawContent.length > 30;
+
+        if (msg.agentType === 'summarizer') {
+          const partialOutput = parsePartialSummarizerJSON(currentRawContent);
+          if (partialOutput) {
+            if (shouldClearStatus) {
+              return {
+                ...clearStatusMessage(msg),
+                streamingContent: partialOutput.summary,
+                summarizerOutput: partialOutput,
+              };
+            }
+            return {
+              ...msg,
+              streamingContent: partialOutput.summary,
+              summarizerOutput: partialOutput,
+            };
+          }
+          if (shouldClearStatus) {
+            return { ...clearStatusMessage(msg), streamingContent: currentRawContent };
+          }
+          return { ...msg, streamingContent: currentRawContent };
+        }
+
+        const parsed = parseStreamingContent(currentRawContent);
+        if (shouldClearStatus) {
+          return {
+            ...clearStatusMessage(msg),
+            streamingContent: parsed.summary,
+            parsedContent: parsed,
+          };
+        }
+        return { ...msg, streamingContent: parsed.summary, parsedContent: parsed };
+      }),
+    );
+  }
+
+  private scheduleDeltaFlush(streamId: string): void {
+    if (!this.rafIdMap.has(streamId)) {
+      const rafId = requestAnimationFrame(() => this.flushDeltaContent(streamId));
+      this.rafIdMap.set(streamId, rafId);
+    }
+  }
+
+  private flushDeltaContentSync(streamId: string): void {
+    const rafId = this.rafIdMap.get(streamId);
+    if (rafId !== undefined) {
+      cancelAnimationFrame(rafId);
+      this.rafIdMap.delete(streamId);
+    }
+    this.flushDeltaContent(streamId);
+  }
+
+  /**
    * Handle stream chunk from worker
    */
   private handleWorkerStreamChunk(streamId: string, data: Record<string, unknown>): void {
@@ -264,6 +365,26 @@ class XyneAIStreamManager {
     };
     void xyneAIStreamStorage.appendChunk(streamId, streamChunk);
 
+    const eventType = data['type'];
+
+    // For delta/content events, batch via rAF instead of immediate state update
+    if (
+      (eventType === 'delta' || eventType === 'content') &&
+      data['content'] &&
+      typeof data['content'] === 'string'
+    ) {
+      const pending = this.pendingDeltaMap.get(streamId) ?? '';
+      this.pendingDeltaMap.set(streamId, pending + data['content']);
+      this.scheduleDeltaFlush(streamId);
+      return;
+    }
+
+    // Flush any pending delta before processing non-delta events
+    // (tool_output, complete, etc. need up-to-date rawContent)
+    if (this.pendingDeltaMap.has(streamId)) {
+      this.flushDeltaContentSync(streamId);
+    }
+
     // Process the event
     const result = this.processStreamEvent(
       data,
@@ -273,13 +394,6 @@ class XyneAIStreamManager {
       streamId,
       threadId,
     );
-
-    // Update rawContent if there's new content
-    if (data['type'] === 'delta' || data['type'] === 'content') {
-      if (data['content'] && typeof data['content'] === 'string') {
-        streamData.rawContent += data['content'];
-      }
-    }
 
     // Update traceId if received
     if (result.traceId) {
@@ -306,6 +420,11 @@ class XyneAIStreamManager {
       return;
     }
 
+    // Flush any remaining buffered delta content before completing
+    if (this.pendingDeltaMap.has(streamId)) {
+      this.flushDeltaContentSync(streamId);
+    }
+
     const streamData = this.streamDataMap.get(streamId);
     const rawContent = streamData?.rawContent || '';
 
@@ -313,6 +432,12 @@ class XyneAIStreamManager {
 
     // Cleanup stream data
     this.streamDataMap.delete(streamId);
+    this.pendingDeltaMap.delete(streamId);
+    const completionRafId = this.rafIdMap.get(streamId);
+    if (completionRafId !== undefined) {
+      cancelAnimationFrame(completionRafId);
+      this.rafIdMap.delete(streamId);
+    }
   }
 
   /**
@@ -340,10 +465,21 @@ class XyneAIStreamManager {
       return;
     }
 
+    // Flush any remaining buffered delta before erroring
+    if (this.pendingDeltaMap.has(streamId)) {
+      this.flushDeltaContentSync(streamId);
+    }
+
     this.errorStream(streamId, threadId, botMessageId, error);
 
     // Cleanup stream data
     this.streamDataMap.delete(streamId);
+    this.pendingDeltaMap.delete(streamId);
+    const errorRafId = this.rafIdMap.get(streamId);
+    if (errorRafId !== undefined) {
+      cancelAnimationFrame(errorRafId);
+      this.rafIdMap.delete(streamId);
+    }
   }
 
   /**
@@ -597,60 +733,9 @@ class XyneAIStreamManager {
 
       case 'delta':
       case 'content':
-        if (data['content'] && typeof data['content'] === 'string') {
-          updateMessages(prev =>
-            prev.map(msg => {
-              if (msg.id !== botMessageId) return msg;
-
-              // Only clear status message once we have substantial content (30+ chars)
-              const shouldClearStatus = rawContent.length > 30;
-
-              // For Summarizer, parse partial JSON in real-time
-              if (msg.agentType === 'summarizer') {
-                const partialOutput = parsePartialSummarizerJSON(rawContent);
-                if (partialOutput) {
-                  if (shouldClearStatus) {
-                    return {
-                      ...clearStatusMessage(msg),
-                      streamingContent: partialOutput.summary,
-                      summarizerOutput: partialOutput,
-                    };
-                  }
-                  return {
-                    ...msg,
-                    streamingContent: partialOutput.summary,
-                    summarizerOutput: partialOutput,
-                  };
-                }
-                if (shouldClearStatus) {
-                  return {
-                    ...clearStatusMessage(msg),
-                    streamingContent: rawContent,
-                  };
-                }
-                return {
-                  ...msg,
-                  streamingContent: rawContent,
-                };
-              }
-
-              // For Genius, parse the streaming content
-              const parsed = parseStreamingContent(rawContent);
-              if (shouldClearStatus) {
-                return {
-                  ...clearStatusMessage(msg),
-                  streamingContent: parsed.summary,
-                  parsedContent: parsed,
-                };
-              }
-              return {
-                ...msg,
-                streamingContent: parsed.summary,
-                parsedContent: parsed,
-              };
-            }),
-          );
-        }
+        // Delta/content events are now batched via rAF in handleWorkerStreamChunk.
+        // This case is kept for any edge cases where processStreamEvent is called
+        // directly with delta events (should not happen in normal flow).
         break;
 
       case 'tool_input': {
@@ -1087,6 +1172,12 @@ class XyneAIStreamManager {
         // Cleanup
         this.activeStreams.delete(threadId);
         this.streamDataMap.delete(streamId);
+        this.pendingDeltaMap.delete(streamId);
+        const rafId = this.rafIdMap.get(streamId);
+        if (rafId !== undefined) {
+          cancelAnimationFrame(rafId);
+          this.rafIdMap.delete(streamId);
+        }
         break;
       }
     }

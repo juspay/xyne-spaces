@@ -6,6 +6,7 @@ import type { ConversationHistory as ConversationHistoryType } from '../../../..
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { XyneStarred, XyneUnstarred, XyneRename, XyneDelete } from '../../../icons/xyne-ai';
+import { formatRelativeTime } from '../../../../utils/dateUtils';
 
 interface ConversationHistoryProps {
   conversations: ConversationHistoryType[];
@@ -579,6 +580,9 @@ const ConversationItem = ({
             }
           >
             {conversation.title}
+          </div>
+          <div className="text-xs text-muted-foreground font-['Inter'] mt-0.5">
+            {formatRelativeTime(conversation.lastUpdated)}
           </div>
         </button>
       )}
