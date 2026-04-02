@@ -81,6 +81,13 @@ export enum UserResponsibility {
 }
 
 // @ts-ignore TS1294
+export enum RotationInterval {
+  WEEKLY = 'WEEKLY',
+  BIWEEKLY = 'BIWEEKLY',
+  MONTHLY = 'MONTHLY',
+}
+
+// @ts-ignore TS1294
 export enum EntityType {
   MERCHANT = 'MERCHANT',
   GATEWAY = 'GATEWAY',
@@ -849,6 +856,7 @@ export const userGroupMappingTable = table('user_group_mappings')
     userId: string(),
     userGroupId: string(),
     responsibility: enumeration<UserResponsibility>(),
+    onCallSetNumber: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -950,6 +958,9 @@ export const userGroupTable = table('user_groups')
     description: string().optional(),
     isActive: boolean(),
     metadata: json().optional(),
+    autoRotationEnabled: boolean(),
+    rotationInterval: enumeration<RotationInterval>().optional(),
+    rotationStartDate: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

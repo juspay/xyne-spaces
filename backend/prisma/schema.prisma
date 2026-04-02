@@ -92,6 +92,13 @@ enum UserResponsibility {
   @@schema("public")
 }
 
+enum RotationInterval {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  @@schema("public")
+}
+
 enum EntityType {
   MERCHANT
   GATEWAY
@@ -820,6 +827,9 @@ model UserGroup {
   alias       String?  @unique // xyne-space-dev | frontend | backend (for mentions)
   description String?
   metadata    Json? // Team-specific config: statuses, skills, etc.
+  autoRotationEnabled  Boolean           @default(false)
+  rotationInterval     RotationInterval? // Only set when autoRotationEnabled is true
+  rotationStartDate    DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -934,6 +944,7 @@ model UserGroupMapping {
   userId         String              // No FK constraint
   userGroupId    String              // No FK constraint
   responsibility UserResponsibility  @default(MEMBER) // User responsibility level within this group
+  onCallSetNumber  Int?                // Only set when autoRotationEnabled is true
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
@@ -945,6 +956,7 @@ model UserGroupMapping {
   @@index([userId])
   @@index([userGroupId])
   @@index([userGroupId, createdAt, id]) // for getUserGroupMembers
+  @@index([userGroupId, onCallSetNumber]) // for on-call rotation queries
   @@map("user_group_mappings")
   @@schema("public")
 }
