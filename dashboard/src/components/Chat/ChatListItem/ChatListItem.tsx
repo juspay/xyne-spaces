@@ -6,7 +6,9 @@ import { DatePill } from '../DatePill';
 import { type ChatListItemWithSeparator } from '../../../utils/chatUtils';
 import { shouldShowAvatar } from '../ChatList/ChatListUtils';
 import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, MessageAttachment } from '@xyne/shared';
+import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
+import { useAuth } from '../../../hooks/useAuth';
 
 type ChatListItemProps = {
   item: ChatListItemWithSeparator;
@@ -36,10 +38,11 @@ const ChatListItemComponent = ({
   // All non-date-separator items are conversations - get conversation data first
   const conversation =
     item.type !== 'date-separator'
-      ? (item.data as QueryResultType<typeof queries.channelConversationsV2>[number])
+      ? (item.data as QueryResultType<typeof queries.channelConversationsPaginatedV2>[number])
       : null;
 
   // Hooks must be called unconditionally
+  const { user } = useAuth();
   const draft = useDraft(channelId, conversation?.conversationId ?? '');
   const draftFromDB = useDraftFromDB(channelId, conversation?.conversationId ?? '');
   const hasDraftAttachments = draftFromDB?.attachments && draftFromDB.attachments?.length > 0;
@@ -53,8 +56,22 @@ const ChatListItemComponent = ({
     );
   }
 
-  // Now we know it's a conversation
-  const message = conversation?.initialMessage;
+  // Now we know it's a conversation - get initial message from denormalized data
+  const initialMsg = conversation
+    ? getInitialMessageFromConversation(conversation, user?.id)
+    : null;
+  // Attach attachments and nudgeCounts from the conversation's denormalized relations
+  const convAny = conversation as {
+    initialMessageAttachments?: readonly { id: string }[];
+    initialMessageNudgeCounts?: readonly { id: string; nudgeCount: number }[];
+  } | null;
+  const message = initialMsg
+    ? {
+        ...initialMsg,
+        attachments: (convAny?.initialMessageAttachments ?? []) as unknown as MessageAttachment[],
+        nudgeCounts: convAny?.initialMessageNudgeCounts ?? [],
+      }
+    : null;
 
   if (!message || !conversation) return null;
 

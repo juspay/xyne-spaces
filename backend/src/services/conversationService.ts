@@ -35,6 +35,7 @@ import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '@/utils/logger';
+import { messageMetadataService } from '@/services/messageMetadataService';
 
 interface UserInfo {
   id: string;
@@ -396,6 +397,7 @@ export class ConversationService {
     await this.conversationRepository.update(conversation.conversationId, {
       initialMessageId: message.messageId,
     });
+    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
     // Update channel last activity
     await this.channelRepository.updateLastActivity(channelId);
@@ -588,6 +590,8 @@ export class ConversationService {
         parentMessageId: conversation.initialMessageId,
         pinned: false,
       });
+      await messageMetadataService.syncInitialMessageMd(childConversationId);
+      await messageMetadataService.syncParentMessageMd(childConversationId);
     }
 
     // Update conversation reply count and last activity

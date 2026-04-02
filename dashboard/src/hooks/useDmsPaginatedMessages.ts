@@ -217,7 +217,7 @@ export const useDmsPaginatedMessages = (
       if (!channel) continue;
       const conversations = channel.conversations;
       if (conversations && conversations.length > 0) {
-        map.set(stat.channelId, conversations[0] as Conversation);
+        map.set(stat.channelId, conversations[0] as unknown as Conversation);
       }
     }
     return map;

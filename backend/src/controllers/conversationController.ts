@@ -23,6 +23,7 @@ import { SendMessageResponse, GetMessagesResponse } from '../api/types/MessageTy
 import { config } from '../config/env';
 import { z } from 'zod';
 import { logger } from '../utils/logger';
+import { messageMetadataService } from '@/services/messageMetadataService';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
 import { unreadService } from '../services/unreadService';
 import { MessagesSideEffectHandler } from '../zero/side-effects/tables/messages-handler';
@@ -313,6 +314,7 @@ export class ConversationController {
       await this.conversationRepository.update(conversation.conversationId, {
         initialMessageId: message.messageId,
       });
+      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
       // Update channel last activity
       await this.channelRepository.updateLastActivity(channelId);
@@ -772,6 +774,8 @@ export class ConversationController {
           parentMessageId: conversation.initialMessageId,
           pinned: false,
         });
+        await messageMetadataService.syncInitialMessageMd(childConversationId);
+        await messageMetadataService.syncParentMessageMd(childConversationId);
 
         logger.info(`📤 [SEND-TO-CHANNEL] Created child conversation ${childConversationId} for message ${message.messageId}`);
       }
@@ -1056,6 +1060,7 @@ export class ConversationController {
           await this.conversationRepository.update(conversationId, {
             initialMessageId: errorMessage.messageId,
           });
+          await messageMetadataService.syncInitialMessageMd(conversationId);
           await this.channelRepository.updateLastActivity(options.channelId);
 
           // Broadcast as new conversation
@@ -1164,6 +1169,7 @@ export class ConversationController {
         await this.conversationRepository.update(conversationId, {
           initialMessageId: triggerMessage.messageId,
         });
+        await messageMetadataService.syncInitialMessageMd(conversationId);
         await this.channelRepository.updateLastActivity(options.channelId);
 
         // Broadcast as new conversation

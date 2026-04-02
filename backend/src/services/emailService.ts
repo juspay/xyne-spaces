@@ -41,6 +41,7 @@ import { createBlockingContext } from '@/utils/superpositionUtils';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { processMeetLinksFromEmail } from './meetLinkService';
@@ -500,6 +501,7 @@ export class EmailService {
       initialMessageId: message.messageId,
       ticketId: ticket.id
     });
+    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
     // Create SYSTEM message for WorkflowBubble (only when workflow is enabled, AFTER ticket message)
     if (config.zoho.autoWorkflowEnabled) {
@@ -820,6 +822,7 @@ export class EmailService {
       initialMessageId: message.messageId,
       ticketId: ticket.id
     });
+    await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
     // Update channel last activity
     await this.channelRepository.updateLastActivity(channelId);

@@ -2,6 +2,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { MessageType } from '@xyne/shared';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
+import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 // Type definitions for utility functions
 export type ThreadMessage = QueryResultType<typeof queries.channelAndThreadMessagesV2>[number];
@@ -43,9 +44,10 @@ export const createConversationFromMessage = (
     createdAt: message.createdAt,
     replies_md: null,
     ticket_md: null,
-    parentMessage: undefined,
-    participants: [],
-    initialMessage: message as QueryResultType<typeof queries.conversationMessagesV2>[number],
+    initial_message_md: null,
+    parent_message_md: null,
+    initialMessageAttachments: [],
+    initialMessageNudgeCounts: [],
   } as unknown as ChatListConversation;
 };
 
@@ -100,7 +102,8 @@ export const shouldShowAvatar = (
   // Always show avatar for call messages
   const isCurrentItemCallMessage = (): boolean => {
     if (currentItem.type === 'conversation') {
-      const metadata = currentItem.data.initialMessage?.metadata as Record<string, unknown> | null;
+      const initialMessage = getInitialMessageFromConversation(currentItem.data);
+      const metadata = initialMessage?.metadata as Record<string, unknown> | null;
       return metadata?.['isCallMessage'] === true;
     }
     const metadata = currentItem.data.metadata as Record<string, unknown> | null;
@@ -110,7 +113,7 @@ export const shouldShowAvatar = (
   const isPreviousItemAWorkflowOrActivity = (): boolean => {
     if (prevItem.type !== 'conversation') return false;
 
-    const previousMessage = prevItem.data.initialMessage;
+    const previousMessage = getInitialMessageFromConversation(prevItem.data);
     const previousMessageMetadata = previousMessage?.metadata as MessageMetadata | null;
     const isPreviousMessageAWorkflowMessage =
       (previousMessage?.msgType === MessageType.SYSTEM &&
@@ -142,7 +145,8 @@ export const shouldShowAvatar = (
   // Check if previous message is a system message
   const isPreviousMessageSystem = (): boolean => {
     if (prevItem.type === 'conversation') {
-      return prevItem.data.initialMessage?.msgType === MessageType.SYSTEM;
+      const prevInitialMessage = getInitialMessageFromConversation(prevItem.data);
+      return prevInitialMessage?.msgType === MessageType.SYSTEM;
     }
     return prevItem.data.msgType === MessageType.SYSTEM;
   };

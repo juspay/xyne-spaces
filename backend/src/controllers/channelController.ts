@@ -26,6 +26,7 @@ import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
+import { messageMetadataService } from '@/services/messageMetadataService';
 
 export class ChannelController {
   private channelRepository: ChannelRepository;
@@ -129,6 +130,7 @@ export class ChannelController {
       await this.conversationRepository.update(conversation.conversationId, {
         initialMessageId: createdMessage.messageId,
       });
+      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
       // Reopen DM for all participants so they can see the system message
       await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
@@ -205,6 +207,7 @@ export class ChannelController {
       await this.conversationRepository.update(conversation.conversationId, {
         initialMessageId: createdMessage.messageId,
       });
+      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
       // Update channel last activity
       await this.channelRepository.updateLastActivity(channelId);
@@ -546,9 +549,11 @@ export class ChannelController {
         };
       });
 
+      await messageMetadataService.syncInitialMessageMd(result.conversation.conversationId);
+
       // Get channel participants for notifications and unread count
       const channelParticipants = await this.channelParticipantRepository.getChannelParticipants(channelId);
-      
+
       // Extract clean content for notification - parse forwarded XML to get actual content
       const parsedContent = parseForwardedMessageXml(result.createdMessage.content);
       let cleanContent = parsedContent?.optionalText || parsedContent?.content || 'Forwarded a message';
