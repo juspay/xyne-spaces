@@ -1,6 +1,7 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators } from '@rocicorp/zero';
 import {
   ChannelRole,
+  ChannelType,
   ChannelVisibility,
   MessageType,
   CallType,
@@ -1344,6 +1345,126 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             isSubscribed: true,
             joinedAt: now,
           });
+        },
+      ),
+      archiveChannel: defineMutator(
+        z.object({
+          channelId: z.string(),
+        }),
+        async ({ tx, args: { channelId } }) => {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
+
+          if (channel.type !== ChannelType.DEFAULT) {
+            throw new Error('Only channels can be unarchived');
+          }
+
+          const user = await tx.run(zql.users.where('id', authData.sub).one());
+          const archiveMessage = `archived #${channel.name}. The contents will still be browsable and available in search.`;
+
+          // Create a new conversation for the archive message
+          const conversationId = uuidv4();
+          const messageId = uuidv4();
+          const now = Date.now();
+
+          await tx.mutate.conversations.insert({
+            conversationId: conversationId,
+            channelId,
+            createdBy: authData.sub,
+            createdAt: now,
+            initialMessageId: messageId,
+            lastActivityAt: now,
+            replyCount: 0,
+            pinned: false,
+          });
+
+          await tx.mutate.messages.insert({
+            messageId,
+            conversationId,
+            senderId: authData.sub,
+            content: archiveMessage,
+            msgType: MessageType.SYSTEM,
+            hasAttachment: false,
+            edited: false,
+            isDeleted: false,
+            isSent: true,
+            showInChannel: true,
+            createdAt: now,
+            metadata: {
+              channelArchived: true,
+              channelName: channel.name,
+              archivedBy: user?.name || 'Unknown',
+            },
+          });
+
+          await tx.mutate.channels.update({
+            id: channelId,
+            isArchived: true,
+          });
+
+          logger.info(`✅ [ARCHIVE-CHANNEL] Channel ${channelId} archived by ${authData.sub}`);
+        },
+      ),
+      unarchiveChannel: defineMutator(
+        z.object({
+          channelId: z.string(),
+        }),
+        async ({ tx, args: { channelId } }) => {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
+
+          if (!channel.isArchived) {
+            throw new Error('Channel is not archived');
+          }
+
+          await tx.mutate.channels.update({
+            id: channelId,
+            isArchived: false,
+          });
+
+          const user = await tx.run(zql.users.where('id', authData.sub).one());
+          const unarchiveMessage = `unarchived #${channel.name}. The channel is now active again.`;
+
+          // Create a new conversation for the unarchive message
+          const conversationId = uuidv4();
+          const messageId = uuidv4();
+          const now = Date.now();
+
+          await tx.mutate.conversations.insert({
+            conversationId: conversationId,
+            channelId,
+            createdBy: authData.sub,
+            createdAt: now,
+            initialMessageId: messageId,
+            lastActivityAt: now,
+            replyCount: 0,
+            pinned: false,
+          });
+
+          await tx.mutate.messages.insert({
+            messageId,
+            conversationId,
+            senderId: authData.sub,
+            content: unarchiveMessage,
+            msgType: MessageType.SYSTEM,
+            hasAttachment: false,
+            edited: false,
+            isDeleted: false,
+            isSent: true,
+            showInChannel: true,
+            createdAt: now,
+            metadata: {
+              channelUnarchived: true,
+              channelName: channel.name,
+              unarchivedBy: user?.name || 'Unknown',
+            },
+          });
+
+          logger.info(`✅ [UNARCHIVE-CHANNEL] Channel ${channelId} unarchived by ${authData.sub}`);
         },
       ),
     },

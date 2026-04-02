@@ -51,6 +51,7 @@ import {
   createMessagePreview,
 } from '../ChatList/ChatListUtils';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
+import { useChannel } from '../../../hooks/useChannels';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById } from '../../../shortcuts';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
@@ -125,6 +126,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const { editingMessageId, requestEdit, stopEditing } = useEditContext();
   const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
+  const channel = useChannel(channelId);
   // Get sender info from useUser hook
   const sender = useUser(message.senderId);
 
@@ -770,6 +772,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen })}
               {...(!isMessageDeleted && !hasTicket && { onEditInCanvas: handleEditInCanvas })}
               onDropdownOpenChange={setIsDropdownOpen}
+              isChannelArchived={channel?.isArchived ?? false}
               {...(context === 'channel' &&
                 !isSystemMessage &&
                 !isMessageDeleted &&
@@ -879,6 +882,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (!isSystemMessage || isCallMessage) &&
                 !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
+              isChannelArchived={channel?.isArchived ?? false}
             />
           )}
         </>

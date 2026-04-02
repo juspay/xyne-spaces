@@ -10,6 +10,11 @@ export class CallParticipantsACL extends BaseACL<'call_participants'> {
     if (!callData || !callData.channel) {
       throw new MutationACLError('Call participant insert failed: the specified call or its channel does not exist', 'call_participants');
     }
+
+    if (callData.channel.isArchived) {
+      throw new MutationACLError('Call participant insert failed: cannot join calls in archived channel', 'call_participants');
+    }
+
     const isParticipant = await tx.run(zql.channel_participants
       .where('channelId', callData.channel.id)
       .where('userId', this.ctx.userID)

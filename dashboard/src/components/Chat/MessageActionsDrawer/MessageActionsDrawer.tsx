@@ -54,6 +54,7 @@ export interface MessageActionsDrawerProps {
   onMarkAsUnread?: () => void;
   onInitiateCall?: () => void;
   isCallDisabled?: boolean;
+  isChannelArchived?: boolean;
 }
 
 export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
@@ -82,6 +83,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   onMarkAsUnread,
   onInitiateCall,
   isCallDisabled = false,
+  isChannelArchived = false,
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -198,7 +200,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
         )}
 
         {/* Initiate Call */}
-        {onInitiateCall && messageId === initialMessageId && (
+        {onInitiateCall && messageId === initialMessageId && !isChannelArchived && (
           <ActionButton
             icon={<Headphones className='w-5 h-5' />}
             label={isCallDisabled ? 'Call already in progress' : 'Start Call'}
@@ -217,7 +219,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
         )}
 
         {/* Create Ticket */}
-        {onCreateTicket && canCreateTicket && (
+        {onCreateTicket && canCreateTicket && !isChannelArchived && (
           <ActionButton
             icon={<Ticket className='w-5 h-5' />}
             label='Create Ticket'
@@ -317,7 +319,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
         )}
 
         {/* Edit in Chat */}
-        {showEditAction && onEditMessage && (
+        {showEditAction && onEditMessage && !isChannelArchived && (
           <ActionButton
             icon={<EditMessageIcon className='w-5 h-5' />}
             label='Edit in Chat'

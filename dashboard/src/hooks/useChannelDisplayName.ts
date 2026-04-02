@@ -30,6 +30,7 @@ const DEFAULT_CHANNEL: Channel = {
   lastActivityAt: 0,
   participantCount: 0,
   addUserPolicy: null,
+  isArchived: false,
 };
 
 export const useChannelDisplayName = (

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Select } from '@base-ui/react/select';
-import { Check, ChevronDown, Hash } from 'lucide-react';
+import { Check, ChevronDown, Hash, Archive, ArchiveRestore } from 'lucide-react';
 import { toast } from 'sonner';
 import { ChannelAddUserPolicy, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
@@ -9,6 +9,10 @@ import { queries } from '../../../zero/queries';
 import { useClipboard } from '../../../hooks/useClipboard';
 import { useUsers } from '../../../hooks/useUsers';
 import { VisibleChannel } from '../../../machines/stateMachine';
+import { Dialog } from '../../ui/Dialog';
+import Button from '../../ui/Button';
+import { useNavigate } from 'react-router-dom';
+import { stateMachineActor } from '../../../machines/stateMachine';
 
 const POLICY_OPTIONS = [
   { value: ChannelAddUserPolicy.EVERYONE, label: 'Everyone' },
@@ -18,6 +22,8 @@ const POLICY_OPTIONS = [
 interface ChannelSettingsProps {
   channel: VisibleChannel;
   isAdmin: boolean;
+  previousChannelId?: string | null | undefined;
+  onClose?: () => void;
 }
 
 interface PolicySelectProps {
@@ -65,14 +71,22 @@ const PolicySelect: React.FC<PolicySelectProps> = ({ value, onValueChange, disab
   );
 };
 
-export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdmin }) => {
+export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
+  channel,
+  isAdmin,
+  previousChannelId,
+  onClose,
+}) => {
   const zero = useZero();
+  const navigate = useNavigate();
   const { copy } = useClipboard();
   const allUsers = useUsers();
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
 
   const currentPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const [selectedPolicy, setSelectedPolicy] = useState<ChannelAddUserPolicy>(currentPolicy);
+  const [showArchiveDialog, setShowArchiveDialog] = useState(false);
+  const [showUnarchiveDialog, setShowUnarchiveDialog] = useState(false);
 
   useEffect(() => {
     setSelectedPolicy(currentPolicy);
@@ -80,6 +94,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
 
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
   const isPrivateChannel = channel.visibility === ChannelVisibility.PRIVATE;
+  const isArchived = channel.isArchived;
 
   const fetchParticipants = () => zero.run(queries.channelParticipants({ channelId: channel.id }));
 
@@ -142,6 +157,29 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
     } catch {
       toast.error('Failed to make channel public');
     }
+  };
+
+  const handleUnarchiveChannel = (): void => {
+    stateMachineActor.send({ type: 'UNARCHIVE_CHANNEL', channelId: channel.id });
+    zero.mutate(mutators.channel.unarchiveChannel({ channelId: channel.id }));
+    setShowUnarchiveDialog(false);
+    toast.success(`#${channel.name} has been unarchived`);
+    onClose?.();
+  };
+
+  const handleArchiveChannel = (): void => {
+    let targetPath = '/chat/dir';
+    if (previousChannelId && previousChannelId !== channel.id) {
+      targetPath = `/chat/dir/${previousChannelId}`;
+    }
+
+    void navigate(targetPath, { replace: true });
+    stateMachineActor.send({ type: 'ARCHIVE_CHANNEL', channelId: channel.id });
+
+    zero.mutate(mutators.channel.archiveChannel({ channelId: channel.id }));
+    setShowArchiveDialog(false);
+    toast.success(`#${channel.name} has been archived`);
+    onClose?.();
   };
 
   if (!isDefaultChannel) {
@@ -233,7 +271,124 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({ channel, isAdm
             </div>
           </div>
         )}
+
+        {/* Unarchive channel card */}
+        {isAdmin && isArchived && (
+          <div className='bg-card p-[12px] rounded-[12px] border border-border'>
+            <div className='flex items-start gap-3'>
+              <ArchiveRestore className='mt-0.5 h-5 w-5 text-muted-foreground' />
+              <div className='flex flex-col gap-y-2 min-w-0'>
+                <p className='text-sm font-medium text-foreground'>Unarchive this channel</p>
+                <p className='text-sm text-muted-foreground'>
+                  This will restore the channel to the sidebar and allow new messages to be sent.
+                </p>
+                <button
+                  type='button'
+                  onClick={() => setShowUnarchiveDialog(true)}
+                  className='mt-1 inline-flex items-center self-start rounded-[8px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent'
+                  data-track-category='CHANNEL_SETTINGS'
+                  data-track-name='UnarchiveChannel'
+                  data-track-metadata={JSON.stringify({ channelId: channel.id })}
+                >
+                  Unarchive channel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Archive channel card */}
+        {isAdmin && !isArchived && (
+          <div className='bg-card p-[12px] rounded-[12px] border border-border'>
+            <div className='flex items-start gap-3'>
+              <Archive className='mt-0.5 h-5 w-5 text-muted-foreground' />
+              <div className='flex flex-col gap-y-2 min-w-0'>
+                <p className='text-sm font-medium text-foreground'>Archive this channel</p>
+                <p className='text-sm text-muted-foreground'>
+                  Archived channels are hidden from the channel list but remain browsable and
+                  searchable. You can unarchive it later.
+                </p>
+                <button
+                  type='button'
+                  onClick={() => setShowArchiveDialog(true)}
+                  className='mt-1 inline-flex items-center self-start rounded-[8px] border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-100 dark:bg-red-950 dark:border-red-800 dark:text-red-400'
+                  data-track-category='CHANNEL_SETTINGS'
+                  data-track-name='ArchiveChannel'
+                  data-track-metadata={JSON.stringify({ channelId: channel.id })}
+                >
+                  Archive channel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Unarchive Confirmation Dialog */}
+      {showUnarchiveDialog && (
+        <Dialog
+          open={showUnarchiveDialog}
+          onOpenChange={setShowUnarchiveDialog}
+          title='Unarchive Channel'
+        >
+          <div className='p-6'>
+            <div className='flex items-center gap-3 mb-4'>
+              <div className='p-2 rounded-full bg-green-100'>
+                <ArchiveRestore className='w-6 h-6 text-green-600' />
+              </div>
+              <h3 className='text-lg font-semibold'>Unarchive #{channel.name}?</h3>
+            </div>
+            <p className='text-sm text-muted-foreground mb-6'>
+              The channel will be restored to the sidebar and members will be able to send messages
+              again.
+            </p>
+            <div className='flex justify-end gap-3'>
+              <Button variant='secondary' onClick={() => setShowUnarchiveDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleUnarchiveChannel}
+                className='bg-green-600 text-white hover:bg-green-700'
+              >
+                Unarchive Channel
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Archive Confirmation Dialog */}
+      {showArchiveDialog && (
+        <Dialog
+          open={showArchiveDialog}
+          onOpenChange={setShowArchiveDialog}
+          title='Archive Channel'
+        >
+          <div className='p-6'>
+            <div className='flex items-center gap-3 mb-4'>
+              <div className='p-2 rounded-full bg-amber-100'>
+                <Archive className='w-6 h-6 text-amber-600' />
+              </div>
+              <h3 className='text-lg font-semibold'>Archive #{channel.name}?</h3>
+            </div>
+            <p className='text-sm text-muted-foreground mb-6'>
+              The channel will be hidden from the sidebar, but its contents will still be browsable
+              and available in search.
+            </p>
+            <div className='flex justify-end gap-3'>
+              <Button variant='secondary' onClick={() => setShowArchiveDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleArchiveChannel}
+                className='bg-amber-600 text-white hover:bg-amber-700'
+              >
+                Archive Channel
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 };

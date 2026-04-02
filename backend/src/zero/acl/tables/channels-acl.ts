@@ -10,24 +10,30 @@ export class ChannelsACL extends BaseACL<'channels'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'channels'>>, tx: Transaction<Schema>): Promise<void> {
+    const channel = await tx.run(zql.channels.where('id', args.id).one());
+    if (!channel) {
+      throw new MutationACLError('Channel update failed: channel does not exist', 'channels');
+    }
+
+    if (channel.isArchived && args.isArchived !== false) {
+      throw new MutationACLError('Channel update failed: cannot update archived channel', 'channels');
+    }
+
     const currentUserParticipantData = await tx.run(zql.channel_participants
       .where('channelId', args.id)
       .where('userId', this.ctx.userID)
       .one());
+
+    if (args.isArchived === true && (!currentUserParticipantData || currentUserParticipantData.role !== ChannelRole.ADMIN)) {
+      throw new MutationACLError('Channel update failed: only ADMINs can archive the channel', 'channels');
+    }
 
     if (!currentUserParticipantData) {
        throw new MutationACLError('Channel update failed: only channel participants can modify channel settings', 'channels');
     }
   }
 
-  async canDelete(args: DeleteID<TableSchema<'channels'>>, tx: Transaction<Schema>): Promise<void> {
-    const currentUserParticipantData = await tx.run(zql.channel_participants
-      .where('channelId', args.id)
-      .where('userId', this.ctx.userID)
-      .one());
-
-    if (!currentUserParticipantData || currentUserParticipantData.role !== ChannelRole.ADMIN) {
-       throw new MutationACLError('Channel delete failed: only channel admins can delete channels', 'channels');
-    }
+  async canDelete(_args: DeleteID<TableSchema<'channels'>>, _tx: Transaction<Schema>): Promise<void> {
+    throw new MutationACLError('Channel delete failed: channels cannot be deleted, use archive instead', 'channels');
   }
 }

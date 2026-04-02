@@ -1,6 +1,7 @@
 import { ReadonlyJSONValue, defineMutators, defineMutator } from '@rocicorp/zero';
 import {
   ChannelRole,
+  ChannelType,
   ChannelVisibility,
   MessageType,
   CallStatus,
@@ -994,6 +995,42 @@ export const mutators = defineMutators({
           participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
           joinedAt: now,
+        });
+      },
+    ),
+    archiveChannel: defineMutator(
+      z.object({
+        channelId: z.string(),
+      }),
+      async ({ tx, args: { channelId } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        if (channel.type !== ChannelType.DEFAULT) {
+          throw new Error('Only channels can be archived');
+        }
+
+        await tx.mutate.channels.update({
+          id: channelId,
+          isArchived: true,
+        });
+      },
+    ),
+    unarchiveChannel: defineMutator(
+      z.object({
+        channelId: z.string(),
+      }),
+      async ({ tx, args: { channelId } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        await tx.mutate.channels.update({
+          id: channelId,
+          isArchived: false,
         });
       },
     ),

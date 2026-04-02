@@ -8,6 +8,11 @@ export class ConversationsACL extends BaseACL<'conversations'> {
 
   async canInsert(args: InsertValue<TableSchema<'conversations'>>, tx: Transaction<Schema>): Promise<void> {
     const channel = await tx.run(zql.channels.where('id', args.channelId).one());
+
+    if (channel?.isArchived) {
+      throw new MutationACLError('Conversation insert failed: cannot create conversations in archived channel', 'conversations');
+    }
+
     const channelParticipant = await tx.run(zql.channel_participants
       .where('channelId', args.channelId)
       .where('userId', this.ctx.userID)
@@ -28,9 +33,17 @@ export class ConversationsACL extends BaseACL<'conversations'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'conversations'>>, tx: Transaction<Schema>): Promise<void> {
-    const conversation = await tx.run(zql.conversations.where('conversationId', args.conversationId).one());
+    const conversation = await tx.run(zql.conversations.where('conversationId', args.conversationId).related('channel').one());
+    if (!conversation) {
+      throw new MutationACLError('Conversation delete failed: conversation does not exist', 'conversations');
+    }
+
+    if (conversation.channel?.isArchived) {
+      throw new MutationACLError('Conversation delete failed: cannot delete conversations in archived channel', 'conversations');
+    }
+
     // conversation?.createdBy === 'user' -> This is a hack since system messages currenthave user as createBy. Need to fix the core issue
-    if (conversation?.createdBy === this.ctx.userID || conversation?.createdBy === 'user') {
+    if (conversation.createdBy === this.ctx.userID || conversation.createdBy === 'user') {
       return;
     }
     throw new MutationACLError('Conversation delete failed: only the conversation creator can delete it', 'conversations');

@@ -431,6 +431,8 @@ const Info = ({
             <ChannelSettings
               channel={channel}
               isAdmin={currentUserParticipant?.role === ChannelRole.ADMIN}
+              previousChannelId={previousChannelId}
+              {...(onClose && { onClose })}
             />
           </Tabs.Content>
         )}

@@ -11,6 +11,10 @@ export class CallsACL extends BaseACL<'calls'> {
       throw new MutationACLError('Call insert failed: the specified channel does not exist', 'calls');
     }
 
+    if (channel.isArchived) {
+      throw new MutationACLError('Call insert failed: cannot start calls in archived channel', 'calls');
+    }
+
     const isParticipant = await tx.run(zql.channel_participants
       .where('channelId', args.channelId)
       .where('userId', this.ctx.userID)
@@ -22,6 +26,15 @@ export class CallsACL extends BaseACL<'calls'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'calls'>>, tx: Transaction<Schema>): Promise<void> {
+    const callInfo = await tx.run(zql.calls.where('id', args.id).related('channel').one());
+    if (!callInfo || !callInfo.channel) {
+      throw new MutationACLError('Call update failed: call does not exist', 'calls');
+    }
+
+    if (callInfo.channel.isArchived) {
+      throw new MutationACLError('Call update failed: cannot update calls in archived channel', 'calls');
+    }
+
     if (args.status || args.endedAt || args.updatedAt) {
       const isParticipant = await tx.run(zql.call_participants
         .where('callId', args.id)
@@ -31,10 +44,6 @@ export class CallsACL extends BaseACL<'calls'> {
         throw new MutationACLError('Call update failed: only call participants can update call status', 'calls');
       }
       return;
-    }
-    const callInfo = await tx.run(zql.calls.where('id', args.id).one());
-    if (!callInfo) {
-      throw new MutationACLError('Call update failed: call does not exist', 'calls');
     }
     if (callInfo.createdByUserId !== this.ctx.userID) {
       throw new MutationACLError('Call update failed: only the call creator can modify call details', 'calls');

@@ -807,7 +807,7 @@ export const ThreadMessages = ({
             />
 
             {/* ChatInput at the bottom - only show if user is a member */}
-            {isUserMember ? (
+            {isUserMember || channel?.isArchived ? (
               <div className='px-4 pb-4 bg-background'>
                 <ChatInput
                   ref={inputRef}
@@ -957,7 +957,7 @@ export const ThreadMessages = ({
                 </Button>
               </Tooltip>
             )}
-            {!isMobile && (
+            {!isMobile && !channel?.isArchived && (
               <Tooltip content='Add context to thread'>
                 <Button
                   variant='ghost'
@@ -1171,7 +1171,7 @@ export const ThreadMessages = ({
             />
 
             {/* ChatInput at the bottom - only show if user is a member */}
-            {isUserMember ? (
+            {isUserMember || channel?.isArchived ? (
               <div className='px-4 pb-4 bg-background'>
                 <ChatInput
                   ref={inputRef}
@@ -1315,7 +1315,7 @@ export const ThreadMessages = ({
                       </Tooltip>
                     )}
                     {/* Add Context Button */}
-                    {!isMobile && (
+                    {!isMobile && !channel?.isArchived && (
                       <Tooltip content='Add context to thread'>
                         <Button
                           variant='ghost'
@@ -1399,7 +1399,7 @@ export const ThreadMessages = ({
                   {!underTicketView && (
                     <div className='flex items-center gap-2'>
                       {/* Add Context Button */}
-                      {!isMobile && (
+                      {!isMobile && !channel?.isArchived && (
                         <Tooltip content='Add context to thread'>
                           <Button
                             variant='ghost'
@@ -1450,7 +1450,7 @@ export const ThreadMessages = ({
                       )}
 
                       {/* Initiate Call Button */}
-                      {derivedConversationId && (
+                      {derivedConversationId && !channel?.isArchived && (
                         <Tooltip
                           content={
                             hasActiveCallForConversation ? 'Call already in progress' : 'Start call'
@@ -1485,6 +1485,7 @@ export const ThreadMessages = ({
                       {/* Create Ticket Button */}
                       {channel?.projectId &&
                         !hasTicketInMessages &&
+                        !channel?.isArchived &&
                         (() => {
                           const buttonContent = (
                             <Button
@@ -1558,7 +1559,7 @@ export const ThreadMessages = ({
           />
 
           {/* ChatInput at the bottom - only show if user is a member */}
-          {isUserMember ? (
+          {isUserMember || channel?.isArchived ? (
             <div className='px-4 pb-4 bg-background'>
               <ChatInput
                 ref={inputRef}

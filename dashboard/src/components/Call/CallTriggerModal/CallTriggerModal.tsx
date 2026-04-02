@@ -135,6 +135,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
   );
 
   if (!hasActiveCalls || (validActiveCalls.length === 1 && hasChannelCall && !isMobile)) {
+    if (disabled) return null;
     return (
       <CallTrigger
         channelId={channelId}

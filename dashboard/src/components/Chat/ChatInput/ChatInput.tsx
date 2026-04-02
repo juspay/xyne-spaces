@@ -464,82 +464,93 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
 
     return (
       <>
-        <InputBox
-          id={currentSessionId}
-          channelId={channelId}
-          autoFocus={isMobile ? false : autoFocus} // eslint-disable-line jsx-a11y/no-autofocus
-          ref={inputBoxRef}
-          key={`inputBox-${channelId}-${conversationId}`}
-          mentionItems={mentionResults}
-          onMentionSearch={handleMentionSearch}
-          channelItems={channelItems}
-          onChannelSearch={handleChannelSearch}
-          onSendMessage={handleSendMessage}
-          onContentChange={handleContentChange}
-          onTyping={handleTyping}
-          placeholder={placeholderText}
-          typingUsers={typingUsers}
-          showTypingIndicator={showTypingIndicator}
-          {...(editorValue !== undefined && { value: editorValue })}
-          {...(messageId && onCancel && { onCancel: handleCancelEdit })}
-          {...(conversationId && { conversationId })}
-          className={className}
-          features={{
-            richText: true,
-            commands: true,
-            mentions: true,
-            fileAttachments: true,
-            emojiPicker: true,
-          }}
-          allowedFileTypes={[...ALLOWED_FILE_TYPES]}
-          {...(conversationId &&
-            !messageId && {
-              onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
-              alsoSendToChannelChecked: alsoSendToChannel,
-            })}
-          {...(channel?.scopeType === ChannelScopeType.DEFAULT &&
-            canCreateTicket && {
-              onCreateTicket: (description: string | undefined) => {
-                void (async () => {
-                  if (isSupportChannel && user) {
-                    const messageContent = description || 'Support request';
-                    try {
-                      // Backend handles everything: ticket creation, bot message, workflow trigger
-                      const ticketPayload: CreateTicketRequest = {
-                        title: messageContent,
-                        description: messageContent,
-                        channelId: channelId,
-                        projectId: (channel.projectId as string | null) || '',
-                        createdBy: user.id,
-                        updatedBy: user.id,
-                        ticketType: BaseTicketType.Support,
-                        ...(conversationId && { sourceConversationId: conversationId }),
-                      };
+        {channel?.isArchived ? (
+          <div className='px-4 py-3 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-200 dark:border-amber-800'>
+            <p className='text-sm text-amber-700 dark:text-amber-300 text-center'>
+              {conversationId
+                ? 'You are viewing a thread from an archived channel'
+                : `You are viewing #${channel.name}, an archived channel`}
+            </p>
+          </div>
+        ) : (
+          <InputBox
+            id={currentSessionId}
+            channelId={channelId}
+            autoFocus={isMobile ? false : autoFocus} // eslint-disable-line jsx-a11y/no-autofocus
+            ref={inputBoxRef}
+            key={`inputBox-${channelId}-${conversationId}`}
+            mentionItems={mentionResults}
+            onMentionSearch={handleMentionSearch}
+            channelItems={channelItems}
+            onChannelSearch={handleChannelSearch}
+            onSendMessage={handleSendMessage}
+            onContentChange={handleContentChange}
+            onTyping={handleTyping}
+            placeholder={placeholderText}
+            typingUsers={typingUsers}
+            showTypingIndicator={showTypingIndicator}
+            {...(editorValue !== undefined && { value: editorValue })}
+            {...(messageId && onCancel && { onCancel: handleCancelEdit })}
+            {...(conversationId && { conversationId })}
+            className={className}
+            features={{
+              richText: true,
+              commands: true,
+              mentions: true,
+              fileAttachments: true,
+              emojiPicker: true,
+            }}
+            allowedFileTypes={[...ALLOWED_FILE_TYPES]}
+            {...(conversationId &&
+              !messageId && {
+                onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
+                alsoSendToChannelChecked: alsoSendToChannel,
+              })}
+            {...(channel?.scopeType === ChannelScopeType.DEFAULT &&
+              canCreateTicket && {
+                onCreateTicket: (description: string | undefined) => {
+                  void (async () => {
+                    if (isSupportChannel && user) {
+                      const messageContent = description || 'Support request';
+                      try {
+                        // Backend handles everything: ticket creation, bot message, workflow trigger
+                        const ticketPayload: CreateTicketRequest = {
+                          title: messageContent,
+                          description: messageContent,
+                          channelId: channelId,
+                          projectId: (channel.projectId as string | null) || '',
+                          createdBy: user.id,
+                          updatedBy: user.id,
+                          ticketType: BaseTicketType.Support,
+                          ...(conversationId && { sourceConversationId: conversationId }),
+                        };
 
-                      await createTicket(ticketPayload);
+                        await createTicket(ticketPayload);
 
-                      inputBoxRef.current?.clearContent();
-                      toast.success('Support Ticket Created', {
-                        description: 'Your support request has been submitted and picked up by AI.',
-                      });
-                    } catch (error) {
-                      console.error('Failed to create support ticket:', error);
-                      toast.error('Failed to create ticket', {
-                        description: 'Please try again or contact support.',
-                      });
+                        inputBoxRef.current?.clearContent();
+                        toast.success('Support Ticket Created', {
+                          description:
+                            'Your support request has been submitted and picked up by AI.',
+                        });
+                      } catch (error) {
+                        console.error('Failed to create support ticket:', error);
+                        toast.error('Failed to create ticket', {
+                          description: 'Please try again or contact support.',
+                        });
+                      }
+                    } else {
+                      setTicketDescription(description || '');
+                      setIsCreateTicketModalOpen(true);
                     }
-                  } else {
-                    setTicketDescription(description || '');
-                    setIsCreateTicketModalOpen(true);
-                  }
-                })();
-              },
-            })}
-          onTranscriptSelect={(content: string) => {
-            inputBoxRef.current?.insertContent(content);
-          }}
-          hasTicket={hasTicket}
-        />
+                  })();
+                },
+              })}
+            onTranscriptSelect={(content: string) => {
+              inputBoxRef.current?.insertContent(content);
+            }}
+            hasTicket={hasTicket}
+          />
+        )}
         {channel && isCreateTicketModalOpen ? (
           <CreateTicketModal
             isOpen={isCreateTicketModalOpen}

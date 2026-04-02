@@ -11,6 +11,9 @@ export class MessagesACL extends BaseACL<'messages'> {
     if (!conversation || !conversation.channel) {
       throw new MutationACLError('Message insert failed: conversation or channel does not exist', 'messages');
     }
+    if (conversation.channel.isArchived) {
+      throw new MutationACLError('Message insert failed: cannot send messages in archived channel', 'messages');
+    }
     if (conversation.channel.visibility === ChannelVisibility.PUBLIC) {
       return;
     }

@@ -33,7 +33,8 @@ const shallowEqualChannels = (a: Channel[], b: Channel[]): boolean => {
       channel.id === otherChannel.id &&
       channel.name === otherChannel.name &&
       channel.scopeType === otherChannel.scopeType &&
-      channel.visibility === otherChannel.visibility
+      channel.visibility === otherChannel.visibility &&
+      channel.isArchived === otherChannel.isArchived
     );
   });
 };
@@ -96,7 +97,7 @@ export const useAllVisibleChannels = (): VisibleChannel[] => {
     state => state.context.visibleChannels,
     shallowEqualVisibleChannels,
   );
-  return useMemo(() => channels, [channels]);
+  return useMemo(() => channels?.filter(c => !c.isArchived) || [], [channels]);
 };
 
 export const useChannel = (channelId: string): Channel | undefined => {
@@ -109,7 +110,8 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.scopeType === b?.scopeType &&
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
-      a?.createdAt === b?.createdAt,
+      a?.createdAt === b?.createdAt &&
+      a?.isArchived === b?.isArchived,
   );
 
   return channel;

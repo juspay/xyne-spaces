@@ -13,6 +13,10 @@ export class CanvasesACL extends BaseACL<'canvases'> {
         throw new MutationACLError('Canvas insert failed: the specified channel does not exist', 'canvases');
       }
 
+      if (channel.isArchived) {
+        throw new MutationACLError('Canvas insert failed: cannot create canvases in archived channel', 'canvases');
+      }
+
       const isParticipant = await tx.run(zql.channel_participants
         .where('channelId', args.channelId)
         .where('userId', this.ctx.userID)
@@ -41,11 +45,14 @@ export class CanvasesACL extends BaseACL<'canvases'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'canvases'>>, tx: Transaction<Schema>): Promise<void> {
-    // Check if user is the creator of the canvas
-    const canvas = await tx.run(zql.canvases.where('id', args.id).one());
-    
+    const canvas = await tx.run(zql.canvases.where('id', args.id).related('channel').one());
+
     if (!canvas) {
       throw new MutationACLError('Canvas delete failed: canvas not found', 'canvases');
+    }
+
+    if (canvas.channel?.isArchived) {
+      throw new MutationACLError('Canvas delete failed: cannot delete canvases in archived channel', 'canvases');
     }
 
     if (canvas.createdBy === this.ctx.userID) {

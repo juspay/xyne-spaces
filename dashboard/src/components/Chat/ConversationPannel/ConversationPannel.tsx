@@ -306,7 +306,8 @@ const ConversationPannel = ({
   });
 
   // Check if channel is public and user is not a member
-  const shouldShowJoinChannel = channel?.visibility === ChannelVisibility.PUBLIC && !isUserMember;
+  const shouldShowJoinChannel =
+    channel?.visibility === ChannelVisibility.PUBLIC && !isUserMember && !channel?.isArchived;
 
   // Safe tab setter with validation
   const handleTabChange = (tab: string, e?: React.MouseEvent): void => {
