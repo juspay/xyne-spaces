@@ -26,6 +26,10 @@ import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload } fr
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
+import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
+import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
+import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 
 const LARGE_GROUP_DM_THRESHOLD = 8;
 const messageAttachmentRepository = new MessageAttachmentRepository();
@@ -33,6 +37,8 @@ const messageAttachmentRepository = new MessageAttachmentRepository();
 export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
     const { entityId: messageId } = job;
+
+    logger.info('[SIDE-EFFECT] Message insert side effect triggered', { messageId });
 
     const message = await db.message.findUnique({
       where: { messageId },
@@ -94,7 +100,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }),
       db.user.findUnique({
         where: { id: senderId },
-        select: { name: true }
+        select: { name: true, userType: true }
       }),
       db.channelParticipant.findMany({
         where: { channelId },
@@ -225,7 +231,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }))
 
     const mentionedAppUsersIds = validMentionedUsers.filter(u => appUserIds.includes(u.userId)).map(u => u.userId);
-     
+
     if (mentionedAppUsersIds.length > 0) {
       const attachments = message.hasAttachment
         ? await messageAttachmentRepository.findByMessageId(messageId)
@@ -250,7 +256,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         }),
       }, mentionedAppUsersIds);
     }
-    
+
     const finalMentionedUserIds = validMentionedUsers
       .map(user => user.userId);
 
@@ -331,6 +337,15 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       senderId,
       mentionType,
       finalMentionedUserIds
+    );
+
+    // Handle bot mentions in channels - trigger bot execution when @mentioned
+    await this.handleBotMentions(
+      message,
+      conversation,
+      channel,
+      sender,
+      channelParticipants
     );
 
     if (isReply && conversationId) {
@@ -953,5 +968,159 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  /**
+   * Handle bot mentions - trigger bot execution when @mentioned in channels/threads
+   */
+  private async handleBotMentions(
+    message: { messageId: string; senderId: string; content: string; conversationId: string },
+    conversation: { channelId: string; initialMessageId: string | null },
+    channel: { id?: string; name: string | null; scopeType: string | null } | null,
+    sender: { name: string; userType?: string } | null,
+    channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>
+  ): Promise<void> {
+    try {
+      // ACL CHECK: Verify sender is a channel participant before proceeding
+      const isSenderParticipant = channelParticipants.some(p => p.userId === message.senderId);
+      if (!isSenderParticipant) {
+        logger.warn('[BOT-MENTION] Sender is not a channel participant, skipping bot mention handling', {
+          messageId: message.messageId,
+          senderId: message.senderId,
+          channelId: channel?.id || conversation.channelId,
+        });
+        return;
+      }
+
+      // Skip if DM channel (already handled by mutator auto-response)
+      if (channel?.scopeType === 'DM' || channel?.scopeType === 'GROUP_DM') {
+        return;
+      }
+
+      // CRITICAL FIX: Skip bot messages to prevent infinite loops
+      // When a bot responds, its response message would trigger this again
+      if (sender?.userType === 'BOT') {
+        logger.debug('[BOT-MENTION] Skipping bot message to prevent infinite loop', {
+          messageId: message.messageId,
+          senderId: message.senderId,
+        });
+        return;
+      }
+
+      // Check if this is a thread reply
+      const isThreadReply = conversation.initialMessageId && conversation.initialMessageId !== message.messageId;
+
+      // Extract bot user IDs from explicit @mentions in content
+      const botMentions = await extractBotMentions(message.content);
+
+      // Thread continuation: if the user replies in a thread that was started by a bot
+      // (with no explicit @mention), auto-route to that same bot. This allows natural
+      // back-and-forth conversation without requiring explicit @mentions on every reply.
+      let threadBotInfo: { botUserId: string; botId: string; botDefinition: BotDefinition } | null = null;
+      if (isThreadReply && botMentions.length === 0 && conversation.initialMessageId) {
+        // Get initial message with sender details
+        const initialMessage = await db.message.findUnique({
+          where: { messageId: conversation.initialMessageId },
+          select: {
+            senderId: true,
+            sender: {
+              select: {
+                id: true,
+                userType: true,
+              }
+            }
+          },
+        });
+
+        if (initialMessage?.sender && initialMessage.sender.userType === 'BOT') {
+          // Look up the bot catalog entry by DB user id instead of parsing the email
+          const dbUserId = initialMessage.sender.id;
+          const botEntry = botCatalog.getAll().find(
+            e => botCatalog.getDbUserId(e.definition.id) === dbUserId
+          );
+          const botDefinition = botEntry?.definition;
+
+          if (botEntry && botDefinition) {
+            threadBotInfo = {
+              botUserId: dbUserId,
+              botId: botDefinition.id,
+              botDefinition,
+            };
+          }
+        }
+      }
+
+      // If no explicit mentions and not a bot thread, skip
+      if (botMentions.length === 0 && !threadBotInfo) {
+        return;
+      }
+
+      // Process explicit mentions or thread bot
+      const botsToProcess = botMentions.length > 0
+        ? botMentions
+        : (threadBotInfo ? [threadBotInfo] : []);
+
+      // Process each bot (explicit mentions or thread bot)
+      for (const { botUserId, botId, botDefinition } of botsToProcess) {
+        try {
+          // SAFETY FIX: Check if botDefinition exists before accessing properties
+          if (!botDefinition) {
+            logger.warn('[BOT-MENTION] Bot definition not found, skipping', { botId });
+            continue;
+          }
+
+          // Only explicitly chat-enabled bots respond to channel/thread @mentions
+          if (!CHAT_ENABLED_BOT_IDS.has(botId)) {
+            continue;
+          }
+
+          // Extract plain-text question. Both paths must strip HTML since message
+          // content is stored as TipTap HTML, not plain text.
+          let question = threadBotInfo
+            ? extractPlainTextFromHtml(message.content)
+            : this.extractQuestionFromMention(message.content, botUserId);
+
+          if (!question.trim()) {
+            const isFirstMessageInThread = conversation.initialMessageId === message.messageId;
+            question = (isFirstMessageInThread || !conversation.initialMessageId)
+              ? 'What all can you do and how can you help me?'
+              : 'What happened in this thread until now?';
+          }
+
+          await executeBotForMention({
+            bot: { botUserId, botId, botDefinition },
+            message,
+            conversation,
+            question,
+            sender,
+            channelParticipants,
+          });
+        } catch (botError) {
+          logger.error('[BOT-MENTION] Failed to execute bot', {
+            botId,
+            messageId: message.messageId,
+            error: botError instanceof Error ? botError.message : String(botError),
+          });
+        }
+      }
+    } catch (error) {
+      logger.error('[BOT-MENTION] Error handling bot mentions', {
+        messageId: message.messageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Extract the question from an explicit @mention message: removes the bot's
+   * mention span then strips remaining HTML tags to return plain text.
+   */
+  private extractQuestionFromMention(content: string, botUserId: string): string {
+    return extractPlainTextFromHtml(
+      content.replace(
+        new RegExp(`<span[^>]*data-user-id="${botUserId}"[^>]*>@[^<]*</span>`, 'g'),
+        '',
+      ),
+    );
   }
 }

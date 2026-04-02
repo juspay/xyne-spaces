@@ -49,6 +49,8 @@ export interface XyneAIRequest {
   messageAttachmentIds?: string[]; // Attachment IDs to fetch from GCS on backend
   parentMessageId?: string; // Parent message ID for branching (tree structure)
   isRegenerate?: boolean; // Whether this is a regenerate request
+  systemPrompt?: string;  // Override system prompt (bypasses Langfuse prompt fetch)
+  agentPromptName?: string;  // Langfuse prompt name to use; defaults to XYNE_AI_SYSTEM
 }
 
 // ============================================================================

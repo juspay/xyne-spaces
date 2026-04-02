@@ -71,11 +71,12 @@ async function buildAgentPrompt(
   researchContext?: ResearchContext,
   researchOptions?: AvailableResearchOptions,
   customInstruction?: string,
-  hasThreadContext?: boolean
+  hasThreadContext?: boolean,
+  promptName?: string
 ): Promise<string> {
   const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions, customInstruction, hasThreadContext);
-  
-  const prompt = await getPromptFromLangfuse(PROMPT_NAMES.XYNE_AI_SYSTEM, {
+
+  const prompt = await getPromptFromLangfuse(promptName ?? PROMPT_NAMES.XYNE_AI_SYSTEM, {
     templateVariables,
   });
   
@@ -220,16 +221,17 @@ export async function createAgentRunner(
   // Determine if we have thread context (conversationId is present)
   const hasThreadContext = !!context.conversationId;
   
-  const systemPrompt = await buildAgentPrompt(
-    source, 
-    context.timestamp, 
-    context.userInfo, 
-    channelNames, 
+  const systemPrompt = context.systemPrompt ?? await buildAgentPrompt(
+    source,
+    context.timestamp,
+    context.userInfo,
+    channelNames,
     context.webSearchEnabled,
     context.researchContext,
     researchOptions,
     context.customInstruction,
-    hasThreadContext
+    hasThreadContext,
+    context.agentPromptName
   );
   const agent = createXyneAIAgent(
     systemPrompt,

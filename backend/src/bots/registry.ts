@@ -32,7 +32,7 @@ import '@/bots/implementations/xyne-automatic/xyne-automatic.js';
 // Xyne Release Bot - system bot for posting release notes canvases to threads
 import '@/bots/implementations/xyne-release-bot/xyne-release-bot.js';
 
-// Ask AI Bot - system bot for AI-generated content and canvases
+// Ask AI Bot - responds to DM conversations and channel/thread @mentions
 import '@/bots/implementations/ask-ai/ask-ai.js';
 
 import {logger} from '@/utils/logger';

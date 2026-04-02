@@ -78,6 +78,8 @@ export interface XyneAIAgentContext {
   createCanvasEnabled?: boolean;  // Flag to add create canvas instruction to prompt
   // Model config
   modelName?: string;  // LLM model name from CAC config (xyneAiModelName), used by tools that make internal LLM calls
+  systemPrompt?: string;  // Direct system prompt override (bypasses Langfuse)
+  agentPromptName?: string;  // Langfuse prompt name; defaults to XYNE_AI_SYSTEM
 }
 
 // ============================================================================

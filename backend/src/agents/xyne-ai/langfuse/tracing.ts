@@ -177,9 +177,10 @@ function handleEventWithEnrichment(
       const userEmail = userInfo?.userEmail;
       const userName = userInfo?.userName;
       
+      const agentName = context?.agentPromptName ?? 'ask-ai-agent';
       const maskedContext = {
         ...context,
-        agentName: 'ask-ai-agent',
+        agentName,
         sessionId,
         userId: userEmail || userId,
         userInfo: {
@@ -188,18 +189,18 @@ function handleEventWithEnrichment(
           userEmail: userEmail,
         },
       };
-      
+
       // Mask the input messages
       const maskedMessages = messages ? maskMessages(messages) : undefined;
       const eventDataAny = event.data as Record<string, unknown>;
-      
+
       const enrichedEvent = {
         type: 'run_start' as const,
         data: {
           ...event.data,
           sessionId: sessionId,
           userId: userEmail || userId,
-          agentName: 'ask-ai-agent',
+          agentName,
           messages: maskedMessages,
           ...(eventDataAny.user_query ? { user_query: eventDataAny.user_query } : {}),
           context: maskedContext,

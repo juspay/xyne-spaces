@@ -148,6 +148,8 @@ export async function compilePrompt(
 
 export const PROMPT_NAMES = {
   XYNE_AI_SYSTEM: 'xyne-ai',
+  XYNE_AI_AGENT_SYSTEM: 'ask-ai-agent',
+  XYNE_AI_CHAT_SYSTEM: 'ask-ai-chat',
   FETCH_CHANNEL_MESSAGES: 'fetch_channel_messages',
   FETCH_CHANNEL_MESSAGES_RECAP: 'fetch_channel_messages_recap',
   FETCH_THREAD_MESSAGES: 'fetch_thread_messages',
