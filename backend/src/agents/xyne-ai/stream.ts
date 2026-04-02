@@ -394,6 +394,8 @@ const {
     researchContext,
     customInstruction,
     modelName: cacConfig.xyneAiModelName,
+    systemPrompt: request.systemPrompt,
+    agentPromptName: request.agentPromptName,
     requestMappings: {
       channelNameToId: new Map<string, string>(),
       userNameToId: new Map<string, string>(),
