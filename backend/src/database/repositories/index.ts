@@ -50,6 +50,7 @@ export { EmailDraftRepository } from './emailDraftRepository';
 export { ActivityEventRepository } from './activityEventRepository';
 export { AppsRepository } from './appsRepository';
 export { InstalledAppsRepository } from './installedAppsRepository';
+export { ScheduledCallRepository } from './scheduledCallRepository';
 
 // Import statements for the container
 import { AgentRepository } from './agents';
@@ -92,6 +93,7 @@ import { EmailDraftRepository } from './emailDraftRepository';
 import { ActivityEventRepository } from './activityEventRepository';
 import { AppsRepository } from './appsRepository';
 import { InstalledAppsRepository } from './installedAppsRepository';
+import { ScheduledCallRepository } from './scheduledCallRepository';
 
 // Repository container for dependency injection
 export class RepositoryContainer {
@@ -134,6 +136,7 @@ export class RepositoryContainer {
   public activityEvents: ActivityEventRepository;
   public apps: AppsRepository;
   public installedApps: InstalledAppsRepository;
+  public scheduledCalls: ScheduledCallRepository;
 
   private constructor() {
     this.agents = new AgentRepository();
@@ -173,6 +176,7 @@ export class RepositoryContainer {
     this.activityEvents = new ActivityEventRepository();
     this.apps = new AppsRepository();
     this.installedApps = new InstalledAppsRepository();
+    this.scheduledCalls = new ScheduledCallRepository();
   }
 
   static getInstance(): RepositoryContainer {

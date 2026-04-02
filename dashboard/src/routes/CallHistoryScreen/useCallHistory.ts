@@ -123,12 +123,13 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
   // Get active calls to check if channel has ongoing call
   const activeCalls = useActiveCalls();
-  // Filter scheduled calls to only show those that haven't ended yet
+  // Filter scheduled calls to only show those that haven't ended yet.
+  // Also limit to 2 instances per recurring series to avoid clutter.
   const scheduledCalls = useMemo(() => {
     if (!allScheduledCalls) return undefined;
 
     const now = Date.now();
-    return allScheduledCalls.filter(call => {
+    const filtered = allScheduledCalls.filter(call => {
       // Only show scheduled calls that haven't passed their end time
       if (call.status === CallStatus.ACTIVE) {
         return false;
@@ -138,6 +139,28 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
         return false;
       }
       return call.endsAt && new Date(call.endsAt).getTime() > now;
+    });
+
+    // Sort by start time ascending
+    filtered.sort((a, b) => {
+      const aTime = a.startsAt ? new Date(a.startsAt).getTime() : Infinity;
+      const bTime = b.startsAt ? new Date(b.startsAt).getTime() : Infinity;
+      return aTime - bTime;
+    });
+
+    // Limit to 2 instances per recurring series
+    const seriesCounts = new Map<string, number>();
+    const MAX_INSTANCES_PER_SERIES = 2;
+
+    return filtered.filter(call => {
+      if (call.recurringSeriesId) {
+        const count = seriesCounts.get(call.recurringSeriesId) || 0;
+        if (count >= MAX_INSTANCES_PER_SERIES) {
+          return false;
+        }
+        seriesCounts.set(call.recurringSeriesId, count + 1);
+      }
+      return true;
     });
   }, [allScheduledCalls]);
 
@@ -482,20 +505,33 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   const handleDeleteConfirm = (cancelEntireSeries: boolean): void => {
     if (!deleteModalCall) return;
 
-    try {
-      void zero.mutate(
-        mutators.calls.cancel({
-          callId: deleteModalCall.externalId,
-          timestamp: Date.now(),
-          cancelEntireSeries: cancelEntireSeries && !!deleteModalCall.recurringSeriesId,
-        }),
-      );
-      toast.success(
-        cancelEntireSeries ? 'Recurring series cancelled' : 'Call cancelled successfully',
-      );
-    } catch (error) {
-      logger.error(Logger.API_CALL_FAILED, { message: 'Failed to cancel call', error });
-      toast.error('Failed to cancel call');
+    const isCancelSeries = cancelEntireSeries && !!deleteModalCall.recurringSeriesId;
+
+    if (isCancelSeries) {
+      // Cancel the entire series via backend API — this marks all future instances
+      // as CANCELLED and removes their Bull jobs. The Zero mutator only updates two
+      // records (the clicked call + the series) and never touches the other future instances.
+      void callService
+        .cancelRecurringSeries(deleteModalCall.recurringSeriesId)
+        .then(() => {
+          toast.success('Recurring series cancelled');
+        })
+        .catch(error => {
+          logger.error(Logger.API_CALL_FAILED, { message: 'Failed to cancel series', error });
+          toast.error('Failed to cancel series');
+        });
+    } else {
+      // Cancel a single instance via backend API — this also triggers buffer replenishment
+      // so the 60-day buffer is maintained for the recurring series.
+      void callService
+        .cancelScheduledCall(deleteModalCall.externalId)
+        .then(() => {
+          toast.success('Call cancelled successfully');
+        })
+        .catch(error => {
+          logger.error(Logger.API_CALL_FAILED, { message: 'Failed to cancel call', error });
+          toast.error('Failed to cancel call');
+        });
     }
 
     closeDeleteModal();
@@ -608,7 +644,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     calls: recentCalls,
     scheduledCalls,
     missedCalls,
-    queryDetails: { type: 'complete' as const },
+    queryDetails: { type: 'complete' },
     selectedCall,
     isParticipantsModalOpen,
     searchQuery,

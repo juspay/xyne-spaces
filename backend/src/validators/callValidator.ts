@@ -122,3 +122,19 @@ export const UpdateRecurringSeriesSchema = z
   );
 
 export type UpdateRecurringSeriesInput = z.infer<typeof UpdateRecurringSeriesSchema>;
+
+/**
+ * Validation schema for cancelling a single scheduled call instance.
+ * No body required — callId comes from URL params.
+ */
+export const CancelScheduledCallSchema = z.object({});
+
+export type CancelScheduledCallInput = z.infer<typeof CancelScheduledCallSchema>;
+
+/**
+ * Validation schema for cancelling an entire recurring series.
+ * No body required — seriesId comes from URL params.
+ */
+export const CancelRecurringSeriesSchema = z.object({});
+
+export type CancelRecurringSeriesInput = z.infer<typeof CancelRecurringSeriesSchema>;

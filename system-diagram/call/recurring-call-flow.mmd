@@ -24,20 +24,20 @@ flowchart TD
     recurrenceRule, timezone
     startTime, endTime, startsOn, endsOn"]
 
-    CreateSeriesRecord --> CreateFirst["Create First Instance
-    recurringCallService.createNextInstance
-    inclusive=true, notifyParticipants=true"]
+    CreateSeriesRecord --> CreateFirst["Create All Instances for 60-day buffer
+    recurringCallService.createInstancesForDateRange
+    inclusive=false, notifyParticipants=true for first only"]
 
     CreateFirst --> InstanceFail{Instance creation failed?}
     InstanceFail -->|Yes| Rollback["Rollback — delete orphaned
-    series record
-    Atomic cleanup"]
+    series record (transactional)"]
     Rollback --> Error500(["500 — Failed to create
-    first call instance"])
-    InstanceFail -->|No| ReturnSeries(["200 — seriesId + channelId"])
+    call instances"])
+    InstanceFail -->|No| ReturnSeries(["200 — seriesId + channelId
+    Buffer instances pre-created"])
 
     %% ══════════════════════════════════════════════════════
-    %% 2. createNextInstance (shared by create + auto-chain)
+    %% 2. createNextInstance (shared by auto-chain)
     %% ══════════════════════════════════════════════════════
     ChainStart([createNextInstance called]) --> FetchSeries["Fetch RecurringCallSeries
     DB lookup by seriesId"]
@@ -59,47 +59,48 @@ flowchart TD
     Status: SCHEDULED
     isRecurring: true
     recurringSeriesId set"]
-    CreateInstance --> NotifyCheck{notifyParticipants?}
-    NotifyCheck -->|Yes first instance only| SendScheduled["Send CALL_SCHEDULED
-    notifications + activities
-    scheduledCallNotificationService.ts"]
-    NotifyCheck -->|No| ScheduleJobs
-    SendScheduled --> ScheduleJobs["Schedule Bull Jobs
+    CreateInstance --> ScheduleJobs["Schedule Bull Jobs
     Reminder: startsAt − 10 min
     Auto-End: at endsAt"]
     ScheduleJobs --> InstanceCreated(["New Call instance created
     Status: SCHEDULED"])
 
     %% ══════════════════════════════════════════════════════
-    %% 3. AUTO-END JOB → CHAIN NEXT INSTANCE
+    %% 3. AUTO-END JOB → CHECK PARTICIPANTS → REPLENISH
     %% ══════════════════════════════════════════════════════
     AutoEndFires([Auto-End Bull Job fires at endsAt]) --> CheckCallStatus{Call status?}
-    CheckCallStatus -->|SCHEDULED| EndScheduled["SCHEDULED → ENDED"]
-    CheckCallStatus -->|ACTIVE| CheckParticipants{Active participants present?}
-    CheckParticipants -->|Yes| SkipEnd["Skip auto-end
-    Ends naturally when last
-    participant leaves"]
-    CheckParticipants -->|No| EndActive["ACTIVE → ENDED"]
+    CheckCallStatus -->|CANCELLED| LogSkip1["Log: call cancelled, skip"]
+    CheckCallStatus -->|SCHEDULED| CheckParticipants{Active participants?
+    findParticipantsWithStatus
+    filter response = ACCEPTED}
+    CheckCallStatus -->|OTHER| LogSkip2["Log: status is X, skip"]
 
-    EndScheduled --> CheckRecurring{recurringSeriesId set?}
-    EndActive --> CheckRecurring
-    SkipEnd --> CheckRecurring2{recurringSeriesId set?}
+    CheckParticipants -->|Yes ACCEPTED| SkipEnd["Skip auto-end
+    Call still active"]
+    CheckParticipants -->|No ACCEPTED| EndCall["UPDATE call
+    Status: ENDED
+    Soft update, no delete"]
 
-    CheckRecurring -->|Yes| CheckDuplicate["Check if next SCHEDULED
-    instance already exists
-    for this series"]
-    CheckRecurring -->|No| Done1(["Call ended"])
-    CheckRecurring2 -->|Yes| CheckDuplicate
-    CheckRecurring2 -->|No| Done1b(["Call ended — no chain"])
+    LogSkip1 --> CheckRecurring
+    LogSkip2 --> CheckRecurring
+    SkipEnd --> CheckRecurring{recurringSeriesId set?}
+    EndCall --> CheckRecurring
 
-    CheckDuplicate --> AlreadyExists{Next instance exists?}
-    AlreadyExists -->|Yes| SkipDuplicate(["Skip — avoid duplicate
-    instance creation"])
-    AlreadyExists -->|No| ChainNext["recurringCallService
-    .createNextInstance
-    afterDate=endsAt
-    inclusive=false"]
-    ChainNext --> ChainStart
+    CheckRecurring -->|Yes| ReplenishBuffer["replenishInstanceBuffer
+    Count future SCHEDULED instances
+    Target: 60-day buffer
+    Create missing instances if needed"]
+    CheckRecurring -->|No| Done1(["Done — no series chain"])
+    ReplenishBuffer --> GetTarget["Calculate target count
+    getOccurrencesInRange(now, now+60d)"]
+    GetTarget --> EnoughInstances{scheduledCount >= targetCount?}
+    EnoughInstances -->|Yes| BufferFull(["Buffer full, skip creation"])
+    EnoughInstances -->|No| FindLast["Find last SCHEDULED instance
+    findLastScheduledInstance"]
+    FindLast --> CreateMissing["Walk forward with getNextOccurrence
+    Skip if instance exists at slot
+    Create with notifyParticipants=false"]
+    CreateMissing --> BufferDone(["Buffer replenished"])
 
     %% ══════════════════════════════════════════════════════
     %% 4. JOIN VIA OLD RECURRING LINK
@@ -160,34 +161,112 @@ flowchart TD
     explicit channelId →
     find/create DM → keep existing"]
     ResolveChannel2 --> DetectRegen{"Needs regeneration?
-    recurrenceRule changed
-    OR startTime changed
-    OR endTime changed"}
+    recurrenceRule changed?"}
     DetectRegen -->|Yes — structural change| UpdateSeriesRecord["Update RecurringCallSeries record
     new rule, startTime, endTime
     endsOn, timezone, channelId"]
     DetectRegen -->|No — metadata only| UpdateSeriesRecord
-    UpdateSeriesRecord --> FutureInstances["Find all future SCHEDULED
-    instances (startsAt > now)"]
 
-    FutureInstances --> RegenBranch{needsRegeneration?}
-    RegenBranch -->|Yes| RemoveJobs["Remove Bull jobs
-    from each future instance"]
-    RemoveJobs --> DeleteInstances["Delete future instances
-    + their participants"]
-    DeleteInstances --> CreateNewNext["recurringCallService
-    .createNextInstance
-    afterDate=now, inclusive=false"]
-    CreateNewNext --> ChainStart
+    %% ── Regeneration path (soft delete) ──
+    UpdateSeriesRecord --> RegenBranch{needsRegeneration?}
+    RegenBranch -->|Yes| Regenerate["regenerateFutureInstances
+    scheduledCallRepo.findScheduledInstances()
+    Remove Bull jobs (all scheduled)
+    Mark SCHEDULED → CANCELLED (soft delete)
+    Participants NOT deleted
+    Create new instances for 60-day buffer"]
+    Regenerate --> RegenerateDone(["Series regenerated
+    Old instances preserved as CANCELLED
+    New instances created SCHEDULED"])
 
-    RegenBranch -->|No| CascadeMeta["Cascade title/channelId
-    to future instances
-    call.updateMany"]
-    CascadeMeta --> UpdateParticipants["Update participants on
-    future instances
-    add/remove delta per instance"]
-    UpdateParticipants --> NotifyUpdated2["Send CALL_UPDATED
-    notifications to channel participants
-    NotificationType.CALL_UPDATED"]
-    CreateNewNext --> NotifyUpdated2
-    NotifyUpdated2 --> EditDone2(["200 — series updated"])
+    %% ── Metadata cascade path (no regeneration) ──
+    RegenBranch -->|No| FindScheduled["scheduledCallRepo.findScheduledInstances()
+    Find all SCHEDULED instances
+    (not just future ones)"]
+    FindScheduled --> CascadeTitle["Cascade title/channelId
+    call.updateMany
+    No time change needed"]
+    CascadeTitle --> TimeChanged{startTime/endTime changed?}
+    TimeChanged -->|Yes| UpdateTimes["Update startsAt/endsAt in-place
+    Preserve date, change time portion
+    Reschedule Bull jobs per instance"]
+    TimeChanged -->|No| CheckParticipants
+    UpdateTimes --> CheckParticipants{targetUserIds provided?}
+    CheckParticipants -->|Yes| UpdateParticip["Delta add/remove participants
+    Per SCHEDULED instance
+    Keep organizer always"]
+    CheckParticipants -->|No| CascadeDone
+    UpdateParticip --> SendNotify2
+    CascadeTitle -->|No time change| CheckParticipants
+    SendNotify2["Send CALL_UPDATED notifications
+    to channel participants"]
+    SendNotify2 --> CascadeDone(["200 — series updated
+    Metadata cascaded to instances"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 7. CANCEL SINGLE INSTANCE  (DELETE /calls/:callId)
+    %% ══════════════════════════════════════════════════════
+    CancelInstance([Organizer cancels single instance]) --> ValidateCancel1["Validate Input
+    CancelScheduledCallSchema"]
+    ValidateCancel1 --> AuthCheck3{Organizer? + SCHEDULED?}
+    AuthCheck3 -->|No| Reject403c(["403/400 — Forbidden or
+    invalid status"])
+    AuthCheck3 -->|Yes| RemoveJobs1["Remove Bull jobs
+    reminder + auto-end"]
+    RemoveJobs1 --> MarkCancelled["UPDATE call
+    Status: CANCELLED
+    Soft update, no delete"]
+    MarkCancelled --> CheckSeriesReplenish{recurringSeriesId?}
+    CheckSeriesReplenish -->|Yes| ReplenishAfterCancel["replenishInstanceBuffer
+    Maintain 60-day buffer count"]
+    CheckSeriesReplenish -->|No| CancelDone1
+    ReplenishAfterCancel --> CancelDone1(["200 — instance cancelled
+    Record preserved"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 8. CANCEL ENTIRE SERIES  (DELETE /calls/series/:seriesId)
+    %% ══════════════════════════════════════════════════════
+    CancelSeries([Organizer cancels entire series]) --> ValidateCancel2["Validate Input
+    CancelRecurringSeriesSchema"]
+    ValidateCancel2 --> AuthCheck4{Organizer? + not CANCELLED?}
+    AuthCheck4 -->|No| Reject403d(["403/400 — Forbidden or
+    already cancelled"])
+    AuthCheck4 -->|Yes| CancelSeriesSvc["cancelSeries
+    recurringCallService.ts"]
+    CancelSeriesSvc --> FindFutureSched["scheduledCallRepo.findFutureScheduledCallIds()
+    Get future SCHEDULED instance IDs
+    startsAt > now"]
+    FindFutureSched --> RemoveJobs2["Remove Bull jobs
+    From each future instance"]
+    RemoveJobs2 --> MarkFutureCancelled["UPDATE calls
+    Status: CANCELLED
+    Only future SCHEDULED affected
+    Past/present instances preserved"]
+    MarkFutureCancelled --> MarkSeriesCancelled["UPDATE series
+    Status: CANCELLED"]
+    MarkSeriesCancelled --> CancelDone2(["200 — series cancelled
+    {cancelledCalls} instances marked
+    Records preserved"])
+
+    %% ══════════════════════════════════════════════════════
+    %% 9. DELETE SERIES (admin) — SOFT DELETE
+    %% ══════════════════════════════════════════════════════
+    DeleteSeriesAdmin([Admin deletes entire series]) --> GetAllInstances["Find ALL instances
+    (regardless of status)"]
+    GetAllInstances --> RemoveAllJobs["Remove ALL Bull jobs"]
+    RemoveAllJobs --> MarkAllScheduledCancelled["UPDATE calls
+    Only SCHEDULED → CANCELLED
+    COMPLETED/HANGUP preserved
+    No hard delete"]
+    MarkAllScheduledCancelled --> MarkSeriesCancelledAdmin["UPDATE series
+    Status: CANCELLED"]
+    MarkSeriesCancelledAdmin --> AdminDone(["Series soft-deleted
+    All call records preserved"])
+
+    classDef node fill:#ffffff,stroke:#333,stroke-width:2px
+    classDef success fill:#d4edda,stroke:#28a745,stroke-width:2px
+    classDef reject fill:#f8d7da,stroke:#dc3545,stroke-width:2px
+    classDef done fill:#d1ecf1,stroke:#0c5460,stroke-width:2px
+    class Success1,Success2,Success3,Success4,Success5 success
+    class Reject400,Reject403a,Reject403b,Reject403c,Reject403d reject
+    class Done1,Done1b,BufferFull,BufferDone,RegenerateDone,CascadeDone,CancelDone1,CancelDone2,AdminDone,Done success

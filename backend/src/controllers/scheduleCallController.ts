@@ -4,14 +4,17 @@ import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
-import { CallOrigin, CallStatus, CallType } from '@prisma/client';
+import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus } from '@prisma/client';
 import { ZodError } from 'zod';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
-import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema } from '@/validators/callValidator';
+import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
 import { recurringCallService } from '@/services/recurringCallService';
 import { addHHMMDuration } from '@/utils/dateUtils';
 import rruleLib from 'rrule';
 const { RRule } = rruleLib;
+
+// Number of milliseconds to buffer recurring call instances ahead of time (60 days)
+const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
 
 /**
  * If the RRULE contains UNTIL or COUNT, derive the effective end date so that
@@ -89,10 +92,9 @@ export class ScheduleCallController {
         return;
       }
 
-      // inclusive=true so startsOn itself is eligible as the first occurrence
-      // notifyParticipants=true so participants get a CALL_SCHEDULED notification for the first instance
-      // Series creation and first instance are wrapped in a single transaction for atomicity.
-      let firstCallId: string | null = null;
+      // Create series and pre-create all instances for the next 60 days
+      // Only the first upcoming instance notifies participants (to avoid spam)
+      let createdCallIds: string[] = [];
       await dbClient.$transaction(async (tx) => {
         const series = await tx.recurringCallSeries.create({
           data: {
@@ -111,11 +113,22 @@ export class ScheduleCallController {
             updatedAt: new Date(),
           },
         });
-        firstCallId = await recurringCallService.createNextInstance(series.id, series.startsOn, true, true, tx);
+
+        // Pre-create all instances for the next buffer period
+        const fromDate = new Date(startsOn);
+        const toDate = new Date(Date.now() + INSTANCE_BUFFER_DAYS);
+        const finalToDate = resolvedEndsOn && resolvedEndsOn < toDate ? resolvedEndsOn : toDate;
+
+        createdCallIds = await recurringCallService.createInstancesForDateRange(
+          series,
+          fromDate,
+          finalToDate,
+          tx,
+        );
       });
 
       logger.info(
-        `Recurring series ${seriesId} created by ${userId} — first instance: ${firstCallId ?? 'none'}`,
+        `Recurring series ${seriesId} created by ${userId} — ${createdCallIds.length} instances pre-created`,
       );
 
       res.json({
@@ -389,8 +402,10 @@ export class ScheduleCallController {
    * PATCH /api/calls/series/:seriesId
    * Update a recurring call series (title, recurrence rule, time, participants).
    * Only the organizer can edit. Updates the series record and cascades title/time
-   * changes to all future SCHEDULED instances. If the recurrence rule or call times
-   * change, future SCHEDULED instances are deleted and regenerated.
+   * changes to ALL SCHEDULED instances in the series. If the recurrence rule or call times
+   * change, all SCHEDULED instances are deleted and regenerated.
+   *
+   * Scope: All SCHEDULED instances in the series are affected by series edits.
    */
   updateRecurringSeries = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
@@ -408,7 +423,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateRecurringSeriesSchema.parse(req.body);
-      const { title, recurrenceRule, startTime, endTime, startsOn, endsOn, timezone, targetUserIds, channelId: reqChannelId } = parsedBody;
+      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId } = parsedBody;
 
       logger.info(`[updateRecurringSeries] request | seriesId=${seriesId} userId=${userId} reqChannelId=${reqChannelId} targetUserIds=${JSON.stringify(targetUserIds)} title=${title}`);
 
@@ -450,11 +465,10 @@ export class ScheduleCallController {
         logger.info(`[updateRecurringSeries] no channelId change — keeping existing channelId=${series.channelId}`);
       }
 
-      // Detect whether recurrence structure changes require instance regeneration
+      // Detect whether recurrence structure changes require instance regeneration.
+      // Only recurrenceRule changes require delete+regenerate.
       const ruleChanged = recurrenceRule !== undefined && recurrenceRule !== series.recurrenceRule;
-      const startTimeChanged = startTime !== undefined && startTime !== series.startTime;
-      const endTimeChanged = endTime !== undefined && endTime !== series.endTime;
-      const needsRegeneration = ruleChanged || startTimeChanged || endTimeChanged;
+      const needsRegeneration = ruleChanged;
 
       // Build the series update payload
       const seriesUpdate: Record<string, unknown> = { updatedAt: new Date() };
@@ -465,9 +479,9 @@ export class ScheduleCallController {
       if (timezone !== undefined) seriesUpdate.timezone = timezone;
       if (endsOn !== undefined) seriesUpdate.endsOn = new Date(endsOn);
       if (resolvedChannelId !== undefined) seriesUpdate.channelId = resolvedChannelId;
-      if (startsOn !== undefined) {
-        seriesUpdate.startsOn = new Date(startsOn);
-      }
+      // NOTE: We intentionally do NOT update startsOn. The original series.startsOn is the
+      // RRULE dtstart anchor and must remain unchanged. The frontend may send startsOn as the
+      // instance date, but overwriting the series start would corrupt the recurrence calculation.
 
       logger.info(`[updateRecurringSeries] seriesUpdate payload=${JSON.stringify(seriesUpdate)}`);
 
@@ -479,55 +493,113 @@ export class ScheduleCallController {
 
       logger.info(`[updateRecurringSeries] series record updated | newChannelId=${updatedSeries.channelId}`);
 
-      const now = new Date();
-
-      // Find all future SCHEDULED instances
-      const futureInstances = await db.call.findMany({
-        where: {
-          recurringSeriesId: seriesId,
-          status: CallStatus.SCHEDULED,
-          startsAt: { gt: now },
-        },
-      });
 
       if (needsRegeneration) {
-        // Delete future instances and their participants, remove Bull jobs
-        // New instances created by createNextInstance will inherit the updated series channelId
-        logger.info(`[updateRecurringSeries] needsRegeneration=true — deleting ${futureInstances.length} future instances`);
-        for (const instance of futureInstances) {
-          try {
-            await scheduledCallNotificationService.removeCallJobs(instance.id);
-          } catch (err) {
-            logger.error(`Failed to remove Bull jobs for instance ${instance.id}:`, err);
-          }
-          await db.callParticipant.deleteMany({ where: { callId: instance.id } });
-          await db.call.delete({ where: { id: instance.id } });
-        }
+        // Delete ALL SCHEDULED instances and recreate them with the new recurrence rule.
+        // Use the ORIGINAL series.startsOn (not the updated one) so the RRULE generates
+        // occurrences from the true series start date.
+        const baseDate = new Date(series.startsOn);
+        logger.info(`[updateRecurringSeries] needsRegeneration=true — regenerating all instances from ${baseDate.toISOString()}`);
 
-        // Create the next instance under the new rule
-        try {
-          await db.$transaction(async (tx) => recurringCallService.createNextInstance(seriesId, now, false, false, tx));
-          logger.info(`Regenerated next instance for series ${seriesId} after update`);
-        } catch (err) {
-          logger.error(`Failed to regenerate next instance for series ${seriesId}:`, err);
-        }
+        const seriesForRegeneration: typeof updatedSeries = {
+          ...updatedSeries,
+          // Override startsOn and recurrenceRule to their correct values for regeneration
+          startsOn: series.startsOn,  // Use ORIGINAL startsOn, not the updated one
+          recurrenceRule: recurrenceRule ?? updatedSeries.recurrenceRule,
+        };
+        await recurringCallService.regenerateFutureInstances(seriesForRegeneration, baseDate);
       } else {
-        // No regeneration needed — cascade title and/or channelId to future instances
+        // No regeneration needed — cascade title, channelId, and/or time changes to ALL SCHEDULED instances
+        // Update all SCHEDULED instances (not just future ones) to keep the series consistent
+        const allScheduledInstances = await repositories.scheduledCalls.findScheduledInstances({
+          seriesId,
+          tx: db,
+        });
+
         const instanceCascade: Record<string, unknown> = {};
         if (title !== undefined) instanceCascade.title = title;
         if (resolvedChannelId !== undefined) instanceCascade.channelId = resolvedChannelId;
 
-        if (Object.keys(instanceCascade).length > 0 && futureInstances.length > 0) {
-          logger.info(`[updateRecurringSeries] cascading ${JSON.stringify(instanceCascade)} to ${futureInstances.length} future instances`);
+        // Cascade startTime/endTime changes in-place by updating startsAt/endsAt on each instance.
+        // We preserve the date portion and only change the time portion.
+        const startTimeChanged = startTime !== undefined && startTime !== series.startTime;
+        const endTimeChanged = endTime !== undefined && endTime !== series.endTime;
+        const timeChanged = startTimeChanged || endTimeChanged;
+
+        // Collect instances that need time updates for Bull job rescheduling
+        const instancesNeedingTimeUpdate: { id: string; externalId: string; startsAt: Date; endsAt: Date }[] = [];
+
+        if (timeChanged && allScheduledInstances.length > 0) {
+          const newStartTime = startTime ?? series.startTime;
+          const newEndTime = endTime ?? series.endTime;
+
+          for (const instance of allScheduledInstances) {
+            // Calculate new startsAt by applying new startTime to the existing date
+            const existingStart = instance.startsAt!;
+            const existingEnd = instance.endsAt!;
+            const newStartsAt = new Date(existingStart);
+            const [newStartHours, newStartMinutes] = newStartTime.split(':').map(Number);
+            newStartsAt.setHours(newStartHours, newStartMinutes, 0, 0);
+
+            const newEndsAt = new Date(existingEnd);
+            const [newEndHours, newEndMinutes] = newEndTime.split(':').map(Number);
+            newEndsAt.setHours(newEndHours, newEndMinutes, 0, 0);
+
+            // Update startsAt and endsAt in-place
+            await db.call.update({
+              where: { id: instance.id },
+              data: { startsAt: newStartsAt, endsAt: newEndsAt },
+            });
+
+            instancesNeedingTimeUpdate.push({
+              id: instance.id,
+              externalId: instance.externalId,
+              startsAt: newStartsAt,
+              endsAt: newEndsAt,
+            });
+
+            logger.info(`[updateRecurringSeries] updated instance ${instance.id} time: ${existingStart.toISOString()} -> ${newStartsAt.toISOString()}`);
+          }
+        }
+
+        if (Object.keys(instanceCascade).length > 0 && allScheduledInstances.length > 0) {
+          logger.info(`[updateRecurringSeries] cascading ${JSON.stringify(instanceCascade)} to ${allScheduledInstances.length} instances`);
           await db.call.updateMany({
-            where: { id: { in: futureInstances.map((i) => i.id) } },
+            where: { id: { in: allScheduledInstances.map((i) => i.id) } },
             data: instanceCascade,
           });
         }
 
-        // Update participants on future instances if targetUserIds provided
+        // Reschedule Bull jobs for instances with time changes
+        if (instancesNeedingTimeUpdate.length > 0) {
+          const callTitle = title ?? series.title;
+          for (const instance of instancesNeedingTimeUpdate) {
+            try {
+              const participants = await repositories.calls.findParticipants(instance.id);
+              const participantIds = participants.map((p) => p.userId);
+
+              await scheduledCallNotificationService.rescheduleCallReminder(
+                instance.id,
+                instance.externalId,
+                callTitle,
+                instance.startsAt,
+                participantIds,
+              );
+              await scheduledCallNotificationService.rescheduleCallAutoEnd(
+                instance.id,
+                instance.externalId,
+                instance.endsAt,
+              );
+              logger.info(`[updateRecurringSeries] rescheduled Bull jobs for instance ${instance.id}`);
+            } catch (err) {
+              logger.error(`[updateRecurringSeries] failed to reschedule Bull jobs for instance ${instance.id}:`, err);
+            }
+          }
+        }
+
+        // Update participants on ALL scheduled instances if targetUserIds provided
         if (targetUserIds !== undefined) {
-          for (const instance of futureInstances) {
+          for (const instance of allScheduledInstances) {
             const currentParticipants = await repositories.calls.findParticipants(instance.id);
             const currentUserIds = new Set(currentParticipants.map((p) => p.userId));
             // Always keep the series organizer in the participant set
@@ -586,6 +658,124 @@ export class ScheduleCallController {
         return;
       }
       res.status(500).json({ success: false, error: 'Failed to update recurring series' });
+    }
+  };
+  /**
+   * DELETE /api/calls/:callId
+   * Cancel a single SCHEDULED call instance.
+   * Marks the instance as CANCELLED (preserves record) and triggers buffer
+   * replenishment so the 60-day buffer is maintained.
+   */
+  cancelScheduledCall = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId: externalId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!externalId) {
+      res.status(400).json({ success: false, error: 'callId is required' });
+      return;
+    }
+
+    try {
+      CancelScheduledCallSchema.parse(req.body);
+
+      const call = await repositories.calls.findByExternalId(externalId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Only the organizer can cancel a scheduled call' });
+        return;
+      }
+
+      if (call.status !== CallStatus.SCHEDULED) {
+        res.status(400).json({ success: false, error: 'Only SCHEDULED calls can be cancelled' });
+        return;
+      }
+
+      // Remove Bull jobs for this instance
+      try {
+        await scheduledCallNotificationService.removeCallJobs(call.id);
+      } catch (err) {
+        logger.error(`Failed to remove Bull jobs for call ${call.id}:`, err);
+      }
+
+      // Mark the instance as CANCELLED (preserve record)
+      await repositories.scheduledCalls.cancelCall(call.id);
+
+      logger.info(`Call ${externalId} cancelled by organizer ${userId}`);
+
+      // Trigger buffer replenishment for recurring series
+      if (call.recurringSeriesId) {
+        try {
+          await recurringCallService.replenishInstanceBuffer(call.recurringSeriesId);
+          logger.info(`Buffer replenished for series ${call.recurringSeriesId} after instance cancellation`);
+        } catch (err) {
+          logger.error(`Failed to replenish buffer for series ${call.recurringSeriesId}:`, err);
+        }
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Failed to cancel scheduled call:', error);
+      res.status(500).json({ success: false, error: 'Failed to cancel scheduled call' });
+    }
+  };
+
+  /**
+   * DELETE /api/calls/series/:seriesId
+   * Cancel an entire recurring series.
+   * Marks all future SCHEDULED instances as CANCELLED (preserves records),
+   * removes their Bull jobs, and marks the series as CANCELLED.
+   */
+  cancelRecurringSeries = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { seriesId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!seriesId) {
+      res.status(400).json({ success: false, error: 'seriesId is required' });
+      return;
+    }
+
+    try {
+      CancelRecurringSeriesSchema.parse(req.body);
+
+      const db = DatabaseClient.getInstance();
+      const series = await db.recurringCallSeries.findUnique({ where: { id: seriesId } });
+
+      if (!series) {
+        res.status(404).json({ success: false, error: 'Series not found' });
+        return;
+      }
+
+      if (series.organizerId !== userId) {
+        res.status(403).json({ success: false, error: 'Only the organizer can cancel this series' });
+        return;
+      }
+
+      if (series.status === RecurringCallSeriesStatus.CANCELLED) {
+        res.status(400).json({ success: false, error: 'Series is already cancelled' });
+        return;
+      }
+
+      const { cancelledCalls } = await recurringCallService.cancelSeries(seriesId);
+
+      logger.info(`Series ${seriesId} cancelled by organizer ${userId}: ${cancelledCalls} future instances cancelled`);
+      res.json({ success: true, cancelledCalls });
+    } catch (error) {
+      logger.error('Failed to cancel recurring series:', error);
+      res.status(500).json({ success: false, error: 'Failed to cancel recurring series' });
     }
   };
 }

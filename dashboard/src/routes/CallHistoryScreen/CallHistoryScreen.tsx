@@ -9,7 +9,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { ReactElement, useEffect, useState, useRef } from 'react';
+import { ReactElement, useEffect, useState, useRef, useMemo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
@@ -239,9 +239,24 @@ const CallHistoryScreen = (): ReactElement => {
     ? filterCallsBySearchQuery(scheduledCalls || [], searchQuery)
     : scheduledCalls;
 
+  // Show only 1 instance per recurring series
+  const limitedScheduledCalls = useMemo(() => {
+    if (!filteredScheduledCalls) return filteredScheduledCalls;
+    const seenSeries = new Set<string>();
+    return filteredScheduledCalls.filter(call => {
+      if (call.recurringSeriesId) {
+        if (seenSeries.has(call.recurringSeriesId)) {
+          return false;
+        }
+        seenSeries.add(call.recurringSeriesId);
+      }
+      return true;
+    });
+  }, [filteredScheduledCalls]);
+
   const displayScheduledCalls = showAllUpcoming
-    ? filteredScheduledCalls
-    : filteredScheduledCalls?.slice(0, MAX_UPCOMING_CALLS_TO_SHOW);
+    ? limitedScheduledCalls
+    : limitedScheduledCalls?.slice(0, MAX_UPCOMING_CALLS_TO_SHOW);
 
   const filteredRecentCalls = searchQuery.trim()
     ? filterCallsBySearchQuery(calls || [], searchQuery)
@@ -257,7 +272,7 @@ const CallHistoryScreen = (): ReactElement => {
       if (activeTab === 'missed') {
         return filteredMissedCalls;
       } else if (activeTab === 'upcoming') {
-        return filteredScheduledCalls;
+        return limitedScheduledCalls;
       }
       return filteredRecentCalls;
     }
@@ -266,7 +281,7 @@ const CallHistoryScreen = (): ReactElement => {
     if (activeTab === 'missed') {
       return missedCalls;
     } else if (activeTab === 'upcoming') {
-      return scheduledCalls;
+      return limitedScheduledCalls;
     }
     return calls;
   };

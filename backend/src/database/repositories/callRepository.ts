@@ -257,6 +257,25 @@ export class CallRepository {
   }
 
   /**
+   * Get all participants for a call with their response status.
+   * Used to check for active participants when auto-ending calls.
+   * - ACCEPTED: participant is currently in the call
+   * - LEFT: participant joined and has left the call
+   * - INVITED: participant has not yet joined
+   */
+  async findParticipantsWithStatus(callId: string): Promise<Array<{ userId: string; response: InvitationResponse | null }>> {
+    return await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        callId,
+      },
+      select: {
+        userId: true,
+        response: true,
+      },
+    });
+  }
+
+  /**
    * Get all participant IDs for a call matching a specific response
    */
   async getParticipantIdsByResponse(callId: string, response: InvitationResponse): Promise<string[]> {

@@ -3,8 +3,7 @@ import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
-import { CallStatus, CallParticipant, NotificationType, ActivityClassification, InvitationResponse } from '@prisma/client';
-import { DatabaseClient } from '@/database/client';
+import { CallStatus, NotificationType, ActivityClassification, InvitationResponse } from '@prisma/client';
 import { formatDateTimeShort } from '@/utils/dateUtils';
 import { recurringCallService } from '@/services/recurringCallService';
 
@@ -137,63 +136,45 @@ class ScheduledCallNotificationService {
         if (call.status === CallStatus.CANCELLED) {
           logger.info(`Call ${callId} has been cancelled, skipping auto-end attempt`);
         } else if (call.status === CallStatus.SCHEDULED) {
-          const db = DatabaseClient.getInstance();
-          const participants = await db.callParticipant.findMany({ where: { callId } });
+          const participants = await repositories.calls.findParticipantsWithStatus(callId);
           const activeParticipants = participants.filter(
-            (p: CallParticipant) => p.joinedAt !== null && p.leftAt === null,
+            (p) => p.response === InvitationResponse.ACCEPTED,
           );
 
           if (activeParticipants.length > 0) {
             logger.info(
-              `Call ${callId} has ${activeParticipants.length} active participant(s) at endsAt — not ending, but will still chain next recurring instance`,
+              `Call ${callId} has ${activeParticipants.length} active participant(s) at endsAt — not ending`,
             );
           } else {
             await repositories.calls.update(callId, { status: CallStatus.ENDED });
             logger.info(`✅ Auto-ended call ${callExternalId} — no active participants at scheduled end time`);
           }
         } else {
-          logger.info(`Call ${callId} status is ${call.status} — skipping auto-end, but will still chain next recurring instance if applicable`);
+          logger.info(`Call ${callId} status is ${call.status} — skipping auto-end`);
         }
 
-        // ── Chain next recurring instance regardless of call state ──
-        // Fires even if the instance was cancelled — the series continues.
+        // ── Buffer replenishment for recurring series ──
+        // After an instance ends, trigger buffer replenishment to maintain 60-day count
+        // AND schedule Bull jobs for the next instance (lazy job creation)
         if (call.recurringSeriesId) {
           try {
-            // Idempotency guard: if Bull retries this job after createNextInstance already
-            // succeeded (e.g. DB write succeeded but job was mis-marked as failed), a
-            // SCHEDULED instance for this series after endsAt will already exist — skip.
-            const db = DatabaseClient.getInstance();
-            const existingNext = await db.call.findFirst({
-              where: {
-                recurringSeriesId: call.recurringSeriesId,
-                status: CallStatus.SCHEDULED,
-                startsAt: { gt: new Date(endsAt) },
-              },
-            });
-
-            if (existingNext) {
-              logger.info(
-                `Next instance ${existingNext.id} already exists for series ${call.recurringSeriesId} — skipping duplicate chain`,
-              );
-            } else {
-              const db = DatabaseClient.getInstance();
-              const nextCallId = await db.$transaction(async (tx) =>
-                recurringCallService.createNextInstance(
-                  call.recurringSeriesId!,
-                  new Date(endsAt),
-                  false,
-                  false,
-                  tx,
-                ),
-              );
-              if (nextCallId) {
-                logger.info(`📅 Chained next recurring instance ${nextCallId} for series ${call.recurringSeriesId}`);
-              }
-            }
-          } catch (recurringError) {
+            await recurringCallService.replenishInstanceBuffer(call.recurringSeriesId);
+            logger.info(`📅 Replenished instance buffer for series ${call.recurringSeriesId}`);
+          } catch (replenishError) {
             logger.error(
-              `Failed to create next recurring instance for series ${call.recurringSeriesId}:`,
-              recurringError,
+              `Failed to replenish instance buffer for series ${call.recurringSeriesId}:`,
+              replenishError,
+            );
+          }
+
+          // Schedule Bull jobs for the next instance in the series
+          try {
+            await recurringCallService.scheduleJobsForNextInstance(call.recurringSeriesId, call.endsAt || endsAt);
+            logger.info(`📅 Scheduled Bull jobs for next instance in series ${call.recurringSeriesId}`);
+          } catch (scheduleError) {
+            logger.error(
+              `Failed to schedule jobs for next instance in series ${call.recurringSeriesId}:`,
+              scheduleError,
             );
           }
         }
