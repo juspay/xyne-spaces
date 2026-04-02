@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { Track } from 'livekit-client';
 import { useSelector } from '@xstate/react';
 import { Maximize2 } from 'lucide-react';
@@ -9,6 +9,9 @@ import { ParticipantTile } from '../ParticipantTile/ParticipantTile';
 import { VideoTrack } from '@livekit/components-react';
 import { logger, Event } from '../../../utils/logger';
 import { ScreenShareFullscreenModal } from '../ScreenShareFullscreenModal';
+import { DrawingCanvas, DrawingToolbar } from '../DrawingCanvas';
+import type { DrawingCanvasHandle } from '../DrawingCanvas';
+import { useDrawStore } from '../../../hooks/useDrawStore';
 
 interface ScreenShareViewProps {
   focusedScreenShare: ParticipantInfo;
@@ -18,6 +21,7 @@ interface ScreenShareViewProps {
   className?: string | undefined;
   compact?: boolean | undefined;
   showSidebar?: boolean | undefined;
+  showDrawingTools?: boolean | undefined;
   aiController?: { id: string; name: string } | null;
   requestedAiController?: boolean;
 }
@@ -30,6 +34,7 @@ export function ScreenShareView({
   className = '',
   compact = false,
   showSidebar = true,
+  showDrawingTools = false,
   aiController,
   requestedAiController,
 }: ScreenShareViewProps): React.ReactElement {
@@ -37,6 +42,10 @@ export function ScreenShareView({
 
   // Fullscreen modal state
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+
+  // Drawing canvas ref (for imperative clearAll)
+  const drawingCanvasRef = useRef<DrawingCanvasHandle>(null);
+  const isDrawingEnabled = useDrawStore(s => s.isDrawingEnabled);
 
   // Create track reference for the focused screen share
   const screenSharePublication = focusedScreenShare.participant?.getTrackPublication(
@@ -137,6 +146,17 @@ export function ScreenShareView({
           {/* Screen share video using LiveKit's VideoTrack component */}
           {screenShareTrackRef && (
             <VideoTrack trackRef={screenShareTrackRef} className='w-full h-full object-contain' />
+          )}
+
+          {/* Drawing overlay — rendered on top of the video, below UI labels */}
+          {screenShareTrackRef && showDrawingTools && <DrawingCanvas ref={drawingCanvasRef} />}
+
+          {/* Drawing toolbar — only shown when drawing mode is active */}
+          {screenShareTrackRef && showDrawingTools && isDrawingEnabled && (
+            <DrawingToolbar
+              onClearAll={() => drawingCanvasRef.current?.clearAll()}
+              onUndo={() => drawingCanvasRef.current?.undo()}
+            />
           )}
 
           {/* Screen Share Label */}
