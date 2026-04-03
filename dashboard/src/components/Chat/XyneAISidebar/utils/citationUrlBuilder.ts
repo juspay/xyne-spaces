@@ -63,9 +63,6 @@ export function buildCitationUrl(citation: SummarizerCitation): string | null {
       // For web search, should have externalUrl
       return externalUrl || null;
 
-    case 'email':
-      return externalUrl || null;
-
     default:
       // Unknown entity type
       console.warn('[CitationUrlBuilder] Unknown entity type:', entityType);

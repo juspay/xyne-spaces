@@ -2843,38 +2843,6 @@ model ChannelDailyRecap {
   @@schema("public")
 }
 
-enum TeamIntelligenceReportStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-  @@schema("public")
-}
-
-model TeamIntelligenceReport {
-  id                  String                       @id @default(cuid())
-  orgId               String
-  requestedByUserId   String
-  status              TeamIntelligenceReportStatus @default(PENDING)
-  timeRangeStart      DateTime
-  timeRangeEnd        DateTime
-  includeTranscripts  Boolean                     @default(false)
-  teamMemberIds       String[]
-  sourceSummary       Json?
-  reportJson          Json?
-  reportMarkdown      String?
-  error               String?
-  completedAt         DateTime?
-  createdAt           DateTime                    @default(now())
-  updatedAt           DateTime                    @updatedAt
-
-  @@index([orgId, createdAt])
-  @@index([requestedByUserId, createdAt])
-  @@index([status, createdAt])
-  @@map("team_intelligence_reports")
-  @@schema("public")
-}
-
 // ============================================================================
 // SURFACE NUDGE FRAMEWORK
 // ============================================================================

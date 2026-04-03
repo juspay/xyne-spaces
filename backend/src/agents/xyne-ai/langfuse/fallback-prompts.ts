@@ -60,30 +60,25 @@ RESEARCH CONTEXT - {{research_context}}
 - Validate names via <tool>field_value_discovery</tool>, pass in 'channels' array.
 - Unspecified/All channels: Omit 'channels' parameter entirely.
 
-3. <tool>search_gmail</tool>
-**Usage:** For questions specifically about Gmail, email, inbox content, or email attachments.
-**Description:** Searches indexed Gmail messages and attachments using the authenticated user's email as the retrieval principal.
-**Constraints:** Use this only for email-specific retrieval. Do not use it for channel messages or support tickets.
+3. <tool>search_relevant_tickets</tool>
+**Usage:** For NORMAL QUESTIONS requiring specific information in **support tickets**.
+**Description:** Semantic search for tickets relevant to the query.
+**Multi-Channel Support:**
+- When the user wants to search tickets across specific channels, use the optional 'channels' parameter.
+- **Step 1:** Call <tool>field_value_discovery</tool> with 'channels=["name"]' to get valid channel names.
+- **Step 2:** Pass those validated names in the 'channels' array parameter.
+- If 'channels' is not provided, search is performed in the current channel only.
+**Constraints:** DO NOT use for summarization. DO NOT use for basic greetings.
 
-4. <tool>generate_team_intelligence_report</tool>
-**Usage:** For manager/admin requests to generate an org-scoped team intelligence report and downloadable PDF.
-**Description:** Builds a structured team report across Gmail activity for the manager's accessible organization scope and prepares a PDF artifact for download.
-**Constraints:** Use this only when the user is explicitly asking for a team report, manager summary, org-wide work intelligence, overlap analysis, or conflict/redundancy detection across a team. If multiple accessible orgs exist, the tool will ask for clarification.
+4. <tool>field_value_discovery</tool>
+**Usage:** Validate channels AND/OR usernames in a **SINGLE** call before using them in search tools.
+**Description:** Returns valid, system-recognized names for channels and users.
+**Critical Rule:** Always call this BEFORE <tool>search_relevant_messages</tool>, <tool>search_relevant_tickets</tool>, or <tool>fetch_channel_messages</tool> if the user specifies a name.
 
-5. <tool>search_relevant_tickets</tool>
-**Usage:** NORMAL QUESTIONS for **support tickets**.
-**Channel Scope:**
-- Validate names via <tool>field_value_discovery</tool> and pass in 'channels' array.
-- Omit 'channels' for "all channels" or unspecified scope.
-**Constraints:** NO summarization. NO greetings.
-
-5. <tool>field_value_discovery</tool>
-**Usage:** Validate explicitly named channels/usernames in a **SINGLE** call before searching.
-**Critical Rule:** NEVER guess or hallucinate names. Call ONLY for names explicitly mentioned by the user that require validation.
-
-6. <tool>genius</tool>
-**Usage:** Analytics, metrics, GMV, revenue, trends, KPIs.
-**Constraints:** Pass natural language query DIRECTLY. Output verbatim. **STRICTLY ANALYTICAL ONLY.**
+5. <tool>genius</tool>
+**Usage:** Business intelligence, analytics, metrics, GMV, revenue, trends, KPIs.
+**Description:** Queries the Genius Analytics engine.
+**Constraint:** Pass the user's natural language question DIRECTLY to the tool. Output the result verbatim.
 
 {{web_search_tool_definition}}
 
@@ -169,8 +164,11 @@ RESEARCH CONTEXT - {{research_context}}
 ## 2. SEARCH & RETRIEVAL WORKFLOW
 - **Meeting/Call Questions:** If the user asks about anything that could have been discussed in an online meeting — including discussions, decisions, action items, pain points, Q&A, merchant feedback, sales calls, pipeline reviews, or participant commitments — ALWAYS call <tool>search_meeting_insights</tool>. Do NOT route these to <tool>search_relevant_messages</tool>. Examples: "do we have any discussion about X?", "what are the action items?", "any pain points raised?", "what did merchant Y say?", "what was decided about Z?".
 - **Generic Search:** Call <tool>search_relevant_messages</tool>. Do not pass the 'channels' parameter unless specific channels were explicitly named by the user.
-- **Email/Gmail Search:** Call <tool>search_gmail</tool> when the user is explicitly asking about emails, Gmail, inbox threads, or email attachments.
-- **Team Intelligence Reports:** Call <tool>generate_team_intelligence_report</tool> when a manager/admin asks for a team report, manager report, overlap/conflict analysis across people, or a downloadable intelligence report PDF.
+{{web_search_handling_instructions}}
+- **User-Specific Search ("BY" vs "FOR"):**
+    - **BY/FROM:** (e.g., "What did John say?") Use the 'sender' parameter. Validate the name first via <tool>field_value_discovery</tool>.
+    - **FOR/ABOUT:** (e.g., "Tasks for John") **DO NOT** use the 'sender' parameter. Search for the name within the 'query' string of <tool>search_relevant_messages</tool>.
+- **Multi-Channel Search:** Validate any channel not in context via <tool>field_value_discovery</tool>. If multiple similar matches return (e.g., "genius-dev" vs "genius-prod"), ask for clarification. Fuzzy matching or suggesting "closest matches" is strictly prohibited.
 
 ## 3. SUMMARIZATION 
 - **Tool:** <tool>fetch_channel_messages</tool>.
@@ -464,31 +462,6 @@ When the user wants to search across specific channels, use the optional "channe
 - If channels is not provided, search will be performed in the current channel only`;
 
 /**
- * Fallback description for search_gmail tool
- */
-const SEARCH_GMAIL_FALLBACK = `Use this tool for questions specifically about Gmail, email, inbox threads, or email attachments.
-Searches indexed Gmail messages and attachments using the authenticated user's email as the retrieval principal.
-
-WHEN TO USE:
-- "Find the email about the contract renewal"
-- "Search my Gmail for invoices from Acme"
-- "Any recent emails from john@example.com?"
-- "Show Gmail attachments about onboarding"
-
-FILTERS:
-- query: Short semantic search query for the email content
-- labels: Optional Gmail labels like INBOX, SENT, IMPORTANT, STARRED, UNREAD
-- participants: Optional object with from, to, cc, bcc arrays. Email addresses are preferred, but names can also be used.
-- timeRange: Optional explicit time range object with startTime and endTime
-- sortBy: asc or desc
-- limit / offset: Pagination controls
-
-RULES:
-- Use this only for Gmail or email-specific retrieval.
-- Do not use this for channel messages, thread summaries, or tickets.
-- Query can be omitted only when labels, participants, or timeRange already narrow the request enough.`;
-
-/**
  * Fallback description for search_relevant_tickets tool
  */
 const SEARCH_RELEVANT_TICKETS_FALLBACK = `Use for NORMAL QUESTIONS requiring ticket information. Searches tickets semantically.
@@ -560,24 +533,6 @@ EXAMPLES:
 - "any concerns raised by merchants about budget?" → search_meeting_insights(query="budget concerns")
 
 Returns: meeting metadata (code, platform, type, participants, date), summary, action items, Q&A exchanges, and other free-form insights (speaker observations, tags).`;
-
-const GENERATE_TEAM_INTELLIGENCE_REPORT_FALLBACK = `Use this tool when a manager or admin asks for a team-level intelligence report, team work summary, overlap detection, or a downloadable PDF report.
-
-What it does:
-- Resolves the caller's accessible organization scope.
-- Generates a manager report across team members using Gmail as the primary source.
-- Prepares a downloadable PDF URL and emits a chat artifact for the frontend.
-
-When to use:
-- "Generate a report for my team"
-- "What is everyone on my team working on?"
-- "Give me a manager report with overlaps and conflicts"
-- "Create a downloadable PDF report for my org"
-
-Important rules:
-- Use it only for organization/team-level reporting, not for single-user Gmail search.
-- Prefer orgName or orgId if the user provides one.
-- If multiple orgs are accessible and the user does not specify one, the tool will return a clarification request.`;
 
 /**
  * Fallback description for field_value_discovery tool (Unified FVD)
@@ -1346,8 +1301,6 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'fetch_thread_messages': FETCH_THREAD_MESSAGES_FALLBACK,
   'fetch_link_content': FETCH_LINK_CONTENT_FALLBACK,
   'search_relevant_messages': SEARCH_RELEVANT_MESSAGES_FALLBACK,
-  'search_gmail': SEARCH_GMAIL_FALLBACK,
-  'generate_team_intelligence_report': GENERATE_TEAM_INTELLIGENCE_REPORT_FALLBACK,
   'search_relevant_tickets': SEARCH_RELEVANT_TICKETS_FALLBACK,
   'search_meeting_insights': SEARCH_MEETING_INSIGHTS_FALLBACK,
   'genius_as_tool': GENIUS_FALLBACK,

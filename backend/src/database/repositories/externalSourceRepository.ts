@@ -37,9 +37,8 @@ export class ExternalSourceRepository {
     name: string;
     sourceType: string;
     displayName: string;
-    channelId?: string | null;
-    boardId?: string | null; // Target board for ticket creation
-    ownerUserId?: string | null;
+    channelId: string;
+    boardId?: string; // Target board for ticket creation
     credentials: string; // Encrypted credentials
   }) {
     return await this.db.externalSource.create({
@@ -49,7 +48,6 @@ export class ExternalSourceRepository {
         displayName: data.displayName,
         channelId: data.channelId,
         boardId: data.boardId,
-        ownerUserId: data.ownerUserId,
         credentials: data.credentials,
         isActive: true,
       }
@@ -61,24 +59,13 @@ export class ExternalSourceRepository {
    */
   async update(id: string, data: {
     displayName?: string;
-    channelId?: string | null;
-    boardId?: string | null;
-    ownerUserId?: string | null;
+    channelId?: string;
+    boardId?: string;
     isActive?: boolean;
   }) {
     return await this.db.externalSource.update({
       where: { id },
       data
-    });
-  }
-
-  /**
-   * Update encrypted credentials payload for an external source
-   */
-  async updateCredentials(id: string, credentials: string) {
-    return await this.db.externalSource.update({
-      where: { id },
-      data: { credentials }
     });
   }
 

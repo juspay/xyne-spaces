@@ -10,7 +10,7 @@ const router = Router();
  * @desc Vespa search across all indexed documents
  * @access Private
  * @param {string} q - Search query (required)
- * @param {string} apps - Comma-separated apps to search: chat,ticket,user,file,gmail (optional, default: chat,ticket,user,file)
+ * @param {string} apps - Comma-separated apps to search: slack,ticket,user (optional, default: slack,ticket,user)
  * @param {number} offset - Pagination offset (optional, default: 0)
  * @param {number} limit - Results per page (optional, default: 20, max: 100)
  * @param {string} rankProfile - Vespa rank profile to use (optional)

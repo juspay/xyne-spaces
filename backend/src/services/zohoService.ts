@@ -62,7 +62,7 @@ export class ZohoService {
 
     try {
       logger.info('[ZohoService] Exchanging refresh token for access token');
-
+      
       const params = new URLSearchParams();
       params.append('refresh_token', this.credentials.refreshToken);
       params.append('client_id', this.credentials.clientId);

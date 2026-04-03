@@ -6,7 +6,6 @@
 // Import adapters (triggers AdapterFactory.create() → auto-registration)
 import './adapters/zoho';
 import './adapters/slack-webhook-tickets';
-import './adapters/google-mail';
 
 // Export public API
 export * from './core/types';

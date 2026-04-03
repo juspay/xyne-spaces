@@ -27,7 +27,6 @@ const envSchema = Joi.object({
   API_KEYS_CONFIG: Joi.string().default(''),
   GOOGLE_CLIENT_ID: Joi.string().allow('').default(''),
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').default(''),
-  GOOGLE_MAIL_ENTITY_TAG_EXTRACTION_ENABLED: Joi.boolean().default(true),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   // File Storage Configuration
@@ -283,9 +282,6 @@ export const config = {
   litellm: {
     baseUrl: envVars.LITELLM_BASE_URL,
     apiKey: envVars.LITELLM_API_KEY,
-  },
-  googleMail: {
-    entityTagExtractionEnabled: envVars.GOOGLE_MAIL_ENTITY_TAG_EXTRACTION_ENABLED,
   },
   productInsights: {
     recluster: {
