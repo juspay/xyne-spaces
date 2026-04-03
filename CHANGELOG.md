@@ -1,3 +1,10 @@
+## [1.105.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.105.0...v1.105.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* improve native app startup ([2e76182](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2e76182bac5df618d7c74e951a944429ef3fd233)), closes [#4618](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4618)
+
 ## [1.105.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.104.0...v1.105.0) (2026-04-02)
 
 
