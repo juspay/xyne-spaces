@@ -14,7 +14,6 @@ import { generateToolInputStatus } from '../../components/Chat/XyneAISidebar/uti
 import type {
   Message,
   MessageAttachment,
-  ReportArtifact,
   Participant,
   UserTag,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -53,7 +52,6 @@ export interface StreamRequest {
   attachmentIds?: string[] | undefined;
   canvasViewAccessId?: string | null | undefined;
   webSearchEnabled: boolean;
-  gmailSearchEnabled: boolean;
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -220,7 +218,6 @@ class XyneAIStreamManager {
             conversationId: record.sessionId,
             sessionId: record.sessionId,
             webSearchEnabled: record.webSearchEnabled,
-            gmailSearchEnabled: record.gmailSearchEnabled,
             researchContext: null,
             ...(record.attachments.length > 0 && {
               attachments: record.attachments.map(att => ({
@@ -685,7 +682,6 @@ class XyneAIStreamManager {
       request.query,
       request.channelIds,
       request.webSearchEnabled,
-      request.gmailSearchEnabled,
       request.attachments,
       initialMessages,
     );
@@ -730,7 +726,6 @@ class XyneAIStreamManager {
           conversationId: request.threadConversationId || '',
           sessionId: request.conversationId,
           webSearchEnabled: request.webSearchEnabled,
-          gmailSearchEnabled: request.gmailSearchEnabled,
           researchContext: request.researchContext
             ? { type: request.researchContext.type, name: request.researchContext.name }
             : null,
@@ -842,22 +837,6 @@ class XyneAIStreamManager {
 
       case 'tool_output':
         this.handleToolOutput(data, botMessageId, toolOutputs, updateMessages);
-        break;
-
-      case 'team_intelligence_report_ready':
-        if (data['reportArtifact'] && typeof data['reportArtifact'] === 'object') {
-          const reportArtifact = data['reportArtifact'] as ReportArtifact;
-          updateMessages(prev =>
-            prev.map(msg =>
-              msg.id === botMessageId
-                ? {
-                    ...msg,
-                    reportArtifact,
-                  }
-                : msg,
-            ),
-          );
-        }
         break;
 
       case 'complete':

@@ -17,10 +17,10 @@ export const vespaSearchQuerySchema = Joi.object({
 
   // Apps to search (comma-separated)
   apps: Joi.string()
-    .pattern(/^(chat|ticket|user|file|gmail)(,(chat|ticket|user|file|gmail))*$/)
+    .pattern(/^(chat|ticket|user|file)(,(chat|ticket|user|file))*$/)
     .default('chat,ticket,user,file')
     .messages({
-      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file, gmail'
+      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file'
     }),
 
   // Pagination

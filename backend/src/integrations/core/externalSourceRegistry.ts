@@ -93,10 +93,6 @@ export async function registerAllExternalSources() {
     logger.info(`Registering ${sources.length} active external sources as bots...`);
 
     for (const source of sources) {
-      if (source.sourceType === 'google') {
-        continue;
-      }
-
       registerExternalSource(
         source.name,
         source.displayName

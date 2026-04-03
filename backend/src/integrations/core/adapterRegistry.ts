@@ -73,7 +73,6 @@ class AdapterRegistry {
     const mapping: Record<string, ExternalSourcePlatform> = {
       zoho: ExternalSourcePlatform.ZOHO,
       slack: ExternalSourcePlatform.SLACK,
-      google: ExternalSourcePlatform.GOOGLE,
     };
 
     const platform = mapping[platformStr];

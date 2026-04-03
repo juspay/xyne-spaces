@@ -16,7 +16,7 @@ import {
   type SessionContext,
 } from './storage/index.js';
 
-import { getAndClearSessionMappings, type EnhancedCitationMappings, type EntityType, type StreamProvider, type StreamEventCallback } from './tools/index.js';
+import { getAndClearSessionMappings, type EnhancedCitationMappings, type StreamProvider, type StreamEventCallback } from './tools/index.js';
 import { createOnEventHandler } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
 import { AgentsConfig } from '../config.js';
@@ -131,7 +131,7 @@ async function convertRawToOutput(
 
     // Extract enhanced entity metadata from mappings
     const channelId = (mappings?.channelIdMapping as Record<string, string>)?.[citationRef] || defaultChannelId || '';
-    const entityType = (mappings?.entityTypeMapping as Record<string, EntityType>)?.[citationRef];
+    const entityType = (mappings?.entityTypeMapping as Record<string, string>)?.[citationRef];
     const entityId = (mappings?.entityIdMapping as Record<string, string>)?.[citationRef];
     const messageId = (mappings?.messageIdMapping as Record<string, string | undefined>)?.[citationRef];
     const conversationId = (mappings?.conversationIdMapping as Record<string, string | undefined>)?.[citationRef];
@@ -207,27 +207,7 @@ export interface XyneAIStreamRequest extends XyneAIRequest {
 export async function* xyneAIStream(
   request: XyneAIStreamRequest
 ): AsyncGenerator<XyneAIStreamChunk, void, unknown> {
-const {
-  query,
-  sessionId,
-  channelIds,
-  conversationId,
-  apiBaseUrl,
-  appRole,
-  canvasViewAccessId,
-  selectionContexts,
-  createCanvasEnabled,
-  userId,
-  currentTimestamp,
-  attachments,
-  onStreamEvent,
-  researchContext,
-  messageAttachmentIds,
-  agentsConfig,
-  parentMessageId,
-  isRegenerate,
-  gmailSearchEnabled,
-} = request;
+  const { query, sessionId, channelIds, conversationId, canvasViewAccessId, selectionContexts, createCanvasEnabled, userId, currentTimestamp, attachments, onStreamEvent, researchContext, messageAttachmentIds, agentsConfig, parentMessageId, isRegenerate } = request;
 
   // Use provided config or fetch defaults
   const cacConfig = agentsConfig ?? AgentsConfig.defaults();
@@ -377,8 +357,6 @@ const {
   const agentContext = {
     channelIds,
     conversationId,
-    apiBaseUrl,
-    appRole,
     canvasViewAccessId,
     selectionContexts,
     createCanvasEnabled,
@@ -390,7 +368,6 @@ const {
     onStreamEvent,
     userInfo: request.userInfo,
     webSearchEnabled: request.webSearchEnabled,
-    gmailSearchEnabled,
     researchContext,
     customInstruction,
     modelName: cacConfig.xyneAiModelName,

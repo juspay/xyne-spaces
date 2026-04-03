@@ -4,7 +4,6 @@ import {
   Hash,
   User,
   MessageCircle,
-  Mail,
   Ticket,
   Paperclip,
   Eye,
@@ -25,11 +24,6 @@ interface SearchResultItemProps {
   isSelected?: boolean;
 }
 
-const isGmailResult = (result: DisplaySearchResult): boolean =>
-  result.metadata.channelName === 'Gmail' ||
-  result.searchContext?.channelTitle === 'Gmail' ||
-  result.searchContext?.originalUrl?.includes('mail.google.com') === true;
-
 const getResultIcon = (result: DisplaySearchResult): ReactElement => {
   const { type, searchContext } = result;
   switch (type) {
@@ -38,16 +32,10 @@ const getResultIcon = (result: DisplaySearchResult): ReactElement => {
     case 'channel':
       return <Hash size={16} className='text-muted-foreground' />;
     case 'conversation':
-      if (isGmailResult(result)) {
-        return <Mail size={16} className='text-muted-foreground' />;
-      }
       return <MessageCircle size={16} className='text-muted-foreground' />;
     case 'ticket':
       return <Ticket size={16} className='text-muted-foreground' />;
     case 'attachment':
-      if (isGmailResult(result)) {
-        return <Mail size={16} className='text-muted-foreground' />;
-      }
       if (searchContext?.subApp === 'canvas') {
         return <FileText size={16} className='text-muted-foreground' />;
       }

@@ -258,8 +258,6 @@ export enum ACLAuditEventType {
   USER_GROUP_CREATED = "USER_GROUP_CREATED",
   USER_GROUP_UPDATED = "USER_GROUP_UPDATED",
   USER_GROUP_DELETED = "USER_GROUP_DELETED",
-  USER_GROUP_REACTIVATED = "USER_GROUP_REACTIVATED",
-  USER_GROUP_DEACTIVATED = "USER_GROUP_DEACTIVATED",
 }
 
 export enum ACLAuditTargetType {
@@ -353,7 +351,6 @@ export enum NotificationType {
   CALL_DISMISS = "CALL_DISMISS",
   CALL_REMINDER = "CALL_REMINDER",
   CALL_SCHEDULED = "CALL_SCHEDULED",
-  CALL_UPDATED = "CALL_UPDATED",
 }
 
 export enum NotificationStatus {
@@ -525,13 +522,6 @@ export enum AttributionConfidence {
   HIGH = "HIGH",
 }
 
-export enum TeamIntelligenceReportStatus {
-  PENDING = "PENDING",
-  PROCESSING = "PROCESSING",
-  COMPLETED = "COMPLETED",
-  FAILED = "FAILED",
-}
-
 export enum SurfaceAreaType {
   MESSAGE = "MESSAGE",
   TICKET = "TICKET",
@@ -549,20 +539,6 @@ export enum SessionRecordingProcessStatus {
   PROCESSING = "PROCESSING",
   COMPLETED = "COMPLETED",
   FAILED = "FAILED",
-}
-
-export enum SavedConfigContextType {
-  BOARD = "BOARD",
-}
-
-export enum SavedConfigVisibility {
-  PRIVATE = "PRIVATE",
-  PUBLIC = "PUBLIC",
-}
-
-export enum SavedConfigEntityName {
-  TICKET = "TICKET",
-  FORM_ENTITY_VALUE = "FORM_ENTITY_VALUE",
 }
 
 // Define tables
@@ -908,7 +884,6 @@ export const userGroupTable = table("user_groups")
     metadata: json().optional(),
     createdAt: number(),
     updatedAt: number(),
-    isActive: boolean(),
   })
   .primaryKey("id");
 
@@ -1423,9 +1398,8 @@ export const externalSourceTable = table("external_sources")
     name: string(),
     sourceType: string(),
     displayName: string(),
-    channelId: string().optional(),
+    channelId: string(),
     boardId: string().optional(),
-    ownerUserId: string().optional(),
     credentials: string(),
     isActive: boolean(),
     createdAt: number(),
@@ -1474,26 +1448,7 @@ export const surfaceNudgeTable = table("surface_nudges")
     actions: json().optional(),
     state: enumeration<NudgeState>(),
     visibleTo: string().optional(),
-    surfaceNudgeCountId: string().optional(),
     projectId: string(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
-export const surfaceNudgeCountTable = table("surface_nudge_counts")
-  .columns({
-    id: string(),
-    nudgeCount: number(),
-    userId: string().optional(),
-    channelId: string().optional(),
-    gid: string().optional(),
-    gidType: string().optional(),
-    messageId: string().optional(),
-    ticketId: string().optional(),
-    canvasId: string().optional(),
-    callId: string().optional(),
-    conversationId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2016,26 +1971,6 @@ export const channelDailyRecapTable = table("channel_daily_recaps")
   })
   .primaryKey("channelId", "recapDate");
 
-export const teamIntelligenceReportTable = table("team_intelligence_reports")
-  .columns({
-    id: string(),
-    orgId: string(),
-    requestedByUserId: string(),
-    status: enumeration<TeamIntelligenceReportStatus>(),
-    timeRangeStart: number(),
-    timeRangeEnd: number(),
-    includeTranscripts: boolean(),
-    teamMemberIds: json<string[]>(),
-    sourceSummary: json().optional(),
-    reportJson: json().optional(),
-    reportMarkdown: string().optional(),
-    error: string().optional(),
-    completedAt: number().optional(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
 export const sessionRecordingFileTable = table("session_recording_files")
   .columns({
     id: string(),
@@ -2079,31 +2014,6 @@ export const installedAppsTable = table("installed_apps")
     userId: string(),
     webhookUrl: string().optional(),
     signingSecret: string(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
-export const savedUserConfigurationTable = table("saved_user_configurations")
-  .columns({
-    id: string(),
-    userId: string(),
-    name: string(),
-    contextType: enumeration<SavedConfigContextType>(),
-    contextId: string(),
-    visibility: enumeration<SavedConfigVisibility>(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("id");
-
-export const savedUserConfigurationValueTable = table("saved_user_configuration_values")
-  .columns({
-    id: string(),
-    configId: string(),
-    entityName: enumeration<SavedConfigEntityName>(),
-    fieldName: string(),
-    fieldValue: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3067,22 +2977,6 @@ export const installedAppsTableRelationships = relationships(installedAppsTable,
   })
 }));
 
-export const savedUserConfigurationTableRelationships = relationships(savedUserConfigurationTable, ({ many }) => ({
-  values: many({
-    sourceField: ["id"],
-    destField: ["configId"],
-    destSchema: savedUserConfigurationValueTable,
-  })
-}));
-
-export const savedUserConfigurationValueTableRelationships = relationships(savedUserConfigurationValueTable, ({ one }) => ({
-  config: one({
-    sourceField: ["configId"],
-    destField: ["id"],
-    destSchema: savedUserConfigurationTable,
-  })
-}));
-
 // Define schema
 
 export const schema = createSchema(
@@ -3152,7 +3046,6 @@ export const schema = createSchema(
       externalMessageTable,
       proactiveNudgeTable,
       surfaceNudgeTable,
-      surfaceNudgeCountTable,
       notificationTable,
       notificationPreferenceTable,
       browserNotificationSubscriptionTable,
@@ -3190,13 +3083,10 @@ export const schema = createSchema(
       coeTable,
       releaseAttributionTable,
       channelDailyRecapTable,
-      teamIntelligenceReportTable,
       sessionRecordingFileTable,
       surfaceLinkTable,
       appsTable,
       installedAppsTable,
-      savedUserConfigurationTable,
-      savedUserConfigurationValueTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -3254,8 +3144,6 @@ export const schema = createSchema(
       canvasParticipantTableRelationships,
       appsTableRelationships,
       installedAppsTableRelationships,
-      savedUserConfigurationTableRelationships,
-      savedUserConfigurationValueTableRelationships,
     ],
   }
 );
@@ -3326,7 +3214,6 @@ export type ExternalSource = Row<typeof schema.tables.external_sources>;
 export type ExternalMessage = Row<typeof schema.tables.external_messages>;
 export type ProactiveNudge = Row<typeof schema.tables.proactive_nudges>;
 export type SurfaceNudge = Row<typeof schema.tables.surface_nudges>;
-export type SurfaceNudgeCount = Row<typeof schema.tables.surface_nudge_counts>;
 export type Notification = Row<typeof schema.tables.notifications>;
 export type NotificationPreference = Row<typeof schema.tables.notification_preferences>;
 export type BrowserNotificationSubscription = Row<typeof schema.tables.browser_notification_subscriptions>;
@@ -3364,10 +3251,7 @@ export type Impact = Row<typeof schema.tables.impacts>;
 export type COE = Row<typeof schema.tables.coes>;
 export type ReleaseAttribution = Row<typeof schema.tables.release_attributions>;
 export type ChannelDailyRecap = Row<typeof schema.tables.channel_daily_recaps>;
-export type TeamIntelligenceReport = Row<typeof schema.tables.team_intelligence_reports>;
 export type SessionRecordingFile = Row<typeof schema.tables.session_recording_files>;
 export type SurfaceLink = Row<typeof schema.tables.surface_links>;
 export type Apps = Row<typeof schema.tables.apps>;
 export type InstalledApps = Row<typeof schema.tables.installed_apps>;
-export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
-export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;

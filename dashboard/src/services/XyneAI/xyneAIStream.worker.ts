@@ -18,7 +18,6 @@ export interface WorkerStartStreamMessage {
       conversationId: string;
       sessionId: string;
       webSearchEnabled: boolean;
-      gmailSearchEnabled: boolean;
       researchContext?: { type: string; name: string } | null;
       canvasViewAccessId?: string;
       messageAttachmentIds?: string[];
@@ -109,7 +108,6 @@ async function executeStream(
         conversation_id: requestBody.conversationId,
         session_id: requestBody.sessionId,
         web_search_enabled: requestBody.webSearchEnabled,
-        gmail_search_enabled: requestBody.gmailSearchEnabled,
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasViewAccessId && {
           canvas_view_access_id: requestBody.canvasViewAccessId,

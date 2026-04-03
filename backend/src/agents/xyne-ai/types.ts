@@ -34,8 +34,6 @@ export interface XyneAIRequest {
   sessionId?: string;
   channelIds: string[];
   conversationId?: string;
-  apiBaseUrl?: string;
-  appRole?: 'admin' | 'user';
   canvasViewAccessId?: string;  // Canvas context when Ask AI is triggered from canvas
   selectionContexts?: SelectionContext[];  // Selected text contexts from canvases
   createCanvasEnabled?: boolean;  // Enable create canvas instruction in prompt
@@ -44,7 +42,6 @@ export interface XyneAIRequest {
   attachments?: AttachmentData[];
   userInfo?: UserInfo;
   webSearchEnabled?: boolean;  // Enable/disable web search tool
-  gmailSearchEnabled?: boolean;  // Enable/disable Gmail search tool
   researchContext?: ResearchContext;
   messageAttachmentIds?: string[]; // Attachment IDs to fetch from GCS on backend
   parentMessageId?: string; // Parent message ID for branching (tree structure)
@@ -65,11 +62,6 @@ export interface Citation {
   prefixedRef: string;
   isTicket?: boolean; // Distinguishes ticket citations from message citations
   url?: string; // URL from web search results for this citation
-  entityType?: 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search' | 'email';
-  entityId?: string;
-  canvasId?: string;
-  externalUrl?: string;
-  isExternal?: boolean;
 }
 
 export interface KeyPointWithCitation {
