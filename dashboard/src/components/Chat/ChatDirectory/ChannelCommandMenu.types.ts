@@ -50,6 +50,9 @@ export const TabType = {
   MESSAGES: 'messages',
   TICKETS: 'tickets',
   ATTACHMENTS: 'attachments',
+  CANVAS: 'canvas',
+  CALL: 'call',
+  RECORDING: 'recording',
 } as const;
 
 export type TabType = (typeof TabType)[keyof typeof TabType];
@@ -81,6 +84,12 @@ export type MentionType = (typeof MentionType)[keyof typeof MentionType];
 
 export type { ContextItem };
 
+export interface ContextPickerItem {
+  id: string;
+  title: string;
+  isPrivate?: boolean; // relevant for channels only
+}
+
 export interface ChannelCommandMenuProps {
   channels: Channel[];
   starred: Channel[];
@@ -97,4 +106,19 @@ export interface ChannelCommandMenuProps {
   onContextItemToggle?: (item: ContextItem) => void;
   /** Called when user confirms selection ("Add to Thread") */
   onContextSelectionConfirm?: () => void;
+  /**
+   * Controls which tabs are visible. When omitted, defaults to all
+   * pre-existing tabs (users, channels, messages, gmail, tickets, attachments).
+   * Pass an explicit array to show only those tabs — e.g.
+   * [TabType.CHANNELS, TabType.TICKETS, TabType.CANVAS] for the AskAI context picker.
+   */
+  enabledTabs?: TabType[];
+  /**
+   * When true, renders as a plain inline panel (<Command>) instead of a
+   * full-screen dialog (<Command.Dialog>). Parent controls visibility by
+   * conditionally mounting/unmounting this component.
+   */
+  inline?: boolean;
+  /** Called whenever the active tab changes; used to track active tab for call/recording disambiguation. */
+  onTabChange?: (tab: TabType) => void;
 }

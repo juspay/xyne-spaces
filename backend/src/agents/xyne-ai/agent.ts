@@ -19,6 +19,7 @@ import { db } from '../../database/client.js';
 
 import { getXyneAITools, type XyneAIAgentContext, type UserInfo, type ResearchContext } from './tools/index.js';
 import { researchAgentService } from '../../services/researchAgentService.js';
+import type { ProvidedContexts } from './utils/contextFetcher.js';
 
 import {
   getPromptFromLangfuse,
@@ -67,9 +68,10 @@ async function buildAgentPrompt(
   researchOptions?: AvailableResearchOptions,
   customInstruction?: string,
   hasThreadContext?: boolean,
-  promptName?: string
+  promptName?: string,
+  providedContexts?: ProvidedContexts
 ): Promise<string> {
-  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions, customInstruction, hasThreadContext);
+  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions, customInstruction, hasThreadContext, providedContexts);
 
   const prompt = await getPromptFromLangfuse(promptName ?? PROMPT_NAMES.XYNE_AI_SYSTEM, {
     templateVariables,
@@ -193,7 +195,8 @@ export async function createAgentRunner(
   messages: Message[],
   modelName: string,
   apiKey: string,
-  onEvent?: (event: TraceEvent) => void
+  onEvent?: (event: TraceEvent) => void,
+  providedContexts?: ProvidedContexts
 ) {
   // Fetch channel info and research data in parallel (single API call for research)
   const [channelInfo, researchData] = await Promise.all([
@@ -226,7 +229,8 @@ export async function createAgentRunner(
     researchOptions,
     context.customInstruction,
     hasThreadContext,
-    context.agentPromptName
+    context.agentPromptName,
+    providedContexts
   );
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, hasThreadContext);
   const agentRegistry = createAgentRegistry(agent);

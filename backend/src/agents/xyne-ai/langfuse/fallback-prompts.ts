@@ -29,7 +29,7 @@ CURRENT TIMESTAMP - {{current_timestamp}}
 CHANNEL CONTEXT - {{channel_context}}
 CURRENT USER - {{user_info}}
 RESEARCH CONTEXT - {{research_context}}
-
+PROVIDED CONTEXT - {{provided_context}}
 **CONTEXT RESOLUTION RULE:** You MUST intelligently use the variables above to resolve pronouns like "this", "that", "these", "here", "mentioned", or "added". Do NOT ask the user for clarification if the provided context clearly contains the target of their query. Only ask for clarification if the context is completely empty or mathematically ambiguous/unrelated to the prompt.
 </context>
 

@@ -48,6 +48,9 @@ export interface XyneAIRequest {
   isRegenerate?: boolean; // Whether this is a regenerate request
   systemPrompt?: string;  // Override system prompt (bypasses Langfuse prompt fetch)
   agentPromptName?: string;  // Langfuse prompt name to use; defaults to XYNE_AI_SYSTEM
+  canvasIds?: string[];  // Canvas IDs to fetch and inject as context
+  ticketIds?: string[];  // Ticket IDs to fetch and inject as context
+  callIds?: string[];    // Call IDs (transcripts + recordings) to fetch and inject as context
 }
 
 // ============================================================================
@@ -62,6 +65,11 @@ export interface Citation {
   prefixedRef: string;
   isTicket?: boolean; // Distinguishes ticket citations from message citations
   url?: string; // URL from web search results for this citation
+  entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search';
+  entityId?: string;
+  canvasId?: string;
+  externalUrl?: string;
+  isExternal?: boolean;
 }
 
 export interface KeyPointWithCitation {

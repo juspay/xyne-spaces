@@ -316,6 +316,7 @@ export interface VespaFileDocument extends VespaDocument {
   conversationId?: string;
   messageId?: string;
   ticketId?: string;
+  callType?: string;
 }
 
 export interface PullRequestReference {

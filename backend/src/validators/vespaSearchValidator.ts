@@ -152,6 +152,15 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'Assignee must be a string'
   }),
 
+  subApp: Joi.string().valid('canvas', 'transcript', 'recording', 'rca').optional().messages({
+    'string.base': 'SubApp must be a string',
+    'any.only': 'SubApp must be one of: canvas, transcript, recording, rca'
+  }),
+
+  callType: Joi.string().optional().messages({
+    'string.base': 'callType must be a string'
+  }),
+
   // Filter-only mode flag
   filterOnly: Joi.string().valid('true', 'false').optional().messages({
     'any.only': 'filterOnly must be "true" or "false"'

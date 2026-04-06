@@ -21,6 +21,9 @@ interface UseXyneAIStreamParams {
   researchContext?: ResearchContext | null;
   createCanvasEnabled?: boolean;
   channelId?: string | undefined; // Added for thread ID construction
+  ticketIds?: string[];
+  canvasIds?: string[];
+  callIds?: string[];
 }
 
 // Canvas creation instruction appended when createCanvasEnabled is true
@@ -52,6 +55,9 @@ export const useXyneAIStream = ({
   researchContext,
   createCanvasEnabled = false,
   channelId,
+  ticketIds,
+  canvasIds,
+  callIds,
 }: UseXyneAIStreamParams) => {
   const currentStreamIdRef = useRef<string | null>(null);
 
@@ -252,6 +258,9 @@ export const useXyneAIStream = ({
           parentMessageId,
           isRegenerate,
           localUserMessageId,
+          ticketIds,
+          canvasIds,
+          callIds,
         },
         allMessages,
       );
@@ -269,6 +278,9 @@ export const useXyneAIStream = ({
       webSearchEnabled,
       createCanvasEnabled,
       syncMessagesRef,
+      ticketIds,
+      canvasIds,
+      callIds,
     ],
   );
 

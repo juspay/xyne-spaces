@@ -109,7 +109,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       range,       // Time keyword filter (today, yesterday, etc.)
       stage,       // Ticket stage
       assignee,    // Assigned user name
-      filterOnly  // Flag for filter-only search (no query text)
+      filterOnly,  // Flag for filter-only search (no query text)
+      callType    // Call type filter (e.g. HEADLESS for recordings)
       // Note: subApp was moved up to be with other frontend filters
     } = req.query;
 
@@ -281,6 +282,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (subApp) {
       options.file.subApp = (subApp as string).split(',');
+    }
+
+    if (callType) {
+      options.file.callType = (callType as string).split(',');
     }
 
     // Call vespa search

@@ -654,6 +654,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             false
           );
         },
+        focus: (): void => {
+          editor?.commands.focus();
+        },
       }),
       [editor, addFilesWithLimit, providerClearDroppedFiles, channelId, conversationId],
     );

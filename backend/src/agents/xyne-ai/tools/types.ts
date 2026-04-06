@@ -134,7 +134,7 @@ export interface ToolResultWithCapping extends ToolResult {
 /**
  * Entity type discriminator for different content types
  */
-export type EntityType = 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search';
+export type EntityType = 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search';
 
 /**
  * Enhanced tool entity that can represent any content type

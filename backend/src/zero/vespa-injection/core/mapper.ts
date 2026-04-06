@@ -750,7 +750,8 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promi
     mimeType: 'text/plain',
     subApp: SubApp.TRANSCRIPT,
     channelRef,
-    conversationId
+    conversationId,
+    callType: args.callType
   };
 };
 

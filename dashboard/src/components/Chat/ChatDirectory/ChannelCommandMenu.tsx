@@ -19,6 +19,10 @@ import {
   Search,
   X,
   Check,
+  LayoutDashboard,
+  Phone,
+  Mic,
+  Lock,
 } from 'lucide-react';
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -42,6 +46,7 @@ import {
   TYPE_SUGGESTIONS,
   SearchableTypes,
 } from './ChannelCommandMenu.types';
+import { loadRecents } from '../../../utils/contextPickerRecents';
 import ThreadContextPanel from '../ThreadContextPanel/ThreadContextPanel';
 import {
   buildContextItemFromResult,
@@ -149,6 +154,14 @@ const ChannelCommandItem = ({
   );
 };
 
+const DEFAULT_ENABLED_TABS: TabType[] = [
+  TabType.USERS,
+  TabType.CHANNELS,
+  TabType.MESSAGES,
+  TabType.TICKETS,
+  TabType.ATTACHMENTS,
+];
+
 const ChannelCommandMenu = ({
   channels,
   starred,
@@ -161,7 +174,10 @@ const ChannelCommandMenu = ({
   contextItems = [],
   onContextItemToggle,
   onContextSelectionConfirm,
-}: ChannelCommandMenuProps): ReactElement => {
+  enabledTabs,
+  inline = false,
+  onTabChange,
+}: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
   const commandRef = useRef<HTMLDivElement>(null);
@@ -283,6 +299,9 @@ const ChannelCommandMenu = ({
       triggerSummaryFetchRef.current?.(results, query);
     }, []),
   });
+
+  // Resolved enabled tabs — computed early so useEffects below can reference it
+  const activeEnabledTabs = enabledTabs ?? DEFAULT_ENABLED_TABS;
 
   // Aliases to match old usage if needed or just use new names
   const search = cleanedSearchText;
@@ -783,6 +802,15 @@ const ChannelCommandMenu = ({
     }
   }, [searchText]);
 
+  // Reset active tab if the current tab is no longer in the enabled set.
+  // In inline mode, fall back to the first enabled tab (never ALL).
+  useEffect(() => {
+    if (!activeEnabledTabs.includes(activeTab)) {
+      setActiveTab(inline ? (activeEnabledTabs[0] ?? TabType.ALL) : TabType.ALL);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEnabledTabs, inline]);
+
   // Reset state when menu closes
   useEffect(() => {
     if (!open) {
@@ -792,6 +820,7 @@ const ChannelCommandMenu = ({
       setMentionSearchQuery('');
       setMentionSearchType(null);
       setActiveTab(TabType.ALL);
+      onTabChange?.(TabType.ALL);
       resetSearchState();
       setExpandedCategories(new Set());
 
@@ -889,13 +918,28 @@ const ChannelCommandMenu = ({
   const groupedBackendResults = useMemo(() => {
     const groups: Record<string, DisplaySearchResult[]> = {};
     backendResults.forEach(result => {
-      if (!groups[result.type]) {
-        groups[result.type] = [];
+      let groupKey: string;
+      if (result.type === 'attachment' && result.searchContext?.subApp) {
+        const subAppKey = result.searchContext.subApp.toLowerCase();
+        if (subAppKey === 'canvas') {
+          groupKey = 'canvas';
+        } else if (subAppKey === 'transcript') {
+          groupKey = activeTab === TabType.RECORDING ? 'recording' : 'transcript';
+        } else {
+          groupKey = 'attachment';
+        }
+      } else {
+        groupKey = result.type;
       }
-      groups[result.type]!.push(result);
+      const group = groups[groupKey];
+      if (group) {
+        group.push(result);
+      } else {
+        groups[groupKey] = [result];
+      }
     });
     return groups;
-  }, [backendResults]);
+  }, [backendResults, activeTab]);
 
   // Group local channels by category
   const groupedChannels = useMemo(() => {
@@ -911,15 +955,18 @@ const ChannelCommandMenu = ({
 
   const iconSize = isMobile ? 14 : 12;
 
-  const tabs: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
-    // { id: TabType.ALL, label: 'All' },
+  const allTabDefinitions: Array<{ id: TabType; label: string; icon?: ReactElement }> = [
     { id: TabType.USERS, label: 'People', icon: <Users size={iconSize} /> },
     { id: TabType.MESSAGES, label: 'Messages', icon: <MessageSquare size={iconSize} /> },
     { id: TabType.CHANNELS, label: 'Channels', icon: <Hash size={iconSize} /> },
     { id: TabType.TICKETS, label: 'Tickets', icon: <SquareDashedKanban size={iconSize} /> },
     { id: TabType.ATTACHMENTS, label: 'Files', icon: <FolderOpen size={iconSize} /> },
-    // { id: TabType.NOTES, label: 'Notes', icon: <Paperclip size={1} /> },
+    { id: TabType.CANVAS, label: 'Canvas', icon: <LayoutDashboard size={iconSize} /> },
+    { id: TabType.CALL, label: 'Calls', icon: <Phone size={iconSize} /> },
+    { id: TabType.RECORDING, label: 'Recordings', icon: <Mic size={iconSize} /> },
   ];
+
+  const tabs = allTabDefinitions.filter(t => activeEnabledTabs.includes(t.id));
 
   const getCategoryLabel = (category: ChannelCategory): string => {
     switch (category) {
@@ -948,6 +995,12 @@ const ChannelCommandMenu = ({
         return 'Tickets';
       case 'attachment':
         return 'Attachments';
+      case 'canvas':
+        return 'Canvas';
+      case 'transcript':
+        return 'Calls';
+      case 'recording':
+        return 'Recordings';
       default:
         return '';
     }
@@ -961,168 +1014,155 @@ const ChannelCommandMenu = ({
 
   const showEmptyState = searchText.trim() && !isLoading && !hasResults;
 
-  return (
-    <Command.Dialog
-      open={open}
-      ref={commandRef}
-      onOpenChange={onOpenChange}
-      shouldFilter={false}
-      onMouseMove={() => {
-        if (suppressHover) {
-          // Clear all manually-set aria-selected so cmdk's internal state takes over
-          commandRef.current
-            ?.querySelectorAll('[cmdk-item][aria-selected="true"]')
-            .forEach(item => {
-              item.setAttribute('aria-selected', 'false');
-            });
-          setSuppressHover(false);
+  if (inline && !open) return null;
+
+  const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLElement>): void => {
+    // ── Tab / Shift+Tab: cycle filter tabs ──────────────────────────────
+    // If type autocomplete suggestion is showing, Tab accepts it instead of cycling tabs
+    if (e.key === 'Tab' && !(typeAutocomplete.suggestion && typeAutocomplete.match)) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (activeTab === TabType.ALL) {
+        // From ALL: Tab → first tab, Shift+Tab → last tab
+        const newTab = e.shiftKey ? tabs[tabs.length - 1]!.id : tabs[0]!.id;
+        setActiveTab(newTab);
+        onTabChange?.(newTab);
+        return;
+      }
+
+      const idx = tabs.findIndex(t => t.id === activeTab);
+      if (idx === -1) return; // Not found, shouldn't happen
+
+      const next = e.shiftKey ? idx - 1 : idx + 1;
+
+      if (next < 0 || next >= tabs.length) {
+        if (inline) {
+          const wrappedIdx = ((next % tabs.length) + tabs.length) % tabs.length;
+          setActiveTab(tabs[wrappedIdx]!.id);
+          onTabChange?.(tabs[wrappedIdx]!.id);
+        } else {
+          setActiveTab(TabType.ALL);
+          onTabChange?.(TabType.ALL);
         }
-      }}
-      className={cn(
-        'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
-        isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
-        contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
-        'md:w-full md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-gray-200 z-50',
-      )}
-      onKeyDownCapture={e => {
-        // ── Tab / Shift+Tab: cycle filter tabs ──────────────────────────────
-        // If type autocomplete suggestion is showing, Tab accepts it instead of cycling tabs
-        if (e.key === 'Tab' && !(typeAutocomplete.suggestion && typeAutocomplete.match)) {
-          e.preventDefault();
-          e.stopPropagation();
+      } else {
+        setActiveTab(tabs[next]!.id);
+        onTabChange?.(tabs[next]!.id);
+      }
+      return;
+    }
 
-          if (activeTab === TabType.ALL) {
-            // From ALL: Tab → first tab, Shift+Tab → last tab
-            setActiveTab(e.shiftKey ? tabs[tabs.length - 1]!.id : tabs[0]!.id);
-            return;
-          }
+    // ── Arrow key handling ───────────────────────────────────────────────
+    // cmdk expects a Command.Input with cmdk-input attribute for focus management.
+    // Since we use LexicalSearchInput (ContentEditable), cmdk's native arrow key
+    // navigation doesn't work. We manually manage aria-selected for navigation.
+    // See: https://github.com/pacocoursey/cmdk/issues/322
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
+      if (!items || items.length === 0) return;
 
-          const idx = tabs.findIndex(t => t.id === activeTab);
-          if (idx === -1) return; // Not found, shouldn't happen
+      // Find current selection (-1 if nothing selected yet)
+      const currentIndex = Array.from(items).findIndex(
+        item => item.getAttribute('aria-selected') === 'true',
+      );
 
-          const next = e.shiftKey ? idx - 1 : idx + 1;
+      // Calculate next index
+      let nextIndex: number;
+      if (e.key === 'ArrowDown') {
+        nextIndex = currentIndex < 0 ? 0 : currentIndex >= items.length - 1 ? 0 : currentIndex + 1;
+      } else {
+        nextIndex = currentIndex <= 0 ? items.length - 1 : currentIndex - 1;
+      }
 
-          if (next < 0 || next >= tabs.length) {
-            setActiveTab(TabType.ALL);
-          } else {
-            setActiveTab(tabs[next]!.id);
-          }
-          return;
-        }
+      // Update aria-selected on all items
+      items.forEach((item, i) => {
+        item.setAttribute('aria-selected', i === nextIndex ? 'true' : 'false');
+      });
 
-        // ── Arrow key handling ───────────────────────────────────────────────
-        // cmdk expects a Command.Input with cmdk-input attribute for focus management.
-        // Since we use LexicalSearchInput (ContentEditable), cmdk's native arrow key
-        // navigation doesn't work. We manually manage aria-selected for navigation.
-        // See: https://github.com/pacocoursey/cmdk/issues/322
-        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-          const items = commandRef.current?.querySelectorAll(
-            '[cmdk-item]:not([aria-disabled="true"])',
-          );
-          if (!items || items.length === 0) return;
+      // Scroll into view if needed
+      items[nextIndex]?.scrollIntoView({ block: 'nearest' });
 
-          // Find current selection (-1 if nothing selected yet)
-          const currentIndex = Array.from(items).findIndex(
-            item => item.getAttribute('aria-selected') === 'true',
-          );
+      // Suppress mouse hover highlights while navigating with keyboard.
+      setSuppressHover(true);
 
-          // Calculate next index
-          let nextIndex: number;
-          if (e.key === 'ArrowDown') {
-            nextIndex =
-              currentIndex < 0 ? 0 : currentIndex >= items.length - 1 ? 0 : currentIndex + 1;
-          } else {
-            nextIndex = currentIndex <= 0 ? items.length - 1 : currentIndex - 1;
-          }
+      e.preventDefault();
+      return;
+    }
 
-          // Update aria-selected on all items
-          items.forEach((item, i) => {
-            item.setAttribute('aria-selected', i === nextIndex ? 'true' : 'false');
-          });
+    // ── Tab / Right Arrow: Accept type autocomplete suggestion ───────────
+    if (
+      (e.key === 'Tab' || e.key === 'ArrowRight') &&
+      typeAutocomplete.suggestion &&
+      typeAutocomplete.match
+    ) {
+      e.preventDefault();
+      e.stopPropagation();
+      acceptTypeAutocomplete();
+      return;
+    }
 
-          // Scroll into view if needed
-          items[nextIndex]?.scrollIntoView({ block: 'nearest' });
+    // ── Enter handling ───────────────────────────────────────────────────
+    if (e.key !== 'Enter') return;
 
-          // Suppress mouse hover highlights while navigating with keyboard.
-          // Cleared on next mouse move (see onMouseMove handler above).
-          setSuppressHover(true);
+    // Shift+Enter → allow newline in Lexical
+    if (e.shiftKey) return;
 
-          e.preventDefault();
-          return;
-        }
+    // If a bot is selected, let the input's onKeyDown handle it
+    if (selectedBot) return;
 
-        // ── Tab / Right Arrow: Accept type autocomplete suggestion ───────────
-        if (
-          (e.key === 'Tab' || e.key === 'ArrowRight') &&
-          typeAutocomplete.suggestion &&
-          typeAutocomplete.match
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-          acceptTypeAutocomplete();
-          return;
-        }
+    // If showing bot suggestions, let cmdk handle selection natively
+    if (showBotsSuggestions) return;
 
-        // ── Enter handling ───────────────────────────────────────────────────
-        if (e.key !== 'Enter') return;
+    // If mention search is active, let the mention selection handle Enter
+    if (mentionSearchType !== null) {
+      // Select the currently highlighted mention
+      e.preventDefault();
+      e.stopPropagation();
 
-        // Shift+Enter → allow newline in Lexical
-        if (e.shiftKey) return;
+      if (mentionSearchType === MentionType.USER && availableUsers[selectedMentionIndex]) {
+        const user = availableUsers[selectedMentionIndex];
+        handleMentionSelect({
+          id: user.id,
+          name: getUserDisplayName(user),
+          type: MentionType.USER,
+          ...(user.email ? { email: user.email } : {}),
+        });
+      } else if (
+        mentionSearchType === MentionType.CHANNEL &&
+        availableChannels[selectedMentionIndex]
+      ) {
+        const { channel, displayName } = availableChannels[selectedMentionIndex];
+        handleMentionSelect({
+          id: channel.id,
+          name: displayName,
+          type: MentionType.CHANNEL,
+        });
+      }
+      return;
+    }
 
-        // If a bot is selected, let the input's onKeyDown handle it
-        if (selectedBot) return;
+    // If type autocomplete is showing, accept it on Enter
+    if (typeAutocomplete.suggestion && typeAutocomplete.match) {
+      e.preventDefault();
+      e.stopPropagation();
+      acceptTypeAutocomplete();
+      // Don't return - let the normal Enter flow continue to select the active item
+    }
 
-        // If showing bot suggestions, let cmdk handle selection natively
-        if (showBotsSuggestions) return;
+    // Prevent Lexical newline
+    e.preventDefault();
+    e.stopPropagation();
 
-        // If mention search is active, let the mention selection handle Enter
-        if (mentionSearchType !== null) {
-          // Select the currently highlighted mention
-          e.preventDefault();
-          e.stopPropagation();
+    // Tell cmdk to select the active item
+    const activeItem = commandRef.current?.querySelector(
+      '[cmdk-item][aria-selected="true"]',
+    ) as HTMLElement | null;
 
-          if (mentionSearchType === MentionType.USER && availableUsers[selectedMentionIndex]) {
-            const user = availableUsers[selectedMentionIndex];
-            handleMentionSelect({
-              id: user.id,
-              name: getUserDisplayName(user),
-              type: MentionType.USER,
-              ...(user.email ? { email: user.email } : {}),
-            });
-          } else if (
-            mentionSearchType === MentionType.CHANNEL &&
-            availableChannels[selectedMentionIndex]
-          ) {
-            const { channel, displayName } = availableChannels[selectedMentionIndex];
-            handleMentionSelect({
-              id: channel.id,
-              name: displayName,
-              type: MentionType.CHANNEL,
-            });
-          }
-          return;
-        }
+    activeItem?.click();
+  };
 
-        // If type autocomplete is showing, accept it on Enter
-        if (typeAutocomplete.suggestion && typeAutocomplete.match) {
-          e.preventDefault();
-          e.stopPropagation();
-          acceptTypeAutocomplete();
-          // Don't return - let the normal Enter flow continue to select the active item
-        }
-
-        // Prevent Lexical newline
-        e.preventDefault();
-        e.stopPropagation();
-
-        // Tell cmdk to select the active item
-        const activeItem = commandRef.current?.querySelector(
-          '[cmdk-item][aria-selected="true"]',
-        ) as HTMLElement | null;
-
-        activeItem?.click();
-      }}
-    >
+  const commandBody = (
+    <>
       {/* Search Input with Bot Selection */}
       <div className='flex items-center border-b border-border'>
         {selectedBot && (
@@ -1289,9 +1329,14 @@ const ChannelCommandMenu = ({
                       <button
                         onClick={e => {
                           if (activeTab === tab.id) {
-                            setActiveTab(TabType.ALL);
+                            if (!inline) {
+                              setActiveTab(TabType.ALL);
+                              onTabChange?.(TabType.ALL);
+                            }
+                            // In inline mode, clicking the active tab does nothing
                           } else {
                             setActiveTab(tab.id);
+                            onTabChange?.(tab.id);
                           }
                           // Blur input when clicking tabs
                           if (inputRef.current) {
@@ -1554,6 +1599,82 @@ const ChannelCommandMenu = ({
                       )}
                   </>
                 )}
+
+                {/* ─── Inline context picker: locked + recent sections ─────────────────── */}
+                {inline &&
+                  contextSelectionMode &&
+                  !mentionSearchType &&
+                  activeTab !== TabType.ALL && (
+                    <>
+                      {/* Recent items — shown when search box is empty, read directly from localStorage */}
+                      {!searchText.trim() && loadRecents(activeTab).length > 0 && (
+                        <Command.Group
+                          heading='Recent'
+                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                        >
+                          {loadRecents(activeTab).map(item => {
+                            const isChannelTab = activeTab === TabType.CHANNELS;
+                            const subApp =
+                              activeTab === TabType.CANVAS
+                                ? 'canvas'
+                                : activeTab === TabType.CALL || activeTab === TabType.RECORDING
+                                  ? 'transcript'
+                                  : undefined;
+                            const resultType: 'channel' | 'ticket' | 'attachment' = isChannelTab
+                              ? 'channel'
+                              : activeTab === TabType.TICKETS
+                                ? 'ticket'
+                                : 'attachment';
+                            const compositeId = `${resultType}-${item.id}`;
+                            const isSelected = contextItems.some(c => c.id === compositeId);
+                            return (
+                              <Command.Item
+                                key={item.id}
+                                value={`recent-${activeTab}-${item.id}`}
+                                onSelect={() => {
+                                  if (!onContextItemToggle) return;
+                                  onContextItemToggle({
+                                    id: compositeId,
+                                    title: item.title,
+                                    type: resultType,
+                                    url: isChannelTab ? `/chat/dir/${item.id}` : '#',
+                                    searchResult: {
+                                      id: item.id,
+                                      type: resultType,
+                                      title: item.title,
+                                      subtitle: '',
+                                      relevanceScore: 0,
+                                      metadata: {},
+                                      ...(subApp
+                                        ? { searchContext: { subApp, attachmentId: item.id } }
+                                        : {}),
+                                    } as DisplaySearchResult,
+                                  });
+                                }}
+                                className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'hover:bg-gray-100 aria-selected:bg-gray-100'}`}
+                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                              >
+                                {isChannelTab &&
+                                  (item.isPrivate ? (
+                                    <Lock size={14} className='text-gray-500 flex-shrink-0' />
+                                  ) : (
+                                    <Hash size={14} className='text-gray-500 flex-shrink-0' />
+                                  ))}
+                                <span className='flex-1 min-w-0 text-left text-xs font-medium text-foreground truncate'>
+                                  {item.title}
+                                </span>
+                                {isSelected && (
+                                  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
+                                    <Check size={10} />
+                                  </span>
+                                )}
+                              </Command.Item>
+                            );
+                          })}
+                        </Command.Group>
+                      )}
+                    </>
+                  )}
 
                 {showEmptyState && !mentionSearchType && (
                   <Command.Empty className='py-6 text-center text-xs text-gray-500'>
@@ -1821,16 +1942,34 @@ const ChannelCommandMenu = ({
                             </div>
                           )}
 
-                        {/* 4. Backend Results (Messages, Tickets, Attachments) */}
+                        {/* 4. Backend Results (Messages, Tickets, Attachments, Canvas, Calls, Recordings) */}
                         {backendResults.length > 0 && (
                           <>
-                            {['conversation', 'ticket', 'attachment']
+                            {[
+                              'conversation',
+                              'ticket',
+                              'attachment',
+                              'canvas',
+                              'transcript',
+                              'recording',
+                            ]
                               .filter(type => {
                                 if (activeTab === TabType.ALL) return true;
                                 if (activeTab === TabType.MESSAGES && type === 'conversation')
                                   return true;
                                 if (activeTab === TabType.TICKETS && type === 'ticket') return true;
-                                if (activeTab === TabType.ATTACHMENTS && type === 'attachment')
+                                if (
+                                  activeTab === TabType.ATTACHMENTS &&
+                                  (type === 'attachment' ||
+                                    type === 'canvas' ||
+                                    type === 'transcript' ||
+                                    type === 'recording')
+                                )
+                                  return true;
+                                if (activeTab === TabType.CANVAS && type === 'canvas') return true;
+                                if (activeTab === TabType.CALL && type === 'transcript')
+                                  return true;
+                                if (activeTab === TabType.RECORDING && type === 'recording')
                                   return true;
                                 return false;
                               })
@@ -2042,7 +2181,7 @@ const ChannelCommandMenu = ({
           </Command.List>
 
           {/* Footer */}
-          {!isMobile && (
+          {!inline && !isMobile && (
             <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-end shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
               {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
@@ -2096,7 +2235,7 @@ const ChannelCommandMenu = ({
         </div>
 
         {/* Context Panel - shown on right side in context selection mode */}
-        {contextSelectionMode && (
+        {!inline && contextSelectionMode && (
           <ThreadContextPanel
             items={contextItems}
             onRemove={id => {
@@ -2110,7 +2249,7 @@ const ChannelCommandMenu = ({
       {/* end body flex row */}
 
       {/* File Preview Modal */}
-      {previewFile && (
+      {!inline && previewFile && (
         <FilePreviewModal
           isOpen={!!previewFile}
           onClose={() => setPreviewFile(null)}
@@ -2120,6 +2259,57 @@ const ChannelCommandMenu = ({
           fileSize={previewFile.fileSize}
         />
       )}
+    </>
+  );
+
+  if (inline) {
+    return (
+      <Command
+        ref={commandRef}
+        shouldFilter={false}
+        className='w-full h-full flex flex-col bg-white'
+        onMouseMove={() => {
+          if (suppressHover) {
+            commandRef.current
+              ?.querySelectorAll('[cmdk-item][aria-selected="true"]')
+              .forEach(item => {
+                item.setAttribute('aria-selected', 'false');
+              });
+            setSuppressHover(false);
+          }
+        }}
+        onKeyDownCapture={handleCommandKeyDown}
+      >
+        {commandBody}
+      </Command>
+    );
+  }
+
+  return (
+    <Command.Dialog
+      open={open}
+      ref={commandRef}
+      onOpenChange={onOpenChange}
+      shouldFilter={false}
+      onMouseMove={() => {
+        if (suppressHover) {
+          commandRef.current
+            ?.querySelectorAll('[cmdk-item][aria-selected="true"]')
+            .forEach(item => {
+              item.setAttribute('aria-selected', 'false');
+            });
+          setSuppressHover(false);
+        }
+      }}
+      className={cn(
+        'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
+        isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
+        contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
+        'md:w-full md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-gray-200 z-50',
+      )}
+      onKeyDownCapture={handleCommandKeyDown}
+    >
+      {commandBody}
     </Command.Dialog>
   );
 };

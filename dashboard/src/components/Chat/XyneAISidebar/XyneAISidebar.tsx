@@ -4,8 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Upload } from 'lucide-react';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { apiInstance } from '../../../services/clients/apiClient';
-import { useChannel } from '../../../hooks/useChannels';
+import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
+import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
 import {
   xyneAIStorage,
@@ -18,6 +19,15 @@ import type { Message, SummarizerCitation, MessageAttachment, UserTag } from './
 import { buildCitationUrl } from './utils/citationUrlBuilder';
 import { XyneAISuggestions } from './components/XyneAISuggestions';
 import { XyneAIInputBox, type Attachment } from './components/XyneAIInputBox';
+import {
+  type SelectedChannel,
+  type SelectedTicket,
+  type SelectedCanvas,
+  type SelectedTranscript,
+  type SelectedRecording,
+  type ContextSelections,
+  ContextPickerPanel,
+} from './components/ContextPickerPanel';
 import { MessageItem } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
@@ -61,7 +71,8 @@ const XyneAISidebar = ({
   const [conversations, setConversations] = useState<ConversationHistoryType[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
   const [isLoadingConversation, setIsLoadingConversation] = useState(true);
-  const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
+  const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
+  const [showContextModal, setShowContextModal] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
   const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
@@ -70,6 +81,10 @@ const XyneAISidebar = ({
   const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [selectedActivities, setSelectedActivities] = useState<UserActivity[]>([]);
+  const [selectedTickets, setSelectedTickets] = useState<SelectedTicket[]>([]);
+  const [selectedCanvases, setSelectedCanvases] = useState<SelectedCanvas[]>([]);
+  const [selectedTranscripts, setSelectedTranscripts] = useState<SelectedTranscript[]>([]);
+  const [selectedRecordings, setSelectedRecordings] = useState<SelectedRecording[]>([]);
   const [browserContext, setBrowserContext] = useState<{
     type: 'browser';
     text: string;
@@ -205,6 +220,36 @@ const XyneAISidebar = ({
 
   const scopeType = (channel?.['scopeType'] as string) || '';
 
+  const allChannels = useAllVisibleChannels();
+  const nonDMChannels = useMemo(
+    () =>
+      allChannels.filter(
+        ch => ch.scopeType !== ChannelScopeType.DM && ch.scopeType !== ChannelScopeType.GROUP_DM,
+      ),
+    [allChannels],
+  );
+
+  // Initialize selectedChannels with current channel (if not DM/GROUP_DM) on mount
+  useEffect(() => {
+    if (
+      channelId &&
+      channelName &&
+      scopeType !== (ChannelScopeType.DM as string) &&
+      scopeType !== (ChannelScopeType.GROUP_DM as string)
+    ) {
+      const ch = allChannels.find(c => c.id === channelId);
+      setSelectedChannels([
+        {
+          id: channelId,
+          name: channelName,
+          isPrivate: ch ? String(ch.visibility) === 'PRIVATE' : false,
+        },
+      ]);
+    }
+    // Only on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Fetch web search configuration from backend
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -232,7 +277,7 @@ const XyneAISidebar = ({
 
   // Use the streaming hook with selected channel IDs, research context, and active thread info
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
-    channelIds: selectedChannelIds,
+    channelIds: selectedChannels.map(ch => ch.id),
     conversationId,
     threadConversationId: activeThreadInfo?.conversationId,
     attachmentIds: activeThreadInfo?.attachmentIds,
@@ -244,6 +289,9 @@ const XyneAISidebar = ({
     researchContext: selectedResearchContext,
     createCanvasEnabled,
     channelId: channelId || undefined, // Pass channelId for thread ID construction
+    ticketIds: selectedTickets.map(t => t.id),
+    canvasIds: selectedCanvases.map(c => c.id),
+    callIds: [...selectedTranscripts.map(t => t.id), ...selectedRecordings.map(r => r.id)],
   });
 
   // Start fresh chat when startFreshChat flag is set
@@ -610,6 +658,44 @@ const XyneAISidebar = ({
     // When user submits a new query, the stream manager will handle aborting
     // any existing stream for the same thread (see XyneAIStreamManager.startStream)
   };
+
+  const handleOpenContextModal = useCallback(() => setShowContextModal(true), []);
+  const handleCloseContextModal = useCallback(() => {
+    setShowContextModal(false);
+    // Focus the input box after closing the modal
+    setTimeout(() => {
+      xyneAIInputRef.current?.focus();
+    }, 0);
+  }, [xyneAIInputRef]);
+  const handleConfirmContext = useCallback((selections: ContextSelections) => {
+    setSelectedChannels(selections.channels);
+    setSelectedTickets(selections.tickets);
+    setSelectedCanvases(selections.canvases);
+    setSelectedTranscripts(selections.transcripts);
+    setSelectedRecordings(selections.recordings);
+  }, []);
+  const handleRemoveChannel = useCallback((id: string) => {
+    setSelectedChannels(prev => prev.filter(ch => ch.id !== id));
+  }, []);
+  const handleAddChannel = useCallback((ch: SelectedChannel) => {
+    setSelectedChannels(prev => {
+      if (prev.some(c => c.id === ch.id)) return prev;
+      if (prev.length >= 5) return prev;
+      return [...prev, ch];
+    });
+  }, []);
+  const handleRemoveTicket = useCallback((id: string) => {
+    setSelectedTickets(prev => prev.filter(t => t.id !== id));
+  }, []);
+  const handleRemoveCanvas = useCallback((id: string) => {
+    setSelectedCanvases(prev => prev.filter(c => c.id !== id));
+  }, []);
+  const handleRemoveTranscript = useCallback((id: string) => {
+    setSelectedTranscripts(prev => prev.filter(t => t.id !== id));
+  }, []);
+  const handleRemoveRecording = useCallback((id: string) => {
+    setSelectedRecordings(prev => prev.filter(r => r.id !== id));
+  }, []);
 
   const handleAddActivities = useCallback((activities: UserActivity[]): void => {
     if (activities.length === 0) return;
@@ -1126,36 +1212,79 @@ const XyneAISidebar = ({
           </div>
 
           {/* Input Box - Fixed at Bottom */}
-          <XyneAIInputBox
-            ref={xyneAIInputRef}
-            channelId={channelId}
-            channelName={channelName}
-            channelDescription={channelDescription}
-            scopeType={scopeType}
-            showChannelTag={true}
-            threadInfo={activeThreadInfo}
-            canvasInfo={canvasInfo}
-            selectionInfos={activeSelectionInfos}
-            inputValue={inputValue}
-            onInputChange={setInputValue}
-            onSubmit={() => void handleSubmit()}
-            onSelectedChannelsChange={setSelectedChannelIds}
-            onResearchContextChange={setSelectedResearchContext}
-            onThreadInfoChange={setActiveThreadInfo}
-            onSelectionInfosChange={setActiveSelectionInfos}
-            onAttachmentsChange={setAttachments}
-            onBrowserContextChange={setBrowserContext}
-            selectedActivities={selectedActivities}
-            onActivitiesChange={setSelectedActivities}
-            isStreaming={messages.some(m => m.isStreaming)}
-            onAbort={abortCurrentRequest}
-            webSearchEnabled={webSearchEnabled}
-            webSearchAccessible={webSearchAccessible}
-            onWebSearchToggle={() => setWebSearchEnabled(!webSearchEnabled)}
-            createCanvasEnabled={createCanvasEnabled}
-            onCreateCanvasToggle={() => setCreateCanvasEnabled(!createCanvasEnabled)}
-            onUserTagsChange={setCurrentUserTags}
-          />
+          <div className='relative'>
+            {showContextModal && (
+              <>
+                <div
+                  role='button'
+                  tabIndex={-1}
+                  className='fixed inset-0 z-10'
+                  onClick={handleCloseContextModal}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') handleCloseContextModal();
+                  }}
+                  aria-label='Close context modal'
+                  data-track-category='XyneAI'
+                  data-track-name='CLOSE_CONTEXT_MODAL_BACKDROP'
+                />
+                <div className='absolute bottom-full left-0 right-0 z-20 px-4 pb-2'>
+                  <ContextPickerPanel
+                    onClose={handleCloseContextModal}
+                    onConfirm={handleConfirmContext}
+                    initialSelections={{
+                      channels: selectedChannels,
+                      tickets: selectedTickets,
+                      canvases: selectedCanvases,
+                      transcripts: selectedTranscripts,
+                      recordings: selectedRecordings,
+                    }}
+                  />
+                </div>
+              </>
+            )}
+            <XyneAIInputBox
+              ref={xyneAIInputRef}
+              channelId={channelId}
+              channelName={channelName}
+              channelDescription={channelDescription}
+              scopeType={scopeType}
+              showChannelTag={true}
+              threadInfo={activeThreadInfo}
+              canvasInfo={canvasInfo}
+              selectionInfos={activeSelectionInfos}
+              inputValue={inputValue}
+              onInputChange={setInputValue}
+              onSubmit={() => void handleSubmit()}
+              onResearchContextChange={setSelectedResearchContext}
+              onThreadInfoChange={setActiveThreadInfo}
+              onSelectionInfosChange={setActiveSelectionInfos}
+              onAttachmentsChange={setAttachments}
+              onBrowserContextChange={setBrowserContext}
+              selectedChannels={selectedChannels}
+              onRemoveChannel={handleRemoveChannel}
+              onAddChannel={handleAddChannel}
+              nonDMChannels={nonDMChannels}
+              onOpenContextModal={handleOpenContextModal}
+              selectedTickets={selectedTickets}
+              onRemoveTicket={handleRemoveTicket}
+              selectedCanvases={selectedCanvases}
+              onRemoveCanvas={handleRemoveCanvas}
+              selectedTranscripts={selectedTranscripts}
+              onRemoveTranscript={handleRemoveTranscript}
+              selectedRecordings={selectedRecordings}
+              onRemoveRecording={handleRemoveRecording}
+              selectedActivities={selectedActivities}
+              onActivitiesChange={setSelectedActivities}
+              isStreaming={messages.some(m => m.isStreaming)}
+              onAbort={abortCurrentRequest}
+              webSearchEnabled={webSearchEnabled}
+              webSearchAccessible={webSearchAccessible}
+              onWebSearchToggle={() => setWebSearchEnabled(!webSearchEnabled)}
+              createCanvasEnabled={createCanvasEnabled}
+              onCreateCanvasToggle={() => setCreateCanvasEnabled(!createCanvasEnabled)}
+              onUserTagsChange={setCurrentUserTags}
+            />
+          </div>
         </>
       )}
     </div>

@@ -136,6 +136,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     [TabType.MESSAGES]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     [TabType.TICKETS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     [TabType.ATTACHMENTS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+    [TabType.CANVAS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+    [TabType.CALL]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+    [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
   });
 
   const pendingSearchCountRef = useRef(0);
@@ -481,6 +484,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       [TabType.MESSAGES]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.TICKETS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.ATTACHMENTS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+      [TabType.CANVAS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+      [TabType.CALL]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+      [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     });
   }, [resetImpressionTracking]);
 
@@ -659,6 +665,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.type = VespaDocTypes.FILES;
             } else if (activeTab === TabType.TICKETS) {
               searchFilters.type = VespaDocTypes.TICKETS;
+            } else if (activeTab === TabType.CANVAS) {
+              searchFilters.type = 'canvas';
+              searchFilters.apps = VespaApps.FILE;
+            } else if (activeTab === TabType.CALL) {
+              searchFilters.type = VespaDocTypes.FILES;
+              searchFilters.apps = VespaApps.FILE;
+              searchFilters.subApp = 'transcript';
+            } else if (activeTab === TabType.RECORDING) {
+              searchFilters.type = VespaDocTypes.FILES;
+              searchFilters.apps = VespaApps.FILE;
+              searchFilters.subApp = 'transcript';
+              searchFilters.callType = 'HEADLESS';
             }
 
             // Add assignee filter for Tickets/ALL (force ticket-only search)
