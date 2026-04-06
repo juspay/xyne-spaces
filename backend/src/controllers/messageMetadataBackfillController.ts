@@ -6,9 +6,12 @@ import {
   addReactionToData,
   serializeReactionsMd,
   serializeRepliesMd,
+  serializeInitialMessageMd,
+  serializeParentMessageMd,
 } from '@xyne/shared';
+import type { InitialMessageSummary, ParentMessageSummary } from '@xyne/shared';
 
-type BackfillType = 'reactions' | 'replies';
+type BackfillType = 'reactions' | 'replies' | 'initialMessage' | 'parentMessage';
 
 type BackfillOptions = {
   types: BackfillType[];
@@ -37,14 +40,15 @@ export class MessageMetadataBackfillController {
       dryRun: boolean;
     }>;
 
+    const validTypes: BackfillType[] = ['reactions', 'replies', 'initialMessage', 'parentMessage'];
     let types: BackfillType[] = payload.types && payload.types.length > 0
       ? payload.types.filter((type): type is BackfillType =>
-          type === 'reactions' || type === 'replies'
+          validTypes.includes(type as BackfillType)
         )
-      : ['reactions', 'replies'];
+      : validTypes;
 
     if (types.length === 0) {
-      types = ['reactions', 'replies'];
+      types = validTypes;
     }
     const batchSize = payload.batchSize && payload.batchSize > 0 ? payload.batchSize : 200;
     const delayMs = payload.delayMs && payload.delayMs >= 0 ? payload.delayMs : 0;
@@ -202,6 +206,187 @@ export class MessageMetadataBackfillController {
   }
 
 
+  private static async backfillInitialMessageMd(options: BackfillOptions): Promise<BackfillSummary> {
+    const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
+    let cursor: string | null = null;
+
+    do {
+      const query: Parameters<typeof db.conversation.findMany>[0] = {
+        where: {
+          initial_message_md: null,
+          initialMessageId: { not: '' },
+        },
+        select: { conversationId: true, initialMessageId: true },
+        orderBy: { conversationId: 'asc' },
+        take: options.batchSize,
+      };
+      if (cursor) {
+        query.cursor = { conversationId: cursor };
+        query.skip = 1;
+      }
+      const conversations = await db.conversation.findMany(query);
+
+      if (conversations.length === 0) break;
+
+      const messageIds = conversations.map(c => c.initialMessageId);
+      const messages = await db.message.findMany({
+        where: { messageId: { in: messageIds } },
+      });
+      const messageMap = new Map(messages.map(m => [m.messageId, m]));
+
+      for (const conv of conversations) {
+        summary.processed += 1;
+        try {
+          const message = messageMap.get(conv.initialMessageId);
+          if (!message) {
+            summary.skipped += 1;
+            continue;
+          }
+
+          const summaryData: InitialMessageSummary = {
+            messageId: message.messageId,
+            conversationId: message.conversationId,
+            senderId: message.senderId,
+            content: message.content,
+            msgType: message.msgType as InitialMessageSummary['msgType'],
+            hasAttachment: message.hasAttachment,
+            edited: message.edited,
+            isDeleted: message.isDeleted,
+            showInChannel: message.showInChannel,
+            visibleTo: message.visibleTo,
+            createdAt: message.createdAt.getTime(),
+            metadata: message.metadata ? JSON.stringify(message.metadata) : null,
+            nudgeCount: message.nudgeCount,
+            isSent: message.isSent,
+            reactions_md: message.reactions_md,
+            link_preview_md: message.link_preview_md,
+            childConversationId: message.childConversationId,
+          };
+
+          const md = serializeInitialMessageMd(summaryData);
+          if (!md) {
+            summary.skipped += 1;
+            continue;
+          }
+
+          if (!options.dryRun) {
+            await db.conversation.update({
+              where: { conversationId: conv.conversationId },
+              data: { initial_message_md: md },
+            });
+          }
+          summary.updated += 1;
+        } catch (error) {
+          summary.errors += 1;
+          logger.warn('[MessageMetadataBackfill] Failed initial_message_md update', {
+            conversationId: conv.conversationId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      cursor = conversations[conversations.length - 1]?.conversationId ?? null;
+      if (options.delayMs > 0) {
+        await this.sleep(options.delayMs);
+      }
+    } while (cursor);
+
+    return summary;
+  }
+
+  private static async backfillParentMessageMd(options: BackfillOptions): Promise<BackfillSummary> {
+    const summary: BackfillSummary = { processed: 0, updated: 0, skipped: 0, errors: 0 };
+    let cursor: string | null = null;
+
+    do {
+      const query: Parameters<typeof db.conversation.findMany>[0] = {
+        where: {
+          parent_message_md: null,
+          parentMessageId: { not: null },
+        },
+        select: { conversationId: true, parentMessageId: true },
+        orderBy: { conversationId: 'asc' },
+        take: options.batchSize,
+      };
+      if (cursor) {
+        query.cursor = { conversationId: cursor };
+        query.skip = 1;
+      }
+      const conversations = await db.conversation.findMany(query);
+
+      if (conversations.length === 0) break;
+
+      const messageIds = conversations
+        .map(c => c.parentMessageId)
+        .filter((id): id is string => id !== null);
+
+      const messages = await db.message.findMany({
+        where: { messageId: { in: messageIds } },
+        select: {
+          messageId: true,
+          conversationId: true,
+          senderId: true,
+          content: true,
+          msgType: true,
+          createdAt: true,
+        },
+      });
+      const messageMap = new Map(messages.map(m => [m.messageId, m]));
+
+      for (const conv of conversations) {
+        summary.processed += 1;
+        try {
+          if (!conv.parentMessageId) {
+            summary.skipped += 1;
+            continue;
+          }
+
+          const message = messageMap.get(conv.parentMessageId);
+          if (!message) {
+            summary.skipped += 1;
+            continue;
+          }
+
+          const summaryData: ParentMessageSummary = {
+            messageId: message.messageId,
+            conversationId: message.conversationId,
+            senderId: message.senderId,
+            content: message.content,
+            msgType: message.msgType as ParentMessageSummary['msgType'],
+            createdAt: message.createdAt.getTime(),
+          };
+
+          const md = serializeParentMessageMd(summaryData);
+          if (!md) {
+            summary.skipped += 1;
+            continue;
+          }
+
+          if (!options.dryRun) {
+            await db.conversation.update({
+              where: { conversationId: conv.conversationId },
+              data: { parent_message_md: md },
+            });
+          }
+          summary.updated += 1;
+        } catch (error) {
+          summary.errors += 1;
+          logger.warn('[MessageMetadataBackfill] Failed parent_message_md update', {
+            conversationId: conv.conversationId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      cursor = conversations[conversations.length - 1]?.conversationId ?? null;
+      if (options.delayMs > 0) {
+        await this.sleep(options.delayMs);
+      }
+    } while (cursor);
+
+    return summary;
+  }
+
   static async triggerBackfill(req: Request, res: Response<ApiResponse>) {
     try {
       const options = MessageMetadataBackfillController.buildDefaultOptions(req.body);
@@ -215,6 +400,14 @@ export class MessageMetadataBackfillController {
 
       if (options.types.includes('replies')) {
         results.replies = await MessageMetadataBackfillController.backfillRepliesMd(options);
+      }
+
+      if (options.types.includes('initialMessage')) {
+        results.initialMessage = await MessageMetadataBackfillController.backfillInitialMessageMd(options);
+      }
+
+      if (options.types.includes('parentMessage')) {
+        results.parentMessage = await MessageMetadataBackfillController.backfillParentMessageMd(options);
       }
 
 
