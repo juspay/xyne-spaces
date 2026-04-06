@@ -10,6 +10,7 @@ import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useWorkflowTypes, type WorkflowType } from '../../hooks/useWorkflowTypes';
 import { useWorkflowFormPersistence } from '../../hooks/useWorkflowFormPersistence';
+import { useAuth } from '../../hooks/useAuth';
 import type { WorkflowTypeSchema } from '../Tickets/types';
 import { Play, X } from 'lucide-react';
 import {
@@ -18,6 +19,7 @@ import {
   type TriggerWorkflowFormData,
   type TicketData,
 } from './utils';
+import { ArrayObjectField } from '../ui/ArrayObjectField';
 
 interface WorkflowTriggerModalProps {
   isOpen: boolean;
@@ -53,6 +55,8 @@ export default function WorkflowTriggerModal({
     isLoading: workflowTypesLoading,
     error: workflowTypesError,
   } = useWorkflowTypes();
+
+  const { user } = useAuth();
 
   const form = useForm<TriggerWorkflowFormData>({
     defaultValues: {
@@ -220,6 +224,13 @@ export default function WorkflowTriggerModal({
     },
     [workflowTypes, ticketData, form, setValue],
   );
+
+  // Auto-populate versionBumpUserEmail when Version Bump workflow is selected
+  useEffect(() => {
+    if (user?.email && !customFields['versionBumpUserEmail']) {
+      setValue('customFields.versionBumpUserEmail' as Path<TriggerWorkflowFormData>, user.email);
+    }
+  }, [user?.email, workflowType, setValue, customFields]);
 
   useEffect(() => {
     if (isRerun) return;
@@ -408,6 +419,26 @@ export default function WorkflowTriggerModal({
         rules={{
           validate: value => {
             if (!field.required) return true;
+
+            // Validate each item for Array Object fields (item-level integrity)
+            if (field.type === 'arrayOfObjects' && field.nestedFields) {
+              if (Array.isArray(value)) {
+                const isValid = value.every(item => {
+                  const typedItem = item as Record<string, unknown>;
+                  return field.nestedFields?.every(
+                    nf =>
+                      !nf.required ||
+                      (typedItem[nf.name] !== undefined &&
+                        typedItem[nf.name] !== null &&
+                        typedItem[nf.name] !== ''),
+                  );
+                });
+                if (!isValid)
+                  return `All mandatory fields in each object of ${field.name} must be filled`;
+              }
+              return true;
+            }
+
             if (value === '' || value === null || value === undefined) {
               return `${field.name} is required`;
             }
@@ -417,7 +448,7 @@ export default function WorkflowTriggerModal({
             return true;
           },
         }}
-        render={({ field: controllerField }) => (
+        render={({ field: controllerField, fieldState }) => (
           <div className='space-y-1'>
             <label className='block text-sm font-medium text-foreground'>
               {field.name}
@@ -456,6 +487,13 @@ export default function WorkflowTriggerModal({
                   alignment={SelectMenuAlignment.START}
                 />
               )
+            ) : field.type === 'arrayOfObjects' ? (
+              <ArrayObjectField
+                field={field}
+                value={Array.isArray(controllerField.value) ? controllerField.value : []}
+                onChange={controllerField.onChange}
+                error={fieldState.error?.message}
+              />
             ) : field.type === 'string' || (!field.type && !field.enumValues) ? (
               <textarea
                 className='w-full px-3 py-2 bg-background text-foreground border border-input rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[80px] text-sm placeholder:text-muted-foreground'
