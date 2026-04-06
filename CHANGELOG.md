@@ -1,3 +1,10 @@
+## [1.106.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.106.0...v1.106.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* Fix activity time inconsistency ([1c9afe9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1c9afe9e200e163ae2f5e56299122a511c9e10d8))
+
 ## [1.106.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.105.1...v1.106.0) (2026-04-06)
 
 
