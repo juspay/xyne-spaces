@@ -10,9 +10,8 @@ import { ProjectsVespaHandler } from '../tables/projects-handler';
 import { RCAVespaHandler } from '../tables/rca-handler';
 import { CanvasesVespaHandler } from '../tables/canvases-handler';
 import { TranscriptsVespaHandler } from '../tables/transcripts-handler';
-
 import { MessageAttachmentsVespaHandler } from '../tables/message-attachments-handler';
-
+import { ChannelStatsVespaHandler } from '../tables/channel-stats-handler';
 /**
  * Factory for getting the appropriate Vespa handler for a given table.
  * 
@@ -37,6 +36,9 @@ export class VespaHandlerFactory {
         return new MessagesVespaHandler(ctx);
       case 'channels':
         return new ChannelsVespaHandler(ctx);
+      case 'channel_stats':
+        // Channel stats changes can affect the parent channel's indexing in Vespa
+        return new ChannelStatsVespaHandler(ctx);
 
       // Ticketing tables
       case 'tickets':
