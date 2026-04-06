@@ -70,6 +70,8 @@ export const ActivityItemCard = ({
     return formatDistanceToNow(dateObj, { addSuffix: true });
   };
 
+  const activityTimestamp = activity.updatedAt ?? activity.createdAt;
+
   return (
     <Button
       variant='ghost'
@@ -164,7 +166,7 @@ export const ActivityItemCard = ({
           </div>
 
           <span className='flex-shrink-0 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
-            {getTimestampDisplay(activity.createdAt)}
+            {getTimestampDisplay(activityTimestamp)}
           </span>
         </div>
 
