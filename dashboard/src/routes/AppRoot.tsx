@@ -78,7 +78,16 @@ import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfi
 import { ShortcutsHelpModal } from '../components/ShortcutsHelpModal/ShortcutsHelpModal';
 import { useShortcutById } from '../shortcuts';
 import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts';
+import {
+  AIOnboardingProvider,
+  useAIOnboarding,
+  isAIOnboardingCompleted,
+  isAIOnboardingPending,
+  clearAIOnboardingPending,
+  isAIOnboardingActive,
+} from '../contexts/AIOnboardingContext';
 import DocsScreen from './DocsScreen/DocsScreen';
+import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
@@ -93,6 +102,30 @@ import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
 import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
+
+/** Auto-triggers AI onboarding after the existing 6-step onboarding completes, or resumes on refresh */
+const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null => {
+  const { startOnboarding } = useAIOnboarding();
+
+  useEffect(() => {
+    if (isOnboarding) return;
+    if (isAIOnboardingCompleted()) return;
+
+    // First-time trigger: pending flag set by OnboardingScreen on completion
+    if (isAIOnboardingPending()) {
+      clearAIOnboardingPending();
+      startOnboarding('auto', true);
+      return;
+    }
+
+    // Resume after refresh: load existing conversation, don't start fresh
+    if (isAIOnboardingActive()) {
+      startOnboarding('auto', false);
+    }
+  }, [isOnboarding, startOnboarding]);
+
+  return null;
+};
 
 const AppRoot = (): ReactElement => {
   // Create panel refs for WebView
@@ -250,6 +283,9 @@ const AppRoot = (): ReactElement => {
     }
 
     const unsubscribe = reactNativeBridge.on('CLOSE_DRAWER', () => {
+      // Don't allow closing during AI onboarding
+      if (isAIOnboardingActive()) return;
+
       const snapshot = xyneAIActor.getSnapshot();
       if (snapshot.matches('open')) {
         xyneAIActor.send({ type: 'CLOSE' });
@@ -278,191 +314,199 @@ const AppRoot = (): ReactElement => {
       <InitialStateLoader>
         <ZeroFallbackProvider>
           <ShareRecordingHandler />
-          <EditProvider>
-            {shouldShowMobileHeader && externalId && (
-              <MobileCallHeader
-                participants={participants}
-                activeCalls={activeCalls}
-                externalId={externalId}
-                isMicEnabled={isMicEnabled}
-                onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
-                onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
-                onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
-              />
-            )}
-            {isOnboarding ? (
-              // Onboarding screen - full width without sidebar
-              <main className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
-                <EditWarningModal />
-                <Outlet />
-              </main>
-            ) : xyneAIState.matches('open') && !isMobile ? (
-              // XyneAI is open on desktop - show panel layout with XyneAI
-              <div className='flex flex-col h-screen'>
-                {!isMobile && <GlobalTopBar />}
-                <PanelGroup
-                  direction='horizontal'
-                  className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
-                  autoSaveId='app-root-xyneai'
-                >
-                  <Panel ref={xyneAILeftPanelRef} defaultSize={65}>
-                    <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
-                      <AppSidebar />
-                      {/* VSCode panel - always mounted, visibility controlled by route */}
-                      <div
-                        className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
-                      >
-                        <VSCodeWorkspaceScreen />
-                      </div>
-                      {/* Regular content - hidden when on VSCode route */}
-                      <main
-                        className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
-                      >
-                        <EditWarningModal />
-                        <Outlet />
-                      </main>
-                    </div>
-                  </Panel>
-                  <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                  </PanelResizeHandle>
-                  <Panel ref={xyneAIRightPanelRef} defaultSize={35} maxSize={50}>
-                    <div className='max-w-[830px] h-full'>
-                      <XyneAISidebar
-                        channelId={xyneAIChannelId}
-                        threadInfo={xyneAIThreadInfo}
-                        startFreshChat={xyneAIStartFreshChat}
-                        canvasInfo={xyneAICanvasInfo}
-                      />
-                    </div>
-                  </Panel>
-                </PanelGroup>
-              </div>
-            ) : browserPanelState === 'open' ? (
-              // Browser Panel is open - show panel layout with Browser
-              <div className='flex flex-col h-screen'>
-                {!isMobile && <GlobalTopBar />}
-                <PanelGroup
-                  direction='horizontal'
-                  className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
-                  autoSaveId='app-root-browser'
-                >
-                  <Panel ref={browserPanelLeftRef} defaultSize={65}>
-                    <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
-                      <AppSidebar />
-                      {/* VSCode panel - always mounted, visibility controlled by route */}
-                      <div
-                        className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
-                      >
-                        <VSCodeWorkspaceScreen />
-                      </div>
-                      {/* Regular content - hidden when on VSCode route */}
-                      <main
-                        className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
-                      >
-                        <EditWarningModal />
-                        <Outlet />
-                      </main>
-                    </div>
-                  </Panel>
-                  <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                  </PanelResizeHandle>
-                  <Panel ref={browserPanelRightRef} defaultSize={35} maxSize={50}>
-                    <div className='h-full'>
-                      <BrowserPanel />
-                    </div>
-                  </Panel>
-                </PanelGroup>
-              </div>
-            ) : webviewState === 'closed' || webviewState === 'idle' ? (
-              // When both closed or idle, only show the left panel without resize handle or right panel
-              <div className='flex flex-col h-screen'>
-                {!isMobile && <GlobalTopBar />}
-                <div
-                  className={`flex flex-1 overflow-hidden ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                >
-                  <AppSidebar />
-                  {/* VSCode panel - always mounted, visibility controlled by route */}
-                  <div
-                    className={`flex-1 no-scrollbar min-[500px]:p-2 overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
-                  >
-                    <VSCodeWorkspaceScreen />
-                  </div>
-                  {/* Regular content - hidden when on VSCode route */}
-                  <main
-                    className={`flex-1 no-scrollbar min-[500px]:p-2 overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
-                  >
-                    <EditWarningModal />
-                    <Outlet />
-                  </main>
-                </div>
-              </div>
-            ) : (
-              // WebView is open - show panel layout with WebView
-              <div className='flex flex-col h-screen'>
-                {!isMobile && <GlobalTopBar />}
-                <PanelGroup
-                  direction='horizontal'
-                  className='flex-1 overflow-hidden'
-                  autoSaveId='app-root'
-                >
-                  <Panel ref={leftPanelRef} defaultSize={50}>
-                    <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
-                      <AppSidebar />
-                      {/* VSCode panel - always mounted, visibility controlled by route */}
-                      <div
-                        className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
-                      >
-                        <VSCodeWorkspaceScreen />
-                      </div>
-                      {/* Regular content - hidden when on VSCode route */}
-                      <main
-                        className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
-                      >
-                        <EditWarningModal />
-                        <Outlet />
-                      </main>
-                    </div>
-                  </Panel>
-                  <PanelResizeHandle className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                  </PanelResizeHandle>
-                  <Panel ref={rightPanelRef} defaultSize={50}>
-                    <WebView />
-                  </Panel>
-                </PanelGroup>
-              </div>
-            )}
-            <IncomingCallModal />
-            <GlobalCallOverlay />
-            <RecordingOverlay />
-            <NotificationHandler />
-            <CallFromRecentsHandler />
-            <BrowserPanelHandler />
-            <AttachmentGalleryModal />
-            <GlobalCommandMenu />
-            <ShortcutsHelpModal
-              isOpen={isShortcutsModalOpen}
-              onClose={() => setIsShortcutsModalOpen(false)}
-            />
-            {/* XyneAI Mobile Drawer */}
-            {isMobile && (
-              <Drawer
-                open={xyneAIState.matches('open')}
-                onOpenChange={open => xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' })}
-                title='Xyne AI'
-                description='Ask questions about your channel'
-              >
-                <XyneAISidebar
-                  channelId={xyneAIChannelId}
-                  threadInfo={xyneAIThreadInfo}
-                  startFreshChat={xyneAIStartFreshChat}
-                  canvasInfo={xyneAICanvasInfo}
+          <AIOnboardingProvider>
+            <AIOnboardingTrigger isOnboarding={isOnboarding} />
+            <AIOnboardingOverlay />
+            <EditProvider>
+              {shouldShowMobileHeader && externalId && (
+                <MobileCallHeader
+                  participants={participants}
+                  activeCalls={activeCalls}
+                  externalId={externalId}
+                  isMicEnabled={isMicEnabled}
+                  onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
+                  onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
+                  onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
                 />
-              </Drawer>
-            )}
-          </EditProvider>
+              )}
+              {isOnboarding ? (
+                // Onboarding screen - full width without sidebar
+                <main className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
+                  <EditWarningModal />
+                  <Outlet />
+                </main>
+              ) : xyneAIState.matches('open') && !isMobile ? (
+                // XyneAI is open on desktop - show panel layout with XyneAI
+                <div className='flex flex-col h-screen'>
+                  {!isMobile && <GlobalTopBar />}
+                  <PanelGroup
+                    direction='horizontal'
+                    className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
+                    autoSaveId='app-root-xyneai'
+                  >
+                    <Panel ref={xyneAILeftPanelRef} defaultSize={65}>
+                      <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
+                        <AppSidebar />
+                        {/* VSCode panel - always mounted, visibility controlled by route */}
+                        <div
+                          className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
+                        >
+                          <VSCodeWorkspaceScreen />
+                        </div>
+                        {/* Regular content - hidden when on VSCode route */}
+                        <main
+                          className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
+                        >
+                          <EditWarningModal />
+                          <Outlet />
+                        </main>
+                      </div>
+                    </Panel>
+                    <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                      <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                    </PanelResizeHandle>
+                    <Panel ref={xyneAIRightPanelRef} defaultSize={35} maxSize={50}>
+                      <div className='max-w-[830px] h-full relative z-[60]'>
+                        <XyneAISidebar
+                          channelId={xyneAIChannelId}
+                          threadInfo={xyneAIThreadInfo}
+                          startFreshChat={xyneAIStartFreshChat}
+                          canvasInfo={xyneAICanvasInfo}
+                        />
+                      </div>
+                    </Panel>
+                  </PanelGroup>
+                </div>
+              ) : browserPanelState === 'open' ? (
+                // Browser Panel is open - show panel layout with Browser
+                <div className='flex flex-col h-screen'>
+                  {!isMobile && <GlobalTopBar />}
+                  <PanelGroup
+                    direction='horizontal'
+                    className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
+                    autoSaveId='app-root-browser'
+                  >
+                    <Panel ref={browserPanelLeftRef} defaultSize={65}>
+                      <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
+                        <AppSidebar />
+                        {/* VSCode panel - always mounted, visibility controlled by route */}
+                        <div
+                          className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
+                        >
+                          <VSCodeWorkspaceScreen />
+                        </div>
+                        {/* Regular content - hidden when on VSCode route */}
+                        <main
+                          className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
+                        >
+                          <EditWarningModal />
+                          <Outlet />
+                        </main>
+                      </div>
+                    </Panel>
+                    <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                      <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                    </PanelResizeHandle>
+                    <Panel ref={browserPanelRightRef} defaultSize={35} maxSize={50}>
+                      <div className='h-full'>
+                        <BrowserPanel />
+                      </div>
+                    </Panel>
+                  </PanelGroup>
+                </div>
+              ) : webviewState === 'closed' || webviewState === 'idle' ? (
+                // When both closed or idle, only show the left panel without resize handle or right panel
+                <div className='flex flex-col h-screen'>
+                  {!isMobile && <GlobalTopBar />}
+                  <div
+                    className={`flex flex-1 overflow-hidden ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                  >
+                    <AppSidebar />
+                    {/* VSCode panel - always mounted, visibility controlled by route */}
+                    <div
+                      className={`flex-1 no-scrollbar min-[500px]:p-2 overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
+                    >
+                      <VSCodeWorkspaceScreen />
+                    </div>
+                    {/* Regular content - hidden when on VSCode route */}
+                    <main
+                      className={`flex-1 no-scrollbar min-[500px]:p-2 overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
+                    >
+                      <EditWarningModal />
+                      <Outlet />
+                    </main>
+                  </div>
+                </div>
+              ) : (
+                // WebView is open - show panel layout with WebView
+                <div className='flex flex-col h-screen'>
+                  {!isMobile && <GlobalTopBar />}
+                  <PanelGroup
+                    direction='horizontal'
+                    className='flex-1 overflow-hidden'
+                    autoSaveId='app-root'
+                  >
+                    <Panel ref={leftPanelRef} defaultSize={50}>
+                      <div className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
+                        <AppSidebar />
+                        {/* VSCode panel - always mounted, visibility controlled by route */}
+                        <div
+                          className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? '' : 'hidden'}`}
+                        >
+                          <VSCodeWorkspaceScreen />
+                        </div>
+                        {/* Regular content - hidden when on VSCode route */}
+                        <main
+                          className={`flex-1 no-scrollbar overflow-auto ${isOnVSCode ? 'hidden' : ''}`}
+                        >
+                          <EditWarningModal />
+                          <Outlet />
+                        </main>
+                      </div>
+                    </Panel>
+                    <PanelResizeHandle className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                      <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                    </PanelResizeHandle>
+                    <Panel ref={rightPanelRef} defaultSize={50}>
+                      <WebView />
+                    </Panel>
+                  </PanelGroup>
+                </div>
+              )}
+              <IncomingCallModal />
+              <GlobalCallOverlay />
+              <RecordingOverlay />
+              <NotificationHandler />
+              <CallFromRecentsHandler />
+              <BrowserPanelHandler />
+              <AttachmentGalleryModal />
+              <GlobalCommandMenu />
+              <ShortcutsHelpModal
+                isOpen={isShortcutsModalOpen}
+                onClose={() => setIsShortcutsModalOpen(false)}
+              />
+              {/* XyneAI Mobile Drawer */}
+              {isMobile && (
+                <Drawer
+                  open={xyneAIState.matches('open')}
+                  onOpenChange={open => {
+                    // Don't allow closing during AI onboarding
+                    if (!open && isAIOnboardingActive()) return;
+                    xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                  }}
+                  title='Xyne AI'
+                  description='Ask questions about your channel'
+                >
+                  <XyneAISidebar
+                    channelId={xyneAIChannelId}
+                    threadInfo={xyneAIThreadInfo}
+                    startFreshChat={xyneAIStartFreshChat}
+                    canvasInfo={xyneAICanvasInfo}
+                  />
+                </Drawer>
+              )}
+            </EditProvider>
+          </AIOnboardingProvider>
         </ZeroFallbackProvider>
       </InitialStateLoader>
     </ZeroProvider>

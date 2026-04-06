@@ -68,6 +68,10 @@ export const useXyneAIStream = ({
       : channelId
     : 'general';
 
+  // Track conversationId in a ref so subscription doesn't re-run when it changes
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
+
   // Subscribe to stream manager updates
   // For global context (no threadConversationId), we listen to any non-thread stream
   useEffect(() => {
@@ -86,8 +90,8 @@ export const useXyneAIStream = ({
       // Update messages from stream state
       setMessages(state.messages);
 
-      // Update session ID if changed
-      if (state.sessionId && state.sessionId !== conversationId) {
+      // Update session ID if changed (use ref to avoid stale closure)
+      if (state.sessionId && state.sessionId !== conversationIdRef.current) {
         setConversationId(state.sessionId);
       }
 
@@ -123,14 +127,7 @@ export const useXyneAIStream = ({
     return () => {
       unsubscribe();
     };
-  }, [
-    threadId,
-    threadConversationId,
-    setMessages,
-    setConversationId,
-    setCurrentTraceId,
-    conversationId,
-  ]);
+  }, [threadId, threadConversationId, setMessages, setConversationId, setCurrentTraceId]);
 
   // Store current messages ref for stream manager
   const messagesRef = useRef<Message[]>([]);

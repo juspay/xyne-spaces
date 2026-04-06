@@ -652,10 +652,17 @@ class XyneAIStreamManager {
   ): Promise<string> {
     const streamId = `stream-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    // Abort any existing stream for this thread
+    // Handle any existing stream for this thread
     const existingStream = this.activeStreams.get(threadId);
     if (existingStream) {
-      this.abortStream(existingStream.streamId);
+      if (existingStream.status === 'completed') {
+        // Silently clean up completed streams — don't abort (which would fire
+        // subscriber notifications that clobber the new stream's React state)
+        this.activeStreams.delete(threadId);
+        this.abortControllers.delete(existingStream.streamId);
+      } else {
+        this.abortStream(existingStream.streamId);
+      }
     }
 
     // Create abort controller
@@ -1141,9 +1148,13 @@ class XyneAIStreamManager {
       this.showCompletionToast(threadId, finalResponse);
     }
 
-    // Cleanup after a delay
+    // Cleanup after a delay — only if this stream is still the active one for this thread
+    // (a new stream may have replaced it under the same threadId key)
     setTimeout(() => {
-      this.activeStreams.delete(threadId);
+      const current = this.activeStreams.get(threadId);
+      if (current && current.streamId === streamId) {
+        this.activeStreams.delete(threadId);
+      }
       this.abortControllers.delete(streamId);
     }, 5000);
   }

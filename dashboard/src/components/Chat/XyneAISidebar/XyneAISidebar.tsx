@@ -31,6 +31,9 @@ import {
 import { MessageItem } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
+import { XyneAIOnboardingHeader } from './components/XyneAIOnboardingHeader';
+import { useAIOnboarding, ALL_ONBOARDING_SUGGESTIONS } from '../../../contexts/AIOnboardingContext';
+import { XyneAIStar } from '../../icons/xyne-ai';
 import { UserActivityPanel } from './components/UserActivityPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -70,7 +73,7 @@ const XyneAISidebar = ({
   const [showUserActivityPanel, setShowUserActivityPanel] = useState(false);
   const [conversations, setConversations] = useState<ConversationHistoryType[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
-  const [isLoadingConversation, setIsLoadingConversation] = useState(true);
+  const [isLoadingConversation, setIsLoadingConversation] = useState(!startFreshChat);
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
   const [showContextModal, setShowContextModal] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
@@ -117,6 +120,7 @@ const XyneAISidebar = ({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const { state: aiOnboarding, completeOnboarding } = useAIOnboarding();
 
   // Use drag and drop hook with the existing pattern
   const {
@@ -328,6 +332,21 @@ const XyneAISidebar = ({
   const scrollToBottom = useCallback((): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
+
+  // AI Onboarding: derive answered count and visible suggestions from messages
+  // No context dispatches — avoids re-renders that interfere with streaming
+  // Count completed bot responses (not streaming) for the "Done" button threshold
+  const onboardingAnsweredCount = aiOnboarding.isActive
+    ? messages.filter((m: Message) => m.type === 'bot' && !m.isStreaming).length
+    : 0;
+
+  const visibleSuggestions = useMemo(() => {
+    if (!aiOnboarding.isActive) return [];
+    const askedQuestions = new Set(
+      messages.filter((m: Message) => m.type === 'user').map((m: Message) => m.content),
+    );
+    return ALL_ONBOARDING_SUGGESTIONS.filter(s => !askedQuestions.has(s)).slice(0, 3);
+  }, [aiOnboarding.isActive, messages]);
 
   // Load most recent conversation on mount
   // Thread context: load thread-specific conversation (channel-specific)
@@ -1093,12 +1112,16 @@ const XyneAISidebar = ({
       ) : (
         <>
           {/* Header - Fixed at Top */}
-          <XyneAIHeader
-            onNewChat={handleNewChat}
-            onShowHistory={() => setShowHistorySidebar(true)}
-            onShowUserActivity={() => setShowUserActivityPanel(true)}
-            isMobile={isMobile}
-          />
+          {aiOnboarding.isActive ? (
+            <XyneAIOnboardingHeader onClose={completeOnboarding} />
+          ) : (
+            <XyneAIHeader
+              onNewChat={handleNewChat}
+              onShowHistory={() => setShowHistorySidebar(true)}
+              onShowUserActivity={() => setShowUserActivityPanel(true)}
+              isMobile={isMobile}
+            />
+          )}
 
           {/* Content - Scrollable Area */}
           <div className='flex-1 overflow-y-auto overflow-x-hidden min-h-0'>
@@ -1121,13 +1144,55 @@ const XyneAISidebar = ({
                 </div>
               </div>
             ) : messages.length === 0 ? (
-              <XyneAISuggestions
-                queries={suggestionQueries}
-                onSuggestionClick={handleSuggestionClick}
-              />
+              aiOnboarding.isActive ? (
+                <div className='flex flex-col h-full px-4 py-6'>
+                  <div className='flex items-start gap-2'>
+                    <div className='mt-0.5 flex-shrink-0'>
+                      <XyneAIStar size={18} />
+                    </div>
+                    <p className='text-foreground text-sm leading-relaxed'>
+                      Hi! I&apos;m your AI assistant. I can help you learn about everything Xyne
+                      Spaces has to offer. Try asking me one of the questions below, or ask anything
+                      you&apos;d like!
+                    </p>
+                  </div>
+                  {/* Onboarding suggestion chips */}
+                  <div className='flex flex-wrap gap-2 mt-6'>
+                    {visibleSuggestions.map(suggestion => (
+                      <button
+                        key={suggestion}
+                        onClick={() => handleSuggestionClick(suggestion)}
+                        className="px-3 py-1.5 rounded-full border border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-xs leading-5 font-['Inter']"
+                        data-track-category='AIOnboarding'
+                        data-track-name='SuggestionChip'
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <XyneAISuggestions
+                  queries={suggestionQueries}
+                  onSuggestionClick={handleSuggestionClick}
+                />
+              )
             ) : (
-              <div className='px-4 py-4'>
+              <div className={`px-4 py-4 ${aiOnboarding.isActive ? 'bot-markdown-content' : ''}`}>
                 <div className='space-y-4 max-w-full'>
+                  {/* Onboarding welcome message — persists at top of messages list */}
+                  {aiOnboarding.isActive && (
+                    <div className='flex items-start gap-2 mb-2'>
+                      <div className='mt-0.5 flex-shrink-0'>
+                        <XyneAIStar size={18} />
+                      </div>
+                      <p className='text-foreground text-sm leading-relaxed'>
+                        Hi! I&apos;m your AI assistant. I can help you learn about everything Xyne
+                        Spaces has to offer. Try asking me one of the questions below, or ask
+                        anything you&apos;d like!
+                      </p>
+                    </div>
+                  )}
                   {(() => {
                     let lastBotIndex = -1;
                     let lastUserIndex = -1;
@@ -1204,11 +1269,46 @@ const XyneAISidebar = ({
                       );
                     });
                   })()}
+                  {/* Onboarding suggestion chips after messages */}
+                  {aiOnboarding.isActive && visibleSuggestions.length > 0 && (
+                    <div className='flex flex-wrap gap-2 mt-4'>
+                      {visibleSuggestions.map(suggestion => (
+                        <button
+                          key={suggestion}
+                          onClick={() => handleSuggestionClick(suggestion)}
+                          className="px-3 py-1.5 rounded-full border border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-xs leading-5 font-['Inter']"
+                          data-track-category='AIOnboarding'
+                          data-track-name='SuggestionChip'
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {aiOnboarding.isActive && visibleSuggestions.length === 0 && (
+                    <p className='text-muted-foreground text-sm mt-4'>
+                      You can also ask me anything else!
+                    </p>
+                  )}
                   <div ref={messagesEndRef} />
                 </div>
               </div>
             )}
           </div>
+
+          {/* Done Exploring Button - shown after 3+ questions during onboarding */}
+          {aiOnboarding.isActive && onboardingAnsweredCount >= 3 && (
+            <div className='px-4 py-2'>
+              <button
+                onClick={completeOnboarding}
+                className='w-full py-2.5 px-4 rounded-xl bg-primary text-primary-foreground font-medium text-sm transition-colors hover:bg-primary/90'
+                data-track-category='AIOnboarding'
+                data-track-name='DoneExploring'
+              >
+                Done exploring — open my workspace
+              </button>
+            </div>
+          )}
 
           {/* Input Box - Fixed at Bottom */}
           <div className='relative'>
@@ -1247,6 +1347,7 @@ const XyneAISidebar = ({
               channelName={channelName}
               channelDescription={channelDescription}
               scopeType={scopeType}
+              isOnboarding={aiOnboarding.isActive}
               showChannelTag={true}
               threadInfo={activeThreadInfo}
               canvasInfo={canvasInfo}
