@@ -485,6 +485,30 @@ export class ConversationService {
     }
   }
 
+  async dispatchAppAction(data: {
+    actionId: string;
+    actionableUrl: string;
+    context: Record<string, unknown>;
+    messageId: string;
+    conversationId: string;
+  }): Promise<void> {
+    try {
+      await apiInstance.post('/apps/chat/action', data);
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
   /**
    * Update a Pulse merchant entry in the message frontmatter.
    * Used when the user corrects the auto-detected merchant name.

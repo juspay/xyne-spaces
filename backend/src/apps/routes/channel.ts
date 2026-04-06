@@ -1,11 +1,35 @@
 import { Router } from 'express';
+import { Request, Response } from 'express';
+import { z } from 'zod';
+import { logger } from '@/utils/logger';
 import { ChannelController } from '../controllers/channelController';
 import { validateChannelAccessForPost } from '../middelware/channelValidation';
 
 const router = Router();
 const channelController = new ChannelController();
 
-// Channel routes
+const OpenDmBodySchema = z.object({
+  targetUserId: z.string().min(1).trim(),
+  userId: z.string().min(1).trim(), // injected by authenticateApp (bot's userId)
+});
+
+router.post('/openDm', async (req: Request, res: Response) => {
+  const result = OpenDmBodySchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: 'Validation error', details: result.error.errors });
+    return;
+  }
+  const { targetUserId, userId: botUserId } = result.data;
+  try {
+    const { unifiedDMService } = await import('@/bots/unified/services/unified-dm-service');
+    const channel = await unifiedDMService.getOrCreateBotDM(targetUserId, botUserId);
+    res.status(200).json({ channelId: channel.id });
+  } catch (error) {
+    logger.error('[openDm] Failed to open DM:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.post('/info', validateChannelAccessForPost, channelController.getChannelByName);
 
 export default router;

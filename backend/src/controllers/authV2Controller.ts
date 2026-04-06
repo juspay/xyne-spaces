@@ -93,7 +93,22 @@ export class AuthV2Controller {
       const codeVerifier = pkceServiceV2.generateCodeVerifier();
       const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
 
-      const state = await oauthStateServiceV2.generateState(platform, codeChallenge);
+      let validatedRedirectTo: string | undefined;
+      const redirectToParam = req.query['redirect_to'] as string | undefined;
+      if (redirectToParam) {
+        const allowedOrigins = (process.env.ALLOWED_REDIRECT_ORIGINS ?? '')
+          .split(',')
+          .map((o) => o.trim())
+          .filter(Boolean);
+        try {
+          const origin = new URL(redirectToParam).origin;
+          if (allowedOrigins.includes(origin)) {
+            validatedRedirectTo = redirectToParam;
+          }
+        } catch (_e) {}
+      }
+
+      const state = await oauthStateServiceV2.generateState(platform, codeChallenge, validatedRedirectTo);
 
       await pkceServiceV2.storeVerifier(state, codeVerifier);
 
@@ -318,7 +333,7 @@ export class AuthV2Controller {
         logger.info(`[${requestId}] Set is_new_user cookie for new user: ${user.email}`);
       }
 
-      const frontendUrl = this.getFrontendUrl(req);
+      const frontendUrl = stateData.redirectTo ?? this.getFrontendUrl(req);
       logger.info(`[${requestId}] Redirecting to frontend with success`);
       res.redirect(`${frontendUrl}?success=true`);
     } catch (error) {

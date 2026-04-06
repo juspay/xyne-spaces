@@ -245,26 +245,65 @@ for i in {1..30}; do
     sleep 1
 done
 
+# Start claw-auth-postgres
+echo -e "${BLUE}🚢 Starting claw-auth-postgres...${NC}"
+$COMPOSE_CMD -f docker-compose.dev.yml up -d claw-auth-postgres
+
+echo -e "${BLUE}⏳ Waiting for claw-auth-postgres...${NC}"
+for i in {1..30}; do
+    if $COMPOSE_CMD -f docker-compose.dev.yml exec -T claw-auth-postgres pg_isready -U claw -d claw_auth_db > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ claw-auth-postgres is ready${NC}"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo -e "${RED}❌ claw-auth-postgres failed to start${NC}"
+        exit 1
+    fi
+    sleep 1
+done
+
+# Setup xyne-claw-auth database schema
+if [ -f "xyne-claw-auth/backend/.env" ]; then
+    echo -e "${BLUE}🔄 Setting up xyne-claw-auth database schema...${NC}"
+    cd xyne-claw-auth/backend
+    if [ ! -d "node_modules" ]; then
+        echo -e "${YELLOW}⚠️  xyne-claw-auth/backend dependencies not installed. Running npm install...${NC}"
+        npm install
+    fi
+    set -a && source .env && set +a
+    npx prisma db push --skip-generate --accept-data-loss
+    npx prisma generate
+    NODE_OPTIONS="" npx tsx prisma/seed.ts
+    echo -e "${GREEN}✓ xyne-claw-auth database schema ready${NC}"
+    cd ../..
+else
+    echo -e "${YELLOW}⚠️  xyne-claw-auth/backend/.env not found, skipping schema setup${NC}"
+    echo -e "${YELLOW}   Run: cp xyne-claw-auth/backend/.env.example xyne-claw-auth/backend/.env${NC}"
+fi
+
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}✅ Infrastructure Services Running!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${BLUE}Services:${NC}"
-echo -e "  🗄️  PostgreSQL:   ${GREEN}localhost:5432${NC}"
-echo -e "  💾 Redis:        ${GREEN}localhost:6379${NC}"
-echo -e "  🎥 LiveKit:      ${GREEN}http://localhost:7880${NC}"
-echo -e "  📝 Y-Sweet:      ${GREEN}http://localhost:8080${NC}"
-echo -e "  ⚡ Zero Server:  ${GREEN}http://localhost:4848${NC}"
-echo -e "  📦 fake-gcs:     ${GREEN}http://localhost:4443${NC}"
-echo -e "  📊 Grafana:      ${GREEN}http://localhost:3333${NC}"
-echo -e "  📈 VM:           ${GREEN}http://localhost:8428${NC}"
-echo -e "  🔭 OTEL:         ${GREEN}http://localhost:4318${NC}"
-echo -e "  🚩 Superposition: ${GREEN}http://localhost:9999${NC}"
+echo -e "  🗄️  PostgreSQL:         ${GREEN}localhost:5432${NC}"
+echo -e "  💾 Redis:              ${GREEN}localhost:6379${NC}"
+echo -e "  🎥 LiveKit:            ${GREEN}http://localhost:7880${NC}"
+echo -e "  📝 Y-Sweet:            ${GREEN}http://localhost:8080${NC}"
+echo -e "  ⚡ Zero Server:        ${GREEN}http://localhost:4848${NC}"
+echo -e "  📦 fake-gcs:           ${GREEN}http://localhost:4443${NC}"
+echo -e "  📊 Grafana:            ${GREEN}http://localhost:3333${NC}"
+echo -e "  📈 VM:                 ${GREEN}http://localhost:8428${NC}"
+echo -e "  🔭 OTEL:               ${GREEN}http://localhost:4318${NC}"
+echo -e "  🚩 Superposition:      ${GREEN}http://localhost:9999${NC}"
+echo -e "  🗄️  claw-auth-postgres: ${GREEN}localhost:5434${NC}"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo -e "  Backend:  ${BLUE}cd backend && npm run dev${NC}"
-echo -e "  Frontend: ${BLUE}cd dashboard && npm run dev${NC}"
+echo -e "  Backend:        ${BLUE}cd backend && npm run dev${NC}"
+echo -e "  Frontend:       ${BLUE}cd dashboard && npm run dev${NC}"
+echo -e "  Claw auth:      ${BLUE}cd xyne-claw-auth/backend && npm run dev${NC}"
+echo -e "  Claw auth UI:   ${BLUE}cd xyne-claw-auth/frontend && npm run dev${NC}"
 echo ""
 echo -e "${YELLOW}To stop services:${NC}"
 echo -e "  ${BLUE}$COMPOSE_CMD -f docker-compose.dev.yml down${NC}"

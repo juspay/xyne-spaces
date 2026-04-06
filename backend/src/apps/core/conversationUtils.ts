@@ -29,6 +29,7 @@ export async function findOrCreateConversation(
     channelId: string,
     userId: string,
     content: string,
+    isMarkdown?: boolean,
     conversationId?: string,
     uploadedFiles?: UploadedFileResult[],
     msgType?: MessageType,
@@ -40,14 +41,15 @@ export async function findOrCreateConversation(
 
     if (conversationId) {
       logger.info(`[INGEST-CONVERSATION] Adding reply to conversation ${conversationId}`);
-      
+
       const result = await conversationService.addMessageToConversation({
         conversationId: conversationId,
         userId: userId,
         content: content,
         msgType: messageType,
-        uploadedFiles: uploadedFiles,
+        isMarkdown: isMarkdown,
         metadata: metadata,
+        uploadedFiles: uploadedFiles,
       });
 
       return {
@@ -57,14 +59,15 @@ export async function findOrCreateConversation(
       };
     } else {
       logger.info(`[INGEST-CONVERSATION] Creating new conversation in channel ${channelId}`);
-      
+
       const result = await conversationService.createConversationWithMessage({
         channelId: channelId,
         userId: userId,
         content: content,
         msgType: messageType,
-        uploadedFiles: uploadedFiles,
+        isMarkdown: isMarkdown,
         messageMetadata: metadata,
+        uploadedFiles: uploadedFiles,
       });
 
       return {

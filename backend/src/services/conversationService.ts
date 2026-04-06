@@ -71,6 +71,7 @@ export interface CreateConversationWithMessageParams {
   isBot?: boolean;
   createdAt?: Date;
   isAddingParticipant?: boolean;
+  isMarkdown?: boolean;
 }
 
 export interface AddMessageToConversationParams {
@@ -86,6 +87,7 @@ export interface AddMessageToConversationParams {
   isBot?: boolean;
   createdAt?: Date;
   isAddingParticipant?: boolean;
+  isMarkdown?: boolean;
 }
 
 export interface UpdateMessageParams {
@@ -150,39 +152,37 @@ export class ConversationService {
     };
   }
 
-  private async pushVespaJobForMessage(
-    messageID: string,
-    userId: string
-  ): Promise<void> {
-   
-    vespaQueue.addJob({
-      schema: messageSchema,
-      jobType: "feed",
-      docId: messageID,
-    }).catch(async (error) => {
-      logger.error('Error queuing Vespa job for channel:', error);
-      // Log failed insertion to Postgres for later retry
-      try {
-        const vespaLogs = db.vespaInsertionLogs;
-        if (vespaLogs) {
-          await vespaLogs.create({
-            data: {
-              status: "FAILED",
-              type: "INSERT",
-              entityId: messageID,
-              entityType: messageSchema,
-              namespace: NAMESPACE,
-              errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
-              errorDetails: JSON.stringify(error),
-              userId: userId,
-              createdAt: new Date(),
-            },
-          });
+  private async pushVespaJobForMessage(messageID: string, userId: string): Promise<void> {
+    vespaQueue
+      .addJob({
+        schema: messageSchema,
+        jobType: 'feed',
+        docId: messageID,
+      })
+      .catch(async (error) => {
+        logger.error('Error queuing Vespa job for channel:', error);
+        // Log failed insertion to Postgres for later retry
+        try {
+          const vespaLogs = db.vespaInsertionLogs;
+          if (vespaLogs) {
+            await vespaLogs.create({
+              data: {
+                status: 'FAILED',
+                type: 'INSERT',
+                entityId: messageID,
+                entityType: messageSchema,
+                namespace: NAMESPACE,
+                errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+                errorDetails: JSON.stringify(error),
+                userId: userId,
+                createdAt: new Date(),
+              },
+            });
+          }
+        } catch (dbError) {
+          logger.error('Failed to log Vespa insertion error to database:', dbError);
         }
-      } catch (dbError) {
-        logger.error('Failed to log Vespa insertion error to database:', dbError);
-      }
-    });
+      });
   }
 
   private async pushVespaJobForChannel(
@@ -271,6 +271,7 @@ export class ConversationService {
       metadata,
       messageMetadata,
       isBot,
+      isMarkdown,
       createdAt,
       isAddingParticipant = true,
     } = params;
@@ -323,7 +324,10 @@ export class ConversationService {
       content: content?.trim() || '',
       msgType: msgType || MessageType.USER,
       hasAttachment: processedFiles.length > 0,
-      metadata: messageMetadata,
+      metadata: {
+        ...messageMetadata,
+        contentFormat: isMarkdown ? 'markdown' : 'html',
+      },
       ...(createdAt && { createdAt }),
     };
 
@@ -394,8 +398,11 @@ export class ConversationService {
     }
 
     // Push Vespa job for message indexing
-    this.pushVespaJobForMessage(message.messageId, userId).catch(error => {
-      logger.error(`[ConversationService] Error pushing Vespa job for message ${message.messageId}:`, error);
+    this.pushVespaJobForMessage(message.messageId, userId).catch((error) => {
+      logger.error(
+        `[ConversationService] Error pushing Vespa job for message ${message.messageId}:`,
+        error
+      );
     });
 
     // Update conversation with real initial message ID
@@ -519,7 +526,7 @@ export class ConversationService {
       hasAttachment: processedFiles.length > 0,
       showInChannel: replyBroadcast,
       childConversationId: childConversationId,
-      metadata,
+      metadata: metadata,
       ...(createdAt && { createdAt }),
     };
 
@@ -582,8 +589,11 @@ export class ConversationService {
     }
 
     // Push Vespa job for message indexing
-    this.pushVespaJobForMessage(message.messageId, userId).catch(error => {
-      logger.error(`[ConversationService] Error pushing Vespa job for message ${message.messageId}:`, error);
+    this.pushVespaJobForMessage(message.messageId, userId).catch((error) => {
+      logger.error(
+        `[ConversationService] Error pushing Vespa job for message ${message.messageId}:`,
+        error
+      );
     });
 
     // Create child conversation if replyBroadcast is true (similar to mutator logic)
@@ -692,7 +702,9 @@ export class ConversationService {
       try {
         let newFiles = await uploadFiles(files);
         processedFiles.push(...newFiles);
-        logger.info(`[ConversationService] Uploaded ${processedFiles.length} files for message ${messageId}`);
+        logger.info(
+          `[ConversationService] Uploaded ${processedFiles.length} files for message ${messageId}`
+        );
       } catch (error) {
         logger.error(`[ConversationService] File upload failed for message ${messageId}:`, error);
         throw new Error('File upload failed');
@@ -763,11 +775,16 @@ export class ConversationService {
 
     // 6. Update message in database
     const updatedMessage = await this.messageRepository.update(messageId, updateData);
-    logger.info(`[ConversationService] Updated message ${messageId} in conversation ${conversation.conversationId}`);
+    logger.info(
+      `[ConversationService] Updated message ${messageId} in conversation ${conversation.conversationId}`
+    );
 
     // Push Vespa job for message update indexing
-    this.pushVespaJobForMessage(updatedMessage.messageId, message.senderId).catch(error => {
-      logger.error(`[ConversationService] Error pushing Vespa job for message ${updatedMessage.messageId}:`, error);
+    this.pushVespaJobForMessage(updatedMessage.messageId, message.senderId).catch((error) => {
+      logger.error(
+        `[ConversationService] Error pushing Vespa job for message ${updatedMessage.messageId}:`,
+        error
+      );
     });
 
     // 7. Get sender info

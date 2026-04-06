@@ -7,6 +7,8 @@ import { resolveChannelId } from '../utils/channelUtils';
 const UploadFilesBodySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   text: z.string().trim().optional(),
+  markdownText: z.string().optional(),
+  metadata: z.string().optional(), // JSON-encoded string
   conversationId: z.string().trim().optional(),
   userId: z.string().min(1, 'User ID is required').trim(),
 }).refine(
@@ -33,7 +35,7 @@ export class FilesController {
         return;
       }
 
-      const { channelId, text, conversationId, userId } = bodyResult.data;
+      const { channelId, text, markdownText, metadata, conversationId, userId } = bodyResult.data;
 
       // Resolve channelId from conversationId if not provided
       const resolvedChannelId = await resolveChannelId(channelId, conversationId);
@@ -51,12 +53,25 @@ export class FilesController {
         return;
       }
 
+      // Parse metadata JSON if provided
+      let parsedMetadata: Record<string, unknown> | undefined;
+      if (metadata) {
+        try {
+          parsedMetadata = JSON.parse(metadata) as Record<string, unknown>;
+        } catch {
+          res.status(400).json({ error: 'metadata must be valid JSON', code: 'VALIDATION_ERROR' });
+          return;
+        }
+      }
+
       // Upload files and create/update conversation
       const result = await ingestAttachment({
         files,
         channelId: resolvedChannelId,
         userId,
         text,
+        markdownText,
+        metadata: parsedMetadata,
         conversationId,
       });
 

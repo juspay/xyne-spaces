@@ -6,6 +6,7 @@ interface OAuthState {
   platform: 'web' | 'electron' | 'mobile';
   codeChallenge?: string;
   createdAt: number;
+  redirectTo?: string;
 }
 
 class OAuthStateService {
@@ -16,7 +17,8 @@ class OAuthStateService {
 
   async generateState(
     platform: 'web' | 'electron' | 'mobile',
-    codeChallenge?: string
+    codeChallenge?: string,
+    redirectTo?: string,
   ): Promise<string> {
     const { redisService } = await import('./redisService');
     const client = redisService.getClient();
@@ -28,6 +30,7 @@ class OAuthStateService {
       platform,
       codeChallenge,
       createdAt: Date.now(),
+      ...(redirectTo !== undefined ? { redirectTo } : {}),
     };
 
     await client.setex(

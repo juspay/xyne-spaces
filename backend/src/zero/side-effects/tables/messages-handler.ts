@@ -22,7 +22,7 @@ import { logger } from '@/utils/logger';
 import { activityTrackingService } from '@/services/activityTrackingService';
 import { Platform, serializeMessagePreviewMd, serializeLinkPreviewMd, parseLinkPreviewMd, type MessagePreviewData, type TicketPreviewSnapshot } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
-import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload } from '@/apps/types';
+import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
@@ -244,7 +244,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         cleanContent: cleanContent,
         createdAt: message.createdAt,
         userId: senderId,
+        senderName,
         channelId,
+        channelName: channel?.name ?? channelId,
         ...(attachments.length > 0 && {
           attachments: attachments.map(att => ({
             attachmentId: att.id,
@@ -257,6 +259,27 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       }, mentionedAppUsersIds);
     }
 
+    // Notify app users in the channel when any user is mentioned
+    const nonAppMentionedUserIds = validMentionedUsers
+      .filter(u => !appUserIds.includes(u.userId))
+      .map(u => u.userId);
+    const observerAppUserIds = appUserIds.filter(id => !mentionedAppUsersIds.includes(id) && id !== senderId);
+
+    if (nonAppMentionedUserIds.length > 0 && observerAppUserIds.length > 0) {
+      void this.handlleMessageAppEvents(AppEventType.USER_MENTIONED, {
+        conversationId,
+        messageId,
+        content: content,
+        cleanContent: cleanContent,
+        createdAt: message.createdAt,
+        userId: senderId,
+        senderName,
+        channelId,
+        channelName: channel?.name ?? channelId,
+        mentionedUserIds: nonAppMentionedUserIds,
+      }, observerAppUserIds);
+    }
+    
     const finalMentionedUserIds = validMentionedUsers
       .map(user => user.userId);
 
@@ -949,7 +972,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
   private async handlleMessageAppEvents(
     eventType: AppEventType,
-    payload: AppMentionEventPayload | DMEventPayload,
+    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload,
     userIds: string[],
   ): Promise<void> {
     const event: BaseAppEvent = {

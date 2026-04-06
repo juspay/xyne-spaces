@@ -9,10 +9,13 @@ import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
 import { MessageType } from '@xyne/shared';
 import { ContentFormat } from '../types';
+import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 
 const ChatActionBodySchema = z.object({
-  text: z.string().optional(),
+  text: z.string().optional(), // plain text or Slack BlockKit — processed through parser
+  markdownText: z.string().optional(), // raw markdown (with optional frontmatter) — stored as-is
   attachments: z.array(z.any()).optional(),
+  metadata: z.record(z.unknown()).optional(), // message metadata (e.g. hasAppActions, appId)
   userId: z.string().min(1, 'User ID is required').trim(),
   uploadedFiles: z.array(z.object({
     originalName: z.string(),
@@ -29,6 +32,9 @@ const PostMessageBodySchema = ChatActionBodySchema.extend({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   conversationId: z.string().trim().optional(),
 }).refine(
+  data => !!data.text || !!data.markdownText,
+  { message: 'Either text or markdownText is required', path: ['text'] }
+).refine(
   data => !!data.channelId || !!data.conversationId,
   { message: 'Either channelId or conversationId is required', path: ['channelId'] }
 );
@@ -36,7 +42,10 @@ const PostMessageBodySchema = ChatActionBodySchema.extend({
 const UpdateMessageBodySchema = ChatActionBodySchema.extend({
   messageId: z.string().min(1, 'Message ID is required').trim(),
   channelId: z.string().optional(),
-});
+}).refine(
+  data => !!data.text || !!data.markdownText,
+  { message: 'Either text or markdownText is required', path: ['text'] }
+);
 
 const ChannelHistoryQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
@@ -126,35 +135,41 @@ export class ChatController {
         return;
       }
 
-      const { 
-        channelId, 
-        text, 
-        conversationId, 
-        attachments, 
+      const {
+        channelId,
+        text,
+        markdownText,
+        conversationId,
+        attachments,
         userId,
         uploadedFiles,
+        metadata,
         contentFormat,
       } = bodyResult.data;
 
       // Resolve channelId from conversationId if not provided
       const resolvedChannelId = await resolveChannelId(channelId, conversationId);
 
-      let content = text || '';
-      console.log(`Received message content for posting:`, { text, attachments, contentFormat });
-      if(contentFormat !== ContentFormat.MARKDOWN){
-        // Process message content (resolve mentions and parse with BlockKit)
+      let content: string;
+      if (markdownText) {
+        content = markdownText;
+      } else if (contentFormat === ContentFormat.MARKDOWN) {
+        content = text || '';
+      } else {
         content = await this.processMessageContent(text, attachments);
       }
 
       // Post the message with all features
+      const isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;
       const result = await findOrCreateConversation(
         resolvedChannelId,
         userId,
         content,
+        isMarkdown,
         conversationId,
         uploadedFiles,
         MessageType.BOT,
-        { contentFormat }
+        { contentFormat, ...metadata },
       );
 
       res.status(201).json(result);
@@ -200,10 +215,14 @@ export class ChatController {
         return;
       }
 
-      const { messageId, text, attachments } = bodyResult.data;
+      const { messageId, text, markdownText, attachments } = bodyResult.data;
 
-      // Process message content (resolve mentions and parse with BlockKit)
-      const content = await this.processMessageContent(text, attachments);
+      let content: string;
+      if (markdownText) {
+        content = markdownText;
+      } else {
+        content = await this.processMessageContent(text, attachments);
+      }
 
       // Update the message
       const result = await updateConversation(
@@ -332,6 +351,57 @@ export class ChatController {
       }
 
       res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * Proxy an app action to the external actionableUrl and update frontmatter.
+   * POST /api/apps/chat/action
+   */
+  dispatchAction = async (req: Request, res: Response): Promise<void> => {
+    const body = req.body as {
+      actionId?: unknown;
+      actionableUrl?: unknown;
+      context?: unknown;
+      messageId?: unknown;
+      conversationId?: unknown;
+    };
+
+    const actionId = typeof body.actionId === 'string' ? body.actionId : '';
+    const actionableUrl = typeof body.actionableUrl === 'string' ? body.actionableUrl : '';
+    const context = typeof body.context === 'object' && body.context !== null ? body.context : {};
+    const messageId = typeof body.messageId === 'string' ? body.messageId : '';
+    const conversationId = typeof body.conversationId === 'string' ? body.conversationId : '';
+
+    if (!actionId || !actionableUrl || !messageId || !conversationId) {
+      res.status(400).json({ error: 'actionId, actionableUrl, messageId, conversationId are required' });
+      return;
+    }
+
+    // Acknowledge immediately so the frontend isn't blocked
+    res.status(200).json({ success: true });
+
+    // Forward to the external URL server-side (no CORS issues)
+    try {
+      const callbackRes = await fetch(actionableUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actionId, context, messageId, conversationId }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!callbackRes.ok) {
+        const text = await callbackRes.text().catch(() => '');
+        logger.error(`[dispatchAction] Callback failed ${callbackRes.status}: ${text.slice(0, 300)}`);
+      }
+    } catch (err) {
+      logger.error('[dispatchAction] Error calling actionableUrl:', err);
+    }
+
+    // Update message frontmatter (action → actioned)
+    try {
+      await updateAppActionStatus(messageId, actionId);
+    } catch (err) {
+      logger.error('[dispatchAction] Error updating app action status:', err);
     }
   };
 }
