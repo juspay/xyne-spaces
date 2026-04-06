@@ -416,7 +416,9 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     },
   });
 
-  const [bookmarks, bookmarksDetails] = useCachedQuery(queries.userBookmarks(), { ttl: '10m' });
+  const [bookmarks, bookmarksDetails] = useCachedQuery(queries.userBookmarks(), {
+    ttl: '10m',
+  });
   const [visibleChannels, visibleChannelsDetails] = useCachedQuery(queries.userVisibleChannels(), {
     ttl: '10m',
   });

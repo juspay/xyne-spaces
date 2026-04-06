@@ -116,7 +116,8 @@ async function decrementSurfaceNudgeCountRow(
 async function reopenClosedDmParticipants(
   tx: Transaction<Schema>,
   channelId: string,
-  scopeType: string
+  scopeType: string,
+  timestamp: number
 ): Promise<void> {
   const isDM =
     scopeType === ChannelScopeType.DM ||
@@ -126,12 +127,14 @@ async function reopenClosedDmParticipants(
 
   const closedParticipants = await tx.run(zql.channel_user_status
     .where('channelId', channelId)
+    .where('isDeleted', false)
     .where('isClosed', true));
 
   for (const participant of closedParticipants) {
     await tx.mutate.channel_user_status.update({
       id: participant.id,
       isClosed: false,
+      updatedAt: timestamp,
     });
   }
 }
@@ -401,6 +404,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const userStatus = await tx.run(
             zql.channel_user_status
               .where('channelId', channelId)
+              .where('isDeleted', false)
               .where('userId', authData.sub)
               .one()
           );
@@ -421,6 +425,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: userStatus.id,
             ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel }),
             ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel }),
+            updatedAt: timestamp,
           });
         }
       ),
@@ -657,8 +662,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       removeParticipant: defineMutator(
-        z.object({ targetUserId: z.string(), channelId: z.string() }),
-        async ({ tx, args: { targetUserId, channelId } }) => {
+        z.object({ targetUserId: z.string(), channelId: z.string(), updatedAt: z.number() }),
+        async ({ tx, args: { targetUserId, channelId, updatedAt } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error("Channel doesn't exist");
@@ -713,7 +718,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Cannot remove the channel creator');
           }
 
-          await removeChannelParticipant(tx, channelId, targetUserId);
+          await removeChannelParticipant(tx, channelId, targetUserId, updatedAt);
 
           // Send system message for removed participant
           if (targetUser) {
@@ -730,8 +735,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       leaveChannel: defineMutator(
-        z.object({ channelId: z.string() }),
-        async ({ tx, args: { channelId } }) => {
+        z.object({ channelId: z.string(), updatedAt: z.number() }),
+        async ({ tx, args: { channelId, updatedAt } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
             throw new Error('Channel not found');
@@ -757,7 +762,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          await removeChannelParticipant(tx, channelId, authData.sub);
+          await removeChannelParticipant(tx, channelId, authData.sub, updatedAt);
         },
       ),
       updateAddUserPolicy: defineMutator(
@@ -832,6 +837,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const participant = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
+            .where('isDeleted', false)
             .one());
 
           if (!participant) {
@@ -850,6 +856,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.channel_user_status.update({
             id: participant.id,
             ...updateData,
+            updatedAt: timestamp,
           });
 
           // Query for drafts in this channel for this user (follows backend logic)
@@ -919,11 +926,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           channelId: z.string(),
           messageId: z.string(),
           conversationId: z.string().optional(),
+          timestamp: z.number(),
         }),
-        async ({ tx, args: { channelId, messageId, conversationId } }) => {
+        async ({ tx, args: { channelId, messageId, conversationId, timestamp } }) => {
           const participant = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
+            .where('isDeleted', false)
             .one());
 
           if (!participant) {
@@ -1058,6 +1067,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.channel_user_status.update({
             id: participant.id,
             ...updateData,
+            updatedAt: timestamp,
           });
 
           // Mark root activities unread sequentially for safer transaction handling
@@ -1072,11 +1082,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       toggleStarred: defineMutator(
-        z.object({ channelId: z.string() }),
-        async ({ tx, args: { channelId } }) => {
+        z.object({ channelId: z.string(), updatedAt: z.number() }),
+        async ({ tx, args: { channelId, updatedAt } }) => {
           const participation = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
+            .where('isDeleted', false)
             .one());
 
           if (!participation) {
@@ -1086,15 +1097,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.channel_user_status.update({
             id: participation.id,
             isStarred: !participation.isStarred,
+            updatedAt,
           });
         },
       ),
       closeDm: defineMutator(
-        z.object({ channelId: z.string() }),
-        async ({ tx, args: { channelId } }) => {
+        z.object({ channelId: z.string(), updatedAt: z.number() }),
+        async ({ tx, args: { channelId, updatedAt } }) => {
           const participation = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
+            .where('isDeleted', false)
             .one());
 
           if (!participation) {
@@ -1104,6 +1117,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.channel_user_status.update({
             id: participation.id,
             isClosed: true,
+            updatedAt,
           });
         },
       ),
@@ -1193,11 +1207,12 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
       reopenDm: defineMutator(
-        z.object({ channelId: z.string() }),
-        async ({ tx, args: { channelId } }) => {
+        z.object({ channelId: z.string(), updatedAt: z.number() }),
+        async ({ tx, args: { channelId, updatedAt } }) => {
           const participation = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
+            .where('isDeleted', false)
             .one());
 
           if (!participation) {
@@ -1207,15 +1222,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.channel_user_status.update({
             id: participation.id,
             isClosed: false,
+            updatedAt,
           });
         },
       ),
       updateSelectedBoardId: defineMutator(
-        z.object({ channelId: z.string(), boardId: z.string().nullable() }),
-        async ({ tx, args: { channelId, boardId } }) => {
+        z.object({ channelId: z.string(), boardId: z.string().nullable(), updatedAt: z.number() }),
+        async ({ tx, args: { channelId, boardId, updatedAt } }) => {
           const userStatus = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
+            .where('isDeleted', false)
             .one());
 
           if (!userStatus) {
@@ -1225,6 +1242,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.channel_user_status.update({
             id: userStatus.id,
             selectedBoardId: boardId,
+            updatedAt,
           });
         },
       ),
@@ -1497,6 +1515,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const channelUserStatusParticipant = await tx.run(zql.channel_user_status
             .where('userId', authData.sub)
             .where('channelId', channelId)
+            .where('isDeleted', false)
             .one());
 
           if (channel === undefined) {
@@ -1599,10 +1618,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: channelUserStatusParticipant.id,
             lastViewedAt: now,
             lastViewedConversationId: conversationId,
+            updatedAt: now,
           });
 
           // Auto-reopen DMs for all participants when a new conversation is started
-          await reopenClosedDmParticipants(tx, channel.id, channel.scopeType);
+          await reopenClosedDmParticipants(tx, channel.id, channel.scopeType, now);
 
           // Add conversation creator as MENTIONED participant
           await tx.mutate.conversation_participants.insert({
@@ -2011,6 +2031,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             zql.channel_user_status
               .where('channelId', targetChannelId)
               .where('userId', authData.sub)
+              .where('isDeleted', false)
               .one()
           );
           if (userStatus) {
@@ -2018,6 +2039,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               id: userStatus.id,
               lastViewedAt: now,
               lastViewedConversationId: conversationId,
+              updatedAt: now,
             });
           }
 
@@ -2260,19 +2282,21 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const senderParticipation = await tx.run(zql.channel_user_status
             .where('channelId', channel.id)
             .where('userId', authData.sub)
+            .where('isDeleted', false)
             .one());
 
           if (senderParticipation) {
             await tx.mutate.channel_user_status.update({
               id: senderParticipation.id,
               lastViewedAt: timestamp,
+              updatedAt: timestamp,
             });
           }
 
           //Activity related updates
 
           // Auto-reopen DMs for all participants when a new message is sent
-          await reopenClosedDmParticipants(tx, channel.id, channel.scopeType);
+          await reopenClosedDmParticipants(tx, channel.id, channel.scopeType, timestamp);
 
           // Add or upgrade sender as AUTHOR participant in conversation
           const existingParticipant = await tx.run(zql.conversation_participants
@@ -3689,8 +3713,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         z.object({
           actorAction: z.string().optional(),
           classification: z.nativeEnum(ActivityClassification).optional(),
+          timestamp: z.number(),
         }),
-        async ({ tx, args: { actorAction, classification } }) => {
+        async ({ tx, args: { actorAction, classification, timestamp } }) => {
           let query = zql.activities
             .where('userId', authData.sub)
             .where('isRead', false);
@@ -3725,7 +3750,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const channelUserStatuses = await tx.run(
               zql.channel_user_status
                 .where('userId', authData.sub)
-                .where('channelId', 'IN', uniqueChannelIds),
+                .where('channelId', 'IN', uniqueChannelIds)
+                .where('isDeleted', false),
             );
             await Promise.all(
               channelUserStatuses.map(channelStatus => {
@@ -3734,6 +3760,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 return tx.mutate.channel_user_status.update({
                   id: channelStatus.id,
                   unreadCount: newUnreadCount,
+                  updatedAt: timestamp,
                 });
               }),
             );
@@ -6005,7 +6032,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           bookmarkId: z.string(),
         }),
         async ({ tx, args: { entityId, entityType, metadata, timestamp, bookmarkId } }) => {
-          // Check if bookmark already exists
+          // Check if bookmark already exists (including soft-deleted)
           const existing = await tx.run(zql.bookmarks
             .where('userId', authData.sub)
             .where('entityId', entityId)
@@ -6013,16 +6040,30 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             .one());
 
           if (existing) {
-            logger.info('[Mutator] Bookmark already exists, skipping');
-            return; // Silently return instead of throwing error
+            if (existing.isDeleted) {
+              // Restore soft-deleted bookmark
+              await tx.mutate.bookmarks.update({
+                id: existing.id,
+                isDeleted: false,
+                updatedAt: timestamp,
+                metadata: metadata ?? existing.metadata,
+              });
+              logger.info('[Mutator] Restored soft-deleted bookmark');
+            } else {
+              logger.info('[Mutator] Bookmark already exists, skipping');
+            }
+            return;
           }
 
+          // Insert new bookmark
           await tx.mutate.bookmarks.insert({
             id: bookmarkId,
             userId: authData.sub,
             entityId: entityId,
             entityType: entityType,
             createdAt: timestamp,
+            updatedAt: timestamp,
+            isDeleted: false,
             metadata: metadata,
           });
         },
@@ -6037,14 +6078,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             .where('userId', authData.sub)
             .where('entityId', entityId)
             .where('entityType', entityType)
+            .where('isDeleted', false)
             .one());
 
           if (!bookmark) {
             throw new Error('Bookmark not found');
           }
 
-          await tx.mutate.bookmarks.delete({
+          // Soft delete - update isDeleted to true
+          await tx.mutate.bookmarks.update({
             id: bookmark.id,
+            isDeleted: true,
+            updatedAt: Date.now(),
           });
         },
       ),
@@ -6059,6 +6104,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             .where('userId', authData.sub)
             .where('entityId', entityId)
             .where('entityType', entityType)
+            .where('isDeleted', false)
             .one());
 
           if (!bookmark) {
@@ -6068,6 +6114,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.bookmarks.update({
             id: bookmark.id,
             metadata: metadata,
+            updatedAt: Date.now(),
           });
         },
       ),
@@ -7971,10 +8018,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           channelIds: z.array(z.string()),
           timestamp: z.number(),
         }),
-        async ({ tx, ctx, args: { channelIds, timestamp: _timestamp } }) => {
+        async ({ tx, ctx, args: { channelIds, timestamp } }) => {
           // Get all channel user status entries for this user
           const userChannelStatuses = await tx.run(
-            zql.channel_user_status.where('userId', ctx.userID),
+            zql.channel_user_status.where('userId', ctx.userID).where('isDeleted', false),
           );
 
           const newChannelIds = new Set(channelIds);
@@ -7988,6 +8035,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               await tx.mutate.channel_user_status.update({
                 id: status.id,
                 isRecapSubscribed: shouldSubscribe,
+                updatedAt: timestamp,
               });
             }
           }
@@ -7998,12 +8046,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           recapDate: z.number(),
           timestamp: z.number(),
         }),
-        async ({ tx, ctx, args: { recapDate, timestamp: _timestamp } }) => {
+        async ({ tx, ctx, args: { recapDate, timestamp } }) => {
           // Update all subscribed channels for this user with the seen date
           const subscribedChannels = await tx.run(
             zql.channel_user_status
               .where('userId', ctx.userID)
-              .where('isRecapSubscribed', true),
+              .where('isRecapSubscribed', true)
+              .where('isDeleted', false),
           );
 
           for (const status of subscribedChannels) {
@@ -8015,6 +8064,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               await tx.mutate.channel_user_status.update({
                 id: status.id,
                 lastSeenRecapDate: recapDate,
+                updatedAt: timestamp,
               });
             }
           }
@@ -8026,12 +8076,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           recapDate: z.number(),
           timestamp: z.number(),
         }),
-        async ({ tx, ctx, args: { channelId, recapDate, timestamp: _timestamp } }) => {
+        async ({ tx, ctx, args: { channelId, recapDate, timestamp } }) => {
           // Find the channel user status for this channel
           const status = await tx.run(
             zql.channel_user_status
               .where('userId', ctx.userID)
               .where('channelId', channelId)
+              .where('isDeleted', false)
               .one(),
           );
 
@@ -8044,6 +8095,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.channel_user_status.update({
               id: status.id,
               lastSeenRecapDate: recapDate,
+              updatedAt: timestamp,
             });
           }
         },
@@ -8053,12 +8105,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           channelId: z.string(),
           timestamp: z.number(),
         }),
-        async ({ tx, ctx, args: { channelId, timestamp: _timestamp } }) => {
+        async ({ tx, ctx, args: { channelId, timestamp } }) => {
           // Find the channel user status for this channel
           const status = await tx.run(
             zql.channel_user_status
               .where('userId', ctx.userID)
               .where('channelId', channelId)
+              .where('isDeleted', false)
               .one(),
           );
 
@@ -8070,6 +8123,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           await tx.mutate.channel_user_status.update({
             id: status.id,
             lastSeenRecapDate: null,
+            updatedAt: timestamp,
           });
         },
       ),

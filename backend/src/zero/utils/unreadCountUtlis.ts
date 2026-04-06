@@ -14,7 +14,7 @@ export async function handleUnreadCount(
     if (recipientIds.length === 0 || !channelStats?.lastActivityAt) return;
 
     const statuses = await db.channelUserStatus.findMany({
-      where: { channelId, userId: { in: recipientIds } },
+      where: { channelId, userId: { in: recipientIds }, isDeleted: false },
       select: { userId: true, lastViewedAt: true }
     });
 
@@ -33,7 +33,7 @@ export async function handleUnreadCount(
             });
             await db.channelUserStatus.update({
               where: { channelId_userId: { channelId, userId: status.userId } },
-              data: { unreadCount }
+              data: { unreadCount, updatedAt: new Date() }
             });
           }
         })
@@ -71,7 +71,7 @@ export async function handleUnreadCount(
 
           await db.channelUserStatus.update({
             where: { channelId_userId: { channelId, userId: status.userId } },
-            data: { unreadCount: unreadActivitiesCount }
+            data: { unreadCount: unreadActivitiesCount, updatedAt: new Date() }
           });
         })
       );

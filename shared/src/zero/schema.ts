@@ -1154,6 +1154,8 @@ export const channelUserStatusTable = table('channel_user_status')
     lastSeenRecapDate: number().optional(),
     desktopNotificationLevel: string(),
     mobileNotificationLevel: string(),
+    isDeleted: boolean(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -1477,6 +1479,8 @@ export const bookmarkTable = table('bookmarks')
     entityId: string(),
     entityType: enumeration<BookmarkEntityType>(),
     createdAt: number(),
+    updatedAt: number(),
+    isDeleted: boolean(),
     metadata: json().optional(),
   })
   .primaryKey('id');

@@ -68,7 +68,7 @@ const MobileChatDirectory = ({
 
       setShowAddDmForm(false);
       if (response.isExisting) {
-        zero.mutate(mutators.channel.reopenDm({ channelId: response.id }));
+        zero.mutate(mutators.channel.reopenDm({ channelId: response.id, updatedAt: Date.now() }));
       }
       void navigate(`/chat/dir/${response.id}`);
     },

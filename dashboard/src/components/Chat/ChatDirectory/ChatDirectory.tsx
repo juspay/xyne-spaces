@@ -96,7 +96,7 @@ const ChatDirectory = ({
       setShowAddDmForm(false);
       // If existing DM was returned (might have been closed), reopen it
       if (response.isExisting) {
-        zero.mutate(mutators.channel.reopenDm({ channelId: response.id }));
+        zero.mutate(mutators.channel.reopenDm({ channelId: response.id, updatedAt: Date.now() }));
       }
       // Navigate to the DM channel
       void navigate(`/chat/dir/${response.id}`);

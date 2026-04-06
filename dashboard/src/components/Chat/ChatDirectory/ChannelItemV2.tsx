@@ -86,7 +86,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
   const handleCloseDm = (e: React.MouseEvent): void => {
     e.preventDefault();
     e.stopPropagation();
-    zero.mutate(mutators.channel.closeDm({ channelId: channel.id }));
+    zero.mutate(mutators.channel.closeDm({ channelId: channel.id, updatedAt: Date.now() }));
     // If currently viewing this DM, navigate away
     if (isActive) {
       void navigate('/chat');

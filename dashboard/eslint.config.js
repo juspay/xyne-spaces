@@ -17,6 +17,7 @@ const localRules = {
     'no-rocicorp-use-zero': require('./eslint-rules/no-rocicorp-use-zero.cjs'),
     'no-date-now-or-uuid-in-mutators': require('./eslint-rules/no-date-now-or-uuid-in-mutators.cjs'),
     'require-tracking-on-click': require('./eslint-rules/require-tracking-on-click.cjs'),
+    'require-is-deleted-filter': require('../shared/eslint-rules/require-is-deleted-filter.cjs'),
     'require-initial-message-md-in-conversation-insert': require('./eslint-rules/require-initial-message-md-in-conversation-insert.cjs'),
   }
 };
@@ -84,6 +85,7 @@ export default tseslint.config(
       "local-rules/no-rocicorp-use-query": "error",
       "local-rules/no-rocicorp-use-zero": "error",
       "local-rules/no-date-now-or-uuid-in-mutators": "error",
+      "local-rules/require-is-deleted-filter": "error",
       "local-rules/require-initial-message-md-in-conversation-insert": "error",
       "local-rules/require-tracking-on-click": ["error", {
         exemptComponents: [],

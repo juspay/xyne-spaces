@@ -375,6 +375,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           mutators.bookmark.remove({
             entityId: message.messageId,
             entityType: BookmarkEntityType.MESSAGE,
+            timestamp: Date.now(),
           }),
         );
       } else {
@@ -515,6 +516,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           channelId,
           messageId: message.messageId,
           conversationId: message.conversationId,
+          timestamp: Date.now(),
         }),
       );
       toast.success('Marked as unread');

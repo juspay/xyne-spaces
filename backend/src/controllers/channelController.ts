@@ -539,7 +539,7 @@ export class ChannelController {
         // Reopen DM for all participants so they can see the message
         await tx.channelUserStatus.updateMany({
           where: { channelId: channelId, isClosed: true },
-          data: { isClosed: false },
+          data: { isClosed: false, updatedAt: new Date() },
         });
 
         return {

@@ -492,7 +492,7 @@ export const queries = defineQueries({
 
   userVisibleChannels: defineQuery(({ ctx }) => {
     return zql.channels.whereExists('participantsStatus', (p) =>
-      p.where('isClosed', false).where('userId', ctx.userID)
+      p.where('isClosed', false).where('isDeleted', false).where('userId', ctx.userID)
     ).related('channelStats');
   }),
 
@@ -580,7 +580,7 @@ export const queries = defineQueries({
         return zql.channel_user_status.where('channelId', 'nonexistent').limit(0);
       }
 
-      return zql.channel_user_status.where('userId', ctx.userID).where((helpers) => {
+      return zql.channel_user_status.where('userId', ctx.userID).where('isDeleted', false).where((helpers) => {
         return helpers.cmp('channelId', 'IN', channelIds);
       });
     }
@@ -660,7 +660,7 @@ export const queries = defineQueries({
   ),
 
   getAllChannelsUserStatus: defineQuery(({ ctx }) => {
-    return zql.channel_user_status.where('userId', ctx.userID);
+    return zql.channel_user_status.where('userId', ctx.userID).where('isDeleted', false);
   }),
 
   userActiveCalls: defineQuery(() => {
@@ -1168,7 +1168,7 @@ export const queries = defineQueries({
   }),
 
   userBookmarks: defineQuery(() => {
-    return zql.bookmarks.orderBy('createdAt', 'desc');
+    return zql.bookmarks.where('isDeleted', false).orderBy('createdAt', 'desc');
   }),
 
   attachmentsByInitialMessage: defineQuery(
@@ -1541,7 +1541,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     return zql.channels
       .where((helpers) => {
         return helpers.exists('participantsStatus', (p) => {
-          return p.where('isClosed', false).where('userId', ctx.userID);
+          return p.where('isClosed', false).where('isDeleted', false).where('userId', ctx.userID);
         });
       })
       .related('conversations', (c) => c.orderBy('createdAt', 'desc').limit(10));

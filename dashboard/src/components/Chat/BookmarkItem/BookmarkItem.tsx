@@ -207,6 +207,7 @@ export const BookmarkItem = ({
       mutators.bookmark.remove({
         entityId,
         entityType,
+        timestamp: Date.now(),
       }),
     );
   };
@@ -235,6 +236,7 @@ export const BookmarkItem = ({
             ...currentMetadata,
             snoozeUntil: null,
           },
+          timestamp: Date.now(),
         }),
       );
       return;
@@ -254,6 +256,7 @@ export const BookmarkItem = ({
           ...currentMetadata,
           snoozeUntil: snoozeTime.toISOString(),
         },
+        timestamp: Date.now(),
       }),
     );
 

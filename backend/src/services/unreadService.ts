@@ -41,8 +41,9 @@ export class UnreadService {
     conversationId?: string // ✅ Now optional
   ): Promise<void> {
     try {
-      const updateData: { lastViewedAt: Date; lastViewedConversationId?: string } = {
+      const updateData: { lastViewedAt: Date; lastViewedConversationId?: string; updatedAt: Date } = {
         lastViewedAt: new Date(),
+        updatedAt: new Date(),
       };
 
       if (conversationId) {

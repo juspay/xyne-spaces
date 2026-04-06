@@ -454,6 +454,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
             mutators.channel.updateSelectedBoardId({
               channelId,
               boardId: selectedBoardId,
+              updatedAt: Date.now(),
             }),
           );
         }

@@ -23,6 +23,7 @@ export interface ChannelUserStatusFilters {
   userId?: string;
   isStarred?: boolean;
   isClosed?: boolean;
+  includeDeleted?: boolean;
 }
 
 export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatus, CreateChannelUserStatusInput, UpdateChannelUserStatusInput> {
@@ -50,7 +51,10 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
 
     async findById(id: string): Promise<ChannelUserStatus | null> {
       return await this.db.channelUserStatus.findUnique({
-        where: { id }
+        where: { 
+          id,
+          isDeleted: false 
+        }
       });
     }
   
@@ -75,6 +79,10 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
       if (filters?.isClosed) {
         where.isClosed = filters.isClosed;
       }
+
+      if (!filters?.includeDeleted) {
+        where.isDeleted = false;
+      }
   
       return await this.db.channelUserStatus.findMany({
         where,
@@ -85,15 +93,14 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
     }
 
   /**
-   * Find status by channel and user
+   * Find status by channel and user (excluding soft deleted)
    */
   async findByChannelAndUser(channelId: string, userId: string): Promise<ChannelUserStatus | null> {
-    return this.db.channelUserStatus.findUnique({
+    return this.db.channelUserStatus.findFirst({
       where: {
-        channelId_userId: {
-          channelId,
-          userId,
-        },
+        channelId,
+        userId,
+        isDeleted: false,
       },
     });
   }
@@ -104,7 +111,10 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
   async update(id: string, data: UpdateChannelUserStatusInput): Promise<ChannelUserStatus> {
     return this.db.channelUserStatus.update({
       where: { id },
-      data,
+      data: {
+        ...data,
+        updatedAt: new Date(),
+      },
     });
   }
 
@@ -125,7 +135,10 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
           userId,
         },
       },
-      update: data,
+      update: {
+        ...data,
+        updatedAt: now,
+      },
       create: {
         channelId,
         userId,
@@ -133,6 +146,7 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
         lastViewedConversationId: data.lastViewedConversationId,
         isStarred: data.isStarred ?? false,
         isClosed: data.isClosed ?? false,
+        updatedAt: now,
       },
     });
   }
@@ -202,9 +216,10 @@ export class ChannelUserStatusRepository extends BaseRepository<ChannelUserStatu
         channelId,
         isClosed: true,
       },
-        data: {
-          isClosed: false,
-        },
+      data: {
+        isClosed: false,
+        updatedAt: new Date(),
+      },
     });
   }
 

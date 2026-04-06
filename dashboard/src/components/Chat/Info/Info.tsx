@@ -193,11 +193,13 @@ const Info = ({
     void navigate(targetPath, { replace: true });
 
     // Then leave channel
-    zero.mutate(mutators.channel.leaveChannel({ channelId: channel.id }));
+    zero.mutate(mutators.channel.leaveChannel({ channelId: channel.id, updatedAt: Date.now() }));
   };
 
   const handleStarToggle = (): void => {
-    void zero.mutate(mutators.channel.toggleStarred({ channelId: channel.id }));
+    void zero.mutate(
+      mutators.channel.toggleStarred({ channelId: channel.id, updatedAt: Date.now() }),
+    );
   };
 
   const { handleCallClick, hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } =
@@ -680,7 +682,13 @@ const ChannelMembers = ({
   };
 
   const handleRemoveParticipant = (targetUserId: string): void => {
-    zero.mutate(mutators.channel.removeParticipant({ channelId: channel.id, targetUserId }));
+    zero.mutate(
+      mutators.channel.removeParticipant({
+        channelId: channel.id,
+        targetUserId,
+        updatedAt: Date.now(),
+      }),
+    );
     setRemoveDialogOpen(false);
     setUserToRemove(null);
   };

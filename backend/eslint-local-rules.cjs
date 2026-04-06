@@ -9,4 +9,5 @@
 module.exports = {
   'no-duplicate-workflow-steps': require('./eslint-rules/no-duplicate-workflow-steps.cjs'),
   'no-rocicorp-define-query': require('../shared/eslint-rules/no-rocicorp-define-query.cjs'),
+  'require-is-deleted-filter': require('../shared/eslint-rules/require-is-deleted-filter.cjs')
 }
