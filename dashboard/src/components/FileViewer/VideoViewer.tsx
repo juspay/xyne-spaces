@@ -32,6 +32,10 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const retryCountRef = useRef(0);
+    const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const videoObserverRef = useRef<IntersectionObserver | null>(null);
+    const MAX_VIDEO_RETRIES = 5;
     const { isMobile } = usePlatform();
 
     // Expose video ref to parent component
@@ -66,6 +70,15 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
         }
       };
     }, [source, streamUrl]);
+
+    // Reset retry state whenever the stream URL changes (new video)
+    useEffect(() => {
+      retryCountRef.current = 0;
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+    }, [streamUrl]);
 
     const isViewerActive = isViewerFocused;
 
@@ -165,7 +178,6 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
 
     // Video event handlers
     const handleLoadStart = (): void => {
-      setIsLoading(true);
       setError(null);
     };
 
@@ -196,8 +208,36 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     };
 
     const handleError = (): void => {
-      setIsLoading(false);
-      setError('Failed to load video. The video format may not be supported.');
+      // Retry on ANY error while retries remain.
+      //
+      // A video that isn't ready yet (still uploading / processing) can
+      // trigger different error codes depending on the browser:
+      //   • MEDIA_ERR_NETWORK (2) – Chrome when the server returns 404
+      //   • MEDIA_ERR_SRC_NOT_SUPPORTED (4) – Firefox / Safari for the same 404
+      //
+      // Checking only MEDIA_ERR_NETWORK therefore fails silently on non-Chrome
+      // browsers and immediately shows the error UI. Retrying on every code
+      // means even a genuinely unsupported format will show an error after
+      // exhausting retries — still a better UX than an instant failure for a
+      // video that simply hasn't finished uploading.
+      if (retryCountRef.current < MAX_VIDEO_RETRIES) {
+        retryCountRef.current += 1;
+        // Keep loading spinner visible during retries
+        setIsLoading(true);
+        setError(null);
+
+        // Exponential back-off: 2 s, 3 s, 4.5 s … capped at 15 s
+        const delay = Math.min(2000 * Math.pow(1.5, retryCountRef.current - 1), 15_000);
+        retryTimeoutRef.current = setTimeout(() => {
+          if (videoRef.current) {
+            videoRef.current.load();
+          }
+        }, delay);
+      } else {
+        // Retries exhausted → show error UI
+        setIsLoading(false);
+        setError('Failed to load video. The video format may not be supported.');
+      }
     };
 
     // Shared keyboard handler logic
@@ -256,11 +296,39 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       },
     );
 
-    // Cleanup timeout on unmount
+    // IntersectionObserver to pause video when scrolled out of view
+    // Only applies to inline mode (when width/height are defined), not immersive mode
+    useEffect(() => {
+      const video = videoRef.current;
+      if (!video || isImmersiveMode) return;
+
+      videoObserverRef.current = new IntersectionObserver(
+        entries => {
+          const entry = entries[0];
+          // If video is not visible and is playing, pause it
+          if (entry && !entry.isIntersecting && !video.paused) {
+            video.pause();
+          }
+        },
+        { threshold: 0, rootMargin: '0px' },
+      );
+
+      videoObserverRef.current.observe(video);
+
+      return () => {
+        videoObserverRef.current?.disconnect();
+        videoObserverRef.current = null;
+      };
+    }, [isImmersiveMode]);
+
+    // Cleanup timeouts on unmount
     useEffect((): (() => void) => {
       return () => {
         if (controlsTimeoutRef.current) {
           clearTimeout(controlsTimeoutRef.current);
+        }
+        if (retryTimeoutRef.current) {
+          clearTimeout(retryTimeoutRef.current);
         }
       };
     }, []);
@@ -281,9 +349,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       <div
         ref={containerRef}
         className={cn(
-          `relative h-full w-full flex items-center justify-center group ${
-            isImmersiveMode ? 'bg-black' : 'bg-background'
-          } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2`,
+          'relative h-full w-full flex items-center justify-center group bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2',
         )}
         onMouseLeave={() => {
           if (controlsTimeoutRef.current) {
@@ -338,22 +404,11 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           Your browser does not support the video tag.
         </video>
 
-        {/* Loading Spinner */}
+        {/* Loading Spinner — always shown over a black background */}
         {isLoading && (
-          <div
-            className={cn(
-              'absolute inset-0 flex items-center justify-center',
-              isImmersiveMode ? 'bg-black/40 z-20' : '',
-            )}
-          >
+          <div className='absolute inset-0 flex items-center justify-center bg-black/60 z-20'>
             <div className='flex flex-col items-center gap-3'>
-              <div
-                className={cn(
-                  `animate-spin rounded-full border-t-4 ${
-                    isImmersiveMode ? 'h-12 w-12 border-white' : 'h-16 w-16 border-white'
-                  }`,
-                )}
-              ></div>
+              <div className='animate-spin rounded-full border-t-4 h-12 w-12 border-white'></div>
               {isImmersiveMode && <div className='text-muted text-sm'>Loading video...</div>}
             </div>
           </div>

@@ -1310,7 +1310,7 @@ export const AttachmentGalleryModal: React.FC = () => {
           onMouseLeave={() => setIsHovered(false)}
           onTouchStart={e => e.stopPropagation()}
         >
-          <div className='absolute inset-0 bg-white'>
+          <div className={cn('absolute inset-0', isVideo ? 'bg-black' : 'bg-white')}>
             {showThreadPanel ? (
               // Side-by-side layout with thread panel
               <PanelGroup direction='horizontal' className='h-full w-full'>
@@ -1323,7 +1323,9 @@ export const AttachmentGalleryModal: React.FC = () => {
                         ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
                         : isPdf
                           ? 'bg-white'
-                          : 'overflow-auto bg-white',
+                          : isVideo
+                            ? 'overflow-hidden bg-black'
+                            : 'overflow-auto bg-white',
                     )}
                   >
                     {/* Floating top bar - no close button when thread visible */}
@@ -1359,7 +1361,9 @@ export const AttachmentGalleryModal: React.FC = () => {
                     ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
                     : isPdf
                       ? 'bg-white'
-                      : 'overflow-auto bg-white',
+                      : isVideo
+                        ? 'overflow-hidden bg-black'
+                        : 'overflow-auto bg-white',
                 )}
               >
                 {renderFloatingTopBar(true)}

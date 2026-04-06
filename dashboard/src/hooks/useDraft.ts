@@ -4,6 +4,7 @@ import { stateMachineActor } from '../machines/stateMachine';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { apiInstance } from '../services/clients/apiClient';
+import { queryClient } from '../services/clients/queryClient';
 import { v4 as uuidv4 } from 'uuid';
 import { generateWebThumbnail, isVideoFile } from '../services/thumbnailService';
 import {
@@ -163,6 +164,18 @@ export function useDraftAttachments() {
       });
 
       const processedFiles = await Promise.all(fileProcessingPromises);
+
+      // Pre-seed the React Query preview cache with thumbnail blobs generated during the draft
+      // phase. This allows InlineVideoPlayer to show the thumbnail immediately after send,
+      // before the server syncs thumbnailUrl back via Zero replication (which can take seconds).
+      processedFiles.forEach(({ attachmentId, thumbnailBlob }) => {
+        if (thumbnailBlob) {
+          queryClient.setQueryData(
+            ['preview-blob', `/attachments/${attachmentId}/thumbnail`],
+            thumbnailBlob,
+          );
+        }
+      });
 
       // Prepare attachments array for mutator
       const attachmentsData = processedFiles.map(

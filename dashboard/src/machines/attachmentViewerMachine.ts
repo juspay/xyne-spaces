@@ -16,6 +16,14 @@ export interface AttachmentRef {
   replyCount?: number;
 }
 
+/**
+ * Check if mime type is a video that should use streaming
+ * instead of full download
+ */
+const isVideoMimeType = (mimeType: string): boolean => {
+  return mimeType.toLowerCase().startsWith('video/');
+};
+
 interface AttachmentViewerContext {
   attachments: AttachmentRef[];
   currentIndex: number;
@@ -108,6 +116,15 @@ export const attachmentViewerMachine = createMachine(
               retryCount: 0,
             }),
           },
+          // Allow closing during loading — the invoked actor is automatically cancelled
+          // by XState when transitioning away from the `opening` state.
+          CLOSE: {
+            target: 'closed',
+            actions: assign(({ context }) => ({
+              ...initialContext,
+              currentVideoTime: context.currentVideoTime,
+            })),
+          },
         },
       },
       viewing: {
@@ -181,12 +198,20 @@ export const attachmentViewerMachine = createMachine(
   },
   {
     actors: {
-      loadAttachment: fromPromise<File, { attachment: AttachmentRef | undefined }>(
+      loadAttachment: fromPromise<File | null, { attachment: AttachmentRef | undefined }>(
         async ({ input }) => {
           if (!input.attachment) {
             throw new Error('No attachment to load');
           }
           const { attachmentId, fileName, mimeType } = input.attachment;
+
+          // SHORT CIRCUIT: For video mime types, skip full download and use streaming
+          // VideoViewer component uses the /stream endpoint directly, so we don't need
+          // to download the full file via fetchFile at the start
+          if (isVideoMimeType(mimeType)) {
+            return null;
+          }
+
           return fetchFile(attachmentId, fileName, mimeType);
         },
       ),
