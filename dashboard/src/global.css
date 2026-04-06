@@ -1510,6 +1510,45 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   font-size: 14px !important;
 }
 
+.bot-markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.bot-markdown-content th {
+  text-align: left;
+  font-weight: 600;
+  color: #1d1e1f;
+  padding: 8px 12px;
+  border-bottom: 2px solid #e5e7eb;
+  border-right: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.bot-markdown-content th:last-child {
+  border-right: none;
+}
+
+.bot-markdown-content td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  border-right: 1px solid #f0f0f0;
+  color: #788187;
+}
+
+.bot-markdown-content td:last-child {
+  border-right: none;
+}
+
+.bot-markdown-content tr:last-child td {
+  border-bottom: none;
+}
+
 /* Memory table summary cell: force <p> inline so line-clamp works */
 .memory-summary-cell p {
   display: inline;
@@ -1880,6 +1919,23 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-theme="midnight"] .bot-markdown-content ul li,
 [data-theme="midnight"] .bot-markdown-content-call-summary ul li {
   color: #9ca3af !important;
+}
+
+[data-theme="midnight"] .bot-markdown-content table {
+  border-color: #374151;
+}
+
+[data-theme="midnight"] .bot-markdown-content th {
+  color: #e5e7eb;
+  background: #1e1e23;
+  border-bottom-color: #374151;
+  border-right-color: #374151;
+}
+
+[data-theme="midnight"] .bot-markdown-content td {
+  color: #9ca3af;
+  border-bottom-color: #1e1e23;
+  border-right-color: #1e1e23;
 }
 
 /* --- 2G: Skeleton/Animation/Highlights --- */

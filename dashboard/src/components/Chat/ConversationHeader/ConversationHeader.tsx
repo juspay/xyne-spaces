@@ -1,4 +1,4 @@
-import { useState, JSX, cloneElement } from 'react';
+import { useState, useEffect, useRef, JSX, cloneElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import { useVisibleChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
@@ -62,6 +62,22 @@ const ConversationHeader = ({
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = getTargetUserIdForCall(channel?.scopeType, channel?.name, context.userID);
+
+  // AI Onboarding: show tooltip after "Done exploring" is clicked
+  const [showOnboardingTooltip, setShowOnboardingTooltip] = useState(false);
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const handler = (): void => {
+      setShowOnboardingTooltip(true);
+      tooltipTimerRef.current = setTimeout(() => setShowOnboardingTooltip(false), 4000);
+    };
+    window.addEventListener('ai-onboarding-complete', handler);
+    return () => {
+      window.removeEventListener('ai-onboarding-complete', handler);
+      if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    };
+  }, []);
 
   const handleStarToggle = (): void => {
     void zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: Date.now() }));
@@ -181,7 +197,11 @@ const ConversationHeader = ({
               </Button>
             </Tooltip>
           )}
-          <Tooltip content='Ask AI'>
+          <Tooltip
+            content={showOnboardingTooltip ? 'Ask AI lives here! Click anytime.' : 'Ask AI'}
+            {...(showOnboardingTooltip ? { open: true } : {})}
+            side='bottom'
+          >
             <Button
               variant='outline'
               onClick={() => {

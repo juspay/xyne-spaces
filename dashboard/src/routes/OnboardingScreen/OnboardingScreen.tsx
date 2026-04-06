@@ -6,6 +6,7 @@ import { useUser } from '../../hooks/useUsers';
 import { useMigratedChannels } from '../../hooks/useChannels';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 import { authActor } from '../../machines/authMachine';
+import { setAIOnboardingPending } from '../../contexts/AIOnboardingContext';
 import Confetti from 'react-confetti';
 
 const OnboardingScreen: React.FC = () => {
@@ -97,6 +98,9 @@ const OnboardingScreen: React.FC = () => {
 
   const handleCompleteOnboarding = (): void => {
     setIsCompleting(true);
+
+    // Mark AI onboarding as pending so AppRoot can auto-trigger it
+    setAIOnboardingPending();
 
     // Send event to auth machine to update isNewUser state
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
