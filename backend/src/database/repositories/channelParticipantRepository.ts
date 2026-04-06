@@ -240,6 +240,70 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
     return participant !== null;
   }
 
+  /**
+   * Batch add participants to a channel in a single transaction
+   * Returns the number of participants actually added (excludes duplicates)
+   */
+  async addParticipantsBatch(
+    channelId: string,
+    userIds: string[],
+    role: ChannelRole = 'MEMBER',
+    isClosed: boolean = false
+  ): Promise<{ addedCount: number; existingCount: number }> {
+    if (userIds.length === 0) {
+      return { addedCount: 0, existingCount: 0 };
+    }
+
+    return await this.db.$transaction(async (tx) => {
+      const existingParticipants = await tx.channelParticipant.findMany({
+        where: {
+          channelId,
+          userId: {
+            in: userIds,
+          },
+        },
+        select: {
+          userId: true,
+        },
+      });
+
+      const existingUserIds = new Set(existingParticipants.map((p) => p.userId));
+      const newUserIds = userIds.filter((id) => !existingUserIds.has(id));
+
+      if (newUserIds.length === 0) {
+        return { addedCount: 0, existingCount: existingUserIds.size };
+      }
+
+      await tx.channelParticipant.createMany({
+        data: newUserIds.map((userId) => ({
+          channelId,
+          userId,
+          role: role || 'MEMBER',
+        })),
+        skipDuplicates: true,
+      });
+
+      await tx.channelUserStatus.createMany({
+        data: newUserIds.map((userId) => ({
+          channelId,
+          userId,
+          isClosed,
+          isStarred: false,
+          lastViewedAt: new Date(),
+        })),
+        skipDuplicates: true,
+      });
+
+      await tx.channelStats.upsert({
+        where: { channelId },
+        update: { participantCount: { increment: newUserIds.length } },
+        create: { channelId, participantCount: newUserIds.length, lastActivityAt: new Date() },
+      });
+
+      return { addedCount: newUserIds.length, existingCount: existingUserIds.size };
+    });
+  }
+
   async getParticipantRole(channelId: string, userId: string): Promise<string | null> {
     const participant = await this.findParticipant(channelId, userId);
     return participant?.role || null;
