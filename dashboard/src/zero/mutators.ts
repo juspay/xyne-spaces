@@ -597,7 +597,7 @@ export const mutators = defineMutators({
 
         if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
           await tx.mutate.draft_messages.delete({ id: draft.id });
-        } else {
+        } else if (draftMessage.trim() !== '') {
           await tx.mutate.draft_messages.upsert({
             id: draft?.id || draftMessageId,
             conversationId: null,
@@ -2764,7 +2764,7 @@ export const mutators = defineMutators({
 
         if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
           await tx.mutate.draft_messages.delete({ id: draft.id });
-        } else {
+        } else if (draftMessage.trim() !== '') {
           await tx.mutate.draft_messages.upsert({
             id: draft?.id || draftMessageId,
             conversationId,
