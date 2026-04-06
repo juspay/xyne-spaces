@@ -22,6 +22,7 @@ import {
   ToggleLeft,
   X,
   Circle,
+  Loader2,
 } from 'lucide-react';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -106,6 +107,7 @@ export const TicketFiltersDropdown = ({
   searchValue,
   onSearchChange,
   selectedBoardName,
+  isTicketsSyncing = false,
   channelId,
   groupBy,
   hasActiveView,
@@ -714,7 +716,10 @@ export const TicketFiltersDropdown = ({
               data-track-category='Tickets'
               data-track-name='ToggleBoardDropdown'
             >
-              <span className='font-semibold text-base'>{boardLabel}</span>
+              <span className='font-semibold text-base'>
+                {isTicketsSyncing ? 'Loading tickets' : boardLabel}
+              </span>
+              {isTicketsSyncing && <Loader2 className='w-4 h-4 animate-spin' />}
               <ChevronDown
                 className={cn(
                   'w-5 h-5 transition-transform font-semibold',

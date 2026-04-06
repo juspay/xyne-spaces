@@ -65,6 +65,7 @@ export interface TicketFiltersProps {
   formMappings?: readonly FormContextMapping[] | undefined;
   /** Board name from parent (avoids waiting for lazy board list fetch) */
   selectedBoardName?: string | undefined;
+  isTicketsSyncing?: boolean;
   channelId?: string;
   groupBy?: string; // serialized groupBy — included in save view and hasActiveFilters check
   hasActiveView?: boolean; // hides Save view button when a saved view is already active
