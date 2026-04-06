@@ -33,6 +33,9 @@ router.get('/user-options', aclMiddleware.checkAccess, analyticsAuth, analyticsC
 // Consolidated dashboard endpoint (returns all data in one call)
 router.get('/dashboard', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getDashboard);
 
+// Workflow metrics endpoint
+router.get('/workflow-metrics', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getWorkflowMetrics);
+
 // Messages exchanged endpoint
 router.get('/messages-exchanged', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getMessagesExchanged);
 

@@ -232,6 +232,35 @@ export class AnalyticsController {
   };
 
   /**
+   * Get workflow metrics (grouped raw execution statuses)
+   * GET /api/analytics/workflow-metrics?timeRange=7d
+   */
+  getWorkflowMetrics = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const filters: AnalyticsFilters = {
+        timeRange: req.query.timeRange as string,
+        startDate: req.query.startDate as string,
+        endDate: req.query.endDate as string
+      };
+
+      const workflowMetrics = await this.analyticsRepository.getWorkflowMetrics(filters);
+
+      res.json({
+        success: true,
+        data: workflowMetrics,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error('Error fetching workflow metrics analytics:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch workflow metrics analytics',
+        timestamp: new Date().toISOString()
+      });
+    }
+  };
+
+  /**
    * Get available workflow types for filter dropdown
    * GET /api/analytics/workflow-types-options
    */
