@@ -2,8 +2,6 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { randomBytes } from 'crypto';
 import { dialog, BrowserWindow, session, net } from 'electron';
 import log from 'electron-log/main';
-import https from 'https';
-import http from 'http';
 import { config } from '../app/config';
 import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
@@ -133,6 +131,13 @@ class AgentAuthService {
         await this.handleMemoryUpdate(req, res, url);
       } else if (req.method === 'POST' && url.pathname === '/memory/replaceSession') {
         await this.handleMemoryReplaceSession(req, res);
+      } else if (req.method === 'POST' && url.pathname.startsWith('/chat/postMessage/')) {
+        const conversationId = url.pathname.split('/chat/postMessage/')[1];
+        await this.handleProxyPost(req, res, `/api/conversations/${conversationId}/messages`);
+      } else if (req.method === 'POST' && url.pathname === '/ticket/create') {
+        await this.handleProxyPost(req, res, '/api/tickets');
+      } else if (req.method === 'POST' && url.pathname === '/calls/schedule') {
+        await this.handleProxyPost(req, res, '/api/calls/schedule');
       } else if (req.method === 'GET' && url.pathname === '/health') {
         this.sendJson(res, 200, { status: 'ok' });
       } else {
@@ -603,6 +608,70 @@ class AgentAuthService {
       res.end(JSON.stringify(backendResponse.data));
     } catch (error: any) {
       log.error('[AgentAuth] replaceSession request failed:', error);
+      this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
+    }
+  }
+
+  /**
+   * Generic write proxy — validates the agent token, parses the JSON body,
+   * retrieves the user's google_access_token from the Electron session cookies,
+   * and forwards the POST request to the backend.
+   */
+  private async handleProxyPost(
+    req: IncomingMessage,
+    res: ServerResponse,
+    backendPath: string
+  ): Promise<void> {
+    // 1. Validate agent token
+    const token = this.extractToken(req);
+    if (!token || !this.validateToken(token)) {
+      this.sendJson(res, 401, { error: 'Unauthorized: invalid or missing agent token' });
+      return;
+    }
+
+    // 2. Parse request body
+    let body: any;
+    try {
+      body = await this.parseBody(req);
+    } catch {
+      this.sendJson(res, 400, { error: 'Bad request: invalid JSON body' });
+      return;
+    }
+
+    if (!body || typeof body !== 'object') {
+      this.sendJson(res, 400, { error: 'Bad request: body must be a JSON object' });
+      return;
+    }
+
+    try {
+      // 3. Retrieve the user's google_access_token from session cookies
+      const cookies = await session.defaultSession.cookies.get({});
+      const googleToken = cookies.find(c => c.name === 'google_access_token');
+
+      if (!googleToken) {
+        this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
+        return;
+      }
+
+      // 4. Forward POST to backend
+      const backendUrl = `${config.BACKEND_URL}${backendPath}`;
+      log.info(`[AgentAuth] Proxying POST to ${backendUrl}`);
+
+      const backendResponse = await this.makeBackendRequest({
+        url: backendUrl,
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${googleToken.value}`,
+          'Content-Type': 'application/json'
+        },
+        data: body
+      });
+
+      // 5. Return backend response
+      res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(backendResponse.data));
+    } catch (error: any) {
+      log.error(`[AgentAuth] Proxy POST to ${backendPath} failed:`, error);
       this.sendJson(res, 500, { error: 'Backend request failed', message: error.message });
     }
   }
