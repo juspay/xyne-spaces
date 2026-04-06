@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id
+  email       String   @unique
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  connections UserMcpConnection[]
+  identities  GatewayIdentity[]
+  agents      Agent[]
+
+  @@map("users")
+}
+
+model Agent {
+  id                   String   @id @default(cuid())
+  slug                 String   @unique
+  name                 String
+  description          String   @default("")
+  systemPrompt         String   @db.Text
+  scope                String   @default("global")
+  ownerUserId          String?
+  owner                User?    @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  enabled              Boolean  @default(true)
+  isDefault            Boolean  @default(false)
+  color                String   @default("#6366f1")
+  modelId              String   @default("")
+  config               Json     @default("{}")
+  spacesAppId          String?  @unique
+  spacesAppUserId      String?
+  spacesAppToken       String?  @db.Text
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  tools                AgentTool[]
+
+  @@map("agents")
+}
+
+model Tool {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String   @default("")
+  source      String
+  inputSchema Json     @default("{}")
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  agents      AgentTool[]
+
+  @@map("tools")
+}
+
+model AgentTool {
+  id         String @id @default(cuid())
+  agentId    String
+  agent      Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  toolId     String
+  tool       Tool   @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  permission String @default("allow")
+
+  @@unique([agentId, toolId])
+  @@map("agent_tools")
+}
+
+model Gateway {
+  id         String   @id @default(cuid())
+  type       String   @unique
+  name       String
+  config     Json     @default("{}")
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  identities GatewayIdentity[]
+
+  @@map("gateways")
+}
+
+model GatewayIdentity {
+  id             String   @id @default(cuid())
+  gatewayId      String
+  gateway        Gateway  @relation(fields: [gatewayId], references: [id], onDelete: Cascade)
+  externalUserId String
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@unique([gatewayId, externalUserId])
+  @@map("gateway_identities")
+}
+
+model McpServer {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  url         String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  connections UserMcpConnection[]
+
+  @@unique([type])
+  @@map("mcp_servers")
+}
+
+model UserMcpConnection {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId    String
+  mcpServer      McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  encryptedCreds String
+  iv             String
+  authTag        String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, mcpServerId])
+  @@map("user_mcp_connections")
+}
+
+model ScheduledJob {
+  id               String    @id @default(cuid())
+  userId           String
+  agentSlug        String
+  task             String    @db.Text
+  context          String?   @db.Text
+  channelId        String?
+  conversationId   String?
+  type             String
+  delayMs          BigInt?
+  cronExpression   String?
+  maxRuns          Int?
+  runCount         Int       @default(0)
+  status           String    @default("active")
+  bullJobId        String?
+  bullSchedulerId  String?   @unique
+  nextRunAt        DateTime?
+  lastRunAt        DateTime?
+  label            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([userId])
+  @@map("scheduled_jobs")
+}

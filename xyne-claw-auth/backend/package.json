@@ -1,0 +1,35 @@
+{
+  "name": "xyne-claw-auth",
+  "version": "0.1.0",
+  "description": "MCP credential management service for XyneClaw",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --env-file=.env --watch src/main.ts",
+    "start": "node --import tsx/esm src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "tsx --env-file=.env prisma/seed.ts",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@prisma/client": "^6.0.0",
+    "@sinclair/typebox": "^0.34.49",
+    "bullmq": "^5.72.0",
+    "express": "^4.21.0",
+    "tsx": "^4.19.0",
+    "xyne-claw-shared": "file:../../xyne-claw-shared",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "prisma": "^6.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  }
+}

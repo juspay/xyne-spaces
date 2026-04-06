@@ -113,6 +113,7 @@ import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegist
 import emojiRoutes from '@/routes/emojis';
 import applicationBackfillRoutes from '@/routes/applicationBackfill';
 import { appRoutes } from '@/apps';
+import { ChatController } from '@/apps/controllers/chatController';
 
 export class App {
   public app: Application;
@@ -310,8 +311,18 @@ export class App {
 
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     
-    // App routes 
+    // App routes
     this.app.use('/api/apps', appRoutes);
+
+    // Internal S2S endpoints (trusted service-to-service calls)
+    this.app.post('/api/internal/postAsUser', (req, res, next) => {
+      const s2sKey = process.env['INTERNAL_S2S_KEY'];
+      if (!s2sKey || req.headers['x-s2s-key'] !== s2sKey) {
+        res.status(401).json({ error: 'Invalid or missing S2S key' });
+        return;
+      }
+      next();
+    }, new ChatController().postMessage);
     
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes

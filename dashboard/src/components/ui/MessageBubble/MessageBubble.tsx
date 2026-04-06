@@ -59,6 +59,8 @@ import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicke
 import { parseWorkflowActionsFromMarkdown } from '../../../utils/markdownWorkflowActions';
 import { WorkflowActionButtons } from './WorkflowActionButtons';
 import { TicketSuggestions } from './TicketSuggestions';
+import { AppActions } from './AppActions';
+import { parseMarkdownWithAppActions } from '../../../utils/markdownAppActions';
 import { PulseTickets } from './PulseTickets';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { hasMessageContent } from '../../../utils/chatUtils';
@@ -350,6 +352,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const ticketSuggestions = parsedMarkdown.ticketSuggestions;
   const ticketsCreated = parsedMarkdown.ticketsCreated;
+
+  const hasAppActions = metadata?.['hasAppActions'] === true;
+  const parsedAppActions = useMemo(() => {
+    if (hasAppActions) {
+      return parseMarkdownWithAppActions(message.content);
+    }
+    return { appActions: [], actioned: [], content: message.content };
+  }, [hasAppActions, message.content]);
 
   const isPulseActionablesMessage = metadata?.['messageSubtype'] === 'pulse_actionables';
 
@@ -763,6 +773,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       suggestions={ticketSuggestions}
                       ticketsCreated={ticketsCreated}
                       channelId={channelId}
+                      messageId={message.messageId}
+                      conversationId={message.conversationId}
+                    />
+                  )}
+                  {(parsedAppActions.appActions.length > 0 ||
+                    parsedAppActions.actioned.length > 0) && (
+                    <AppActions
+                      appActions={parsedAppActions.appActions}
+                      actioned={parsedAppActions.actioned}
                       messageId={message.messageId}
                       conversationId={message.conversationId}
                     />

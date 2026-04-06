@@ -6,6 +6,7 @@ import ImageViewer from './ImageViewer';
 import PdfViewer from './PdfViewer';
 import VideoViewer from './VideoViewer';
 import CodeViewer from './CodeViewer';
+import HtmlViewer from './HtmlViewer';
 
 export interface BaseViewerProps {
   source: File | null;
@@ -106,6 +107,13 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
     component: CodeViewer,
     wrapperClass: 'h-full overflow-auto p-4',
     displayName: 'Code File',
+  },
+  html: {
+    mimeTypes: ['text/html'],
+    extensions: ['.html', '.htm'],
+    component: HtmlViewer,
+    wrapperClass: 'h-full w-full',
+    displayName: 'HTML Document',
   },
   text: {
     mimeTypes: ['text/', 'application/xml'],

@@ -19,6 +19,8 @@ const IngestAttachmentParamsSchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim(),
   userId: z.string().min(1, 'User ID is required').trim(),
   text: z.string().trim().optional(),
+  markdownText: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
   conversationId: z.string().trim().optional(),
 });
 
@@ -42,31 +44,40 @@ export async function ingestAttachment(
       throw new Error(`Validation error: ${errorMessages}`);
     }
 
-    const { files, channelId, userId, text, conversationId } = paramsResult.data;
+    const { files, channelId, userId, text, markdownText, metadata, conversationId } = paramsResult.data;
 
     // Upload files to GCS
     logger.info(`[INGEST-ATTACHMENT] Uploading ${files.length} file(s)`);
     const uploadedFiles: UploadedFileResult[] = await uploadFiles(files);
 
-    // Resolve Slack mentions in text if text exists
-    const botOauthToken = config.slackBotToken;
-    let resolvedText = text;
-    if (resolvedText) {
-      resolvedText = await resolveSlackMentions(resolvedText, botOauthToken);
-    }
+    let content: string;
+    let isMarkdown: boolean;
 
-    const processedContent = blockKitParser.parse({
-      text: resolvedText,
-      attachments: undefined,
-    });
+    if (markdownText) {
+      // Use raw markdown (e.g. frontmatter + result text from bot) — skip BlockKit parsing
+      content = markdownText;
+      isMarkdown = true;
+    } else {
+      // Resolve Slack mentions in text if text exists, then parse with BlockKit
+      const botOauthToken = config.slackBotToken;
+      let resolvedText = text;
+      if (resolvedText) {
+        resolvedText = await resolveSlackMentions(resolvedText, botOauthToken);
+      }
+      content = blockKitParser.parse({ text: resolvedText, attachments: undefined });
+      isMarkdown = false;
+    }
 
     // Reuse the find or create conversation logic
     const result = await findOrCreateConversation(
       channelId,
       userId,
-      processedContent,
+      content,
+      isMarkdown,
       conversationId,
-      uploadedFiles
+      uploadedFiles,
+      undefined,
+      metadata,
     );
 
     // Get created attachments from database

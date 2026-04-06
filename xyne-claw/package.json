@@ -1,0 +1,32 @@
+{
+  "name": "xyne-claw",
+  "version": "0.1.0",
+  "description": "Multi-tenant agent orchestration server",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --env-file=.env --watch src/main.ts",
+    "start": "node --import tsx/esm src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "0.58.3",
+    "@mariozechner/pi-ai": "0.58.3",
+    "@mariozechner/pi-coding-agent": "0.58.3",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@sinclair/typebox": "^0.34.0",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.3",
+    "tsx": "^4.19.0",
+    "xyne-claw-shared": "file:../xyne-claw-shared",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  }
+}

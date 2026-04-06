@@ -1,0 +1,22 @@
+{
+  "name": "xyne-claw-shared",
+  "version": "0.1.0",
+  "description": "Shared tool definitions and implementations for xyne-claw ecosystem",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tools": "./src/tools/index.ts",
+    "./tools/pgm": "./src/tools/pgm/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

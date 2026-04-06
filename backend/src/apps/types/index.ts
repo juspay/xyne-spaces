@@ -24,8 +24,9 @@ export enum TicketEventType {
  * Enum for app event types
  */
 export enum AppEventType {
-    APP_MENTION = 'APP_MENTIONED',  
-    DM = 'DIRECT_MESSAGE',                   
+    APP_MENTION = 'APP_MENTIONED',
+    DM = 'DIRECT_MESSAGE',
+    USER_MENTIONED = 'USER_MENTIONED',
 }
 
 export enum ContentFormat {
@@ -53,7 +54,9 @@ export interface AppMentionEventPayload {
     cleanContent: string;
     createdAt: Date | number;
     userId: string;
+    senderName?: string;
     channelId: string;
+    channelName?: string;
     attachments?: AppEventAttachment[];
     metadata?: Record<string, unknown>;
 }
@@ -68,8 +71,28 @@ export interface DMEventPayload {
     cleanContent: string;
     createdAt: Date | number;
     userId: string;
+    senderName?: string;
     channelId: string;
+    channelName?: string;
     attachments?: AppEventAttachment[];
+    metadata?: Record<string, unknown>;
+}
+
+/**
+ * Payload type for USER_MENTIONED events — fired when any user is mentioned
+ * in a channel where an app is a participant.
+ */
+export interface UserMentionedEventPayload {
+    conversationId: string;
+    messageId: string;
+    content: string;
+    cleanContent: string;
+    createdAt: Date | number;
+    userId: string;
+    senderName?: string;
+    channelId: string;
+    channelName?: string;
+    mentionedUserIds: string[];
     metadata?: Record<string, unknown>;
 }
 
@@ -78,7 +101,7 @@ export interface DMEventPayload {
  */
 export interface BaseAppEvent {
     eventType: AppEventType;
-    payload: AppMentionEventPayload | DMEventPayload;
+    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload;
     timestamp: string; // ISO timestamp
 }
 
