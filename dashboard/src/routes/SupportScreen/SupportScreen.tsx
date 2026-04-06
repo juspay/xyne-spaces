@@ -13,6 +13,7 @@ import {
   List,
   Store,
   Split,
+  Paperclip,
 } from 'lucide-react';
 import { EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback } from 'react';
@@ -70,6 +71,9 @@ import { getDraft } from '../../hooks/useDraft';
 import { v4 as uuidv4 } from 'uuid';
 import { useUsers } from '../../hooks/useUsers';
 import { EmailTagWithAvatar } from '../../components/xyne-desk/EmailTagWithAvatar/EmailTagWithAvatar';
+import { useEmailDraft, useEmailDraftOperations } from '../../hooks/useEmailDraft';
+import { AttachmentPreview } from '../../components/ui/files/AttachmentPreview';
+import { MediaViewer } from '../../components/ui/files';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFiltered>[number];
@@ -108,7 +112,14 @@ const DropdownIcon = ({
 );
 
 // Type definition for emails from the query
-type Email = QueryResultType<typeof queries.getEmailsForTicket>[number];
+type EmailAttachment = {
+  url: string;
+  originalFilename: string;
+};
+
+type Email = QueryResultType<typeof queries.getEmailsForTicket>[number] & {
+  attachments?: EmailAttachment[];
+};
 
 // API response type for email demerge endpoint
 interface DemergeEmailResponse {
@@ -1251,6 +1262,24 @@ const EmailThreadItem = ({
             <span className='text-muted-foreground italic'>No content</span>
           )}
         </div>
+        {/* Attachments */}
+        {email.attachments && email.attachments.length > 0 && (
+          <div className='mt-3 flex flex-wrap gap-2'>
+            {email.attachments.map((attachment, idx) => (
+              <a
+                key={idx}
+                href={attachment.url}
+                target='_blank'
+                rel='noopener noreferrer'
+                className='flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-border rounded-lg text-xs text-foreground transition-colors'
+                title={attachment.originalFilename}
+              >
+                <Paperclip size={14} className='text-muted-foreground' />
+                <span className='max-w-[150px] truncate'>{attachment.originalFilename}</span>
+              </a>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1313,6 +1342,15 @@ const AIICIcon = (): ReactElement => {
   );
 };
 
+const stripHtml = (html: string): string => {
+  if (!html) return '';
+  if (typeof document === 'undefined') return html;
+
+  const tmp = document.createElement('DIV');
+  tmp.innerHTML = html;
+  return tmp.textContent || tmp.innerText || '';
+};
+
 const EmailComposer = ({
   conversationId,
 }: {
@@ -1321,31 +1359,37 @@ const EmailComposer = ({
   const [emails] = useCachedQuery(
     queries.getEmailsForTicket({ conversationId: conversationId || '' }),
   );
-  const [drafts] = useCachedQuery(
-    queries.getDraftForConversation({ conversationId: conversationId || '' }),
-  );
+  // Use email draft hooks
+  const draftContent = useEmailDraft(conversationId);
+  const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId);
   const [emailContent, setEmailContent] = useState<string>('');
   const [isSending, setIsSending] = useState<boolean>(false);
   const users = useUsers();
 
-  const stripHtml = (html: string): string => {
-    if (!html) return '';
-    if (typeof document === 'undefined') return html;
+  // Attachment state
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState<boolean>(false);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-    const tmp = document.createElement('DIV');
-    tmp.innerHTML = html;
-    return tmp.textContent || tmp.innerText || '';
-  };
-
+  // Reset all composer state when switching conversations
   useEffect(() => {
-    const draft = drafts?.[0];
-    if (draft?.draftContent) {
-      const textContent = stripHtml(draft.draftContent);
+    setAttachments([]);
+    setPreviewFile(null);
+    setIsPreviewOpen(false);
+  }, [conversationId]);
+
+  // Initialize email content from draft
+  useEffect(() => {
+    if (draftContent) {
+      const textContent = stripHtml(draftContent);
       setEmailContent(textContent);
     } else {
       setEmailContent('');
     }
-  }, [drafts, conversationId]);
+  }, [draftContent, conversationId]);
+
   const toInputRef = React.useRef<HTMLInputElement>(null);
   const [toInputValue, setToInputValue] = useState<string>('');
 
@@ -1398,25 +1442,81 @@ const EmailComposer = ({
     }
   }, [emails, conversationId]);
 
+  // Upload attachments to Zoho to get attachmentIds for email
+  const uploadAttachments = async (files: File[]): Promise<string[]> => {
+    if (files.length === 0 || !conversationId) return [];
+
+    setIsUploadingAttachments(true);
+    try {
+      const formData = new FormData();
+      files.forEach(file => formData.append('files', file));
+
+      const response = await apiInstance.post<{ attachmentIds: string[] }>(
+        `/email/${conversationId}/upload-attachments`,
+        formData,
+        {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        },
+      );
+
+      return response.data?.attachmentIds || [];
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to upload attachments');
+      throw error;
+    } finally {
+      setIsUploadingAttachments(false);
+    }
+  };
+
   const handleSendEmail = async (): Promise<void> => {
     if (!emailContent.trim() || !conversationId || isSending || toEmails.length === 0) {
       return;
     }
     setIsSending(true);
     try {
+      let attachmentIds: string[] = [];
+
+      // Upload attachments if any
+      if (attachments.length > 0) {
+        attachmentIds = await uploadAttachments(attachments);
+      }
+
       await apiInstance.post(`/email/${conversationId}/reply`, {
         body: emailContent,
         type: 'REPLY_ALL',
         to: toEmails,
         cc: ccEmails,
         bcc: bccEmails,
+        ...(attachmentIds.length > 0 && { attachmentIds }),
       });
+
+      // Clear state after successful send
       setEmailContent('');
+      deleteDraft();
+      setAttachments([]);
     } catch (error) {
       console.warn('Failed to send email:', error);
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      setAttachments(prev => [...prev, ...files]);
+    }
+    // Reset input so same file can be selected again
+    e.target.value = '';
+  };
+
+  const handleRemoveAttachment = (index: number): void => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handlePreviewAttachment = (file: File): void => {
+    setPreviewFile(file);
+    setIsPreviewOpen(true);
   };
 
   const handleToKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -1509,7 +1609,7 @@ const EmailComposer = ({
                 ccCount: ccEmails.length,
                 bccCount: bccEmails.length,
                 conversationId,
-                draftEmailId: drafts?.[0]?.id,
+                draftEmailId: draftId,
               })}
             >
               <ReplyAll size={16} className='text-foreground flex-shrink-0' />
@@ -1542,7 +1642,7 @@ const EmailComposer = ({
                     ccEmails: ccEmails,
                     bccEmails: bccEmails,
                     conversationId,
-                    draftEmailId: drafts?.[0]?.id,
+                    draftEmailId: draftId,
                   })}
                 >
                   <ReplyAll size={16} className='text-muted-foreground' />
@@ -1567,7 +1667,7 @@ const EmailComposer = ({
                     ccEmails: ccEmails,
                     bccEmails: bccEmails,
                     conversationId,
-                    draftEmailId: drafts?.[0]?.id,
+                    draftEmailId: draftId,
                   })}
                 >
                   {toEmails.map(email => (
@@ -1596,7 +1696,7 @@ const EmailComposer = ({
                       ccEmails: ccEmails,
                       bccEmails: bccEmails,
                       conversationId,
-                      draftEmailId: drafts?.[0]?.id,
+                      draftEmailId: draftId,
                     })}
                   />
                 </div>
@@ -1613,7 +1713,7 @@ const EmailComposer = ({
                         ccMails: ccEmails,
                         bccCount: bccEmails.length,
                         conversationId,
-                        draftEmailId: drafts?.[0]?.id,
+                        draftEmailId: draftId,
                       })}
                     >
                       Cc
@@ -1629,7 +1729,7 @@ const EmailComposer = ({
                         ccCount: ccEmails.length,
                         bccEmails: bccEmails,
                         conversationId,
-                        draftEmailId: drafts?.[0]?.id,
+                        draftEmailId: draftId,
                       })}
                     >
                       Bcc
@@ -1659,7 +1759,7 @@ const EmailComposer = ({
                       ccCount: ccEmails.length,
                       bccCount: bccEmails.length,
                       conversationId,
-                      draftEmailId: drafts?.[0]?.id,
+                      draftEmailId: draftId,
                     })}
                   >
                     {ccEmails.map(email => (
@@ -1693,7 +1793,7 @@ const EmailComposer = ({
                         ccEmails: ccEmails,
                         bccCount: bccEmails.length,
                         conversationId,
-                        draftEmailId: drafts?.[0]?.id,
+                        draftEmailId: draftId,
                       })}
                     />
                   </div>
@@ -1722,7 +1822,7 @@ const EmailComposer = ({
                     data-track-metadata={JSON.stringify({
                       bccCount: bccEmails,
                       conversationId,
-                      draftEmailId: drafts?.[0]?.id,
+                      draftEmailId: draftId,
                     })}
                   >
                     {bccEmails.map(email => (
@@ -1753,7 +1853,7 @@ const EmailComposer = ({
                       data-track-metadata={JSON.stringify({
                         bccEmails: bccEmails,
                         conversationId,
-                        draftEmailId: drafts?.[0]?.id,
+                        draftEmailId: draftId,
                       })}
                       className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
                       disabled={isSending}
@@ -1771,19 +1871,69 @@ const EmailComposer = ({
           placeholder='Compose email...'
           value={emailContent}
           onChange={e => setEmailContent(e.target.value)}
+          onBlur={() => saveDraft(emailContent)}
           className='w-full px-4 py-3 focus:outline-none text-sm resize-none'
           disabled={isSending}
         />
 
-        <div className='px-4 py-3 flex items-center justify-end'>
+        {/* Attachments section */}
+        {attachments.length > 0 && (
+          <div className='px-4 pb-3'>
+            <div className='flex flex-wrap gap-2'>
+              {attachments.map((file, index) => (
+                <AttachmentPreview
+                  key={`${file.name}-${file.size}-${index}`}
+                  file={file}
+                  onRemove={() => handleRemoveAttachment(index)}
+                  onPreview={() => handlePreviewAttachment(file)}
+                  isUploading={isUploadingAttachments && index === attachments.length - 1}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className='px-4 py-3 flex items-center justify-between border-t border-border'>
+          {/* Attachment button */}
+          <div>
+            <input
+              ref={fileInputRef}
+              type='file'
+              multiple
+              className='hidden'
+              onChange={handleFileSelect}
+              disabled={isSending || isUploadingAttachments}
+            />
+            <button
+              type='button'
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isSending || isUploadingAttachments}
+              className='p-2 hover:bg-muted rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              title='Attach files'
+              aria-label='Attach files'
+              data-track-category='SUPPORT'
+              data-track-name='AddEmailAttachment'
+              data-track-metadata={JSON.stringify({
+                conversationId,
+                attachmentCount: attachments.length,
+              })}
+            >
+              <Paperclip size={18} className='text-muted-foreground' />
+            </button>
+          </div>
+
+          {/* Send button */}
           <button
-            className='size-8 flex items-center justify-center rounded-full bg-gray-400 text-white hover:bg-muted0 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+            className='size-8 flex items-center justify-center rounded-full bg-gray-400 text-white hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
             onClick={() => void handleSendEmail()}
             disabled={!emailContent.trim() || !conversationId || isSending || toEmails.length === 0}
             aria-label='Send email'
             data-track-category='Support'
             data-track-name='SendEmailReply'
-            data-track-metadata={JSON.stringify({ conversationId })}
+            data-track-metadata={JSON.stringify({
+              conversationId,
+              attachmentCount: attachments.length,
+            })}
           >
             {isSending ? (
               <RefreshCw size={16} className='text-white animate-spin' />
@@ -1793,6 +1943,18 @@ const EmailComposer = ({
           </button>
         </div>
       </div>
+
+      {/* Media viewer for attachment preview */}
+      {previewFile && (
+        <MediaViewer
+          file={previewFile}
+          isOpen={isPreviewOpen}
+          onClose={() => {
+            setIsPreviewOpen(false);
+            setPreviewFile(null);
+          }}
+        />
+      )}
     </div>
   );
 };

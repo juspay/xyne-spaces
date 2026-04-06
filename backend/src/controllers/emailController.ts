@@ -10,9 +10,9 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailDraftRepository } from '@/database/repositories/emailDraftRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
-// import { ZohoService } from '@/services/zohoService';
+import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { logger } from '@/utils/logger';
-import { EmailType, MessageDirection, ExternalEntityType } from '@prisma/client';
+import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType } from '@prisma/client';
 import { ZohoService } from '@/services/zohoService';
 
 interface ReplyEmailRequest {
@@ -21,6 +21,7 @@ interface ReplyEmailRequest {
   to?: string[];
   cc?: string[];
   bcc?: string[];
+  attachmentIds?: string[];
 }
 
 export class EmailController {
@@ -30,6 +31,7 @@ export class EmailController {
   private channelRepo = new ChannelRepository();
   private emailDraftRepo = new EmailDraftRepository();
   private externalMessageRepo = new ExternalMessageRepository();
+  private messageAttachmentRepo = new MessageAttachmentRepository();
 
   /**
    * POST /api/email/:conversationId/reply
@@ -63,6 +65,8 @@ export class EmailController {
 
       // Get initial email (last in array since findByConversationId orders by createdAt DESC)
       const initialEmail = emails[emails.length - 1];
+      // Most recent email (first in DESC-ordered array) — used as isReplyTo for Zoho threading
+      const latestEmail = emails[0];
 
       // 3. Compose recipients based on reply type or use custom recipients if provided
       let toRecipients: string[];
@@ -105,7 +109,8 @@ export class EmailController {
         sourceId
       );
 
-      logger.info(`[EmailController] Sending ${type} to ticket ${ticketId} for conversation ${conversationId}`);
+      const attachmentIds = req.body.attachmentIds || [];
+      logger.info(`[EmailController] Sending ${type} to ticket ${ticketId} for conversation ${conversationId} with ${attachmentIds.length} attachments`);
       const result = await zohoService.sendReply({
         ticketId,
         content: body,
@@ -113,9 +118,14 @@ export class EmailController {
         cc: ccRecipients,
         bcc: bccRecipients,
         fromEmailAddress,
+        attachmentIds,
+        // Only set when externalMessageId differs from externalThreadId (ticket ID).
+        // For initial emails (TICKET_ADD), both fields store the ticket ID — not a valid thread ID for Zoho.
+        // For reply emails (TICKET_THREAD_ADD), externalMessageId is the actual Zoho thread ID.
+        inReplyToThreadId: latestEmail.externalMessageId !== latestEmail.externalThreadId
+          ? latestEmail.externalMessageId
+          : undefined,
       });
-
-     
 
       // 6. Save reply in database
       const emailType = type === 'REPLY' ? EmailType.REPLY : EmailType.REPLY_ALL;
@@ -155,12 +165,55 @@ export class EmailController {
         logger.warn(`[EmailController] Failed to delete draft for conversation ${conversationId}:`, error);
       }
 
+      // 8. Store attachment references in MessageAttachment table for UI display
+      if (attachmentIds.length > 0) {
+        try {
+          // Create attachment records for each Zoho attachment ID
+          // Note: Zoho attachment IDs are stored with external URL pattern
+          for (const attachmentId of attachmentIds) {
+            await this.messageAttachmentRepo.create({
+              entityType: AttachmentEntityType.EMAIL,
+              entityId: newEmail.id,
+              url: `https://desk.zoho.com/api/v1/uploads/${attachmentId}`, // Zoho attachment URL pattern
+              originalFilename: `attachment-${attachmentId}`, // Generic name since we don't have original filename
+              size: 0, // Size unknown from Zoho response
+              mimetype: 'application/octet-stream', // Generic type
+              createdBy: req.user?.id || 'system',
+              uploadedByUserId: req.user?.id || 'system',
+              storageProvider: 'zoho',
+              conversationId: conversationId,
+              metadata: { zohoAttachmentId: attachmentId, source: 'zoho_upload' },
+            });
+          }
+          logger.info(`[EmailController] Stored ${attachmentIds.length} attachment references for email: ${newEmail.id}`);
+        } catch (error) {
+          logger.warn(`[EmailController] Failed to store attachment references:`, error);
+        }
+      }
+
+      // Get stored attachments for response
+      let storedAttachments: any[] = [];
+      if (attachmentIds.length > 0) {
+        try {
+          storedAttachments = await this.messageAttachmentRepo.findByEntityIdAndType(newEmail.id, AttachmentEntityType.EMAIL);
+        } catch (error) {
+          logger.warn(`[EmailController] Failed to fetch stored attachments:`, error);
+        }
+      }
+
       logger.info(`[EmailController] Reply sent. Email ID: ${newEmail.id}, Zoho Thread ID: ${result.threadId}`);
 
       return res.status(200).json({
         success: true,
         emailId: newEmail.id,
         threadId: result.threadId,
+        attachments: storedAttachments.map(att => ({
+          id: att.id,
+          url: att.url,
+          originalFilename: att.originalFilename,
+          size: att.size,
+          mimetype: att.mimetype,
+        })),
       });
     } catch (error: any) {
       logger.error('[EmailController] Failed to send email reply:', error);

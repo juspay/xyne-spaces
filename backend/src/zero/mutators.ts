@@ -7043,6 +7043,35 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
+    emailDraft: {
+      upsert: defineMutator(
+        z.object({
+          id: z.string(),
+          conversationId: z.string(),
+          draftContent: z.string(),
+          updatedAt: z.number(),
+        }),
+        async ({ tx, args: { id, conversationId, draftContent, updatedAt } }) => {
+          const existing = await tx.run(zql.email_drafts.where('conversationId', conversationId).one());
+          if (existing) {
+            await tx.mutate.email_drafts.update({ id: existing.id, draftContent, updatedAt });
+          } else {
+            await tx.mutate.email_drafts.insert({ id, conversationId, draftContent, createdAt: updatedAt, updatedAt });
+          }
+        },
+      ),
+      delete: defineMutator(
+        z.object({
+          conversationId: z.string(),
+        }),
+        async ({ tx, args: { conversationId } }) => {
+          const existing = await tx.run(zql.email_drafts.where('conversationId', conversationId).one());
+          if (existing) {
+            await tx.mutate.email_drafts.delete({ id: existing.id });
+          }
+        },
+      ),
+    },
     draft: {
       createAttachments: defineMutator(
         z.object({

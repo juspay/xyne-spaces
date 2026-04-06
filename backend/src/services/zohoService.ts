@@ -21,6 +21,8 @@ interface SendReplyParams {
   cc?: string[];
   bcc?: string[];
   fromEmailAddress: string;
+  attachmentIds?: string[];
+  inReplyToThreadId?: string;
 }
 
 interface SendReplyResponse {
@@ -50,9 +52,16 @@ export class ZohoService {
   }
 
   /**
+   * Get orgId from credentials
+   */
+  getOrgId(): string {
+    return this.credentials.orgId;
+  }
+
+  /**
    * Exchange refresh token for access token
    */
-  private async getAccessToken(scope: string = 'Desk.tickets.UPDATE'): Promise<string> {
+  async getAccessToken(scope: string = 'Desk.tickets.UPDATE,Desk.basic.CREATE'): Promise<string> {
     const cacheKey = `${this.sourceId}:${scope}`;
     const cached = tokenCache.get(cacheKey);
     if (cached && new Date() < cached.expiresAt) {
@@ -108,7 +117,7 @@ export class ZohoService {
    * Send email reply via Zoho API
    */
   async sendReply(params: SendReplyParams): Promise<SendReplyResponse> {
-    const { ticketId, content, to, cc = [], bcc = [], fromEmailAddress } = params;
+    const { ticketId, content, to, cc = [], bcc = [], fromEmailAddress, attachmentIds, inReplyToThreadId } = params;
 
     logger.info(`[ZohoService] Sending reply to ticket ${ticketId} with sourceId: ${this.sourceId}`);
 
@@ -129,6 +138,16 @@ export class ZohoService {
 
     if (bcc.length > 0) {
       payload.bcc = bcc.join(',');
+    }
+
+    // Add attachment IDs if provided
+    if (attachmentIds && attachmentIds.length > 0) {
+      payload.attachmentIds = attachmentIds;
+    }
+
+    // Set the thread being replied to so Zoho threads the reply correctly
+    if (inReplyToThreadId) {
+      payload.inReplyToThreadId = inReplyToThreadId;
     }
 
     const response = await this.client.post(`/tickets/${ticketId}/sendReply`, payload, {
