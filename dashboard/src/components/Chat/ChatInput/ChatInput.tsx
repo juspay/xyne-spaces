@@ -107,6 +107,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
         clearContent: () => inputBoxRef.current?.clearContent(),
         insertContent: (content: string) => inputBoxRef.current?.insertContent(content),
         isSuggestionOpen: () => inputBoxRef.current?.isSuggestionOpen() ?? false,
+        focus: () => inputBoxRef.current?.focus(),
       }),
       [],
     );

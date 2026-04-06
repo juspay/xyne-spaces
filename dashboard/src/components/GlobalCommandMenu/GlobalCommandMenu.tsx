@@ -9,6 +9,7 @@ import { groupChannelsByScope } from '../Chat/ChatDirectory/ChatDirectory.utils'
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
+import type { TabType } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { VisibleChannel } from '../../machines/stateMachine';
 
 interface GlobalCommandMenuProps {
@@ -18,6 +19,9 @@ interface GlobalCommandMenuProps {
   contextItems?: ContextItem[];
   onContextItemToggle?: (item: ContextItem) => void;
   onContextSelectionConfirm?: () => void;
+  enabledTabs?: TabType[];
+  inline?: boolean;
+  onTabChange?: (tab: TabType) => void;
 }
 
 const GlobalCommandMenu = ({
@@ -27,6 +31,9 @@ const GlobalCommandMenu = ({
   contextItems,
   onContextItemToggle,
   onContextSelectionConfirm,
+  enabledTabs,
+  inline,
+  onTabChange,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
@@ -84,6 +91,9 @@ const GlobalCommandMenu = ({
       {...(contextItems !== undefined ? { contextItems } : {})}
       {...(onContextItemToggle !== undefined ? { onContextItemToggle } : {})}
       {...(onContextSelectionConfirm !== undefined ? { onContextSelectionConfirm } : {})}
+      {...(enabledTabs !== undefined ? { enabledTabs } : {})}
+      {...(inline !== undefined ? { inline } : {})}
+      {...(onTabChange !== undefined ? { onTabChange } : {})}
     />
   );
 };

@@ -44,9 +44,9 @@ export interface StreamState {
 export interface StreamRequest {
   query: string;
   channelIds: string[];
-  canvasIds?: string[];
-  ticketIds?: string[];
-  callIds?: string[];
+  canvasIds?: string[] | undefined;
+  ticketIds?: string[] | undefined;
+  callIds?: string[] | undefined;
   conversationId: string;
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined;

@@ -143,6 +143,7 @@ export interface VespaSearchFilters {
   stage?: string; // Ticket stage
   assignee?: string; // Assigned user ID
   subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'
+  callType?: string; // Comma-separated call types: 'HEADLESS'
 
   // Filter-only mode (no query text, just filters)
   filterOnly?: boolean;

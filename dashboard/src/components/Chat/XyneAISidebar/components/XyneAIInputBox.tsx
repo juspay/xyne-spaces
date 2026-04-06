@@ -19,16 +19,16 @@ import {
   Package,
   Search,
   File,
+  Ticket,
+  Phone,
+  Mic,
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import { toast } from 'sonner';
-import { ChannelScopeType } from '@xyne/shared';
 import { StopIcon } from './StopIcon';
-import { useAllVisibleChannels, searchChannels } from '../../../../hooks/useChannels';
-import type { Channel } from '@xyne/shared';
 import {
   ChannelMentionExtension,
   channelMentionPluginKey,
@@ -40,6 +40,7 @@ import type { MentionResult } from '../../../ui/Selectors/Selectors.types';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { useResearchOptions, type ResearchContext } from '../../../../hooks/useResearchAgent';
 import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
+import type { VisibleChannel } from '../../../../machines/stateMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 
@@ -51,6 +52,13 @@ const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
 import type { UserActivity } from '../../../../hooks/useUserActivity';
 import type { UserTag } from '../utils/XyneAITypes';
 import { useMentionSearch } from '../../../../hooks/useMentionSearch';
+import type {
+  SelectedChannel,
+  SelectedTicket,
+  SelectedCanvas,
+  SelectedTranscript,
+  SelectedRecording,
+} from './ContextPickerPanel';
 
 // Browser context interface
 interface BrowserContext {
@@ -74,12 +82,24 @@ interface XyneAIInputBoxProps {
   inputValue: string;
   onInputChange: (value: string) => void;
   onSubmit: () => void;
-  onSelectedChannelsChange?: (channelIds: string[]) => void;
   onResearchContextChange?: (context: ResearchContext | null) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
   onAttachmentsChange?: (attachments: Attachment[]) => void;
   onBrowserContextChange?: (context: BrowserContext | null) => void;
+  selectedChannels?: SelectedChannel[];
+  onRemoveChannel?: (id: string) => void;
+  onAddChannel?: (channel: SelectedChannel) => void;
+  nonDMChannels?: VisibleChannel[];
+  onOpenContextModal?: () => void;
+  selectedTickets?: SelectedTicket[];
+  onRemoveTicket?: (id: string) => void;
+  selectedCanvases?: SelectedCanvas[];
+  onRemoveCanvas?: (id: string) => void;
+  selectedTranscripts?: SelectedTranscript[];
+  onRemoveTranscript?: (id: string) => void;
+  selectedRecordings?: SelectedRecording[];
+  onRemoveRecording?: (id: string) => void;
   selectedActivities?: UserActivity[];
   onActivitiesChange?: (activities: UserActivity[]) => void;
   isStreaming?: boolean;
@@ -98,12 +118,7 @@ export interface XyneAIInputBoxHandle {
   clearContent: () => void;
   insertContent: (content: string) => void;
   isSuggestionOpen: () => boolean;
-}
-
-interface SelectedChannel {
-  id: string;
-  name: string;
-  isPrivate: boolean;
+  focus: () => void;
 }
 
 export interface Attachment {
@@ -121,20 +136,32 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
   (
     {
       channelId,
-      channelName,
-      scopeType,
+      channelName: _channelName,
+      scopeType: _scopeType,
       threadInfo,
       canvasInfo,
       selectionInfos = [],
       inputValue,
       onInputChange,
       onSubmit,
-      onSelectedChannelsChange,
       onResearchContextChange,
       onThreadInfoChange,
       onSelectionInfosChange,
       onAttachmentsChange,
       onBrowserContextChange,
+      selectedChannels = [],
+      onRemoveChannel,
+      onAddChannel,
+      nonDMChannels = [],
+      onOpenContextModal,
+      selectedTickets = [],
+      onRemoveTicket,
+      selectedCanvases = [],
+      onRemoveCanvas,
+      selectedTranscripts = [],
+      onRemoveTranscript,
+      selectedRecordings = [],
+      onRemoveRecording,
       selectedActivities = [],
       onActivitiesChange,
       isStreaming = false,
@@ -148,27 +175,14 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     },
     ref,
   ): ReactElement => {
-    const dropdownRef = useRef<HTMLDivElement>(null);
     const researchDropdownRef = useRef<HTMLDivElement>(null);
-    const searchInputRef = useRef<HTMLInputElement>(null);
     const researchSearchInputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const hasInitializedDefaultChannel = useRef(false);
     const { isMobile } = usePlatform();
     const navigate = useNavigate();
 
     // Get user mentions using the existing hook
     const { results: mentionResults, searchMentions } = useMentionSearch(channelId ?? undefined);
-
-    // Get all visible channels and filter out DMs
-    const allChannels = useAllVisibleChannels();
-    const nonDMChannels = useMemo(() => {
-      return allChannels.filter(
-        channel =>
-          channel.scopeType !== ChannelScopeType.DM &&
-          channel.scopeType !== ChannelScopeType.GROUP_DM,
-      );
-    }, [allChannels]);
 
     // Get research agent products and repositories (lazy-loaded)
     const {
@@ -179,30 +193,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       hasFetched: hasResearchFetched,
     } = useResearchOptions();
 
-    // Initialize with current channel as default pill (if exists and not DM)
-    const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>(() => {
-      // Don't add default pill for DMs or if no channelId
-      if (!channelId || !channelName || scopeType === 'DM' || scopeType === 'GROUP_DM') {
-        return [];
-      }
-
-      // Try to find the channel to get correct isPrivate value
-      const currentChannel = allChannels.find(ch => ch.id === channelId);
-
-      return [
-        {
-          id: channelId,
-          name: channelName,
-          isPrivate: currentChannel ? String(currentChannel.visibility) === 'PRIVATE' : false,
-        },
-      ];
-    });
-
     const [selectedAttachments, setSelectedAttachments] = useState<Attachment[]>([]);
-    const [showChannelDropdown, setShowChannelDropdown] = useState(false);
-    const [channelSearchQuery, setChannelSearchQuery] = useState('');
-    const [highlightedIndex, setHighlightedIndex] = useState(0);
-    const [dropdownTriggeredBy, setDropdownTriggeredBy] = useState<'button' | 'text'>('button');
 
     // Research Agent state
     const [selectedResearch, setSelectedResearch] = useState<ResearchContext | null>(null);
@@ -310,6 +301,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           handleBrowserContext as EventListener,
         );
       };
+    }, []);
+
+    const handleAttachFiles = useCallback((): void => {
+      fileInputRef.current?.click();
     }, []);
 
     // Handle removing thread info
@@ -425,14 +420,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     };
 
-    // Filter channels based on search query (exclude DMs)
-    const filteredChannels = useMemo(() => {
-      if (!channelSearchQuery.trim()) {
-        return nonDMChannels.slice(0, 10);
-      }
-      return searchChannels(nonDMChannels, channelSearchQuery, 10);
-    }, [nonDMChannels, channelSearchQuery]);
-
     // TipTap editor setup
     const editor = useEditor({
       extensions: [
@@ -472,6 +459,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           style: 'min-height: 20px; max-height: 140px; overflow-y: auto;',
         },
         handleKeyDown: (view, event) => {
+          // Open context modal when '/' is typed
+          if (event.key === '/') {
+            event.preventDefault();
+            onOpenContextModal?.();
+            return true;
+          }
+
           if (event.key === 'Enter' && !event.shiftKey) {
             const mentionState = mentionPluginKey.getState(view.state);
             const channelMentionState = channelMentionPluginKey.getState(view.state);
@@ -554,41 +548,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       },
     });
 
-    // Update the default channel's isPrivate status when channel data loads (only once)
-    useEffect(() => {
-      if (
-        !hasInitializedDefaultChannel.current &&
-        channelId &&
-        channelName &&
-        allChannels.length > 0
-      ) {
-        const currentChannel = allChannels.find(ch => ch.id === channelId);
-        if (
-          currentChannel &&
-          selectedChannels.length > 0 &&
-          selectedChannels[0]?.id === channelId
-        ) {
-          setSelectedChannels(prev => {
-            if (prev.length === 0 || prev[0]?.id !== channelId) return prev;
-            return [
-              {
-                ...prev[0],
-                isPrivate: String(currentChannel.visibility) === 'PRIVATE',
-              },
-              ...prev.slice(1),
-            ];
-          });
-          hasInitializedDefaultChannel.current = true;
-        }
-      }
-    }, [channelId, channelName, allChannels, selectedChannels]);
-
-    // Notify parent component when selected channels change
-    useEffect(() => {
-      const channelIds = selectedChannels.map(ch => ch.id);
-      onSelectedChannelsChange?.(channelIds);
-    }, [selectedChannels, onSelectedChannelsChange]);
-
     // Notify parent component when attachments change
     useEffect(() => {
       onAttachmentsChange?.(selectedAttachments);
@@ -624,11 +583,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }));
     }, [nonDMChannels]);
 
-    // Handle channel mention search
-    const handleChannelMentionSearch = useCallback((query: string) => {
-      setChannelSearchQuery(query);
-    }, []);
-
     // Handle channel mention selection from TipTap selector
     const handleChannelMentionSelect = useCallback(
       (mention: MentionResult) => {
@@ -646,26 +600,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           return;
         }
 
-        // Add channel to selected channels pills
-        const newChannel: SelectedChannel = {
+        // Add channel via parent callback
+        onAddChannel?.({
           id: mention.id,
           name: mention.name,
           isPrivate: mention.isPrivate ?? false,
-        };
-        setSelectedChannels([...selectedChannels, newChannel]);
+        });
       },
-      [selectedChannels],
+      [selectedChannels, onAddChannel],
     );
-
-    // Handle removing a selected channel pill
-    const handleRemoveChannel = (channelIdToRemove: string): void => {
-      setSelectedChannels(selectedChannels.filter(ch => ch.id !== channelIdToRemove));
-    };
-
-    // Handle attachment button click
-    const handleAttachmentClick = (): void => {
-      fileInputRef.current?.click();
-    };
 
     // File size limits
     const MAX_INDIVIDUAL_FILE_SIZE = 100 * 1024 * 1024; // 100MB in bytes
@@ -977,106 +920,16 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
             false
           );
         },
+        focus: (): void => {
+          editor?.commands.focus();
+        },
       }),
       [editor, handleFilesAdded],
     );
 
-    // Handle "/" button click
-    const handleSlashButtonClick = (): void => {
-      setShowChannelDropdown(true);
-      setChannelSearchQuery('');
-      setHighlightedIndex(0);
-      setDropdownTriggeredBy('button');
-      // Focus on the search input when dropdown opens
-      setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 0);
-    };
-
-    // Handle search input in dropdown
-    const handleDropdownSearchChange = (value: string): void => {
-      setChannelSearchQuery(value);
-      setHighlightedIndex(0);
-    };
-
-    // Handle selecting channel from dropdown (via button or search)
-    const handleDropdownChannelSelect = (channel: Channel): void => {
-      // Check if channel is already selected
-      if (selectedChannels.some(ch => ch.id === channel.id)) {
-        toast.info('This channel is already added to context', { duration: 2000 });
-        setShowChannelDropdown(false);
-        setChannelSearchQuery('');
-        return;
-      }
-
-      // Check if maximum limit of 5 channels is reached
-      if (selectedChannels.length >= 5) {
-        toast.error('Maximum 5 channels can be selected', { duration: 2000 });
-        setShowChannelDropdown(false);
-        setChannelSearchQuery('');
-        return;
-      }
-
-      // Add channel to selected channels pills
-      const newChannel: SelectedChannel = {
-        id: channel.id,
-        name: channel.name,
-        isPrivate: String(channel.visibility) === 'PRIVATE',
-      };
-      setSelectedChannels([...selectedChannels, newChannel]);
-
-      setShowChannelDropdown(false);
-      setChannelSearchQuery('');
-    };
-
-    // Handle keyboard navigation in dropdown search
-    const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-      switch (e.key) {
-        case 'ArrowDown':
-          e.preventDefault();
-          setHighlightedIndex(prev => (prev < filteredChannels.length - 1 ? prev + 1 : prev));
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          setHighlightedIndex(prev => (prev > 0 ? prev - 1 : 0));
-          break;
-        case 'Enter':
-          e.preventDefault();
-          if (filteredChannels[highlightedIndex]) {
-            handleDropdownChannelSelect(filteredChannels[highlightedIndex]);
-          }
-          break;
-        case 'Escape':
-          e.preventDefault();
-          setShowChannelDropdown(false);
-          setChannelSearchQuery('');
-          break;
-        default:
-          break;
-      }
-    };
-
-    // Scroll highlighted item into view
-    useEffect(() => {
-      if (showChannelDropdown && dropdownRef.current) {
-        const highlightedElement = dropdownRef.current.querySelector(
-          `[data-index="${highlightedIndex}"]`,
-        );
-        if (highlightedElement) {
-          highlightedElement.scrollIntoView({
-            block: 'nearest',
-          });
-        }
-      }
-    }, [highlightedIndex, showChannelDropdown]);
-
-    // Close dropdown when clicking outside
+    // Close research dropdown when clicking outside
     useEffect(() => {
       const handleClickOutside = (event: MouseEvent): void => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-          setShowChannelDropdown(false);
-          setChannelSearchQuery('');
-        }
         if (
           researchDropdownRef.current &&
           !researchDropdownRef.current.contains(event.target as Node)
@@ -1086,14 +939,14 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         }
       };
 
-      if (showChannelDropdown || showResearchDropdown) {
+      if (showResearchDropdown) {
         document.addEventListener('mousedown', handleClickOutside);
         return (): void => {
           document.removeEventListener('mousedown', handleClickOutside);
         };
       }
       return undefined;
-    }, [showChannelDropdown, showResearchDropdown]);
+    }, [showResearchDropdown]);
 
     // Notify parent when research context changes
     useEffect(() => {
@@ -1225,7 +1078,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           editor={editor}
           mentionItems={channelMentionItems}
           triggerChar='#'
-          {...(handleChannelMentionSearch && { onMentionSearch: handleChannelMentionSearch })}
           {...(handleChannelMentionSelect && { onMentionSelect: handleChannelMentionSelect })}
         />
 
@@ -1240,17 +1092,17 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               scrollbarColor: '#D1D5DB transparent',
             }}
           >
-            {/* "/" Button to open channel selector */}
+            {/* "/" Button to open unified context modal */}
             <button
               type='button'
-              onClick={handleSlashButtonClick}
+              onClick={() => onOpenContextModal?.()}
               className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-[#E4E6E7] hover:bg-[#E8EAED] transition-all duration-200 ease-in-out flex-shrink-0`}
-              aria-label='Select channels'
-              title='Select channels'
+              aria-label='Add context'
+              title='Add context'
               data-track-category='XyneAI'
-              data-track-name='OPEN_CHANNEL_SELECTOR'
+              data-track-name='OPEN_CONTEXT_MODAL'
             >
-              <span className='text-muted-foreground font-semibold text-sm'>#</span>
+              <span className='text-muted-foreground font-semibold text-sm'>/</span>
             </button>
 
             {/* Research Agent Button - only show if no research is selected */}
@@ -1338,7 +1190,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
             {activeSelectionInfos.map((selection, index) => (
               <div
                 key={`${selection.canvasViewAccessId}-${index}`}
-                className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-blue-200 bg-blue-50 flex-shrink-0`}
+                className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0`}
               >
                 <button
                   type='button'
@@ -1430,7 +1282,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 </div>
                 {/* Show X button for all channels */}
                 <button
-                  onClick={() => handleRemoveChannel(channel.id)}
+                  onClick={() => onRemoveChannel?.(channel.id)}
                   className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
                   aria-label={`Remove ${channel.name}`}
                   data-track-category='XyneAI'
@@ -1498,9 +1350,117 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               </div>
             ))}
 
+            {/* Ticket Context Pills */}
+            {selectedTickets.map(ticket => (
+              <div
+                key={ticket.id}
+                className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'
+              >
+                <div className='flex items-center gap-1'>
+                  <div className='flex-shrink-0'>
+                    <Ticket className='w-3.5 h-3.5 text-muted-foreground' />
+                  </div>
+                  <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                    {ticket.xyneId ? `${ticket.xyneId}` : ticket.title}
+                  </span>
+                </div>
+                <button
+                  onClick={() => onRemoveTicket?.(ticket.id)}
+                  className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                  aria-label={`Remove ticket ${ticket.title}`}
+                  data-track-category='XyneAI'
+                  data-track-name='REMOVE_TICKET'
+                  data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                >
+                  <X className='w-3 h-3' />
+                </button>
+              </div>
+            ))}
+
+            {/* Canvas Pills */}
+            {selectedCanvases.map(canvas => (
+              <div
+                key={canvas.id}
+                className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'
+              >
+                <div className='flex items-center gap-1'>
+                  <div className='flex-shrink-0'>
+                    <FileText className='w-3.5 h-3.5 text-muted-foreground' />
+                  </div>
+                  <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                    {canvas.title}
+                  </span>
+                </div>
+                <button
+                  onClick={() => onRemoveCanvas?.(canvas.id)}
+                  className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                  aria-label={`Remove canvas ${canvas.title}`}
+                  data-track-category='XyneAI'
+                  data-track-name='REMOVE_CANVAS'
+                  data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+                >
+                  <X className='w-3 h-3' />
+                </button>
+              </div>
+            ))}
+
+            {/* Transcript Pills */}
+            {selectedTranscripts.map(transcript => (
+              <div
+                key={transcript.id}
+                className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'
+              >
+                <div className='flex items-center gap-1'>
+                  <div className='flex-shrink-0'>
+                    <Phone className='w-3.5 h-3.5 text-muted-foreground' />
+                  </div>
+                  <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                    {transcript.title}
+                  </span>
+                </div>
+                <button
+                  onClick={() => onRemoveTranscript?.(transcript.id)}
+                  className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                  aria-label={`Remove transcript ${transcript.title}`}
+                  data-track-category='XyneAI'
+                  data-track-name='REMOVE_TRANSCRIPT'
+                  data-track-metadata={JSON.stringify({ transcriptId: transcript.id })}
+                >
+                  <X className='w-3 h-3' />
+                </button>
+              </div>
+            ))}
+
+            {/* Recording Pills */}
+            {selectedRecordings.map(recording => (
+              <div
+                key={recording.id}
+                className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'
+              >
+                <div className='flex items-center gap-1'>
+                  <div className='flex-shrink-0'>
+                    <Mic className='w-3.5 h-3.5 text-muted-foreground' />
+                  </div>
+                  <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                    {recording.title}
+                  </span>
+                </div>
+                <button
+                  onClick={() => onRemoveRecording?.(recording.id)}
+                  className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
+                  aria-label={`Remove recording ${recording.title}`}
+                  data-track-category='XyneAI'
+                  data-track-name='REMOVE_RECORDING'
+                  data-track-metadata={JSON.stringify({ recordingId: recording.id })}
+                >
+                  <X className='w-3 h-3' />
+                </button>
+              </div>
+            ))}
+
             {/* Activity Pills */}
             {selectedActivities.length > 0 && (
-              <div className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-blue-50 flex-shrink-0'>
+              <div className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'>
                 <div className='flex items-center gap-1'>
                   <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap">
                     {selectedActivities.length}{' '}
@@ -1509,7 +1469,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 </div>
                 <button
                   onClick={() => onActivitiesChange?.([])}
-                  className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                  className='hover:bg-accent rounded p-0.5 transition-colors flex-shrink-0'
                   aria-label='Remove all activities'
                   data-track-category='XYNE_AI'
                   data-track-name='RemoveAllActivities'
@@ -1529,7 +1489,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
             />
           </div>
 
-          {/* Bottom buttons - Attachment, Web Search Toggle and Submit */}
+          {/* Bottom buttons - Context menu, Web Search Toggle and Submit */}
           <div className='flex items-center justify-between gap-2 px-2'>
             <div className='flex items-center gap-2'>
               {/* Hidden file input */}
@@ -1542,10 +1502,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 className='hidden'
                 aria-label='Upload files'
               />
-              {/* Attachment button */}
+              {/* Attach files button */}
               <button
                 type='button'
-                onClick={handleAttachmentClick}
+                onClick={handleAttachFiles}
                 className='p-1.5 -ml-1.5 rounded-lg hover:bg-accent transition-colors'
                 aria-label='Attach files'
                 title='Attach files'
@@ -1637,67 +1597,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
             </button>
           </div>
         </div>
-
-        {/* Channel Dropdown when triggered by button click */}
-        {showChannelDropdown && dropdownTriggeredBy === 'button' && (
-          <div
-            ref={dropdownRef}
-            className='absolute bottom-full left-4 right-4 mb-2 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden'
-          >
-            {/* Search Input */}
-            <div className='p-2 border-b border-border bg-muted'>
-              <input
-                ref={searchInputRef}
-                type='text'
-                value={channelSearchQuery}
-                onChange={e => handleDropdownSearchChange(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder='Search...'
-                className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent font-['Inter']"
-                data-track-category='XyneAI'
-                data-track-name='CHANNEL_SEARCH_INPUT'
-              />
-            </div>
-
-            {/* Channel List */}
-            <div className='max-h-64 overflow-y-auto'>
-              {filteredChannels.length > 0 ? (
-                <div className='py-1'>
-                  {filteredChannels.map((channel, index) => (
-                    <button
-                      key={channel.id}
-                      data-index={index}
-                      onClick={() => handleDropdownChannelSelect(channel)}
-                      className={`w-full text-left px-3 py-2 hover:bg-accent transition-colors flex items-center gap-2 ${
-                        index === highlightedIndex ? 'bg-accent' : ''
-                      }`}
-                      data-track-category='XyneAI'
-                      data-track-name='SELECT_CHANNEL'
-                      data-track-metadata={JSON.stringify({ channelId: channel.id })}
-                    >
-                      <div className='flex-shrink-0'>
-                        {String(channel.visibility) === 'PRIVATE' ? (
-                          <Lock className='h-3.5 w-3.5 text-muted-foreground' />
-                        ) : (
-                          <HashIcon />
-                        )}
-                      </div>
-                      <div className='flex-1 min-w-0'>
-                        <div className="text-sm font-medium text-foreground font-['Inter'] truncate">
-                          {channel.name}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-                  No channels found
-                </div>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Research Agent Dropdown */}
         {showResearchDropdown && (

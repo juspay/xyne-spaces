@@ -1108,7 +1108,8 @@ const SummarizerContent = ({
                     {keyPoint.citation &&
                       (keyPoint.citation.conversationId ||
                         keyPoint.citation.externalUrl ||
-                        keyPoint.citation.canvasId) &&
+                        keyPoint.citation.canvasId ||
+                        keyPoint.citation.entityType === 'recording') &&
                       !message.isStreaming && (
                         <>
                           {' '}

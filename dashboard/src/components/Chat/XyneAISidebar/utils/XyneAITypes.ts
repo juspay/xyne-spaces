@@ -16,7 +16,7 @@ export interface SummarizerCitation {
   isTicket?: boolean; // Distinguishes ticket citations from message citations (legacy)
 
   // NEW: Multi-entity support
-  entityType?: 'message' | 'attachment' | 'call' | 'canvas' | 'ticket' | 'web_search';
+  entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search';
   entityId?: string;
   canvasId?: string;
   callId?: string;

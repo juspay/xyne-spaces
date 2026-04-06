@@ -433,6 +433,10 @@ export class SearchService {
       params['subApp'] = filters.subApp;
     }
 
+    if (filters.callType) {
+      params['callType'] = filters.callType;
+    }
+
     if (filters.filterOnly !== undefined) {
       params['filterOnly'] = filters.filterOnly.toString();
     }

@@ -45,6 +45,7 @@ export interface TicketFilters {
 
 export interface FileFilters {
   subApp?: string[];
+  callType?: string[];
   docType?: string[];
   createdBefore?: string;
   createdAfter?: string;
@@ -211,6 +212,12 @@ private buildUserConditions(): string {
 
     if (subAppConditions.length > 0) {
       conditions.push(`(${subAppConditions.join(' or ')})`);
+    }
+
+    // callType filter (e.g. HEADLESS for recordings)
+    if (filters.callType && filters.callType.length > 0) {
+      const types = filters.callType.map(t => `callType contains "${t.trim()}"`).join(' or ');
+      conditions.push(`(${types})`);
     }
 
     // Date filters

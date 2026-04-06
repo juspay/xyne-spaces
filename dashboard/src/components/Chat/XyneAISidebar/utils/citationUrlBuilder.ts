@@ -33,6 +33,12 @@ export function buildCitationUrl(citation: SummarizerCitation): string | null {
       }
       return null;
 
+    case 'recording':
+      if (citation.entityId) {
+        return `/recordings/${citation.entityId}`;
+      }
+      return null;
+
     case 'call':
       // Calls need conversationId to navigate to the conversation where the call occurred
       if (channelId && conversationId) {
