@@ -3,232 +3,324 @@ import { QueryResultType } from '@rocicorp/zero';
 import { useCachedQuery } from './useCachedQuery';
 import { useZero } from './useZero';
 import { queries } from '../zero/queries';
-import { Conversation } from '../machines/stateMachine';
+import { useAllVisibleChannels } from './useChannels';
 
 type DmStatsPageResult = QueryResultType<typeof queries.dmChannelsLatestMessagesPaginated>;
-type DmStatsRow = DmStatsPageResult[number];
 
-// The channel shape exposed to consumers — channel data with channelStats attached
-type DmChannel = NonNullable<DmStatsRow['channel']> & {
+type DmChannel = NonNullable<DmStatsPageResult[number]['channel']> & {
   channelStats: { lastActivityAt: number; participantCount: number } | undefined;
 };
 
+type DmConversation = NonNullable<
+  NonNullable<DmStatsPageResult[number]['channel']>['conversations']
+>[number];
+
 const PAGE_SIZE = 20;
+
+// Virtuoso requires firstItemIndex to stay above 0 as items are prepended.
+// This is headroom only — the actual value has no domain meaning.
+const VIRTUOSO_PREPEND_HEADROOM = 100_000;
 
 interface UseDmsPaginatedMessagesOptions {
   selectedChannelId?: string | undefined;
 }
 
 interface UseDmsPaginatedMessagesReturn {
-  messagesMap: Map<string, Conversation>;
+  messagesMap: Map<string, DmConversation>;
   channels: DmChannel[];
   hasMore: boolean;
+  hasMoreBefore: boolean;
   loadMore: () => void;
-  isLoading: boolean;
-  /** Increments each time the selected channel moves to the top (index 0). Use to trigger scroll-to-top. */
+  /** Virtuoso firstItemIndex — increases by N each time N items are prepended. */
+  firstItemIndex: number;
+  /** Increments each time the selected channel moves to index 0. Use to trigger scroll-to-top. */
   selectedChannelMovedVersion: number;
+  /**
+   * When called with a channelId: scrolls to an existing channel or fetches and jumps to it.
+   * When called without arguments: loads the previous page (newer channels) — equivalent to
+   * the former loadMoreBefore, used by Virtuoso's startReached.
+   */
+  jumpToChannel: (
+    channelId?: string,
+  ) => Promise<
+    { type: 'scroll'; index: number } | { type: 'loaded' } | { type: 'skipped' } | { type: 'error' }
+  >;
 }
 
-/**
- * Hook for paginated DM channel list with cursor-based pagination.
- *
- * Design:
- * - Page 1 (cursor=null) is ALWAYS the live Zero subscription (useCachedQuery). It reactively
- *   updates whenever any channel gets new activity.
- * - Deeper pages (2, 3, ...) are fetched on demand via `zero.run()` — a one-shot imperative
- *   fetch with NO subscription. Deeper-page channels are frozen snapshots and will NOT produce
- *   reactive re-renders or keep open Zero subscriptions.
- * - Cursor-based pagination: each page uses the `{ lastActivityAt, channelId }` of the last
- *   item in the current list as the cursor for the next page fetch.
- * - When page 1 reactively updates, we replace the page-1 portion of accumulatedStats with
- *   fresh data. Deeper-page channels are retained but de-duplicated (a channel that moved up
- *   into page 1 is removed from the deeper-page snapshot automatically).
- * - When user scrolls back to top, all deeper-page snapshots are discarded. Page 2 will be
- *   re-fetched fresh the next time the user scrolls to the bottom.
- * - The selected channel scrolls to top when it receives a message (selectedChannelMovedVersion).
- */
+const sortDesc = (rows: DmStatsPageResult): DmStatsPageResult =>
+  [...rows].sort(
+    (a, b) => b.lastActivityAt - a.lastActivityAt || b.channelId.localeCompare(a.channelId),
+  );
+
 export const useDmsPaginatedMessages = (
   options: UseDmsPaginatedMessagesOptions = {},
 ): UseDmsPaginatedMessagesReturn => {
   const { selectedChannelId } = options;
   const zero = useZero();
 
-  // ========== STATE ==========
+  // Keep a ref so jumpToChannel can read the current visible channels list
+  // synchronously without a stale closure, without re-creating the callback.
+  const visibleChannels = useAllVisibleChannels();
+  const visibleChannelsRef = useRef(visibleChannels);
+  visibleChannelsRef.current = visibleChannels;
 
-  // Accumulated stats: page 1 (live) + deeper pages (frozen snapshots), sorted by lastActivityAt desc
-  const [accumulatedStats, setAccumulatedStats] = useState<DmStatsPageResult>([]);
-  // Synchronous mirror for effects/callbacks (avoids stale closure reads)
-  const accumulatedStatsRef = useRef<DmStatsPageResult>([]);
+  // ── Rows ─────────────────────────────────────────────────────────────────────
+  // Ref mirrors state so async callbacks always read current value without stale closures.
+  const [rows, setRows] = useState<DmStatsPageResult>([]);
+  const rowsRef = useRef<DmStatsPageResult>([]);
+  const commitRows = useCallback((next: DmStatsPageResult) => {
+    rowsRef.current = next;
+    setRows(next);
+  }, []);
 
+  // ── Pagination state ──────────────────────────────────────────────────────────
   const [hasMore, setHasMore] = useState(true);
+  const [hasMoreBefore, setHasMoreBefore] = useState(false);
+  const hasMoreBeforeRef = useRef(false);
+  const commitHasMoreBefore = useCallback((next: boolean) => {
+    hasMoreBeforeRef.current = next;
+    setHasMoreBefore(next);
+  }, []);
 
-  // Guard: prevents concurrent loadMore calls
+  const [firstItemIndex, setFirstItemIndex] = useState(0);
   const isFetchingRef = useRef(false);
 
-  // Track selected channel movement for scroll-to-top
+  // ── Selected channel scroll tracking ─────────────────────────────────────────
   const [selectedChannelMovedVersion, setSelectedChannelMovedVersion] = useState(0);
-  const prevSelectedIndexRef = useRef<number>(-1);
-  const prevSelectedActivityRef = useRef<number>(-1);
-
+  const prevSelectedIndexRef = useRef(-1);
+  const prevSelectedActivityRef = useRef(-1);
   const selectedChannelIdRef = useRef(selectedChannelId);
-  if (selectedChannelIdRef.current !== selectedChannelId) {
+
+  useEffect(() => {
     selectedChannelIdRef.current = selectedChannelId;
     prevSelectedIndexRef.current = -1;
     prevSelectedActivityRef.current = -1;
-  }
+  }, [selectedChannelId]);
 
-  // PAGE 1: Always-live Zero subscription. Reactively updates when any DM channel changes.
-  const [page1, page1Details] = useCachedQuery(
+  // ── Page 1: always-live Zero subscription ─────────────────────────────────────
+  const [page1] = useCachedQuery(
     queries.dmChannelsLatestMessagesPaginated({ limit: PAGE_SIZE, start: null }),
   );
 
-  // Always-current ref for page1 — used inside debounced callbacks to avoid stale closures
-  const page1Ref = useRef(page1);
-  page1Ref.current = page1;
-
-  // Fingerprint to detect content changes even if the page1 array reference is stable
-  const page1Fingerprint = useMemo(() => {
-    if (!page1 || page1.length === 0) return '';
-    return page1.map(r => `${r.channelId}:${r.lastActivityAt}`).join('|');
-  }, [page1]);
-
-  /**
-   * Effect: Handle page 1 reactive updates.
-   *
-   * Page 1 is always live. When it updates (e.g. channels move due to new messages),
-   * we replace the page-1 portion of accumulatedStats with the fresh page-1 data.
-   * Deeper-page channels are kept as-is but de-duplicated (if a channel moved up
-   * into page 1, the stale deeper-page copy is removed automatically).
-   */
   useEffect(() => {
     if (!page1) return;
 
+    // Cursor mode: ignore page1 updates unless the selected channel has bubbled up into
+    // page1 (e.g. user sent a message from a jump position), in which case close the gap
+    // and fall through to the live merge below.
+    if (hasMoreBeforeRef.current) {
+      const selectedId = selectedChannelIdRef.current;
+      const selectedInPage1 = selectedId !== null && page1.some(s => s.channelId === selectedId);
+      if (!selectedInPage1) return;
+      commitHasMoreBefore(false);
+    }
+
     if (page1.length === 0) {
-      accumulatedStatsRef.current = [];
-      setAccumulatedStats([]);
+      commitRows([]);
       setHasMore(false);
       return;
     }
 
-    const page1Map = new Map(page1.map(s => [s.channelId, s]));
+    // Merge: fresh page1 replaces the live portion; deeper-page rows are de-duplicated and kept.
+    const page1Ids = new Set(page1.map(s => s.channelId));
+    const deeperRows = rowsRef.current.filter(s => !page1Ids.has(s.channelId));
+    const merged = sortDesc([...page1, ...deeperRows]);
 
-    // Keep deeper-page channels not already in the fresh page 1 (de-duplicate only)
-    const deeperPageStats = accumulatedStatsRef.current.filter(s => !page1Map.has(s.channelId));
+    // Fire scroll-to-top when the selected channel reaches index 0 or gets a new message there.
+    const selectedId = selectedChannelIdRef.current;
+    if (selectedId) {
+      const newIdx = merged.findIndex(s => s.channelId === selectedId);
+      const newActivity = newIdx >= 0 ? merged[newIdx]!.lastActivityAt : -1;
 
-    // Merge: fresh page 1 + retained deeper-page snapshots, sorted
-    const newAccumulated = [...page1, ...deeperPageStats].sort(
-      (a, b) => b.lastActivityAt - a.lastActivityAt || b.channelId.localeCompare(a.channelId),
-    );
-
-    // Detect selected channel movement and fire scroll-to-top signal
-    const currentSelectedId = selectedChannelIdRef.current;
-    if (currentSelectedId) {
-      const newIdx = newAccumulated.findIndex(s => s.channelId === currentSelectedId);
-      const newActivity = newIdx >= 0 ? newAccumulated[newIdx]!.lastActivityAt : -1;
-      const prevIdx = prevSelectedIndexRef.current;
-      const prevActivity = prevSelectedActivityRef.current;
+      if (
+        newIdx === 0 &&
+        (prevSelectedIndexRef.current !== 0 || prevSelectedActivityRef.current !== newActivity)
+      ) {
+        setSelectedChannelMovedVersion(v => v + 1);
+      }
 
       prevSelectedIndexRef.current = newIdx;
       prevSelectedActivityRef.current = newActivity;
-
-      // Trigger scroll-to-top when:
-      // 1. Selected channel moved to index 0 from elsewhere, OR
-      // 2. It was already at 0 and its lastActivityAt changed (new message received)
-      if (newIdx === 0 && (prevIdx !== 0 || newActivity !== prevActivity)) {
-        setSelectedChannelMovedVersion(v => v + 1);
-      }
     }
 
-    accumulatedStatsRef.current = newAccumulated;
-    setAccumulatedStats(newAccumulated);
+    commitRows(merged);
     setHasMore(page1.length === PAGE_SIZE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page1, page1Fingerprint]);
-  /**
-   * loadMore: Fetches the next page using cursor-based pagination via `zero.run()`.
-   *
-   * The cursor `{ lastActivityAt, channelId }` is taken from the last item in the
-   * current accumulated list and passed as `start` to the same paginated query.
-   * zero.run() is a one-shot imperative fetch — it creates NO subscription.
-   */
+  }, [page1]);
+
+  // ── Single fetch helper ────────────────────────────────────────────────────
+  const fetchPage = useCallback(
+    (
+      start: { lastActivityAt: number; channelId: string } | null,
+      direction?: 'forward' | 'backward',
+    ) =>
+      zero.run(queries.dmChannelsLatestMessagesPaginated({ limit: PAGE_SIZE, start, direction }), {
+        type: 'complete',
+      }),
+    [zero],
+  );
+
+  // ── loadMore (forward — older channels) ──────────────────────────────────────
   const loadMore = useCallback(() => {
     if (isFetchingRef.current || !hasMore) return;
 
-    const last = accumulatedStatsRef.current[accumulatedStatsRef.current.length - 1];
+    const last = rowsRef.current.at(-1);
     if (!last) {
       setHasMore(false);
       return;
     }
 
-    // Cursor points to the last item — the query will return items after this point
-    const cursor = { lastActivityAt: last.lastActivityAt, channelId: last.channelId };
     isFetchingRef.current = true;
+    const cursor = { lastActivityAt: last.lastActivityAt, channelId: last.channelId };
 
     void (async () => {
       try {
-        const deeperPage = await zero.run(
-          queries.dmChannelsLatestMessagesPaginated({ limit: PAGE_SIZE, start: cursor }),
-          { type: 'complete' },
-        );
+        const page = await fetchPage(cursor, 'forward');
 
-        if (!deeperPage || deeperPage.length === 0) {
+        if (!page || page.length === 0) {
           setHasMore(false);
           return;
         }
 
-        // De-duplicate: page 1 reactive update may have already pulled some channels up
-        const existingIds = new Set(accumulatedStatsRef.current.map(s => s.channelId));
-        const newRows = deeperPage.filter(s => !existingIds.has(s.channelId));
+        const existingIds = new Set(rowsRef.current.map(s => s.channelId));
+        const newRows = page.filter(s => !existingIds.has(s.channelId));
 
         if (newRows.length > 0) {
-          const newAccumulated = [...accumulatedStatsRef.current, ...newRows].sort(
-            (a, b) => b.lastActivityAt - a.lastActivityAt || b.channelId.localeCompare(a.channelId),
-          );
-          accumulatedStatsRef.current = newAccumulated;
-          setAccumulatedStats(newAccumulated);
+          // Cursor mode: preserve query order so the jump segment stays intact.
+          // Live mode: sort so deeper rows slot in at the correct position.
+          const next = hasMoreBeforeRef.current
+            ? [...rowsRef.current, ...newRows]
+            : sortDesc([...rowsRef.current, ...newRows]);
+          commitRows(next);
         }
 
-        // If we got a full page there may be more; otherwise we've reached the end
-        setHasMore(deeperPage.length === PAGE_SIZE);
+        setHasMore(page.length === PAGE_SIZE);
       } finally {
         isFetchingRef.current = false;
       }
     })();
-  }, [hasMore, zero]);
+  }, [hasMore, fetchPage, commitRows]);
 
-  const isLoading = page1Details.type !== 'complete' && accumulatedStats.length === 0;
+  // ── jumpToChannel / loadMoreBefore (unified) ────────────────────────────────
+  //
+  // Called with a channelId → jump to that channel (scroll if loaded, fetch if not).
+  // Called without arguments → load the previous page (newer channels, backward pagination).
+  const jumpToChannel = useCallback(
+    async (
+      channelId?: string,
+    ): Promise<
+      | { type: 'scroll'; index: number }
+      | { type: 'loaded' }
+      | { type: 'skipped' }
+      | { type: 'error' }
+    > => {
+      // ── No channelId: behave as loadMoreBefore ──────────────────────────────
+      if (channelId === undefined) {
+        if (isFetchingRef.current || !hasMoreBeforeRef.current) return { type: 'skipped' };
 
-  const channels = useMemo<DmChannel[]>(() => {
-    return accumulatedStats
-      .filter(s => s.channel !== null)
-      .map(s => ({
-        ...s.channel!,
-        channelStats: {
-          lastActivityAt: s.lastActivityAt,
-          participantCount: s.participantCount,
-        },
-      }));
-  }, [accumulatedStats]);
+        const first = rowsRef.current[0];
+        if (!first) {
+          commitHasMoreBefore(false);
+          return { type: 'skipped' };
+        }
+
+        isFetchingRef.current = true;
+        const cursor = { lastActivityAt: first.lastActivityAt, channelId: first.channelId };
+
+        try {
+          // Backward query returns ASC; reverse to get DESC before prepending.
+          const page = await fetchPage(cursor, 'backward');
+
+          if (!page || page.length === 0) {
+            commitHasMoreBefore(false);
+            return { type: 'skipped' };
+          }
+
+          const existingIds = new Set(rowsRef.current.map(s => s.channelId));
+          const newRows = [...page].reverse().filter(s => !existingIds.has(s.channelId));
+
+          if (newRows.length > 0) {
+            commitRows([...newRows, ...rowsRef.current]);
+            // Shift firstItemIndex down so Virtuoso keeps the viewport anchored.
+            setFirstItemIndex(prev => prev - newRows.length);
+          }
+
+          // Partial page means we've reached the top — gap is closed, live mode resumes.
+          if (page.length < PAGE_SIZE) {
+            commitHasMoreBefore(false);
+          }
+
+          return { type: 'loaded' };
+        } finally {
+          isFetchingRef.current = false;
+        }
+      }
+
+      // ── channelId provided: jump to specific channel ────────────────────────
+      const existingIndex = rowsRef.current.findIndex(s => s.channelId === channelId);
+      if (existingIndex >= 0) return { type: 'scroll', index: existingIndex };
+
+      if (isFetchingRef.current) return { type: 'error' };
+      isFetchingRef.current = true;
+
+      try {
+        // Check visible channels cache first to avoid a network round-trip.
+        // Fall back to a direct Zero query only if the channel isn't cached.
+        const cachedStats = visibleChannelsRef.current.find(c => c.id === channelId);
+        const lastActivityAt =
+          cachedStats?.channelStats?.lastActivityAt ??
+          (await zero.run(queries.channelStats({ channelId }), { type: 'complete' }))
+            ?.lastActivityAt;
+
+        if (!lastActivityAt) return { type: 'error' };
+
+        const cursor = { lastActivityAt, channelId };
+        const results = await fetchPage(cursor, 'forward');
+
+        if (!results || results.length === 0) return { type: 'error' };
+
+        commitRows(results);
+        setHasMore(results.length === PAGE_SIZE);
+        commitHasMoreBefore(true);
+        setFirstItemIndex(VIRTUOSO_PREPEND_HEADROOM);
+
+        return { type: 'loaded' };
+      } finally {
+        isFetchingRef.current = false;
+      }
+    },
+    [fetchPage, commitRows, commitHasMoreBefore],
+  );
+
+  // ── Derived values ────────────────────────────────────────────────────────────
+  const channels = useMemo<DmChannel[]>(
+    () =>
+      rows
+        .filter(s => s.channel !== null)
+        .map(s => ({
+          ...s.channel!,
+          channelStats: { lastActivityAt: s.lastActivityAt, participantCount: s.participantCount },
+        })),
+    [rows],
+  );
 
   const messagesMap = useMemo(() => {
-    const map = new Map<string, Conversation>();
-    for (const stat of accumulatedStats) {
-      const channel = stat.channel;
-      if (!channel) continue;
-      const conversations = channel.conversations;
-      if (conversations && conversations.length > 0) {
-        map.set(stat.channelId, conversations[0] as unknown as Conversation);
-      }
+    const map = new Map<string, DmConversation>();
+    for (const { channelId, channel } of rows) {
+      const first = channel?.conversations?.[0];
+      if (first) map.set(channelId, first);
     }
     return map;
-  }, [accumulatedStats]);
+  }, [rows]);
 
   return {
     messagesMap,
     channels,
     hasMore,
+    hasMoreBefore,
     loadMore,
-    isLoading,
+    firstItemIndex,
     selectedChannelMovedVersion,
+    jumpToChannel,
   };
 };

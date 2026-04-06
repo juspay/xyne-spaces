@@ -1467,12 +1467,18 @@ export const queries = defineQueries({
   ),
   // Queries from channel_stats as the base table so we can orderBy the
   // authoritative lastActivityAt field (channels.lastActivityAt is deprecated).
+  // Supports bidirectional pagination: forward (older items) and backward (newer items).
   dmChannelsLatestMessagesPaginated: defineQuery(
     z.object({
       limit: z.number(),
       start: z.object({ lastActivityAt: z.number(), channelId: z.string() }).nullable(),
+      direction: z.enum(['forward', 'backward']).optional(),
     }),
-    ({ ctx, args: { limit, start } }) => {
+    ({ args: { limit, start, direction } }) => {
+      const isBackward = direction === 'backward';
+
+      // For backward: order ASC to get items before cursor, then reverse
+      // For forward: order DESC to get items after cursor
       let query = zql.channel_stats
         .whereExists('channel', ch =>
           ch.where(helpers =>
@@ -1482,31 +1488,25 @@ export const queries = defineQueries({
             ),
           ),
         )
-        .orderBy('lastActivityAt', 'desc')
-        .orderBy('channelId', 'desc');
+        .orderBy('lastActivityAt', isBackward ? 'asc' : 'desc')
+        .orderBy('channelId', isBackward ? 'asc' : 'desc');
 
       if (start) {
+        // Forward: inclusive to include cursor and items after (older)
+        // Backward: exclusive to get items before cursor (newer)
         query = query.start(
           { lastActivityAt: start.lastActivityAt, channelId: start.channelId },
-          { inclusive: true },
+          { inclusive: !isBackward },
         );
       }
 
-      return query.limit(limit).related('channel', channelQuery =>
-        channelQuery.related('conversations', conversationQuery =>
-          conversationQuery
-            .orderBy('createdAt', 'desc')
-            .limit(1)
-            .related('initialMessage', initialMessageQuery =>
-              initialMessageQuery.where(helpers => {
-                return helpers.or(
-                  helpers.cmp('visibleTo', 'IS', null),
-                  helpers.cmp('visibleTo', '=', ctx.userID),
-                );
-              }),
-            ),
-        ),
-      );
+      return query
+        .limit(limit)
+        .related('channel', channelQuery =>
+          channelQuery.related('conversations', conversationQuery =>
+            conversationQuery.orderBy('createdAt', 'desc').limit(1),
+          ),
+        );
     },
   ),
   conversationOfUserChannels: defineQuery(({ ctx }) => {
