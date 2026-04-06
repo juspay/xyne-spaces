@@ -93,7 +93,7 @@ const ChatView = (): ReactElement => {
 
     // If user's participation is closed, reopen it
     if (channelUserStatus?.isClosed) {
-      zero.mutate(mutators.channel.reopenDm({ channelId }));
+      zero.mutate(mutators.channel.reopenDm({ channelId, updatedAt: Date.now() }));
     }
   }, [channel, channelId, context.userID, zero]);
 

@@ -150,10 +150,14 @@ export const mutators = defineMutators({
       async ({
         tx,
         ctx,
-        args: { channelId, desktopNotificationLevel, mobileNotificationLevel },
+        args: { channelId, desktopNotificationLevel, mobileNotificationLevel, timestamp },
       }) => {
         const userStatus = await tx.run(
-          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!userStatus) {
@@ -164,6 +168,7 @@ export const mutators = defineMutators({
           id: userStatus.id,
           ...(desktopNotificationLevel !== undefined && { desktopNotificationLevel }),
           ...(mobileNotificationLevel !== undefined && { mobileNotificationLevel }),
+          updatedAt: timestamp,
         });
       },
     ),
@@ -219,18 +224,40 @@ export const mutators = defineMutators({
           isClosed: false,
         });
 
-        await tx.mutate.channel_user_status.insert({
-          id: channelUserStatusId,
-          channelId: channelId,
-          lastViewedAt: timestamp,
-          userId: _ctx.userID,
-          isStarred: false,
-          isClosed: false,
-          unreadCount: 0,
-          isRecapSubscribed: false,
-          desktopNotificationLevel: NotificationLevel.ALL,
-          mobileNotificationLevel: NotificationLevel.ALL,
-        });
+        // Check for existing soft-deleted channel_user_status to restore
+        const existingSoftDeletedStatus = await tx.run(
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', _ctx.userID)
+            .where('isDeleted', true)
+            .one(),
+        );
+
+        if (existingSoftDeletedStatus) {
+          // Restore the soft-deleted status record
+          await tx.mutate.channel_user_status.update({
+            id: existingSoftDeletedStatus.id,
+            isDeleted: false,
+            isClosed: false,
+            lastViewedAt: timestamp,
+            updatedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.channel_user_status.insert({
+            id: channelUserStatusId,
+            channelId: channelId,
+            lastViewedAt: timestamp,
+            userId: _ctx.userID,
+            isStarred: false,
+            isClosed: false,
+            unreadCount: 0,
+            isRecapSubscribed: false,
+            desktopNotificationLevel: NotificationLevel.ALL,
+            mobileNotificationLevel: NotificationLevel.ALL,
+            isDeleted: false,
+            updatedAt: timestamp,
+          });
+        }
       },
     ),
     promoteToChannel: defineMutator(
@@ -335,13 +362,15 @@ export const mutators = defineMutators({
             isRecapSubscribed: false,
             desktopNotificationLevel: NotificationLevel.ALL,
             mobileNotificationLevel: NotificationLevel.ALL,
+            isDeleted: false,
+            updatedAt: timestamp,
           });
         }
       },
     ),
     removeParticipant: defineMutator(
-      z.object({ channelId: z.string(), targetUserId: z.string() }),
-      async ({ tx, ctx, args: { channelId, targetUserId } }) => {
+      z.object({ channelId: z.string(), targetUserId: z.string(), updatedAt: z.number() }),
+      async ({ tx, ctx, args: { channelId, targetUserId, updatedAt } }) => {
         const channel = await tx.run(zql.channels.where('id', channelId).one());
         if (!channel) {
           throw new Error("Channel doesn't exist");
@@ -392,19 +421,25 @@ export const mutators = defineMutators({
         });
 
         const channelUserStatusParticipant = await tx.run(
-          zql.channel_user_status.where('channelId', channelId).where('userId', targetUserId).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', targetUserId)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (channelUserStatusParticipant) {
-          await tx.mutate.channel_user_status.delete({
+          await tx.mutate.channel_user_status.update({
             id: channelUserStatusParticipant.id,
+            isDeleted: true,
+            updatedAt,
           });
         }
       },
     ),
     leaveChannel: defineMutator(
-      z.object({ channelId: z.string() }),
-      async ({ tx, ctx, args: { channelId } }) => {
+      z.object({ channelId: z.string(), updatedAt: z.number() }),
+      async ({ tx, ctx, args: { channelId, updatedAt } }) => {
         const channel = await tx.run(zql.channels.where('id', channelId).one());
         if (!channel) {
           throw new Error('Channel not found');
@@ -434,12 +469,18 @@ export const mutators = defineMutators({
         });
 
         const channelUserStatusParticipant = await tx.run(
-          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (channelUserStatusParticipant) {
-          await tx.mutate.channel_user_status.delete({
+          await tx.mutate.channel_user_status.update({
             id: channelUserStatusParticipant.id,
+            isDeleted: true,
+            updatedAt,
           });
         }
       },
@@ -516,7 +557,11 @@ export const mutators = defineMutators({
         args: { channelId, conversationId, timestamp, draftMessageId, draftMessage },
       }) => {
         const participant = await tx.run(
-          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!participant) {
@@ -539,6 +584,7 @@ export const mutators = defineMutators({
         await tx.mutate.channel_user_status.update({
           id: participant.id,
           ...updateData,
+          updatedAt: timestamp,
         });
 
         // Query for drafts in this channel for this user (follows backend logic)
@@ -608,10 +654,15 @@ export const mutators = defineMutators({
         channelId: z.string(),
         messageId: z.string(),
         conversationId: z.string().optional(),
+        timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { channelId, messageId, conversationId } }) => {
+      async ({ tx, ctx, args: { channelId, messageId, conversationId, timestamp } }) => {
         const participant = await tx.run(
-          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!participant) {
@@ -746,6 +797,7 @@ export const mutators = defineMutators({
         await tx.mutate.channel_user_status.update({
           id: participant.id,
           ...updateData,
+          updatedAt: timestamp,
         });
 
         // Mark root activities unread sequentially for safer transaction handling
@@ -760,10 +812,14 @@ export const mutators = defineMutators({
       },
     ),
     toggleStarred: defineMutator(
-      z.object({ channelId: z.string() }),
-      async ({ tx, ctx, args: { channelId } }) => {
+      z.object({ channelId: z.string(), updatedAt: z.number() }),
+      async ({ tx, ctx, args: { channelId, updatedAt } }) => {
         const participation = await tx.run(
-          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!participation) {
@@ -773,14 +829,19 @@ export const mutators = defineMutators({
         await tx.mutate.channel_user_status.update({
           id: participation.id,
           isStarred: !participation.isStarred,
+          updatedAt,
         });
       },
     ),
     closeDm: defineMutator(
-      z.object({ channelId: z.string() }),
-      async ({ tx, ctx, args: { channelId } }) => {
+      z.object({ channelId: z.string(), updatedAt: z.number() }),
+      async ({ tx, ctx, args: { channelId, updatedAt } }) => {
         const participation = await tx.run(
-          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!participation) {
@@ -790,12 +851,13 @@ export const mutators = defineMutators({
         await tx.mutate.channel_user_status.update({
           id: participation.id,
           isClosed: true,
+          updatedAt,
         });
       },
     ),
     reopenDm: defineMutator(
-      z.object({ channelId: z.string() }),
-      async ({ tx, ctx, args: { channelId } }) => {
+      z.object({ channelId: z.string(), updatedAt: z.number() }),
+      async ({ tx, ctx, args: { channelId, updatedAt } }) => {
         const participation = await tx.run(
           zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
         );
@@ -807,14 +869,19 @@ export const mutators = defineMutators({
         await tx.mutate.channel_user_status.update({
           id: participation.id,
           isClosed: false,
+          updatedAt,
         });
       },
     ),
     updateSelectedBoardId: defineMutator(
-      z.object({ channelId: z.string(), boardId: z.string().nullable() }),
-      async ({ tx, ctx, args: { channelId, boardId } }) => {
+      z.object({ channelId: z.string(), boardId: z.string().nullable(), updatedAt: z.number() }),
+      async ({ tx, ctx, args: { channelId, boardId, updatedAt } }) => {
         const userStatus = await tx.run(
-          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!userStatus) {
@@ -824,6 +891,7 @@ export const mutators = defineMutators({
         await tx.mutate.channel_user_status.update({
           id: userStatus.id,
           selectedBoardId: boardId,
+          updatedAt,
         });
       },
     ),
@@ -1203,7 +1271,11 @@ export const mutators = defineMutators({
         }
 
         const participation = await tx.run(
-          zql.channel_user_status.where('channelId', channelId).where('userId', ctx.userID).one(),
+          zql.channel_user_status
+            .where('channelId', channelId)
+            .where('userId', ctx.userID)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (participation) {
@@ -1212,6 +1284,7 @@ export const mutators = defineMutators({
             lastViewedAt: now,
             lastViewedConversationId: conversationId,
             isClosed: false,
+            updatedAt: now,
           });
         }
       },
@@ -1376,6 +1449,7 @@ export const mutators = defineMutators({
           zql.channel_user_status
             .where('channelId', targetChannelId)
             .where('userId', ctx.userID)
+            .where('isDeleted', false)
             .one(),
         );
         if (userStatus) {
@@ -1383,6 +1457,7 @@ export const mutators = defineMutators({
             id: userStatus.id,
             lastViewedAt: now,
             lastViewedConversationId: conversationId,
+            updatedAt: now,
           });
         }
 
@@ -2580,8 +2655,9 @@ export const mutators = defineMutators({
       z.object({
         actorAction: z.string().optional(),
         classification: z.enum(ActivityClassification).optional(),
+        timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { actorAction, classification } }) => {
+      async ({ tx, ctx, args: { actorAction, classification, timestamp } }) => {
         let query = zql.activities.where('userId', ctx.userID).where('isRead', false);
 
         if (actorAction) {
@@ -2614,6 +2690,7 @@ export const mutators = defineMutators({
           const channelUserStatuses = await tx.run(
             zql.channel_user_status
               .where('userId', ctx.userID)
+              .where('isDeleted', false)
               .where('channelId', 'IN', uniqueChannelIds),
           );
           await Promise.all(
@@ -2623,6 +2700,7 @@ export const mutators = defineMutators({
               return tx.mutate.channel_user_status.update({
                 id: channelStatus.id,
                 unreadCount: newUnreadCount,
+                updatedAt: timestamp,
               });
             }),
           );
@@ -4164,8 +4242,9 @@ export const mutators = defineMutators({
         metadata: z.any().optional(),
       }),
       async ({ tx, ctx, args: { entityId, entityType, bookmarkId, timestamp, metadata } }) => {
-        // Check if bookmark already exists
+        // Check if bookmark already exists (including soft-deleted)
         const existing = await tx.run(
+          // eslint-disable-next-line local-rules/require-is-deleted-filter
           zql.bookmarks
             .where('userId', ctx.userID)
             .where('entityId', entityId)
@@ -4174,28 +4253,46 @@ export const mutators = defineMutators({
         );
 
         if (existing) {
-          return; // Silently return instead of throwing error
+          if (existing.isDeleted) {
+            await tx.mutate.bookmarks.update({
+              id: existing.id,
+              isDeleted: false,
+              updatedAt: timestamp,
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+              metadata: metadata ?? existing.metadata,
+            });
+          }
+          // If not deleted, silently return (do nothing)
+          return;
         }
 
+        // Insert new bookmark
         await tx.mutate.bookmarks.insert({
           id: bookmarkId,
           userId: ctx.userID,
           entityId,
           entityType,
           createdAt: timestamp,
+          updatedAt: timestamp,
+          isDeleted: false,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           metadata,
         });
       },
     ),
     remove: defineMutator(
-      z.object({ entityId: z.string(), entityType: z.enum(BookmarkEntityType) }),
-      async ({ tx, ctx, args: { entityId, entityType } }) => {
+      z.object({
+        entityId: z.string(),
+        entityType: z.enum(BookmarkEntityType),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { entityId, entityType, timestamp } }) => {
         const bookmark = await tx.run(
           zql.bookmarks
             .where('userId', ctx.userID)
             .where('entityId', entityId)
             .where('entityType', entityType)
+            .where('isDeleted', false)
             .one(),
         );
 
@@ -4203,8 +4300,11 @@ export const mutators = defineMutators({
           throw new Error('Bookmark not found');
         }
 
-        await tx.mutate.bookmarks.delete({
+        // Soft delete - update isDeleted to true
+        await tx.mutate.bookmarks.update({
           id: bookmark.id,
+          isDeleted: true,
+          updatedAt: timestamp,
         });
       },
     ),
@@ -4213,13 +4313,15 @@ export const mutators = defineMutators({
         entityId: z.string(),
         entityType: z.enum(BookmarkEntityType),
         metadata: z.any(),
+        timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { entityId, entityType, metadata } }) => {
+      async ({ tx, ctx, args: { entityId, entityType, metadata, timestamp } }) => {
         const bookmark = await tx.run(
           zql.bookmarks
             .where('userId', ctx.userID)
             .where('entityId', entityId)
             .where('entityType', entityType)
+            .where('isDeleted', false)
             .one(),
         );
 
@@ -4229,6 +4331,7 @@ export const mutators = defineMutators({
 
         await tx.mutate.bookmarks.update({
           id: bookmark.id,
+          updatedAt: timestamp,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           metadata,
         });
@@ -5662,9 +5765,11 @@ export const mutators = defineMutators({
         channelIds: z.array(z.string()),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { channelIds, timestamp: _timestamp } }) => {
+      async ({ tx, ctx, args: { channelIds, timestamp } }) => {
         // Get existing channel user status for this user
-        const existingStatuses = await tx.run(zql.channel_user_status.where('userId', ctx.userID));
+        const existingStatuses = await tx.run(
+          zql.channel_user_status.where('userId', ctx.userID).where('isDeleted', false),
+        );
 
         const newChannelIds = new Set(channelIds);
 
@@ -5675,6 +5780,7 @@ export const mutators = defineMutators({
             await tx.mutate.channel_user_status.update({
               id: status.id,
               isRecapSubscribed: shouldSubscribe,
+              updatedAt: timestamp,
             });
           }
         }
@@ -5685,10 +5791,13 @@ export const mutators = defineMutators({
         recapDate: z.number(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { recapDate, timestamp: _timestamp } }) => {
+      async ({ tx, ctx, args: { recapDate, timestamp } }) => {
         // Update all subscribed channel user statuses for this user with the seen date
         const statuses = await tx.run(
-          zql.channel_user_status.where('userId', ctx.userID).where('isRecapSubscribed', true),
+          zql.channel_user_status
+            .where('userId', ctx.userID)
+            .where('isRecapSubscribed', true)
+            .where('isDeleted', false),
         );
 
         for (const status of statuses) {
@@ -5697,6 +5806,7 @@ export const mutators = defineMutators({
             await tx.mutate.channel_user_status.update({
               id: status.id,
               lastSeenRecapDate: recapDate,
+              updatedAt: timestamp,
             });
           }
         }
@@ -5708,10 +5818,14 @@ export const mutators = defineMutators({
         recapDate: z.number(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { channelId, recapDate, timestamp: _timestamp } }) => {
+      async ({ tx, ctx, args: { channelId, recapDate, timestamp } }) => {
         // Find the channel user status for this channel
         const status = await tx.run(
-          zql.channel_user_status.where('userId', ctx.userID).where('channelId', channelId).one(),
+          zql.channel_user_status
+            .where('userId', ctx.userID)
+            .where('channelId', channelId)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!status) {
@@ -5723,6 +5837,7 @@ export const mutators = defineMutators({
           await tx.mutate.channel_user_status.update({
             id: status.id,
             lastSeenRecapDate: recapDate,
+            updatedAt: timestamp,
           });
         }
       },
@@ -5732,10 +5847,14 @@ export const mutators = defineMutators({
         channelId: z.string(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { channelId, timestamp: _timestamp } }) => {
+      async ({ tx, ctx, args: { channelId, timestamp } }) => {
         // Find the channel user status for this channel
         const status = await tx.run(
-          zql.channel_user_status.where('userId', ctx.userID).where('channelId', channelId).one(),
+          zql.channel_user_status
+            .where('userId', ctx.userID)
+            .where('channelId', channelId)
+            .where('isDeleted', false)
+            .one(),
         );
 
         if (!status) {
@@ -5746,6 +5865,7 @@ export const mutators = defineMutators({
         await tx.mutate.channel_user_status.update({
           id: status.id,
           lastSeenRecapDate: null,
+          updatedAt: timestamp,
         });
       },
     ),

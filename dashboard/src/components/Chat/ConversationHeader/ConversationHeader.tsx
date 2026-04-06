@@ -64,7 +64,7 @@ const ConversationHeader = ({
   const targetUserId = getTargetUserIdForCall(channel?.scopeType, channel?.name, context.userID);
 
   const handleStarToggle = (): void => {
-    void zero.mutate(mutators.channel.toggleStarred({ channelId }));
+    void zero.mutate(mutators.channel.toggleStarred({ channelId, updatedAt: Date.now() }));
   };
 
   const handleOpenAllLinks = (e: React.MouseEvent): void => {

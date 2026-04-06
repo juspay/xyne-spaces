@@ -194,7 +194,13 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
   };
 
   const handleRemoveParticipant = (targetUserId: string): void => {
-    zero.mutate(mutators.channel.removeParticipant({ channelId: channel.id, targetUserId }));
+    zero.mutate(
+      mutators.channel.removeParticipant({
+        channelId: channel.id,
+        targetUserId,
+        updatedAt: Date.now(),
+      }),
+    );
   };
 
   // Filter participants based on selected filter and search query

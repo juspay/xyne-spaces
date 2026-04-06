@@ -420,8 +420,13 @@ const ActivityListView = (): ReactElement => {
       filters.actorAction = 'group_mention';
     } else if (activeTab === 'replies') {
       // added to maintain backward compat for now, to be deprecated
-      void zero.mutate(mutators.activities.markAsReadByFilter({ actorAction: 'replied' }));
-      void zero.mutate(mutators.activities.markAsReadByFilter({ actorAction: 'replied_v2' }));
+      const timestamp = Date.now();
+      void zero.mutate(
+        mutators.activities.markAsReadByFilter({ actorAction: 'replied', timestamp }),
+      );
+      void zero.mutate(
+        mutators.activities.markAsReadByFilter({ actorAction: 'replied_v2', timestamp }),
+      );
       return;
     } else if (activeTab === 'actionable') {
       filters.classification = ActivityClassification.ACTIONABLE;
@@ -429,7 +434,7 @@ const ActivityListView = (): ReactElement => {
       filters.classification = ActivityClassification.FYI;
     }
 
-    void zero.mutate(mutators.activities.markAsReadByFilter(filters));
+    void zero.mutate(mutators.activities.markAsReadByFilter({ ...filters, timestamp: Date.now() }));
   };
   // Fetch all unread activities for counting
   const [unreadActivities] = useCachedQuery(queries.userUnreadActivities());

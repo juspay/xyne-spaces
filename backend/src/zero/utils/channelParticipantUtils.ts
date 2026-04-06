@@ -35,6 +35,13 @@ export async function addChannelParticipant(
   const id = participantId;
   const now = timestamp;
 
+  // Check for existing soft-deleted channel_user_status to restore
+  const existingSoftDeletedStatus = await tx.run(zql.channel_user_status
+    .where('channelId', channelId)
+    .where('userId', userId)
+    .where('isDeleted', true)
+    .one());
+
   // Insert into channel_participants
   await tx.mutate.channel_participants.insert({
     id,
@@ -48,19 +55,32 @@ export async function addChannelParticipant(
     isClosed: false,
   });
 
-  // Insert into channel_user_status
-  await tx.mutate.channel_user_status.insert({
-    id: channelUserStatusId,
-    channelId,
-    userId,
-    lastViewedAt: now,
-    isStarred: false,
-    isClosed: false,
-    unreadCount: 0,
-    isRecapSubscribed: false,
-    desktopNotificationLevel: 'ALL',
-    mobileNotificationLevel: 'ALL',
-  });
+  if (existingSoftDeletedStatus) {
+    // Restore the soft-deleted status record
+    await tx.mutate.channel_user_status.update({
+      id: existingSoftDeletedStatus.id,
+      isDeleted: false,
+      lastViewedAt: now,
+      isClosed: false,
+      updatedAt: now,
+    });
+  } else {
+    // Insert new channel_user_status
+    await tx.mutate.channel_user_status.insert({
+      id: channelUserStatusId,
+      channelId,
+      userId,
+      lastViewedAt: now,
+      isStarred: false,
+      isClosed: false,
+      unreadCount: 0,
+      isRecapSubscribed: false,
+      desktopNotificationLevel: 'ALL',
+      mobileNotificationLevel: 'ALL',
+      isDeleted: false,
+      updatedAt: now,
+    });
+  }
 
   // Increment participantCount in channel_stats
   const channelStats = await tx.run(zql.channel_stats.where('channelId', channelId).one());
@@ -80,13 +100,15 @@ export async function addChannelParticipant(
  * @param channelId - Channel ID to add participants to
  * @param userIds - Array of user IDs to add
  * @param role - Participant role for all users (default: 'member')
+ * @param timestamp - Timestamp for the operation
  * @returns Object with count and list of added user IDs
  */
 export async function addChannelParticipants(
   tx: Transaction<Schema>,
   channelId: string,
   userIds: string[],
-  role: ChannelRole = ChannelRole.MEMBER
+  role: ChannelRole = ChannelRole.MEMBER,
+  timestamp: number
 ): Promise<{ addedCount: number; addedUserIds: string[] }> {
   if (userIds.length === 0) {
     return { addedCount: 0, addedUserIds: [] };
@@ -105,9 +127,21 @@ export async function addChannelParticipants(
     return { addedCount: 0, addedUserIds: [] };
   }
 
+  // Check for existing soft-deleted channel_user_status records
+  const existingSoftDeletedStatuses = await tx.run(zql.channel_user_status
+    .where('channelId', channelId)
+    .where('isDeleted', true));
+
+  const softDeletedStatusMap = new Map(
+    existingSoftDeletedStatuses
+      .filter((s: any) => newUserIds.includes(s.userId))
+      .map((s: any) => [s.userId, s])
+  );
+
   // Insert all new participants
   for (const userId of newUserIds) {
     const participantId = uuidv4();
+    const softDeletedStatus = softDeletedStatusMap.get(userId);
     
     await tx.mutate.channel_participants.insert({
       id: participantId,
@@ -121,18 +155,32 @@ export async function addChannelParticipants(
       isClosed: false,
     });
 
-    await tx.mutate.channel_user_status.insert({
-      id: uuidv4(),
-      channelId,
-      userId,
-      lastViewedAt: Date.now(),
-      isStarred: false,
-      isClosed: false,
-      unreadCount: 0,
-      isRecapSubscribed: false,
-      desktopNotificationLevel: 'ALL',
-      mobileNotificationLevel: 'ALL',
-    });
+    if (softDeletedStatus) {
+      // Restore the soft-deleted status record
+      await tx.mutate.channel_user_status.update({
+        id: softDeletedStatus.id,
+        isDeleted: false,
+        lastViewedAt: timestamp,
+        isClosed: false,
+        updatedAt: timestamp,
+      });
+    } else {
+      // Insert new channel_user_status
+      await tx.mutate.channel_user_status.insert({
+        id: uuidv4(),
+        channelId,
+        userId,
+        lastViewedAt: timestamp,
+        isStarred: false,
+        isClosed: false,
+        unreadCount: 0,
+        isRecapSubscribed: false,
+        desktopNotificationLevel: 'ALL',
+        mobileNotificationLevel: 'ALL',
+        isDeleted: false,
+        updatedAt: timestamp,
+      });
+    }
   }
 
   // Increment participantCount by the number of actually added participants in channel_stats
@@ -152,12 +200,14 @@ export async function addChannelParticipants(
  * @param tx - Zero transaction
  * @param channelId - Channel ID to remove participant from
  * @param userId - User ID to remove
+ * @param timestamp - Timestamp for the operation
  * @returns Object with removed status and participantId
  */
 export async function removeChannelParticipant(
   tx: Transaction<Schema>,
   channelId: string,
-  userId: string
+  userId: string,
+  timestamp: number
 ): Promise<{ removed: boolean; participantId: string | null }> {
   // Find the participant
   const participant = await tx.run(zql.channel_participants
@@ -182,14 +232,18 @@ export async function removeChannelParticipant(
   // Delete from channel_participants
   await tx.mutate.channel_participants.delete({ id: participant.id });
 
-  // Delete from channel_user_status
+  // Delete from channel_user_status (soft delete)
   const userStatus = await tx.run(zql.channel_user_status
     .where('channelId', channelId)
     .where('userId', userId)
     .one());
 
   if (userStatus) {
-    await tx.mutate.channel_user_status.delete({ id: userStatus.id });
+    await tx.mutate.channel_user_status.update({
+      id: userStatus.id,
+      isDeleted: true,
+      updatedAt: timestamp,
+    });
   }
 
   return { removed: true, participantId: participant.id };

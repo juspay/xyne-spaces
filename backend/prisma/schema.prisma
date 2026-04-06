@@ -1442,6 +1442,9 @@ model ChannelUserStatus {
   desktopNotificationLevel  NotificationLevel     @default(ALL) // Channel notification preference (desktop)
   mobileNotificationLevel   NotificationLevel    @default(ALL) // Channel notification preference (mobile)
 
+  isDeleted                 Boolean     @default(false) // Soft delete flag
+  updatedAt                 DateTime    @default(now()) @updatedAt // Auto-updated timestamp
+
   // Relations
   channel Channel @relation(fields: [channelId], references: [id])
   user    User    @relation("ChannelUserStatusUser", fields: [userId], references: [id])
@@ -2214,6 +2217,8 @@ model Bookmark {
   entityId   String             // ID of the bookmarked entity
   entityType BookmarkEntityType // Type of entity bookmarked
   createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @default(now()) @updatedAt
+  isDeleted  Boolean            @default(false)
   metadata   Json?              // Additional metadata
 
   @@unique([userId, entityId, entityType]) // User can only bookmark an entity once

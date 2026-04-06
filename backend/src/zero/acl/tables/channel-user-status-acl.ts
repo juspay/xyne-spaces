@@ -32,10 +32,55 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
       throw new MutationACLError('Channel user status update failed: status record does not exist', 'channel_user_status');
     }
     
-    // Allow updating only `isClosed` on any user's status (e.g., admin closing a channel for a user)
     const argsKeys = Object.keys(args);
-    const isClosedOnlyUpdate = argsKeys.length === 2 && argsKeys.every(k => k === 'id' || k === 'isClosed');
-
+    
+    // Allow updating only `isClosed` and `updatedAt` on any user's status (e.g., admin closing a channel for a user)
+    const allowedIsClosedOnlyKeys = ['id', 'isClosed', 'updatedAt'];
+    const isClosedOnlyUpdate = argsKeys.every(k => allowedIsClosedOnlyKeys.includes(k)) && argsKeys.includes('isClosed');
+    
+    // Check if this is a soft delete operation (isDeleted is being set to true)
+    const isSoftDelete = 'isDeleted' in args && args.isDeleted === true;
+    
+    // Check if this is a restore operation (isDeleted is being set to false)
+    const isRestore = 'isDeleted' in args && args.isDeleted === false;
+    
+    // For soft delete, only owner or admin can delete
+    if (isSoftDelete) {
+      const allowedSoftDeleteKeys = ['id', 'isDeleted', 'updatedAt'];
+      const invalidKeys = argsKeys.filter(k => !allowedSoftDeleteKeys.includes(k));
+      if (invalidKeys.length > 0) {
+        throw new MutationACLError('Channel user status soft delete failed: invalid keys', 'channel_user_status');
+      }
+      if (status.userId === this.ctx.userID) {
+        return;
+      }
+      
+      const requestingParticipant = await this.verifyChannelParticipant(status.channelId, tx, 'update');
+      if (requestingParticipant.role !== ChannelRole.ADMIN) {
+        throw new MutationACLError('Channel user status soft delete failed: you can only delete your own status records or be a channel admin', 'channel_user_status');
+      }
+      
+      return;
+    }
+    
+    // For restore (isDeleted: false), only allow updating specific columns
+    if (isRestore) {
+      const allowedRestoreKeys = ['id', 'isDeleted', 'isClosed', 'lastViewedAt', 'updatedAt'];
+      const invalidKeys = argsKeys.filter(k => !allowedRestoreKeys.includes(k));
+      if (invalidKeys.length > 0) {
+        throw new MutationACLError('Channel user status restore failed: invalid keys', 'channel_user_status');
+      }
+      
+      const channel = await tx.run(zql.channels.where('id', '=', status.channelId).one());
+      const requestingParticipant = await this.verifyChannelParticipant(status.channelId, tx, 'update');
+      
+      const addUserPolicy = channel?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
+      if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY && requestingParticipant.role !== ChannelRole.ADMIN) {
+        throw new MutationACLError('Channel user status restore failed: only channel admins can restore users to this channel', 'channel_user_status');
+      }
+      return;
+    }
+    
     // Only the user themselves can update their status record (unless it's a isClosed-only update)
     if (status.userId !== this.ctx.userID && !isClosedOnlyUpdate) {
       throw new MutationACLError('Channel user status update failed: you can only modify your own status records', 'channel_user_status');
