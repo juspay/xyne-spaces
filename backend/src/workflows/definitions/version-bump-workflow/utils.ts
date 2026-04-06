@@ -3,9 +3,12 @@ import { promisify } from 'util';
 import * as path from 'path';
 import * as fs from 'fs';
 import { logger } from '@/utils/logger';
-import { JiraTicketResult } from './types';
+import { JiraTicketResult, VersionBumpResult } from './types';
+import { slackService } from '@/services/slackService';
 import { config } from '@/config/env';
 import { bitbucketManager } from '../../../bitbucket/apis';
+import { getPRDescription } from "./prTemplates";
+
 
 export const REPOSITORY_URL_MAP: Record<string, string> = {
   'euler-api-cards': 'ssh://git@github.com/example-org/euler-api-cards.git',
@@ -86,8 +89,9 @@ async function execWithStreaming(
 /**
  * Creates a JIRA ticket for the version bump.
  */
-export const createJiraTicket = async (dependencyName: string, version: string, email: string, repositoryName: string): Promise<JiraTicketResult> => {
-  logger.info(`Creating JIRA ticket for ${dependencyName} bump to ${version} on behalf of ${email} for ${repositoryName}`);
+export const createJiraTicket = async (dependencies: {dependency: string, version: string}[], versionBumpUserEmail: string, repositoryName: string): Promise<JiraTicketResult> => {
+  const depsText = dependencies.map(d => `${d.dependency}@${d.version}`).join(', ');
+  logger.info(`Creating JIRA ticket for ${depsText} bump on behalf of ${versionBumpUserEmail} for ${repositoryName}`);
   
   try {
     const { baseUrl, eulerBotEmail, eulerBotAuthToken } = config.jira;
@@ -99,8 +103,8 @@ export const createJiraTicket = async (dependencyName: string, version: string, 
     const authHeader = `Basic ${Buffer.from(`${eulerBotEmail}:${eulerBotAuthToken}`).toString('base64')}`;
 
     // 1. Fetch Account ID
-    logger.info(`🔍 Fetching JIRA account ID for email: ${email}`);
-    const searchRes = await fetch(`${baseUrl}/rest/api/3/user/search?query=${encodeURIComponent(email)}`, {
+    logger.info(`🔍 Fetching JIRA account ID for email: ${versionBumpUserEmail}`);
+    const searchRes = await fetch(`${baseUrl}/rest/api/3/user/search?query=${encodeURIComponent(versionBumpUserEmail)}`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -116,7 +120,7 @@ export const createJiraTicket = async (dependencyName: string, version: string, 
     } else {
       const userData = await searchRes.json();
       if (!Array.isArray(userData) || userData.length === 0) {
-        logger.error(`No JIRA account found for email: ${email}`);
+        logger.error(`No JIRA account found for email: ${versionBumpUserEmail}`);
       } else {
         accountId = userData[0].accountId;
         logger.info(`✅ Found JIRA account ID: ${accountId}`);
@@ -133,7 +137,7 @@ export const createJiraTicket = async (dependencyName: string, version: string, 
         issuetype: {
           id: "10035"
         },
-        summary: `Update version of ${dependencyName} to ${version} <> ${repositoryName}`,
+        summary: `Update dependencies ${dependencies.map(d => `${d.dependency}@${d.version}`).join(', ')} <> ${repositoryName}`,
         description: {
           version: 1,
           type: "doc",
@@ -143,7 +147,7 @@ export const createJiraTicket = async (dependencyName: string, version: string, 
               content: [
                 {
                   type: "text",
-                  text: `Auto-generated ticket for bumping ${dependencyName} to ${version}.`
+                  text: `Auto-generated ticket for bumping dependencies:\n${dependencies.map(d => `- ${d.dependency} to ${d.version}`).join('\n')}`
                 }
               ]
             }
@@ -238,10 +242,10 @@ export const cloneAndCheckoutStaging = async (
 export const createBranch = async (
   workingDirectory: string,
   jiraTicket: string,
-  dependencyName: string,
-  version: string
+  dependencies: {dependency: string, version: string}[]
 ): Promise<{ success: boolean; branchName: string; error?: string }> => {
-  const branchName = `${jiraTicket}-${dependencyName}-${version}-bump`.replace(/[^a-zA-Z0-9-]/g, '-');
+  const depsId = dependencies.map(d => d.dependency).join('-').substring(0, 30);
+  const branchName = `${jiraTicket}-multiple-deps-${depsId}-bump`.replace(/[^a-zA-Z0-9-]/g, '-');
   
   try {
     logger.info(`🌿 Creating and checking out new branch: ${branchName}`);
@@ -256,12 +260,11 @@ export const createBranch = async (
 };
 
 /**
- * Updates the version of the dependency in flake.nix
+ * Updates the version of the dependencies in flake.nix
  */
 export const updateFlakeNix = async (
   workingDirectory: string,
-  dependencyName: string,
-  version: string
+  dependencies: {dependency: string, version: string}[]
 ): Promise<{ success: boolean; error?: string }> => {
   const flakeNixPath = path.join(workingDirectory, 'flake.nix');
   
@@ -270,55 +273,57 @@ export const updateFlakeNix = async (
       throw new Error(`flake.nix not found in ${workingDirectory}`);
     }
 
-    logger.info(`📝 Updating ${dependencyName} version to ${version} in flake.nix`);
+    logger.info(`📝 Updating dependencies in flake.nix`);
     let content = fs.readFileSync(flakeNixPath, 'utf8');
 
-    // Handle different types of dependency declarations in flake.nix
-    
-    // 1. Case: Git ref update (e.g., ref = "refs/tags/10.5.32";)
-    const refRegex = new RegExp(`(${dependencyName}\\s*=\\s*{[^}]*?ref\\s*=\\s*")(refs/tags/[^"]+|[^"]+)(";)`, 'gs');
-    
-    // 2. Case: URL ref update (e.g., euler-api-order = { url = "...?ref=staging" })
-    const urlRefRegex = new RegExp(`(${dependencyName}(?:\\.url|\\s*=\\s*{[^}]*?url)\\s*=\\s*"[^"?]+\\?ref=)([^"]+)(".*?;)`, 'gs');
-    
-    // 3. Case: GitHub rev update (e.g., github:juspay/spider/fcb5...)
-    const githubRevRegex = new RegExp(`(${dependencyName}\\s*=\\s*{\\s*url\\s*=\\s*"github:[^/]+/[^/]+/)([^"]+)(";)`, 'gs');
-
-    let updated = false;
-
-    if (refRegex.test(content)) {
-      content = content.replace(refRegex, (_match: string, prefix: string, oldRef: string, suffix: string) => {
-        updated = true;
-        // If it starts with refs/tags/, preserve that prefix
-        const newRef = oldRef.startsWith('refs/tags/') ? `refs/tags/${version}` : version;
-        logger.info(`Replaced ref ${oldRef} with ${newRef}`);
-        return `${prefix}${newRef}${suffix}`;
-      });
-    } 
-    
-    if (!updated && urlRefRegex.test(content)) {
-      content = content.replace(urlRefRegex, (_match: string, prefix: string, oldRef: string, suffix: string) => {
-        updated = true;
-        logger.info(`Replaced url ref ${oldRef} with ${version}`);
-        return `${prefix}${version}${suffix}`;
-      });
-    }
-    
-    if (!updated && githubRevRegex.test(content)) {
-      content = content.replace(githubRevRegex, (_match: string, prefix: string, oldRev: string, suffix: string) => {
-        updated = true;
-        logger.info(`Replaced github rev ${oldRev} with ${version}`);
-        return `${prefix}${version}${suffix}`;
-      });
-    }
-
-    if (!updated) {
-      // Fallback: Try a simpler sed-like replacement via a custom script if regexes fail
-      logger.warn(`⚠️ Regex replacements didn't match anything. Dependency might have a different format or be missing.`);
+    for (const {dependency: dependencyName, version} of dependencies) {
+      // Handle different types of dependency declarations in flake.nix
       
-      // Let's create and run a python script that does AST-based or safer structural replacement if needed
-      // For this workflow, throwing an error is safer than silently failing
-      throw new Error(`Could not find a recognized pattern for dependency ${dependencyName} in flake.nix`);
+      // 1. Case: Git ref update (e.g., ref = "refs/tags/10.5.32";)
+      const refRegex = new RegExp(`(${dependencyName}\\s*=\\s*{[^}]*?ref\\s*=\\s*")(refs/tags/[^"]+|[^"]+)(";)`, 'gs');
+    
+      // 2. Case: URL ref update (e.g., euler-api-order = { url = "...?ref=staging" })
+      const urlRefRegex = new RegExp(`(${dependencyName}(?:\\.url|\\s*=\\s*{[^}]*?url)\\s*=\\s*"[^"?]+\\?ref=)([^"]+)(".*?;)`, 'gs');
+      
+      // 3. Case: GitHub rev update (e.g., github:juspay/spider/fcb5...)
+      const githubRevRegex = new RegExp(`(${dependencyName}\\s*=\\s*{\\s*url\\s*=\\s*"github:[^/]+/[^/]+/)([^"]+)(";)`, 'gs');
+
+      let updated = false;
+
+      if (refRegex.test(content)) {
+        content = content.replace(refRegex, (_match: string, prefix: string, oldRef: string, suffix: string) => {
+          updated = true;
+          // If it starts with refs/tags/, preserve that prefix
+          const newRef = oldRef.startsWith('refs/tags/') ? `refs/tags/${version}` : version;
+          logger.info(`Replaced ref ${oldRef} with ${newRef}`);
+          return `${prefix}${newRef}${suffix}`;
+        });
+      } 
+      
+      if (!updated && urlRefRegex.test(content)) {
+        content = content.replace(urlRefRegex, (_match: string, prefix: string, oldRef: string, suffix: string) => {
+          updated = true;
+          logger.info(`Replaced url ref ${oldRef} with ${version}`);
+          return `${prefix}${version}${suffix}`;
+        });
+      }
+      
+      if (!updated && githubRevRegex.test(content)) {
+        content = content.replace(githubRevRegex, (_match: string, prefix: string, oldRev: string, suffix: string) => {
+          updated = true;
+          logger.info(`Replaced github rev ${oldRev} with ${version}`);
+          return `${prefix}${version}${suffix}`;
+        });
+      }
+
+      if (!updated) {
+        // Fallback: Try a simpler sed-like replacement via a custom script if regexes fail
+        logger.warn(`⚠️ Regex replacements didn't match anything. Dependency might have a different format or be missing.`);
+        
+        // Let's create and run a python script that does AST-based or safer structural replacement if needed
+        // For this workflow, throwing an error is safer than silently failing
+        throw new Error(`Could not find a recognized pattern for dependency ${dependencyName} in flake.nix`);
+      }
     }
 
     fs.writeFileSync(flakeNixPath, content);
@@ -336,15 +341,17 @@ export const updateFlakeNix = async (
  */
 export const updateFlakeLock = async (
   workingDirectory: string,
-  dependencyName: string
+  dependencies: {dependency: string, version: string}[]
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    logger.info(`🔒 Updating flake.lock for ${dependencyName}`);
+    logger.info(`🔒 Updating flake.lock for dependencies`);
     
     // Using execWithStreaming to get real-time output and handle potential long-running commands
-    await execWithStreaming('nix', ['flake', 'update', dependencyName], { 
-      cwd: workingDirectory 
-    });
+    for (const {dependency: dependencyName} of dependencies) {
+      await execWithStreaming('nix', ['flake', 'update', dependencyName], { 
+        cwd: workingDirectory 
+      });
+    }
     
     logger.info(`✅ Successfully updated flake.lock`);
     return { success: true };
@@ -370,15 +377,15 @@ export const commitAndPush = async (
   workingDirectory: string,
   branchName: string,
   jiraTicket: string,
-  dependencyName: string,
-  version: string
+  dependencies: {dependency: string, version: string}[]
 ): Promise<{ success: boolean; error?: string }> => {
   try {
     logger.info(`💾 Committing and pushing changes...`);
     
     await execAsync('git add flake.nix flake.lock', { cwd: workingDirectory });
     
-    const commitMessage = `${jiraTicket} | Updated dependency ${dependencyName} with version ${version}`;
+    const depsText = dependencies.map(d => `${d.dependency}@${d.version}`).join(', ');
+    const commitMessage = `${jiraTicket} | Updated dependencies: ${depsText}`;
     await execAsync(`git commit -m "${commitMessage}"`, { cwd: workingDirectory });
     logger.info(`✅ Changes committed with message: "${commitMessage}"`);
 
@@ -393,6 +400,8 @@ export const commitAndPush = async (
   }
 };
 
+
+
 /**
  * Raise a Pull Request via Bitbucket API
  */
@@ -401,9 +410,8 @@ export const raisePullRequest = async (
   repoUrl: string,
   branchName: string,
   jiraTicket: string,
-  dependencyName: string,
-  version: string,
-  email: string
+  dependencies: {dependency: string, version: string}[],
+  versionBumpUserEmail: string
 ): Promise<{ success: boolean; prUrl?: string; error?: string }> => {
   try {
     logger.info(`🔄 Raising Pull Request for ${branchName}...`);
@@ -422,8 +430,10 @@ export const raisePullRequest = async (
     projectName = pathMatch[1].toUpperCase();
     repoName = pathMatch[2].replace(/\.git$/, '');
 
-    const ticketTitle = `Updated dependency ${dependencyName} to ${version}`;
-    const ticketDescription = `## Description\nAuto-generated PR bumping \`${dependencyName}\` to version \`${version}\`.\n\nPR Raised on behalf of @"${email}"\n\nAssociated JIRA Ticket: ${jiraTicket}`;
+    const depsText = dependencies.map(d => `${d.dependency}@${d.version}`).join(', ');
+    const ticketTitle = `Update dependencies: ${depsText}`;
+
+    const ticketDescription = getPRDescription(repoName, dependencies, versionBumpUserEmail, jiraTicket);
     
     // The target branch is typically staging.
     // If staging wasn't the default in the clone fallback, it's safer to use 'staging'.
@@ -451,5 +461,46 @@ export const raisePullRequest = async (
   } catch (error: any) {
     logger.error(`❌ Failed to raise pull request: ${error.message}`);
     return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Sends a Slack notification to the user after workflow execution.
+ * Mirrors the previous inline logic in versionBumpWorkflow.ts.
+ */
+export const notifyUser = async (
+  versionBumpUserEmail: string,
+  status: 'completed' | 'partially_completed' | 'failed',
+  repositoryNames: string[],
+  successfulResults: VersionBumpResult[],
+  failedResults: VersionBumpResult[],
+): Promise<void> => {
+  try {
+    const statusEmoji = status === 'completed' ? '✅' : status === 'partially_completed' ? '⚠️' : '❌';
+    let slackMessage = `*${statusEmoji} Version Bump Workflow: ${status.toUpperCase().replace('_', ' ')}*\n`;
+    slackMessage += `Processed *${repositoryNames.length}* repositories.\n\n`;
+
+    if (successfulResults.length > 0) {
+      slackMessage += `*Successful Updates:*\n`;
+      successfulResults.forEach(r => {
+        const repoName = Object.keys(REPOSITORY_URL_MAP).find(key => REPOSITORY_URL_MAP[key] === r.repositoryUrl) || r.repositoryUrl;
+        slackMessage += `• *${repoName}*: <${r.prUrl}|View Pull Request>\n`;
+      });
+      slackMessage += '\n';
+    }
+
+    if (failedResults.length > 0) {
+      slackMessage += `*Failed Updates:*\n`;
+      failedResults.forEach(r => {
+        const repoName = Object.keys(REPOSITORY_URL_MAP).find(key => REPOSITORY_URL_MAP[key] === r.repositoryUrl) || r.repositoryUrl;
+        slackMessage += `• *${repoName}*: ${r.error}\n`;
+      });
+    }
+
+    await slackService.sendDirectMessageByEmail(versionBumpUserEmail, slackMessage);
+    logger.info(`[notifyUser] Sent Slack notification to ${versionBumpUserEmail}`);
+  } catch (slackError: any) {
+    logger.error(`[notifyUser] Failed to send Slack notification: ${slackError.message}`);
+    // Swallow error to not fail the workflow checkpoint.
   }
 };

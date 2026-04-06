@@ -9,6 +9,7 @@ export const VersionBumpStepsEnumBase = {
   COMMIT_AND_PUSH: 'commit_and_push',
   RAISE_PR: 'raise_pr',
   PARALLEL_BUMP: 'parallel_bump',
+  NOTIFY_USER: 'notify_user',
 } as const;
 
 /**
@@ -42,9 +43,8 @@ export const VersionBumpStepsEnum = (repoName?: string): VersionBumpStepsEnumTyp
 
 export interface VersionBumpWorkflowInput extends BaseWorkflowContext {
   repositoryNames: string[];
-  dependencyName: string;
-  version: string;
-  email: string;
+  dependencies: { dependency: string; version: string }[];
+  versionBumpUserEmail: string;
 }
 
 export interface VersionBumpWorkflowContext extends VersionBumpWorkflowInput {}
@@ -59,7 +59,7 @@ export interface VersionBumpResult {
 }
 
 export interface VersionBumpWorkflowOutput {
-  status: 'completed' | 'partial_failure' | 'failed';
+  status: 'completed' | 'partially_completed' | 'failed';
   results: VersionBumpResult[];
   summary: string;
 }

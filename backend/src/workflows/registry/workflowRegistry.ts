@@ -112,6 +112,9 @@ function convertProperties(properties: any, required: string[]): WorkflowFieldSc
     // Handle nested objects recursively
     if (def.type === "object" && def.properties) {
       nestedFields = convertProperties(def.properties, def.required || []);
+    } else if (fieldName === "dependencies" && def.type === "array" && def.items && def.items.type === "object" && def.items.properties) {
+      type = "arrayOfObjects";
+      nestedFields = convertProperties(def.items.properties, def.items.required || []);
     }
 
     return {
@@ -161,7 +164,10 @@ function convertJsonSchemaToFields(jsonSchema: any): WorkflowFieldSchema[] {
     // Handle nested objects recursively
     if (def.type === "object" && def.properties) {
       nestedFields = convertProperties(def.properties, def.required || []);
-    }  
+    } else if (fieldName === "dependencies" && def.type === "array" && def.items && def.items.type === "object" && def.items.properties) {
+      type = "arrayOfObjects";
+      nestedFields = convertProperties(def.items.properties, def.items.required || []);
+    }
   
     fields.push({  
       name: fieldName,  

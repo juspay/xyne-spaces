@@ -61,6 +61,7 @@ export function validateCustomField(field: WorkflowFieldSchema, value: unknown):
         }
         break;
       case 'array':
+      case 'arrayOfObjects':
         if (!Array.isArray(value)) {
           return `${field.name} must be an array`;
         }
@@ -248,6 +249,7 @@ export function getFieldValue(field: WorkflowFieldSchema): unknown {
     case 'boolean':
       return false;
     case 'array':
+    case 'arrayOfObjects':
       return [];
     case 'object':
       return {};
