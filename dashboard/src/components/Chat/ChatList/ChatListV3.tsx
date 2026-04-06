@@ -35,6 +35,7 @@ export type ChatListProps = {
   linkedConversationId?: string;
   channelScopeType?: ChannelScopeType | undefined;
   skipMarkAsReadRef: React.RefObject<boolean>;
+  isActive?: boolean;
 };
 
 type Anchor = {
@@ -148,6 +149,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   linkedConversationId,
   channelScopeType,
   skipMarkAsReadRef,
+  isActive = true,
 }) => {
   const zero = useZero();
   const { user } = useAuth();
@@ -201,6 +203,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const initialLinkedIdRef = useRef(linkedConversationId);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const wasActiveRef = useRef(isActive);
   const isNearBottomRef = useRef(false);
   const dateObserverRef = useRef<IntersectionObserver | null>(null);
   const visibleDatesRef = useRef<Map<Element, { timestamp: number; rect: DOMRect }>>(new Map());
@@ -222,7 +225,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       limit: PAGE_SIZE,
     }),
     {
-      enabled: inViewAnchor !== null,
+      enabled: inViewAnchor !== null && isActive,
     },
   );
 
@@ -479,6 +482,42 @@ const ChatListV3: React.FC<ChatListProps> = ({
     }
   }, [conversations, isInitialLoadComplete]);
 
+  // Scroll to correct position when channel becomes active again (keep-alive tab switch)
+  useEffect(() => {
+    if (isActive && !wasActiveRef.current && virtuosoRef.current) {
+      let target: VirtuosoIndex = { index: 'LAST', align: 'end' };
+
+      if (linkedConversationId) {
+        const idx = combinedMessages.findIndex(m => m.data.conversationId === linkedConversationId);
+        if (idx !== -1) {
+          const isLast = idx === combinedMessages.length - 1;
+          target = {
+            index: isLast ? firstItemIndex + idx : idx,
+            align: isLast ? 'end' : 'center',
+          };
+        }
+      }
+
+      if (target.index === 'LAST') {
+        const newConvIdx = computeNewConvIdx(
+          combinedMessages,
+          channelParticipation?.lastViewedAt,
+          user?.id,
+        );
+        if (newConvIdx !== -1) {
+          const isLast = newConvIdx === combinedMessages.length - 1;
+          target = {
+            index: isLast ? firstItemIndex + newConvIdx : newConvIdx,
+            align: isLast ? 'end' : 'center',
+          };
+        }
+      }
+
+      virtuosoRef.current.scrollToIndex(target);
+    }
+    wasActiveRef.current = isActive;
+  }, [isActive]);
+
   useEffect(() => {
     if (updatedConversationsDetails.type === 'complete' && isInitialLoadComplete) {
       const itemsToDelete: Conversation[] = [];
@@ -547,29 +586,43 @@ const ChatListV3: React.FC<ChatListProps> = ({
     }
   }, [channelId, latestConversations, latestConversationsDetails.type, isInitialLoadComplete]);
 
-  // Save virtuoso state on unmount
+  // Mark channel as viewed when it becomes inactive or unmounts
   useEffect(() => {
     if (!channelId) return;
+    if (!isActive && wasActiveRef.current) {
+      // Channel just became inactive (switched away)
+      if (!skipMarkAsReadRef?.current) {
+        const draft = getDraft(channelId, null);
+        void zero.mutate(
+          mutators.channel.markChannelAsViewed({
+            channelId,
+            timestamp: Date.now(),
+            draftMessageId: uuidv4(),
+            draftMessage: draft || '',
+          }),
+        );
+      } else {
+        skipMarkAsReadRef.current = false;
+      }
+    }
 
     return () => {
-      // Mark as viewed
+      // Also mark on unmount (when evicted from cache)
       if (skipMarkAsReadRef?.current) {
         skipMarkAsReadRef.current = false;
         return;
       }
-
       const draft = getDraft(channelId, null);
-
-      const payload = {
-        channelId,
-        timestamp: Date.now(),
-        draftMessageId: uuidv4(),
-        draftMessage: draft || '',
-      };
-
-      void zero.mutate(mutators.channel.markChannelAsViewed(payload));
+      void zero.mutate(
+        mutators.channel.markChannelAsViewed({
+          channelId,
+          timestamp: Date.now(),
+          draftMessageId: uuidv4(),
+          draftMessage: draft || '',
+        }),
+      );
     };
-  }, [channelId]);
+  }, [channelId, isActive]);
 
   useEffect(() => {
     queryCacheActor.send({
