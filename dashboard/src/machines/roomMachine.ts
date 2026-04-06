@@ -113,6 +113,7 @@ export interface RoomContext {
     type: PermissionErrorType;
     dismissed: boolean;
   };
+  pushToTalkState: 'idle' | 'active';
 }
 
 // Events for Room operations
@@ -143,6 +144,8 @@ export type RoomMachineEvent =
       viewMode?: 'mini' | 'full';
     }
   | { type: 'TOGGLE_MIC' }
+  | { type: 'PUSH_TO_TALK_START' }
+  | { type: 'PUSH_TO_TALK_END' }
   | { type: 'TOGGLE_CAMERA' }
   | { type: 'TOGGLE_SCREEN_SHARE' }
   | { type: 'SCREEN_SHARE_FAILED' }
@@ -1115,6 +1118,7 @@ export const roomMachine = setup({
       type: null,
       dismissed: false,
     },
+    pushToTalkState: 'idle',
   },
   id: 'roomMachine',
   on: {
@@ -1449,6 +1453,48 @@ export const roomMachine = setup({
               void context.room.localParticipant.setMicrophoneEnabled(!currentState);
             }
           },
+        },
+        PUSH_TO_TALK_START: {
+          actions: [
+            assign({
+              pushToTalkState: ({ context }) => {
+                // Only activate push-to-talk if currently muted
+                const isCurrentlyMuted = context.isNativeMode
+                  ? !(context.participants.find(p => p.isLocal)?.isMicrophoneEnabled ?? false)
+                  : !(context.room?.localParticipant.isMicrophoneEnabled ?? false);
+                return isCurrentlyMuted ? 'active' : 'idle';
+              },
+            }),
+            ({ context }) => {
+              // Only unmute if currently muted
+              const isCurrentlyMuted = context.isNativeMode
+                ? !(context.participants.find(p => p.isLocal)?.isMicrophoneEnabled ?? false)
+                : !(context.room?.localParticipant.isMicrophoneEnabled ?? false);
+
+              if (isCurrentlyMuted) {
+                if (context.isNativeMode) {
+                  reactNativeBridge.livekitToggleMic(true);
+                } else if (context.room) {
+                  void context.room.localParticipant.setMicrophoneEnabled(true);
+                }
+              }
+            },
+          ],
+        },
+        PUSH_TO_TALK_END: {
+          actions: [
+            assign({
+              pushToTalkState: () => 'idle',
+            }),
+            ({ context }) => {
+              // Always mute since push-to-talk can only be triggered when muted
+              if (context.isNativeMode) {
+                reactNativeBridge.livekitToggleMic(false);
+              } else if (context.room) {
+                void context.room.localParticipant.setMicrophoneEnabled(false);
+              }
+            },
+          ],
         },
         TOGGLE_CAMERA: {
           actions: ({ context }) => {
