@@ -1,3 +1,10 @@
+## [1.108.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.107.0...v1.108.0) (2026-04-06)
+
+
+### Features
+
+* Xyne Claw ([73ac8ed](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/73ac8ed6fae08dabc5b24db736ed315151980d5b)), closes [#4633](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4633)
+
 ## [1.107.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.106.1...v1.107.0) (2026-04-06)
 
 
