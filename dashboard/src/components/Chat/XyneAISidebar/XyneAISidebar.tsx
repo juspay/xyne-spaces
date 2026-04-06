@@ -303,7 +303,6 @@ const XyneAISidebar = ({
       setBranchSelections({});
       setConversationId('');
       setCurrentTraceId(undefined);
-      setInputValue('');
       setAttachments([]);
       setSelectedActivities([]);
       setShowHistorySidebar(false);
