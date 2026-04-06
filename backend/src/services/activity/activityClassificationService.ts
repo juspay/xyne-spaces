@@ -11,7 +11,12 @@ import {
   type ActivityClassificationPromptResult,
 } from '@/services/activity/activityClassificationLangfusePrompts';
 import { config as envConfig } from '@/config/env';
-import { runActivityClassification } from '@/agents/activity-classification';
+import { LLMClient, createUserMessage } from 'agentic-framework';
+import type { LLMClientConfig } from 'agentic-framework';
+
+const ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS = 3;
+const ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS = 1000;
+const ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS = 30000;
 
 export const ACTIVITY_CLASSIFICATION_MODEL =
   envConfig.activityClassification?.model ?? 'glm-latest';
@@ -162,6 +167,35 @@ type ThreadContextResult = {
 export class ActivityClassificationService {
   // private readonly model = 'glm-46-fp8';
   private readonly model = ACTIVITY_CLASSIFICATION_MODEL;
+  private llmClient: LLMClient | null = null;
+
+  private getLLMClient(): LLMClient {
+    if (!this.llmClient) {
+      const llmConfig: LLMClientConfig = {
+        provider: {
+          type: 'litellm',
+          config: {
+            apiKey: envConfig.litellm.apiKey,
+            baseUrl: envConfig.litellm.baseUrl,
+            timeout: envConfig.llm?.requestTimeoutMs,
+            customHeaders: {
+              'x-litellm-disable-logging': 'true',
+            },
+          },
+        },
+        defaultModel: this.model,
+        temperature: 0.2,
+        retry: {
+          maxAttempts: ACTIVITY_CLASSIFICATION_REQUEST_MAX_ATTEMPTS,
+          baseDelay: ACTIVITY_CLASSIFICATION_RETRY_BASE_DELAY_MS,
+          maxDelay: ACTIVITY_CLASSIFICATION_RETRY_MAX_DELAY_MS,
+          exponentialBackoff: true,
+        },
+      };
+      this.llmClient = new LLMClient(llmConfig);
+    }
+    return this.llmClient;
+  }
 
   async classifyActivity(activityId: string): Promise<{
     status: 'classified' | 'pending' | 'error' | 'skipped';
@@ -259,17 +293,11 @@ export class ActivityClassificationService {
         activityId,
         model: this.model,
       });
-      const responseContent = await runActivityClassification(
-        prompt,
-        {
-          activityId,
-          jobType: 'single',
-          actorAction: activity.actorAction,
-        },
-        {
-          modelOverride: this.model,
-        }
-      );
+      const llmResponse = await this.getLLMClient().generate({
+        messages: [createUserMessage(prompt)],
+        model: this.model,
+      });
+      const responseContent = llmResponse.content;
 
       const parsed = this.parseLLMResponse(responseContent);
       if (!parsed) {
@@ -393,17 +421,11 @@ export class ActivityClassificationService {
         messageId,
         model: this.model,
       });
-      const responseContent = await runActivityClassification(
-        prompt,
-        {
-          activityId: activityIds[0],
-          jobType: 'special_mention_audience',
-          actorAction: inputPayload.actorAction,
-        },
-        {
-          modelOverride: this.model,
-        }
-      );
+      const llmResponse = await this.getLLMClient().generate({
+        messages: [createUserMessage(prompt)],
+        model: this.model,
+      });
+      const responseContent = llmResponse.content;
 
       const parsed = this.parseLLMResponse(responseContent);
       if (!parsed) {
