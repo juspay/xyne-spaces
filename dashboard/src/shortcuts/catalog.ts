@@ -195,6 +195,14 @@ export const shortcuts = {
     category: 'Huddle',
     priority: 100,
   },
+  'huddle.pushToTalk': {
+    keys: 'space',
+    scope: 'global',
+    description: 'Push-to-talk (hold spacebar to temporarily unmute)',
+    category: 'Huddle',
+    priority: 200,
+    allowInInputs: false,
+  },
 
   // ===== CANVAS SHORTCUTS =====
   'canvas.save': {

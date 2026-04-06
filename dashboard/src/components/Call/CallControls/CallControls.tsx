@@ -23,7 +23,7 @@ import { roomActor } from '../../../machines/roomMachine';
 import { useDrawStore, sendDrawEvent } from '../../../hooks/useDrawStore';
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useShortcutById } from '../../../shortcuts';
+import { useShortcutById, useShortcut } from '../../../shortcuts';
 
 interface CallControlsProps {
   isMicEnabled: boolean;
@@ -96,6 +96,42 @@ export function CallControls({
 
   // Keyboard shortcut for mute toggle
   useShortcutById('huddle.toggleMute', onToggleMic);
+
+  // Push-to-talk functionality using spacebar
+  const isPushToTalkActive = useSelector(
+    roomActor,
+    state => state.context.pushToTalkState === 'active',
+  );
+
+  // Register spacebar for push-to-talk with high priority
+  // Only works when mic is currently muted
+  useShortcut(
+    'space',
+    () => {
+      roomActor.send({ type: 'PUSH_TO_TALK_START' });
+    },
+    {
+      scope: 'global',
+      priority: 200,
+      allowInInputs: false,
+      preventDefault: true,
+      description: 'Push-to-talk (hold spacebar to unmute)',
+      category: 'Huddle',
+      when: () => !isMicEnabled,
+    },
+  );
+
+  // Listen for keyup to end push-to-talk
+  useEffect(() => {
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space' && isPushToTalkActive) {
+        roomActor.send({ type: 'PUSH_TO_TALK_END' });
+      }
+    };
+
+    window.addEventListener('keyup', handleKeyUp);
+    return () => window.removeEventListener('keyup', handleKeyUp);
+  }, [isPushToTalkActive]);
 
   // Check if current user is the controller
   const isController = localParticipantId === aiController?.id;
@@ -214,18 +250,22 @@ export function CallControls({
               className={cn(
                 'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
                 !hasCustomSizing && 'p-2.5 sm:p-4',
-                isMicEnabled
-                  ? 'bg-gray-700 hover:bg-gray-600 text-white'
-                  : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
+                isPushToTalkActive
+                  ? 'bg-green-500 hover:bg-green-600 text-white shadow-green-500/50 ring-4 ring-green-500/30'
+                  : isMicEnabled
+                    ? 'bg-gray-700 hover:bg-gray-600 text-white'
+                    : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title={isMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
+              title={
+                isMicEnabled ? 'Mute microphone' : 'Unmute microphone (press spacebar to speak)'
+              }
               data-testid='mic-toggle-button'
               data-track-category='CALLS'
               data-track-name='MIC_TOGGLE'
               data-track-metadata={JSON.stringify({ enabled: isMicEnabled, callId })}
             >
-              {isMicEnabled ? (
+              {isMicEnabled || isPushToTalkActive ? (
                 <Mic
                   className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
                   style={
