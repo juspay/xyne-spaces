@@ -1,3 +1,23 @@
+## [1.106.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.105.1...v1.106.0) (2026-04-06)
+
+
+### Features
+
+* add generic post proxy layer for Electron agent ([53d8a9e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/53d8a9e30a749e27e2b90fe929feb640da51956a)), closes [#4645](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4645)
+* added softdelete for channel_user_status ([77540ee](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/77540ee7b34d1ef974a627c6303038241a701215)), closes [#4477](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4477)
+* draft saving and attachments zoho ([a013205](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a013205be6b94c2bd92807a685708b518221ee11)), closes [#4661](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4661)
+* Feature/direct context xyne ai ([b99baa6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b99baa6f8b0b77d2656421e28139286d71e101b8)), closes [#4603](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4603)
+* Push to talk in call using space bar ([603e352](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/603e352f63eed34f37dc1f84c244f6ba27f2887c)), closes [#4571](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4571)
+
+
+### Bug Fixes
+
+* fixed dms search to use command + k approach and add jump to channels ([c71d35e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c71d35e9a824290cf0736152ab360b228c37f933))
+* Participant update fix ([8c45e76](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8c45e765e191dec0da5487a46b4444879fc54c75)), closes [#4595](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4595)
+* removed Jaf for activity Classification ([d3f50da](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d3f50dafbf643fde3b70cde8f72fdab9584b8af9)), closes [#4652](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4652)
+* revert pr for email report ([5ef1e48](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5ef1e48648063a49d5887ee0083f9997522cd2bf)), closes [#4642](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4642)
+* Video Attachment bug fixes ([1ed8988](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1ed89884cf2fcf6f5be4c80d4324e1724700fbc9)), closes [#4613](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4613)
+
 ## [1.105.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.105.0...v1.105.1) (2026-04-03)
 
 
