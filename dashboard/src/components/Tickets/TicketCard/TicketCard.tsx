@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Calendar, User, Code2, Tag } from 'lucide-react';
 import { BaseTicketType, isReleaseTicket, Ticket, TicketTag } from '@xyne/shared';
 import { getPriorityIcon, formatEta, isEtaUrgent, isStageEtaOverdue } from './TicketCard.utils';
@@ -13,10 +13,35 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { TagSelector } from '../TicketTable/TagSelector';
 import Avatar from '../../ui/Avatar/Avatar';
-import { useUserGroups } from '../../../hooks/useUserGroup';
+import { useUserGroupById, useUserGroups } from '../../../hooks/useUserGroup';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
-import { getAssigneeOptions, PriorityOptions } from '../TicketTable/TicketTableHelper';
+import { PriorityOptions, useAssigneeOptions } from '../TicketTable/TicketTableHelper';
 import { v4 as uuidv4 } from 'uuid';
+
+const DEFAULT_VISIBLE_COLUMNS = new Set(['assignee', 'dueDate', 'priority', 'tags']);
+
+const AssigneeEditor: React.FC<{
+  selectedValue: string | null;
+  onSelect: (value: string | null) => void;
+  onOpenChange: (open: boolean) => void;
+}> = ({ selectedValue, onSelect, onOpenChange }) => {
+  const users = useUsers();
+  const userGroups = useUserGroups();
+  const assigneeOptions = useAssigneeOptions(users, userGroups || []);
+
+  return (
+    <EntitySelector
+      options={assigneeOptions}
+      selectedValue={selectedValue}
+      onSelect={onSelect}
+      placeholder='Select assignee'
+      searchPlaceholder='Search...'
+      variant='inline'
+      isOpen={true}
+      onOpenChange={onOpenChange}
+    />
+  );
+};
 
 interface TicketCardProps {
   ticket: Ticket;
@@ -36,7 +61,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   tags,
   availableTags = [],
   isCompact = false,
-  visibleColumns = new Set(['assignee', 'dueDate', 'priority', 'tags']),
+  visibleColumns = DEFAULT_VISIBLE_COLUMNS,
   isConversation = false,
 }) => {
   const zero = useZero();
@@ -46,33 +71,13 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   const [isEditingTags, setIsEditingTags] = useState(false);
   // const navigate = useNavigate();
 
-  // Get creator information
-  const creator = useUser(ticket.createdBy || '');
-
-  const assigneeType = ticket.assignedTo?.startsWith('group:') ? 'group' : 'user';
-  const assigneeId = ticket.assignedTo?.replace(/^(user:|group:)/, '') || '';
-
-  const assignedUser = useUser(assigneeId && assigneeType === 'user' ? assigneeId : '');
-
   const [isEditingPriority, setIsEditingPriority] = useState(false);
   const [isEditingAssignee, setIsEditingAssignee] = useState(false);
 
   const isStageOverdue = isStageEtaOverdue(ticket);
-
-  const userGroups = useUserGroups();
-  const assignedGroup = userGroups.find(
-    group => group.id === assigneeId && assigneeType === 'group',
-  );
-
   const hasDueDate = !!ticket.eta;
   const hasTags = tags && tags.length > 0;
 
-  const users = useUsers();
-  const assigneeOptions = useMemo(() => {
-    return getAssigneeOptions(users, userGroups || []);
-  }, [users, userGroups]);
-
-  // functions to check visibility
   const isVisible = (column: string) => visibleColumns.has(column);
   const showAssignee = isVisible('assignee');
   const showDueDate = isVisible('dueDate');
@@ -82,7 +87,26 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   const showCreatedAt = isVisible('createdAt');
   const showCreatedBy = isVisible('createdBy');
 
-  // Handle tag changes
+  const assigneeType = ticket.assignedTo?.startsWith('group:') ? 'group' : 'user';
+  const assigneeId = ticket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+  const shouldResolveAssignee = showAssignee || !isCompact;
+  const shouldResolveCreator = showCreatedBy;
+
+  const creator = useUser(shouldResolveCreator ? ticket.createdBy || '' : '');
+  const assignedUser = useUser(shouldResolveAssignee && assigneeType === 'user' ? assigneeId : '');
+  const assignedGroup = useUserGroupById(
+    shouldResolveAssignee && assigneeType === 'group' ? assigneeId : '',
+  );
+
+  const selectedTagNames = tags?.map(t => t.name) || [];
+
+  // Check if any compact metadata should be shown
+  const hasCompactMetadata = isCompact && (showSubStatus || showCreatedAt || showCreatedBy);
+
+  // Check if ticket is from a release
+  const releaseBoardBgColor =
+    isReleaseTicket(ticket.ticketType as BaseTicketType) && isConversation ? 'bg-muted' : 'bg-card';
+
   const handleTagsChange = (newTags: string[]) => {
     const oldTagNames = tags?.map(t => t.name) || [];
     const toAdd = newTags.filter(t => !oldTagNames.includes(t));
@@ -110,6 +134,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     );
     setIsEditingAssignee(false);
   };
+
   const handlePriorityChange = (value: string | null) => {
     zero.mutate(
       mutators.ticket.update({
@@ -120,6 +145,13 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     );
     setIsEditingPriority(false);
   };
+
+  const handleAssigneeEditorOpenChange = (open: boolean) => {
+    if (!open) {
+      setIsEditingAssignee(false);
+    }
+  };
+  const startEditingAssignee = () => setIsEditingAssignee(true);
 
   // Format created date
   const formatCreatedDate = (timestamp?: number | null) => {
@@ -139,15 +171,10 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           data-track-category='Tickets'
           data-track-name='EditAssignee'
         >
-          <EntitySelector
-            options={assigneeOptions}
+          <AssigneeEditor
             selectedValue={ticket.assignedTo || null}
             onSelect={handleAssigneeChange}
-            placeholder='Select assignee'
-            searchPlaceholder='Search...'
-            variant='inline'
-            isOpen={true}
-            onOpenChange={open => !open && setIsEditingAssignee(false)}
+            onOpenChange={handleAssigneeEditorOpenChange}
           />
         </button>
       );
@@ -188,7 +215,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         <button
           onClick={e => {
             e.stopPropagation();
-            setIsEditingAssignee(true);
+            startEditingAssignee();
           }}
           className='cursor-pointer hover:opacity-80 transition-opacity'
           data-track-category='Tickets'
@@ -255,14 +282,6 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     );
   };
 
-  const selectedTagNames = tags?.map(t => t.name) || [];
-
-  // Check if any compact metadata should be shown
-  const hasCompactMetadata = isCompact && (showSubStatus || showCreatedAt || showCreatedBy);
-
-  // Check if ticket is from a release
-  const releaseBoardBgColor =
-    isReleaseTicket(ticket.ticketType as BaseTicketType) && isConversation ? 'bg-muted' : 'bg-card';
   return (
     <button
       type='button'
@@ -413,6 +432,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 )}
                 <div className='hidden sm:block'>
                   {!isCompact &&
+                    showAssignee &&
                     (assignedUser ? (
                       <Tooltip content={assignedUser.name || assignedUser.email || 'Unknown User'}>
                         <div className='relative group/assignee'>

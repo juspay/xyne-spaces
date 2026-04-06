@@ -1068,6 +1068,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [filteredTickets]);
 
+  const isTicketsSyncing = ticketsDetails.type !== 'complete' || allTagsDetails.type !== 'complete';
+
   // Create a map of user ID to user name for display
   const userNamesById = useMemo(() => {
     const map = new Map<string, string>();
@@ -1352,6 +1354,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
               availableTags={availableTags}
               availableStages={availableStages}
               hideAssigneeFilter={viewMode === 'my-tickets' ? true : false}
+              isTicketsSyncing={isTicketsSyncing}
               formMappings={
                 filters.boards?.length === 1 && selectedBoardDetail
                   ? selectedBoardDetail.formContextMappings || []

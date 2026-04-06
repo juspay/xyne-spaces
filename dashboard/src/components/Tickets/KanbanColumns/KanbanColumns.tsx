@@ -1,16 +1,15 @@
 import React from 'react';
 import { Circle } from 'lucide-react';
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { useSortable } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
-import { Virtuoso } from 'react-virtuoso';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 import type {
-  Stage,
-  SortableTicketCardProps,
   DroppableStageProps,
+  SortableTicketCardProps,
+  Stage,
 } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import { TicketCard } from '../TicketCard/TicketCard';
 import Button from '../../ui/Button';
@@ -18,6 +17,9 @@ import { CollapseIcon } from '../../../assets/icons/CollapseIcon';
 import { ExpandIcon } from '../../../assets/icons/ExpandIcon';
 import { cn } from '../../../utils/classNames';
 import { StatusOptions } from '../TicketTable/TicketTableHelper';
+
+const VIRTUAL_ROW_HEIGHT = 130;
+const VIRTUAL_OVERSCAN = 15;
 
 const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   ticket,
@@ -61,6 +63,58 @@ const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
 const DroppableStage: React.FC<DroppableStageProps> = ({ id, children }) => {
   const { setNodeRef } = useDroppable({ id });
   return <div ref={setNodeRef}>{children}</div>;
+};
+
+const VirtualizedStageList: React.FC<{
+  stageTickets: Ticket[];
+  tagsByTicketId: Map<string, TicketTag[]>;
+  availableTags: string[];
+  visibleColumns?: Set<string> | undefined;
+  onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
+}> = ({ stageTickets, tagsByTicketId, availableTags, visibleColumns, onTicketClick }) => {
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: stageTickets.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => VIRTUAL_ROW_HEIGHT,
+    overscan: VIRTUAL_OVERSCAN,
+  });
+
+  const virtualItems = virtualizer.getVirtualItems();
+
+  return (
+    <div ref={scrollRef} className='h-full overflow-y-auto pt-3 px-3'>
+      <div
+        className='relative w-full'
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+        }}
+      >
+        {virtualItems.map(virtualItem => {
+          const ticket = stageTickets[virtualItem.index];
+          if (!ticket) return null;
+
+          return (
+            <div
+              key={ticket.id}
+              className='absolute left-0 top-0 w-full pb-1.5'
+              style={{
+                transform: `translateY(${virtualItem.start}px)`,
+              }}
+            >
+              <SortableTicketCard
+                ticket={ticket}
+                tags={tagsByTicketId.get(ticket.id) || []}
+                availableTags={availableTags}
+                onClick={e => onTicketClick(e, ticket)}
+                visibleColumns={visibleColumns}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 };
 
 interface KanbanColumnsProps {
@@ -219,29 +273,17 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
               </div>
 
               {!isCollapsed && (
-                <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
-                  <div className='flex-1 min-h-0'>
-                    <Virtuoso
-                      increaseViewportBy={200}
-                      minOverscanItemCount={20}
-                      defaultItemHeight={118}
-                      data={stageTickets}
-                      itemContent={(index, ticket) => (
-                        <div className={index === 0 ? 'pt-3 px-3 pb-1.5' : 'px-3 pb-1.5'}>
-                          <SortableTicketCard
-                            key={ticket.id}
-                            ticket={ticket}
-                            tags={tagsByTicketId.get(ticket.id) || []}
-                            availableTags={availableTags}
-                            onClick={e => onTicketClick(e, ticket)}
-                            visibleColumns={visibleColumns}
-                          />
-                        </div>
-                      )}
-                      style={{ height: '100%' }}
+                <div className='flex-1 min-h-0'>
+                  <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
+                    <VirtualizedStageList
+                      stageTickets={stageTickets}
+                      tagsByTicketId={tagsByTicketId}
+                      availableTags={availableTags}
+                      visibleColumns={visibleColumns}
+                      onTicketClick={onTicketClick}
                     />
-                  </div>
-                </SortableContext>
+                  </SortableContext>
+                </div>
               )}
             </div>
           </DroppableStage>
