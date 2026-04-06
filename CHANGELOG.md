@@ -1,3 +1,22 @@
+## [1.107.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.106.1...v1.107.0) (2026-04-06)
+
+
+### Features
+
+* | Version Bump Workflow - added support for multiple dependencies, slack notifications on completion ([dcb9dd0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dcb9dd0ca6286cc799eeb727a521ece582c46a40)), closes [#4648](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4648)
+* added empty string check in markThreadActivitiesAsRead and markChannelAsViewed ([5d47153](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5d4715376eec1d5bc672776a5c91605b42019606)), closes [#4679](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4679)
+* ask-ai-guided-onboardin ([d7cbfae](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d7cbfaed0a0ac37e14177b1167d5990d58feebb2)), closes [#4628](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4628)
+* Implement workflow metric boxes ([499228b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/499228b0ad8354b14638b302675a35c1f0da41f4)), closes [#4681](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4681)
+
+
+### Bug Fixes
+
+* add participant fixx ([9cc61f7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9cc61f7445c26e402c9a43f9a546c943c0ae69c5)), closes [#4683](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4683)
+* added dedup check ([6ddf665](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6ddf6658eee17713b302ab975f85a8b5a650e904)), closes [#4649](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4649)
+* backfill conversations initialMessageMd ([c11cf4d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c11cf4d9ba3c2a95e8e7cbe45840254d3215ee60)), closes [#4674](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4674)
+* changed virtualizer ([d0c93d0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d0c93d023edbbc454e822c42760edbaf4c565af2)), closes [#4688](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4688)
+* optimise frontend channel loading ([8fbf7c2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8fbf7c2cc8e51009460d374cde19747bfa8b1c45)), closes [#4612](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4612)
+
 ## [1.106.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.106.0...v1.106.1) (2026-04-06)
 
 
