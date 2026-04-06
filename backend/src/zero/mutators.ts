@@ -871,7 +871,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
             await tx.mutate.draft_messages.delete({ id: draft.id });
-          } else {
+          } else if (draftMessage.trim() !== '') {
             await tx.mutate.draft_messages.upsert({
               id: draft?.id || draftMessageId,
               conversationId: null,
@@ -3831,7 +3831,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
             await tx.mutate.draft_messages.delete({ id: draft.id });
-          } else {
+          } else if (draftMessage.trim() !== '') {
             await tx.mutate.draft_messages.upsert({
               id: draft?.id || draftMessageId,
               conversationId,
