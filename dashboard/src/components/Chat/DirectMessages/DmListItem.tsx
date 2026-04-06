@@ -16,14 +16,13 @@ import { formatElapsedTime } from '../../../utils/dateUtils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
-import { Conversation } from '../../../machines/stateMachine';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 interface DmListItemProps {
   channel: Channel;
   unreadCount?: number;
   isSelected?: boolean;
-  latestConversation?: Conversation | undefined;
+  latestConversation?: { initial_message_md?: string | null } | undefined;
 }
 
 // Helper: robustly strip HTML tags using DOM parser
@@ -48,12 +47,7 @@ export const DmListItem = ({
   // Use the provided latestConversation prop (from batched query in parent)
   // instead of making individual queries per DM channel
   const lastMessage = latestConversation
-    ? (getInitialMessageFromConversation(latestConversation) ??
-      (
-        latestConversation as {
-          initialMessage?: { content: string; senderId: string; createdAt: number };
-        }
-      )?.initialMessage)
+    ? getInitialMessageFromConversation(latestConversation)
     : undefined;
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);

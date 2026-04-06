@@ -1496,48 +1496,45 @@ export const queries = defineQueries({
     }
   ),
 
-  dmChannelsLatestMessagesPaginated: defineQuery(
+dmChannelsLatestMessagesPaginated: defineQuery(
     z.object({
       limit: z.number(),
       start: z.object({ lastActivityAt: z.number(), channelId: z.string() }).nullable(),
+      direction: z.enum(['forward', 'backward']).optional(),
     }),
-    ({ ctx, args: { limit, start } }) => {
+    ({ args: { limit, start, direction } }) => {
+      const isBackward = direction === 'backward';
+
+      // For backward: order ASC to get items before cursor, then reverse
+      // For forward: order DESC to get items after cursor
       let query = zql.channel_stats
         .whereExists('channel', ch =>
           ch.where(helpers =>
-              helpers.or(
-                helpers.cmp('scopeType', '=', ChannelScopeType.DM),
-                helpers.cmp('scopeType', '=', ChannelScopeType.GROUP_DM),
+            helpers.or(
+              helpers.cmp('scopeType', '=', ChannelScopeType.DM),
+              helpers.cmp('scopeType', '=', ChannelScopeType.GROUP_DM),
             ),
           ),
         )
-        .orderBy('lastActivityAt', 'desc')
-        .orderBy('channelId', 'desc');
+        .orderBy('lastActivityAt', isBackward ? 'asc' : 'desc')
+        .orderBy('channelId', isBackward ? 'asc' : 'desc');
 
       if (start) {
+        // Forward: inclusive to include cursor and items after (older)
+        // Backward: exclusive to get items before cursor (newer)
         query = query.start(
           { lastActivityAt: start.lastActivityAt, channelId: start.channelId },
-          { inclusive: true },
+          { inclusive: !isBackward },
         );
       }
 
       return query
         .limit(limit)
         .related('channel', channelQuery =>
-          channelQuery.related('conversations', conversationQuery =>
-            conversationQuery
-              .orderBy('createdAt', 'desc')
-              .limit(1)
-              .related('initialMessage', initialMessageQuery =>
-                initialMessageQuery.where(helpers => {
-                  return helpers.or(
-                    helpers.cmp('visibleTo', 'IS', null),
-                    helpers.cmp('visibleTo', '=', ctx.userID),
-                  );
-                }),
-              ),
-          ),
-        );
+        channelQuery.related('conversations', conversationQuery =>
+          conversationQuery.orderBy('createdAt', 'desc').limit(1),
+        ),
+      );
     },
   ),
   conversationOfUserChannels: defineQuery(({ ctx }) => {

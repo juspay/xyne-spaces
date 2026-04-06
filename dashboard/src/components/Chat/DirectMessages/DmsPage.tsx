@@ -1,4 +1,4 @@
-import { ReactElement, useMemo, useState, useRef, useCallback, useEffect } from 'react';
+import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
 import { Search, PenBox, ArrowLeft, X } from 'lucide-react';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { DmListItem } from './DmListItem';
@@ -19,11 +19,49 @@ import {
   type ImperativePanelHandle,
 } from 'react-resizable-panels';
 import { useUsers } from '../../../hooks/useUsers';
-import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
+import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Button from '../../ui/Button';
+import Avatar from '../../ui/Avatar/Avatar';
 import { useDmsPaginatedMessages } from '../../../hooks/useDmsPaginatedMessages';
+import { useDmsSearch } from '../../../hooks/useDmsSearch';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { Channel, ChannelScopeType } from '@xyne/shared';
+import { StatusIndicator } from '../../ui/StatusIndicator';
+
+// Simple component for DM search results (no message preview)
+const DmSearchResultItem = ({
+  channel,
+  isSelected,
+}: {
+  channel: Channel;
+  isSelected: boolean;
+}): ReactElement => {
+  const context = useAuthContextValues();
+  const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
+  const is1on1DM = channel.scopeType === ChannelScopeType.DM;
+
+  const allUsers = useUsers();
+  const targetUser = allUsers.find(u => u.id === avatarUserId);
+
+  return (
+    <div className={`flex items-center gap-3 px-2 py-2 ${isSelected ? 'bg-accent' : ''}`}>
+      <Avatar userId={avatarUserId} size='md' showActiveStatus={is1on1DM} className='rounded-lg' />
+      <div className='flex-1 min-w-0'>
+        <div className='flex items-center gap-1.5'>
+          <span className='text-sm font-medium text-foreground truncate'>{displayName}</span>
+          {is1on1DM && targetUser?.presenceStatus && (
+            <StatusIndicator
+              statusEmoji={targetUser.presenceStatus.statusEmoji}
+              statusContent={targetUser.presenceStatus.statusContent}
+              statusExpiryAt={targetUser.presenceStatus.statusExpiryAt}
+              size='sm'
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // Hardcoded item heights derived from CSS (avoids DOM measurement via ref)
 // Desktop: py-3 (24px) + size-[48px] avatar + 1px border-bottom = 73px
@@ -43,7 +81,6 @@ const DmsPage = (): ReactElement => {
   // All hooks must be called before any conditional returns
   const { channelId } = useParams<{ channelId: string }>();
   const [showAddDmForm, setShowAddDmForm] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const context = useAuthContextValues();
 
   const selectedChannelIdRef = useRef<string | undefined>(channelId);
@@ -51,56 +88,88 @@ const DmsPage = (): ReactElement => {
     selectedChannelIdRef.current = channelId;
   }
 
+  // Pending scroll: set when jumpToChannel returns 'loaded' (channel not yet in list).
+  // Cleared once the channel appears in the channels array and we scroll to it.
+  const pendingScrollChannelIdRef = useRef<string | null>(null);
+
   const createDmMutation = useMutation({
     mutationFn: (data: CreateDmRequest) => channelService.createDm(data),
     onSuccess: response => {
       setShowAddDmForm(false);
-      // Navigate to /chat/dm/:channelId for both mobile and desktop
       void navigate(`/chat/dm/${response.id}?fromDM=true`);
     },
   });
 
   const unreadCounts = useAllUnreadCount();
-  const allUsers = useUsers();
 
   const {
     messagesMap,
     channels: directMessages,
-    hasMore,
     loadMore,
+    firstItemIndex,
     selectedChannelMovedVersion,
+    jumpToChannel,
   } = useDmsPaginatedMessages({ selectedChannelId: channelId });
-  // Scroll to top when the selected channel receives an update and moves
+
+  const {
+    dmSearchQuery,
+    setDmSearchQuery,
+    dmSearchResults,
+    showDmSearchDropdown,
+    setShowDmSearchDropdown,
+    selectedDmSearchIndex,
+    dmSearchInputRef,
+    handleDmSearchKeyDown,
+  } = useDmsSearch();
+
+  // Handle DM selection from search dropdown
+  const handleDmSelect = useCallback(
+    async (selectedChannelId: string) => {
+      setDmSearchQuery('');
+      setShowDmSearchDropdown(false);
+      void navigate(`/chat/dm/${selectedChannelId}`);
+
+      // On mobile the sidebar unmounts immediately after navigation, so jumping the
+      // list (switching to cursor mode) is both pointless and harmful — cursor mode
+      // blocks page1 reactive updates, so sending a message in the channel and pressing
+      // back would show a stale list. Skip jumpToChannel entirely on mobile.
+      if (isMobile) return;
+
+      // Desktop only: scroll the sidebar to the channel in the background.
+      const result = await jumpToChannel(selectedChannelId);
+
+      if (result.type === 'scroll') {
+        virtuosoRef.current?.scrollToIndex({ index: result.index, align: 'center' });
+      } else if (result.type === 'loaded') {
+        pendingScrollChannelIdRef.current = selectedChannelId;
+      }
+    },
+    [isMobile, jumpToChannel, navigate, setDmSearchQuery, setShowDmSearchDropdown],
+  );
+
+  // When directMessages updates, check if the pending scroll channel has appeared.
+  // rAF ensures Virtuoso has finished re-measuring after firstItemIndex changes before scrolling.
+  useEffect(() => {
+    const pendingId = pendingScrollChannelIdRef.current;
+    if (!pendingId) return;
+
+    const index = directMessages.findIndex(ch => ch.id === pendingId);
+    if (index < 0) return;
+
+    pendingScrollChannelIdRef.current = null;
+    const raf = requestAnimationFrame(() => {
+      virtuosoRef.current?.scrollToIndex({ index, align: 'center' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [directMessages]);
+
+  // Scroll to top when the selected channel receives a new message and moves to top.
+  // Only fires in live mode (the hook guards this internally).
   useEffect(() => {
     if (!isMobile && selectedChannelMovedVersion > 0 && virtuosoRef.current) {
       virtuosoRef.current.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
     }
   }, [selectedChannelMovedVersion, isMobile]);
-
-  // Create userId -> name map for O(1) lookups
-  const userMap = useMemo(() => {
-    const map = new Map<string, string>();
-    allUsers.forEach(user => {
-      const displayName = getUserDisplayName(user);
-      map.set(user.id, displayName.toLowerCase());
-    });
-    return map;
-  }, [allUsers]);
-
-  const filteredDms = useMemo(() => {
-    if (!searchQuery) return directMessages;
-
-    const query = searchQuery.toLowerCase().trim();
-
-    return directMessages.filter(dm => {
-      // For DM/GROUP_DM channels, search by participant names
-      const participantIds = parseDMParticipantIds(dm);
-      const participantNames = participantIds
-        .map(id => userMap.get(id))
-        .filter((name): name is string => Boolean(name));
-      return participantNames.some(name => name.includes(query));
-    });
-  }, [directMessages, searchQuery, userMap]);
 
   const handleAddDirectMessage = (): void => {
     setShowAddDmForm(true);
@@ -114,8 +183,12 @@ const DmsPage = (): ReactElement => {
     createDmMutation.mutate(dmRequest);
   };
 
+  const itemHeight = isMobile ? MOBILE_ITEM_HEIGHT : DESKTOP_ITEM_HEIGHT;
+  // Trigger loadMore ~5 items before reaching the bottom
+  const threshold = itemHeight * 5;
+
   const renderDmItem = useCallback(
-    (_index: number, channel: (typeof filteredDms)[number]) => {
+    (_index: number, channel: (typeof directMessages)[number]) => {
       return (
         <div>
           <DmListItem
@@ -131,13 +204,8 @@ const DmsPage = (): ReactElement => {
     [unreadCounts, messagesMap],
   );
 
-  const itemHeight = isMobile ? MOBILE_ITEM_HEIGHT : DESKTOP_ITEM_HEIGHT;
-
-  // Trigger loadMore ~5 items before reaching the bottom
-  const bottomThreshold = itemHeight * 5;
-
   const renderMobileDmItem = useCallback(
-    (index: number, channel: (typeof filteredDms)[number]) => {
+    (index: number, channel: (typeof directMessages)[number]) => {
       return (
         <div className={index === 0 ? 'pt-4' : 'mt-6'}>
           <DmListItem
@@ -153,8 +221,35 @@ const DmsPage = (): ReactElement => {
     [unreadCounts, messagesMap],
   );
 
+  // Shared search dropdown JSX to avoid duplication between mobile and desktop
+  const renderSearchDropdown = (): ReactElement | null => {
+    if (!showDmSearchDropdown || !dmSearchQuery.trim()) return null;
+    return (
+      <div className='absolute top-full left-0 right-0 mt-2 bg-background rounded-xl border border-border shadow-lg z-50 max-h-80 overflow-y-auto'>
+        {dmSearchResults.length === 0 ? (
+          <div className='px-4 py-3 text-sm text-muted-foreground'>No DMs found</div>
+        ) : (
+          dmSearchResults.map((channel, index) => (
+            <button
+              key={channel.id}
+              type='button'
+              className={`w-full text-left cursor-pointer hover:bg-accent ${
+                index === selectedDmSearchIndex ? 'bg-accent' : ''
+              }`}
+              onClick={() => void handleDmSelect(channel.id)}
+              data-track-category='DM'
+              data-track-name='SELECT_DM_SEARCH_RESULT'
+            >
+              <DmSearchResultItem channel={channel} isSelected={index === selectedDmSearchIndex} />
+            </button>
+          ))
+        )}
+      </div>
+    );
+  };
+
   if (isMobile) {
-    // If on a specific DM route, render the outlet for chat view with white background
+    // If on a specific DM route, render the outlet for chat view
     if (!isOnIndexRoute) {
       return (
         <div className='flex flex-col h-full max-w-full bg-background text-foreground overflow-x-hidden w-screen'>
@@ -176,24 +271,33 @@ const DmsPage = (): ReactElement => {
           </div>
 
           {/* Search Row: Input Only */}
-          <div className='relative w-full'>
+          <div className='relative w-full dm-search-container'>
             <div className='absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none'>
               <Search className='size-5 text-muted-foreground' />
             </div>
             <input
+              ref={dmSearchInputRef}
               type='text'
               className='w-full h-11 pl-12 pr-10 py-3 bg-background/70 rounded-full border border-[#181B1D] border-opacity-[0.06] text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-0'
-              placeholder='Search'
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              placeholder='Search DMs (Cmd+K)'
+              value={dmSearchQuery}
+              onChange={e => {
+                setDmSearchQuery(e.target.value);
+                setShowDmSearchDropdown(true);
+              }}
+              onFocus={() => setShowDmSearchDropdown(true)}
+              onKeyDown={e => handleDmSearchKeyDown(e, id => void handleDmSelect(id))}
               data-track-event='blur'
               data-track-category='DM'
               data-track-name='SEARCH_DMS_INPUT'
             />
-            {searchQuery && (
+            {dmSearchQuery && (
               <Button
                 className='absolute inset-y-1 right-1 pr-3 flex items-center'
-                onClick={() => setSearchQuery('')}
+                onClick={() => {
+                  setDmSearchQuery('');
+                  setShowDmSearchDropdown(false);
+                }}
                 aria-label='Clear search'
                 variant='link'
                 size='icon'
@@ -201,11 +305,12 @@ const DmsPage = (): ReactElement => {
                 <X className='size-4 text-muted-foreground hover:text-foreground' />
               </Button>
             )}
+            {renderSearchDropdown()}
           </div>
         </div>
 
         <div className='flex-1 w-full max-w-full overflow-hidden'>
-          {filteredDms.length === 0 ? (
+          {directMessages.length === 0 ? (
             <div className='flex flex-col items-center justify-center h-full pb-24 px-6'>
               <img
                 src='/images/empty-chats.png'
@@ -220,14 +325,14 @@ const DmsPage = (): ReactElement => {
           ) : (
             <Virtuoso
               ref={virtuosoRef}
-              data={filteredDms}
+              data={directMessages}
+              firstItemIndex={firstItemIndex}
               computeItemKey={(_, channel) => channel.id}
               fixedItemHeight={itemHeight}
               overscan={5}
-              increaseViewportBy={{ top: 100, bottom: bottomThreshold }}
-              endReached={() => {
-                if (hasMore) loadMore();
-              }}
+              increaseViewportBy={{ top: threshold, bottom: threshold }}
+              startReached={() => void jumpToChannel()}
+              endReached={loadMore}
               itemContent={renderMobileDmItem}
               components={{
                 Footer: () => <div className='pb-20' />,
@@ -301,24 +406,31 @@ const DmsPage = (): ReactElement => {
                   <PenBox className='size-5 text-blue-600' />
                 </button>
               </div>
-              <div className='relative'>
+              <div className='relative dm-search-container'>
                 <Search className='absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground' />
                 <input
+                  ref={dmSearchInputRef}
                   type='text'
                   className='w-full pl-9 pr-4 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring'
-                  placeholder='Search messages'
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder='Search DMs (Cmd+K)'
+                  value={dmSearchQuery}
+                  onChange={e => {
+                    setDmSearchQuery(e.target.value);
+                    setShowDmSearchDropdown(true);
+                  }}
+                  onFocus={() => setShowDmSearchDropdown(true)}
+                  onKeyDown={e => handleDmSearchKeyDown(e, id => void handleDmSelect(id))}
                   data-testid='search-messages-input'
                   data-track-event='blur'
                   data-track-category='DM'
                   data-track-name='SEARCH_DMS_INPUT_DESKTOP'
                 />
+                {renderSearchDropdown()}
               </div>
             </div>
 
             <div className='flex-1 w-full overflow-hidden'>
-              {filteredDms.length === 0 ? (
+              {directMessages.length === 0 ? (
                 <div className='flex flex-col items-center justify-center h-full px-6'>
                   <img
                     src='/images/empty-chats.png'
@@ -333,14 +445,14 @@ const DmsPage = (): ReactElement => {
               ) : (
                 <Virtuoso
                   ref={virtuosoRef}
-                  data={filteredDms}
+                  data={directMessages}
+                  firstItemIndex={firstItemIndex}
                   computeItemKey={(_, channel) => channel.id}
                   fixedItemHeight={itemHeight}
                   overscan={5}
-                  increaseViewportBy={{ top: 100, bottom: bottomThreshold }}
-                  endReached={() => {
-                    if (hasMore) loadMore();
-                  }}
+                  increaseViewportBy={{ top: threshold, bottom: threshold }}
+                  startReached={() => void jumpToChannel()}
+                  endReached={loadMore}
                   itemContent={renderDmItem}
                   className='h-full'
                 />
