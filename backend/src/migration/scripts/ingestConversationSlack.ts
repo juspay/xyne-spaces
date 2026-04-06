@@ -8,7 +8,6 @@ import { UserRepository } from '../../database/repositories/users';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
-import { ChannelUserStatusRepository } from '../../database/repositories/channelUserStatusRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { AuthProvider, ExternalEntityType, MessageDirection } from '@prisma/client';
 import { SlackMessage, SlackFile } from '../slack/utils/extractConversation';
@@ -40,11 +39,6 @@ export interface IngestConversationSlackResult {
 interface MessageIngestionResult {
   messageId: string;
   conversationId: string;
-}
-
-interface UserActivity {
-  lastViewedAt: Date;
-  lastViewedConversationId: string;
 }
 
 // ============================================================================
@@ -132,7 +126,6 @@ export async function ingestConversationSlack(
     const externalMessageRepo = new ExternalMessageRepository();
     const userRepo = new UserRepository();
     const messageRepo = new MessageRepository();
-    const channelUserStatusRepo = new ChannelUserStatusRepository();
     const channelRepo = new ChannelRepository();
 
     // Get or create external source
@@ -161,9 +154,8 @@ export async function ingestConversationSlack(
 
     const externalSourceId = externalSource.id;
 
-    // User cache and activity tracking
+    // User cache for lookups
     const userCache = new Map<string, { id: string; isDeactivated: boolean }>();
-    const userActivityMap = new Map<string, UserActivity>();
 
     // Helper: Download attachments (returns empty array on failure)
     const downloadAttachments = async (
@@ -260,7 +252,7 @@ export async function ingestConversationSlack(
       let conversationId: string;
 
       if (isNewConversation) {
-        // Create new conversation with message
+        // Create new conversation with message (skip participant check since participants are added before migration)
         const result = await conversationService.createConversationWithMessage({
           channelId,
           userId: resolvedUserId,
@@ -269,6 +261,7 @@ export async function ingestConversationSlack(
           uploadedFiles: downloadedAttachments,
           isBot: false,
           createdAt,
+          isAddingParticipant: false,
         });
 
         message = result.message;
@@ -276,7 +269,7 @@ export async function ingestConversationSlack(
         conversationId = conversation.conversationId;
 
       } else {
-        // Add message to existing conversation
+        // Add message to existing conversation (skip participant check since participants are added before migration)
         conversationId = existingConversationId;
 
         const result = await conversationService.addMessageToConversation({
@@ -289,6 +282,7 @@ export async function ingestConversationSlack(
           isBot: false,
           lastActivityAt: createdAt,
           createdAt,
+          isAddingParticipant: false,
         });
 
         message = result.message;
@@ -303,15 +297,6 @@ export async function ingestConversationSlack(
         entityId: message.messageId,
         direction: MessageDirection.INCOMING,
       });
-
-      // Track user activity
-      const existingActivity = userActivityMap.get(resolvedUserId);
-      if (!existingActivity || createdAt > existingActivity.lastViewedAt) {
-        userActivityMap.set(resolvedUserId, {
-          lastViewedAt: createdAt,
-          lastViewedConversationId: conversationId,
-        });
-      }
 
       return {
         messageId: message.messageId,
@@ -398,23 +383,6 @@ export async function ingestConversationSlack(
           error: error instanceof Error ? error.message : 'Unknown error',
         });
         // Continue with next message
-      }
-    }
-
-    // Update channelUserStatus for all users
-    for (const [userId, activity] of userActivityMap.entries()) {
-      try {
-        await channelUserStatusRepo.upsert(channelId, userId, {
-          lastViewedAt: activity.lastViewedAt,
-          lastViewedConversationId: activity.lastViewedConversationId,
-          isStarred: false,
-          isClosed: false,
-        });
-      } catch (error) {
-        logger.error('[IngestSlack] Failed to update channelUserStatus', {
-          userId,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
       }
     }
 

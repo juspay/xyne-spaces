@@ -70,6 +70,7 @@ export interface CreateConversationWithMessageParams {
   messageMetadata?: Record<string, unknown>;
   isBot?: boolean;
   createdAt?: Date;
+  isAddingParticipant?: boolean;
 }
 
 export interface AddMessageToConversationParams {
@@ -84,6 +85,7 @@ export interface AddMessageToConversationParams {
   lastActivityAt?: Date;
   isBot?: boolean;
   createdAt?: Date;
+  isAddingParticipant?: boolean;
 }
 
 export interface UpdateMessageParams {
@@ -270,6 +272,7 @@ export class ConversationService {
       messageMetadata,
       isBot,
       createdAt,
+      isAddingParticipant = true,
     } = params;
 
     // Check if channel exists
@@ -278,15 +281,17 @@ export class ConversationService {
       throw new Error('Channel not found');
     }
 
-    // Check if user is channel participant
-    const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
-    if (!isParticipant && !isBot) {
-      // Auto-add user as participant when they send first message
-      await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
-      // Re-index channel in Vespa so permissions/memberCount reflect the new participant
-      this.pushVespaJobForChannel(channelId, userId).catch((error) => {
-        logger.error(`[ConversationService] Error pushing Vespa job for channel ${channelId} after adding participant:`, error);
-      });
+    // Check if user is channel participant (skip if isAddingParticipant is false)
+    if (isAddingParticipant) {
+      const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
+      if (!isParticipant && !isBot) {
+        // Auto-add user as participant when they send first message
+        await this.channelParticipantRepository.addParticipant(channelId, userId, 'MEMBER');
+        // Re-index channel in Vespa so permissions/memberCount reflect the new participant
+        this.pushVespaJobForChannel(channelId, userId).catch((error) => {
+          logger.error(`[ConversationService] Error pushing Vespa job for channel ${channelId} after adding participant:`, error);
+        });
+      }
     }
 
     // Handle file uploads - either from raw files or pre-uploaded files
@@ -452,6 +457,7 @@ export class ConversationService {
       lastActivityAt,
       isBot,
       createdAt,
+      isAddingParticipant = true,
     } = params;
 
     const conversation = await this.conversationRepository.findById(conversationId);
@@ -459,22 +465,24 @@ export class ConversationService {
       throw new Error('Conversation not found');
     }
 
-    // Check if user is channel participant
-    const isParticipant = await this.channelParticipantRepository.isParticipant(
-      conversation.channelId,
-      userId
-    );
-    if (!isParticipant && !isBot) {
-      // Auto-add user as participant when they reply
-      await this.channelParticipantRepository.addParticipant(
+    // Check if user is channel participant (skip if isAddingParticipant is false)
+    if (isAddingParticipant) {
+      const isParticipant = await this.channelParticipantRepository.isParticipant(
         conversation.channelId,
-        userId,
-        'MEMBER'
+        userId
       );
-      // Re-index channel in Vespa so permissions/memberCount reflect the new participant
-      this.pushVespaJobForChannel(conversation.channelId, userId).catch((error) => {
-        logger.error(`[ConversationService] Error pushing Vespa job for channel ${conversation.channelId} after adding participant:`, error);
-      });
+      if (!isParticipant && !isBot) {
+        // Auto-add user as participant when they reply
+        await this.channelParticipantRepository.addParticipant(
+          conversation.channelId,
+          userId,
+          'MEMBER'
+        );
+        // Re-index channel in Vespa so permissions/memberCount reflect the new participant
+        this.pushVespaJobForChannel(conversation.channelId, userId).catch((error) => {
+          logger.error(`[ConversationService] Error pushing Vespa job for channel ${conversation.channelId} after adding participant:`, error);
+        });
+      }
     }
 
     // Handle file uploads - either from raw files or pre-uploaded files

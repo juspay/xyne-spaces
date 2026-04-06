@@ -82,6 +82,20 @@ interface BatchResult {
   messages: number;
 }
 
+interface ParticipantFailure {
+  slackUserId: string;
+  userEmail?: string;
+  userName?: string;
+  reason: string;
+}
+
+interface UserToAdd {
+  slackUserId: string;
+  xyneUserId: string;
+  userEmail?: string;
+  userName?: string;
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -161,8 +175,7 @@ async function processBatch(
   batch: TimeBatch,
   input: MigrationInput,
   externalSourceName: string,
-  messageTs: string | null | undefined,
-  postingUserIds: Set<string>
+  messageTs: string | null | undefined
 ): Promise<BatchResult> {
   const { channelId, xyneSpaceChannelId, syncOptions } = input;
 
@@ -188,18 +201,15 @@ async function processBatch(
     });
   }
 
-  // Extract channel history (track posting user IDs)
-  const conversationHistory = await extractChannelHistory(
-    {
-      channelId,
-      oldest: oldestTimestamp,
-      latest: latestTimestamp,
-      includeThreads: syncOptions?.includes('include_threads'),
-      includeAttachments: syncOptions?.includes('include_attachments'),
-      includeDeactivatedUsers: syncOptions?.includes('include_deactivated_users'),
-    },
-    postingUserIds
-  );
+  // Extract channel history
+  const conversationHistory = await extractChannelHistory({
+    channelId,
+    oldest: oldestTimestamp,
+    latest: latestTimestamp,
+    includeThreads: syncOptions?.includes('include_threads'),
+    includeAttachments: syncOptions?.includes('include_attachments'),
+    includeDeactivatedUsers: syncOptions?.includes('include_deactivated_users'),
+  });
 
   if (ENABLE_NOTIFICATIONS && messageTs) {
     await postMessage({
@@ -262,6 +272,126 @@ async function validateInput(input: MigrationInput): Promise<void> {
 }
 
 /**
+ * Add all Slack channel members as Xyne channel participants before migration
+ * First collects and validates all users, then batch adds if no failures
+ * If any failures exist, posts error to Slack and throws without adding anyone
+ */
+async function addChannelParticipantsBeforeMigration(
+  slackChannelId: string,
+  xyneChannelId: string
+): Promise<void> {
+  logger.info('[Migration] Preparing channel participants before migration', {
+    slackChannelId,
+    xyneChannelId,
+  });
+
+  const channelMemberIds = await extractChannelMembers(slackChannelId);
+  const userRepo = new UserRepository();
+  const userInfoCache: UserInfoCache = new Map();
+  const userCache = new Map<string, { id: string; isDeactivated: boolean }>();
+
+  const usersToBeAdded: UserToAdd[] = [];
+  const failedUsers: ParticipantFailure[] = [];
+
+  // Phase 1: Collect all users to be added and identify failures
+  for (let i = 0; i < channelMemberIds.length; i++) {
+    const memberId = channelMemberIds[i];
+    try {
+      const userInfo = await getUserInfo(memberId, userInfoCache);
+      if (userInfo && (userInfo.userId || (userInfo.userEmail && userInfo.userName))) {
+        let resolvedUserId = userInfo.userId;
+        if (!resolvedUserId && userInfo.userEmail && userInfo.userName) {
+          resolvedUserId = await findOrCreateUser(
+            userInfo.userEmail,
+            userInfo.userName,
+            userInfo.isDeactivated ?? false,
+            userRepo,
+            userCache
+          );
+        }
+        if (resolvedUserId) {
+          usersToBeAdded.push({
+            slackUserId: memberId,
+            xyneUserId: resolvedUserId,
+            userEmail: userInfo.userEmail,
+            userName: userInfo.userName,
+          });
+        } else {
+          failedUsers.push({
+            slackUserId: memberId,
+            userEmail: userInfo.userEmail,
+            userName: userInfo.userName,
+            reason: 'Could not resolve user ID',
+          });
+        }
+      } else {
+        failedUsers.push({
+          slackUserId: memberId,
+          reason: 'No user info found in Slack',
+        });
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('[Migration] Failed to resolve channel participant', {
+        memberId,
+        error: reason,
+      });
+      failedUsers.push({
+        slackUserId: memberId,
+        reason,
+      });
+    }
+    // Rate limiting: 2 second delay between users to avoid Slack API limits
+    if (i < channelMemberIds.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+
+  logger.info('[Migration] Channel participants validation complete', {
+    xyneChannelId,
+    totalMembers: channelMemberIds.length,
+    validUsers: usersToBeAdded.length,
+    failedUsers: failedUsers.length,
+  });
+
+  // Phase 2: If any failures exist, throw error (will be caught by runMigration's catch block)
+  if (failedUsers.length > 0) {
+    const failureDetails = failedUsers
+      .map((f) => {
+        const userInfo = f.userName || f.userEmail ? ` (${f.userName || ''}${f.userName && f.userEmail ? ' - ' : ''}${f.userEmail || ''})` : '';
+        return `- ${f.slackUserId}${userInfo}: ${f.reason}`;
+      })
+      .join('\n');
+
+    const errorMessage = `❌ Migration failed: ${failedUsers.length} participant(s) could not be resolved:\n${failureDetails}`;
+    throw new Error(errorMessage);
+  }
+
+  // Phase 3: Batch add all participants since no failures
+  if (usersToBeAdded.length > 0) {
+    const channelParticipantRepo = new ChannelParticipantRepository();
+    const userIds = usersToBeAdded.map((u) => u.xyneUserId);
+
+    const result = await channelParticipantRepo.addParticipantsBatch(
+      xyneChannelId,
+      userIds,
+      'MEMBER'
+    );
+
+    logger.info('[Migration] Channel participants batch added', {
+      xyneChannelId,
+      addedCount: result.addedCount,
+      existingCount: result.existingCount,
+    });
+
+    // Queue Vespa re-indexing for the channel (single job for all participants)
+    if (result.addedCount > 0) {
+      await pushVespaJobForChannel(xyneChannelId, userIds[0]);
+    }
+  }
+}
+
+/**
  * Run migration with batch processing
  */
 export async function runMigration(input: MigrationInput): Promise<MigrationResult> {
@@ -269,6 +399,8 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     syncDate: input.syncDate,
     channelId: input.channelId,
   });
+
+  let messageTs: string | null = null;
 
   try {
     // Validate input
@@ -293,13 +425,18 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
     });
     const fallbackText = getMigrationMessageFallbackText(input.syncDate!);
 
-    const messageTs = ENABLE_NOTIFICATIONS
+    messageTs = ENABLE_NOTIFICATIONS
       ? await postMessage({
           channelId: input.channelId!,
           text: fallbackText,
           blocks,
         })
       : null;
+
+    // Add all channel participants before migration (if target channel is specified)
+    if (input.xyneSpaceChannelId) {
+      await addChannelParticipantsBeforeMigration(input.channelId!, input.xyneSpaceChannelId);
+    }
 
     // Create time batches
     const batches = createTimeBatches(input.syncDate!);
@@ -314,8 +451,6 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
 
     // External source name format: slackMigration-{slackChannelId}
     const externalSourceName = `slackMigration-${input.channelId}`;
-    const channelMemberIds = await extractChannelMembers(input.channelId!);
-    const postingUserIds = new Set<string>();
 
     // Process batches
     let totalMessages = 0;
@@ -324,13 +459,7 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       const batch = batches[i];
 
       try {
-        const result = await processBatch(
-          batch,
-          input,
-          externalSourceName,
-          messageTs,
-          postingUserIds
-        );
+        const result = await processBatch(batch, input, externalSourceName, messageTs);
         totalMessages += result.messages;
 
         // Delay between batches (except last)
@@ -361,44 +490,6 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
           });
         }
         // Continue with next batch
-      }
-    }
-
-    // Calculate viewers (members who never posted)
-    const viewerUserIds = channelMemberIds.filter((memberId) => !postingUserIds.has(memberId));
-    const userRepo = new UserRepository();
-    const userCache: UserInfoCache = new Map();
-    if (viewerUserIds.length > 0 && config.slackBotToken !== '') {
-      for (let i = 0; i < viewerUserIds.length; i++) {
-        const viewerUserId = viewerUserIds[i];
-        try {
-          const userInfo = await getUserInfo(viewerUserId, userCache);
-          if (userInfo && (userInfo.userId || (userInfo.userEmail && userInfo.userName))) {
-            let resolvedUserId = userInfo.userId;
-            if (!resolvedUserId && userInfo.userEmail && userInfo.userName) {
-              resolvedUserId = await findOrCreateUser(
-                userInfo.userEmail,
-                userInfo.userName,
-                userInfo.isDeactivated ?? false,
-                userRepo
-              );
-            }
-            if (resolvedUserId) {
-              const channelParticipantRepo = new ChannelParticipantRepository();
-              await channelParticipantRepo.addParticipant(input.xyneSpaceChannelId!, resolvedUserId, 'MEMBER');
-              // Re-index channel in Vespa so permissions/memberCount reflect the new participant
-              await pushVespaJobForChannel(input.xyneSpaceChannelId!, resolvedUserId);
-            }
-          }
-        } catch (error) {
-          logger.error('[Migration] Failed to fetch viewer user info', {
-            viewerUserId,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          });
-        }
-        if (i < viewerUserIds.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-        }
       }
     }
 
@@ -439,13 +530,29 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       channelId: input.channelId,
     };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
     logger.error('[Migration] Migration failed', {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
     });
+
+    if (messageTs && ENABLE_NOTIFICATIONS) {
+      try {
+        await postMessage({
+          channelId: input.channelId!,
+          threadTs: messageTs,
+          text: `❌ Migration failed: ${errorMessage}`,
+        });
+      } catch (error) {
+        logger.error('[Migration] postMessage failed', {
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
 
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: errorMessage,
     };
   }
 }
