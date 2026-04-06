@@ -46,12 +46,30 @@ export interface PermissionCheck {
   hasAccess: boolean;
 }
 
+export interface WorkflowMetricGroup {
+  workflowType: string | null;
+  status: string;
+  _count: {
+    id: number;
+  };
+}
+
 class AnalyticsService {
   async getMessagesExchanged(
     params: TimeRangeParams,
   ): Promise<AnalyticsResponse<TimeSeriesDataPoint[]>> {
     const response = await apiInstance.get<AnalyticsResponse<TimeSeriesDataPoint[]>>(
       '/analytics/messages-exchanged',
+      { params },
+    );
+    return response.data;
+  }
+
+  async getWorkflowMetrics(
+    params: TimeRangeParams,
+  ): Promise<AnalyticsResponse<WorkflowMetricGroup[]>> {
+    const response = await apiInstance.get<AnalyticsResponse<WorkflowMetricGroup[]>>(
+      '/analytics/workflow-metrics',
       { params },
     );
     return response.data;

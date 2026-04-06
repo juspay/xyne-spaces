@@ -1,5 +1,13 @@
 import React from 'react';
-import { CircleDashed, CircleDot, CircleCheck, Clock, CircleX, CirclePause } from 'lucide-react';
+import {
+  CircleDashed,
+  CircleDot,
+  CircleCheck,
+  Clock,
+  CircleX,
+  CirclePause,
+  PlayCircle,
+} from 'lucide-react';
 
 /* ── Status config ── */
 interface StatusConfig {
@@ -11,7 +19,7 @@ interface StatusConfig {
 const RUNNING: StatusConfig = {
   label: 'Running',
   cssVar: 'var(--status-pending)',
-  Icon: CircleDot,
+  Icon: PlayCircle,
 };
 const PENDING: StatusConfig = {
   label: 'Pending',
@@ -47,11 +55,13 @@ const STATUS_CONFIG: Record<string, StatusConfig> = {
   FAILURE: FAILED,
   PAUSED,
   RUNNING,
+  IN_PROGRESS: RUNNING,
   COMPLETED,
   WAITING,
   // Lowercase (workflow-level)
   new: NEW,
   running: RUNNING,
+  in_progress: RUNNING,
   pending: PENDING,
   waiting: WAITING,
   completed: COMPLETED,

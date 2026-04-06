@@ -7,6 +7,7 @@ import { SegmentedToggle, SegmentedToggleOption } from '../ui/SegmentedToggle';
 import FilterMenu from './FilterMenu';
 import ActiveFiltersBar from './ActiveFiltersBar';
 import { User } from '@xyne/shared';
+import { WorkflowMetricsBlock } from './WorkflowMetricsBlock';
 import { cn } from '../../utils/classNames';
 
 export interface DateRange {
@@ -37,7 +38,7 @@ type StatusTabKey = 'all' | 'running' | 'pending' | 'paused' | 'completed' | 'fa
 
 const STATUS_TAB_MAP: Record<StatusTabKey, string[]> = {
   all: [],
-  running: ['RUNNING'],
+  running: ['RUNNING', 'IN_PROGRESS'],
   pending: ['PENDING', 'WAITING'],
   paused: ['PAUSED'],
   completed: ['COMPLETED', 'SUCCESS'],
@@ -131,6 +132,9 @@ const TicketHeader: React.FC<TicketHeaderProps> = ({
           Tickets Workflows
         </h1>
       </div>
+
+      {/* Metrics Block */}
+      <WorkflowMetricsBlock />
 
       {/* Filters row */}
       <div

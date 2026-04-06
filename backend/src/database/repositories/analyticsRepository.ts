@@ -723,6 +723,28 @@ export class AnalyticsRepository {
   }
 
   /**
+   * Get workflow metrics bucketed by workflowType and status
+   */
+  async getWorkflowMetrics(filters: AnalyticsFilters) {
+    const dateFilter = getDateFilter(filters);
+    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
+      ? dateFilter
+      : { gte: dateFilter };
+
+    const groupedData = await this.prisma.workflow.groupBy({
+      by: ['workflowType', 'status'],
+      where: {
+        createdAt: dateCondition,
+      },
+      _count: {
+        id: true
+      }
+    });
+
+    return groupedData;
+  }
+
+  /**
    * Get optimized execution statistics for all 3 UI components
    */
   async getExecutionStats(filters: AnalyticsFilters): Promise<ExecutionStats> {
