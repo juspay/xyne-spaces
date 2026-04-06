@@ -32,6 +32,7 @@ import {
 } from './utils';
 import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
+import { queryClient } from '../../../services/clients/queryClient';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import TxtViewer from '../../FileViewer/TxtViewer';
 import VideoViewer from '../../FileViewer/VideoViewer';
@@ -732,6 +733,12 @@ const InlineVideoPlayer: React.FC<{
   const { isMobile } = usePlatform();
   const [loading, setLoading] = useState(true);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Track whether THIS specific video was open in the modal.
+  // Used to ensure we only resume playback when THIS video's modal closes,
+  // not when any other video's modal fires SET_VIDEO_TIME events.
+  const wasOpenInModalRef = useRef(false);
+  // Store the video time from modal to use as initialTime when VideoViewer mounts
+  const [pendingVideoTime, setPendingVideoTime] = useState<number | undefined>(undefined);
 
   // check if the video is open in modal
   const { isOpenInModal, modalVideoTime } = useSelector(
@@ -743,13 +750,31 @@ const InlineVideoPlayer: React.FC<{
     },
   );
 
-  // pause inline player when modal opens and resume from exact time when close
+  // Pause inline player when modal opens for THIS video.
+  // Resume from the exact modal time only when THIS video's modal closes.
+  // Without the wasOpenInModalRef guard, every InlineVideoPlayer whose
+  // hasClickedPlay=true would call play() whenever ANY other video emits
+  // SET_VIDEO_TIME (because isOpenInModal=false and modalVideoTime!==undefined
+  // are both true for bystander videos).
   useEffect(() => {
     if (isOpenInModal) {
-      videoRef.current?.pause();
-    } else if (modalVideoTime !== undefined && videoRef.current) {
-      videoRef.current.currentTime = modalVideoTime;
-      videoRef.current.play().catch(() => {});
+      wasOpenInModalRef.current = true;
+      videoRef.current?.pause(); //pausing inline player
+    } else if (wasOpenInModalRef.current) {
+      // Only runs when transitioning open→closed for THIS video
+      wasOpenInModalRef.current = false;
+      if (modalVideoTime !== undefined) {
+        if (videoRef.current) {
+          // Inline video is already mounted, resume from modal time
+          videoRef.current.currentTime = modalVideoTime;
+          // Stay paused after modal closes - don't auto-play
+        } else {
+          // Inline video was never played, store the time
+          // so VideoViewer can use it as initialTime when it mounts
+          setPendingVideoTime(modalVideoTime);
+          setHasClickedPlay(true);
+        }
+      }
     }
   }, [isOpenInModal, modalVideoTime]);
 
@@ -843,9 +868,24 @@ const InlineVideoPlayer: React.FC<{
     </Menu.Root>
   );
 
-  // Fetch thumbnail on mount
+  // Fetch thumbnail on mount.
+  // When thumbnailUrl is null (server hasn't synced yet after send), check the React Query
+  // preview cache which was pre-seeded during the draft upload phase. This eliminates the
+  // black-box flash that occurs between send and Zero replicating thumbnailUrl from the server.
   useEffect(() => {
     if (!thumbnailUrl) {
+      const cachedBlob = queryClient.getQueryData<Blob>([
+        'preview-blob',
+        `/attachments/${attachmentId}/thumbnail`,
+      ]);
+      if (cachedBlob) {
+        const localBlobUrl = URL.createObjectURL(cachedBlob);
+        setThumbnailBlobUrl(localBlobUrl);
+        setLoading(false);
+        return (): void => {
+          URL.revokeObjectURL(localBlobUrl);
+        };
+      }
       setLoading(false);
       return;
     }
@@ -875,7 +915,7 @@ const InlineVideoPlayer: React.FC<{
 
   return (
     <>
-      <div style={{ contain: 'layout', height: dimensions.height }}>
+      <div style={{ contain: 'layout', width: dimensions.width, height: dimensions.height }}>
         <div className='relative bg-black rounded-lg overflow-hidden border border-border shadow-sm w-full h-full max-w-md'>
           {/* Show thumbnail on mobile or until user clicks to play on desktop */}
           {loading ? (
@@ -885,8 +925,8 @@ const InlineVideoPlayer: React.FC<{
               {thumbnailBlobUrl && !thumbnailError ? (
                 <img src={thumbnailBlobUrl} alt={fileName} className='w-full h-full object-cover' />
               ) : (
-                // Show video icon if no thumbnail
-                <div className={cn('flex items-center justify-center bg-gray-900 h-full min-w-64')}>
+                // Show video icon if no thumbnail — container already has explicit dimensions
+                <div className='flex items-center justify-center bg-gray-900 w-full h-full'>
                   {!isMobile && <Video size={64} className='text-muted-foreground' />}
                 </div>
               )}
@@ -949,6 +989,7 @@ const InlineVideoPlayer: React.FC<{
                 onExpand={openModal}
                 menuContent={inlineMenuContent}
                 ref={videoRef}
+                {...(pendingVideoTime !== undefined && { initialTime: pendingVideoTime })}
               />
             </div>
           )}
