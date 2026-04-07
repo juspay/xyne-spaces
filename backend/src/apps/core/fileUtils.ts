@@ -7,6 +7,7 @@ import { findOrCreateConversation } from './conversationUtils';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { config } from '@/config/env';
+import { MessageType } from '@prisma/client';
 
 // Initialize Block Kit parser instance
 const blockKitParser = new SlackBlockKitParser();
@@ -76,7 +77,7 @@ export async function ingestAttachment(
       isMarkdown,
       conversationId,
       uploadedFiles,
-      undefined,
+      MessageType.BOT,
       metadata,
     );
 

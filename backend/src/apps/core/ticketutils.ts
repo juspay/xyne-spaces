@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { findOrCreateConversation } from './conversationUtils';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { DatabaseClient } from '@/database/client';
-import { TicketPriority, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
+import { MessageType, TicketPriority, VespaInsertionStatus, VespaOperationType } from '@prisma/client';
 import { serializeTicketMd } from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { TicketActionResponse, TicketEventType } from '../types';
@@ -131,6 +131,10 @@ export async function createTicketWithConversation(
       channelId,
       userId,
       processedContent,
+      false,
+      undefined,
+      undefined,
+      MessageType.BOT,
     );
     const finalConversationId = conversationResult.conversationId;
     const messageId = conversationResult.messageId;
