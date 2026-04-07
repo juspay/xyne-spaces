@@ -19,6 +19,7 @@ const localRules = {
     'require-tracking-on-click': require('./eslint-rules/require-tracking-on-click.cjs'),
     'require-is-deleted-filter': require('../shared/eslint-rules/require-is-deleted-filter.cjs'),
     'require-initial-message-md-in-conversation-insert': require('./eslint-rules/require-initial-message-md-in-conversation-insert.cjs'),
+    'no-direct-message-lookup-in-mutators': require('./eslint-rules/no-direct-message-lookup-in-mutators.cjs'),
   }
 };
 
@@ -87,6 +88,7 @@ export default tseslint.config(
       "local-rules/no-date-now-or-uuid-in-mutators": "error",
       "local-rules/require-is-deleted-filter": "error",
       "local-rules/require-initial-message-md-in-conversation-insert": "error",
+      "local-rules/no-direct-message-lookup-in-mutators": "error",
       "local-rules/require-tracking-on-click": ["error", {
         exemptComponents: [],
         exemptDataTestIds: [],

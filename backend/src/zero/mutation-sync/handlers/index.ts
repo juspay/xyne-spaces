@@ -2,6 +2,7 @@ import type { TableName } from '../../acl/core/types';
 import type { QueryContext } from '../../acl/core/types';
 import { ReactionsMutationSyncHandler } from './reactions';
 import { MessagesMutationSyncHandler } from './messages';
+import { ConversationsMutationSyncHandler } from './conversations';
 import { TicketsMutationSyncHandler } from './tickets';
 import { BaseMutationSyncHandler } from '../base-handler';
 
@@ -10,5 +11,6 @@ export const mutationSyncHandlers: Partial<
 > = {
   reactions: ctx => new ReactionsMutationSyncHandler(ctx),
   messages: ctx => new MessagesMutationSyncHandler(ctx),
+  conversations: ctx => new ConversationsMutationSyncHandler(ctx),
   tickets: ctx => new TicketsMutationSyncHandler(ctx),
 };

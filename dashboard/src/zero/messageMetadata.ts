@@ -10,8 +10,51 @@ import {
   serializeRepliesMd,
   serializeInitialMessageMd,
 } from '@xyne/shared';
-import type { InitialMessageSummary } from '@xyne/shared';
+import type { InitialMessageSummary, Message } from '@xyne/shared';
 import { zql } from './queries';
+
+/**
+ * Resolves a message by ID. First tries the local messages store. If not found
+ * (e.g., initial messages only available via initial_message_md), falls back to
+ * reconstructing a Message-shaped object from the conversation's initial_message_md.
+ *
+ * Returns `null` if the message can't be found anywhere.
+ */
+export async function resolveMessage(
+  tx: Transaction<Schema>,
+  messageId: string,
+): Promise<Message | null> {
+  const message = await tx.run(zql.messages.where('messageId', messageId).one());
+  if (message) return message;
+
+  // Message not in local store — try to reconstruct from initial_message_md
+  const conversation = await tx.run(zql.conversations.where('initialMessageId', messageId).one());
+  if (!conversation?.initial_message_md) return null;
+
+  const summary = parseInitialMessageMd(conversation.initial_message_md);
+  if (!summary || summary.messageId !== messageId) return null;
+
+  return {
+    messageId: summary.messageId,
+    conversationId: summary.conversationId,
+    senderId: summary.senderId,
+    content: summary.content,
+    msgType: summary.msgType,
+    hasAttachment: summary.hasAttachment,
+    edited: summary.edited,
+    isDeleted: summary.isDeleted,
+    showInChannel: summary.showInChannel,
+    visibleTo: summary.visibleTo ?? null,
+    createdAt: summary.createdAt,
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    metadata: summary.metadata ? JSON.parse(summary.metadata) : null,
+    nudgeCount: summary.nudgeCount ?? null,
+    isSent: summary.isSent,
+    reactions_md: summary.reactions_md ?? null,
+    link_preview_md: summary.link_preview_md ?? null,
+    childConversationId: summary.childConversationId ?? null,
+  };
+}
 
 export const isChatMessageType = (type: MessageType | null | undefined) =>
   type === MessageType.USER || type === MessageType.FORWARDED;

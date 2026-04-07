@@ -7,7 +7,7 @@ import { getInitialMessageFromConversation } from '../../../utils/conversationMe
 // Type definitions for utility functions
 export type ThreadMessage = QueryResultType<typeof queries.channelAndThreadMessagesV2>[number];
 
-type ChatListConversation = QueryResultType<typeof queries.channelConversationsPaginatedV2>[number];
+type ChatListConversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
 export type CombinedMessageItem =
   | {
@@ -202,7 +202,7 @@ export const createMessagePreview = (content: string | undefined): string => {
  * Combines regular conversations and thread messages in chronological order
  */
 export const combineMessages = (
-  messages: QueryResultType<typeof queries.channelConversationsPaginatedV2> | undefined,
+  messages: QueryResultType<typeof queries.channelConversationsPaginatedV3> | undefined,
   channelThreadMessages: ThreadMessage[],
 ): CombinedMessageItem[] => {
   if (!messages && !channelThreadMessages?.length) return [];

@@ -111,6 +111,7 @@ import { zql } from './queries';
 import {
   buildRepliesMdFromMessages,
   isChatMessageType,
+  resolveMessage,
   updateReactionsMd,
   updateInitialMessageMdField,
   updateInitialMessageMdReaction,
@@ -632,16 +633,18 @@ export const mutators = defineMutators({
         );
 
         const messages = await Promise.all(
-          messageIds.map(messagePair =>
-            tx.run(
-              zql.messages.where('messageId', messagePair.sourceId).related('conversation').one(),
-            ),
-          ),
+          messageIds.map(messagePair => resolveMessage(tx, messagePair.sourceId)),
         );
 
         for (const [index, message] of messages.entries()) {
           const messagePair = messageIds[index];
-          if (message?.conversation?.initialMessageId === message?.messageId && messagePair) {
+          if (!message || !messagePair) {
+            continue;
+          }
+          const conv = await tx.run(
+            zql.conversations.where('conversationId', message.conversationId).one(),
+          );
+          if (conv?.initialMessageId === message.messageId) {
             await tx.mutate.activities.update({
               id: messagePair.activityId,
               isRead: true,
@@ -671,7 +674,7 @@ export const mutators = defineMutators({
         }
 
         // Validate message exists
-        let message = await tx.run(zql.messages.where('messageId', messageId).one());
+        let message = await resolveMessage(tx, messageId);
         if (!message) {
           throw new Error(`Message ${messageId} not found`);
         }
@@ -717,9 +720,7 @@ export const mutators = defineMutators({
           }
 
           // Get the initial message of that conversation
-          const targetMessage = await tx.run(
-            zql.messages.where('messageId', targetConversation.initialMessageId).one(),
-          );
+          const targetMessage = await resolveMessage(tx, targetConversation.initialMessageId);
 
           if (!targetMessage) {
             // Target message not found, nothing to mark as unread
@@ -1363,9 +1364,7 @@ export const mutators = defineMutators({
         }
 
         // Get the original message
-        const originalMessage = await tx.run(
-          zql.messages.where('messageId', originalMessageId).one(),
-        );
+        const originalMessage = await resolveMessage(tx, originalMessageId);
         if (!originalMessage) {
           throw new Error('Original message not found');
         }
@@ -1780,9 +1779,7 @@ export const mutators = defineMutators({
             throw new Error('Child conversation ID is required when showInChannel is true');
           }
 
-          const parentMsg = await tx.run(
-            zql.messages.where('messageId', conversation.initialMessageId).one(),
-          );
+          const parentMsg = await resolveMessage(tx, conversation.initialMessageId);
 
           await tx.mutate.conversations.insert({
             conversationId: childConversationId,
@@ -1831,17 +1828,7 @@ export const mutators = defineMutators({
     update: defineMutator(
       z.object({ messageId: z.string(), content: z.string().optional() }),
       async ({ tx, ctx, args: { messageId, content } }) => {
-        const message = await tx.run(
-          zql.messages
-            .where('messageId', messageId)
-            .where(helpers => {
-              return helpers.or(
-                helpers.cmp('visibleTo', 'IS', null),
-                helpers.cmp('visibleTo', ctx.userID),
-              );
-            })
-            .one(),
-        );
+        const message = await resolveMessage(tx, messageId);
 
         if (!message) {
           throw new Error('Message not available');
@@ -1902,17 +1889,7 @@ export const mutators = defineMutators({
         if (!showInChannel) {
           throw new Error('This action only supports sending messages to the channel.');
         }
-        const message = await tx.run(
-          zql.messages
-            .where('messageId', messageId)
-            .where(helpers => {
-              return helpers.or(
-                helpers.cmp('visibleTo', 'IS', null),
-                helpers.cmp('visibleTo', ctx.userID),
-              );
-            })
-            .one(),
-        );
+        const message = await resolveMessage(tx, messageId);
 
         if (!message) {
           throw new Error('Unauthorized');
@@ -1947,9 +1924,7 @@ export const mutators = defineMutators({
 
         const hasNewerReplies = messagesAfterThis.length > 0;
 
-        const parentMsgRow = await tx.run(
-          zql.messages.where('messageId', conversation.initialMessageId).one(),
-        );
+        const parentMsgRow = await resolveMessage(tx, conversation.initialMessageId);
 
         // Create a new conversation for this message in the channel (like send does)
         await tx.mutate.conversations.insert({
@@ -2091,18 +2066,8 @@ export const mutators = defineMutators({
     ),
     delete: defineMutator(
       z.object({ messageId: z.string() }),
-      async ({ tx, ctx, args: { messageId } }) => {
-        const message = await tx.run(
-          zql.messages
-            .where('messageId', messageId)
-            .where(helpers => {
-              return helpers.or(
-                helpers.cmp('visibleTo', 'IS', null),
-                helpers.cmp('visibleTo', ctx.userID),
-              );
-            })
-            .one(),
-        );
+      async ({ tx, args: { messageId } }) => {
+        const message = await resolveMessage(tx, messageId);
 
         if (!message) {
           throw new Error('Message not found');
@@ -2332,9 +2297,7 @@ export const mutators = defineMutators({
           );
 
           if (remainingAttachments.length === 0) {
-            const message = await tx.run(
-              zql.messages.where('messageId', attachment.entityId).one(),
-            );
+            const message = await resolveMessage(tx, attachment.entityId);
             if (!message) {
               throw new Error('Message not found for the attachment');
             }
@@ -2802,16 +2765,18 @@ export const mutators = defineMutators({
         );
 
         const messages = await Promise.all(
-          messageIds.map(messagePair =>
-            tx.run(
-              zql.messages.where('messageId', messagePair.sourceId).related('conversation').one(),
-            ),
-          ),
+          messageIds.map(messagePair => resolveMessage(tx, messagePair.sourceId)),
         );
 
         for (const [index, message] of messages.entries()) {
           const messagePair = messageIds[index];
-          if (message?.conversation?.initialMessageId !== message?.messageId && messagePair) {
+          if (!message || !messagePair) {
+            continue;
+          }
+          const conv = await tx.run(
+            zql.conversations.where('conversationId', message.conversationId).one(),
+          );
+          if (conv?.initialMessageId !== message.messageId) {
             await tx.mutate.activities.update({
               id: messagePair.activityId,
               isRead: true,
