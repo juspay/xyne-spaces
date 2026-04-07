@@ -1,7 +1,9 @@
 import React, { useState, useEffect, ReactElement, useMemo } from 'react';
 import { useForm } from '@tanstack/react-form';
+import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
 import { SingleSelect } from '@juspay/blend-design-system';
+import { Hash, Lock } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
 import { cn } from '../../../utils/classNames';
@@ -90,6 +92,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       }
     },
   });
+
+  const visibility = useStore(form.store, state => state.values.visibility);
 
   // Auto-select first project if none selected
   useEffect(() => {
@@ -184,8 +188,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               Channel Name
             </label>
             <div className='relative'>
-              <div className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm'>
-                #
+              <div className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground'>
+                {visibility === 'private' ? <Lock size={14} /> : <Hash size={14} />}
               </div>
               <Input
                 id='channel-name'
@@ -193,7 +197,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 onChange={handleNameChange}
                 placeholder='e.g. general, development, support'
                 className={cn(
-                  'pl-7 pr-12',
+                  'pl-8 pr-12',
                   field.state.meta.errors.length > 0 &&
                     'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
                 )}
