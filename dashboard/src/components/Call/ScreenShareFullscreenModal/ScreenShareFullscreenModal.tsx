@@ -219,12 +219,7 @@ export function ScreenShareFullscreenModal({
       <DrawingCanvas ref={drawingCanvasRef} />
 
       {/* Drawing toolbar — only shown when drawing mode is active */}
-      {isDrawingEnabled && (
-        <DrawingToolbar
-          onClearAll={() => drawingCanvasRef.current?.clearAll()}
-          onUndo={() => drawingCanvasRef.current?.undo()}
-        />
-      )}
+      {isDrawingEnabled && <DrawingToolbar />}
 
       {/* Hint Text - Positioned at top center, below the participant label */}
       <div

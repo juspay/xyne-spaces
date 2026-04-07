@@ -6,7 +6,7 @@
 /** LiveKit data channel topic for draw annotation messages */
 export const DRAW_DATA_TOPIC = 'draw-annotations';
 
-export type DrawMessageType = 'DRAW_BEGIN' | 'DRAW_POINT' | 'DRAW_END' | 'DRAW_CLEAR' | 'DRAW_UNDO';
+export type DrawMessageType = 'DRAW_BEGIN' | 'DRAW_POINT' | 'DRAW_END' | 'DRAW_CLEAR';
 
 /** Wire-format message sent over the data channel */
 export interface DrawMessage {
@@ -36,4 +36,5 @@ export interface Stroke {
   width: number;
   tool: 'pen' | 'eraser';
   isComplete: boolean;
+  completedAt?: number;
 }

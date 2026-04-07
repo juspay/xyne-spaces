@@ -11,8 +11,6 @@ import type { DrawMessage, Stroke } from './types';
 export interface DrawingCanvasHandle {
   /** Clear all strokes and broadcast DRAW_CLEAR to all participants */
   clearAll: () => void;
-  /** Undo the last local stroke and broadcast DRAW_UNDO to all participants */
-  undo: () => void;
 }
 
 /** Renders a single stroke as a smooth quadratic bezier curve path */
@@ -21,11 +19,13 @@ function renderStroke(
   stroke: Stroke,
   canvasWidth: number,
   canvasHeight: number,
+  opacity = 1,
 ): void {
   const { points, color, width, tool } = stroke;
   if (points.length === 0) return;
 
   ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
   ctx.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over';
   ctx.strokeStyle = color;
   // Use strokeWidth directly in canvas pixels — coordinates are normalized so
@@ -66,6 +66,11 @@ function generateStrokeId(identity: string): string {
   return `${identity}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Total lifetime of a completed stroke in ms before it fully disappears */
+const STROKE_LIFETIME_MS = 10_000;
+/** How long the fade-out lasts at the tail end of the lifetime */
+const STROKE_FADE_DURATION_MS = 2_000;
+
 /**
  * Transparent canvas overlay for screen-share annotations.
  * Syncs drawn strokes with remote participants via LiveKit data channel.
@@ -88,18 +93,22 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
 
   // All strokes (local + remote) stored as a Map for O(1) lookup by strokeId
   const strokesRef = useRef<Map<string, Stroke>>(new Map());
-  // Ordered list of local stroke IDs for undo (most recent last)
-  const localStrokeHistoryRef = useRef<string[]>([]);
   // ID of the stroke currently being drawn by the local user
   const currentStrokeIdRef = useRef<string | null>(null);
   // Whether the pointer is currently held down
   const isPointerDownRef = useRef(false);
   // rAF handle for batched redraws
   const animFrameRef = useRef<number | null>(null);
+  // rAF handle for the continuous fade-animation loop
+  const fadeLoopRef = useRef<number | null>(null);
   // Ref for the floating eraser cursor element — updated via direct DOM for zero re-renders
   const eraserCursorRef = useRef<HTMLDivElement>(null);
 
   // ── Canvas rendering ────────────────────────────────────────────────────────
+
+  // Stable ref so the fade loop tick can always call the latest redrawCanvas
+  // without creating a circular useCallback dependency
+  const redrawCanvasRef = useRef<() => void>(() => {});
 
   const redrawCanvas = useCallback((): void => {
     const canvas = canvasRef.current;
@@ -109,9 +118,57 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    for (const stroke of strokesRef.current.values()) {
-      renderStroke(ctx, stroke, canvas.width, canvas.height);
+    const now = Date.now();
+    let hasActiveStrokes = false;
+
+    for (const [id, stroke] of strokesRef.current.entries()) {
+      // Strokes still being drawn have no completedAt — render fully opaque
+      if (!stroke.completedAt || !stroke.isComplete) {
+        hasActiveStrokes = true;
+        renderStroke(ctx, stroke, canvas.width, canvas.height, 1);
+        continue;
+      }
+
+      const age = now - stroke.completedAt;
+
+      // Stroke has fully expired — remove it
+      if (age >= STROKE_LIFETIME_MS) {
+        strokesRef.current.delete(id);
+        continue;
+      }
+
+      hasActiveStrokes = true;
+
+      // Linear fade: fully opaque until the last STROKE_FADE_DURATION_MS, then 1→0
+      const fadeStart = STROKE_LIFETIME_MS - STROKE_FADE_DURATION_MS;
+      const opacity = age < fadeStart ? 1 : 1 - (age - fadeStart) / STROKE_FADE_DURATION_MS;
+
+      renderStroke(ctx, stroke, canvas.width, canvas.height, opacity);
     }
+
+    // Schedule the next fade tick if there are still strokes on screen
+    if (hasActiveStrokes) {
+      if (fadeLoopRef.current === null) {
+        fadeLoopRef.current = requestAnimationFrame(() => {
+          fadeLoopRef.current = null;
+          redrawCanvasRef.current();
+        });
+      }
+    }
+  }, []);
+
+  // Keep the ref in sync with the latest redrawCanvas
+  useEffect(() => {
+    redrawCanvasRef.current = redrawCanvas;
+  }, [redrawCanvas]);
+
+  /** Kick off the fade animation loop if it isn't already running */
+  const ensureFadeLoop = useCallback((): void => {
+    if (fadeLoopRef.current !== null) return;
+    fadeLoopRef.current = requestAnimationFrame(() => {
+      fadeLoopRef.current = null;
+      redrawCanvasRef.current();
+    });
   }, []);
 
   const scheduleRedraw = useCallback((): void => {
@@ -207,7 +264,9 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
           const stroke = strokesRef.current.get(msg.strokeId);
           if (stroke) {
             stroke.isComplete = true;
+            stroke.completedAt = Date.now();
             scheduleRedraw();
+            ensureFadeLoop();
           }
           break;
         }
@@ -221,13 +280,6 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
           scheduleRedraw();
           break;
         }
-        case 'DRAW_UNDO': {
-          if (msg.strokeId) {
-            strokesRef.current.delete(msg.strokeId);
-            scheduleRedraw();
-          }
-          break;
-        }
       }
     };
 
@@ -235,7 +287,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
     return (): void => {
       room.off(RoomEvent.DataReceived, handleDataReceived);
     };
-  }, [room, participantIdentity, scheduleRedraw]);
+  }, [room, participantIdentity, scheduleRedraw, ensureFadeLoop]);
 
   // ── Pointer event handlers (local drawing) ──────────────────────────────────
 
@@ -264,9 +316,6 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
       };
       strokesRef.current.set(strokeId, newStroke);
       scheduleRedraw();
-
-      // Track in local history for undo
-      localStrokeHistoryRef.current.push(strokeId);
 
       publishDrawEvent({
         type: 'DRAW_BEGIN',
@@ -335,7 +384,10 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
     isPointerDownRef.current = false;
 
     const stroke = strokesRef.current.get(currentStrokeIdRef.current);
-    if (stroke) stroke.isComplete = true;
+    if (stroke) {
+      stroke.isComplete = true;
+      stroke.completedAt = Date.now();
+    }
 
     publishDrawEvent({
       type: 'DRAW_END',
@@ -345,9 +397,12 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
     });
 
     currentStrokeIdRef.current = null;
-  }, [participantIdentity, publishDrawEvent]);
 
-  // ── Imperative handle (clearAll, undo) ─────────────────────────────────────
+    // Kick off the auto-fade animation loop
+    ensureFadeLoop();
+  }, [participantIdentity, publishDrawEvent, ensureFadeLoop]);
+
+  // ── Imperative handle (clearAll) ──────────────────────────────────────────
 
   useImperativeHandle(
     ref,
@@ -359,7 +414,6 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
             strokesRef.current.delete(id);
           }
         }
-        localStrokeHistoryRef.current = [];
         scheduleRedraw();
         // Broadcast: remote peers apply the same filter using the sender identity
         publishDrawEvent({
@@ -369,28 +423,19 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle>((_props, ref) => {
           timestamp: Date.now(),
         });
       },
-      undo: (): void => {
-        const strokeId = localStrokeHistoryRef.current.pop();
-        if (!strokeId) return;
-        strokesRef.current.delete(strokeId);
-        scheduleRedraw();
-        publishDrawEvent({
-          type: 'DRAW_UNDO',
-          participantIdentity,
-          strokeId,
-          timestamp: Date.now(),
-        });
-      },
     }),
     [participantIdentity, publishDrawEvent, scheduleRedraw],
   );
 
-  // ── Cleanup animation frame ──────────────────────────────────────────────────
+  // ── Cleanup animation frames ──────────────────────────────────────────────────
 
   useEffect(() => {
     return (): void => {
       if (animFrameRef.current !== null) {
         cancelAnimationFrame(animFrameRef.current);
+      }
+      if (fadeLoopRef.current !== null) {
+        cancelAnimationFrame(fadeLoopRef.current);
       }
     };
   }, []);
