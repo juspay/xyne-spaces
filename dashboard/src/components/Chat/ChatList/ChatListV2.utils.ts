@@ -13,7 +13,7 @@ type CombinedMesseges = {
   itemHeights: number[];
 };
 
-type InputProps = QueryResultType<typeof queries.channelConversationsPaginatedV2>;
+type InputProps = QueryResultType<typeof queries.channelConversationsPaginatedV3>;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 

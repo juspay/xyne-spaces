@@ -14,7 +14,7 @@ import { QueryResult } from '@rocicorp/zero/react';
 
 /* -------------------------- TYPES -------------------------- */
 
-export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV2>[number];
+export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
 export type CallHistoryEntry = QueryResultType<typeof queries.userCallHistory>[number];
 
@@ -201,14 +201,14 @@ let persistTimeout: NodeJS.Timeout | null = null;
 const PERSIST_DEBOUNCE_MS = 500;
 
 /**
- * Get the AST-based hash for the channelConversationsPaginatedV2 query.
+ * Get the AST-based hash for the channelConversationsPaginatedV3 query.
  * This hash changes automatically when the query structure changes.
  */
 export const getChannelConversationsQueryHash = (context: { userID: string }): string => {
   try {
     // Build the query with context and dummy args to get the Query object
     // The fn() returns a QueryImpl which has the hash() method
-    const query = queries.channelConversationsPaginatedV2.fn({
+    const query = queries.channelConversationsPaginatedV3.fn({
       args: {
         channelId: '__dummy__',
         limit: 1,

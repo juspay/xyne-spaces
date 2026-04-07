@@ -1274,6 +1274,49 @@ export const queries = defineQueries({
     ({ ctx, args: { channelId, limit, start, direction } }) => {
       let query = zql.conversations
         .where('channelId', channelId)
+        .related('initialMessage', initialMessageQuery =>
+          initialMessageQuery
+            .where(helpers => {
+              return helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', '=', ctx.userID),
+              );
+            })
+            .related('attachments')
+            .related('nudgeCounts', nudgeCountsQuery =>
+              nudgeCountsQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('userId', '=', ctx.userID),
+                  helpers.cmp('channelId', '=', channelId),
+                ),
+              ),
+            ),
+        )
+        .related('parentMessage');
+
+      // Apply ordering based on direction
+      const orderDirection = direction === 'forward' ? 'desc' : 'asc';
+      query = query.orderBy('createdAt', orderDirection);
+
+      // Apply cursor pagination if start is provided
+      if (start) {
+        query = query.start({ createdAt: start.createdAt }, { inclusive: direction === 'forward' });
+      }
+
+      // Apply limit
+      return limit ? query.limit(limit) : query;
+    },
+  ),
+  channelConversationsPaginatedV3: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ createdAt: z.number() }).nullable(),
+      direction: z.literal('forward').or(z.literal('backward')),
+    }),
+    ({ ctx, args: { channelId, limit, start, direction } }) => {
+      let query = zql.conversations
+        .where('channelId', channelId)
         .related('initialMessageAttachments')
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
@@ -1330,6 +1373,35 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV2: defineQuery(
+    z.object({ channelId: z.string(), limit: z.number() }),
+    ({ ctx, args: { channelId, limit } }) => {
+      return zql.conversations
+        .where('channelId', channelId)
+        .related('initialMessage', initialMessageQuery =>
+          initialMessageQuery
+            .where(helpers => {
+              return helpers.or(
+                helpers.cmp('visibleTo', 'IS', null),
+                helpers.cmp('visibleTo', '=', ctx.userID),
+              );
+            })
+            .related('attachments')
+            .related('nudgeCounts', nudgeCountsQuery =>
+              nudgeCountsQuery.where(helpers =>
+                helpers.or(
+                  helpers.cmp('userId', '=', ctx.userID),
+                  helpers.cmp('channelId', '=', channelId),
+                ),
+              ),
+            ),
+        )
+        .related('parentMessage')
+        .related('ticket')
+        .orderBy('createdAt', 'desc')
+        .limit(limit);
+    },
+  ),
+  channelLatestMultipleConversationsV3: defineQuery(
     z.object({ channelId: z.string(), limit: z.number() }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations

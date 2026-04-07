@@ -218,7 +218,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const isFetchingRef = useRef(false);
 
   const [updatedConversations, updatedConversationsDetails] = useQuery(
-    queries.channelConversationsPaginatedV2({
+    queries.channelConversationsPaginatedV3({
       channelId,
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
       direction: inViewAnchor ? inViewAnchor.direction : 'forward',
@@ -230,7 +230,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   );
 
   const [latestConversations, latestConversationsDetails] = useQuery(
-    queries.channelLatestMultipleConversationsV2({
+    queries.channelLatestMultipleConversationsV3({
       channelId,
       limit: PAGE_SIZE / 2,
     }),
@@ -239,7 +239,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   useEffect(() => {
     Promise.all([
       zero.run(
-        queries.channelConversationsPaginatedV2({
+        queries.channelConversationsPaginatedV3({
           channelId,
           start: oldConversationsAnchor,
           direction: 'forward',
@@ -249,7 +249,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       ),
       newConversationsAnchor &&
         zero.run(
-          queries.channelConversationsPaginatedV2({
+          queries.channelConversationsPaginatedV3({
             channelId,
             start: newConversationsAnchor,
             direction: 'backward',
@@ -300,7 +300,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
     if (!isInitialLoadComplete) return;
     zero
       .run(
-        queries.channelConversationsPaginatedV2({
+        queries.channelConversationsPaginatedV3({
           channelId,
           start: oldConversationsAnchor,
           direction: 'forward',
@@ -349,7 +349,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
     isFetchingRef.current = true;
     zero
       .run(
-        queries.channelConversationsPaginatedV2({
+        queries.channelConversationsPaginatedV3({
           channelId,
           start: newConversationsAnchor,
           direction: 'backward',

@@ -54,11 +54,11 @@ const ChatList = ({
     queries.channelAndThreadMessagesV2({ channelId }),
   );
   const combinedMessages = useMemo((): CombinedMessageItem[] => {
-    // messages comes from channelConversationsV2 but combineMessages expects channelConversationsPaginatedV2;
+    // messages comes from channelConversationsV2 but combineMessages expects channelConversationsPaginatedV3;
     // the two types share all fields used by combineMessages, so the cast is safe.
     return combineMessages(
       messages as unknown as
-        | QueryResultType<typeof queries.channelConversationsPaginatedV2>
+        | QueryResultType<typeof queries.channelConversationsPaginatedV3>
         | undefined,
       replyToChannelThreadMessages,
     );

@@ -337,12 +337,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     return { ticketSuggestions: [], ticketsCreated: [], content: message.content };
   }, [isMarkdownContent, hasSuggestedTickets, message.content]);
-  console.log(
-    `Parsed markdown content for message ${message.messageId}:`,
-    message,
-    parsedMarkdown,
-    conversation?.ticketId,
-  );
+
   const parsedWorkflowActions = useMemo(() => {
     if (isBotMessage) {
       return parseWorkflowActionsFromMarkdown(message.content);
