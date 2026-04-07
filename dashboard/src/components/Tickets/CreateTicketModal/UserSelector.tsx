@@ -122,6 +122,7 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
       onSearchChange={setSearchValue}
       disableClientFiltering={true}
       noBorder={noBorder || false}
+      showUnassignOption={true}
     />
   );
 };
