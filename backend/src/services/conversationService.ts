@@ -36,6 +36,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { isSupportedMimeType } from '@/services/fileProcessor';
 
 interface UserInfo {
   id: string;
@@ -219,19 +220,22 @@ export class ConversationService {
   }
 
   private async pushVespaJobForAttachments(
-    attachmentIds: string[],
+    attachments: Array<{ id: string; mimetype: string }>,
     userId: string
   ): Promise<void> {
-    if (attachmentIds.length === 0) return;
+    if (attachments.length === 0) return;
 
-    for (const attachmentId of attachmentIds) {
+    // Filter only supported MIME types (PDF, DOCX, TXT, MD, etc.)
+    const supportedAttachments = attachments.filter(att => isSupportedMimeType(att.mimetype));
+
+    for (const attachment of supportedAttachments) {
       vespaQueue.addJob({
         schema: fileSchema,
         jobType: "feed",
-        docId: attachmentId,
+        docId: attachment.id,
         app: SubApp.CHAT_ATTACHMENT,
       }).catch(async (error) => {
-        logger.error(`[ConversationService] Error queuing Vespa job for attachment ${attachmentId}:`, error);
+        logger.error(`[ConversationService] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
         try {
           if (db.vespaInsertionLogs) {
@@ -239,7 +243,7 @@ export class ConversationService {
               data: {
                 status: "FAILED",
                 type: "INSERT",
-                entityId: attachmentId,
+                entityId: attachment.id,
                 entityType: fileSchema,
                 namespace: NAMESPACE,
                 errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
@@ -390,8 +394,8 @@ export class ConversationService {
       const savedAttachments = await this.messageAttachmentRepository.findByMessageId(message.messageId);
 
       if (savedAttachments.length > 0) {
-        const attachmentIds = savedAttachments.map(a => a.id);
-        this.pushVespaJobForAttachments(attachmentIds, userId).catch(error => {
+        const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
+        this.pushVespaJobForAttachments(attachments, userId).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in conversation ${conversation.conversationId}:`, error);
         });
       }
@@ -581,8 +585,8 @@ export class ConversationService {
       const savedAttachments = await this.messageAttachmentRepository.findByMessageId(message.messageId);
 
       if (savedAttachments.length > 0) {
-        const attachmentIds = savedAttachments.map(a => a.id);
-        this.pushVespaJobForAttachments(attachmentIds, userId).catch(error => {
+        const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
+        this.pushVespaJobForAttachments(attachments, userId).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
         });
       }
@@ -764,8 +768,8 @@ export class ConversationService {
       const savedAttachments = await this.messageAttachmentRepository.findByMessageId(message.messageId);
 
       if (savedAttachments.length > 0) {
-        const attachmentIds = savedAttachments.map(a => a.id);
-        this.pushVespaJobForAttachments(attachmentIds, message.senderId).catch(error => {
+        const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
+        this.pushVespaJobForAttachments(attachments, message.senderId).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
         });
       }

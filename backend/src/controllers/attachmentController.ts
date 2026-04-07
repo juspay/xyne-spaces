@@ -14,6 +14,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { DatabaseClient } from '../database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
+import { isSupportedMimeType } from '@/services/fileProcessor';
 
 const db = DatabaseClient.getInstance();
 
@@ -29,19 +30,22 @@ export class AttachmentController {
   }
 
   private async pushVespaJobForAttachments(
-    attachmentIds: string[],
+    attachments: Array<{ id: string; mimetype: string }>,
     userId: string
   ): Promise<void> {
-    if (attachmentIds.length === 0) return;
+    if (attachments.length === 0) return;
 
-    for (const attachmentId of attachmentIds) {
+    // Filter only supported MIME types (PDF, DOCX, TXT, MD, etc.)
+    const supportedAttachments = attachments.filter(att => isSupportedMimeType(att.mimetype));
+
+    for (const attachment of supportedAttachments) {
       vespaQueue.addJob({
         schema: fileSchema,
         jobType: "feed",
-        docId: attachmentId,
+        docId: attachment.id,
         app: SubApp.CHAT_ATTACHMENT
       }).catch(async (error: any) => {
-        logger.error(`[AttachmentController] Error queuing Vespa job for attachment ${attachmentId}:`, error);
+        logger.error(`[AttachmentController] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
         try {
           if (db.vespaInsertionLogs) {
@@ -49,7 +53,7 @@ export class AttachmentController {
               data: {
                 status: "FAILED",
                 type: "INSERT",
-                entityId: attachmentId,
+                entityId: attachment.id,
                 entityType: fileSchema,
                 namespace: NAMESPACE,
                 errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
@@ -469,8 +473,8 @@ export class AttachmentController {
       const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(entityId, AttachmentEntityType.IMPACT);
 
       if (savedAttachments.length > 0) {
-        const attachmentIds = savedAttachments.map(a => a.id);
-        this.pushVespaJobForAttachments(attachmentIds, userId).catch(error => {
+        const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
+        this.pushVespaJobForAttachments(attachments, userId).catch(error => {
           logger.error(`[AttachmentController] Error pushing Vespa job for attachments for entity ${entityId}:`, error);
         });
       }

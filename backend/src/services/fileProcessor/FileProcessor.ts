@@ -13,6 +13,10 @@ import { DocxStrategy } from "./strategies/DocxStrategy"
 export const SUPPORTED_MIME_TYPES = new Set([
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     "text/plain",
     "text/markdown",
     "text/csv",

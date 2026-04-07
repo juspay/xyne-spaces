@@ -12,6 +12,7 @@ import {
   SubApp,
 } from '@/vespa/src/types';
 import { AttachmentEntityType, ChannelType, Prisma } from '@prisma/client';
+import { isSupportedMimeType } from '@/services/fileProcessor';
 
 type BackfillFilters = {
   channelType?: ChannelType;
@@ -525,7 +526,7 @@ export class AdminBackfillController {
         take: AdminBackfillController.BATCH_SIZE,
         skip,
         orderBy: { createdAt: 'asc' },
-        select: { id: true, createdBy: true } // Only select ID and createdBy initially
+        select: { id: true, createdBy: true, mimetype: true } // Select ID, createdBy, and mimetype
       });
 
       if (attachments.length === 0) {
@@ -538,6 +539,12 @@ export class AdminBackfillController {
       // Transform and queue each attachment
       for (const attachmentRef of attachments) {
         try {
+          // Skip if MIME type is not supported
+          if (!isSupportedMimeType(attachmentRef.mimetype)) {
+            logger.debug(`[Backfill] Skipping chat attachment ${attachmentRef.id} due to unsupported MIME type: ${attachmentRef.mimetype}`);
+            continue;
+          }
+
           // Queue only the ID - worker will handle the processing
           await vespaQueue.addJob({
             schema: fileSchema,
@@ -610,7 +617,7 @@ export class AdminBackfillController {
         take: AdminBackfillController.BATCH_SIZE,
         skip,
         orderBy: { createdAt: 'asc' },
-        select: { id: true, createdBy: true } // Only select ID and createdBy initially
+        select: { id: true, createdBy: true, mimetype: true } // Select ID, createdBy, and mimetype
       });
 
       if (attachments.length === 0) {
@@ -623,6 +630,12 @@ export class AdminBackfillController {
       // Transform and queue each attachment
       for (const attachmentRef of attachments) {
         try {
+          // Skip if MIME type is not supported
+          if (!isSupportedMimeType(attachmentRef.mimetype)) {
+            logger.debug(`[Backfill] Skipping ticket attachment ${attachmentRef.id} due to unsupported MIME type: ${attachmentRef.mimetype}`);
+            continue;
+          }
+
           // Queue only the ID - worker will handle the processing
           await vespaQueue.addJob({
             schema: fileSchema,

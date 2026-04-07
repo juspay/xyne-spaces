@@ -588,9 +588,9 @@ export class JiraMigrationImportService {
     queueJiraImportTicketVespaJob(ticketId, userId);
   }
 
-  private queueAttachmentVespaJobs(attachments: Array<{ attachmentId: string; userId: string }>): void {
+  private queueAttachmentVespaJobs(attachments: Array<{ attachmentId: string; userId: string; mimetype: string }>): void {
     for (const attachment of attachments) {
-      queueJiraImportAttachmentVespaJob(attachment.attachmentId, attachment.userId);
+      queueJiraImportAttachmentVespaJob(attachment.attachmentId, attachment.userId, attachment.mimetype);
     }
   }
 
@@ -1964,6 +1964,7 @@ export class JiraMigrationImportService {
         attachmentsToCreate.map(attachment => ({
           attachmentId: attachment.id,
           userId: attachment.uploadedByUserId,
+          mimetype: attachment.mimetype
         })),
       );
       imported += attachmentsToCreate.length;
