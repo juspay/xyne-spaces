@@ -69,7 +69,7 @@ class AnalyticsService {
     params: TimeRangeParams,
   ): Promise<AnalyticsResponse<WorkflowMetricGroup[]>> {
     const response = await apiInstance.get<AnalyticsResponse<WorkflowMetricGroup[]>>(
-      '/analytics/workflow-metrics',
+      '/tickets/workflow-metrics',
       { params },
     );
     return response.data;
