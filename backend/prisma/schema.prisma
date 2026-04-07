@@ -1596,12 +1596,14 @@ model Message {
   sender         User           @relation("MessageSender", fields: [senderId], references: [id])
   reactions      Reaction[]
   reactionCounts ReactionCount[]
+  externalMessages   ExternalMessage[] @relation("ExternalMessageEntity")
 
   @@index([conversationId, createdAt]) // Fast conversation message lookup
   @@index([conversationId]) // Alternative simple index
   @@index([visibleTo]) // Fast visibility filtering
   @@index([conversationId, visibleTo]) // Composite index for visibility queries
   @@index([senderId])
+  @@index([msgType, createdAt])
   @@map("messages")
   @@schema("public")
 }
@@ -1788,6 +1790,9 @@ model ExternalMessage {
   direction          MessageDirection      // INCOMING | OUTGOING
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+
+  // Relation: entityId
+  entity             Message?  @relation("ExternalMessageEntity", fields: [entityId], references: [messageId])
 
   @@unique([externalSourceId, externalId])  // Prevent duplicates
   @@index([externalSourceId, externalThreadId])  // Fast lookup by thread
