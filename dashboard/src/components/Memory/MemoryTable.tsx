@@ -9,9 +9,17 @@ import {
   TagSize,
   TagShape,
 } from '@juspay/blend-design-system';
+import { Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 
-import { useMemory, useUpdateMemory, useDeleteMemory } from '../../hooks/useMemory';
+import {
+  useMemory,
+  useUpdateMemory,
+  useDeleteMemory,
+  useDeleteBySessionIds,
+} from '../../hooks/useMemory';
 import { useAuthContextValues } from '../../hooks/useAuth';
+import { useIsMemoryAdmin } from '../../hooks/usePermissions';
 import type {
   MemoryDocument,
   DocType,
@@ -52,6 +60,7 @@ interface MemoryTableProps {
 
 const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = false }) => {
   const context = useAuthContextValues();
+  const isMemoryAdmin = useIsMemoryAdmin();
   const [currentPage, setCurrentPage] = useState(1);
   const [allDocuments, setAllDocuments] = useState<MemoryDocument[]>([]);
   const [selectedDocument, setSelectedDocument] = useState<MemoryDocument | null>(null);
@@ -62,6 +71,7 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
 
   const updateMutation = useUpdateMemory();
   const deleteMutation = useDeleteMemory();
+  const deleteSessionMutation = useDeleteBySessionIds();
 
   const handleUpdateDocument = useCallback(
     (docId: string, fields: MemoryUpdateRequest) => {
@@ -509,6 +519,37 @@ const MemoryTable: React.FC<MemoryTableProps> = ({ filters, enableCompare = fals
 
   return (
     <div>
+      {/* Session delete toolbar — visible to MEMORY admins when a session filter is active */}
+      {filters.sessionIdFilter.trim() && isMemoryAdmin && (
+        <div className='flex items-center justify-between px-2 py-2 mb-2 rounded-md bg-muted/50 border border-border'>
+          <span className='text-sm text-muted-foreground'>
+            Showing session:{' '}
+            <span className='font-mono text-xs text-foreground'>
+              {filters.sessionIdFilter.trim()}
+            </span>
+          </span>
+          <button
+            onClick={() => {
+              const sessionId = filters.sessionIdFilter.trim();
+              deleteSessionMutation.mutate([sessionId], {
+                onSuccess: () => {
+                  toast.success('Session deleted from Vespa memory');
+                },
+                onError: () => toast.error('Failed to delete session'),
+              });
+            }}
+            disabled={deleteSessionMutation.isPending}
+            className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded border border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+            title='Delete all Vespa memory docs for this session'
+            data-track-category='Memory'
+            data-track-name='DeleteSession'
+          >
+            <Trash2 size={12} />
+            {deleteSessionMutation.isPending ? 'Deleting…' : 'Delete Session'}
+          </button>
+        </div>
+      )}
+
       <DataTable
         title=''
         showHeader={false}

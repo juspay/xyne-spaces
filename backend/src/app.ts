@@ -108,6 +108,8 @@ import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
+import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
+import { documentIngestQueue } from '@/queues/documentIngestQueue';
 
 import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
@@ -569,6 +571,12 @@ export class App {
     logger.info('Initializing Vespa queue...');
     const { vespaQueue } = await import('@/queues/vespaQueue');
     await vespaQueue.initialize();
+
+    logger.info('Initializing conversation ingest queue (producer)...');
+    await conversationIngestQueue.initialize();
+
+    logger.info('Initializing document ingest queue (producer)...');
+    await documentIngestQueue.initialize();
 
     this.httpServer.listen(config.port, config.host, () => {
       logger.info(`Server is running on ${config.host}:${config.port} in ${config.env} mode`);

@@ -55,3 +55,11 @@ export const useCanManageUserActivity = (): boolean => {
     permission => permission.resourceName === 'USER_ACTIVITY' && permission.accessType === 'ADMIN',
   );
 };
+
+/**
+ * Returns true if the current user has ADMIN access to the MEMORY resource.
+ * Controls visibility of destructive memory actions (delete session, cleanup all).
+ */
+export const useIsMemoryAdmin = (): boolean => {
+  return useHasResourceAccess('MEMORY');
+};
