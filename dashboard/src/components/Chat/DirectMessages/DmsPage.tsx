@@ -1,5 +1,5 @@
 import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
-import { Search, PenBox, ArrowLeft, X } from 'lucide-react';
+import { Search, PenBox, ArrowLeft, X, HelpCircle } from 'lucide-react';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { DmListItem } from './DmListItem';
 import { useNavigate, Outlet, useLocation, useParams, Link } from 'react-router-dom';
@@ -11,6 +11,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { MobileProfileMenu } from '../../ui/MobileProfileMenu/MobileProfileMenu';
 
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useWalkthrough } from '../../../hooks/useWalkthrough';
 import { DirectMessagesIcon } from '../../icons';
 import {
   PanelGroup,
@@ -102,6 +103,11 @@ const DmsPage = (): ReactElement => {
 
   const unreadCounts = useAllUnreadCount();
 
+  const { startWalkthrough } = useWalkthrough({
+    feature: 'direct_messages',
+    autoPlay: false,
+  });
+
   const {
     messagesMap,
     channels: directMessages,
@@ -168,7 +174,7 @@ const DmsPage = (): ReactElement => {
     const raf = requestAnimationFrame(() => {
       virtuosoRef.current?.scrollToIndex({ index, align: 'center' });
     });
-    return () => cancelAnimationFrame(raf);
+    return (): void => cancelAnimationFrame(raf);
   }, [directMessages]);
 
   // Scroll to top when the selected channel receives a new message and moves to top.
@@ -268,14 +274,26 @@ const DmsPage = (): ReactElement => {
 
     // Show DM list on index route
     return (
-      <div className='flex flex-col h-full max-w-full bg-background text-foreground overflow-x-hidden px-2 bg-sidebar w-screen'>
+      <div className='flex flex-col h-full max-w-full bg-background text-foreground overflow-x-hidden px-2 w-screen'>
         <div className='block sm:hidden -mx-2 px-4 pt-2 pb-4 bg-[#E9ECF5D9] rounded-b-[24px] border-b border-[#181B1D] border-opacity-[0.07]'>
           {/* Top Row: Logo + Avatar */}
           <div className='flex items-center justify-between mb-4'>
             <div className='flex items-center gap-1'>
               <img src='/svgs/xyne.svg' alt='Xyne Logo' className='h-5 w-auto' />
             </div>
-            <MobileProfileMenu userId={context.userID} />
+            <div className='flex items-center gap-3'>
+              <button
+                onClick={() => startWalkthrough(true)}
+                className='p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-black/5 transition-colors'
+                aria-label='Replay Tour'
+                title='Replay Tour'
+                data-track-category='DM'
+                data-track-name='REPLAY_TOUR_MOBILE'
+              >
+                <HelpCircle size={20} />
+              </button>
+              <MobileProfileMenu userId={context.userID} />
+            </div>
           </div>
 
           {/* Search Row: Input Only */}
@@ -284,6 +302,7 @@ const DmsPage = (): ReactElement => {
               <Search className='size-5 text-muted-foreground' />
             </div>
             <input
+              id='dm-search-input'
               ref={dmSearchInputRef}
               type='text'
               className='w-full h-11 pl-12 pr-10 py-3 bg-background/70 rounded-full border border-[#181B1D] border-opacity-[0.06] text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-0'
@@ -352,6 +371,7 @@ const DmsPage = (): ReactElement => {
 
         {/* Floating Create DM Button */}
         <button
+          id='dm-create-btn'
           className='fixed bottom-[85px] right-4 z-40 flex items-center justify-center size-14 rounded-full bg-[#ff4f4f] border-[0.5px] border-[#181B1D]/30 backdrop-blur-[10px] shadow-lg'
           onClick={handleAddDirectMessage}
           aria-label='Create new message'
@@ -399,11 +419,24 @@ const DmsPage = (): ReactElement => {
                   >
                     <ArrowLeft size={20} />
                   </Link>
-                  <h2 className='text-lg font-semibold' data-testid='dms-heading'>
-                    Direct Messages
-                  </h2>
+                  <div className='flex items-center gap-2'>
+                    <h2 className='text-lg font-semibold' data-testid='dms-heading'>
+                      Direct Messages
+                    </h2>
+                    <button
+                      onClick={() => startWalkthrough(true)}
+                      className='p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+                      aria-label='Replay Tour'
+                      title='Replay Tour'
+                      data-track-category='DM'
+                      data-track-name='REPLAY_TOUR_DESKTOP'
+                    >
+                      <HelpCircle size={18} />
+                    </button>
+                  </div>
                 </div>
                 <button
+                  id='dm-create-btn'
                   className='flex items-center justify-center size-10 rounded-full bg-background border-[0.1px] backdrop-blur-[10px] shadow-md hover:bg-accent hover:border-primary transition-colors'
                   onClick={handleAddDirectMessage}
                   aria-label='Create new message'
@@ -417,6 +450,7 @@ const DmsPage = (): ReactElement => {
               <div className='relative dm-search-container'>
                 <Search className='absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground' />
                 <input
+                  id='dm-search-input'
                   ref={dmSearchInputRef}
                   type='text'
                   className='w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring'

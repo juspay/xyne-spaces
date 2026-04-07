@@ -13,7 +13,9 @@ import {
   FileText,
   MessageCircle,
   Sparkles,
+  HelpCircle,
 } from 'lucide-react';
+import { useWalkthrough } from '../../../hooks/useWalkthrough';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
 import { groupChannelsByScope } from './ChatDirectory.utils';
@@ -64,6 +66,11 @@ const ChatDirectory = ({
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+
+  const { startWalkthrough } = useWalkthrough({
+    feature: 'direct_messages',
+    autoPlay: false,
+  });
 
   // Get unread counts for all channels (for DMs)
   const unreadCounts = useAllUnreadCount();
@@ -219,7 +226,7 @@ const ChatDirectory = ({
           </div>
         </div>
       </div>
-      <div className='hidden sm:block pt-2 pb-3 px-2 h-10 flex items-center justify-between mb-2'>
+      <div className='hidden sm:flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2'>
         <h2 className='text-base font-semibold leading-normal text-sidebar-primary-foreground'>
           Chat
         </h2>
@@ -498,6 +505,20 @@ const ChatDirectory = ({
               <div className='group px-1 flex items-center justify-between gap-2 '>
                 <button className='flex items-center justify-start gap-1 w-full h-8 text-sidebar-secondary-foreground text-xs font-medium'>
                   <span className='text-left truncate block'>Direct Messages</span>
+                  <button
+                    onClick={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      startWalkthrough(true);
+                    }}
+                    className='ml-1 flex items-center justify-center p-0.5 rounded focus:outline-none'
+                    title='Replay Direct Messages Tour'
+                    aria-label='Replay Direct Messages Tour'
+                    data-track-category='CHAT_SIDEBAR'
+                    data-track-name='REPLAY_TOUR_DIRECTORY'
+                  >
+                    <HelpCircle className='size-3.5 text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground transition-colors' />
+                  </button>
                   <span className='size-3.5 flex items-center justify-center shrink-0'>
                     <ChevronRight
                       strokeWidth={2.33}
@@ -507,7 +528,8 @@ const ChatDirectory = ({
                 </button>
                 <Tooltip content='Add direct message' side='top' sideOffset={0} delayDuration={500}>
                   <button
-                    className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground opacity-0 group-hover:opacity-100 transition-opacity ease-in-out duration-300 hover:bg-sidebar-item-hover rounded-md p-1 mr-0.5'
+                    id='sidebar-add-dm-btn'
+                    className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity ease-in-out duration-300 hover:bg-sidebar-item-hover rounded-md p-1 mr-0.5'
                     onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                       e.preventDefault();
                       e.stopPropagation();

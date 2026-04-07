@@ -111,6 +111,7 @@
     "diff": "^8.0.2",
     "docx-preview": "^0.3.7",
     "dompurify": "^3.3.1",
+    "driver.js": "^1.4.0",
     "emoji-datasource": "^16.0.0",
     "emoji-picker-react": "^4.15.0",
     "framer-motion": "^12.23.24",
