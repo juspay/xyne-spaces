@@ -1,3 +1,10 @@
+## [1.109.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.108.0...v1.109.0) (2026-04-07)
+
+
+### Features
+
+* clear DM search on selection and add clear button ([349c857](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/349c8573a22f15aca2fabed53de7e11bc392dc0a)), closes [#4644](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4644)
+
 ## [1.108.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.107.0...v1.108.0) (2026-04-06)
 
 
