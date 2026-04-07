@@ -94,4 +94,10 @@ export interface EntitySelectorProps {
 
   /** Optional: data-testid for automation testing */
   testId?: string;
+
+  /** Show an "Unassign" option at the top of the dropdown when a value is selected */
+  showUnassignOption?: boolean;
+
+  /** Label for the unassign option. Default: 'Unassign' */
+  unassignLabel?: string;
 }

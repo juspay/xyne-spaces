@@ -37,6 +37,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   onOpenChange,
   showIndicator = true,
   testId,
+  showUnassignOption = false,
+  unassignLabel = 'Unassign',
 }) => {
   // ==================== STATE ====================
   const [internalOpen, setInternalOpen] = useState(false);
@@ -324,6 +326,31 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                 data-testid={testId ? `${testId}-options` : undefined}
                 className='p-1 space-y-1'
               >
+                {showUnassignOption && selectedValue && (
+                  <li>
+                    <button
+                      type='button'
+                      className='relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left cursor-pointer text-foreground hover:bg-accent'
+                      onClick={() => {
+                        onSelect?.(null);
+                        handleOpenChange(false);
+                        setSearchValue('');
+                      }}
+                    >
+                      <span className='flex h-5 w-5 flex-none items-center justify-center'>
+                        <div className='w-5 h-5 rounded-full bg-border flex items-center justify-center'>
+                          <X className='w-3 h-3 text-muted-foreground' />
+                        </div>
+                      </span>
+                      <div className='flex-1 min-w-0'>
+                        <div className='truncate font-medium text-foreground'>{unassignLabel}</div>
+                        <div className='truncate text-xs text-muted-foreground'>
+                          Remove assignee
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                )}
                 {filteredOptions.map(option => (
                   <li
                     role='option'
