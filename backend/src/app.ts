@@ -238,6 +238,7 @@ export class App {
     if (process.env.ENABLE_ACTIVITIES_BACKFILL_ROUTES === 'true') {
       this.app.use('/api/admin/activities-backfill', activitiesBackfillRoutes);
     }
+    this.app.use('/migrate/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
     this.app.use('/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
     this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);
     this.app.use('/api/admin/ticket-metadata-backfill', ticketMetadataBackfillRoutes);
