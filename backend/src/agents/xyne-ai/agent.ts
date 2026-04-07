@@ -27,6 +27,7 @@ import {
   buildAgentTemplateVariables,
   type AvailableResearchOptions,
 } from './langfuse/index.js';
+import { getSystemSkills } from './langfuse/system-skills.js';
 import {logger} from '@/utils/logger';
 
 // ============================================================================
@@ -67,16 +68,19 @@ interface Skill {
 
 async function fetchUserSkills(userId: string): Promise<Skill[]> {
   try {
-    const skills = await db.userSkill.findMany({
-      where: { userId, enabled: true },
-      select: {
-        name: true,
-        description: true,
-        instructions: true,
-        enabled: true,
-      },
-    });
-    return skills;
+    const [systemSkills, dbSkills] = await Promise.all([
+      getSystemSkills(),
+      db.userSkill.findMany({
+        where: { userId, enabled: true },
+        select: { name: true, description: true, instructions: true, enabled: true },
+      }),
+    ]);
+
+    // System skills take priority — put them first
+    return [
+      ...systemSkills.map(s => ({ ...s, enabled: true })),
+      ...dbSkills,
+    ];
   } catch (error) {
     logger.warn('[XyneAI] Failed to fetch user skills:', error);
     return [];
