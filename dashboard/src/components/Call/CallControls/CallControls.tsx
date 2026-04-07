@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { REACTION_EMOJIS } from '../hooks/useReactions';
 import {
   Users,
   Share2,
@@ -15,6 +16,7 @@ import {
   ChevronUp,
   Bot,
   Pencil,
+  SmilePlus,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -47,6 +49,7 @@ interface CallControlsProps {
   onToggleParticipantsSidebar: () => void;
   onToggleAIAssistant: () => void;
   onRequestControl?: (() => void) | undefined;
+  onSendReaction?: (emoji: string) => void;
   viewMode?: 'mini' | 'full';
   iconSize?: number;
   buttonPadding?: number;
@@ -77,6 +80,7 @@ export function CallControls({
   onToggleParticipantsSidebar,
   onToggleAIAssistant,
   onRequestControl,
+  onSendReaction,
   viewMode = 'full',
   iconSize = 20,
   buttonPadding = 16,
@@ -86,6 +90,8 @@ export function CallControls({
   const [showCopied, setShowCopied] = useState(false);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
   const [showMicMenu, setShowMicMenu] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const reactionPickerRef = useRef<HTMLDivElement>(null);
   const { isMobile } = usePlatform();
 
   const micMenuRef = useRef<HTMLDivElement>(null);
@@ -160,7 +166,7 @@ export function CallControls({
     setActiveMediaDevice: setActiveCameraDevice,
   } = useMediaDeviceSelect({ kind: 'videoinput', ...(room && { room }) });
 
-  // Close dropdowns when clicking outside
+  // Close dropdowns and reaction picker when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent): void => {
       if (micMenuRef.current && !micMenuRef.current.contains(event.target as Node)) {
@@ -168,6 +174,9 @@ export function CallControls({
       }
       if (cameraMenuRef.current && !cameraMenuRef.current.contains(event.target as Node)) {
         setShowCameraMenu(false);
+      }
+      if (reactionPickerRef.current && !reactionPickerRef.current.contains(event.target as Node)) {
+        setShowReactionPicker(false);
       }
     };
 
@@ -532,6 +541,53 @@ export function CallControls({
         </button>
 
         {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-gray-700/50 mx-0.5'></div>}
+
+        {/* Reactions Button */}
+        {onSendReaction && (
+          <div className='relative' ref={reactionPickerRef}>
+            <button
+              onClick={() => setShowReactionPicker(prev => !prev)}
+              className={cn(
+                buttonClasses,
+                showReactionPicker
+                  ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600 text-white',
+              )}
+              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+              title='Send a reaction'
+              data-track-category='CALLS'
+              data-track-name='TOGGLE_REACTION_PICKER'
+            >
+              <SmilePlus
+                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                style={
+                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+                }
+              />
+            </button>
+
+            {showReactionPicker && (
+              <div className='absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl p-2 flex gap-1'>
+                {REACTION_EMOJIS.map(emoji => (
+                  <button
+                    key={emoji}
+                    onClick={() => {
+                      onSendReaction(emoji);
+                      setShowReactionPicker(false);
+                    }}
+                    className='text-2xl p-2 rounded-xl hover:bg-gray-700 transition-colors duration-150 hover:scale-125 transform'
+                    title={emoji}
+                    data-track-category='CALLS'
+                    data-track-name='SEND_REACTION'
+                    data-track-metadata={JSON.stringify({ emoji, callId })}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Chat Button */}
         <button
