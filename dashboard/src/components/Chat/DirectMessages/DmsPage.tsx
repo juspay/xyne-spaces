@@ -122,6 +122,14 @@ const DmsPage = (): ReactElement => {
     handleDmSearchKeyDown,
   } = useDmsSearch();
 
+  // Clear search when a DM is selected
+  useEffect(() => {
+    if (channelId) {
+      setDmSearchQuery('');
+      setShowDmSearchDropdown(false);
+    }
+  }, [channelId, setDmSearchQuery, setShowDmSearchDropdown]);
+
   // Handle DM selection from search dropdown
   const handleDmSelect = useCallback(
     async (selectedChannelId: string) => {
@@ -411,7 +419,7 @@ const DmsPage = (): ReactElement => {
                 <input
                   ref={dmSearchInputRef}
                   type='text'
-                  className='w-full pl-9 pr-4 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring'
+                  className='w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring'
                   placeholder='Search DMs (Cmd+K)'
                   value={dmSearchQuery}
                   onChange={e => {
@@ -425,6 +433,20 @@ const DmsPage = (): ReactElement => {
                   data-track-category='DM'
                   data-track-name='SEARCH_DMS_INPUT_DESKTOP'
                 />
+                {dmSearchQuery && (
+                  <Button
+                    className='absolute right-1 top-1/2 -translate-y-1/2 flex items-center'
+                    onClick={() => {
+                      setDmSearchQuery('');
+                      setShowDmSearchDropdown(false);
+                    }}
+                    aria-label='Clear search'
+                    variant='link'
+                    size='icon'
+                  >
+                    <X className='size-4 text-muted-foreground hover:text-foreground' />
+                  </Button>
+                )}
                 {renderSearchDropdown()}
               </div>
             </div>
