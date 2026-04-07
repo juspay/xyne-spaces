@@ -1,7 +1,9 @@
 import {
+  Calendar,
   CalendarClock,
   CalendarDays,
   ChevronDown,
+  LayoutList,
   LucideIcon,
   Megaphone,
   Phone,
@@ -33,7 +35,6 @@ import {
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import Input from '../../components/ui/Input';
-import { Switch } from '../../components/ui/Switch';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useUsers } from '../../hooks/useUsers';
 import { useZero } from '../../hooks/useZero';
@@ -44,6 +45,9 @@ import { Call } from './callHistoryItem.utils';
 import { ParticipantsModal } from './ParticipantsModal';
 import * as Tabs from '@radix-ui/react-tabs';
 import { getUserDisplayName } from '../../utils/userDisplayName';
+import CalendarWeekView from './CalendarWeekView';
+import CalendarDayView from './CalendarDayView';
+import CalendarMonthView from './CalenderMonthView';
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -55,6 +59,18 @@ export type CallTabType = 'all' | 'upcoming' | 'missed';
 
 const MAX_UPCOMING_CALLS_TO_SHOW = 3;
 
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function isSameMonth(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
 const CallHistoryScreen = (): ReactElement => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -63,6 +79,25 @@ const CallHistoryScreen = (): ReactElement => {
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
+  const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>('month');
+  const [currentMonthStart, setCurrentMonthStart] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - d.getDay());
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  const [currentDayStart, setCurrentDayStart] = useState(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
 
   const {
     calls,
@@ -98,8 +133,6 @@ const CallHistoryScreen = (): ReactElement => {
     editModalOpen,
     editModalCall,
     closeEditModal,
-    showChannelCalls,
-    setShowChannelCalls,
   } = useCallHistory(user?.id);
 
   const zero = useZero();
@@ -168,7 +201,7 @@ const CallHistoryScreen = (): ReactElement => {
   // call tabs
   const tabs: Array<{ id: CallTabType; label: string }> = [
     { id: 'all', label: 'All' },
-    { id: 'upcoming', label: 'Upcoming' },
+    { id: 'upcoming', label: 'Scheduled' },
     { id: 'missed', label: 'Missed' },
   ];
 
@@ -177,6 +210,85 @@ const CallHistoryScreen = (): ReactElement => {
     const params = new URLSearchParams(location.search);
     params.set('tab', newTab);
     void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+    if (newTab !== 'upcoming') {
+      setViewMode('list');
+    }
+  };
+
+  const handleCalendarPrev = () => {
+    if (calendarSubView === 'month') {
+      setCurrentMonthStart(d => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+    } else if (calendarSubView === 'week') {
+      setCurrentWeekStart(d => {
+        const n = new Date(d);
+        n.setDate(n.getDate() - 7);
+        return n;
+      });
+    } else {
+      setCurrentDayStart(d => {
+        const n = new Date(d);
+        n.setDate(n.getDate() - 1);
+        return n;
+      });
+    }
+  };
+
+  const handleCalendarNext = () => {
+    const max = new Date();
+    max.setDate(max.getDate() + 60);
+    max.setHours(23, 59, 59, 999);
+    if (calendarSubView === 'month') {
+      const next = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 1);
+      if (next <= max) setCurrentMonthStart(next);
+    } else if (calendarSubView === 'week') {
+      const next = new Date(currentWeekStart);
+      next.setDate(next.getDate() + 7);
+      if (next <= max) setCurrentWeekStart(next);
+    } else {
+      const next = new Date(currentDayStart);
+      next.setDate(next.getDate() + 1);
+      if (next <= max) setCurrentDayStart(next);
+    }
+  };
+
+  const handleCalendarToday = () => {
+    const today = new Date();
+    const month = new Date(today.getFullYear(), today.getMonth(), 1);
+    month.setHours(0, 0, 0, 0);
+    setCurrentMonthStart(month);
+
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+    setCurrentWeekStart(weekStart);
+
+    const dayStart = new Date(today);
+    dayStart.setHours(0, 0, 0, 0);
+    setCurrentDayStart(dayStart);
+  };
+
+  const calendarTitle = (): string => {
+    if (calendarSubView === 'month') {
+      return currentMonthStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    } else if (calendarSubView === 'week') {
+      // Calculate week number within the month
+      const firstDayOfMonth = new Date(
+        currentWeekStart.getFullYear(),
+        currentWeekStart.getMonth(),
+        1,
+      );
+      const firstWeekDay = firstDayOfMonth.getDay();
+      const offset = firstWeekDay === 0 ? 1 : 0;
+      const weekNumber = Math.ceil((currentWeekStart.getDate() + firstWeekDay - 1) / 7) - offset;
+      const monthName = currentWeekStart.toLocaleDateString('en-US', { month: 'short' });
+      return `Week ${weekNumber}, ${monthName}`;
+    } else {
+      return currentDayStart.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      });
+    }
   };
 
   // Redirect to /calls/all if no tab or invalid tab
@@ -266,6 +378,20 @@ const CallHistoryScreen = (): ReactElement => {
     ? filterCallsBySearchQuery(missedCalls || [], searchQuery)
     : missedCalls;
 
+  const calendarCalls = useMemo(() => {
+    const combined = [...(filteredRecentCalls || []), ...(filteredScheduledCalls || [])];
+    const seenCallIds = new Set<string>();
+
+    return combined.filter(call => {
+      if (seenCallIds.has(call.id)) {
+        return false;
+      }
+
+      seenCallIds.add(call.id);
+      return true;
+    });
+  }, [filteredRecentCalls, filteredScheduledCalls]);
+
   // Filter calls based on active tab
   const getTabContent = () => {
     if (searchQuery.trim()) {
@@ -288,6 +414,51 @@ const CallHistoryScreen = (): ReactElement => {
 
   const tabContent = getTabContent();
 
+  const isCalendarMode = activeTab === 'upcoming' && viewMode === 'calendar';
+
+  // 60-day navigation limit
+  const maxCalendarDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 60);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }, []);
+
+  const isNextDisabled = useMemo(() => {
+    if (calendarSubView === 'month') {
+      return (
+        new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 1) >
+        maxCalendarDate
+      );
+    } else if (calendarSubView === 'week') {
+      const next = new Date(currentWeekStart);
+      next.setDate(next.getDate() + 7);
+      return next > maxCalendarDate;
+    } else {
+      const next = new Date(currentDayStart);
+      next.setDate(next.getDate() + 1);
+      return next > maxCalendarDate;
+    }
+  }, [calendarSubView, currentMonthStart, currentWeekStart, currentDayStart, maxCalendarDate]);
+
+  const isTodayDisabled = useMemo(() => {
+    const today = new Date();
+
+    if (calendarSubView === 'month') {
+      return isSameMonth(currentMonthStart, today);
+    }
+
+    if (calendarSubView === 'week') {
+      const todayWeekStart = new Date(today);
+      todayWeekStart.setDate(today.getDate() - today.getDay());
+      todayWeekStart.setHours(0, 0, 0, 0);
+
+      return currentWeekStart.getTime() === todayWeekStart.getTime();
+    }
+
+    return isSameDay(currentDayStart, today);
+  }, [calendarSubView, currentMonthStart, currentWeekStart, currentDayStart]);
+
   if (queryDetails.type === 'unknown') {
     return (
       <div className='flex items-center justify-center h-full'>
@@ -307,10 +478,13 @@ const CallHistoryScreen = (): ReactElement => {
   return (
     <div
       ref={scrollContainerRef}
-      className='bg-background flex flex-col w-full h-full md:rounded-2xl overflow-y-auto shadow-md relative'
+      className={cn(
+        'bg-background flex flex-col w-full h-full md:rounded-2xl shadow-md relative',
+        isCalendarMode ? 'overflow-hidden' : 'overflow-y-auto',
+      )}
     >
       <div className='w-full flex flex-col items-center px-4'>
-        <div className='max-w-[810px] w-full sticky top-0 bg-background z-50 '>
+        <div className='max-w-[810px] w-full sticky top-0 bg-background z-50'>
           {/* Header */}
           <div className='flex items-center justify-between py-3'>
             <h1 className='text-lg font-semibold text-foreground'>Calls</h1>
@@ -318,7 +492,8 @@ const CallHistoryScreen = (): ReactElement => {
               <DropdownMenuTrigger asChild>
                 <Button
                   data-testid='new-call-button'
-                  className='bg-primary hover:opacity-90 duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8'
+                  className='duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8 hover:opacity-90'
+                  style={{ backgroundColor: '#6276BE' }}
                 >
                   <span className='text-white text-sm leading-5 font-semibold'>New Call</span>
                   <ChevronDown className='size-4 text-white' strokeWidth={2.3} />
@@ -369,70 +544,184 @@ const CallHistoryScreen = (): ReactElement => {
             </Tabs.Root>
           </div>
 
-          {/* Search Input and Channel Calls Toggle */}
-          <div className='my-4 flex items-center justify-between gap-4'>
-            <div className='relative flex-1 max-w-full md:max-w-[350px]'>
-              <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 text-muted-foreground dark:text-muted-foreground size-4' />
-              <Input
-                type='text'
-                placeholder='Search calls'
-                value={searchQuery}
-                maxLength={56}
-                onChange={e => setSearchQuery(e.target.value)}
-                className='pl-8 w-full placeholder:text-muted-foreground rounded-xl focus-visible:ring-0 duration-300 ease-in-out'
-                data-testid='user-search-input'
-              />
-            </div>
-            <div className='flex items-center gap-3 shrink-0'>
-              <label
-                htmlFor='channel-calls-toggle'
-                className='text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
-              >
-                Show all calls in my channels
-              </label>
-              <Switch
-                id='channel-calls-toggle'
-                checked={showChannelCalls}
-                onCheckedChange={setShowChannelCalls}
-              />
-            </div>
-          </div>
-
-          {/* Selected Users Pills */}
-          {selectedUsers.length > 0 && (
-            <div className='my-4 flex flex-wrap gap-2'>
-              {selectedUsers.map(selectedUser => (
-                <div
-                  key={selectedUser.id}
-                  className='flex items-center gap-2 px-3 py-1.5 bg-primary/20 dark:bg-primary/20 rounded-full'
-                >
-                  <Avatar userId={selectedUser.id} size='sm' />
-                  <span className='text-sm font-medium text-primary'>
-                    {getUserDisplayName(selectedUser)}
-                  </span>
+          {/* Calendar toolbar (calendar mode) or Search + icons (list mode) */}
+          {isCalendarMode ? (
+            <div className='my-3 flex items-center justify-between gap-3'>
+              {/* Left: title + prev/next */}
+              <div className='flex items-center gap-2'>
+                <h2 className='text-base font-semibold text-foreground min-w-[140px]'>
+                  {calendarTitle()}
+                </h2>
+                <div className='flex items-center'>
                   <button
-                    onClick={() => handleRemoveUser(selectedUser.id)}
-                    className='text-primary hover:text-primary/80'
+                    onClick={handleCalendarPrev}
                     data-track-category='Calls'
-                    data-track-name='RemoveUserFilter'
-                    data-track-metadata={JSON.stringify({ userId: selectedUser.id })}
+                    data-track-name='calendar-prev'
+                    className='p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground'
+                    aria-label='Previous'
                   >
-                    <X size={16} />
+                    <ChevronDown className='size-4 rotate-90' />
+                  </button>
+                  <button
+                    onClick={handleCalendarNext}
+                    disabled={isNextDisabled}
+                    data-track-category='Calls'
+                    data-track-name='calendar-next'
+                    className={cn(
+                      'p-1.5 rounded transition-colors',
+                      isNextDisabled
+                        ? 'text-muted-foreground/30 cursor-not-allowed'
+                        : 'hover:bg-muted text-muted-foreground',
+                    )}
+                    aria-label='Next'
+                  >
+                    <ChevronDown className='size-4 -rotate-90' />
                   </button>
                 </div>
-              ))}
+              </div>
+
+              {/* Right: Today + sub-view dropdown + list/calendar icons */}
+              <div className='flex items-center gap-2'>
+                <button
+                  onClick={handleCalendarToday}
+                  disabled={isTodayDisabled}
+                  data-track-category='Calls'
+                  data-track-name='calendar-today'
+                  className={cn(
+                    'px-3 py-1.5 text-sm font-medium border border-border rounded-lg transition-colors',
+                    isTodayDisabled
+                      ? 'text-muted-foreground/50 cursor-not-allowed'
+                      : 'hover:bg-muted text-foreground',
+                  )}
+                >
+                  Today
+                </button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-border rounded-lg hover:bg-muted transition-colors text-foreground'>
+                      {calendarSubView.charAt(0).toUpperCase() + calendarSubView.slice(1)}
+                      <ChevronDown className='size-3.5' />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align='end' sideOffset={6} className='rounded-xl w-32'>
+                    {(['month', 'week', 'day'] as const).map(v => (
+                      <DropdownMenuItem
+                        key={v}
+                        className={cn(
+                          'text-sm rounded-lg capitalize cursor-pointer',
+                          calendarSubView === v && 'font-medium',
+                        )}
+                        onSelect={() => setCalendarSubView(v)}
+                      >
+                        {v.charAt(0).toUpperCase() + v.slice(1)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <div className='flex items-center shrink-0 border border-border rounded-lg overflow-hidden'>
+                  <button
+                    onClick={() => setViewMode('list')}
+                    data-track-category='Calls'
+                    data-track-name='calendar-switch-to-list'
+                    className='p-2 text-muted-foreground hover:bg-muted/50 transition-colors'
+                    aria-label='List view'
+                  >
+                    <LayoutList className='size-4' />
+                  </button>
+                  <button
+                    onClick={() => setViewMode('calendar')}
+                    data-track-category='Calls'
+                    data-track-name='calendar-switch-to-calendar'
+                    className='p-2 bg-muted text-foreground transition-colors'
+                    aria-label='Calendar view'
+                  >
+                    <Calendar className='size-4' />
+                  </button>
+                </div>
+              </div>
             </div>
+          ) : (
+            <>
+              {/* Search Input and View Mode Toggle */}
+              <div className='my-4 flex items-center justify-between gap-4'>
+                <div className='relative flex-1 max-w-full md:max-w-[350px]'>
+                  <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 text-muted-foreground dark:text-muted-foreground size-4' />
+                  <Input
+                    type='text'
+                    placeholder='Search calls'
+                    value={searchQuery}
+                    maxLength={56}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className='pl-8 w-full placeholder:text-muted-foreground rounded-xl focus-visible:ring-0 duration-300 ease-in-out'
+                    data-testid='user-search-input'
+                  />
+                </div>
+                {activeTab === 'upcoming' && (
+                  <div className='flex items-center shrink-0 border border-border rounded-lg overflow-hidden'>
+                    <button
+                      onClick={() => setViewMode('list')}
+                      data-track-category='Calls'
+                      data-track-name='list-switch-to-list'
+                      className='p-2 bg-muted text-foreground transition-colors'
+                      aria-label='List view'
+                    >
+                      <LayoutList className='size-4' />
+                    </button>
+                    <button
+                      onClick={() => setViewMode('calendar')}
+                      data-track-category='Calls'
+                      data-track-name='list-switch-to-calendar'
+                      className='p-2 text-muted-foreground hover:bg-muted/50 transition-colors'
+                      aria-label='Calendar view'
+                    >
+                      <Calendar className='size-4' />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Selected Users Pills */}
+              {selectedUsers.length > 0 && (
+                <div className='my-4 flex flex-wrap gap-2'>
+                  {selectedUsers.map(selectedUser => (
+                    <div
+                      key={selectedUser.id}
+                      className='flex items-center gap-2 px-3 py-1.5 bg-primary/20 dark:bg-primary/20 rounded-full'
+                    >
+                      <Avatar userId={selectedUser.id} size='sm' />
+                      <span className='text-sm font-medium text-primary'>
+                        {getUserDisplayName(selectedUser)}
+                      </span>
+                      <button
+                        onClick={() => handleRemoveUser(selectedUser.id)}
+                        className='text-primary hover:text-primary/80'
+                        data-track-category='Calls'
+                        data-track-name='RemoveUserFilter'
+                        data-track-metadata={JSON.stringify({ userId: selectedUser.id })}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
 
         {/* Call List */}
         <div
-          className='flex-1 overflow-y-auto max-w-[810px] w-full no-scrollbar'
+          className={cn(
+            'flex-1 min-h-0 w-full no-scrollbar',
+            isCalendarMode ? 'overflow-hidden' : 'overflow-y-auto',
+          )}
           data-testid='call-history-list'
         >
           {/* All Tab View */}
           {activeTab === 'all' && (
-            <div className='flex flex-col gap-7'>
+            <div className='max-w-[810px] w-full mx-auto flex flex-col gap-7'>
               {/* Upcoming calls */}
               {(!searchQuery.trim() ||
                 (filteredScheduledCalls && filteredScheduledCalls.length > 0)) &&
@@ -547,9 +836,44 @@ const CallHistoryScreen = (): ReactElement => {
             </div>
           )}
 
-          {/* Upcoming Calls Tab View */}
-          {activeTab === 'upcoming' && (
-            <div className='flex flex-col gap-4 w-full pb-20 md:pb-4'>
+          {/* Scheduled Calls Tab View */}
+          {activeTab === 'upcoming' && viewMode === 'calendar' && (
+            <div className='w-full h-full min-h-0 pb-6 overflow-hidden'>
+              {calendarSubView === 'month' && (
+                <CalendarMonthView
+                  calls={calendarCalls}
+                  currentMonth={currentMonthStart}
+                  currentUserId={user?.id}
+                  onCallClick={call => handleCallRowClick(call)}
+                  onGotoMessage={call => handleGotoTranscript(call)}
+                  onDownloadTranscript={call => handleDownloadTranscript(call)}
+                />
+              )}
+              {calendarSubView === 'week' && (
+                <CalendarWeekView
+                  calls={calendarCalls}
+                  currentWeekStart={currentWeekStart}
+                  currentUserId={user?.id}
+                  onCallClick={call => handleCallRowClick(call)}
+                  onGotoMessage={call => handleGotoTranscript(call)}
+                  onDownloadTranscript={call => handleDownloadTranscript(call)}
+                />
+              )}
+              {calendarSubView === 'day' && (
+                <CalendarDayView
+                  calls={calendarCalls}
+                  currentDay={currentDayStart}
+                  currentUserId={user?.id}
+                  onCallClick={call => handleCallRowClick(call)}
+                  onGotoMessage={call => handleGotoTranscript(call)}
+                  onDownloadTranscript={call => handleDownloadTranscript(call)}
+                />
+              )}
+            </div>
+          )}
+
+          {activeTab === 'upcoming' && viewMode === 'list' && (
+            <div className='max-w-[810px] w-full mx-auto flex flex-col gap-4 pb-20 md:pb-4'>
               {tabContent && tabContent.length > 0 && (
                 <div className='grid grid-cols-1 md:grid-cols-3 md:gap-4 border md:border-none border-gray-100 rounded-xl'>
                   {tabContent.map((call, i) => (
@@ -580,7 +904,7 @@ const CallHistoryScreen = (): ReactElement => {
                 ) : (
                   <EmptyState
                     icon={CalendarClock}
-                    title='No Upcoming Calls'
+                    title='No Scheduled Calls'
                     description='Your calendar is clear. Schedule a call to get started.'
                   />
                 ))}
@@ -589,7 +913,7 @@ const CallHistoryScreen = (): ReactElement => {
 
           {/* Missed Calls Tab View */}
           {activeTab === 'missed' && (
-            <div className='flex flex-col gap-4 w-full pb-20 md:pb-4 '>
+            <div className='max-w-[810px] w-full mx-auto flex flex-col gap-4 pb-20 md:pb-4'>
               {tabContent && tabContent.length > 0 && (
                 <div className='border border-border rounded-xl'>
                   {tabContent.map((call, i) => (

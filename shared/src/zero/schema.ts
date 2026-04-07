@@ -242,6 +242,14 @@ export enum InvitationResponse {
 }
 
 // @ts-ignore TS1294
+export enum MeetingStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  DECLINED = 'DECLINED',
+  MAYBE = 'MAYBE',
+}
+
+// @ts-ignore TS1294
 export enum ConversationParticipation {
   AUTHOR = 'AUTHOR',
   MENTIONED = 'MENTIONED',
@@ -1408,6 +1416,7 @@ export const callParticipantTable = table('call_participants')
     invitedBy: string(),
     invitedAt: number(),
     response: enumeration<InvitationResponse>().optional(),
+    meetingStatus: enumeration<MeetingStatus>(),
     respondedAt: number().optional(),
     joinedAt: number().optional(),
     leftAt: number().optional(),

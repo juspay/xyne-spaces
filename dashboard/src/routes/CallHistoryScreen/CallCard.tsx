@@ -433,6 +433,7 @@ export const CallCard = ({
         'relative flex items-center justify-between p-4 hover:bg-card',
         !isLastItem && 'border-b border-border',
         isActiveState && 'bg-primary/10 hover:bg-primary/20',
+        hasCurrentUserJoined && 'bg-blue-50 dark:bg-blue-900/30',
       )}
     >
       {isRecurringCall(call) && <RepeatBadge />}

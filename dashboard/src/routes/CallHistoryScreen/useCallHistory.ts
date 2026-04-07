@@ -124,7 +124,6 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   // Get active calls to check if channel has ongoing call
   const activeCalls = useActiveCalls();
   // Filter scheduled calls to only show those that haven't ended yet.
-  // Also limit to 2 instances per recurring series to avoid clutter.
   const scheduledCalls = useMemo(() => {
     if (!allScheduledCalls) return undefined;
 
@@ -148,20 +147,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       return aTime - bTime;
     });
 
-    // Limit to 2 instances per recurring series
-    const seriesCounts = new Map<string, number>();
-    const MAX_INSTANCES_PER_SERIES = 2;
-
-    return filtered.filter(call => {
-      if (call.recurringSeriesId) {
-        const count = seriesCounts.get(call.recurringSeriesId) || 0;
-        if (count >= MAX_INSTANCES_PER_SERIES) {
-          return false;
-        }
-        seriesCounts.set(call.recurringSeriesId, count + 1);
-      }
-      return true;
-    });
+    return filtered;
   }, [allScheduledCalls]);
 
   const recentCalls = useMemo(() => {

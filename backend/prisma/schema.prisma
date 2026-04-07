@@ -240,6 +240,14 @@ enum InvitationResponse {
   @@schema("public")
 }
 
+enum MeetingStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  MAYBE
+  @@schema("public")
+}
+
 enum RecurringCallSeriesStatus {
   ACTIVE    // Instances are still being generated
   ENDED     // endsOn has passed
@@ -2095,6 +2103,7 @@ model CallParticipant {
   invitedBy    String              // User who sent invitation (no FK constraint)
   invitedAt    DateTime            @default(now())
   response     InvitationResponse? // INVITED | ACCEPTED | null (rejected/left)
+  meetingStatus MeetingStatus      @default(PENDING)
   respondedAt  DateTime?           // When they accepted/rejected
   joinedAt     DateTime?           // NULL = not joined yet
   leftAt       DateTime?           // NULL = still in call

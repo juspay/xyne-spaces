@@ -1,4 +1,12 @@
 import { z } from 'zod';
+import { MeetingStatus } from '@prisma/client';
+
+export const UpdateRsvpSchema = z.object({
+  status: z.nativeEnum(MeetingStatus),
+  isSeries: z.boolean().optional(),
+});
+
+export type UpdateRsvpInput = z.infer<typeof UpdateRsvpSchema>;
 
 /**
  * Validation schema for scheduling a call

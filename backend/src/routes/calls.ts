@@ -43,6 +43,9 @@ router.post('/:callId/invite', callController.inviteUsers);
 // Decline call endpoint
 router.post('/:callId/decline', callController.declineCall);
 
+// RSVP endpoint for scheduled calls
+router.post('/:callId/rsvp', callController.updateMeetingStatus);
+
 // Get call participants (for native Participants screen)
 router.get('/:callId/participants', callController.getCallParticipants);
 

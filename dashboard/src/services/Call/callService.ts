@@ -1,7 +1,7 @@
 import { apiInstance } from '../clients/apiClient';
 import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
-import { CallType } from '@xyne/shared';
+import { CallType, MeetingStatus } from '@xyne/shared';
 
 // ============================================================================
 // TYPES
@@ -101,6 +101,11 @@ export interface ApiErrorResponse {
   message?: string;
 }
 
+export interface UpdateRsvpRequest {
+  status: MeetingStatus;
+  isSeries?: boolean;
+}
+
 // ============================================================================
 // CUSTOM ERROR CLASS
 // ============================================================================
@@ -139,6 +144,24 @@ function isApiErrorResponse(data: unknown): data is ApiErrorResponse {
 // ============================================================================
 
 export class CallService {
+  async updateMeetingStatus(callId: string, data: UpdateRsvpRequest): Promise<void> {
+    try {
+      await apiInstance.post(`/calls/${callId}/rsvp`, data);
+    } catch (error) {
+      if (error instanceof AxiosError && error.response?.data) {
+        const errorData = error.response.data as unknown;
+        if (isApiErrorResponse(errorData)) {
+          throw new ApiError(
+            errorData.error,
+            error.response.status,
+            errorData.code ?? 'UNKNOWN_ERROR',
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
   /**
    * Initiate a new call
    * Creates a LiveKit room and returns call details

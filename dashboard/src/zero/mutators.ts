@@ -7,6 +7,7 @@ import {
   CallStatus,
   RecurringCallSeriesStatus,
   InvitationResponse,
+  MeetingStatus,
   ChannelScopeType,
   ChannelAddUserPolicy,
   ConversationParticipation,
@@ -2577,6 +2578,7 @@ export const mutators = defineMutators({
               await tx.mutate.call_participants.update({
                 id: existingParticipant.id,
                 response: InvitationResponse.INVITED,
+                meetingStatus: existingParticipant.meetingStatus,
                 invitedBy: ctx.userID,
                 invitedAt: now,
                 respondedAt: null,
@@ -2597,6 +2599,7 @@ export const mutators = defineMutators({
               invitedBy: ctx.userID,
               invitedAt: now,
               response: InvitationResponse.INVITED,
+              meetingStatus: MeetingStatus.PENDING,
               respondedAt: null,
               joinedAt: null,
               leftAt: null,
