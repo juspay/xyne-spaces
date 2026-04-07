@@ -152,12 +152,7 @@ export function ScreenShareView({
           {screenShareTrackRef && showDrawingTools && <DrawingCanvas ref={drawingCanvasRef} />}
 
           {/* Drawing toolbar — only shown when drawing mode is active */}
-          {screenShareTrackRef && showDrawingTools && isDrawingEnabled && (
-            <DrawingToolbar
-              onClearAll={() => drawingCanvasRef.current?.clearAll()}
-              onUndo={() => drawingCanvasRef.current?.undo()}
-            />
-          )}
+          {screenShareTrackRef && showDrawingTools && isDrawingEnabled && <DrawingToolbar />}
 
           {/* Screen Share Label */}
           <div

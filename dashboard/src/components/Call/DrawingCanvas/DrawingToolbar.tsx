@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pencil, Eraser, Undo2, Trash2, X } from 'lucide-react';
+import { Pencil, Eraser, X } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { useDrawStore, sendDrawEvent } from '../../../hooks/useDrawStore';
 import { DRAW_COLORS } from '../../../stores/drawStore';
@@ -9,13 +9,8 @@ function Divider(): React.ReactElement {
   return <div className='w-6 h-px bg-white/20 my-0.5' aria-hidden />;
 }
 
-interface DrawingToolbarProps {
-  onClearAll: () => void;
-  onUndo: () => void;
-}
-
 /** Vertical annotation toolbar — positioned on the left edge of the screen-share container. */
-export function DrawingToolbar({ onClearAll, onUndo }: DrawingToolbarProps): React.ReactElement {
+export function DrawingToolbar(): React.ReactElement {
   const color = useDrawStore(s => s.color);
   const strokeWidth = useDrawStore(s => s.strokeWidth);
   const tool = useDrawStore(s => s.tool);
@@ -137,32 +132,6 @@ export function DrawingToolbar({ onClearAll, onUndo }: DrawingToolbarProps): Rea
         }}
         aria-hidden
       />
-
-      <Divider />
-
-      {/* ── Undo ── */}
-      <button
-        onClick={onUndo}
-        className='w-8 h-8 rounded-xl flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors'
-        title='Undo last stroke (your strokes only)'
-        aria-label='Undo'
-        data-track-category='CALLS'
-        data-track-name='Draw_Undo'
-      >
-        <Undo2 className='w-4 h-4' aria-hidden />
-      </button>
-
-      {/* ── Clear all ── */}
-      <button
-        onClick={onClearAll}
-        className='w-8 h-8 rounded-xl flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-900/30 transition-colors'
-        title='Clear my annotations'
-        aria-label='Clear my annotations'
-        data-track-category='CALLS'
-        data-track-name='Draw_Clear_My_Annotations'
-      >
-        <Trash2 className='w-4 h-4' aria-hidden />
-      </button>
 
       <Divider />
 
