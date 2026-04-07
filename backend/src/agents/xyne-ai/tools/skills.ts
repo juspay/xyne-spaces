@@ -9,6 +9,7 @@ import { db } from '../../../database/client.js';
 import { logger } from '../../../utils/logger.js';
 import type { XyneAIAgentContext } from './types.js';
 import { getDescription } from './helpers.js';
+import { getSystemSkillByName } from '../langfuse/system-skills.js';
 
 // ============================================================================
 // Tool Factory
@@ -36,7 +37,13 @@ export function createFetchSkillInstructionsTool(): Tool<{ skillName: string }, 
       logger.info(`[Tool] fetch_skill_instructions: skillName="${skillName}", userId=${context.userId}`);
 
       try {
-        // Fetch enabled skills from UserSkill table
+        // System skills take priority — check them first
+        const systemSkill = await getSystemSkillByName(skillName);
+        if (systemSkill) {
+          return `Skill: ${systemSkill.name}\n\nDescription: ${systemSkill.description}\n\nInstructions:\n${systemSkill.instructions}`;
+        }
+
+        // Fall back to user-level skills from DB
         const skills = await db.userSkill.findMany({
           where: { userId: context.userId, enabled: true },
           select: {

@@ -8,6 +8,7 @@ import { LangfuseClient } from '@langfuse/client';
 import { logger } from '../../../utils/logger.js';
 import { getLangfuseConfig } from './config.js';
 import { compileFallbackPrompt } from './fallback-prompts.js';
+import { SYSTEM_SKILL_PROMPT_NAMES } from './fallback-skills.js';
 
 const DEFAULT_PROMPT_CACHE_TTL = parseInt(process.env.LANGFUSE_PROMPT_CACHE_TTL || '300', 10) * 1000;
 
@@ -185,7 +186,7 @@ export async function prefetchPrompts(): Promise<void> {
   
   logger.info('[Langfuse] Prefetching prompts...');
   
-  const promptNames = Object.values(PROMPT_NAMES);
+  const promptNames = [...Object.values(PROMPT_NAMES), ...SYSTEM_SKILL_PROMPT_NAMES];
   const results = await Promise.allSettled(
     promptNames.map(name => getPrompt(name))
   );

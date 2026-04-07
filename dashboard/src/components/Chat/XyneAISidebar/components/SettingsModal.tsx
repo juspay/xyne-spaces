@@ -1,13 +1,14 @@
 import { ReactElement, useState, useEffect } from 'react';
 import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
-import { Edit2, Trash2, Plus } from 'lucide-react';
+import { Edit2, Trash2, Plus, Eye } from 'lucide-react';
 
 interface Skill {
   name: string;
   description: string;
   instructions: string;
   enabled: boolean;
+  isSystem?: boolean;
 }
 
 interface SettingsModalProps {
@@ -40,6 +41,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
   const [skillDescription, setSkillDescription] = useState<string>('');
   const [skillInstructions, setSkillInstructions] = useState<string>('');
   const [nameError, setNameError] = useState<string | null>(null);
+  const [previewingSkill, setPreviewingSkill] = useState<Skill | null>(null);
 
   // Load data on mount
   useEffect(() => {
@@ -119,6 +121,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
     setEditingSkillName(null);
     setNameError(null);
     setShowSkillForm(false);
+    setPreviewingSkill(null);
   };
 
   const handleAddNewSkill = (): void => {
@@ -152,6 +155,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
   };
 
   const handleEditSkill = (skill: Skill): void => {
+    if (skill.isSystem) return;
     setSkillName(skill.name);
     setSkillDescription(skill.description);
     setSkillInstructions(skill.instructions);
@@ -251,6 +255,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                 onClick={() => {
                   setActiveTab('custom');
                   setShowSkillForm(false);
+                  setPreviewingSkill(null);
                 }}
                 className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
                   activeTab === 'custom'
@@ -266,6 +271,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                 onClick={() => {
                   setActiveTab('skills');
                   setShowSkillForm(false);
+                  setPreviewingSkill(null);
                 }}
                 className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
                   activeTab === 'skills'
@@ -336,6 +342,64 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                     {instruction.length}/{MAX_CUSTOM_INSTRUCTION_LENGTH}
                   </span>
                 </div>
+              </div>
+            </div>
+          ) : previewingSkill ? (
+            // System Skill Preview (read-only)
+            <div className='space-y-4'>
+              <p className='text-xs text-muted-foreground'>
+                Note: This skill is managed by the system and cannot be edited.
+              </p>
+              <div>
+                <label
+                  htmlFor='preview-skill-name'
+                  className='block text-sm font-medium text-foreground mb-2'
+                >
+                  Name
+                </label>
+                <input
+                  id='preview-skill-name'
+                  type='text'
+                  value={previewingSkill.name}
+                  readOnly
+                  className='w-full px-3 py-2 border border-border rounded-lg text-sm bg-muted text-muted-foreground cursor-default'
+                  data-track-category='XYNE_AI'
+                  data-track-name='PreviewSkillName'
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor='preview-skill-description'
+                  className='block text-sm font-medium text-foreground mb-2'
+                >
+                  Description
+                </label>
+                <textarea
+                  id='preview-skill-description'
+                  value={previewingSkill.description}
+                  readOnly
+                  rows={3}
+                  className='w-full px-3 py-2 border border-border rounded-lg resize-none text-sm bg-muted text-muted-foreground cursor-default'
+                  data-track-category='XYNE_AI'
+                  data-track-name='PreviewSkillDescription'
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor='preview-skill-instructions'
+                  className='block text-sm font-medium text-foreground mb-2'
+                >
+                  Instructions
+                </label>
+                <textarea
+                  id='preview-skill-instructions'
+                  value={previewingSkill.instructions}
+                  readOnly
+                  rows={10}
+                  className='w-full px-3 py-2 border border-border rounded-lg resize-none text-sm bg-muted text-muted-foreground cursor-default'
+                  data-track-category='XYNE_AI'
+                  data-track-name='PreviewSkillInstructions'
+                />
               </div>
             </div>
           ) : showSkillForm ? (
@@ -474,55 +538,68 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
                         <span
-                          className={`w-2 h-2 rounded-full ${skill.enabled ? 'bg-green-500' : 'bg-gray-300'}`}
+                          className={`w-2 h-2 rounded-full flex-shrink-0 ${skill.enabled ? 'bg-green-500' : 'bg-gray-300'}`}
                         />
                         <span className='text-sm font-medium text-foreground truncate'>
                           {skill.name}
                         </span>
                       </div>
-                      <div className='flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity'>
-                        {/* Toggle Switch for Enable/Disable */}
-                        <label
-                          className='relative inline-flex items-center cursor-pointer'
-                          data-track-category='XYNE_AI'
-                          data-track-name='ToggleSkillEnabled'
-                        >
-                          <input
-                            type='checkbox'
-                            checked={skill.enabled}
-                            onChange={() => {
-                              void handleToggleEnableSkill(skill.name, skill.enabled);
-                            }}
-                            className='sr-only peer'
+                      {skill.isSystem ? (
+                        <div className='flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity'>
+                          <button
+                            onClick={() => setPreviewingSkill(skill)}
+                            className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
+                            title='View'
                             data-track-category='XYNE_AI'
-                            data-track-name='ToggleSkillCheckbox'
-                          />
-                          <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                          <span className='ml-2 text-xs text-muted-foreground'>
-                            {skill.enabled ? 'On' : 'Off'}
-                          </span>
-                        </label>
-                        <button
-                          onClick={() => handleEditSkill(skill)}
-                          className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
-                          title='Edit'
-                          data-track-category='XYNE_AI'
-                          data-track-name='EditSkill'
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            void handleDeleteSkill(skill.name);
-                          }}
-                          className='p-1.5 rounded-md hover:bg-red-100 text-muted-foreground hover:text-red-600 transition-colors'
-                          title='Delete'
-                          data-track-category='XYNE_AI'
-                          data-track-name='DeleteSkill'
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
+                            data-track-name='PreviewSystemSkill'
+                          >
+                            <Eye size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className='flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity'>
+                          <label
+                            className='relative inline-flex items-center cursor-pointer'
+                            data-track-category='XYNE_AI'
+                            data-track-name='ToggleSkillEnabled'
+                          >
+                            <input
+                              type='checkbox'
+                              checked={skill.enabled}
+                              onChange={() => {
+                                void handleToggleEnableSkill(skill.name, skill.enabled);
+                              }}
+                              className='sr-only peer'
+                              data-track-category='XYNE_AI'
+                              data-track-name='ToggleSkillCheckbox'
+                            />
+                            <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                            <span className='ml-2 text-xs text-muted-foreground'>
+                              {skill.enabled ? 'On' : 'Off'}
+                            </span>
+                          </label>
+                          <button
+                            onClick={() => handleEditSkill(skill)}
+                            className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
+                            title='Edit'
+                            data-track-category='XYNE_AI'
+                            data-track-name='EditSkill'
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              void handleDeleteSkill(skill.name);
+                            }}
+                            className='p-1.5 rounded-md hover:bg-red-100 text-muted-foreground hover:text-red-600 transition-colors'
+                            title='Delete'
+                            data-track-category='XYNE_AI'
+                            data-track-name='DeleteSkill'
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -569,6 +646,19 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   {isSavingInstruction ? 'Saving...' : 'Save'}
                 </button>
               </div>
+            </>
+          ) : previewingSkill ? (
+            // System Skill Preview Footer
+            <>
+              <div />
+              <button
+                onClick={() => setPreviewingSkill(null)}
+                className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors'
+                data-track-category='XYNE_AI'
+                data-track-name='CloseSystemSkillPreview'
+              >
+                Close
+              </button>
             </>
           ) : showSkillForm ? (
             // Skill Form Footer

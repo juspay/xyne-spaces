@@ -1,13 +1,14 @@
 import { ReactElement, useState, useEffect } from 'react';
 import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
-import { Edit2, Trash2, Plus } from 'lucide-react';
+import { Edit2, Trash2, Plus, Eye } from 'lucide-react';
 
 interface Skill {
   name: string;
   description: string;
   instructions: string;
   enabled: boolean;
+  isSystem?: boolean;
 }
 
 interface SkillsModalProps {
@@ -64,6 +65,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
   };
 
   const handleEdit = (skill: Skill): void => {
+    if (skill.isSystem) return;
     setName(skill.name);
     setDescription(skill.description);
     setInstructions(skill.instructions);
@@ -271,49 +273,58 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
                         <span
-                          className={`w-2 h-2 rounded-full ${skill.enabled ? 'bg-green-500' : 'bg-gray-300'}`}
+                          className={`w-2 h-2 rounded-full flex-shrink-0 ${skill.enabled ? 'bg-green-500' : 'bg-gray-300'}`}
                         />
                         <span className='text-sm font-medium text-foreground truncate'>
                           {skill.name}
                         </span>
+                        {skill.isSystem && (
+                          <span className='flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded'>
+                            System
+                          </span>
+                        )}
                       </div>
-                      <div className='flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity'>
-                        <button
-                          onClick={() => {
-                            void handleToggleEnable(skill.name, skill.enabled);
-                          }}
-                          className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                            skill.enabled
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-gray-100 text-gray-600'
-                          }`}
-                          title={skill.enabled ? 'Disable' : 'Enable'}
-                          data-track-category='XYNE_AI'
-                          data-track-name='ToggleSkillEnabled'
-                        >
-                          {skill.enabled ? 'Enabled' : 'Disabled'}
-                        </button>
-                        <button
-                          onClick={() => handleEdit(skill)}
-                          className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
-                          title='Edit'
-                          data-track-category='XYNE_AI'
-                          data-track-name='EditSkill'
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            void handleDelete(skill.name);
-                          }}
-                          className='p-1.5 rounded-md hover:bg-red-100 text-muted-foreground hover:text-red-600 transition-colors'
-                          title='Delete'
-                          data-track-category='XYNE_AI'
-                          data-track-name='DeleteSkill'
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
+                      {skill.isSystem ? (
+                        <Eye size={15} className='flex-shrink-0 text-muted-foreground' />
+                      ) : (
+                        <div className='flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity'>
+                          <button
+                            onClick={() => {
+                              void handleToggleEnable(skill.name, skill.enabled);
+                            }}
+                            className={`px-2 py-1 text-xs rounded-md transition-colors ${
+                              skill.enabled
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}
+                            title={skill.enabled ? 'Disable' : 'Enable'}
+                            data-track-category='XYNE_AI'
+                            data-track-name='ToggleSkillEnabled'
+                          >
+                            {skill.enabled ? 'Enabled' : 'Disabled'}
+                          </button>
+                          <button
+                            onClick={() => handleEdit(skill)}
+                            className='p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
+                            title='Edit'
+                            data-track-category='XYNE_AI'
+                            data-track-name='EditSkill'
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              void handleDelete(skill.name);
+                            }}
+                            className='p-1.5 rounded-md hover:bg-red-100 text-muted-foreground hover:text-red-600 transition-colors'
+                            title='Delete'
+                            data-track-category='XYNE_AI'
+                            data-track-name='DeleteSkill'
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

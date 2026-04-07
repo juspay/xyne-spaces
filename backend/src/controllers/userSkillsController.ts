@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { db } from '../database/client';
 import { logger } from '@/utils/logger';
+import { getSystemSkills } from '../agents/xyne-ai/langfuse/system-skills';
 
 const MAX_SKILLS_PER_USER = 20;
 
@@ -15,10 +16,15 @@ export async function getUserSkills(req: Request, res: Response) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const skills = await db.userSkill.findMany({
-      where: { userId },
-      orderBy: { name: 'asc' },
-    });
+    const [systemSkills, userSkills] = await Promise.all([
+      getSystemSkills(),
+      db.userSkill.findMany({ where: { userId }, orderBy: { name: 'asc' } }),
+    ]);
+
+    const skills = [
+      ...systemSkills.map(s => ({ ...s, enabled: true, isSystem: true })),
+      ...userSkills.map(s => ({ ...s, isSystem: false })),
+    ];
 
     return res.json({ skills });
   } catch (error) {
