@@ -26,6 +26,7 @@ import { config } from '../config/env';
 import { randomUUID } from 'crypto';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
+import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
@@ -74,19 +75,22 @@ export class TicketController {
   }
 
   private async pushVespaJobForAttachments(
-    attachmentIds: string[],
+    attachments: Array<{ id: string; mimetype: string }>,
     userId: string
   ): Promise<void> {
-    if (attachmentIds.length === 0) return;
+    if (attachments.length === 0) return;
 
-    for (const attachmentId of attachmentIds) {
+    // Filter only supported MIME types (PDF, DOCX, TXT, MD, etc.)
+    const supportedAttachments = attachments.filter(att => isSupportedMimeType(att.mimetype));
+
+    for (const attachment of supportedAttachments) {
       vespaQueue.addJob({
         schema: fileSchema,
         jobType: "feed",
-        docId: attachmentId,
+        docId: attachment.id,
         app: SubApp.TICKET_ATTACHMENT
       }).catch(async (error) => {
-        logger.error(`[TicketController] Error queuing Vespa job for attachment ${attachmentId}:`, error);
+        logger.error(`[TicketController] Error queuing Vespa job for attachment ${attachment.id}:`, error);
         // Log failed insertion to Postgres
         try {
           if (db.vespaInsertionLogs) {
@@ -94,7 +98,7 @@ export class TicketController {
               data: {
                 status: "FAILED",
                 type: "INSERT",
-                entityId: attachmentId,
+                entityId: attachment.id,
                 entityType: fileSchema,
                 namespace: NAMESPACE,
                 errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
@@ -660,8 +664,8 @@ export class TicketController {
           // Fetch back to get real IDs for manual Vespa trigger
           const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
           if (savedAttachments.length > 0) {
-            const attachmentIds = savedAttachments.map(a => a.id);
-            this.pushVespaJobForAttachments(attachmentIds, finalCreatedBy).catch((error: any) => {
+            const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
+            this.pushVespaJobForAttachments(attachments, finalCreatedBy).catch((error: any) => {
               logger.error(`[TicketController] Error pushing Vespa job for ticket attachments ${ticket.id}:`, error);
             });
           }
@@ -672,8 +676,8 @@ export class TicketController {
           // chat attachments were updated to TICKET type, we should re-index them
           const convertedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
           if (convertedAttachments.length > 0) {
-            const convertedIds = convertedAttachments.map(a => a.id);
-            this.pushVespaJobForAttachments(convertedIds, finalCreatedBy).catch((error: any) => {
+            const attachments = convertedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
+            this.pushVespaJobForAttachments(attachments, finalCreatedBy).catch((error: any) => {
               logger.error(`[TicketController] Error pushing Vespa job for converted attachments in ticket ${ticket.id}:`, error);
             });
           }
@@ -689,12 +693,13 @@ export class TicketController {
           }
 
           // Validate all are DRAFT attachments owned by the user
-          const validDraftAttachmentIds: string[] = draftAttachments
+          const validDraftAttachments = draftAttachments
             .filter((attachment: MessageAttachment) =>
               attachment.entityType === AttachmentEntityType.DRAFT &&
               attachment.uploadedByUserId === userId
-            )
-            .map((attachment: MessageAttachment) => attachment.id);
+            );
+
+          const validDraftAttachmentIds = validDraftAttachments.map(a => a.id);
 
           // Update draft attachments to ticket attachments
           if (validDraftAttachmentIds.length > 0) {
@@ -731,7 +736,8 @@ export class TicketController {
             logger.info(`[Ticket Creation] Transferred ${validDraftAttachmentIds.length} draft attachments to ticket ${ticket.id}`);
 
             // Trigger Vespa re-indexing for transferred draft attachments
-            this.pushVespaJobForAttachments(validDraftAttachmentIds, userId!).catch((error: any) => {
+            const attachments = validDraftAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
+            this.pushVespaJobForAttachments(attachments, userId!).catch((error: any) => {
               logger.error(`[TicketController] Error pushing Vespa job for transferred draft attachments in ticket ${ticket.id}:`, error);
             });
           }
