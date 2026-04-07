@@ -96,6 +96,10 @@ function MentionRenderer({ userId }: { userId: string }): JSX.Element {
   return (
     <UserHoverWrapper userId={userId}>
       <span
+        data-mention=''
+        data-mention-type='user'
+        data-user-id={userId}
+        data-username={displayName}
         className={
           isCurrentUser
             ? 'mention-text !bg-[var(--mention-current-user-bg)] !text-[color:var(--mention-color)]'
@@ -215,7 +219,13 @@ function ChannelMentionRenderer({
       }}
       onClick={handleChannelClick}
     >
-      <span className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] px-[2px] pt-[1px] font-normal no-underline transition-colors duration-200 inline whitespace-nowrap leading-none align-baseline '>
+      <span
+        data-channel-mention=''
+        data-channel-id={channelId}
+        data-channel-name={channelName}
+        data-is-private={isPrivate.toString()}
+        className='text-[color:var(--mention-color)] bg-[var(--mention-channel-bg)] hover:bg-[var(--mention-channel-hover-bg)] px-[2px] pt-[1px] font-normal no-underline transition-colors duration-200 inline whitespace-nowrap leading-none align-baseline '
+      >
         {isPrivate ? <Lock className='h-3 w-3 inline-block mr-0.5 mb-1' /> : '#'}
         {channelName}
       </span>
@@ -244,6 +254,11 @@ function GroupMentionRenderer({
   return (
     <GroupHoverWrapper groupId={groupId}>
       <span
+        data-mention=''
+        data-mention-type='group'
+        data-group-id={groupId}
+        data-group-name={groupName}
+        data-group-alias={alias}
         className='mention-text cursor-pointer'
         onClick={handleClick}
         role='button'
@@ -575,7 +590,9 @@ const parseNode = (
           subtitle: 'Notifies all members in this channel',
         }}
       >
-        <span className='chat-input-special-mention'>@channel</span>
+        <span data-mention='' data-mention-type='channel' className='chat-input-special-mention'>
+          @channel
+        </span>
       </GenericMentionHoverPopover>
     );
   }
@@ -590,7 +607,9 @@ const parseNode = (
           subtitle: 'Notifies all online members',
         }}
       >
-        <span className='chat-input-special-mention'>@here</span>
+        <span data-mention='' data-mention-type='here' className='chat-input-special-mention'>
+          @here
+        </span>
       </GenericMentionHoverPopover>
     );
   }
