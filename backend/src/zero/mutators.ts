@@ -9,6 +9,7 @@ import {
   RecurringCallSeriesStatus,
   CallOrigin,
   InvitationResponse,
+  MeetingStatus,
   Schema,
   ChannelScopeType,
   ChannelAddUserPolicy,
@@ -3354,6 +3355,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             respondedAt: now,
             joinedAt: now,
             leftAt: null,
+            meetingStatus: MeetingStatus.ACCEPTED,
           });
 
           // Invite specific users or all channel participants
@@ -3375,6 +3377,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   respondedAt: null,
                   joinedAt: null,
                   leftAt: null,
+                  meetingStatus: MeetingStatus.PENDING,
                 });
               }
             }
@@ -3396,6 +3399,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   respondedAt: null,
                   joinedAt: null,
                   leftAt: null,
+                  meetingStatus: MeetingStatus.PENDING,
                 });
               }
             }
@@ -3484,6 +3488,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               respondedAt: now,
               joinedAt: now,
               leftAt: null,
+              meetingStatus: MeetingStatus.ACCEPTED,
             });
           }
         },
@@ -3656,6 +3661,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 respondedAt: null,
                 joinedAt: null,
                 leftAt: null,
+                meetingStatus: MeetingStatus.PENDING,
               });
             }
           }

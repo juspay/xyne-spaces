@@ -5,14 +5,168 @@ import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { transcriptService } from '@/services/transcriptService';
-import { CallOrigin, CallStatus, CallType, InvitationResponse } from '@prisma/client';
+import {
+  CallOrigin,
+  CallStatus,
+  CallType,
+  InvitationResponse,
+  MeetingStatus,
+  NotificationType,
+} from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import z from 'zod';
 import { TrackSource } from 'livekit-server-sdk';
+import { UpdateRsvpSchema } from '@/validators/callValidator';
+import { notificationService } from '@/services/notificationService';
+import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 
 export class CallController {
+  updateMeetingStatus = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    try {
+      const { status, isSeries } = UpdateRsvpSchema.parse(req.body);
+      const requestedStatus = status;
+      const now = new Date();
+
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (call.status === CallStatus.ENDED || call.status === CallStatus.CANCELLED) {
+        res.status(400).json({ success: false, error: 'Cannot RSVP to an ended or cancelled call' });
+        return;
+      }
+
+      if (!call.startsAt || call.startsAt <= now) {
+        res.status(400).json({ success: false, error: 'RSVP is only allowed for future scheduled calls' });
+        return;
+      }
+
+      const participant = await repositories.calls.findParticipant(call.id, userId);
+      if (!participant) {
+        res.status(403).json({ success: false, error: 'You are not a participant of this call' });
+        return;
+      }
+
+      const updatedCount = await scheduledCallNotificationService.updateParticipantMeetingStatus({
+        participantId: participant.id,
+        meetingStatus: requestedStatus,
+        respondedAt: now,
+        isSeries: !!isSeries,
+        recurringSeriesId: call.recurringSeriesId ?? undefined,
+        userId,
+      });
+
+      if (call.createdByUserId !== userId) {
+        const responder = await repositories.users.findById(userId);
+        const responderName = responder?.name || responder?.email || 'A participant';
+        const callName = call.title || 'Scheduled Call';
+        
+        let notificationTitle = '';
+        let notificationMessage = '';
+        
+        if (requestedStatus === MeetingStatus.ACCEPTED) {
+          if (isSeries && call.recurringSeriesId) {
+            notificationTitle = 'Call Invite Accepted';
+            notificationMessage = `${responderName} accepted call invite for ${callName}`;
+          } else {
+            const callDateTime = call.startsAt 
+              ? new Date(call.startsAt).toLocaleString('en-US', { 
+                  month: 'short', 
+                  day: 'numeric', 
+                  hour: '2-digit', 
+                  minute: '2-digit',
+                  hour12: true 
+                })
+              : '';
+            notificationTitle = 'Call Invite Accepted';
+            notificationMessage = `${responderName} accepted call invite for ${callName} at ${callDateTime}`;
+          }
+        } else if (requestedStatus === MeetingStatus.DECLINED) {
+          if (isSeries && call.recurringSeriesId) {
+            notificationTitle = 'Call Invite Declined';
+            notificationMessage = `${responderName} declined call invite for ${callName}`;
+          } else {
+            const callDateTime = call.startsAt 
+              ? new Date(call.startsAt).toLocaleString('en-US', { 
+                  month: 'short', 
+                  day: 'numeric', 
+                  hour: '2-digit', 
+                  minute: '2-digit',
+                  hour12: true 
+                })
+              : '';
+            notificationTitle = 'Call Invite Declined';
+            notificationMessage = `${responderName} declined call invite for ${callName} at ${callDateTime}`;
+          }
+        } else if (requestedStatus === MeetingStatus.MAYBE) {
+          const callDateTime = call.startsAt 
+              ? new Date(call.startsAt).toLocaleString('en-US', { 
+                  month: 'short', 
+                  day: 'numeric', 
+                  hour: '2-digit', 
+                  minute: '2-digit',
+                  hour12: true 
+                })
+              : '';
+          notificationTitle = 'Call Invite Response';
+          notificationMessage = `${responderName} might join ${callName} at ${callDateTime}`;
+        }
+
+        if (notificationTitle && notificationMessage) {
+          await notificationService.createNotification(call.createdByUserId, {
+            title: notificationTitle,
+            message: notificationMessage,
+            type: NotificationType.CALL_UPDATED,
+            relatedEntityType: 'call',
+            relatedEntityId: call.externalId,
+            metadata: {
+              action: 'CALL_RSVP_UPDATED',
+              callId: call.externalId,
+              responderUserId: userId,
+              responderName,
+              meetingStatus: requestedStatus,
+              isSeries: Boolean(isSeries && call.recurringSeriesId),
+              instanceCount: updatedCount,
+            },
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        message: 'RSVP status updated successfully',
+        rsvpStatus: requestedStatus,
+        seriesUpdated: Boolean(isSeries && call.recurringSeriesId),
+        instanceCount: updatedCount,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message || 'Invalid request body' });
+        return;
+      }
+
+      logger.error('Failed to update RSVP:', error);
+      res.status(500).json({ success: false, error: 'Failed to update RSVP' });
+    }
+  };
+
   /**
    * Helper method to get the Xyne Automatic bot user
    * Uses the unified bot service to ensure consistency with transcript service

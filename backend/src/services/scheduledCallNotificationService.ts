@@ -3,9 +3,10 @@ import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
-import { CallStatus, NotificationType, ActivityClassification, InvitationResponse } from '@prisma/client';
+import { CallStatus, NotificationType, ActivityClassification, InvitationResponse, MeetingStatus } from '@prisma/client';
 import { formatDateTimeShort } from '@/utils/dateUtils';
 import { recurringCallService } from '@/services/recurringCallService';
+import { db } from '@/database/client';
 
 interface ScheduledCallReminderData {
   callId: string;
@@ -614,8 +615,40 @@ class ScheduledCallNotificationService {
     } catch (activityError) {
       logger.error(`Failed to create update activities for call ${callId}:`, activityError);
     }
-  }
-}
+   }
 
-// Export singleton instance
-export const scheduledCallNotificationService = new ScheduledCallNotificationService();
+   /**
+    * Update meeting status (RSVP) for a participant, with optional series update
+    * Executes both single call and series updates atomically inside a transaction
+    */
+   async updateParticipantMeetingStatus(params: {
+     participantId: string;
+     meetingStatus: MeetingStatus;
+     respondedAt: Date;
+     isSeries: boolean;
+     recurringSeriesId?: string;
+     userId: string;
+   }): Promise<number> {
+     const { participantId, meetingStatus, respondedAt, isSeries, recurringSeriesId, userId } = params;
+     let updatedCount = 1;
+
+     await db.$transaction(async (tx) => {
+       await repositories.calls.updateParticipantMeetingStatus(participantId, meetingStatus, respondedAt, tx);
+
+       if (isSeries && recurringSeriesId) {
+         updatedCount = await repositories.calls.updateRecurringSeriesMeetingStatus({
+           recurringSeriesId,
+           userId,
+           meetingStatus,
+           respondedAt,
+           tx,
+         });
+       }
+     });
+
+     return updatedCount;
+   }
+ }
+ 
+ // Export singleton instance
+ export const scheduledCallNotificationService = new ScheduledCallNotificationService();

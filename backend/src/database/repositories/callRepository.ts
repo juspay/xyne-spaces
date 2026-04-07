@@ -1,6 +1,15 @@
 import { DatabaseClient } from '../client';
 import { v4 as uuidv4 } from 'uuid';
-import { CallOrigin, CallStatus, CallType, InvitationResponse, type Call, type CallParticipant, type Prisma } from '@prisma/client';
+import {
+  CallOrigin,
+  CallStatus,
+  CallType,
+  InvitationResponse,
+  MeetingStatus,
+  type Call,
+  type CallParticipant,
+  type Prisma,
+} from '@prisma/client';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
@@ -15,6 +24,7 @@ export interface CreateCallParticipantInput {
   invitedBy: string;
   invitedAt: Date;
   response: InvitationResponse;
+  meetingStatus?: MeetingStatus;
   respondedAt?: Date | null;
   joinedAt?: Date | null;
   leftAt?: Date | null;
@@ -180,9 +190,57 @@ export class CallRepository {
 
   async createParticipant(data: CreateCallParticipantInput): Promise<CallParticipant> {
     const result = await DatabaseClient.getInstance().callParticipant.create({
-      data,
+      data: {
+        ...data,
+        meetingStatus: data.meetingStatus ?? MeetingStatus.PENDING,
+      },
     });
     return result;
+  }
+
+  async updateParticipantMeetingStatus(
+    participantId: string,
+    meetingStatus: MeetingStatus,
+    respondedAt: Date,
+    tx: Prisma.TransactionClient,
+  ): Promise<CallParticipant> {
+    return await tx.callParticipant.update({
+      where: { id: participantId },
+      data: {
+        meetingStatus,
+        respondedAt,
+      },
+    });
+  }
+
+  async updateRecurringSeriesMeetingStatus(params: {
+    recurringSeriesId: string;
+    userId: string;
+    meetingStatus: MeetingStatus;
+    respondedAt: Date;
+    tx?: Prisma.TransactionClient;
+  }): Promise<number> {
+    const { recurringSeriesId, userId, meetingStatus, respondedAt, tx } = params;
+    const client = tx || DatabaseClient.getInstance();
+
+    const result = await client.callParticipant.updateMany({
+      where: {
+        userId,
+        call: {
+          recurringSeriesId,
+          status: CallStatus.SCHEDULED,
+          startsAt: {
+            gt: respondedAt,
+          },
+        },
+      },
+      data: {
+        meetingStatus,
+        respondedAt,
+      },
+    });
+
+    return result.count;
   }
 
   /**
@@ -231,6 +289,7 @@ export class CallRepository {
         invitedBy: params.createdByUserId,
         invitedAt: new Date(),
         response: InvitationResponse.INVITED,
+        meetingStatus: MeetingStatus.PENDING,
         respondedAt: null,
         joinedAt: null,
         leftAt: null,
@@ -964,6 +1023,7 @@ export class CallRepository {
     userEmail: string;
     userPicture: string | null;
     response: InvitationResponse | null;
+    meetingStatus: MeetingStatus;
     joinedAt: Date | null;
     leftAt: Date | null;
   }>> {
@@ -981,6 +1041,7 @@ export class CallRepository {
       select: {
         userId: true,
         response: true,
+        meetingStatus: true,
         joinedAt: true,
         leftAt: true,
       },
@@ -1008,6 +1069,7 @@ export class CallRepository {
         userEmail: user?.email ?? '',
         userPicture: user?.picture ?? null,
         response: p.response,
+        meetingStatus: p.meetingStatus,
         joinedAt: p.joinedAt,
         leftAt: p.leftAt,
       };
@@ -1058,6 +1120,7 @@ export class CallRepository {
             invitedBy: updatedCall.createdByUserId,
             invitedAt: new Date(),
             response: InvitationResponse.INVITED,
+            meetingStatus: MeetingStatus.PENDING,
           })),
           skipDuplicates: true,
         });

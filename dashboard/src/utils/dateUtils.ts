@@ -186,6 +186,18 @@ export const formatTime12HourNoAmPm = (date: Date | number): string => {
 };
 
 /**
+ * Formats a Date object into 12-hour time format with AM/PM
+ * @param date - The Date object to format
+ * @returns Formatted time string like "3:05 PM"
+ */
+export const formatCurrentTime = (date: Date): string => {
+  const h = date.getHours() % 12 || 12;
+  const m = date.getMinutes().toString().padStart(2, '0');
+  const ampm = date.getHours() >= 12 ? 'PM' : 'AM';
+  return `${h}:${m} ${ampm}`;
+};
+
+/**
  * Format duration from milliseconds to human readable format
  * @param duration - Duration in milliseconds or string
  * @returns Formatted duration string like "1h 2m 3s" or "-" if no duration
