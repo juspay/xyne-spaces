@@ -27,7 +27,7 @@ import {
 import { useQuery as useReactQuery } from '@tanstack/react-query';
 import * as Tabs from '@radix-ui/react-tabs';
 //import * as Switch from '@radix-ui/react-switch';
-import { Channel } from '@xyne/shared';
+import { Channel, ChannelVisibility } from '@xyne/shared';
 import {
   isDMChannel,
   isGroupDMChannel,
@@ -911,6 +911,9 @@ const ChannelCommandMenu = ({
         return <Avatar userId={userIds[0]} size='sm' />;
       }
     }
+    if (channel.visibility === ChannelVisibility.PRIVATE) {
+      return <Lock size={14} />;
+    }
     return <Hash size={14} />;
   };
 
@@ -1569,6 +1572,8 @@ const ChannelCommandMenu = ({
                               <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
                                 {isGroupDM ? (
                                   <Users size={16} className='text-gray-600' />
+                                ) : channel.visibility === ChannelVisibility.PRIVATE ? (
+                                  <Lock size={16} className='text-gray-600' />
                                 ) : (
                                   <Hash size={16} className='text-gray-600' />
                                 )}
