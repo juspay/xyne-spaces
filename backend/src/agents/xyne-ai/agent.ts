@@ -58,6 +58,31 @@ function createXyneAIAgent(systemPrompt: string, webSearchEnabled?: boolean, has
   };
 }
 
+interface Skill {
+  name: string;
+  description: string | null;
+  instructions: string | null;
+  enabled: boolean;
+}
+
+async function fetchUserSkills(userId: string): Promise<Skill[]> {
+  try {
+    const skills = await db.userSkill.findMany({
+      where: { userId, enabled: true },
+      select: {
+        name: true,
+        description: true,
+        instructions: true,
+        enabled: true,
+      },
+    });
+    return skills;
+  } catch (error) {
+    logger.warn('[XyneAI] Failed to fetch user skills:', error);
+    return [];
+  }
+}
+
 async function buildAgentPrompt(
   source: 'thread' | 'channel',
   timestamp?: string,
@@ -68,10 +93,26 @@ async function buildAgentPrompt(
   researchOptions?: AvailableResearchOptions,
   customInstruction?: string,
   hasThreadContext?: boolean,
+  userId?: string,
   promptName?: string,
   providedContexts?: ProvidedContexts
 ): Promise<string> {
-  const templateVariables = buildAgentTemplateVariables(source, timestamp, userInfo, channelNames, webSearchEnabled, researchContext, researchOptions, customInstruction, hasThreadContext, providedContexts);
+  // Fetch user skills if userId is provided
+  const skills = userId ? await fetchUserSkills(userId) : [];
+
+  const templateVariables = buildAgentTemplateVariables(
+    source,
+    timestamp,
+    userInfo,
+    channelNames,
+    webSearchEnabled,
+    researchContext,
+    researchOptions,
+    customInstruction,
+    hasThreadContext,
+    skills,
+    providedContexts
+  );
 
   const prompt = await getPromptFromLangfuse(promptName ?? PROMPT_NAMES.XYNE_AI_SYSTEM, {
     templateVariables,
@@ -229,6 +270,7 @@ export async function createAgentRunner(
     researchOptions,
     context.customInstruction,
     hasThreadContext,
+    context.userId,
     context.agentPromptName,
     providedContexts
   );

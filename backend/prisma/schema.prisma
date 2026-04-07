@@ -14,7 +14,7 @@ generator zero {
 datasource db {
   provider     = "postgresql"
   url          = env("DATABASE_URL")
-  schemas      = ["public", "workflow"]
+  schemas      = ["public", "workflow", "non_zero"]
   relationMode = "prisma"
 }
 
@@ -936,6 +936,19 @@ model UserPreference {
 
   @@map("user_preferences")
   @@schema("public")
+}
+
+// User Skills - standalone table for better querying via API
+model UserSkill {
+  userId            String   // User ID (no FK constraint for flexibility)
+  name              String   // Skill name
+  description       String?  // Skill description
+  instructions      String?  // Instructions for the skill
+  enabled           Boolean  @default(true)
+
+  @@id([userId, name])
+  @@map("user_skills")
+  @@schema("non_zero")
 }
 
 // User-Team membership (many-to-many, no FK constraints)

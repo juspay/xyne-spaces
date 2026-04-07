@@ -89,6 +89,7 @@ import emailDemergeRoutes from '@/routes/emailDemerge';
 import docsRoutes from '@/routes/docs';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
+import userSkillsRoutes from '@/routes/userSkills';
 import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -380,6 +381,9 @@ export class App {
 
     // Custom instruction routes (auth required)
     this.app.use('/api/custom-instruction', customInstructionRoutes);
+
+    // User skills routes (auth required)
+    this.app.use('/api/user-skills', authMiddleware.authenticate, userSkillsRoutes);
 
     // Activity logging routes (auth required)
     this.app.use('/api/activity', authMiddleware.authenticate, activityLogRoutes);

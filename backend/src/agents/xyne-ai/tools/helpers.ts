@@ -34,7 +34,7 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, createPpt, searchMeetingInsights] = await Promise.all([
+  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, fetchSkillInstructions, createPpt, searchMeetingInsights] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_MESSAGES),
@@ -48,6 +48,7 @@ const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xy
     getPromptFromLangfuse(PROMPT_NAMES.READ_CANVAS),
     getPromptFromLangfuse(PROMPT_NAMES.EDIT_CANVAS),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_LINK_CONTENT),
+    getPromptFromLangfuse(PROMPT_NAMES.FETCH_SKILL_INSTRUCTIONS),
     getPromptFromLangfuse(PROMPT_NAMES.CREATE_PPT),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_MEETING_INSIGHTS),
   ]);
@@ -66,6 +67,7 @@ const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xy
     read_canvas: readCanvas || 'Read a canvas by its viewAccessId and return the content as markdown.',
     edit_canvas: editCanvas || 'Edit an existing canvas by replacing its content.',
     fetch_link_content: fetchLinkContent || 'Fetch content from a Xyne Spaces link (message, conversation, ticket, or canvas).',
+    fetch_skill_instructions: fetchSkillInstructions || 'Fetch the full instructions for a skill by name. Use this when you need to load a skill that the user has enabled.',
     create_ppt: createPpt || 'Create a visually stunning PowerPoint presentation from structured slide content.',
     search_meeting_insights: searchMeetingInsights || 'Search for AI-analyzed meeting insights including summaries, action items, pain points, and merchant discussions.',
   };

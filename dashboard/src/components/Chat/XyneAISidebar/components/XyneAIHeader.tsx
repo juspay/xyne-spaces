@@ -2,7 +2,7 @@ import { ReactElement, useState } from 'react';
 import { Settings, Activity } from 'lucide-react';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { ChatHistory } from '../../../icons/xyne-ai';
-import { CustomInstructionsModal } from './CustomInstructionsModal';
+import { SettingsModal } from './SettingsModal';
 
 interface XyneAIHeaderProps {
   onNewChat: () => void;
@@ -96,10 +96,7 @@ export const XyneAIHeader = ({
         </div>
 
         {/* Settings Modal */}
-        <CustomInstructionsModal
-          isOpen={isSettingsModalOpen}
-          onClose={() => setIsSettingsModalOpen(false)}
-        />
+        <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} />
       </>
     );
   }
@@ -143,9 +140,9 @@ export const XyneAIHeader = ({
           <button
             onClick={() => setIsSettingsModalOpen(true)}
             className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
-            title='Custom instructions'
+            title='Settings'
             data-track-category='XYNE_AI'
-            data-track-name='OpenCustomInstructions'
+            data-track-name='OpenSettings'
           >
             <Settings size={16} />
           </button>
@@ -162,10 +159,7 @@ export const XyneAIHeader = ({
       </div>
 
       {/* Settings Modal */}
-      <CustomInstructionsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-      />
+      <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} />
     </>
   );
 };
