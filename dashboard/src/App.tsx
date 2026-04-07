@@ -10,7 +10,10 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './services/clients/queryClient';
 import { XYNE_FOUNDATION_TOKENS } from './themes/XYNE_FOUNDATION_TOKENS';
 import { XYNE_DARK_FOUNDATION_TOKENS } from './themes/XYNE_DARK_FOUNDATION_TOKENS';
-import { XYNE_THEME_COMPONENT_TOKENS } from './themes/componentTokens';
+import {
+  XYNE_THEME_COMPONENT_TOKENS,
+  XYNE_THEME_COMPONENT_TOKENS_DARK,
+} from './themes/componentTokens';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useTheme } from './hooks/useTheme';
 import { ShortcutsProvider } from './shortcuts';
@@ -86,7 +89,11 @@ const App = (): ReactElement => {
                     foundationTokens={
                       theme === 'midnight' ? XYNE_DARK_FOUNDATION_TOKENS : XYNE_FOUNDATION_TOKENS
                     }
-                    componentTokens={XYNE_THEME_COMPONENT_TOKENS}
+                    componentTokens={
+                      theme === 'midnight'
+                        ? XYNE_THEME_COMPONENT_TOKENS_DARK
+                        : XYNE_THEME_COMPONENT_TOKENS
+                    }
                     theme={theme === 'midnight' ? 'dark' : 'light'}
                   >
                     <ShortcutsProvider>
