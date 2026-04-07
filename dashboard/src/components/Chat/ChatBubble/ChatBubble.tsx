@@ -802,7 +802,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               isPinned={conversation?.pinned || false}
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
-              {...(canEditMessage && !hasTicket && { onEditMessage: handleEditMessage })}
+              {...(canEditMessage && { onEditMessage: handleEditMessage })}
               {...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage })}
               {...(replies &&
                 (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
@@ -859,7 +859,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage })}
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
-              {...(canEditMessage && !hasTicket && { onEditMessage: handleEditMessage })}
+              {...(canEditMessage && { onEditMessage: handleEditMessage })}
               {...(canEditMessage && !hasTicket && { onDeleteMessage: handleDeleteMessage })}
               {...(canEditMessage && !hasTicket && { onEditInCanvas: handleEditInCanvas })}
               {...(replies &&
