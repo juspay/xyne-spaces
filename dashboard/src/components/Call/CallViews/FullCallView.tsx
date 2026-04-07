@@ -15,6 +15,8 @@ import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
+import { useReactions } from '../hooks/useReactions';
+import { ReactionsOverlay } from '../components/ReactionsOverlay';
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -73,6 +75,9 @@ export function FullCallView({
   // UI state
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
+
+  // Reactions
+  const { reactions, sendReaction } = useReactions(room);
 
   // Get call title and origin from activeCalls
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
@@ -159,6 +164,8 @@ export function FullCallView({
         'h-screen bg-gradient-to-br from-gray-900 to-gray-950 flex flex-col overflow-hidden transition-all duration-300',
       )}
     >
+      {/* Floating reactions overlay */}
+      <ReactionsOverlay reactions={reactions} />
       {/* Connection Status Indicators Bar */}
       <div className='flex justify-between items-center px-4 py-3'>
         <div className='flex items-center gap-2'>
@@ -269,6 +276,7 @@ export function FullCallView({
             onToggleChat={onToggleThread}
             onToggleParticipantsSidebar={handleToggleParticipantsSidebar}
             onToggleAIAssistant={() => roomActor.send({ type: 'TOGGLE_AI_ASSISTANT' })}
+            onSendReaction={sendReaction}
             onRequestControl={onRequestControl}
             viewMode='full'
             requestedAiController={requestedAiController}
