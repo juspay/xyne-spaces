@@ -49,6 +49,10 @@ export async function showMeetingPopup(meetingData: { app: string; startedAt: st
     hasShadow: false,
     focusable: true,
     show: false,              // Don't show until content is ready
+    // 'panel' (NSPanel) is a macOS(not available on other platforms) floating panel that sits above normal windows
+    // and full-screen spaces without triggering a process-type transformation.
+    // This avoids the Dock icon disappearing / traffic lights stripping issue.
+    type: 'panel',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -56,9 +60,15 @@ export async function showMeetingPopup(meetingData: { app: string; startedAt: st
     },
   });
 
-  // Float above everything including full-screen apps, without stealing focus
+  // 'screen-saver' keeps it above full-screen apps.
+  // visibleOnFullScreen makes it appear in full-screen spaces (e.g. Chrome full-screen).
+  // skipTransformProcessType=true is safe here because 'panel' type windows don't
+  // require the process-type switch — they handle workspace visibility natively.
   popupWindow.setAlwaysOnTop(true, 'screen-saver');
-  popupWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  popupWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true,
+  });
 
   const popupHtml = path.join(__dirname, '..', '..', 'assets', 'meeting-popup.html');
   void popupWindow.loadFile(popupHtml);
