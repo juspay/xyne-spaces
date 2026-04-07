@@ -1,7 +1,11 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { TextInput, MultiSelect } from '@juspay/blend-design-system';
-import { Search, Brain } from 'lucide-react';
+import { Search, Brain, Upload, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { MemoryFilters } from '../../types/memory';
+import { useUploadDocuments, useCleanupAllVespaMemory } from '../../hooks/useMemory';
+import { useIsMemoryAdmin } from '../../hooks/usePermissions';
+import Dialog from '../ui/Dialog';
 
 interface MemoryHeaderProps {
   filters: MemoryFilters;
@@ -9,6 +13,59 @@ interface MemoryHeaderProps {
 }
 
 const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [repoUrl, setRepoUrl] = useState('');
+
+  const isMemoryAdmin = useIsMemoryAdmin();
+  const uploadMutation = useUploadDocuments();
+  const cleanupMutation = useCleanupAllVespaMemory();
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ''; // reset so same file can be re-selected
+    if (files.length === 0) return;
+    setPendingFiles(files);
+    setRepoUrl('');
+    setShowUploadDialog(true);
+  };
+
+  const handleUploadSubmit = (): void => {
+    uploadMutation.mutate(
+      { files: pendingFiles, repoUrl: repoUrl.trim() },
+      {
+        onSuccess: data => {
+          setShowUploadDialog(false);
+          setPendingFiles([]);
+          setRepoUrl('');
+          const count = data.files.length;
+          toast.success(`${count} file${count !== 1 ? 's' : ''} queued for ingestion`);
+          if (data.rejected && data.rejected.length > 0) {
+            toast.warning(
+              `${data.rejected.length} file(s) rejected: only .txt and .md are supported`,
+            );
+          }
+        },
+        onError: () => toast.error('Failed to upload documents'),
+      },
+    );
+  };
+
+  const handleCleanupConfirm = (): void => {
+    cleanupMutation.mutate(undefined, {
+      onSuccess: () => {
+        setShowCleanupConfirm(false);
+        toast.success('All Vespa memory documents deleted');
+      },
+      onError: () => {
+        setShowCleanupConfirm(false);
+        toast.error('Cleanup failed');
+      },
+    });
+  };
+
   const hasActiveFilters = (): boolean => {
     return (
       filters.docTypeFilter.length > 0 ||
@@ -87,7 +144,136 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
             Context
           </h1>
         </div>
+
+        {/* Action buttons */}
+        <div className='flex items-center gap-2'>
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type='file'
+            multiple
+            accept='.txt,.md'
+            className='hidden'
+            onChange={handleFileChange}
+          />
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadMutation.isPending}
+            className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-border bg-background text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+            title='Upload .txt or .md files to ingest as SOPs/Facts'
+            data-track-category='Memory'
+            data-track-name='UploadDocuments'
+          >
+            <Upload size={14} />
+            {uploadMutation.isPending ? 'Uploading…' : 'Upload Docs'}
+          </button>
+
+          {isMemoryAdmin && (
+            <button
+              onClick={() => setShowCleanupConfirm(true)}
+              disabled={cleanupMutation.isPending}
+              className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-red-300 bg-background text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              title='Delete ALL documents from Vespa memory — irreversible'
+              data-track-category='Memory'
+              data-track-name='CleanupAllVespaMemory'
+            >
+              <Trash2 size={14} />
+              {cleanupMutation.isPending ? 'Deleting…' : 'Cleanup All'}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Upload dialog — asks for optional repoUrl before submitting */}
+      <Dialog
+        open={showUploadDialog}
+        onOpenChange={open => {
+          if (!open) {
+            setShowUploadDialog(false);
+            setPendingFiles([]);
+            setRepoUrl('');
+          }
+        }}
+        className='max-w-sm'
+      >
+        <div className='p-6 space-y-4'>
+          <h2 className='text-base font-semibold text-foreground'>Upload documents</h2>
+          <p className='text-sm text-muted-foreground'>
+            {pendingFiles.length} file{pendingFiles.length !== 1 ? 's' : ''} selected:{' '}
+            <span className='text-foreground'>{pendingFiles.map(f => f.name).join(', ')}</span>
+          </p>
+
+          <div className='space-y-1'>
+            <p className='text-xs font-medium text-muted-foreground uppercase tracking-wider'>
+              Repository URL <span className='text-red-500'>*</span>
+            </p>
+            <TextInput
+              placeholder='https://github.com/org/repo'
+              value={repoUrl}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRepoUrl(e.target.value)}
+            />
+            <p className='text-xs text-muted-foreground'>
+              Scope ingested knowledge to a specific repository for better retrieval.
+            </p>
+          </div>
+
+          <div className='flex justify-end gap-2'>
+            <button
+              onClick={() => {
+                setShowUploadDialog(false);
+                setPendingFiles([]);
+                setRepoUrl('');
+              }}
+              className='px-4 py-2 text-sm font-medium rounded-md border border-border bg-background text-foreground hover:bg-muted transition-colors'
+              data-track-category='Memory'
+              data-track-name='CancelUploadDocuments'
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleUploadSubmit}
+              disabled={uploadMutation.isPending || !repoUrl.trim()}
+              className='px-4 py-2 text-sm font-medium rounded-md bg-purple-600 text-white hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              data-track-category='Memory'
+              data-track-name='ConfirmUploadDocuments'
+            >
+              {uploadMutation.isPending ? 'Uploading…' : 'Upload'}
+            </button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* Cleanup confirmation dialog — admin only */}
+      <Dialog open={showCleanupConfirm} onOpenChange={setShowCleanupConfirm} className='max-w-sm'>
+        <div className='p-6 space-y-4'>
+          <h2 className='text-base font-semibold text-foreground'>Delete all Vespa memory?</h2>
+          <p className='text-sm text-muted-foreground'>
+            This will permanently delete{' '}
+            <span className='font-medium text-foreground'>all SOP and Fact documents</span> from the
+            Vespa memory schema for all users. This action cannot be undone.
+          </p>
+          <div className='flex justify-end gap-2'>
+            <button
+              onClick={() => setShowCleanupConfirm(false)}
+              className='px-4 py-2 text-sm font-medium rounded-md border border-border bg-background text-foreground hover:bg-muted transition-colors'
+              data-track-category='Memory'
+              data-track-name='CancelCleanupVespaMemory'
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCleanupConfirm}
+              disabled={cleanupMutation.isPending}
+              className='px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              data-track-category='Memory'
+              data-track-name='ConfirmCleanupVespaMemory'
+            >
+              {cleanupMutation.isPending ? 'Deleting…' : 'Delete All'}
+            </button>
+          </div>
+        </div>
+      </Dialog>
 
       <div className='flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4'>
         <div className='flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto'>

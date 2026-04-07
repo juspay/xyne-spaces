@@ -93,6 +93,13 @@ export interface ReplaceSessionDoc {
 
 export class VespaKnowledgeIngestionService {
   /**
+   * Publicly exposed helper — deletes all Vespa memory documents for a session.
+   */
+  async deleteSession(sessionId: string): Promise<void> {
+    await deleteAllForSession(sessionId);
+  }
+
+  /**
    * Replace all SOPs and Facts for a session atomically.
    * Deletes all existing docs for the session, then inserts the provided docs.
    * repoUrl/commitId/ticketId should be fetched by the caller from an existing doc.

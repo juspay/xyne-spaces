@@ -1,10 +1,19 @@
 import { Router} from 'express';
+import multer from 'multer';
 import { memoryController } from '@/controllers/memoryController';
+import { documentController } from '@/controllers/documentController';
 import { authMiddleware } from '@/middleware/auth';
+import { authorize } from '@/middleware/authorize';
 import { validateZod } from '@/middleware/validation';
+import { AccessType } from '@prisma/client';
 import { z } from 'zod';
 
 const router = Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+});
 
 /**
   * Validation schema for POST /memory/search
@@ -131,5 +140,55 @@ router.post('/replaceSession', authMiddleware.authenticate, validateZod(replaceS
   * @query sessionId - The session or workflow execution ID
   */
 router.get('/sessionHistory', authMiddleware.authenticate, memoryController.getSessionHistory);
+
+// ---------------------------------------------------------------------------
+// Document Upload & Cleanup (admin-only for destructive operations)
+// ---------------------------------------------------------------------------
+
+const deleteBySessionIdsSchema = z.object({
+  sessionIds: z
+    .array(z.string().uuid())
+    .min(1, 'At least one sessionId is required')
+    .max(100, 'Maximum 100 sessionIds per request'),
+});
+
+/**
+ * @route POST /api/memory/upload
+ * @desc Upload one or more .txt/.md files to be async-ingested into Vespa memory.
+ *       Body fields: files (multipart), repoUrl (optional string)
+ * @access Private (requires authentication)
+ */
+router.post(
+  '/upload',
+  authMiddleware.authenticate,
+  upload.array('files', 20),
+  documentController.uploadDocuments,
+);
+
+/**
+ * @route DELETE /api/memory/sessions
+ * @desc Delete all Vespa memory documents for the given session IDs.
+ * @access Private — requires MEMORY ADMIN permission
+ * @body { sessionIds: string[] }
+ */
+router.delete(
+  '/sessions',
+  authMiddleware.authenticate,
+  authorize('MEMORY', AccessType.ADMIN),
+  validateZod(deleteBySessionIdsSchema),
+  documentController.deleteBySessionIds,
+);
+
+/**
+ * @route DELETE /api/memory/vespa-memory
+ * @desc Cleanup — deletes ALL documents from the Vespa memory schema. Irreversible.
+ * @access Private — requires MEMORY ADMIN permission
+ */
+router.delete(
+  '/vespa-memory',
+  authMiddleware.authenticate,
+  authorize('MEMORY', AccessType.ADMIN),
+  documentController.cleanupAllVespaMemory,
+);
 
 export default router;

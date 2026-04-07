@@ -21,6 +21,7 @@ import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { callValidationWorker } from '@/workers/callValidationWorker';
 import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
+import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
 import { recoveryService } from './workflows/services/recovery-service' 
 config()
 
@@ -131,6 +132,12 @@ class WorkerService {
         await conversationIngestionWorker.start();
       }
 
+      const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
+      if (documentIngestionWorkerEnabled) {
+        logger.info('Starting document ingestion worker...');
+        await documentIngestionWorker.start();
+      }
+
       process.on('SIGINT', () => this.shutdown())
       process.on('SIGTERM', () => this.shutdown())
 
@@ -206,6 +213,11 @@ class WorkerService {
 
       if (appConfig.enableConversationIngestionWorker) {
         await conversationIngestionWorker.shutdown();
+      }
+
+      const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
+      if (documentIngestionWorkerEnabled) {
+        await documentIngestionWorker.shutdown();
       }
 
       await DatabaseClient.disconnect()

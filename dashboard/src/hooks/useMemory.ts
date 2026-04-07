@@ -180,3 +180,46 @@ export function useDeleteMemory() {
     },
   });
 }
+
+/**
+ * Hook for uploading documents (.txt/.md) for async ingestion into Vespa memory.
+ */
+export function useUploadDocuments() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ files, repoUrl }: { files: File[]; repoUrl: string }) =>
+      memoryService.uploadDocuments(files, repoUrl),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['memory'] });
+    },
+  });
+}
+
+/**
+ * Hook for deleting all Vespa memory docs for the given session IDs.
+ */
+export function useDeleteBySessionIds() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (sessionIds: string[]) => memoryService.deleteBySessionIds(sessionIds),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['memory'] });
+    },
+  });
+}
+
+/**
+ * Hook for wiping ALL documents from the Vespa memory schema.
+ */
+export function useCleanupAllVespaMemory() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => memoryService.cleanupAllVespaMemory(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['memory'] });
+    },
+  });
+}
