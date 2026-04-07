@@ -7,13 +7,17 @@ interface CustomInstructionsModalProps {
   onClose: () => void;
 }
 
+const MAX_INSTRUCTION_LENGTH = 1000;
+
 export const CustomInstructionsModal = ({
   isOpen,
   onClose,
 }: CustomInstructionsModalProps): ReactElement | null => {
   const [instruction, setInstruction] = useState<string>('');
+  const [originalInstruction, setOriginalInstruction] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [showLengthWarning, setShowLengthWarning] = useState<boolean>(false);
 
   // Load custom instruction on mount
   useEffect(() => {
@@ -26,7 +30,10 @@ export const CustomInstructionsModal = ({
     setIsLoading(true);
     try {
       const response = await apiInstance.get<{ instruction: string | null }>('/custom-instruction');
-      setInstruction(response.data.instruction || '');
+      const loadedInstruction = response.data.instruction || '';
+      setInstruction(loadedInstruction);
+      setOriginalInstruction(loadedInstruction);
+      setShowLengthWarning(loadedInstruction.length > MAX_INSTRUCTION_LENGTH);
     } catch {
       toast.error('Failed to load custom instructions');
     } finally {
@@ -40,6 +47,7 @@ export const CustomInstructionsModal = ({
       await apiInstance.put('/custom-instruction', {
         instruction: instruction.trim() || null,
       });
+      setOriginalInstruction(instruction);
       toast.success('Custom instructions saved!');
       onClose();
     } catch {
@@ -58,6 +66,7 @@ export const CustomInstructionsModal = ({
     try {
       await apiInstance.delete('/custom-instruction');
       setInstruction('');
+      setOriginalInstruction('');
       toast.success('Custom instructions cleared');
     } catch {
       toast.error('Failed to clear custom instructions');
@@ -88,6 +97,17 @@ export const CustomInstructionsModal = ({
         {/* Content */}
         <div className='p-6 overflow-y-auto flex-1'>
           <div className='space-y-4'>
+            {/* Length Warning */}
+            {showLengthWarning && (
+              <div className='p-3 bg-amber-50 border border-amber-200 rounded-lg'>
+                <p className='text-sm text-amber-800'>
+                  <span className='font-semibold'>Warning:</span> Your custom instructions exceed
+                  the {MAX_INSTRUCTION_LENGTH} character limit. Please edit your content to fit
+                  within the limit before saving.
+                </p>
+              </div>
+            )}
+
             {/* Textarea */}
             <div>
               <label
@@ -99,7 +119,7 @@ export const CustomInstructionsModal = ({
               <textarea
                 id='instruction'
                 value={instruction}
-                onChange={e => setInstruction(e.target.value)}
+                onChange={e => setInstruction(e.target.value.slice(0, MAX_INSTRUCTION_LENGTH))}
                 placeholder={
                   isLoading ? 'Loading...' : 'Additional behavior, style, and tone preferences'
                 }
@@ -108,6 +128,13 @@ export const CustomInstructionsModal = ({
                 data-track-category='XYNE_AI'
                 data-track-name='EditCustomInstructions'
               />
+              <div className='flex justify-end mt-1'>
+                <span
+                  className={`text-xs ${instruction.length >= MAX_INSTRUCTION_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                >
+                  {instruction.length}/{MAX_INSTRUCTION_LENGTH}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -136,7 +163,7 @@ export const CustomInstructionsModal = ({
             <button
               onClick={() => void handleSave()}
               className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-              disabled={isSaving || isLoading || !instruction.trim()}
+              disabled={isSaving || isLoading || instruction.trim() === originalInstruction.trim()}
               data-track-category='XYNE_AI'
               data-track-name='SaveCustomInstructions'
             >

@@ -241,6 +241,7 @@ export interface ToolDescriptions {
   edit_canvas: string;
   fetch_link_content: string;
   create_ppt: string;
+  fetch_skill_instructions: string;
 }
 
 // ============================================================================

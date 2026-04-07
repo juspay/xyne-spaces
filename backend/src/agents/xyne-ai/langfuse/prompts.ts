@@ -166,6 +166,7 @@ export const PROMPT_NAMES = {
   READ_CANVAS: 'read_canvas',
   EDIT_CANVAS: 'edit_canvas',
   CREATE_PPT: 'create_ppt',
+  FETCH_SKILL_INSTRUCTIONS: 'fetch_skill_instructions',
   TICKET_DESCRIPTION_CLEANER: 'ticket_description_cleaner',
   CLUSTER_THEME_SINGLE: 'cluster_theme_single',
   META_THEME_SINGLE: 'meta_theme_single',

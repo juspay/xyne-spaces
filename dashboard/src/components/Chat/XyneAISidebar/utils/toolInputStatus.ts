@@ -342,6 +342,14 @@ export const generateToolInputStatus = (
         ];
       }
 
+      case 'fetch_skill_instructions': {
+        const skillName = extractSafeString(input['skillName']);
+        if (skillName) {
+          return `Loaded ${skillName} skill`;
+        }
+        return 'Loaded skill';
+      }
+
       default:
         return 'Processing';
     }

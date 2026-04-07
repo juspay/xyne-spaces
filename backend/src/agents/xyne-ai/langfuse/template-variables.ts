@@ -103,6 +103,31 @@ ${customInstruction}`;
 }
 
 /**
+ * Format enabled skills list for agent prompt
+ * Shows only name and description - instructions are fetched at runtime via fetch_skill_instructions tool
+ */
+function formatEnabledSkills(skills?: Array<{ name: string; description: string | null; instructions: string | null; enabled: boolean }>): string {
+  if (!skills || skills.length === 0) {
+    return 'No skills configured.';
+  }
+
+  const enabledSkills = skills.filter(s => s.enabled);
+  
+  if (enabledSkills.length === 0) {
+    return 'No skills enabled. Enable skills in settings to use them.';
+  }
+
+  const skillList = enabledSkills
+    .map(s => `- ${s.name}: ${s.description}`)
+    .join('\n');
+
+  return `Available Skills (use <tool>fetch_skill_instructions</tool> to load instructions at runtime):
+${skillList}
+
+To use a skill, call: <tool>fetch_skill_instructions</tool>({ "skillName": "Skill Name" })`;
+}
+
+/**
  * Format thread context indicator when conversationId is present
  * Kept concise - just indicates thread mode is active
  */
@@ -311,6 +336,15 @@ export function buildProvidedContextCitationRefs(
   return refs;
 }
 
+
+export interface Skill {
+  name: string;
+  description: string | null;
+  instructions: string | null;
+  enabled: boolean;
+}
+
+
 export function buildAgentTemplateVariables(
   _source: SourceType,
   currentTimestamp?: string,
@@ -321,6 +355,7 @@ export function buildAgentTemplateVariables(
   researchOptions?: AvailableResearchOptions,
   customInstruction?: string,
   hasThreadContext?: boolean,
+  skills?: Skill[],
   providedContexts?: ProvidedContexts
 ): Record<string, string> {
   const variables = {
@@ -328,6 +363,7 @@ export function buildAgentTemplateVariables(
     user_info: formatUserInfo(userInfo),
     channel_context: formatChannelContext(channelNames),
     custom_instructions: formatCustomInstructions(customInstruction),
+    enabled_skills: formatEnabledSkills(skills),
     thread_context: formatThreadContext(hasThreadContext || false),
     fetch_thread_messages_instructions: formatFetchThreadMessagesInstructions(hasThreadContext || false),
     fetch_thread_messages_few_shot_example: formatFetchThreadMessagesFewShotExample(hasThreadContext || false),
