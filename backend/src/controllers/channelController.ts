@@ -12,6 +12,7 @@ import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
 import { redisService } from '../services/redisService';
 import { notificationService } from '../services/notificationService';
+import { ChannelParticipantsSideEffectHandler } from '../zero/side-effects/tables/channel-participants-handler';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import {
   CreateChannelResponse,
@@ -1848,6 +1849,18 @@ export class ChannelController {
                 authData,
                 'participants_added'
               );
+
+              const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId });
+              for (const user of filteredUsers) {
+                const participant = await this.channelParticipantRepository.findParticipant(channelId, user.userId);
+                if (participant) {
+                  handler.onInsert({
+                    entityId: participant.id,
+                    entityType: 'channel_participants',
+                    operation: 'insert'
+                  }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
+                }
+              }
             }
           }
 
@@ -1876,6 +1889,21 @@ export class ChannelController {
             const role = participantId === currentUserId ? 'ADMIN' : 'MEMBER';
             await this.channelParticipantRepository.addParticipant(newChannel.id, participantId, role);
             participantsAdded++;
+          }
+
+          const newlyAddedUserIds = uniqueUserIds.filter(id => id !== currentUserId);
+          const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId });
+          if (newlyAddedUserIds.length > 0) {
+            for (const userId of newlyAddedUserIds) {
+              const participant = await this.channelParticipantRepository.findParticipant(newChannel.id, userId);
+              if (participant) {
+                handler.onInsert({
+                  entityId: participant.id,
+                  entityType: 'channel_participants',
+                  operation: 'insert'
+                }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert (new DM)', err));
+              }
+            }
           }
 
           res.status(201).json({

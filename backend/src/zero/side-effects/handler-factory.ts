@@ -2,6 +2,7 @@ import type { TableName } from '../acl/core/types';
 import type { QueryContext } from '../acl/core/types';
 import { BaseSideEffectHandler } from './base-handler';
 import { CallParticipantsSideEffectHandler } from './tables/call-participants-handler';
+import { ChannelParticipantsSideEffectHandler } from './tables/channel-participants-handler';
 import { MessagesSideEffectHandler } from './tables/messages-handler';
 import { ConversationsSideEffectHandler } from './tables/conversations-handler';
 import { CallSideEffectHandler } from './tables/call-handler';
@@ -24,6 +25,8 @@ export class SideEffectHandlerFactory {
 
       case 'call_participants':
         return new CallParticipantsSideEffectHandler(ctx);
+      case 'channel_participants':
+        return new ChannelParticipantsSideEffectHandler(ctx);
       case 'calls':
         return new CallSideEffectHandler(ctx);
       case 'tickets':
