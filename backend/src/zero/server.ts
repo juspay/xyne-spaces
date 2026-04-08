@@ -139,6 +139,25 @@ export async function handleMutate(request: Request): Promise<unknown> {
         }),
       request
     );
+    if (result && typeof result === 'object') {
+      if ('mutations' in result && Array.isArray(result.mutations)) {
+        for (const mutation of result.mutations) {
+          if (mutation.result && typeof mutation.result === 'object' && 'error' in mutation.result) {
+            const errorObj = mutation.result;
+            const latency = Date.now() - startTime;
+            const errorMsg = ('message' in errorObj && errorObj.message) || 
+                            ('details' in errorObj && errorObj.details) || 
+                            errorObj.error;
+    
+            logger.error('zero_mutation_error', {
+              latency,
+              mutation: capturedMutatorName,
+              error: errorMsg,
+            });
+          }
+        }
+      }
+    }
 
     const latency = Date.now() - startTime;
     getZeroMutationLatency().record(latency, { mutation: capturedMutatorName || 'unknown' });
