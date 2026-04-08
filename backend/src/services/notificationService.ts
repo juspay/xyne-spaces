@@ -1056,6 +1056,37 @@ class NotificationService {
     );
   }
 
+  async createParticipantAddedNotifications(
+    userIds: string[],
+    channelId: string,
+    channelName: string,
+    adderId: string,
+    adderName: string
+  ): Promise<void> {
+    if (userIds.length === 0) return;
+
+    const title = `Added to ${channelName}`;
+    const message = `${adderName} added you to ${channelName}`;
+
+    await Promise.allSettled(
+      userIds.map(userId =>
+        this.createNotification(userId, {
+          title,
+          message,
+          type: NotificationType.DIRECT_MESSAGE,
+          relatedEntityType: 'channel',
+          relatedEntityId: channelId,
+          actionUrl: `/chat/dir/${channelId}`,
+          metadata: {
+            channelId,
+            addedBy: adderId,
+            adderName,
+          },
+        })
+      )
+    );
+  }
+
   async createFCMNotification(userId: string, data: NotificationData): Promise<void> {
     try {
       const shouldSendToMobile = await fcmPushService.hasActiveTokens(userId);

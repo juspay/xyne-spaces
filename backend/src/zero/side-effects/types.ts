@@ -61,6 +61,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   reactions: ['insert', 'delete'],
   messages: ['insert', 'delete'],
   call_participants: ["insert", "update"],
+  channel_participants: ['insert'],
   conversations: ['insert', 'delete'],
   calls: ['update'],
   tickets: ['update'],
