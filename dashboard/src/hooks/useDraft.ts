@@ -168,12 +168,17 @@ export function useDraftAttachments() {
       // Pre-seed the React Query preview cache with thumbnail blobs generated during the draft
       // phase. This allows InlineVideoPlayer to show the thumbnail immediately after send,
       // before the server syncs thumbnailUrl back via Zero replication (which can take seconds).
-      processedFiles.forEach(({ attachmentId, thumbnailBlob }) => {
+      processedFiles.forEach(({ attachmentId, thumbnailBlob, file }) => {
         if (thumbnailBlob) {
           queryClient.setQueryData(
             ['preview-blob', `/attachments/${attachmentId}/thumbnail`],
             thumbnailBlob,
           );
+        }
+        // For images, cache the full file blob so it displays instantly after send
+        // Images don't have a separate thumbnail - they use the full file directly
+        if (file.type.startsWith('image/')) {
+          queryClient.setQueryData(['preview-blob', attachmentId], file);
         }
       });
 

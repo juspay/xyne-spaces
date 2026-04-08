@@ -137,6 +137,11 @@ const SlideContent: React.FC<{
   }
 
   if (isVideo) {
+    // Only render video player when this slide is active to prevent background streaming when grouped with non-video attachments
+    if (!isActive) {
+      return <SlidePlaceholder file={file} />;
+    }
+
     if (file.attachmentId) {
       const ViewerComponent = fileType.component;
       return (

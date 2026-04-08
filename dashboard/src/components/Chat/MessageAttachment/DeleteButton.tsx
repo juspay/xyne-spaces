@@ -113,7 +113,10 @@ export const DeleteButton = memo<DeleteButtonProps>(
               </div>
               <Button
                 type='button'
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={e => {
+                  e.stopPropagation();
+                  setShowDeleteConfirm(false);
+                }}
                 variant='secondary'
                 aria-label='Close dialog'
               >
@@ -137,7 +140,10 @@ export const DeleteButton = memo<DeleteButtonProps>(
             <div className='flex gap-3 justify-end'>
               <Button
                 type='button'
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={e => {
+                  e.stopPropagation();
+                  setShowDeleteConfirm(false);
+                }}
                 disabled={isDeleting}
                 variant='secondary'
               >
@@ -145,7 +151,10 @@ export const DeleteButton = memo<DeleteButtonProps>(
               </Button>
               <Button
                 type='button'
-                onClick={() => void handleConfirmDelete()}
+                onClick={e => {
+                  e.stopPropagation();
+                  void handleConfirmDelete();
+                }}
                 disabled={isDeleting}
                 variant='destructive'
               >
