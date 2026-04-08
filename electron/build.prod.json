@@ -43,7 +43,20 @@
     "signAndEditExecutable": false
   },
   "linux": {
-    "icon": "assets/images/xyne.ico",
-    "category": "Utility"
+    "icon": "build/icons",
+    "category": "Utility",
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": ["x64"]
+      },
+      {
+        "target": "deb",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "deb": {
+    "depends": ["libnss3-tools"]
   }
 }

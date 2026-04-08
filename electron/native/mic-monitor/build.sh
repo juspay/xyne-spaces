@@ -4,7 +4,12 @@ cd "$(dirname "$0")"
 
 if [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "win32" ]]; then
   echo "mic-monitor is not yet supported on windows. Skipping build."
-  exit 1
+  exit 0
+fi
+
+if [[ "$OSTYPE" == "linux"* ]]; then
+  echo "mic-monitor is not yet supported on linux. Skipping build."
+  exit 0
 fi
 
 echo "Building mic-monitor universal binary..."

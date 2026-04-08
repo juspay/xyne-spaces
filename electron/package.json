@@ -23,7 +23,11 @@
     "desktop",
     "xyne-spaces"
   ],
-  "author": "Xyne Team",
+  "author": {
+    "name": "Xyne Team",
+    "email": "engineering@xyne.com"
+  },
+  "homepage": "https://xyne.com",
   "license": "ISC",
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
