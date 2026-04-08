@@ -60,6 +60,8 @@ interface MessageAttachmentProps {
   allAttachments?: QueryResultType<typeof queries.conversationMessagesV2>[number]['attachments'];
   isInGrid?: boolean | undefined;
   fullSize?: boolean;
+  /** When true (multiple image attachments in the same message), enforce uniform 256px height */
+  isInMultiImageGroup?: boolean;
   // Thread context props
   conversationId?: string;
   channelId?: string;
@@ -106,6 +108,7 @@ const Preview: React.FC<{
   height?: number | null;
   isInGrid?: boolean | undefined;
   fullSize?: boolean | undefined;
+  isInMultiImageGroup?: boolean;
   onLoadingChange?: (isLoading: boolean) => void;
 }> = ({
   attachmentId,
@@ -118,6 +121,7 @@ const Preview: React.FC<{
   height,
   isInGrid,
   fullSize,
+  isInMultiImageGroup,
 }) => {
   const isImage = isImageFile(mimeType);
   const isVideo = isVideoFile(mimeType);
@@ -139,6 +143,19 @@ const Preview: React.FC<{
 
   const imageWidth = calculatedWidth;
 
+  // For non-grid image thumbnails: compute the true rendered height so the container
+  // matches the image aspect ratio and avoids letterbox gray bars.
+  // When a wide image's width is capped at 300 px, height = 300 / aspectRatio < fixedHeight.
+  // For multi-image groups we want uniform height (fixedHeight) so all thumbnails align.
+  const actualDisplayHeight = useMemo(() => {
+    if (!isInGrid && !fullSize && !isInMultiImageGroup && width && height) {
+      const ar = width / height;
+      const h = Math.round(calculatedWidth / ar);
+      return Math.min(fixedHeight, h);
+    }
+    return fixedHeight;
+  }, [width, height, calculatedWidth, isInGrid, fullSize, isInMultiImageGroup, fixedHeight]);
+
   useEffect(() => {
     // Fetch image, video thumbnail, or document thumbnail
     if (!isImage && !(isVideo && thumbnailUrl) && !isDocumentWithThumbnail) {
@@ -147,6 +164,20 @@ const Preview: React.FC<{
     }
 
     let blobUrl: string | null = null;
+
+    // For images: Check React Query cache first (local-first behavior)
+    // This prevents "No Preview" flash while waiting for server sync
+    if (isImage) {
+      const cachedBlob = queryClient.getQueryData<Blob>(['preview-blob', attachmentId]);
+      if (cachedBlob) {
+        const localBlobUrl = URL.createObjectURL(cachedBlob);
+        setImageBlobUrl(localBlobUrl);
+        setIsLoading(false);
+        return (): void => {
+          URL.revokeObjectURL(localBlobUrl);
+        };
+      }
+    }
 
     const fetchPreview = async (): Promise<void> => {
       setIsLoading(true);
@@ -205,7 +236,7 @@ const Preview: React.FC<{
             ? undefined
             : imageWidth
               ? {
-                  height: fixedHeight,
+                  height: actualDisplayHeight,
                   width: `${imageWidth}px`,
                   minWidth: `${imageWidth}px`,
                 }
@@ -347,7 +378,9 @@ const Preview: React.FC<{
             ? undefined
             : isInGrid
               ? { objectFit: 'cover' }
-              : { objectFit: 'cover', height: fixedHeight, width: `${imageWidth}px` || '300px' }
+              : isInMultiImageGroup
+                ? { objectFit: 'contain', height: fixedHeight, width: `${imageWidth}px` }
+                : { height: actualDisplayHeight, width: `${imageWidth}px` }
         }
         onError={() => setError(true)}
       />
@@ -1008,6 +1041,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
   allAttachments,
   isInGrid,
   fullSize,
+  isInMultiImageGroup,
   conversationId,
   channelId,
   replyCount,
@@ -1029,6 +1063,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');
   const isCodeFile = isCodeFileByName(attachment.originalFilename);
   const isVideo = isVideoFile(attachment.mimetype);
+  const isImage = isImageFile(attachment.mimetype);
 
   const handleCardClick = (): void => {
     // Use thread attachments if available, otherwise build from message attachments
@@ -1144,7 +1179,11 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
               ? 'w-full h-full'
               : isMobile
                 ? 'h-full '
-                : 'w-full h-64',
+                : isImage
+                  ? isInMultiImageGroup
+                    ? 'w-fit h-64'
+                    : 'w-fit'
+                  : 'w-fit h-64',
         )}
         onClick={handleCardClick}
         onKeyDown={handleKeyDown}
@@ -1177,6 +1216,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
             {...(compact && { compact: true })}
             isInGrid={isInGrid}
             fullSize={fullSize}
+            {...(isInMultiImageGroup && { isInMultiImageGroup: true })}
           />
 
           {/* Slack-style hover action tray */}

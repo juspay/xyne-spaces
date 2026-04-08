@@ -21,6 +21,7 @@ import { queries } from '../../../zero/queries';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
+import { FilePill } from '../files';
 import { useReactions } from '../../../hooks/useReaction';
 import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
@@ -67,7 +68,11 @@ import { hasMessageContent } from '../../../utils/chatUtils';
 import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
 import MobileReactionDrawer from './MobileReactionDrawer';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
-import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
+import { AttachmentRef, attachmentViewerActor } from '../../../machines/attachmentViewerMachine';
+import { useZero } from '../../../hooks/useZero';
+import { mutators } from '../../../zero/mutators';
+import { toast } from 'sonner';
+import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -85,8 +90,16 @@ interface AttachmentsBlockProps {
 }
 
 /**
+ * Check if attachment has a document thumbnail (PDF with preview)
+ */
+const hasDocumentThumbnail = (attachment: AttachmentType): boolean => {
+  return isPreviewableDocument(attachment.mimetype) && !!attachment.thumbnailUrl;
+};
+
+/**
  * AttachmentsBlock renders message attachments with expand/collapse functionality.
  * Videos are rendered in separate rows first, then other attachments.
+ * Non-image/video files without thumbnails use FilePill component.
  *
  * @param attachments - Array of attachment objects
  * @param isMobile - Whether the view is mobile
@@ -101,11 +114,63 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   replyCount,
   allThreadAttachments,
 }) => {
+  const zero = useZero();
   const [isExpanded, setIsExpanded] = useState(true);
 
   if (attachments.length === 0) {
     return null;
   }
+
+  // Separate attachments by type
+  const videoAttachments = attachments.filter(a => a.mimetype.startsWith('video/'));
+  const imageAttachments = attachments.filter(a => a.mimetype.startsWith('image/'));
+
+  // Files - separate into those with thumbnails (PDFs, Office docs) and those without
+  const fileAttachments = attachments.filter(
+    a => !a.mimetype.startsWith('image/') && !a.mimetype.startsWith('video/'),
+  );
+
+  const previewableFiles = fileAttachments.filter(a => hasDocumentThumbnail(a));
+  const nonPreviewableFiles = fileAttachments.filter(a => !hasDocumentThumbnail(a));
+
+  // Check if we need to use FilePill for all files (mixed types)
+  const useFilePillForAllFiles = nonPreviewableFiles.length > 0;
+
+  const handleFileClick = (attachment: AttachmentType) => {
+    // Build attachment refs for the viewer
+    const allRefs: AttachmentRef[] = attachments.map(att => ({
+      attachmentId: att.id,
+      fileName: att.originalFilename,
+      fileUrl: `/attachments/${att.id}/download`,
+      mimeType: att.mimetype,
+      fileSize: att.size,
+      thumbnailUrl: att.thumbnailUrl,
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+      ...(replyCount !== undefined && { replyCount }),
+    }));
+
+    const startIndex = allRefs.findIndex(ref => ref.attachmentId === attachment.id);
+
+    attachmentViewerActor.send({
+      type: 'OPEN',
+      attachments: allRefs,
+      startIndex: startIndex >= 0 ? startIndex : 0,
+    });
+  };
+
+  const handleDelete = (attachmentId: string, fileName: string) => {
+    try {
+      zero.mutate(mutators.messageAttachment.delete({ attachmentId }));
+      toast.success('Attachment deleted', {
+        description: `${fileName} has been deleted successfully.`,
+      });
+    } catch (error) {
+      toast.error(`Failed to delete ${fileName}`, {
+        description: error instanceof Error ? error.message : 'Please try again later.',
+      });
+    }
+  };
 
   return (
     <div className={className}>
@@ -146,56 +211,85 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
       {isExpanded && (
         <div className='flex flex-col gap-3'>
           {/* Videos first - each in separate row */}
-          {attachments
-            .filter(attachment => attachment.mimetype.startsWith('video/'))
-            .map(attachment => (
-              <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
-                <MessageAttachment
-                  attachment={attachment}
-                  allAttachments={attachments}
-                  {...(conversationId && { conversationId })}
-                  {...(channelId && { channelId })}
-                  {...(replyCount !== undefined && { replyCount })}
-                  {...(allThreadAttachments && { allThreadAttachments })}
-                />
-              </div>
-            ))}
+          {videoAttachments.map(attachment => (
+            <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
+              <MessageAttachment
+                attachment={attachment}
+                allAttachments={attachments}
+                {...(conversationId && { conversationId })}
+                {...(channelId && { channelId })}
+                {...(replyCount !== undefined && { replyCount })}
+                {...(allThreadAttachments && { allThreadAttachments })}
+              />
+            </div>
+          ))}
 
-          {/* Other attachments in one row */}
-          {attachments.filter(attachment => !attachment.mimetype.startsWith('video/')).length >
-            0 && (
+          {/* Images - use MessageAttachment with grid layout */}
+          {imageAttachments.length > 0 && (
             <div
               className={`flex gap-3 ${isMobile ? 'overflow-x-auto flex-nowrap no-scrollbar' : 'flex-wrap'}`}
             >
-              {attachments
-                .filter(attachment => !attachment.mimetype.startsWith('video/'))
-                .map(attachment => {
-                  const isImageOrText =
-                    attachment.mimetype.startsWith('image/') ||
-                    attachment.mimetype === 'text/plain' ||
-                    attachment.mimetype.startsWith('text/') ||
-                    attachment.mimetype === 'application/json' ||
-                    attachment.originalFilename.match(
-                      /\.(ts|tsx|js|jsx|py|rb|go|java|c|cpp|cs|sql|yml|yaml|json)$/i,
-                    );
-                  const hasDocumentPreview = !isImageOrText && !!attachment.thumbnailUrl;
-                  // Calculate the actual index in the full attachments array
-                  return (
-                    <div
-                      key={attachment.id}
-                      className={`flex items-center gap-2 py-2 text-sm ${hasDocumentPreview ? 'w-[420px]' : !isImageOrText ? 'w-[256px] aspect-square' : ''} ${isMobile ? 'flex-shrink-0' : ''}`}
-                    >
-                      <MessageAttachment
-                        attachment={attachment}
-                        allAttachments={attachments}
-                        {...(conversationId && { conversationId })}
-                        {...(channelId && { channelId })}
-                        {...(replyCount !== undefined && { replyCount })}
-                        {...(allThreadAttachments && { allThreadAttachments })}
-                      />
-                    </div>
-                  );
-                })}
+              {imageAttachments.map(attachment => (
+                <div
+                  key={attachment.id}
+                  className={`flex items-center gap-2 py-2 text-sm ${isMobile ? 'flex-shrink-0' : ''}`}
+                >
+                  <MessageAttachment
+                    attachment={attachment}
+                    allAttachments={attachments}
+                    isInMultiImageGroup={imageAttachments.length > 1}
+                    {...(conversationId && { conversationId })}
+                    {...(channelId && { channelId })}
+                    {...(replyCount !== undefined && { replyCount })}
+                    {...(allThreadAttachments && { allThreadAttachments })}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Previewable files (PDFs, Office docs with thumbnails) - use MessageAttachment */}
+          {!useFilePillForAllFiles && previewableFiles.length > 0 && (
+            <div
+              className={`flex gap-3 ${isMobile ? 'overflow-x-auto flex-nowrap no-scrollbar' : 'flex-wrap'}`}
+            >
+              {previewableFiles.map(attachment => (
+                <div
+                  key={attachment.id}
+                  className={`flex items-center gap-2 py-2 text-sm ${isMobile ? 'flex-shrink-0' : ''}`}
+                >
+                  <MessageAttachment
+                    attachment={attachment}
+                    allAttachments={attachments}
+                    {...(conversationId && { conversationId })}
+                    {...(channelId && { channelId })}
+                    {...(replyCount !== undefined && { replyCount })}
+                    {...(allThreadAttachments && { allThreadAttachments })}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Non-previewable files - use FilePill component */}
+          {/* If useFilePillForAllFiles is true, show ALL files in FilePill format */}
+          {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).length > 0 && (
+            <div className='flex flex-col gap-2'>
+              {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).map(attachment => (
+                <FilePill
+                  key={attachment.id}
+                  fileName={attachment.originalFilename}
+                  mimeType={attachment.mimetype}
+                  fileSize={attachment.size}
+                  fileId={attachment.id}
+                  uploadedByUserId={attachment.uploadedByUserId}
+                  onClick={() => handleFileClick(attachment)}
+                  onDownload={() => {
+                    void downloadAttachment(attachment.id, attachment.originalFilename);
+                  }}
+                  onDelete={() => handleDelete(attachment.id, attachment.originalFilename)}
+                />
+              ))}
             </div>
           )}
         </div>
