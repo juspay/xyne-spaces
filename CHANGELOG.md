@@ -1,3 +1,27 @@
+## [1.111.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.110.0...v1.111.0) (2026-04-08)
+
+
+### Features
+
+* : resolved z-index fix ([c7278cc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c7278cc7beb202c952b572b5f2000e25b8a7ab6a))
+* Call organiser should accept the invite by default ([b4a812c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b4a812c36cf26d7e9aa707dcb8cc7d83e2964b35)), closes [#4784](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4784)
+* fix unknown channel issue ([ebf3426](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ebf3426ad7c32dbe78a08115f05a38aa05610eaa))
+* made console logs conditional in client logger ([5ea7a76](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5ea7a76ca99ac37526e53a0b76158322900f2d69)), closes [#4768](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4768)
+* removed null constraint for updatedAt ([466b629](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/466b629f7d5e0284adf5be8627b92d1bed791333)), closes [#4751](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4751)
+* send notification when added to group/channel ([232fbd5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/232fbd54f5d0166c4c6a85aa1cfeef3ee2ee15c3)), closes [#4668](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4668)
+
+
+### Bug Fixes
+
+* added airborne integration ([2b58a75](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2b58a7540faccadb438d9a8a0da2187273d0435e)), closes [#4739](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4739)
+* change route preview ([a3b3e55](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a3b3e55d4f62e10ac64e9c710baf415b90f4fe9d)), closes [#4767](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4767)
+* fixed mention trigger to detect hyphen ([2038abd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2038abd9ab21c72902553d83959a51efc19ee09d))
+* fixed message and activities issue, added new pagination pattern in single dm messages ([e3192f0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e3192f00322ac3682de7c418bf0c5d76673ef4b8))
+* fixes ticket creation attachment issue ([af9ed76](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/af9ed76d6e7dc2902646db44a5d9c5a2b68eff48))
+* ordering change from:/in: operators in Cmd K ([b012d92](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b012d9282c3a05ca2bbac9a61bbc5c3ddc0ea0fb)), closes [#4640](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4640)
+* support workflow refactor ([c1a39da](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c1a39da2d2919ab612c57718ba48076a2d7a6b70)), closes [#4631](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4631)
+* XYNE-11943 Fixed Image attachment thumbnail ([c1db880](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c1db8808133b70948dc4b0772c6babe0de2b42f0))
+
 ## [1.110.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.109.0...v1.110.0) (2026-04-08)
 
 
