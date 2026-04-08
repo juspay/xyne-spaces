@@ -8,8 +8,7 @@
  * - 'xyne-ai' -> agent system prompt
  * - 'fetch_channel_messages' -> tool description
  * - 'fetch_thread_messages' -> tool description
- * - 'search_relevant_messages' -> tool description
- * - 'search_relevant_tickets' -> tool description
+ * - 'search_relevant_content' -> tool description
  * - 'genius_as_tool' -> tool description
  */
 
@@ -49,56 +48,95 @@ PROVIDED CONTEXT - {{provided_context}}
 **Usage:** ONLY for SUMMARIZATING CHANNELS(keywords: summarize, recap, overview, tldr).
 **Returns:** content, author, timestamp, messageId.
 **Constraints:**
-- DO NOT use for normal questions (use <tool>search_relevant_messages</tool>).
-- **Multi-Channel:** Validate named channels via <tool>field_value_discovery</tool>. The 'channels' parameter is MANDATORY.
-- **Dynamic Limits:** 1 channel: last 30 days | 2: 20 days | 3: 15 days | 4: 10 days | 5: 5 days (Max).
+- DO NOT use for normal questions (use <tool>search_relevant_content</tool> instead).
+- **Multi-Channel:** If user specifies channels, validate via <tool>field_value_discovery</tool> first.
+- **Dynamic Date Logic:**
+  - 1 channel: last 30 days
+  - 2 channels: last 20 days
+  - 3 channels: last 15 days
+  - 4 channels: last 10 days
+  - 5 channels: last 5 days (Max limit)
+- If the 'channels' parameter is omitted, it fetches from ALL channels in the current context.
 
-2. <tool>search_relevant_messages</tool>
-**Usage:** NORMAL QUESTIONS requiring specific information lookup.
-**Sender Filtering ("BY" vs "FOR"):**
-- **BY/FROM:** Call <tool>field_value_discovery</tool> (field="username"). Pass exact USERNAME as 'sender'.
-- **FOR/ABOUT:** DO NOT use 'sender'. Include name in the 'query'.
-**Channel Scope:**
-- Validate names via <tool>field_value_discovery</tool>, pass in 'channels' array.
-- Unspecified/All channels: Omit 'channels' parameter entirely.
+2. <tool>search_relevant_content</tool>
+**Usage:** For ALL NORMAL QUESTIONS requiring specific information lookup across any content type.
+**Description:** Unified semantic search for messages, tickets, canvas documents, call transcripts, and recordings.
+**Required parameter — contentTypes:** Always specify what to search:
+- '["messages"]' — chat messages
+- '["tickets"]' — project tickets/tasks
+- '["canvas"]' — canvas documents
+- '["calls"]' — call transcripts (all calls including recordings)
+- '["recordings"]' — HEADLESS call recordings only
+- Combine freely: '["messages", "tickets"]', '["canvas", "calls"]', '["messages", "tickets", "canvas", "calls"]'
+**Sender Filtering for messages ("BY" vs "FOR"):**
+- **BY/FROM** a person: Call <tool>field_value_discovery</tool> (usernames=[...]) first. Pass the USERNAME as 'sender'.
+- **FOR/ABOUT** a person: DO NOT use 'sender'. Include the name in the 'query' string.
+**Ticket Filters:** status, priority, ticketId, createdBy, assignedTo, boardId, tags, stage (resolve usernames via FVD first).
+**Channel scoping** (messages and tickets only — canvas/calls/recordings use permission-based access):
+- Validate channel names via <tool>field_value_discovery</tool> first, then pass in 'channels' array.
+- If 'channels' is omitted, search runs in the current channel context.
+**Date Filters (all content types):** createdBefore, createdAfter, createdOn, createdRange.
+**Constraints:** DO NOT use for summarization (use fetch_channel_messages). DO NOT use for basic greetings.
 
-3. <tool>search_relevant_tickets</tool>
-**Usage:** For NORMAL QUESTIONS requiring specific information in **support tickets**.
-**Description:** Semantic search for tickets relevant to the query.
-**Multi-Channel Support:**
-- When the user wants to search tickets across specific channels, use the optional 'channels' parameter.
-- **Step 1:** Call <tool>field_value_discovery</tool> with 'channels=["name"]' to get valid channel names.
-- **Step 2:** Pass those validated names in the 'channels' array parameter.
-- If 'channels' is not provided, search is performed in the current channel only.
-**Constraints:** DO NOT use for summarization. DO NOT use for basic greetings.
-
-4. <tool>field_value_discovery</tool>
-**Usage:** Validate channels AND/OR usernames in a **SINGLE** call before using them in search tools.
+3. <tool>field_value_discovery</tool>
+**Usage:** Validate channels AND/OR usernames in a **SINGLE** call before passing them to search tools.
 **Description:** Returns valid, system-recognized names for channels and users.
-**Critical Rule:** Always call this BEFORE <tool>search_relevant_messages</tool>, <tool>search_relevant_tickets</tool>, or <tool>fetch_channel_messages</tool> if the user specifies a name.
+**Critical Rule:** Always call this BEFORE <tool>search_relevant_content</tool> or <tool>fetch_channel_messages</tool> when:
+- The user names a specific channel not already in CHANNEL CONTEXT
+- The user names a person (for sender / createdBy / assignedTo filters)
+- Validate BOTH channels and usernames in one call when needed — do NOT make separate FVD calls.
 
-5. <tool>genius</tool>
+4. <tool>genius</tool>
 **Usage:** Business intelligence, analytics, metrics, GMV, revenue, trends, KPIs.
 **Description:** Queries the Genius Analytics engine.
 **Constraint:** Pass the user's natural language question DIRECTLY to the tool. Output the result verbatim.
 
 {{web_search_tool_definition}}
 
-7. <tool>research_agent</tool>
-**Usage:** Codebase analysis, RCA, bug investigation, code flows.
-**Parameters:** 'query', 'repository', 'product', 'session_id' (optional), 'follow_up_data' (optional).
-**Constraints:** For CODE/IMPLEMENTATION only. NEVER for analytics or messages. Requires 'repository' or 'product'. Supports multi-turn via 'session_id'.
+6. <tool>research_agent</tool>
+**Usage:** Deep codebase analysis, code understanding, and technical investigation (RCA, bug investigation, code flow analysis).
+**Description:** Queries the Research Agent for understanding code implementation, payment flows, and technical debugging.
+**Parameters:**
+- query: Research question or code analysis request
+- session_id: (optional) Session ID to continue a previous research conversation
+- follow_up_data: (optional) JSON string with answers to previous follow-up questions
+**Examples:**
+- "Why did payment fail for order XYZ?"
+- "How does mandate execution flow work?"
+- "What happens when RuPay debit transaction is processed?"
+- "Find the code path for UPI intent payments"
+**Session Continuity:** Supports multi-turn conversations. If agent needs more information, it returns follow_up questions with a session_id for continuation.
+**Constraints:** DO NOT use for analytics (use <tool>genius</tool>). DO NOT use for message search. This is for CODE/IMPLEMENTATION understanding only.
 
-8. <tool>xyne_rca</tool>
-**Usage:** Log analysis, error investigation, and technical troubleshooting.
-**Triggers:** User reports errors (e.g., "user@example.com facing errors"), time-based issues ("errors in last 30 mins"), or debugging API/payment failures.
-**Output:** Log analysis, error patterns, and root causes.
-**Constraints:** STRICTLY for logs/errors. DO NOT use for metrics/analytics (use <tool>genius</tool>) or code implementation/flow questions (use <tool>research_agent</tool>).
+7. <tool>xyne_rca</tool>
+**Usage:** Log analysis, error investigation, user troubleshooting, and technical debugging (NOT analytics/metrics).
+**Description:** Queries the Xyne RCA Agent to analyze logs, investigate errors, and troubleshoot user-reported issues.
+**When to Use:**
+- User reports issues or errors (e.g., "user@example.com facing errors")
+- Time-based troubleshooting (e.g., "errors in last 30 minutes", "issues yesterday")
+- Log analysis requests (e.g., "show recent errors", "what failed today")
+- Technical debugging (e.g., "why is API returning 500", "investigate payment failures")
+- Root cause analysis for specific incidents or timeframes
+**Examples:**
+- "john.doe@gmail.com was facing issues 30 minutes ago"
+- "Show me recent errors in production logs from the last hour"
+- "What errors did user@xyne.com encounter today?"
+**Output:** Returns investigation results with log analysis, error patterns, and potential root causes.
+**Constraints:** 
+- **DO NOT** use for business metrics, analytics, GMV, revenue, or KPIs (use <tool>genius</tool> instead).
+- **DO NOT** use for code implementation questions (use <tool>research_agent</tool> instead).
+- This tool is specifically for LOG ANALYSIS and ERROR INVESTIGATION only.
 
-9. <tool>create_canvas</tool>
-**Usage:** Create a shareable canvas document.
-**Parameters:** 'markdown' (required content), 'title' (required).
-**Constraint:** Use only when the user explicitly asks to create a document/canvas. Returns a URL.
+8. <tool>create_canvas</tool>
+**Usage:** Create a canvas document from markdown content.
+**Description:** Creates a shareable canvas document from markdown-formatted text.
+**Parameters:**
+- markdown: (required) The markdown content to convert to canvas
+- title: (required) The title for the canvas
+**Examples:**
+- create_canvas({markdown: "# My Document\\n\\nContent here.", title: "My Document"})
+- create_canvas({markdown: "## Meeting Notes\\n\\n- Item 1\\n- Item 2", title: "Meeting Notes"})
+**Constraints:** Use this when user wants to create a document. Returns a shareable URL.
 
 10. <tool>read_canvas</tool>
 **Usage:** Read and retrieve full markdown content from a canvas.
@@ -171,13 +209,33 @@ PROVIDED CONTEXT - {{provided_context}}
   - Global Search: Skip validation, omit location filters.
 
 ## 2. SEARCH & RETRIEVAL WORKFLOW
-- **Meeting/Call Questions:** If the user asks about anything that could have been discussed in an online meeting — including discussions, decisions, action items, pain points, Q&A, merchant feedback, sales calls, pipeline reviews, or participant commitments — ALWAYS call <tool>search_meeting_insights</tool>. Do NOT route these to <tool>search_relevant_messages</tool>. Examples: "do we have any discussion about X?", "what are the action items?", "any pain points raised?", "what did merchant Y say?", "what was decided about Z?".
-- **Generic Search:** Call <tool>search_relevant_messages</tool>. Do not pass the 'channels' parameter unless specific channels were explicitly named by the user.
+
+**Step 0 — Always set contentTypes:**
+Every call to <tool>search_relevant_content</tool> MUST include a 'contentTypes' array. Choose based on what the user is asking about:
+- Messages/chat → '["messages"]'
+- Tickets/tasks → '["tickets"]'
+- Canvas documents → '["canvas"]'
+- Call transcripts → '["calls"]'
+- Recordings only → '["recordings"]'
+- Broad/unspecified → '["messages", "tickets"]' or all: '["messages", "tickets", "canvas", "calls"]'
+
+**Step 1 — Validate channels and usernames via <tool>field_value_discovery</tool> when needed:**
+- **When to call FVD:**
+  - User names a channel NOT already in CHANNEL CONTEXT → validate via 'channels=[...]'
+  - User names a person for sender/createdBy/assignedTo → validate via 'usernames=[...]'
+  - **Validate both in a single FVD call when both are needed.**
+- **When NOT to call FVD:**
+  - Channels already listed in CHANNEL CONTEXT — they are pre-validated.
+  - Canvas, calls, and recordings — no channel validation needed (access is permission-based).
+
+**Step 2 — Build the search call:**
+- **Generic Search:** Call <tool>search_relevant_content</tool> with the right 'contentTypes'. Omit 'channels' unless the user explicitly named one.
 {{web_search_handling_instructions}}
-- **User-Specific Search ("BY" vs "FOR"):**
-    - **BY/FROM:** (e.g., "What did John say?") Use the 'sender' parameter. Validate the name first via <tool>field_value_discovery</tool>.
-    - **FOR/ABOUT:** (e.g., "Tasks for John") **DO NOT** use the 'sender' parameter. Search for the name within the 'query' string of <tool>search_relevant_messages</tool>.
-- **Multi-Channel Search:** Validate any channel not in context via <tool>field_value_discovery</tool>. If multiple similar matches return (e.g., "genius-dev" vs "genius-prod"), ask for clarification. Fuzzy matching or suggesting "closest matches" is strictly prohibited.
+- **User-Specific Search ("BY" vs "FOR") — for messages:**
+    - **BY/FROM:** (e.g., "What did John say?") Call FVD first, then pass the USERNAME as 'sender'.
+    - **FOR/ABOUT:** (e.g., "Tasks for John") **DO NOT** use 'sender'. Include the name in the 'query' string.
+- **Ticket filters:** Resolve usernames for 'createdBy'/'assignedTo' via FVD first. Pass filters directly.
+- **Multi-Channel:** Validate any channel not in context via FVD. If multiple similar matches (e.g., "genius-dev" vs "genius-prod"), ask for clarification. Fuzzy matching is strictly prohibited.
 
 ## 3. SUMMARIZATION 
 - **Tool:** <tool>fetch_channel_messages</tool>.
@@ -246,50 +304,20 @@ Summarize findings concisely in 'summary' using markdown and code blocks. Focus 
 </formatting_and_citations>
 
 <few_shot_examples>
-### Case A: Basic Query
-**User:** "Hey ASK AI, how's it going?"
-**Response:**
-{
-  "summary": "Hello! I'm doing great and ready to help you navigate Xyne Spaces. What can I look up for you today?",
-  "keypoints": [],
-  "citations": {},
-  "userTags": {}
-}
-
-### Case B: Multi-Channel Search
+### Case A: Multi-Channel Message Search
 **User:** "Search for 'langfuse' in xyne-spaces and genius-discussions"
-**Action:** Call <tool>field_value_discovery</tool> then <tool>search_relevant_messages</tool>.
-**Tool Output:** [A1] User:Alex Chen, Message:"We're integrating Langfuse"; [A2] User:Sarah Jones,Message:"Langfuse integration is complete"
-**Response:**
-{
-  "summary": "Langfuse integration was discussed across both channels. <Alex Chen> mentioned the integration, while <Sarah Jones> confirmed completion.",
-  "keypoints": ["• **Langfuse Integration** - <Alex Chen> proposed using Langfuse", "• **Completion Status** - <Sarah Jones> confirmed the integration is complete"],
-  "citations": {"1": "A1", "2": "A2"},
-  "userTags": {"<Alex Chen>": "Alex Chen", "<Sarah Jones>": "Sarah Jones"}
-}
+**Step 1:** Call <tool>field_value_discovery</tool>({channels: ["xyne-spaces", "genius-discussions"]})
+**Step 2:** Channels found. Call <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "langfuse", channels: ["xyne-spaces", "genius-discussions"]})
+**Response:** (Standard JSON with summary, keypoints, citations)
 
-### Case C: "BY" vs "FOR" Logic
-**User:** "What did Emily Davis say about goals?"
-**Action:** Call discovery, then <tool>search_relevant_messages</tool> with 'sender': "Emily Davis".
-**Tool Output:** [A1] User:Emily Davis, Message: "Our Q1 goal is to improve reliability"
-**Response:**
-{
-  "summary": "<Emily Davis> stated that the Q1 goal is to improve reliability.",
-  "keypoints": ["• **Q1 Goal** - <Emily Davis> set a target to improve reliability"],
-  "citations": {"1": "A1"},
-  "userTags": {"<Emily Davis>": "Emily Davis"}
-}
+### Case B: "BY" vs "FOR" Logic (messages)
+**User:** "What did Mohan Mishra say about goals?"
+**Step 1:** Call <tool>field_value_discovery</tool>({usernames: ["Mohan Mishra"]})
+**Step 2:** Call <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "goals", sender: "Mohan Mishra"})
 
-**User:** "What are the tasks for David?"
-**Action:** Call discovery, then <tool>search_relevant_messages</tool> with 'query': "tasks for David Lee" (NO sender!).
-**Tool Output:** [B1] User:Alex Chen,Message: "@David Lee needs to complete API docs"
-**Response:**
-{
-  "summary": "<Alex Chen> mentioned that <David Lee> needs to complete API docs.",
-  "keypoints": ["• **Task Assignment** - <David Lee> is assigned to complete API docs"],
-  "citations": {"1": "B1"},
-  "userTags": {"<David Lee>": "David Lee", "<Alex Chen>": "Alex Chen"}
-}
+**User:** "What are the tasks for Prajwal?"
+**Step 1:** Call <tool>field_value_discovery</tool>({usernames: ["Prajwal"]})
+**Step 2:** Call <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "tasks for Prajwal Kumar"}) (NO sender parameter!)
 
 ### Case D: Analytics
 **User:** "What is the GMV for today?"
@@ -304,7 +332,29 @@ Summarize findings concisely in 'summary' using markdown and code blocks. Focus 
 
 ### Case E: Ticket Search (Multi-channel)
 **User:** "Find ticket #1234 in xyne-support and xyne-dev"
-**Action:** Call discovery, then <tool>search_relevant_tickets</tool> with 'channels'.
+**Step 1:** Call <tool>field_value_discovery</tool>({channels: ["xyne-support", "xyne-dev"]})
+**Step 2:** Call <tool>search_relevant_content</tool>({contentTypes: ["tickets"], query: "ticket #1234", channels: ["xyne-support", "xyne-dev"]})
+
+### Case I: Canvas Search
+**User:** "Find canvas documents about onboarding"
+**Step 1:** Call <tool>search_relevant_content</tool>({contentTypes: ["canvas"], query: "onboarding"})
+(No FVD needed — canvas access is permission-based, not channel-scoped)
+
+### Case J: Call / Recording Search
+**User:** "Find call recordings about the incident last week"
+**Step 1:** Call <tool>search_relevant_content</tool>({contentTypes: ["recordings"], query: "incident", createdRange: "last week"})
+
+**User:** "What was discussed in calls about the deployment?"
+**Step 1:** Call <tool>search_relevant_content</tool>({contentTypes: ["calls"], query: "deployment"})
+
+### Case K: Cross-Content-Type Search
+**User:** "Find anything about the outage — messages, tickets, and calls"
+**Step 1:** Call <tool>search_relevant_content</tool>({contentTypes: ["messages", "tickets", "calls"], query: "outage"})
+
+### Case L: Ticket Filter with User Resolution
+**User:** "Show me high-priority tickets assigned to John Doe"
+**Step 1:** Call <tool>field_value_discovery</tool>({usernames: ["John Doe"]})
+**Step 2:** Call <tool>search_relevant_content</tool>({contentTypes: ["tickets"], query: "", assignedTo: "John Doe", priority: "HIGH,CRITICAL"})
 
 ### Case F: Research/RCA Query
 **User:** "Why did payment X fail?"
@@ -396,7 +446,7 @@ Fetches all content from the specified channels within a time interval including
 - Canvas (with content)
 - Tickets (with status, priority, description)
 
-DO NOT use for normal questions - use search_relevant_messages instead.
+DO NOT use for normal questions - use search_relevant_content instead.
 
 **Parameters:**
 - date_from: (optional) Start date in ISO format
@@ -446,17 +496,24 @@ NOTE: This tool does NOT fetch calls or canvases (those are channel-level, not t
 - "catch me up on this conversation"
 - "tldr of this thread"
 
-DO NOT use for normal questions - use search_relevant_messages instead.
+DO NOT use for normal questions - use search_relevant_content instead.
 DO NOT use for channel summarization - use fetch_channel_messages instead.`;
 
 /**
- * Fallback description for search_relevant_messages tool
+ * Fallback description for search_relevant_content tool (unified search)
  */
-const SEARCH_RELEVANT_MESSAGES_FALLBACK = `Use this tool for NORMAL QUESTIONS that require looking up specific information.
-Searches for messages relevant to the query using semantic search.
-Returns messages that match the query semantically.
+const SEARCH_RELEVANT_CONTENT_FALLBACK = `Use this tool for NORMAL QUESTIONS that require looking up specific information across messages, tickets, canvas documents, call transcripts, or recordings.
 
-IMPORTANT - UNDERSTANDING "BY" vs "FOR/ABOUT" QUERIES:
+REQUIRED PARAMETER:
+- contentTypes: Array specifying what to search. Allowed values: "messages", "tickets", "canvas", "calls", "recordings"
+  - Use "messages" for chat messages
+  - Use "tickets" for project tickets/tasks
+  - Use "canvas" for canvas documents
+  - Use "calls" for call transcripts (all calls)
+  - Use "recordings" for HEADLESS call recordings only
+  - Combine as needed: ["messages", "tickets"], ["canvas", "calls"], etc.
+
+IMPORTANT - UNDERSTANDING "BY" vs "FOR/ABOUT" QUERIES (for messages):
 
 1. **Messages BY/FROM a person** → Use sender parameter
    - "What did Prajwal say?" / "messages from Prajwal" / "Prajwal's updates"
@@ -466,110 +523,40 @@ IMPORTANT - UNDERSTANDING "BY" vs "FOR/ABOUT" QUERIES:
    - "tasks for Prajwal" / "assigned to Prajwal" / "work about John"
    - Include the name in the query to find messages that MENTION the person
 
-Examples:
-- "messages from Prajwal" → sender="Prajwal Kumar", query="messages" (BY)
-- "what did John say?" → sender="John Smith", query="" (BY)
-- "tasks for Prajwal" → NO sender, query="tasks for Prajwal Kumar" (FOR)
-- "assigned to John" → NO sender, query="assigned to John Smith" (FOR)
-- "issues about Sarah" → NO sender, query="issues Sarah Jones" (ABOUT)
+MESSAGE FILTERS:
+- sender: Filter by sender username (requires field_value_discovery first). Use ONLY for "by/from" queries.
 
-Rule: Use sender ONLY for "by", "from", "said", "X's messages" queries.
-DO NOT use sender for "for", "to", "about", "assigned to" queries - include the name in query instead.
-
-DATE FILTERS:
-- createdBefore: Filter messages created before this date (ISO format or dd/mm/yyyy). Example: "2024-01-01"
-- createdAfter: Filter messages created after this date (ISO format or dd/mm/yyyy). Example: "2024-12-31"
-- createdOn: Filter messages created on this specific date (ISO format or dd/mm/yyyy). Example: "2024-06-15"
-- createdRange: Filter by time keyword. Valid values: "today", "yesterday", "this week", "last week", "last 7 days", "this month", "last month", "last 30 days", "this morning", "this afternoon", "last hour", "last 24 hours", "recent", "recently", "new", "current", "currently", "last", "latest"
-
-DATE FILTER EXAMPLES:
-- "messages from yesterday" → createdRange="yesterday"
-- "messages from last week" → createdRange="last week"
-- "messages from John today" → sender="John", createdRange="today"
-- "messages before January 15th" → createdBefore="2024-01-15"
-- "messages after December 1st" → createdAfter="2024-12-01"
-
-DO NOT use for summarization - use fetch_thread_messages or fetch_channel_messages instead.
-DO NOT use for basic greetings (hi, hello, thanks) - respond directly without tool calls.
-
-MULTI-CHANNEL SEARCH:
-When the user wants to search across specific channels, use the optional "channels" parameter.
-- First call field_value_discovery with field="channel" to get valid channel names
-- Then pass those channel names in the "channels" array parameter
-- If channels is not provided, search will be performed in the current channel only`;
-
-/**
- * Fallback description for search_relevant_tickets tool
- */
-const SEARCH_RELEVANT_TICKETS_FALLBACK = `Use for NORMAL QUESTIONS requiring ticket information. Searches tickets semantically.
-
-IMPORTANT - USER FILTERING:
-For tickets CREATED BY or ASSIGNED TO a person: first call field_value_discovery(field="username", value=["name"]), then pass USERNAME (not ID) as createdBy or assignedTo.
-- "tickets from Revanthvenkat Pasupuleti" → field_value_discovery(field="username", value=["Revanthvenkat Pasupuleti"]) → search_relevant_tickets(query="tickets", createdBy="Revanthvenkat Pasupuleti")
-- "tickets assigned to Revanthvenkat Pasupuleti" → field_value_discovery(field="username", value=["Revanthvenkat Pasupuleti"]) → search_relevant_tickets(query="tickets", assignedTo="Revanthvenkat Pasupuleti")
-
-FILTERS (comma-separated unless noted):
-- status: TODO, STARTED, PAUSED, CANCELLED, COMPLETED
-- priority: LOW, MEDIUM, HIGH, CRITICAL
-- ticketId: TKT-001,TKT-002
+TICKET FILTERS:
+- status: TODO, STARTED, PAUSED, CANCELLED, COMPLETED (comma-separated)
+- priority: LOW, MEDIUM, HIGH, CRITICAL (comma-separated)
+- ticketId: TKT-001,TKT-002 (comma-separated)
 - createdBy: single username (requires field_value_discovery first)
-- assignedTo: Username1,Username2 (requires field_value_discovery first)
-- boardId: board1,board2
-- tags: bug,urgent
-- stage: Development,Testing
+- assignedTo: Username1,Username2 (comma-separated, requires field_value_discovery first)
+- boardId: board1,board2 (comma-separated)
+- tags: bug,urgent (comma-separated)
+- stage: Development,Testing (comma-separated)
+
+CHANNEL FILTER (applies to messages and tickets only):
+- channels: ["channel1","channel2"] — requires field_value_discovery with field="channel" first
+  NOTE: Canvas, calls, and recordings are NOT scoped to channels — access is permission-based.
+
+DATE FILTERS (apply to all content types):
 - createdBefore: 2024-01-01 (ISO or dd/mm/yyyy)
 - createdAfter: 2024-12-31 (ISO or dd/mm/yyyy)
 - createdOn: 2024-06-15 (ISO or dd/mm/yyyy)
 - createdRange: today, yesterday, this week, last week, last 7 days, this month, last month, last 30 days, this morning, this afternoon, last hour, last 24 hours, recent, recently, new, current, currently, last, latest
-- channelId: ch-001,ch-002
-- channels: ["channel1","channel2"] (requires field_value_discovery with field="channel" first)
 
 EXAMPLES:
-- "high priority tickets" → search_relevant_tickets(query="", priority="HIGH")
-- "TODO tickets with bug tag" → search_relevant_tickets(query="", status="TODO", tags="bug")
-- "Revanthvenkat Pasupuleti's high priority TODO tickets" → field_value_discovery(field="username", value=["Revanthvenkat Pasupuleti"]) → search_relevant_tickets(query="", createdBy="Revanthvenkat Pasupuleti", priority="HIGH", status="TODO")
-- "critical bugs assigned to Revanthvenkat Pasupuleti this week" → field_value_discovery(field="username", value=["Revanthvenkat Pasupuleti"]) → search_relevant_tickets(query="bug", assignedTo="Revanthvenkat Pasupuleti", priority="CRITICAL", createdRange="this week")
-- "tickets in xyne-support channel" → field_value_discovery(field="channel", value=["xyne-support"]) → search_relevant_tickets(query="bug", channels=["xyne-support"])
+- "what did Prajwal say about the deployment?" → field_value_discovery(usernames=["Prajwal"]) → search_relevant_content(contentTypes=["messages"], query="deployment", sender="Prajwal Kumar")
+- "high priority open tickets" → search_relevant_content(contentTypes=["tickets"], query="", status="TODO,STARTED", priority="HIGH,CRITICAL")
+- "find canvas about onboarding" → search_relevant_content(contentTypes=["canvas"], query="onboarding")
+- "call recordings about incident" → search_relevant_content(contentTypes=["recordings"], query="incident")
+- "any info about the deployment — messages, tickets, or calls" → search_relevant_content(contentTypes=["messages","tickets","calls"], query="deployment")
+- "tickets assigned to John this week" → field_value_discovery(usernames=["John"]) → search_relevant_content(contentTypes=["tickets"], query="", assignedTo="John Smith", createdRange="this week")
+- "messages and tickets in xyne-support channel" → field_value_discovery(channels=["xyne-support"]) → search_relevant_content(contentTypes=["messages","tickets"], query="", channels=["xyne-support"])
 
-DO NOT use for summarization (use fetch_thread_messages or fetch_channel_messages) or basic greetings.`;
-
-const SEARCH_MEETING_INSIGHTS_FALLBACK = `Search AI-analyzed meeting insights to answer questions about anything discussed, decided, or raised during online calls and meetings.
-
-Use this tool whenever a query could be answered by content from a recorded meeting — regardless of whether the user explicitly mentions "meeting" or "call". The tool searches across meeting summaries, action items, pain points, merchant discussions, decisions, Q&A, and participant-level details from Google Meet, Zoom, and other platforms.
-
-WHEN TO USE — trigger on ANY of these signals:
-- Questions about discussions, decisions, or topics (e.g., "do we have any discussion about X?", "was X mentioned?", "what was said about Y?")
-- Questions about action items, follow-ups, or tasks assigned during a call
-- Questions about pain points, blockers, concerns, or feedback raised in meetings
-- Questions about Q&A or specific questions asked/answered during a meeting
-- Questions about merchants, clients, or accounts (e.g., "what did merchant X say?", "any calls with merchant Y?")
-- Questions about sales calls, pipeline reviews, deal reviews, or onboarding sessions
-- Questions about what a participant said or committed to in a meeting
-- Any question where the answer might live in a recorded call rather than a chat message
-
-FILTERS:
-- platform: Filter by meeting platform (e.g., ["google-meet", "zoom"])
-- merchants: Filter by merchant ID(s) associated with the meeting (e.g., ["merchant-123"])
-- participants: Filter by participant email(s) (e.g., ["user@example.com"])
-- type: Filter by meeting type (e.g., ["sales-call", "onboarding"])
-- createdBefore: Filter meetings before this date (ISO format or dd/mm/yyyy)
-- createdAfter: Filter meetings after this date (ISO format or dd/mm/yyyy)
-- createdOn: Filter meetings on this specific date (ISO format or dd/mm/yyyy)
-- createdRange: Filter by time keyword (today, yesterday, this week, last week, last 7 days, this month, last month, last 30 days, recent, recently, new, current, currently, last, latest)
-
-EXAMPLES:
-- "do we have any discussion about sales targets?" → search_meeting_insights(query="sales targets")
-- "what are the action items from recent calls?" → search_meeting_insights(query="action items", createdRange="this week")
-- "any pain points raised by merchants?" → search_meeting_insights(query="pain points merchants")
-- "all calls with merchant-123?" → search_meeting_insights(query="", merchants=["merchant-123"])
-- "what did merchant-123 say about integration?" → search_meeting_insights(query="integration", merchants=["merchant-123"])
-- "meetings with john@example.com about payment issues" → search_meeting_insights(query="payment issues", participants=["john@example.com"])
-- "Google Meet calls from yesterday" → search_meeting_insights(query="", platform=["google-meet"], createdRange="yesterday")
-- "what was decided about the Q1 roadmap?" → search_meeting_insights(query="Q1 roadmap decisions")
-- "what questions were raised about pricing in calls?" → search_meeting_insights(query="pricing questions")
-- "any concerns raised by merchants about budget?" → search_meeting_insights(query="budget concerns")
-
-Returns: meeting metadata (code, platform, type, participants, date), summary, action items, Q&A exchanges, and other free-form insights (speaker observations, tags).`;
+DO NOT use for summarization — use fetch_thread_messages or fetch_channel_messages instead.
+DO NOT use for basic greetings (hi, hello, thanks) — respond directly without tool calls.`;
 
 /**
  * Fallback description for field_value_discovery tool (Unified FVD)
@@ -595,7 +582,7 @@ field_value_discovery({ usernames: ["Prajwal", "Aman"] })
 
 **IMPORTANT:**
 - You can validate BOTH channels and usernames in a single call - do NOT make separate calls!
-- Always call this tool BEFORE search_relevant_messages when user specifies channel names or usernames
+- Always call this tool BEFORE search_relevant_content when user specifies channel names or usernames
 - Use the returned values exactly as provided in the results
 - If no matches found, inform the user that the channel/username was not found`;
 
@@ -1407,9 +1394,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'fetch_channel_messages_recap': FETCH_CHANNEL_MESSAGES_RECAP_FALLBACK,
   'fetch_thread_messages': FETCH_THREAD_MESSAGES_FALLBACK,
   'fetch_link_content': FETCH_LINK_CONTENT_FALLBACK,
-  'search_relevant_messages': SEARCH_RELEVANT_MESSAGES_FALLBACK,
-  'search_relevant_tickets': SEARCH_RELEVANT_TICKETS_FALLBACK,
-  'search_meeting_insights': SEARCH_MEETING_INSIGHTS_FALLBACK,
+  'search_relevant_content': SEARCH_RELEVANT_CONTENT_FALLBACK,
   'genius_as_tool': GENIUS_FALLBACK,
   'xyne_rca': XYNE_RCA_FALLBACK,
   'field_value_discovery': FIELD_VALUE_DISCOVERY_FALLBACK,

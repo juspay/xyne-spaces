@@ -62,8 +62,7 @@ export {
 
 import { createFetchChannelMessagesTool, getFetchChannelMessagesTool } from './fetch_channel_messages.js';
 import { createFetchThreadMessagesTool, getFetchThreadMessagesTool } from './fetch_thread_messages.js';
-import { createSearchRelevantMessagesTool, getSearchRelevantMessagesTool } from './search_relevant_messages.js';
-import { createSearchRelevantTicketsTool, getSearchRelevantTicketsTool } from './search_relevant_tickets.js';
+import { createSearchRelevantContentTool, getSearchRelevantContentTool } from './search_relevant_content.js';
 import { createSearchMeetingInsightsTool, getSearchMeetingInsightsTool } from './search_meeting_insights.js';
 import { createFieldValueDiscoveryTool } from './field_value_discovery.js';
 import { createGeniusTool, getGeniusTool } from './genius.js';
@@ -92,11 +91,8 @@ export { createFetchChannelMessagesTool, getFetchChannelMessagesTool };
 // Fetch Thread Messages
 export { createFetchThreadMessagesTool, getFetchThreadMessagesTool };
 
-// Search Relevant Messages
-export { createSearchRelevantMessagesTool, getSearchRelevantMessagesTool };
-
-// Search Relevant Tickets
-export { createSearchRelevantTicketsTool, getSearchRelevantTicketsTool };
+// Search Relevant Content (unified: messages, tickets, canvas, calls, recordings)
+export { createSearchRelevantContentTool, getSearchRelevantContentTool };
 
 // Search Meeting Insights
 export { createSearchMeetingInsightsTool, getSearchMeetingInsightsTool };
@@ -169,8 +165,7 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
   
   const tools: Tool<any, XyneAIAgentContext>[] = [
     createFetchChannelMessagesTool(),
-    createSearchRelevantMessagesTool(),
-    createSearchRelevantTicketsTool(),
+    createSearchRelevantContentTool(),
     createSearchMeetingInsightsTool(),
     createFieldValueDiscoveryTool(),
     createGeniusTool(),

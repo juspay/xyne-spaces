@@ -260,22 +260,27 @@ export const generateToolInputStatus = (
       case 'fetch_thread_messages':
         return 'Fetching thread messages';
 
-      case 'search_relevant_messages': {
+      case 'search_relevant_content': {
         const query = extractSafeString(input['query']);
+        const contentTypes = Array.isArray(input['contentTypes'])
+          ? (input['contentTypes'] as string[])
+          : [];
+        const typeLabels: Record<string, string> = {
+          messages: 'messages',
+          tickets: 'tickets',
+          canvas: 'canvas',
+          calls: 'calls',
+          recordings: 'recordings',
+        };
+        const label =
+          contentTypes.length > 0
+            ? contentTypes.map(t => typeLabels[t] ?? t).join(', ')
+            : 'content';
         if (query) {
           const truncated = query.length > 50 ? query.slice(0, 50) + '...' : query;
-          return `Searching messages for "${truncated}"`;
+          return `Searching ${label} for "${truncated}"`;
         }
-        return 'Searching messages';
-      }
-
-      case 'search_relevant_tickets': {
-        const query = extractSafeString(input['query']);
-        if (query) {
-          const truncated = query.length > 50 ? query.slice(0, 50) + '...' : query;
-          return `Searching tickets for "${truncated}"`;
-        }
-        return 'Searching tickets';
+        return `Searching ${label}`;
       }
 
       case 'web_search': {
