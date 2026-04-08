@@ -45,19 +45,45 @@ export function useZero(): Zero {
 
           // Handle completion
           Promise.all([result.client, result.server])
-            .then(() => {
+            .then(([_clientResult, serverResult]) => {
               const duration = performance.now() - startTime;
-              logger.info(Event.ZERO_MUTATION_COMPLETE, {
-                mutation: mutationName,
-                duration,
-              });
-              safeRecordMetric(() => {
-                zeroMutationLatency.record(duration, { mutation: mutationName });
-                zeroMutationOperations.add(1, {
+              let hasError = false;
+              let errorMessage = '';
+
+              if (serverResult && typeof serverResult === 'object') {
+                if (serverResult.type === 'error' && serverResult.error) {
+                  hasError = true;
+                  errorMessage =
+                    serverResult.error.message || serverResult.error.type || 'Unknown error';
+                }
+              }
+
+              if (hasError) {
+                logger.error(Event.ZERO_MUTATION_ERROR, {
                   mutation: mutationName,
-                  stage: 'success',
+                  error: errorMessage,
+                  duration,
                 });
-              });
+                safeRecordMetric(() => {
+                  zeroMutationLatency.record(duration, { mutation: mutationName });
+                  zeroMutationOperations.add(1, {
+                    mutation: mutationName,
+                    stage: 'error',
+                  });
+                });
+              } else {
+                logger.info(Event.ZERO_MUTATION_COMPLETE, {
+                  mutation: mutationName,
+                  duration,
+                });
+                safeRecordMetric(() => {
+                  zeroMutationLatency.record(duration, { mutation: mutationName });
+                  zeroMutationOperations.add(1, {
+                    mutation: mutationName,
+                    stage: 'success',
+                  });
+                });
+              }
             })
             .catch(error => {
               const duration = performance.now() - startTime;
@@ -65,6 +91,7 @@ export function useZero(): Zero {
               logger.error(Event.ZERO_MUTATION_ERROR, {
                 mutation: mutationName,
                 error: errorMessage,
+                duration,
               });
               safeRecordMetric(() => {
                 zeroMutationLatency.record(duration, { mutation: mutationName });
