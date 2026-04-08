@@ -323,6 +323,30 @@ export const generateToolInputStatus = (
         return 'Fetching link content';
       }
 
+      case 'deep_research': {
+        const topic = extractSafeString(input['topic']);
+        return [
+          topic
+            ? `Researching "${topic.length > 500 ? topic.slice(0, 500) + '…' : topic}"`
+            : 'Starting deep research',
+          'Brewing research brief',
+          'Kneading sub-queries',
+          'Sifting through data',
+          'Marinating web sources',
+          'Fermenting ideas',
+          'Sautéing parallel searches',
+          'Stewing on findings',
+          'Simmering findings',
+          'Infusing perspectives',
+          'Caramelizing insights',
+          'Proofing conclusions',
+          'Whisking together references',
+          'Tempering conclusions',
+          'Reducing sauce of knowledge',
+          'Plating final report',
+        ];
+      }
+
       case 'research_agent':
         return [
           'Diving deep into your question',

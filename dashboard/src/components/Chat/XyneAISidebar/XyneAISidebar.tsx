@@ -35,6 +35,7 @@ import { XyneAIOnboardingHeader } from './components/XyneAIOnboardingHeader';
 import { useAIOnboarding, ALL_ONBOARDING_SUGGESTIONS } from '../../../contexts/AIOnboardingContext';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { UserActivityPanel } from './components/UserActivityPanel';
+import { MemoriesPanel } from './components/MemoriesPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
 import {
@@ -50,6 +51,7 @@ import { xyneAIStreamManager } from '../../../services/XyneAI';
 
 interface XyneAIConfigResponse {
   webSearchAccessible: boolean;
+  deepResearchAccessible: boolean;
 }
 
 interface XyneAISidebarProps {
@@ -71,12 +73,14 @@ const XyneAISidebar = ({
   const [currentTraceId, setCurrentTraceId] = useState<string | undefined>();
   const [showHistorySidebar, setShowHistorySidebar] = useState(false);
   const [showUserActivityPanel, setShowUserActivityPanel] = useState(false);
+  const [showMemoriesPanel, setShowMemoriesPanel] = useState(false);
   const [conversations, setConversations] = useState<ConversationHistoryType[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
   const [isLoadingConversation, setIsLoadingConversation] = useState(!startFreshChat);
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
   const [showContextModal, setShowContextModal] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
   const [selectedResearchContext, setSelectedResearchContext] = useState<ResearchContext | null>(
     null,
@@ -264,6 +268,7 @@ const XyneAISidebar = ({
   });
 
   const webSearchAccessible = configData?.webSearchAccessible ?? false;
+  const deepResearchAccessible = configData?.deepResearchAccessible ?? false;
 
   // Auto-enable web search when browser context is provided (and user has access)
   // Web search stays enabled for the session to allow follow-up questions
@@ -290,6 +295,7 @@ const XyneAISidebar = ({
     setConversationId,
     setCurrentTraceId,
     webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
+    deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
     researchContext: selectedResearchContext,
     createCanvasEnabled,
     channelId: channelId || undefined, // Pass channelId for thread ID construction
@@ -1109,6 +1115,8 @@ const XyneAISidebar = ({
           onClose={() => setShowUserActivityPanel(false)}
           onAddToChat={handleAddActivities}
         />
+      ) : showMemoriesPanel ? (
+        <MemoriesPanel onClose={() => setShowMemoriesPanel(false)} />
       ) : (
         <>
           {/* Header - Fixed at Top */}
@@ -1119,6 +1127,7 @@ const XyneAISidebar = ({
               onNewChat={handleNewChat}
               onShowHistory={() => setShowHistorySidebar(true)}
               onShowUserActivity={() => setShowUserActivityPanel(true)}
+              onShowMemories={() => setShowMemoriesPanel(true)}
               isMobile={isMobile}
             />
           )}
@@ -1380,6 +1389,9 @@ const XyneAISidebar = ({
               webSearchEnabled={webSearchEnabled}
               webSearchAccessible={webSearchAccessible}
               onWebSearchToggle={() => setWebSearchEnabled(!webSearchEnabled)}
+              deepResearchEnabled={deepResearchEnabled}
+              deepResearchAccessible={deepResearchAccessible}
+              onDeepResearchToggle={() => setDeepResearchEnabled(!deepResearchEnabled)}
               createCanvasEnabled={createCanvasEnabled}
               onCreateCanvasToggle={() => setCreateCanvasEnabled(!createCanvasEnabled)}
               onUserTagsChange={setCurrentUserTags}

@@ -62,22 +62,16 @@ interface JafToolResult<T> {
  * Uses the @xynehq/jaf package's websearch tool internally
  */
 export function createWebSearchTool(): Tool<{ query: string }, XyneAIAgentContext> {
-    // Check if web search is configured
-    const webSearchUrl = config.webSearch.url;
+    const webSearchUrl = config.xyneAiExtended.url;
 
     if (!webSearchUrl) {
-        // Return a disabled tool if not configured
         return {
             schema: {
                 name: 'web_search',
                 description: 'Web search is not configured. Contact administrator to enable.',
-                parameters: z.object({
-                    query: z.string().describe('The search query'),
-                }),
+                parameters: z.object({ query: z.string().describe('The search query') }),
             },
-            execute: async () => {
-                return 'Error: Web search is not configured. Please set WEB_SEARCH_URL environment variable.';
-            },
+            execute: async () => 'Error: Web search is not configured. Please set XYNE_AI_EXTENDED_URL environment variable.',
         };
     }
 
@@ -140,7 +134,7 @@ export function createWebSearchTool(): Tool<{ query: string }, XyneAIAgentContex
                     webSearchTool.execute(
                         {
                             hostedWebServerUrl: webSearchUrl,
-                            apiKey: config.webSearch.apiKey || '', // Empty string if no API key configured
+                            apiKey: '',
                             query,
                         },
                         {}

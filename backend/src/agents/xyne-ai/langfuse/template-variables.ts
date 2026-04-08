@@ -351,6 +351,7 @@ export function buildAgentTemplateVariables(
   userInfo?: UserInfo,
   channelNames?: string[],
   webSearchEnabled?: boolean,
+  deepResearchEnabled?: boolean,
   researchContext?: ResearchContext,
   researchOptions?: AvailableResearchOptions,
   customInstruction?: string,
@@ -389,6 +390,26 @@ export function buildAgentTemplateVariables(
 - **Citation Mapping:** The web_search tool displays results as [1], [2], [3]... but when citing in your response, you must prefix with the tool call letter (A for first call, B for second, etc.). So if you want to cite result [3] from your first web_search call, use [A3].
 - **Single URL Per Keypoint:** When citing web_search results, provide ONLY ONE URL per keypoint. Each keypoint should cite exactly ONE search result with its URL. The system will automatically attach the corresponding URL to your citation.`
       : '',
+    deep_research_tool_definition: deepResearchEnabled
+      ? `14. <tool>deep_research</tool>
+**Usage:** For comprehensive, multi-step research on complex topics requiring synthesis from multiple sources.
+**Description:** Conducts autonomous deep research: generates sub-queries, performs parallel web searches, and synthesizes a comprehensive report. Takes 1–10 minutes.
+**Important:**
+- Use this ONLY for complex research questions that require thorough investigation.
+- Do NOT use for simple factual lookups (use web_search instead).
+- Do NOT use for time-sensitive queries — deep research has a 600-second timeout.
+- The tool returns a complete research report; cite it as a single source.
+**Examples:** "Write a comprehensive analysis of LLM trends in 2024", "Research the competitive landscape of fintech in India", "Deep dive into microservices architecture patterns"`
+      : '',
+    deep_research_handling_instructions: deepResearchEnabled
+      ? `- **Deep Research Protocol:** When a query demands thorough multi-source research (e.g., "research X comprehensively", "give me a deep analysis of Y", "write a detailed report on Z"), use <tool>deep_research</tool>.
+- **Scope Distinction:** Use <tool>web_search</tool> for quick lookups; use <tool>deep_research</tool> for comprehensive synthesis tasks.
+- **Single Call:** Only call deep_research once per user query — it already handles multi-query synthesis internally.
+- **CRITICAL: After deep_research returns, immediately produce your final response. Do NOT call create_canvas, web_search, or any other tool. The canvas has already been created by deep_research itself.`
+      : ``,
+    deep_research_citation_instructions: deepResearchEnabled
+      ? `- **Deep Research Citations:** When deep_research returns "DEEP_RESEARCH_DONE", immediately output your final JSON response. Include the canvas URL in the summary. Do NOT call any other tool.`
+      : ``,
     research_context: formatFullResearchContext(researchContext, researchOptions),
     provided_context: formatProvidedContexts(providedContexts),
     provided_context_few_shot_example: formatProvidedContextFewShotExample(providedContexts),

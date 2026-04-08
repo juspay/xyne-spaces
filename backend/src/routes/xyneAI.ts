@@ -80,4 +80,13 @@ router.get('/list-repositories', xyneAIController.listRepositories);
 // GET /api/xyne-ai/config - Public endpoint returning web search config
 router.get('/config', xyneAIController.getConfig);
 
+// GET /api/xyne-ai/memories - Get all memories for current user
+router.get('/memories', xyneAIController.getMemories);
+
+// DELETE /api/xyne-ai/memories/:id - Delete a single memory
+router.delete('/memories/:id', xyneAIController.deleteMemory);
+
+// DELETE /api/xyne-ai/memories - Clear all memories for current user
+router.delete('/memories', xyneAIController.clearMemories);
+
 export default router;

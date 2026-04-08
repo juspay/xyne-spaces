@@ -130,9 +130,8 @@ const envSchema = Joi.object({
   // oh-my-opencode Plugin Configuration
   OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
   OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default(''),
-  // Web Search Configuration
-  WEB_SEARCH_URL: Joi.string().uri().allow('').default(''),
-  WEB_SEARCH_API_KEY: Joi.string().allow('').default(''),
+  // Xyne AI Extended (web search, mem0, deep research, etc.)
+  XYNE_AI_EXTENDED_URL: Joi.string().uri().allow('').default(''),
   ENABLE_WORKFLOW_RECOVERY: Joi.boolean().default(true),
   // Otel Configuration
   OTEL_BASE_URL: Joi.string().default(''),
@@ -366,9 +365,8 @@ export const config = {
     serviceName: envVars.OTEL_SERVICE_NAME,
     exportIntervalMs: envVars.OTEL_EXPORT_INTERVAL_MS,
   },
-  webSearch: {
-    url: envVars.WEB_SEARCH_URL,
-    apiKey: envVars.WEB_SEARCH_API_KEY,
+  xyneAiExtended: {
+    url: envVars.XYNE_AI_EXTENDED_URL,
   },
   jwt: {
     expirationSeconds: envVars.JWT_EXPIRATION_SECONDS,

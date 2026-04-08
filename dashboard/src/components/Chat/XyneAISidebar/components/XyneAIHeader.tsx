@@ -1,5 +1,5 @@
 import { ReactElement, useState } from 'react';
-import { Settings, Activity } from 'lucide-react';
+import { Settings, Activity, Brain } from 'lucide-react';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { ChatHistory } from '../../../icons/xyne-ai';
 import { SettingsModal } from './SettingsModal';
@@ -8,6 +8,7 @@ interface XyneAIHeaderProps {
   onNewChat: () => void;
   onShowHistory: () => void;
   onShowUserActivity: () => void;
+  onShowMemories: () => void;
   isMobile?: boolean;
 }
 
@@ -15,6 +16,7 @@ export const XyneAIHeader = ({
   onNewChat,
   onShowHistory,
   onShowUserActivity,
+  onShowMemories,
   isMobile = false,
 }: XyneAIHeaderProps): ReactElement => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -58,6 +60,15 @@ export const XyneAIHeader = ({
               data-track-name='OpenCustomInstructions'
             >
               <Settings size={16} className='w-4 h-4' />
+            </button>
+            <button
+              onClick={onShowMemories}
+              className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+              title='Memories'
+              data-track-category='XyneAI'
+              data-track-name='SHOW_MEMORIES_MOBILE'
+            >
+              <Brain size={16} className='w-4 h-4' />
             </button>
             <button
               onClick={onShowUserActivity}
@@ -125,6 +136,16 @@ export const XyneAIHeader = ({
             data-track-name='SHOW_HISTORY_DESKTOP'
           >
             <ChatHistory />
+          </button>
+          {/* Memories Icon */}
+          <button
+            onClick={onShowMemories}
+            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
+            title='Memories'
+            data-track-category='XyneAI'
+            data-track-name='SHOW_MEMORIES_DESKTOP'
+          >
+            <Brain size={16} />
           </button>
           {/* User Activity Icon */}
           <button
