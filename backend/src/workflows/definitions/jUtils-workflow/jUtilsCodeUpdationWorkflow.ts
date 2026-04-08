@@ -302,7 +302,7 @@ export const jUtilsCodeUpdationWorkflow: WorkflowDefinition<
   contextMapper: jUtilsPropagationContextMapper,
   async execute(
     engine: WorkflowEngine<JUtilsPropagationContext, typeof JUtilsPropagationSteps>,
-    preExecuteResult: JUtilsPropagationPreExecuteResult
+    _preExecuteResult: JUtilsPropagationPreExecuteResult
   ): Promise<JUtilsPropagationOutput> {
     const context = engine.getContext();
     const { repoUrl, commitHash, baseBranch = 'staging', userContext } = context;
@@ -363,7 +363,7 @@ export const jUtilsCodeUpdationWorkflow: WorkflowDefinition<
       diffLength: diffContent.length,
     });
 
-    if (!preExecuteResult.hasChanges || !hasChanges) {
+    if (!hasChanges) {
       logger.info('[JUTILS_CODE_UPDATION] No jUtils changes detected, exiting');
       return {
         changedFunctions: '[]',
