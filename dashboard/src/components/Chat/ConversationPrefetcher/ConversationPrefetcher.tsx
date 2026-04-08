@@ -6,6 +6,7 @@ import { queries } from '../../../zero/queries';
 import { stateMachineActor, Conversation } from '../../../machines/stateMachine';
 import { queryCacheActor } from '../../../machines/queryCacheMachine';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
+import { Event, logger } from '../../../utils/logger';
 
 const PAGE_SIZE = 50;
 const MAX_QUEUE_SIZE = 5;
@@ -108,10 +109,14 @@ const ConversationPrefetcher = (): null => {
 
         // return merged;
       } catch (error) {
-        console.error(
-          `[ConversationPrefetcher] Error fetching conversations for channel ${channelId}:`,
+        logger.error(Event.CONVERSATION_PREFERCH_ERROR, {
           error,
-        );
+          message: `Error fetching conversations for channel ${channelId}:`,
+        });
+        // console.error(
+        //   `[ConversationPrefetcher] Error fetching conversations for channel ${channelId}:`,
+        //   error,
+        // );
         return;
       }
     },
@@ -138,9 +143,9 @@ const ConversationPrefetcher = (): null => {
       conversations: merged,
     });
 
-    console.log(
-      `[ConversationPrefetcher] Stored ${merged.length} conversations for channel ${channelId}`,
-    );
+    // console.log(
+    //   `[ConversationPrefetcher] Stored ${merged.length} conversations for channel ${channelId}`,
+    // );
   }, []);
 
   /**
@@ -157,7 +162,7 @@ const ConversationPrefetcher = (): null => {
     // If queue is empty, we're done
     if (state.queue.length === 0) {
       stateRef.current = { ...state, status: 'complete' };
-      console.log('[ConversationPrefetcher] All channels processed');
+      // console.log('[ConversationPrefetcher] All channels processed');
       return;
     }
 
@@ -186,9 +191,9 @@ const ConversationPrefetcher = (): null => {
       queue: remainingQueue,
     };
 
-    console.log(
-      `[ConversationPrefetcher] Processing channel ${nextChannel.channelId} (${remainingQueue.length} remaining in queue)`,
-    );
+    // console.log(
+    //   `[ConversationPrefetcher] Processing channel ${nextChannel.channelId} (${remainingQueue.length} remaining in queue)`,
+    // );
 
     // Fetch conversations
     await fetchConversationsForChannel(nextChannel);
@@ -270,13 +275,13 @@ const ConversationPrefetcher = (): null => {
       initialQueue.push(...fallbackChannels);
     }
 
-    console.log(
-      `[ConversationPrefetcher] Initialized with ${initialQueue.length} channels in queue`,
-      {
-        totalWithUnread: channelsWithUnread.length,
-        totalWithoutUnread: channelsWithoutUnread.length,
-      },
-    );
+    // console.log(
+    //   `[ConversationPrefetcher] Initialized with ${initialQueue.length} channels in queue`,
+    //   {
+    //     totalWithUnread: channelsWithUnread.length,
+    //     totalWithoutUnread: channelsWithoutUnread.length,
+    //   },
+    // );
 
     stateRef.current = {
       ...stateRef.current,
@@ -363,7 +368,7 @@ const ConversationPrefetcher = (): null => {
           queue: [...stateRef.current.queue, ...toAdd],
         };
 
-        console.log(`[ConversationPrefetcher] Added ${toAdd.length} channels to queue`);
+        // console.log(`[ConversationPrefetcher] Added ${toAdd.length} channels to queue`);
 
         // Start processing if idle
         if (stateRef.current.status === 'idle') {
