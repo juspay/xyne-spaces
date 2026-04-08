@@ -6,12 +6,14 @@ import type {
   BotEvent,
 } from '@/bots/unified/types/index.js'
 import { logger } from '@/utils/logger'
-import { Channel, MessageType, User } from '@prisma/client'
+import { Channel, MessageType, User, UserGroup } from '@prisma/client'
 import axios from 'axios'
 import { superpositionClient } from '@/services/superpositionClient'
 import { UserGroupRepository, UserRepository } from '@/database/repositories'
 import * as yaml from 'js-yaml'
 import jwt from "jsonwebtoken";
+import { gcsService } from '@/services/gcsService'
+import { FileMetadata } from '@google-cloud/storage'
 
 const CAC_KEYS = {
   support_group_name: 'support_group_name',
@@ -81,7 +83,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
   }
 
   private readonly BACKEND_URL: string;
-  private readonly APP_JWT_TOKEN: string;
+  private readonly APP_JWT_KEY: string;
   private userGroupRepository = new UserGroupRepository();
   private userRepository = new UserRepository();
   private botUserId: string;
@@ -92,12 +94,12 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
     if (!backendUrl) {
       logger.warn('API_BASE_URL or BACKEND_URL environment variable is not set');
     }
-    if (!process.env.APP_JWT_TOKEN) {
-      logger.warn('APP_JWT_TOKEN environment variable is not set.');
+    if (!process.env.APP_JWT_KEY) {
+      logger.warn('APP_JWT_KEY environment variable is not set.');
     }
     this.BACKEND_URL = backendUrl || 'http://localhost:3000';
-    this.APP_JWT_TOKEN = process.env.APP_JWT_TOKEN || '';
-    const parsed = TokenPayloadSchema.safeParse(jwt.decode(this.APP_JWT_TOKEN));
+    this.APP_JWT_KEY = process.env.APP_JWT_KEY || '';
+    const parsed = TokenPayloadSchema.safeParse(jwt.decode(this.APP_JWT_KEY));
     this.botUserId = parsed.data?.userId || '';
 
   }
@@ -126,7 +128,19 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
   } | null> {
     try {
       const supportGroupAlias = await superpositionClient.getStringValue(CAC_KEYS.support_group_name, "itsupport", {})
-      const supportGroup = await this.userGroupRepository.findByName(supportGroupAlias)
+      const response = await axios.get(
+        `${this.BACKEND_URL}/api/apps/usergroups/list`,
+        {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.APP_JWT_KEY}` 
+          },
+          timeout: 30000,
+        }
+      )
+      const userGroups = response.data as Array <UserGroup>;
+      const supportGroup = userGroups.find(group => group.name === supportGroupAlias)
       if (supportGroup) {
         const memberCount = supportGroup ? await this.userGroupRepository.getUserCount(supportGroup.id) : 0
         return {
@@ -200,24 +214,23 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
       }> | undefined
 
       if (params.gcsPaths && params.gcsPaths.length > 0 && !params.isEscalation) {
-        const mimeTypeMap: Record<string, string> = {
-          'pdf': 'application/pdf',
-          'doc': 'application/msword',
-          'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'txt': 'text/plain',
-          'md': 'text/markdown',
-        }
+        // Fetch metadata for all files concurrently
+        const metadataPromises = params.gcsPaths.map(gcsPath => 
+          gcsService.getFileMetadata(gcsPath)
+        )
+        const metadataResults: FileMetadata[] = await Promise.all(metadataPromises)
 
-        uploadedFiles = params.gcsPaths.map((gcsPath, index) => {
-          const fileName = gcsPath.split('/').pop() || 'document'
-          const extension = fileName.split('.').pop()?.toLowerCase() || ''
-          const mimeType = mimeTypeMap[extension] || 'application/octet-stream'
+        uploadedFiles = metadataResults.map((metadata, index) => {
+          const gcsPath = params.gcsPaths![index]
+          const fileName = metadata.name || 'document'
           const originalName = params.documentNames?.[index] || fileName
+          const mimeType = metadata.contentType || 'application/octet-stream'
+          const fileSize = parseInt(String(metadata.size || '0'), 10)
 
           return {
             originalName,
             fileName,
-            fileSize: 0,
+            fileSize,
             mimeType,
             fileUrl: gcsPath,
           }
@@ -255,7 +268,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.APP_JWT_TOKEN}` 
+            'Authorization': `Bearer ${this.APP_JWT_KEY}` 
           },
           timeout: 30000,
         }
@@ -293,7 +306,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.APP_JWT_TOKEN}`,
+            'Authorization': `Bearer ${this.APP_JWT_KEY}`,
             'Content-Type': 'application/json',
           },
           timeout: 5000,
@@ -341,7 +354,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.APP_JWT_TOKEN}`,
+            'Authorization': `Bearer ${this.APP_JWT_KEY}`,
           },
           timeout: 30000,
         }
