@@ -79,7 +79,7 @@ const CallHistoryScreen = (): ReactElement => {
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>('month');
   const [currentMonthStart, setCurrentMonthStart] = useState(() => {
     const d = new Date();
@@ -713,10 +713,7 @@ const CallHistoryScreen = (): ReactElement => {
 
         {/* Call List */}
         <div
-          className={cn(
-            'flex-1 min-h-0 w-full no-scrollbar',
-            isCalendarMode ? 'overflow-hidden' : 'overflow-y-auto',
-          )}
+          className={cn('flex-1 min-h-0 w-full no-scrollbar overflow-y-auto')}
           data-testid='call-history-list'
         >
           {/* All Tab View */}

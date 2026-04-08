@@ -771,9 +771,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const parsed = parseTimeAndUpdateDate(timeString, endsAt ?? startsAt);
       if (parsed) {
         setRecurringEndTime(toHHMM(parsed));
+        setValue('endsAt', parsed, { shouldValidate: true });
       }
     },
-    [endsAt, startsAt, parseTimeAndUpdateDate],
+    [endsAt, startsAt, parseTimeAndUpdateDate, setValue],
   );
 
   const onSubmit = async (data: ScheduleCallFormData): Promise<void> => {
