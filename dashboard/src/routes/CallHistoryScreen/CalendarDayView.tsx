@@ -92,7 +92,7 @@ const CalendarDayView = ({
       <div
         ref={scrollRef}
         className='overflow-y-auto'
-        style={{ maxHeight: 'calc(100dvh - 200px)' }}
+        style={{ maxHeight: 'calc(100dvh - 290px)' }}
       >
         <div className='flex' style={{ height: HOUR_HEIGHT * 24 }}>
           {/* ── Time gutter ── */}
