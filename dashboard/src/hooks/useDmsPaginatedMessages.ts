@@ -289,7 +289,7 @@ export const useDmsPaginatedMessages = (
         isFetchingRef.current = false;
       }
     },
-    [fetchPage, commitRows, commitHasMoreBefore],
+    [fetchPage, commitRows, commitHasMoreBefore, zero],
   );
 
   // ── Derived values ────────────────────────────────────────────────────────────
