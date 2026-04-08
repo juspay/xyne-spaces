@@ -1,6 +1,12 @@
 import { type Platform } from '../hooks/usePlatform';
 import { detectPlatform } from '../hooks/usePlatform';
-import { FLUSH_INTERVAL_IN_MS, LOGGER_BASE_URL, MAX_BATCH_SIZE, MAX_RETRIES } from '../config';
+import {
+  FLUSH_INTERVAL_IN_MS,
+  LOGGER_BASE_URL,
+  MAX_BATCH_SIZE,
+  MAX_RETRIES,
+  isLocalhost,
+} from '../config';
 import type { WorkerMessage } from './logger.worker';
 import { v4 as uuidv4 } from 'uuid';
 import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
@@ -137,6 +143,7 @@ export const Event = {
   THREAD_CONTEXT_BUTTON_CLICKED: 'thread_context_button_clicked',
   THREAD_CONTEXT_SUBMITTED: 'thread_context_submitted',
   KANBAN_ENTITY_LOADED: 'kanban_entity_loaded',
+  CONVERSATION_PREFERCH_ERROR: 'conversation_prefetch_error',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];
@@ -302,7 +309,9 @@ export class Logger implements LoggerConfig {
     level: LogLevel,
     event: EventType,
     extraFields?: Record<string, unknown>,
+    consoleLog?: boolean,
   ): void {
+    const shouldConsoleLog = consoleLog ?? isLocalhost;
     if (this.worker) {
       const payload: WorkerMessage['payload'] = {
         level,
@@ -311,6 +320,7 @@ export class Logger implements LoggerConfig {
         zeroSocketState: this.zeroSocketState,
         pageViewId: this.pageViewId,
         pageUrl: this.pageUrl,
+        consoleLog: shouldConsoleLog,
       };
       if (extraFields !== undefined) {
         payload.extraFields = extraFields;
@@ -323,20 +333,20 @@ export class Logger implements LoggerConfig {
     }
   }
 
-  debug(event: EventType, extraFields?: Record<string, unknown>): void {
-    this.postLogMessage(LogLevel.DEBUG, event, extraFields);
+  debug(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+    this.postLogMessage(LogLevel.DEBUG, event, extraFields, consoleLog);
   }
 
-  info(event: EventType, extraFields?: Record<string, unknown>): void {
-    this.postLogMessage(LogLevel.INFO, event, extraFields);
+  info(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+    this.postLogMessage(LogLevel.INFO, event, extraFields, consoleLog);
   }
 
-  warn(event: EventType, extraFields?: Record<string, unknown>): void {
-    this.postLogMessage(LogLevel.WARN, event, extraFields);
+  warn(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+    this.postLogMessage(LogLevel.WARN, event, extraFields, consoleLog);
   }
 
-  error(event: EventType, extraFields?: Record<string, unknown>): void {
-    this.postLogMessage(LogLevel.ERROR, event, extraFields);
+  error(event: EventType, extraFields?: Record<string, unknown>, consoleLog?: boolean): void {
+    this.postLogMessage(LogLevel.ERROR, event, extraFields, consoleLog);
   }
 
   pushlogs(): void {

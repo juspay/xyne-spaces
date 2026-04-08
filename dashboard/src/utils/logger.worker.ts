@@ -36,6 +36,7 @@ export interface WorkerMessage {
     level?: LogLevel | undefined;
     event?: EventType | undefined;
     extraFields?: Record<string, unknown> | undefined;
+    consoleLog?: boolean | undefined;
     logs?: LogEntry[] | undefined;
     notificationWsId?: string | undefined;
     notificationSocketState?: string | undefined;
@@ -161,7 +162,9 @@ class LoggerWorker {
         (logEntry as Record<string, unknown>)['pageUrl'] = this.pageUrl;
       }
 
-      console.log(JSON.stringify(logEntry));
+      if (payload.consoleLog) {
+        console.log(JSON.stringify(logEntry));
+      }
 
       this.logs.push(logEntry);
     }
