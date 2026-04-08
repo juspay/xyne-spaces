@@ -5,6 +5,7 @@
  */
 
 import { type Tool } from '@xynehq/jaf';
+import { config } from '../../../config/env.js';
 
 // ============================================================================
 // Types
@@ -68,6 +69,7 @@ import { createFieldValueDiscoveryTool } from './field_value_discovery.js';
 import { createGeniusTool, getGeniusTool } from './genius.js';
 import { createXyneRcaTool, getXyneRcaTool } from './xyne_rca.js';
 import { createWebSearchTool, getWebSearchTool } from './web_search.js';
+import { createDeepResearchTool } from './deep_research.js';
 import { createResearchAgentTool, getResearchAgentTool } from './research_agent.js';
 import { createCreateCanvasTool, getCreateCanvasTool } from './create_canvas.js';
 import { createReadCanvasTool, getReadCanvasTool } from './read_canvas.js';
@@ -75,6 +77,8 @@ import { createEditCanvasTool, getEditCanvasTool } from './edit_canvas.js';
 import { createFetchLinkContentTool, getFetchLinkContentTool } from './fetch_link_content.js';
 import { createCreatePptTool, getCreatePptTool } from './create_ppt/index.js';
 import { createFetchSkillInstructionsTool, getFetchSkillInstructionsTool } from './skills.js';
+import { createGetMemoriesTool, getGetMemoriesTool } from './get_memories.js';
+import { createUpdateMemoryTool, getUpdateMemoryTool } from './update_memory.js';
 
 import type { XyneAIAgentContext } from './types.js';
 
@@ -109,6 +113,9 @@ export { createXyneRcaTool, getXyneRcaTool };
 // Web Search
 export { createWebSearchTool, getWebSearchTool };
 
+// Deep Research
+export { createDeepResearchTool };
+
 // Research Agent
 export { createResearchAgentTool, getResearchAgentTool };
 
@@ -130,6 +137,12 @@ export { createCreatePptTool, getCreatePptTool };
 // Fetch Skill Instructions
 export { createFetchSkillInstructionsTool, getFetchSkillInstructionsTool };
 
+// Get Memories
+export { createGetMemoriesTool, getGetMemoriesTool };
+
+// Update Memory
+export { createUpdateMemoryTool, getUpdateMemoryTool };
+
 // ============================================================================
 // Get All Tools
 // ============================================================================
@@ -139,6 +152,7 @@ export { createFetchSkillInstructionsTool, getFetchSkillInstructionsTool };
  */
 export interface GetXyneAIToolsOptions {
   webSearchEnabled?: boolean;
+  deepResearchEnabled?: boolean;
   hasThreadContext?: boolean;
 }
 
@@ -151,7 +165,7 @@ export interface GetXyneAIToolsOptions {
  * @param options.hasThreadContext Whether to include the fetch_thread_messages tool (when conversationId is present)
  */
 export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneAIAgentContext>[] {
-  const { webSearchEnabled = false, hasThreadContext = false } = options || {};
+  const { webSearchEnabled = false, deepResearchEnabled = false, hasThreadContext = false } = options || {};
   
   const tools: Tool<any, XyneAIAgentContext>[] = [
     createFetchChannelMessagesTool(),
@@ -170,9 +184,12 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createFetchSkillInstructionsTool(),
   ];
 
-  // Add web search tool if runtime flag is true
-  if (webSearchEnabled) {
-    tools.push(createWebSearchTool());
+  // These 4 tools are purely dependent on XYNE_AI_EXTENDED_URL
+  if (config.xyneAiExtended.url) {
+    if (webSearchEnabled) tools.push(createWebSearchTool());
+    if (deepResearchEnabled) tools.push(createDeepResearchTool());
+    tools.push(createGetMemoriesTool());
+    tools.push(createUpdateMemoryTool());
   }
 
   // Add fetch_thread_messages tool if in thread context (conversationId is present)

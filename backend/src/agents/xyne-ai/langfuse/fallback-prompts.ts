@@ -158,6 +158,8 @@ PROVIDED CONTEXT - {{provided_context}}
 - "what did merchant-123 say about integration?" → search_meeting_insights(query="integration", merchants=["merchant-123"])
 - "meetings with john@example.com about pipeline" → search_meeting_insights(query="pipeline", participants=["john@example.com"])
 **IMPORTANT:** Always prefer this over <tool>search_relevant_messages</tool> when the question is about meetings, calls, or anything discussed in a recorded session.
+
+{{deep_research_tool_definition}}
 </tools_definition>
 
 <behavior_guidelines>
@@ -195,6 +197,7 @@ PROVIDED CONTEXT - {{provided_context}}
   - User asks for "technical writing" help and skill "Technical Writer" is enabled → Fetch skill instructions
   - User asks about "payment flows" and skill "Payment Expert" is enabled → Fetch skill instructions
 - **Multiple Skills:** If multiple skills seem relevant, fetch the most specific one first. If still unsure, fetch the first matching skill.
+{{deep_research_handling_instructions}}
 </behavior_guidelines>
 
 <user_tagging>
@@ -213,7 +216,7 @@ Put EXACT tool response in 'summary'. 'keypoints' MUST be '[]' and 'citations' M
 <research_module>
 ## RESEARCH (<tool>research_agent</tool>)
 Summarize findings concisely in 'summary' using markdown and code blocks. Focus on root cause/recommendations. 'keypoints' MUST be '[]' and 'citations' MUST be '{}'.
-</research_module
+</research_module>
 
 <create_ppt_module>
 ## CREATE PPT TOOL
@@ -239,6 +242,7 @@ Summarize findings concisely in 'summary' using markdown and code blocks. Focus 
 - NEVER put citations (e.g., '[A1]') inside 'keypoints' strings. Exactly ONE citation per keypoint index.
 
 {{web_search_citation_instructions}}
+{{deep_research_citation_instructions}}
 </formatting_and_citations>
 
 <few_shot_examples>
@@ -1355,6 +1359,47 @@ Use ONLY HTML tags. NEVER markdown syntax (**bold**, - item, \`code\`, ### headi
  * Map of prompt names to their fallback values
  * Uses exact prompt names as keys (same as PROMPT_NAMES values in prompts.ts)
  */
+/**
+ * Fallback description for get_memories tool
+ */
+const GET_MEMORIES_FALLBACK = `Retrieve all stored memories for the current user from the memory service.
+
+## When to use
+Use when the user asks about past preferences, personal context, or anything that may have been remembered in a previous session.
+
+## Parameters
+- **query** (required): A hint describing what you are looking for (e.g. "user's preferred language", "past meeting decisions"). All memories are returned regardless — use this to signal your intent.`;
+
+/**
+ * Fallback description for update_memory tool
+ */
+const UPDATE_MEMORY_FALLBACK = `Store a new memory for the current user in the memory service. Fire-and-forget — returns immediately.
+
+## When to use
+Use when the user shares a preference, decision, or fact that should be remembered for future sessions (e.g. "I prefer dark mode", "my timezone is IST").
+
+## Parameters
+- **content** (required): The information to remember, written as a clear factual statement`;
+
+/**
+ * Fallback description for deep_research tool
+ */
+const DEEP_RESEARCH_FALLBACK = `Perform comprehensive multi-step deep research on a complex topic.
+
+Use this tool when the user asks for:
+- In-depth research or analysis on a topic
+- Comprehensive reports synthesizing multiple sources
+- Detailed investigation requiring parallel web searches
+
+The tool generates sub-queries, runs parallel web searches, synthesizes findings into a report, and saves it to a canvas. Takes 1–10 minutes.
+
+Examples:
+- "Research the competitive landscape of fintech in India"
+- "Write a comprehensive analysis of LLM trends in 2024"
+- "Deep dive into microservices architecture patterns"
+
+Note: Use web_search for quick lookups. Use deep_research only for thorough, multi-source synthesis tasks.`;
+
 export const FALLBACK_PROMPTS: Record<string, string> = {
   'xyne-ai': XYNE_AI_SYSTEM_FALLBACK,
   'ask-ai-chat': XYNE_AI_CHAT_SYSTEM_FALLBACK,
@@ -1375,6 +1420,9 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'edit_canvas': EDIT_CANVAS_FALLBACK,
   'fetch_skill_instructions': FETCH_SKILL_INSTRUCTIONS_FALLBACK,
   'create_ppt': CREATE_PPT_FALLBACK,
+  'get_memories': GET_MEMORIES_FALLBACK,
+  'update_memory': UPDATE_MEMORY_FALLBACK,
+  'deep_research': DEEP_RESEARCH_FALLBACK,
   'ticket_description_cleaner': TICKET_DESCRIPTION_CLEANER_FALLBACK,
   'cluster_theme_single': CLUSTER_THEME_SINGLE_FALLBACK,
   'meta_theme_single': META_THEME_SINGLE_FALLBACK,

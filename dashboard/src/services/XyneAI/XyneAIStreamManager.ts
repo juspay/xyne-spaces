@@ -52,6 +52,7 @@ export interface StreamRequest {
   attachmentIds?: string[] | undefined;
   canvasViewAccessId?: string | null | undefined;
   webSearchEnabled: boolean;
+  deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -218,6 +219,7 @@ class XyneAIStreamManager {
             conversationId: record.sessionId,
             sessionId: record.sessionId,
             webSearchEnabled: record.webSearchEnabled,
+            deepResearchEnabled: record.deepResearchEnabled ?? false,
             researchContext: null,
             ...(record.attachments.length > 0 && {
               attachments: record.attachments.map(att => ({
@@ -689,6 +691,7 @@ class XyneAIStreamManager {
       request.query,
       request.channelIds,
       request.webSearchEnabled,
+      request.deepResearchEnabled ?? false,
       request.attachments,
       initialMessages,
     );
@@ -733,6 +736,7 @@ class XyneAIStreamManager {
           conversationId: request.threadConversationId || '',
           sessionId: request.conversationId,
           webSearchEnabled: request.webSearchEnabled,
+          deepResearchEnabled: request.deepResearchEnabled ?? false,
           researchContext: request.researchContext
             ? { type: request.researchContext.type, name: request.researchContext.name }
             : null,

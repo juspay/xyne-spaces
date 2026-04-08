@@ -48,11 +48,11 @@ function createModelProvider(apiKey: string) {
 // Agent Definition
 // ============================================================================
 
-function createXyneAIAgent(systemPrompt: string, webSearchEnabled?: boolean, hasThreadContext?: boolean): Agent<XyneAIAgentContext, string> {
+function createXyneAIAgent(systemPrompt: string, webSearchEnabled?: boolean, deepResearchEnabled?: boolean, hasThreadContext?: boolean): Agent<XyneAIAgentContext, string> {
   return {
     name: 'XyneAI',
     instructions: () => systemPrompt,
-    tools: getXyneAITools({ webSearchEnabled, hasThreadContext }),
+    tools: getXyneAITools({ webSearchEnabled, deepResearchEnabled, hasThreadContext }),
     modelConfig: {
       temperature: 0.3,
     },
@@ -93,6 +93,7 @@ async function buildAgentPrompt(
   userInfo?: UserInfo,
   channelNames?: string[],
   webSearchEnabled?: boolean,
+  deepResearchEnabled?: boolean,
   researchContext?: ResearchContext,
   researchOptions?: AvailableResearchOptions,
   customInstruction?: string,
@@ -110,7 +111,7 @@ async function buildAgentPrompt(
     userInfo,
     channelNames,
     webSearchEnabled,
-    researchContext,
+    deepResearchEnabled, researchContext,
     researchOptions,
     customInstruction,
     hasThreadContext,
@@ -270,6 +271,7 @@ export async function createAgentRunner(
     context.userInfo,
     channelNames,
     context.webSearchEnabled,
+    context.deepResearchEnabled,
     context.researchContext,
     researchOptions,
     context.customInstruction,
@@ -278,7 +280,7 @@ export async function createAgentRunner(
     context.agentPromptName,
     providedContexts
   );
-  const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, hasThreadContext);
+  const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, context.deepResearchEnabled, hasThreadContext);
   const agentRegistry = createAgentRegistry(agent);
   const runConfig = createRunConfig(agentRegistry, modelName, apiKey, onEvent);
   const initialState = createInitialState(enrichedContext, messages);

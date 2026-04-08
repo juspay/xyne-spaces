@@ -42,6 +42,7 @@ export interface XyneAIRequest {
   attachments?: AttachmentData[];
   userInfo?: UserInfo;
   webSearchEnabled?: boolean;  // Enable/disable web search tool
+  deepResearchEnabled?: boolean;  // Enable/disable deep research tool
   researchContext?: ResearchContext;
   messageAttachmentIds?: string[]; // Attachment IDs to fetch from GCS on backend
   parentMessageId?: string; // Parent message ID for branching (tree structure)

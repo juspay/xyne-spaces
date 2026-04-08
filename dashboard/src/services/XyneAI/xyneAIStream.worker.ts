@@ -18,6 +18,7 @@ export interface WorkerStartStreamMessage {
       conversationId: string;
       sessionId: string;
       webSearchEnabled: boolean;
+      deepResearchEnabled?: boolean;
       researchContext?: { type: string; name: string } | null;
       canvasViewAccessId?: string;
       messageAttachmentIds?: string[];
@@ -108,6 +109,7 @@ async function executeStream(
         conversation_id: requestBody.conversationId,
         session_id: requestBody.sessionId,
         web_search_enabled: requestBody.webSearchEnabled,
+        deep_research_enabled: requestBody.deepResearchEnabled ?? false,
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasViewAccessId && {
           canvas_view_access_id: requestBody.canvasViewAccessId,

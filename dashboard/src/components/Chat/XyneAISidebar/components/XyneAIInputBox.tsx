@@ -22,6 +22,7 @@ import {
   Ticket,
   Phone,
   Mic,
+  Microscope,
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -107,6 +108,9 @@ interface XyneAIInputBoxProps {
   webSearchEnabled?: boolean;
   webSearchAccessible?: boolean;
   onWebSearchToggle?: () => void;
+  deepResearchEnabled?: boolean;
+  deepResearchAccessible?: boolean;
+  onDeepResearchToggle?: () => void;
   createCanvasEnabled?: boolean;
   onCreateCanvasToggle?: () => void;
   onUserTagsChange?: (userTags: Record<string, UserTag>) => void;
@@ -170,6 +174,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       webSearchEnabled = false,
       webSearchAccessible = false,
       onWebSearchToggle,
+      deepResearchEnabled = false,
+      deepResearchAccessible = false,
+      onDeepResearchToggle,
       createCanvasEnabled = false,
       onCreateCanvasToggle,
       onUserTagsChange,
@@ -1563,6 +1570,46 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     data-track-metadata={JSON.stringify({ enabled: webSearchEnabled })}
                   >
                     <Globe className='w-4 h-4' />
+                  </button>
+                )}
+
+                {/* Divider line */}
+                {onDeepResearchToggle && <div className='h-4 w-px bg-muted' />}
+
+                {/* Deep Research Toggle Button */}
+                {onDeepResearchToggle && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      if (deepResearchAccessible) {
+                        onDeepResearchToggle();
+                      }
+                    }}
+                    disabled={!deepResearchAccessible}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      deepResearchEnabled
+                        ? 'bg-[#FFF3E0] text-[#E65100] hover:bg-[#FFE0B2]'
+                        : 'hover:bg-accent text-muted-foreground'
+                    } ${!deepResearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    aria-label={
+                      deepResearchAccessible
+                        ? deepResearchEnabled
+                          ? 'Disable deep research'
+                          : 'Enable deep research'
+                        : 'Deep research not available'
+                    }
+                    title={
+                      deepResearchAccessible
+                        ? deepResearchEnabled
+                          ? 'Deep research enabled'
+                          : 'Enable deep research'
+                        : "You don't have access to deep research."
+                    }
+                    data-track-category='XyneAI'
+                    data-track-name='TOGGLE_DEEP_RESEARCH'
+                    data-track-metadata={JSON.stringify({ enabled: deepResearchEnabled })}
+                  >
+                    <Microscope className='w-4 h-4' />
                   </button>
                 )}
 

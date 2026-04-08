@@ -72,6 +72,18 @@ export function getWebSearchEnabledTotal(): Counter {
   return _webSearchEnabledTotal;
 }
 
+// Deep Research Enabled Total Counter
+let _deepResearchEnabledTotal: Counter | null = null;
+export function getDeepResearchEnabledTotal(): Counter {
+  if (!_deepResearchEnabledTotal) {
+    _deepResearchEnabledTotal = getMeter().createCounter('deep_research_enabled_total', {
+      description: 'Total number of Ask AI queries submitted with deep research enabled',
+      unit: '1',
+    });
+  }
+  return _deepResearchEnabledTotal;
+}
+
 // Web Search Tool Used Total Counter
 let _webSearchToolUsedTotal: Counter | null = null;
 export function getWebSearchToolUsedTotal(): Counter {

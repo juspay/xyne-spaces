@@ -10,7 +10,8 @@ import {
   getAskAIQueryDuration,
   getAskAIContextChannels,
   getAskAIFeedbackTotal,
-  getWebSearchEnabledTotal
+  getWebSearchEnabledTotal,
+  getDeepResearchEnabledTotal
 } from '@/services/otel';
 import { researchAgentService } from '@/services/researchAgentService';
 
@@ -51,6 +52,7 @@ const XyneAIRequestSchema = z.object({
   selection_contexts: z.array(SelectionContextSchema).optional(), // Selected text contexts from canvases
   create_canvas_enabled: z.boolean().optional().default(false), // Enable create canvas instruction
   web_search_enabled: z.boolean().optional().default(false), // Enable/disable web search tool, defaults to false
+  deep_research_enabled: z.boolean().optional().default(false), // Enable/disable deep research tool, defaults to false
   research_context: ResearchContextSchema.optional().nullable(), // Selected product/repository from frontend
   attachments: z.array(z.object({
     data: z.string().min(1, 'Attachment data cannot be empty').refine(isValidBase64, {
@@ -106,7 +108,7 @@ export class XyneAIController {
       canvas_view_access_id,
       selection_contexts,
       create_canvas_enabled,
-      web_search_enabled,
+      web_search_enabled, deep_research_enabled,
       research_context,
       attachments,
       message_attachment_ids,
@@ -187,6 +189,7 @@ export class XyneAIController {
         attachments: attachments,
         userInfo,
         webSearchEnabled: web_search_enabled,
+        deepResearchEnabled: deep_research_enabled,
         researchContext: research_context || undefined,
         messageAttachmentIds: message_attachment_ids,
         canvasIds: canvas_ids || [],
@@ -203,6 +206,9 @@ export class XyneAIController {
       // Track web search query if enabled
       if (web_search_enabled) {
         getWebSearchEnabledTotal().add(1);
+      }
+      if (deep_research_enabled) {
+        getDeepResearchEnabledTotal().add(1);
       }
 
       const startTime = Date.now();
@@ -366,7 +372,126 @@ export class XyneAIController {
   };
 
   getConfig = async (_req: Request, res: Response): Promise<void> => {
-    res.json({ webSearchAccessible: !!config.webSearch.url });
+    res.json({
+      webSearchAccessible: !!config.xyneAiExtended.url,
+      deepResearchAccessible: !!config.xyneAiExtended.url,
+    });
+  };
+
+  /**
+   * GET /api/xyne-ai/memories
+   * Returns all memories stored for the current user in mem0.
+   */
+  getMemories = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const baseUrl = config.xyneAiExtended.url;
+    if (!baseUrl) {
+      res.json({ results: [] });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${baseUrl}/mem0/memories?user_id=${encodeURIComponent(userId)}`, {
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) {
+        res.status(response.status).json({ error: 'Failed to fetch memories' });
+        return;
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      logger.error('[XyneAI] Error fetching memories:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * DELETE /api/xyne-ai/memories/:id
+   * Deletes a single memory by ID from mem0.
+   */
+  deleteMemory = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { id } = req.params;
+    const baseUrl = config.xyneAiExtended.url;
+    if (!baseUrl) {
+      res.json({ success: true });
+      return;
+    }
+
+    try {
+      // Verify ownership before deleting
+      const getResponse = await fetch(`${baseUrl}/mem0/memories/${encodeURIComponent(id)}`, {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (getResponse.status === 404) {
+        res.status(404).json({ error: 'Memory not found' });
+        return;
+      }
+      if (getResponse.ok) {
+        const memory = await getResponse.json() as { user_id?: string };
+        if (memory.user_id && memory.user_id !== userId) {
+          res.status(403).json({ error: 'Forbidden' });
+          return;
+        }
+      }
+
+      const response = await fetch(`${baseUrl}/mem0/memories/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) {
+        res.status(response.status).json({ error: 'Failed to delete memory' });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('[XyneAI] Error deleting memory:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
+   * DELETE /api/xyne-ai/memories
+   * Deletes all memories for the current user from mem0.
+   */
+  clearMemories = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const baseUrl = config.xyneAiExtended.url;
+    if (!baseUrl) {
+      res.json({ success: true });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${baseUrl}/mem0/memories?user_id=${encodeURIComponent(userId)}`, {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) {
+        res.status(response.status).json({ error: 'Failed to clear memories' });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('[XyneAI] Error clearing memories:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   };
 
   private async streamResponse(

@@ -60,6 +60,7 @@ export interface XyneAIAgentContext {
   contextChannelMap?: Map<string, string>;  // Pre-computed channel name→ID map
   contextChannelIdToName?: Map<string, string>;
   webSearchEnabled?: boolean;  // Flag to enable/disable web search functionality
+  deepResearchEnabled?: boolean;  // Flag to enable/disable deep research functionality
   requestMappings?: {  // Request-scoped mappings from FVD tool
     channelNameToId: Map<string, string>;
     userNameToId: Map<string, string>;
@@ -235,6 +236,7 @@ export interface ToolDescriptions {
   xyne_rca: string;
   field_value_discovery: string;
   web_search: string;
+  deep_research: string;
   research_agent: string;
   create_canvas: string;
   read_canvas: string;
@@ -242,6 +244,8 @@ export interface ToolDescriptions {
   fetch_link_content: string;
   create_ppt: string;
   fetch_skill_instructions: string;
+  get_memories: string;
+  update_memory: string;
 }
 
 // ============================================================================
