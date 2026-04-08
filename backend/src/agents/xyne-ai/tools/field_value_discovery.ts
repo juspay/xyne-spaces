@@ -354,9 +354,9 @@ function formatFVDResult(response: FetchValidDimensionsResponse): string {
   if (foundItems.length > 0) {
     validationSummary += `\n\nAVAILABLE FOR USE: ${foundItems.map(c => `"${c}"`).join(', ')}`;
     if (response.field === 'channel') {
-      validationSummary += `\n   → You can search these channels. Use the channel NAMES (not IDs) in search_relevant_messages.`;
+      validationSummary += `\n   → You can search these channels. Use the channel NAMES (not IDs) in search_relevant_content.`;
     } else {
-      validationSummary += `\n   → You can filter by these usernames in search_relevant_messages.`;
+      validationSummary += `\n   → You can filter by these usernames in search_relevant_content.`;
     }
   }
 

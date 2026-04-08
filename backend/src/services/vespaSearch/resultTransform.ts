@@ -53,6 +53,7 @@ import { PrismaClient } from '@prisma/client';
        originalUrl?: string;
        xyneId?: string;
        subApp?: string;
+       callType?: string;
      };
      debugInfo?: {
        matchfeatures?: Record<string, any>;
@@ -408,7 +409,7 @@ import { PrismaClient } from '@prisma/client';
      } catch (error) {
        logger.warn('Invalid createdAt for attachment:', doc.docId, doc.createdAt);
      }
-   
+
      return {
        id: doc.docId,
        type: 'attachment',
@@ -430,6 +431,7 @@ import { PrismaClient } from '@prisma/client';
          channelId: doc.channelId,
          messageId: doc.messageId,
          ticketId: doc.ticketId,
+         callType: doc.callType,
        },
      };
    }

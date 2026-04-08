@@ -99,6 +99,7 @@ export interface ToolMessage {
   channelName: string;
   hasAttachment: boolean;
   isTicket?: boolean; // Indicates if this is a ticket citation
+  contentType?: 'message' | 'ticket' | 'canvas' | 'call' | 'recording'; // Content type for citation URL construction
 }
 
 // ============================================================================
@@ -220,6 +221,7 @@ export interface MessageMappings {
   isTicketMapping: Record<number, boolean>;  // messageIndex -> isTicket flag
   channelIdMapping: Record<number, string>;  // messageIndex -> channelId
   urlMapping: Record<number, string>;  // messageIndex -> URL from web search results
+  contentTypeMapping: Record<number, string>;  // messageIndex -> content type ('message' | 'ticket' | 'canvas' | 'call' | 'recording')
 }
 
 // ============================================================================
@@ -229,8 +231,7 @@ export interface MessageMappings {
 export interface ToolDescriptions {
   fetch_channel_messages: string;
   fetch_thread_messages: string;
-  search_relevant_messages: string;
-  search_relevant_tickets: string;
+  search_relevant_content: string;
   search_meeting_insights: string;
   genius: string;
   xyne_rca: string;

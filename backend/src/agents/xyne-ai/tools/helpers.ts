@@ -34,11 +34,10 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, fetchThread, searchMessages, searchTickets, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, deepResearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, fetchSkillInstructions, createPpt, searchMeetingInsights, getMemories, updateMemory] = await Promise.all([
+  const [fetchChannel, fetchThread, searchContent, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, deepResearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, fetchSkillInstructions, createPpt, searchMeetingInsights, getMemories, updateMemory] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
-    getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_MESSAGES),
-    getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_TICKETS),
+    getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_CONTENT),
     getPromptFromLangfuse(PROMPT_NAMES.GENIUS),
     getPromptFromLangfuse(PROMPT_NAMES.XYNE_RCA),
     getPromptFromLangfuse(PROMPT_NAMES.FIELD_VALUE_DISCOVERY),
@@ -59,8 +58,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
   const descriptions = {
     fetch_channel_messages: fetchChannel || 'Fetch messages from the current channel.',
     fetch_thread_messages: fetchThread || 'Fetch all content from the current thread including messages, attachments, and tickets.',
-    search_relevant_messages: searchMessages || 'Search for relevant messages in the channel.',
-    search_relevant_tickets: searchTickets || 'Search for relevant support tickets using semantic search.',
+    search_relevant_content: searchContent || 'Search for relevant content (messages, tickets, canvas, calls, recordings) using semantic search.',
     genius: geniusQuery || 'Query Genius for analytics and data insights.',
     xyne_rca: xyneRcaQuery || 'Query the Xyne RCA Agent for Root Cause Analysis of production issues and errors.',
     field_value_discovery: fieldValueDiscovery || 'Discover field values from data sources.',
@@ -77,7 +75,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     get_memories: getMemories || 'Search the user memory store for relevant past preferences, decisions, or facts.',
     update_memory: updateMemory || 'Store a new memory for the user. Fire-and-forget — returns immediately.',
   };
-  
+
   return descriptions;
 }
 
@@ -243,19 +241,23 @@ export function buildMessageMappings(result: ToolResult, urlMapping?: Record<num
   const isTicketMapping: Record<number, boolean> = {};
   const channelIdMapping: Record<number, string> = {};
   const finalUrlMapping: Record<number, string> = {};
+  const contentTypeMapping: Record<number, string> = {};
 
   for (const msg of result.messages) {
     messageIdMapping[msg.messageIndex] = msg.messageId;
     conversationIdMapping[msg.messageIndex] = msg.conversationId;
     isTicketMapping[msg.messageIndex] = msg.isTicket || false;
     channelIdMapping[msg.messageIndex] = msg.channelId;
+    if (msg.contentType) {
+      contentTypeMapping[msg.messageIndex] = msg.contentType;
+    }
     // Include URL from provided mapping if available
     if (urlMapping && urlMapping[msg.messageIndex]) {
       finalUrlMapping[msg.messageIndex] = urlMapping[msg.messageIndex];
     }
   }
-  
-  return { messageIdMapping, conversationIdMapping, isTicketMapping, channelIdMapping, urlMapping: finalUrlMapping };
+
+  return { messageIdMapping, conversationIdMapping, isTicketMapping, channelIdMapping, urlMapping: finalUrlMapping, contentTypeMapping };
 }
 
 /**
@@ -268,16 +270,36 @@ export function formatToolResultForContext(result: ToolResult, prefix: string): 
   }
 
   if (result.messages.length === 0) {
-    return 'No messages found.';
+    return 'No results found.';
   }
+
+  // Build a summary of counts per content type
+  const typeCounts: Record<string, number> = {};
+  for (const msg of result.messages) {
+    const type = msg.contentType || 'message';
+    typeCounts[type] = (typeCounts[type] || 0) + 1;
+  }
+  const typeLabels: Record<string, string> = {
+    message: 'message',
+    ticket: 'ticket',
+    canvas: 'canvas document',
+    call: 'call transcript',
+    recording: 'recording',
+  };
+  const summaryParts = Object.entries(typeCounts).map(([type, count]) => {
+    const label = typeLabels[type] || type;
+    return `${count} ${label}${count !== 1 ? 's' : ''}`;
+  });
+  const summary = summaryParts.join(', ');
 
   const formatted = result.messages.map(msg => {
     const attachmentNote = msg.hasAttachment ? ' [has attachment]' : '';
     const channelInfo = msg.channelName ? ` in **${msg.channelName}**` : '';
-    return `[${prefix}${msg.messageIndex}] ${msg.authorName} (${msg.timestamp})${channelInfo}${attachmentNote}:\n${msg.content}`;
+    const typeLabel = msg.contentType && msg.contentType !== 'message' ? ` [${typeLabels[msg.contentType] || msg.contentType}]` : '';
+    return `[${prefix}${msg.messageIndex}] ${msg.authorName} (${msg.timestamp})${channelInfo}${attachmentNote}${typeLabel}:\n${msg.content}`;
   }).join('\n\n');
 
-  return `Found ${result.messages.length} messages:\n\n${formatted}`;
+  return `Found ${summary}:\n\n${formatted}`;
 }
 
 // ============================================================================
