@@ -298,6 +298,9 @@ async function addChannelParticipantsBeforeMigration(
     const memberId = channelMemberIds[i];
     try {
       const userInfo = await getUserInfo(memberId, userInfoCache);
+      if (userInfo?.botId) {
+        continue;
+      }
       if (userInfo && (userInfo.userId || (userInfo.userEmail && userInfo.userName))) {
         let resolvedUserId = userInfo.userId;
         if (!resolvedUserId && userInfo.userEmail && userInfo.userName) {

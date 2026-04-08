@@ -63,6 +63,7 @@ export type UserInfoCache = Map<
     userName?: string;
     userId?: string;
     isDeactivated?: boolean;
+    botId?: string;
   }
 >;
 
@@ -271,6 +272,8 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
   userName?: string;
   userId?: string;
   isDeactivated?: boolean;
+  botId?: string;
+
 }> {
   if (cache.has(slackUID)) {
     return cache.get(slackUID)!;
@@ -306,6 +309,7 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
       userEmail: userInfo?.profile?.email,
       userName: userInfo?.profile?.real_name,
       isDeactivated: userInfo?.deleted,
+      botId: userInfo?.profile?.bot_id,
     };
     cache.set(slackUID, result);
     return result;
@@ -335,6 +339,7 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
     userEmail: userInfo.profile.email,
     userName: userInfo.profile.real_name,
     isDeactivated: userInfo.deleted,
+    botId: userInfo.profile?.bot_id,
   };
 
   cache.set(slackUID, result);

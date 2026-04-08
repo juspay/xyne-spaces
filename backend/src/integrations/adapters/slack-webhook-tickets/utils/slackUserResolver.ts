@@ -41,11 +41,13 @@ function buildMentionAttrs(
 
 export interface SlackUserInfo {
   id: string;
+  is_bot?: boolean;
   deleted?: boolean; 
   profile: {
     email?: string;
     real_name?: string;
     display_name?: string;
+    bot_id?: string;
   };
 }
 
