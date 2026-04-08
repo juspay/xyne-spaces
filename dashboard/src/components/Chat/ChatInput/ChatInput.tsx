@@ -105,6 +105,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       () => ({
         addFiles: (files: File[]) => inputBoxRef.current?.addFiles(files),
         clearContent: () => inputBoxRef.current?.clearContent(),
+        clearTextOnly: () => inputBoxRef.current?.clearTextOnly(),
         insertContent: (content: string) => inputBoxRef.current?.insertContent(content),
         isSuggestionOpen: () => inputBoxRef.current?.isSuggestionOpen() ?? false,
         focus: () => inputBoxRef.current?.focus(),
@@ -184,8 +185,8 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       setIsCreateTicketModalOpen(false);
       setTicketDescription('');
 
-      // Clear the chat input content after ticket creation
-      inputBoxRef.current?.clearContent();
+      // Clear only the text, not attachments (they've been transferred to the ticket)
+      inputBoxRef.current?.clearTextOnly();
     };
 
     useEffect(() => {

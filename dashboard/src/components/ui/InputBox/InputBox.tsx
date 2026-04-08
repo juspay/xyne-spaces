@@ -637,6 +637,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             void providerClearDroppedFiles(channelId, conversationId ?? null);
           }
         },
+        clearTextOnly: (): void => {
+          editor?.commands.setContent('');
+          setContent('');
+        },
         insertContent: (content: string): void => {
           editor?.commands.insertContent(content);
           editor?.commands.focus();

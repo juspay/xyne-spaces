@@ -1044,8 +1044,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           );
         });
       }
-      // Clear files after successful creation
-      void clearFiles();
 
       // Don't auto-close if part of a sequence - let the parent handle it
       if (!ticketSequence || ticketSequence.current === ticketSequence.total) {

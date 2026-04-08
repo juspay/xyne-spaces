@@ -5,6 +5,7 @@ import { usePlatform } from './usePlatform';
 export interface InputBoxHandle {
   addFiles: (files: File[]) => void;
   clearContent: () => void;
+  clearTextOnly: () => void;
   insertContent: (content: string) => void;
   isSuggestionOpen: () => boolean;
   focus: () => void;
