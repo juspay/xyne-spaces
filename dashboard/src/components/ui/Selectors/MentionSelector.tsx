@@ -77,7 +77,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
       const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\0');
 
       // Match pattern based on trigger character
-      const pattern = triggerChar === '#' ? /#([\w-]*)$/ : /@([\w\s]*)$/;
+      const pattern = triggerChar === '#' ? /#([\w-]*)$/ : /@([\w\s-]*)$/;
       const mentionMatch = textBefore.match(pattern);
 
       if (mentionMatch) {

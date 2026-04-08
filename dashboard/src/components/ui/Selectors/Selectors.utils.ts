@@ -51,11 +51,11 @@ export const detectTrigger = (editor: Editor, pattern: RegExp): TriggerMatch | n
 export const detectMentionTrigger = (editor: Editor): TriggerMatch | null => {
   const { from } = editor.state.selection;
   const textBefore = getTextBeforeCursor(editor);
-  const mentionMatch = textBefore.match(/(?:^|[\s\u200B])@([\w\s]*)$/);
+  const mentionMatch = textBefore.match(/(?:^|[\s\u200B])@([\w\s-]*)$/);
   // Close mention box if:
   // 1. Space comes immediately after @ (e.g., "@ ")
   // 2. Two consecutive spaces are encountered anywhere after @ (e.g., "@john  ")
-  if (textBefore.match(/@ $/) || textBefore.match(/@[\w\s]* {2}$/)) {
+  if (textBefore.match(/@ $/) || textBefore.match(/@[\w\s-]* {2}$/)) {
     return null;
   }
 
