@@ -125,6 +125,9 @@ export function parseSearchFilters(text: string) {
     searchText = searchText.replace(typeMatch[0], '').trim();
   }
 
+  // Strip from:/in:/assignee: and any trailing text (these are handled as MentionNodes, not text filters)
+  searchText = searchText.replace(/\b(from|in|assignee):\s*\S*/gi, '').trim();
+
   // Clean incomplete filter patterns
   searchText = searchText
     .replace(/\b(priority|board|tags|before|after|on|range|stage|status|type):\s*/gi, '')

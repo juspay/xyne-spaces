@@ -487,13 +487,13 @@ export function MentionPlugin({
         const textBeforeCursor = textContent.substring(0, cursorOffset);
 
         // Check for "from:" or "@" (user triggers)
-        const fromMatch = textBeforeCursor.match(/\bfrom:\s*(\S*)$/i);
+        const fromMatch = textBeforeCursor.match(/\bfrom:\s*(.*)$/i);
         const atMatch = textBeforeCursor.match(/@(\S*)$/);
 
-        const assigneeMatch = textBeforeCursor.match(/\bassignee:\s*(\S*)$/i);
+        const assigneeMatch = textBeforeCursor.match(/\bassignee:\s*(.*)$/i);
 
         // Check for "in:" or "#" (channel triggers)
-        const inMatch = textBeforeCursor.match(/\bin:\s*(\S*)$/i);
+        const inMatch = textBeforeCursor.match(/\bin:\s*(.*)$/i);
         const hashMatch = textBeforeCursor.match(/#(\S*)$/);
 
         let trigger: { type: TriggerType; text: string; query: string; index: number } | null =
@@ -536,7 +536,7 @@ export function MentionPlugin({
           };
         }
 
-        if (trigger && !trigger.query.includes(' ')) {
+        if (trigger) {
           setSearchTerm(trigger.query);
           setTriggerType(trigger.type);
           mentionStartOffset.current = trigger.index;
@@ -547,9 +547,9 @@ export function MentionPlugin({
 
           // Trigger search immediately when trigger is detected
           if (trigger.type === 'user' && onUserSearch) {
-            onUserSearch(trigger.query);
+            onUserSearch(trigger.query.trim());
           } else if (trigger.type === 'channel' && onChannelSearch) {
-            onChannelSearch(trigger.query);
+            onChannelSearch(trigger.query.trim());
           }
 
           return;
