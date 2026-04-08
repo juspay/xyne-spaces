@@ -1,4 +1,10 @@
+import { API_BASE_URL, isSandBox } from '../../config';
 import { apiInstance } from '../clients/apiClient';
+
+const JIRA_MIGRATION_BASE_URL = API_BASE_URL.replace(
+  /\/api$/,
+  isSandBox ? '/api/migration/jira' : '/migrate/api/migration/jira',
+);
 
 export interface JiraMigrationPreviewResponse {
   jiraProject: {
@@ -168,7 +174,7 @@ class JiraMigrationService {
     payload: JiraMigrationPreviewRequest,
   ): Promise<JiraMigrationPreviewResponse> {
     const response = await apiInstance.post<{ success: true; data: JiraMigrationPreviewResponse }>(
-      '/migration/jira/preview',
+      `${JIRA_MIGRATION_BASE_URL}/preview`,
       payload,
     );
 
@@ -177,7 +183,7 @@ class JiraMigrationService {
 
   async startMigration(payload: JiraMigrationExecuteRequest): Promise<JiraMigrationStartResponse> {
     const response = await apiInstance.post<{ success: true; data: JiraMigrationStartResponse }>(
-      '/migration/jira/execute',
+      `${JIRA_MIGRATION_BASE_URL}/execute`,
       payload,
     );
 
@@ -186,7 +192,7 @@ class JiraMigrationService {
 
   async getMigrationHistory(): Promise<JiraMigrationHistoryItem[]> {
     const response = await apiInstance.get<{ success: true; data: JiraMigrationHistoryItem[] }>(
-      '/migration/jira/history',
+      `${JIRA_MIGRATION_BASE_URL}/history`,
     );
 
     return response.data.data;
@@ -194,7 +200,7 @@ class JiraMigrationService {
 
   async getMigrationStatus(jobId: string): Promise<JiraMigrationJobProgress> {
     const response = await apiInstance.get<{ success: true; data: JiraMigrationJobProgress }>(
-      `/migration/jira/status/${jobId}`,
+      `${JIRA_MIGRATION_BASE_URL}/status/${jobId}`,
     );
 
     return response.data.data;
