@@ -145,6 +145,7 @@ const envSchema = Joi.object({
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
+  SUMMARISER_MODEL: Joi.string().default(''),
   JENKINS_WEBHOOK_SECRET: Joi.string().allow('').default(''),
   GITHUB_TOKEN: Joi.string().allow('').default(''),
   GITHUB_API_URL: Joi.string().uri().default(''),
@@ -300,6 +301,7 @@ export const config = {
   xyne: {
     apiKey: envVars.XYNE_API_KEY,
   },
+  summariserModel: envVars.SUMMARISER_MODEL,
   transcriptionAgentApiKey: envVars.TRANSCRIPTION_AGENT_API_KEY,
   bitbucket: {
     webhookSecret: envVars.SCM_WEBHOOK_SECRET,

@@ -22,7 +22,7 @@ import {
 } from '@xynehq/jaf';
 
 // Import config for environment variables
-import { config } from '../../config/env.js';
+import { config as envConfig } from '../../config/env.js';
 
 // Import langfuse for prompt management
 import { getPromptFromLangfuse, PROMPT_NAMES } from '../xyne-ai/langfuse/index.js';
@@ -36,10 +36,10 @@ export type { EnhancedEntityMetadata };
 // ============================================================================
 
 // LiteLLM proxy URL from environment
-const LITELLM_BASE_URL = config.litellm.baseUrl;
+const LITELLM_BASE_URL = envConfig.litellm.baseUrl;
 
 // LiteLLM API key from environment
-const LITELLM_API_KEY = config.litellm.apiKey;
+const LITELLM_API_KEY = envConfig.litellm.apiKey;
 
 // ============================================================================
 // Types
@@ -375,7 +375,7 @@ export async function* summarizeStream(
     agentRegistry,
     modelProvider: modelProvider as RunConfig<SummarizerContext>['modelProvider'],
     maxTurns: 3,
-    modelOverride: 'minimaxai/minimax-m2',
+    modelOverride: envConfig.summariserModel,
   };
 
   // Create initial state - uses unified Summarizer agent
@@ -562,7 +562,7 @@ export async function summarizeThread(
     agentRegistry,
     modelProvider: modelProvider as RunConfig<SummarizerContext>['modelProvider'],
     maxTurns: 3,
-    modelOverride: 'minimaxai/minimax-m2',
+    modelOverride: envConfig.summariserModel,
     onEvent,
   };
 
