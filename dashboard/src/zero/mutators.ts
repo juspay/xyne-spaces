@@ -198,11 +198,6 @@ export const mutators = defineMutators({
           throw new Error('Can only join public channels');
         }
 
-        const joiningUser = await tx.run(zql.users.where('id', _ctx.userID).one());
-        if (!joiningUser) {
-          throw new Error('Invalid user requesting to join');
-        }
-
         // Check if user is already a participant
         const existingParticipant = await tx.run(
           zql.channel_participants.where('channelId', channelId).where('userId', _ctx.userID).one(),
@@ -260,6 +255,11 @@ export const mutators = defineMutators({
             updatedAt: timestamp,
           });
         }
+
+        console.info('[ZeroMutator] joinChannel success', {
+          channelId,
+          userId: _ctx.userID,
+        });
       },
     ),
     promoteToChannel: defineMutator(

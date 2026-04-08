@@ -30,6 +30,7 @@ import {
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
 import { Virtuoso } from 'react-virtuoso';
+import { Skeleton } from '../../ui/Skeleton';
 import { extractUserMentions } from '../../../utils/mentionParser';
 import {
   PanelGroup,
@@ -288,7 +289,7 @@ const ActivityListView = (): ReactElement => {
   const [fetchCursor, setFetchCursor] = useState<ActivityCursor | null>(null);
   const [nextCursor, setNextCursor] = useState<ActivityCursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const activityLoadStartTimeRef = useRef<number | null>(null);
 
   // Reset pagination when tab changes
@@ -297,7 +298,7 @@ const ActivityListView = (): ReactElement => {
     setFetchCursor(null);
     setNextCursor(null);
     setHasMore(true);
-    setIsLoading(false);
+    setIsLoading(true);
     activityLoadStartTimeRef.current = Date.now();
   }, [activeTab]);
 
@@ -382,7 +383,7 @@ const ActivityListView = (): ReactElement => {
         updatedAt: lastItemOfPage.updatedAt ?? lastItemOfPage.createdAt,
       });
     }
-  }, [activitiesPage, activitiesDetails.type, fetchCursor]);
+  }, [activitiesPage, activitiesDetails.type, fetchCursor, activeTab]);
 
   // Scroll down - load older items (triggered ~20-25 items before end via overscan)
   const handleEndReached = useCallback(() => {
@@ -496,6 +497,27 @@ const ActivityListView = (): ReactElement => {
 
   const renderActivityList = (activityList: ActivityWithRelated[]): ReactElement => {
     const isExpanded = active === 'detailed';
+
+    // Show loading skeleton during initial load
+    if (isLoading && activityList.length === 0) {
+      return (
+        <div className='flex-1 flex flex-col px-4 py-4 gap-3 overflow-hidden'>
+          {Array.from({ length: 15 }).map((_, i) => (
+            <div key={i} className='flex items-start gap-3 py-2'>
+              <Skeleton className='h-8 w-8 rounded-full flex-shrink-0' />
+              <div className='flex-1 flex flex-col gap-2 min-w-0'>
+                <div className='flex items-center gap-2'>
+                  <Skeleton className='h-4 w-24' />
+                  <Skeleton className='h-3 w-16' />
+                </div>
+                <Skeleton className='h-3 w-full max-w-[300px]' />
+                <Skeleton className='h-3 w-3/4' />
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
 
     if (activityList.length > 0) {
       return (

@@ -10,6 +10,7 @@ import { jiraMigrationProgressService } from '@/services/jiraMigrationProgressSe
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { getCanvasUrl } from '@/services/canvasService';
+import { messageMetadataService } from '@/services/messageMetadataService';
 
 const db = DatabaseClient.getInstance();
 
@@ -492,6 +493,8 @@ export class JiraMigrationController {
         data: { lastActivityAt: now },
       });
     });
+
+    await messageMetadataService.syncInitialMessageMd(conversationId);
   }
 
   private async handleProgressUpdate(
