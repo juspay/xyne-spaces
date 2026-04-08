@@ -8,6 +8,7 @@ import fileRoutes from './files';
 import ticketRoutes from './ticket';
 import userRoutes from './user';
 import channelRoutes from './channel';
+import userGroupRoutes from './usergroups';
 import { authenticateApp } from '../middelware/authenticator';
 import { uploadMultiple } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
@@ -40,5 +41,8 @@ router.use('/user', authenticateApp, userRoutes);
 
 // Channel routes
 router.use('/channel', authenticateApp, channelRoutes);
+
+// User Group routes
+router.use('/usergroups', authenticateApp, userGroupRoutes);
 
 export default router;

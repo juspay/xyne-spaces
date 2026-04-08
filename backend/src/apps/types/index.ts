@@ -246,3 +246,17 @@ export interface UserResponse {
     status: string;
     joined: Date; 
 }
+
+/**
+ * User group data response for user groups API endpoint
+ */
+export interface UserGroupResponse {
+    id: string;
+    name: string;
+    alias: string | null;
+    description: string | null;
+    isActive: boolean;
+    memberCount: number;
+    createdAt: Date;
+    updatedAt: Date;
+}
