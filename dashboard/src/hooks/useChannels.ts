@@ -114,8 +114,9 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.createdAt === b?.createdAt &&
       a?.isArchived === b?.isArchived,
   );
-
-  return channel;
+  const visibleChannels = useAllVisibleChannels();
+  const visibleChannel = visibleChannels.find(c => c.id === channelId);
+  return channel || visibleChannel;
 };
 
 export const useVisibleChannel = (channelId: string): VisibleChannel | undefined => {
