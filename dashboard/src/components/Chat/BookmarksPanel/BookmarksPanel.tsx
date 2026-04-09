@@ -1,9 +1,10 @@
 import { ReactElement, useRef } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Bookmark, ArrowLeft } from 'lucide-react';
-import { useBookmarkGrouping } from '../../../hooks/useBookmarkGrouping';
 import { BookmarkItem } from '../BookmarkItem/BookmarkItem';
-import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
+import { VirtualizedList } from '../../VirtualizedList';
+import { queries } from '../../../zero/queries';
+import type { Bookmark as BookmarkType } from '@xyne/shared';
 import {
   PanelGroup,
   Panel,
@@ -19,11 +20,6 @@ const BookmarksPanel = (): ReactElement => {
   const isOnIndexRoute = location.pathname === '/chat/bookmarks';
 
   const bookmarksPanelRef = useRef<ImperativePanelHandle>(null);
-
-  const { bookmarks } = useUserBookmarks();
-
-  // Use shared hook for grouping and sorting
-  const { groupedBookmarks, sortedDateKeys } = useBookmarkGrouping(bookmarks || []);
 
   // Render the left panel content (exact same UI)
   const renderLeftPanel = (): ReactElement => (
@@ -49,38 +45,51 @@ const BookmarksPanel = (): ReactElement => {
 
       {/* Bookmarks List */}
       <div className='flex-1 overflow-y-auto'>
-        {!bookmarks || bookmarks.length === 0 ? (
-          <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
-            <Bookmark className='text-muted-foreground mb-4' size={48} />
-            <p className='text-muted-foreground text-lg font-medium mb-2'>No bookmarks yet</p>
-            <p className='text-muted-foreground text-sm max-w-md'>
-              Save messages for later by clicking the bookmark icon when you hover over a message
-            </p>
-          </div>
-        ) : (
-          <div>
-            {sortedDateKeys.map(dateKey => (
-              <div key={dateKey}>
-                {/* Bookmarks for this date */}
-                <div>
-                  {groupedBookmarks[dateKey]?.map(bookmark => (
-                    <BookmarkItem
-                      key={bookmark.id}
-                      bookmarkId={bookmark.id}
-                      entityId={bookmark.entityId}
-                      entityType={bookmark.entityType}
-                      createdAt={bookmark.createdAt}
-                      bookmarkMetadata={bookmark.metadata}
-                      showChannelName={true}
-                      enableSnooze={!isMobile}
-                      isMobile={isMobile}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        <VirtualizedList<BookmarkType, { id: string; createdAt: number }>
+          pagination={{
+            createQuery: ({ cursor }) =>
+              queries.userBookmarksPaginated({
+                limit: 25,
+                start: cursor,
+              }),
+            getCursor: bookmark => ({ id: bookmark.id, createdAt: bookmark.createdAt }),
+            getKey: bookmark => bookmark.id,
+            mergePages: (prev, next) => {
+              const map = new Map(prev.map(item => [item.id, item]));
+              for (const item of next) map.set(item.id, item);
+              return [...map.values()].sort(
+                (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+              );
+            },
+            windowSize: 25,
+            threshold: 10,
+            resetKey: 'bookmarks',
+          }}
+          renderItem={bookmark => (
+            <BookmarkItem
+              key={bookmark.id}
+              bookmarkId={bookmark.id}
+              entityId={bookmark.entityId}
+              entityType={bookmark.entityType}
+              createdAt={bookmark.createdAt}
+              bookmarkMetadata={bookmark.metadata}
+              showChannelName={true}
+              enableSnooze={!isMobile}
+              isMobile={isMobile}
+            />
+          )}
+          emptyState={
+            <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
+              <Bookmark className='text-muted-foreground mb-4' size={48} />
+              <p className='text-muted-foreground text-lg font-medium mb-2'>No bookmarks yet</p>
+              <p className='text-muted-foreground text-sm max-w-md'>
+                Save messages for later by clicking the bookmark icon when you hover over a message
+              </p>
+            </div>
+          }
+          className='h-full'
+          style={{ height: '100%' }}
+        />
       </div>
     </div>
   );
