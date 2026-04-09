@@ -86,8 +86,8 @@ const envSchema = Joi.object({
   ENABLE_TICKET_CLEANUP_WORKER: Joi.boolean().default(false),
   ENABLE_WORKER_SCHEDULER: Joi.boolean().default(true),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
-  RECAP_GENERATION_CRON: Joi.string().default(''),//5:45 IST daily
-  RECAP_CLEANUP_CRON: Joi.string().default(''),//5:00 IST daily
+  RECAP_GENERATION_CRON: Joi.string().default(''), //5:45 IST daily
+  RECAP_CLEANUP_CRON: Joi.string().default(''), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
   ACTIVITY_CLASSIFICATION_MAX_RETRIES: Joi.number().default(2),
   TICKET_DESC_CLEAN_MODEL: Joi.string().default(''),
@@ -102,6 +102,10 @@ const envSchema = Joi.object({
   GENIUS_API_URL: Joi.string().uri().default(''),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
   QUERY_ROUTING_KEY: Joi.string().allow('').default(''),
+  // UPI Analytics Bot API Configuration
+  GENIUS_UPI_ANALYTICS_API_URL: Joi.string().uri().default(''),
+  GENIUS_UPI_ANALYTICS_API_KEY: Joi.string().allow('').default(''),
+  GENIUS_UPI_ANALYTICS_USERNAME: Joi.string().allow('').default(''),
   // Xyne Investigation API Configuration
   XYNE_API_KEY: Joi.string().allow('').default(''),
   // Transcription Agent API Key (for S2S authentication)
@@ -114,7 +118,9 @@ const envSchema = Joi.object({
   SUPERPOSITION_POLLING_INTERVAL: Joi.number().default(60000), // 60 seconds in milliseconds
   SUPERPOSITION_TIMEOUT: Joi.number().default(30000), // 30 seconds in milliseconds
   // Jenkins Configuration
-  JENKINS_BASE_URL: Joi.string().uri().default(''),
+  JENKINS_BASE_URL: Joi.string()
+    .uri()
+    .default(''),
   JENKINS_JOB_PATH: Joi.string().default(''),
   JENKINS_USERNAME: Joi.string().allow('').default(''),
   JENKINS_API_TOKEN: Joi.string().allow('').default(''),
@@ -145,7 +151,9 @@ const envSchema = Joi.object({
   BITBUCKET_AUTH: Joi.string().allow('').default(''),
   BITBUCKET_SSH_BASE_URL: Joi.string().allow('').default(''),
   // Bitbucket Configuration
-  BITBUCKET_BASE_URL: Joi.string().allow('').default(''),
+  BITBUCKET_BASE_URL: Joi.string()
+    .allow('')
+    .default(''),
   BITBUCKET_USERNAME: Joi.string().allow('').default(''),
   BITBUCKET_PASSWORD: Joi.string().allow('').default(''),
   BITBUCKET_TOKEN: Joi.string().allow('').default(''),
@@ -258,8 +266,8 @@ export const config = {
   slackSigningSecret: envVars.SLACK_SIGNING_SECRET,
   slackMigrationApprovals: envVars.SLACK_MIGRATION_APPROVALS
     ? envVars.SLACK_MIGRATION_APPROVALS.split(',')
-      .map((id: string) => id.trim())
-      .filter(Boolean)
+        .map((id: string) => id.trim())
+        .filter(Boolean)
     : [],
   zoho: {
     autoWorkflowEnabled: envVars.ZOHO_AUTO_WORKFLOW_ENABLED,
@@ -306,6 +314,11 @@ export const config = {
     apiUrl: envVars.GENIUS_API_URL,
     apiKey: envVars.GENIUS_API_KEY,
     queryRoutingKey: envVars.QUERY_ROUTING_KEY,
+  },
+  geniusUpiAnalytics: {
+    apiUrl: envVars.GENIUS_UPI_ANALYTICS_API_URL,
+    apiKey: envVars.GENIUS_UPI_ANALYTICS_API_KEY,
+    username: envVars.GENIUS_UPI_ANALYTICS_USERNAME,
   },
   xyne: {
     apiKey: envVars.XYNE_API_KEY,

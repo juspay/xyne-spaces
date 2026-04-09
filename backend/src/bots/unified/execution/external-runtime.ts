@@ -21,8 +21,7 @@ import {
   isExternalBot,
 } from '../types/index.js';
 import { sseParserRegistry } from '../adapters/index.js';
-import {logger} from '@/utils/logger';
-
+import { logger } from '@/utils/logger';
 
 /**
  * External Bot Runtime
