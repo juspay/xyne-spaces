@@ -58,7 +58,7 @@ export const OpenIDEModal: React.FC<OpenIDEModalProps> = ({
   const { user } = useAuth();
 
   // Query all repos and filter by current user
-  const [allRepos] = useCachedQuery(queries.getAllRepos());
+  const [allRepos] = useCachedQuery(queries.getAllRepos(), { enabled: isOpen });
 
   const repos = useMemo(() => {
     if (!allRepos || !user?.id) return [];
