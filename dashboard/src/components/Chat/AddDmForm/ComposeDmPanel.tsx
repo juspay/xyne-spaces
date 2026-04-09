@@ -6,10 +6,11 @@ import { CircleAlert } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useUserSearch } from '../../../hooks/useUsers';
+import { useUserSearch, useUsers } from '../../../hooks/useUsers';
 import {
   EVENT_PROPERTIES,
   EVENTS,
@@ -24,7 +25,7 @@ import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import ChatListV2 from '../ChatList/ChatListV2';
 import { useExistingDmChannel } from './useExistingDmChannel';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
-import { useChannelSearch } from '../../../hooks/useChannels';
+import { useChannelSearch, useAllVisibleChannels } from '../../../hooks/useChannels';
 
 export interface CreateDmFormData {
   participants: User[];
@@ -39,6 +40,7 @@ export const ComposeDmPanel: React.FC = () => {
   const searchUserRef = useRef<HTMLInputElement>(null);
   const inputBoxRef = useRef<InputBoxHandle>(null);
   const context = useAuthContextValues();
+  const { user } = useAuth();
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
   const zero = useZero();
@@ -140,12 +142,86 @@ export const ComposeDmPanel: React.FC = () => {
   // Get users matching search query
   const searchResults = useUserSearch(searchValue, 10);
 
-  // Filter and map users to items
-  const filteredUsers = useMemo(() => {
-    if (!searchResults) return [];
+  // All workspace users and visible channels – used for conversation-history ordering
+  const allWorkspaceUsers = useUsers();
+  const visibleChannels = useAllVisibleChannels();
 
-    return searchResults.filter(user => user.id !== context.userID);
-  }, [searchResults, context.userID]);
+  // Build an ordered list of user IDs based on most-recently-active DM channels
+  // (same logic as useMentionSearch so CMD+N matches the behaviour of @mentions)
+  const cachedDMParticipants = useMemo(() => {
+    const currentUserId = user?.id;
+    const sortedDmChannels = visibleChannels
+      .filter(
+        ch => ch.scopeType === ChannelScopeType.DM || ch.scopeType === ChannelScopeType.GROUP_DM,
+      )
+      .sort(
+        (a, b) => (b.channelStats?.lastActivityAt || 0) - (a.channelStats?.lastActivityAt || 0),
+      );
+
+    const dmUserIds: string[] = [];
+    for (const ch of sortedDmChannels) {
+      if (dmUserIds.length >= 10) break;
+      for (const participantId of ch.name.split(',')) {
+        if (dmUserIds.length >= 10) break;
+        if (participantId !== currentUserId && !dmUserIds.includes(participantId)) {
+          dmUserIds.push(participantId);
+        }
+      }
+    }
+
+    if (dmUserIds.length > 0) return dmUserIds;
+
+    // No DM history – fall back to all workspace users (excluding self)
+    return allWorkspaceUsers.filter(u => u.id !== currentUserId).map(u => u.id);
+  }, [visibleChannels, user?.id, allWorkspaceUsers]);
+
+  // Build a lookup map for quick access by id
+  const usersById = useMemo(() => {
+    const map = new Map<string, User>();
+    for (const u of allWorkspaceUsers) {
+      map.set(u.id, u);
+    }
+    return map;
+  }, [allWorkspaceUsers]);
+
+  // Filter and map users to items, ordered by conversation history
+  const filteredUsers = useMemo(() => {
+    const currentUserId = context.userID;
+
+    if (!searchValue.trim()) {
+      // No search query: show users ordered by most-recently-active DM
+      return cachedDMParticipants
+        .filter(id => id !== currentUserId)
+        .map(id => usersById.get(id))
+        .filter((u): u is User => u !== undefined)
+        .slice(0, 10);
+    }
+
+    // With a search query: use Fuse results but put DM conversation partners first,
+    // ordered by most-recently-active DM (position in cachedDMParticipants).
+    // If Fuse returns nothing (e.g. query is too short for minMatchCharLength),
+    // fall back to a simple substring match so single-char queries still work.
+    const dmRank = new Map(cachedDMParticipants.map((id, idx) => [id, idx]));
+    const baseResults =
+      searchResults && searchResults.length > 0
+        ? searchResults
+        : Array.from(usersById.values()).filter(u => {
+            const q = searchValue.toLowerCase();
+            return (
+              u.name.toLowerCase().includes(q) ||
+              u.email.toLowerCase().includes(q) ||
+              (u.displayName?.toLowerCase() || '').includes(q)
+            );
+          });
+
+    return baseResults
+      .filter(user => user.id !== currentUserId)
+      .sort((a, b) => {
+        const rankA = dmRank.get(a.id) ?? Infinity;
+        const rankB = dmRank.get(b.id) ?? Infinity;
+        return rankA - rankB;
+      });
+  }, [searchResults, searchValue, context.userID, cachedDMParticipants, usersById]);
 
   // Build chat list props
   const chatListProps = useMemo(() => {
