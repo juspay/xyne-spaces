@@ -70,6 +70,7 @@ import { initializeRotationForGroup } from '@/utils/rotationEngine';
 import { livekitService } from '@/services/liveKitService';
 import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
+import { ticketAssignmentService } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
 import {
   executionOrchestrator,
@@ -137,6 +138,92 @@ async function reopenClosedDmParticipants(
       isClosed: false,
       updatedAt: timestamp,
     });
+  }
+}
+
+/**
+ * Handles the full-role-assignment path when a board has `fullRoleAssignment` enabled.
+ * Assigns MANAGER, TEAM_LEAD, MEMBER (Dev), PR_REVIEWER, QA into ticket_assignments,
+ * sets ticket.assignedTo = MEMBER, and optionally logs an activity + system message.
+ */
+async function assignFullRoles(
+  tx: Transaction<Schema>,
+  {
+    ticketId,
+    userGroupId,
+    boardId,
+    oldAssignedTo,
+    conversationId,
+    createdBy,
+    creatorName,
+    activityId,
+    messageId,
+    timestamp,
+  }: {
+    ticketId: string;
+    userGroupId: string;
+    boardId: string;
+    oldAssignedTo: string | null | undefined;
+    conversationId: string | null | undefined;
+    createdBy: string;
+    creatorName: string;
+    activityId?: string;
+    messageId?: string;
+    timestamp: number;
+  }
+): Promise<void> {
+  logger.info(`[AUTO-ASSIGN] Board ${boardId} has fullRoleAssignment enabled for ticket ${ticketId}`);
+
+  const fullResult = await ticketAssignmentService.assignFullRolesToTicket({
+    ticketId,
+    userGroupId,
+    boardId,
+    createdBy,
+  });
+
+  if (fullResult.member) {
+    await tx.mutate.tickets.update({
+      id: ticketId,
+      assignedTo: fullResult.member,
+      updatedBy: createdBy,
+      updatedAt: timestamp,
+    });
+
+    if (activityId) {
+      await tx.mutate.ticket_activities.insert({
+        id: activityId,
+        ticketId,
+        updatedBy: createdBy,
+        timestamp,
+        activityType: ActivityType.ASSIGNED_TO,
+        value: { oldValue: oldAssignedTo, newValue: fullResult.member },
+      });
+    }
+
+    if (messageId && conversationId) {
+      const assignedUser = await tx.run(zql.users.where('id', fullResult.member).one());
+      if (assignedUser) {
+        await tx.mutate.messages.insert({
+          messageId,
+          conversationId,
+          senderId: createdBy,
+          content: `${creatorName} auto-assigned ticket to ${assignedUser.name} (full role assignment)`,
+          msgType: MessageType.SYSTEM,
+          hasAttachment: false,
+          edited: false,
+          isDeleted: false,
+          isSent: true,
+          showInChannel: false,
+          createdAt: timestamp,
+          metadata: {
+            activityType: ActivityType.ASSIGNED_TO,
+            isTicketActivity: true,
+          },
+        });
+      }
+    }
+
+    logger.info(`[AUTO-ASSIGN] Full role assignment complete for ticket ${ticketId}`);
   }
 }
 
@@ -4045,22 +4132,35 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 try {
                   logger.info(`[MUTATOR-TICKET-UPDATE] Board changed from ${oldBoardId} to ${params.boardId}, retriggering autoassignment for userGroupId: ${ticket.userGroupId}`);
 
-                  const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId, params.boardId!);
+                  const newBoardId = params.boardId!;
+                  const boardRow = await tx.run(zql.boards.where('id', newBoardId).one());
+                  const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
 
-                  if (assignmentResult.assignedUserId) {
-                    logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
-
-                    // Update the ticket with the auto-assigned user using tx.mutate
-                    await tx.mutate.tickets.update({
-                      id: params.id,
-                      assignedTo: assignmentResult.assignedUserId,
-                      updatedAt: Date.now(),
-                      updatedBy: authData.sub,
+                  if (boardMetadata?.fullRoleAssignment === true) {
+                    await assignFullRoles(tx, {
+                      ticketId: params.id,
+                      userGroupId: ticket.userGroupId!,
+                      boardId: newBoardId,
+                      oldAssignedTo: ticket.assignedTo,
+                      conversationId: null,
+                      createdBy: authData.sub,
+                      creatorName: authData.name,
+                      timestamp: Date.now(),
                     });
-
-                    // Sync workload for new assigned user with new board
-                    const newBoardId = params.boardId!;
-                    await syncUserWorkloadMapping(tx, assignmentResult.assignedUserId, { userGroupId: ticket.userGroupId, boardId: newBoardId }, authData.sub);
+                  } else {
+                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId);
+                    if (assignmentResult.assignedUserId) {
+                      logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
+                      
+                      // Update the ticket with the auto-assigned user using tx.mutate
+                      await tx.mutate.tickets.update({
+                        id: params.id,
+                        assignedTo: assignmentResult.assignedUserId,
+                        updatedAt: Date.now(),
+                        updatedBy: authData.sub,
+                      });
+                      await syncUserWorkloadMapping(tx, assignmentResult.assignedUserId, { userGroupId: ticket.userGroupId!, boardId: newBoardId }, authData.sub);
+                    }
                   }
                 } catch (error) {
                   console.error(`[MUTATOR-TICKET-UPDATE] Failed to retrigger autoassignment for board change:`, error);
@@ -4302,6 +4402,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             const activityId = uuidv4();
             const messageId = uuidv4();
             const timestamp = params.updatedAt;
+            const creatorName = authData.name;
             // Use the new board if changed, otherwise use existing board
             const targetBoardId = params.boardId !== undefined ? params.boardId : ticket.boardId;
 
@@ -4313,6 +4414,23 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   return;
                 }
 
+                const boardRow = await tx.run(zql.boards.where('id', targetBoardId).one());
+                const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
+
+                if (boardMetadata?.fullRoleAssignment === true) {
+                  await assignFullRoles(tx, {
+                    ticketId: params.id,
+                    userGroupId: params.userGroupId!,
+                    boardId: targetBoardId,
+                    oldAssignedTo: ticket.assignedTo,
+                    conversationId: ticket.conversationId,
+                    createdBy: authData.sub,
+                    creatorName,
+                    activityId,
+                    messageId,
+                    timestamp,
+                  });
+                } else {
                 const assignmentResult = await evaluateAssignmentRule(
                   params.userGroupId!,
                   targetBoardId,
@@ -4339,15 +4457,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
                   // Create system message if conversation exists
                   if (ticket.conversationId) {
-                    const user = await tx.run(zql.users.where('id', authData.sub).one());
                     const assignedUser = await tx.run(zql.users.where('id', assignmentResult.assignedUserId).one());
-
-                    if (user && assignedUser) {
+                    if (assignedUser) {
                       await tx.mutate.messages.insert({
-                        messageId: messageId,
+                        messageId,
                         conversationId: ticket.conversationId,
                         senderId: authData.sub,
-                        content: `${user.name} auto-assigned ticket to ${assignedUser.name}`,
+                        content: `${creatorName} auto-assigned ticket to ${assignedUser.name}`,
                         msgType: MessageType.SYSTEM,
                         hasAttachment: false,
                         edited: false,
@@ -4362,18 +4478,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       });
                     }
                   }
-
-                  // Sync workload mapping using Prisma (like Zoho tickets do)
-                  await syncUserWorkload(
-                    assignmentResult.assignedUserId,
-                    params.userGroupId!,
-                    targetBoardId,
-                    authData.sub
-                  );
+                    // Sync workload mapping using Prisma (like Zoho tickets do)
+                    await syncUserWorkload(assignmentResult.assignedUserId, params.userGroupId!, targetBoardId, authData.sub);
 
                   logger.info(`[AUTO-ASSIGN] Ticket ${params.id} assigned to ${assignmentResult.assignedUserId} (group change)`);
                 } else {
                   logger.info(`[AUTO-ASSIGN] No user assigned for ticket ${params.id}. Reason: ${assignmentResult.reason}`);
+                  }
                 }
               } catch (error) {
                 logger.error(`[AUTO-ASSIGN] Failed to auto-assign ticket ${params.id}:`, error);

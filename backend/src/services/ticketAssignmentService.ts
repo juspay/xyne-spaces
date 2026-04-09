@@ -1,11 +1,22 @@
 import { DatabaseClient } from '@/database/client';
-import { TicketStatusV2 } from '@prisma/client';
+import { TicketStatusV2, UserResponsibility } from '@prisma/client';
+import { evaluateAllRoles } from '@/utils/assignmentEngine';
+import { logger } from '@/utils/logger';
+import { syncUserWorkload } from '@/utils/workloadUtils';
 
 const prisma = DatabaseClient.getInstance();
 
 interface AssignmentResult {
   assignedUserId: string;
   reason: string;
+}
+
+export interface FullRoleAssignmentResult {
+  manager?: string;
+  teamLead?: string;
+  member?: string;
+  prReviewer?: string;
+  qa?: string;
 }
 
 /**
@@ -131,6 +142,67 @@ export class TicketAssignmentService {
     }));
 
     return usersWithWorkload;
+  }
+
+  /**
+   * Full role assignment — assigns one user per role (MANAGER, TEAM_LEAD, MEMBER,
+   * PR_REVIEWER, QA) into the ticket_assignments table when the board has
+   * fullRoleAssignment enabled.
+   *
+   * Also returns the MEMBER userId so the caller can set ticket.assignedTo.
+   */
+  async assignFullRolesToTicket(params: {
+    ticketId: string;
+    userGroupId: string;
+    boardId: string;
+    createdBy: string;
+  }): Promise<FullRoleAssignmentResult> {
+    const { ticketId, userGroupId, boardId, createdBy } = params;
+
+    const allRoles = await evaluateAllRoles(userGroupId, boardId);
+
+    // upsert into ticket_assignments + sync workload for one resolved role
+    const persist = async (
+      userId: string,
+      responsibility: UserResponsibility,
+    ): Promise<string> => {
+      await prisma.ticketAssignment.upsert({
+        where: {
+          ticketId_userId_userResponsibility: { ticketId, userId, userResponsibility: responsibility },
+        },
+        update: {},
+        create: { ticketId, userId, userResponsibility: responsibility, createdBy },
+      });
+      await syncUserWorkload(userId, userGroupId, boardId, createdBy);
+      logger.info(`[FULL-ROLE-ASSIGN] Assigned ${responsibility} → ${userId} for ticket ${ticketId}`);
+      return userId;
+    };
+
+    const roleEntries: Array<{ userId: string | undefined; responsibility: UserResponsibility; key: keyof FullRoleAssignmentResult }> = [
+      { userId: allRoles.manager.assignedUserId,    responsibility: UserResponsibility.MANAGER,     key: 'manager' },
+      { userId: allRoles.teamLead.assignedUserId,   responsibility: UserResponsibility.TEAM_LEAD,   key: 'teamLead' },
+      { userId: allRoles.member.assignedUserId,     responsibility: UserResponsibility.MEMBER,      key: 'member' },
+      { userId: allRoles.prReviewer.assignedUserId, responsibility: UserResponsibility.PR_REVIEWER, key: 'prReviewer' },
+      { userId: allRoles.qa.assignedUserId,         responsibility: UserResponsibility.QA,          key: 'qa' },
+    ];
+
+    const result: FullRoleAssignmentResult = {};
+
+    await Promise.all(
+      roleEntries.map(async ({ userId, responsibility, key }) => {
+        if (!userId) {
+          logger.info(`[FULL-ROLE-ASSIGN] No candidate for ${responsibility} on ticket ${ticketId}`);
+          return;
+        }
+        try {
+          result[key] = await persist(userId, responsibility);
+        } catch (err) {
+          logger.error(`[FULL-ROLE-ASSIGN] Failed to persist ${responsibility} for ticket ${ticketId}:`, err);
+        }
+      }),
+    );
+
+    return result;
   }
 }
 

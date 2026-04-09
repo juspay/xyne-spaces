@@ -6,6 +6,12 @@ import { TicketPriority } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
+import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import { DatabaseClient } from '@/database/client';
+import type { BoardMetadata } from '@xyne/shared';
+import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+
+const prismaClient = DatabaseClient.getInstance();
 
 const CreateTicketBodySchema = z.object({
   title: z.string().min(1, 'Title is required').trim(),
@@ -112,11 +118,21 @@ export class TicketController {
       }
 
       let resolvedAssignedTo = assignedTo;
+      let pendingFullRoleAssignment = false;
+
       if (userGroupId && !assignedTo) {
         try {
+          const boardRow = await prismaClient.board.findUnique({ where: { id: boardId }, select: { metadata: true } });
+          const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
+
+          if (boardMetadata?.fullRoleAssignment === true) {
+            // Full role assignment will be done after ticket creation
+            pendingFullRoleAssignment = true;
+          } else {
           const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId);
           if (assignmentResult.assignedUserId) {
             resolvedAssignedTo = assignmentResult.assignedUserId;
+            }
           }
         } catch (error) {
           logger.error('[Apps Ticket Creation] Error during auto-assignment:', error);
@@ -136,6 +152,26 @@ export class TicketController {
         userGroupId,
         text,
       });
+
+      if (pendingFullRoleAssignment && userGroupId && result.ticketId) {
+        try {
+          const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
+            ticketId: result.ticketId,
+            userGroupId,
+            boardId,
+            createdBy: userId,
+          });
+          if (fullRoles.member) {
+            const updatedTicket = await prismaClient.ticket.update({
+              where: { id: result.ticketId },
+              data: { assignedTo: fullRoles.member },
+            });
+            await syncConversationTicketMdFromPrismaTicket(prismaClient, updatedTicket);
+          }
+        } catch (error) {
+          logger.error('[Apps Ticket Creation] Error during full role assignment:', error);
+        }
+      }
 
       res.status(201).json(result);
     } catch (error) {

@@ -388,6 +388,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       .filter(Boolean) || [];
 
   const qaId = ticketAssignments?.find(a => a.userResponsibility === 'QA')?.userId || null;
+  const managerId =
+    ticketAssignments?.find(a => a.userResponsibility === 'MANAGER')?.userId || null;
   // Check if description needs truncation by comparing scrollHeight with clientHeight
   useEffect(() => {
     if (!descriptionRef.current || showFullDescription) return;
@@ -1839,6 +1841,27 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 />
               }
             />
+
+            {/* Manager - Only show if assigned */}
+            {managerId && (
+              <TicketKeyValuePair
+                ticketKey='Manager'
+                value={
+                  <div className='flex items-center gap-2'>
+                    <UserAvatar
+                      userId={managerId}
+                      size={AvatarSize.SM}
+                      shape={AvatarShape.CIRCULAR}
+                      showActiveStatus={false}
+                    />
+                    <span className='text-sm text-foreground'>
+                      {users?.find((u: { id: string; name: string }) => u.id === managerId)?.name ||
+                        'Unknown'}
+                    </span>
+                  </div>
+                }
+              />
+            )}
 
             {/* PR Reviewers - Only show if assigned */}
             {prReviewerIds && prReviewerIds.length > 0 && (

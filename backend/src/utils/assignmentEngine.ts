@@ -25,6 +25,9 @@ export interface AssignmentCandidate {
  */
 export enum AssignmentType {
   TICKET_ASSIGNEE = 'TICKET_ASSIGNEE',  // For ticket.assignedTo field - everyone EXCEPT QA (MANAGER, TEAM_LEAD, MEMBER, PR_REVIEWER)
+  MANAGER = 'MANAGER',                   // Only MANAGER responsibility
+  TEAM_LEAD = 'TEAM_LEAD',               // Only TEAM_LEAD responsibility
+  MEMBER = 'MEMBER',                     // Only MEMBER (Dev) responsibility
   PR_REVIEWER = 'PR_REVIEWER',           // For ticket.prReviewerId field - only PR_REVIEWER
   QA = 'QA',                             // For ticket.qaId field - only QA
 }
@@ -44,6 +47,16 @@ function filterUsersByResponsibility(
         case AssignmentType.TICKET_ASSIGNEE:
           // Everyone EXCEPT QA can be assigned regular tickets (assignedTo field)
           return responsibility !== 'QA';
+
+        case AssignmentType.MANAGER:
+          return responsibility === 'MANAGER';
+
+        case AssignmentType.TEAM_LEAD:
+          return responsibility === 'TEAM_LEAD';
+
+        case AssignmentType.MEMBER:
+          return responsibility === 'MEMBER';
+
         
         case AssignmentType.PR_REVIEWER:
           // Only PR_REVIEWER can be assigned for PR review
@@ -401,4 +414,220 @@ export async function evaluateAssignmentRule(
   logger.info(`[Assignment] Selected userId: ${selectedUser.userId} with score: ${selectedUser.score.toFixed(2)}`);
 
   return { assignedUserId: selectedUser.userId };
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface AllRolesResult {
+  manager:    AssignmentResult;
+  teamLead:   AssignmentResult;
+  member:     AssignmentResult;
+  prReviewer: AssignmentResult;
+  qa:         AssignmentResult;
+}
+
+// ─── Shared context fetched once ─────────────────────────────────────────────
+
+interface SharedContext {
+  userGroupMappings:      UserGroupMapping[];
+  userStates:             UserAssignmentState[];
+  userStateMap:           Map<string, UserAssignmentState>;
+  expertiseMappings:      UserExpertiseMapping[];
+  allWorkloadMappings:    UserWorkloadMapping[];
+  boardWeightMap:         Map<string, number>;
+  workloadsByUserId:      Map<string, UserWorkloadMapping[]>;
+  workloadByUserAndBoard: Map<string, UserWorkloadMapping>;
+  expertiseMap:           Map<string, UserExpertiseMapping>;
+  totalTicketsOnBoard:    number;
+}
+
+/**
+ * Score a pool of userIds against pre-fetched shared context.
+ * Exact same scoring/fallback logic as evaluateAssignmentRule — no behaviour change.
+ */
+function pickBest(
+  userIds: string[],
+  assignmentType: AssignmentType,
+  ctx: SharedContext,
+  boardId: string,
+  excludeUserId?: string,
+): AssignmentResult {
+  const { userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, totalTicketsOnBoard } = ctx;
+
+  const getUserState   = (id: string) => userStateMap.get(id);
+  const hasExpertise   = (id: string) => expertiseMap.get(id)?.hasExpertise === true;
+
+  // Build workloadMap for this role's userIds using pre-computed workloadsByUserId
+  const workloadMap = new Map<string, number>();
+  for (const userId of userIds) {
+    const userMappings = workloadsByUserId.get(userId) ?? [];
+    let weighted = 0;
+    for (const m of userMappings) {
+      weighted += m.activeTasks * (boardWeightMap.get(m.boardId) ?? 1);
+    }
+    workloadMap.set(userId, weighted);
+  }
+
+  // 4-level availability fallback — single pass, pick highest non-empty tier
+  // Tier 1: on-call + active + expertise  (best)
+  // Tier 2: on-call + active
+  // Tier 3: active + expertise
+  // Tier 4: active only                   (minimum bar)
+  const t1: string[] = [], t2: string[] = [], t3: string[] = [], t4: string[] = [];
+  for (const id of userIds) {
+    const s = getUserState(id);
+    if (s?.isActiveForAssignment !== true) continue;
+    const onCall  = s.onCall === true;
+    const expert  = hasExpertise(id);
+    if (onCall && expert)  { t1.push(id); continue; }
+    if (onCall)            { t2.push(id); continue; }
+    if (expert)            { t3.push(id); continue; }
+    t4.push(id);
+  }
+  const eligible = t1.length ? t1 : t2.length ? t2 : t3.length ? t3 : t4;
+  if (eligible.length === 0) {
+    return { reason: 'NO_ON_CALL_USERS' };
+  }
+
+  const finalEligible = (expertiseMappings.length > 0)
+    ? eligible.slice().sort((a, b) => (hasExpertise(b) ? 1 : 0) - (hasExpertise(a) ? 1 : 0))
+    : eligible;
+
+  // Score candidates
+  const score = (userId: string): AssignmentCandidate => {
+    const weightedActiveTasks = workloadMap.get(userId) ?? 0;
+    const em            = expertiseMap.get(userId);
+    const expert        = em?.hasExpertise === true;
+    const percentage    = em?.percentage ?? 100;
+    const maxTickets    = em?.maxTickets ?? -1;
+    const userWorkload  = workloadByUserAndBoard.get(`${userId}#${boardId}`);
+    const userTickets   = userWorkload?.activeTasks ?? 0;
+    const currentPct    = totalTicketsOnBoard > 0 ? (userTickets / totalTicketsOnBoard) * 100 : 0;
+    const percentDiff   = percentage - currentPct;
+    const expertBonus   = expert ? 10 : 0;
+    return {
+      userId,
+      score: weightedActiveTasks - expertBonus - percentDiff,
+      details: { weightedActiveTasks, expertBonus, hasExpertise: expert, percentage, maxTickets, userTickets, currentPct, percentDiff },
+    };
+  };
+
+  const selectFrom = (candidates: AssignmentCandidate[]): AssignmentResult => {
+    candidates.sort((a, b) => a.score - b.score);
+    let excluded: AssignmentCandidate | undefined;
+    for (const c of candidates) {
+      const { maxTickets, userTickets } = c.details ?? {};
+      if (typeof maxTickets === 'number' && maxTickets >= 0 && (userTickets ?? 0) > maxTickets) continue;
+      if (assignmentType === AssignmentType.PR_REVIEWER && excludeUserId && c.userId === excludeUserId) {
+        excluded = c;
+        continue;
+      }
+      return { assignedUserId: c.userId };
+    }
+    if (excluded) return { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' };
+    return { reason: 'NO_ON_CALL_USERS' };
+  };
+
+  return selectFrom(finalEligible.map(score));
+}
+
+/**
+ * Evaluates all 5 roles (MANAGER, TEAM_LEAD, MEMBER, PR_REVIEWER, QA) for a
+ * given user group + board in a single DB round-trip.
+ *
+ * Shared data (userGroupMappings, userStates, expertiseMappings, workloadMappings,
+ * boardComplexityScores) is fetched once and reused across all role pools.
+ * Per-role scoring logic is identical to evaluateAssignmentRule — no behaviour change.
+ *
+ * PR_REVIEWER exclusion: member's userId is excluded from PR_REVIEWER pool to
+ * prevent self-review (same as calling evaluateAssignmentRule 5× sequentially).
+ */
+export async function evaluateAllRoles(
+  userGroupId: string,
+  boardId: string,
+): Promise<AllRolesResult> {
+  logger.info(`[Assignment] evaluateAllRoles for userGroupId: ${userGroupId}, boardId: ${boardId}`);
+
+  // ── Single round of DB fetches ─────────────────────────────────────────────
+  const userGroupMappings = await repositories.userGroupMapping.findMany({ where: { userGroupId } });
+
+  if (userGroupMappings.length === 0) {
+    const empty: AssignmentResult = { reason: 'NO_ON_CALL_USERS' };
+    return { manager: empty, teamLead: empty, member: empty, prReviewer: empty, qa: empty };
+  }
+
+  const allUserIds = userGroupMappings.map(m => m.userId);
+
+  const [userStates, expertiseMappings, allWorkloadMappings, allBoardScores] = await Promise.all([
+    repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
+    repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
+    repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
+  ]);
+
+  const boardWeightMap = new Map<string, number>(allBoardScores.map(s => [s.boardId, s.weight]));
+  
+  // Pre-compute userStateMap for O(1) lookups across all 5 roles
+  const userStateMap = new Map<string, UserAssignmentState>(userStates.map(s => [s.userId, s]));
+  
+  // Pre-compute workloadsByUserId once for all roles
+  const workloadsByUserId = new Map<string, UserWorkloadMapping[]>();
+  for (const w of allWorkloadMappings) {
+    if (!workloadsByUserId.has(w.userId)) {
+      workloadsByUserId.set(w.userId, []);
+    }
+    workloadsByUserId.get(w.userId)!.push(w);
+  }
+  
+  // Pre-compute user+board workload lookup for O(1) access
+  const workloadByUserAndBoard = new Map<string, UserWorkloadMapping>();
+  for (const w of allWorkloadMappings) {
+    const key = `${w.userId}#${w.boardId}`;
+    workloadByUserAndBoard.set(key, w);
+  }
+  
+  // Pre-compute expertise lookup for O(1) access across all 5 roles
+  const expertiseMap = new Map<string, UserExpertiseMapping>(
+    expertiseMappings.map(e => [e.userId, e])
+  );
+  
+  const totalTicketsOnBoard = allWorkloadMappings
+    .filter(w => w.boardId === boardId)
+    .reduce((sum, w) => sum + (w.activeTasks ?? 0), 0);
+
+  const ctx: SharedContext = {
+    userGroupMappings,
+    userStates,
+    userStateMap,
+    expertiseMappings,
+    allWorkloadMappings,
+    boardWeightMap,
+    workloadsByUserId,
+    workloadByUserAndBoard,
+    expertiseMap,
+    totalTicketsOnBoard,
+  };
+
+  // ── Per-role pools ─────────────────────────────────────────────────────────
+  const poolFor = (type: AssignmentType) =>
+    filterUsersByResponsibility(userGroupMappings, type);
+
+  // Round 1: MANAGER, TEAM_LEAD, MEMBER, QA
+  const manager   = pickBest(poolFor(AssignmentType.MANAGER),   AssignmentType.MANAGER,   ctx, boardId);
+  const teamLead  = pickBest(poolFor(AssignmentType.TEAM_LEAD), AssignmentType.TEAM_LEAD, ctx, boardId);
+  const member    = pickBest(poolFor(AssignmentType.MEMBER),    AssignmentType.MEMBER,    ctx, boardId);
+  const qa        = pickBest(poolFor(AssignmentType.QA),        AssignmentType.QA,        ctx, boardId);
+
+  // Round 2: PR_REVIEWER — exclude MEMBER to prevent self-review
+  const prReviewer = pickBest(
+    poolFor(AssignmentType.PR_REVIEWER),
+    AssignmentType.PR_REVIEWER,
+    ctx,
+    boardId,
+    member.assignedUserId,
+  );
+
+  logger.info(`[Assignment] evaluateAllRoles results — manager:${manager.assignedUserId} teamLead:${teamLead.assignedUserId} member:${member.assignedUserId} prReviewer:${prReviewer.assignedUserId} qa:${qa.assignedUserId}`);
+
+  return { manager, teamLead, member, prReviewer, qa };
 }
