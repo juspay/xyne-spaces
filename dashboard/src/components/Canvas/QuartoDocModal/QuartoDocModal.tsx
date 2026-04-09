@@ -42,7 +42,7 @@ export const QuartoDocModal: React.FC<QuartoDocModalProps> = ({ isOpen, onClose 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
-  const [allRepos] = useCachedQuery(queries.getAllRepos());
+  const [allRepos] = useCachedQuery(queries.getAllRepos(), { enabled: isOpen });
 
   const userRepos = useMemo(() => {
     if (!allRepos || !user?.id) return [];
