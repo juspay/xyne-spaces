@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
 import Input from '../../components/ui/Input';
+import { Switch } from '../../components/ui/Switch';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useUsers } from '../../hooks/useUsers';
 import { useZero } from '../../hooks/useZero';
@@ -133,6 +134,8 @@ const CallHistoryScreen = (): ReactElement => {
     editModalOpen,
     editModalCall,
     closeEditModal,
+    showChannelCalls,
+    setShowChannelCalls,
   } = useCallHistory(user?.id);
 
   const zero = useZero();
@@ -658,6 +661,21 @@ const CallHistoryScreen = (): ReactElement => {
                     data-testid='user-search-input'
                   />
                 </div>
+                {activeTab === 'all' && (
+                  <div className='flex items-center gap-3 shrink-0'>
+                    <label
+                      htmlFor='channel-calls-toggle'
+                      className='text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
+                    >
+                      Show all calls in my channels
+                    </label>
+                    <Switch
+                      id='channel-calls-toggle'
+                      checked={showChannelCalls}
+                      onCheckedChange={setShowChannelCalls}
+                    />
+                  </div>
+                )}
                 {activeTab === 'upcoming' && (
                   <div className='flex items-center shrink-0 border border-border rounded-lg overflow-hidden'>
                     <button
