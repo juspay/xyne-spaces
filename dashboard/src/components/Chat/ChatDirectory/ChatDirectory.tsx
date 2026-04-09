@@ -28,6 +28,7 @@ import {
 } from '../../../services/Chat/channelService';
 import { AddDmForm, CreateDmFormData } from '../AddDmForm/AddDmForm';
 import AddChannelForm from '../AddChannelForm/AddChannelForm';
+import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import { useUnreadActivitiesCount } from '../../../hooks/useUnreadActivitiesCount';
 import Badge from '../../ui/Badge';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -66,6 +67,8 @@ const ChatDirectory = ({
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
+  const [newlyCreatedChannelId, setNewlyCreatedChannelId] = useState<string | null>(null);
 
   const { startWalkthrough } = useWalkthrough({
     feature: 'direct_messages',
@@ -84,6 +87,9 @@ const ChatDirectory = ({
       setShowAddChannelForm(false);
       // Navigate to the newly created channel
       void navigate(`/chat/dir/${response.id}`);
+      // Auto-open add people dialog after channel creation
+      setNewlyCreatedChannelId(response.id);
+      setShowAddPeopleDialog(true);
     },
   });
 
@@ -581,6 +587,20 @@ const ChatDirectory = ({
           />
         </div>
       </Dialog>
+
+      {newlyCreatedChannelId && (
+        <Dialog
+          open={showAddPeopleDialog}
+          onOpenChange={setShowAddPeopleDialog}
+          title='Add Members'
+        >
+          <AddPeopleForm
+            channelId={newlyCreatedChannelId}
+            onSuccess={() => setShowAddPeopleDialog(false)}
+            onCancel={() => setShowAddPeopleDialog(false)}
+          />
+        </Dialog>
+      )}
     </div>
   );
 
