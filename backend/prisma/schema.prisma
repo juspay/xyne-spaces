@@ -976,7 +976,7 @@ model UserGroupMapping {
   @@unique([userId, userGroupId])
   @@index([userId])
   @@index([userGroupId])
-  @@index([userGroupId, createdAt, id]) // for getUserGroupMembers
+  @@index([userGroupId, createdAt(sort: Desc), id(sort: Asc)]) // for getUserGroupMembers
   @@index([userGroupId, onCallSetNumber]) // for on-call rotation queries
   @@map("user_group_mappings")
   @@schema("public")
@@ -1510,7 +1510,7 @@ model Conversation {
   @@index([ticketId]) // Fast ticket lookup
   @@index([callId])
   @@index([conversationId, callId])
-  @@index([channelId, createdAt, conversationId])
+  @@index([channelId, createdAt(sort: Desc), conversationId(sort: Asc)])
   @@index([createdBy])
   @@index([initialMessageId])
   @@map("conversations")
