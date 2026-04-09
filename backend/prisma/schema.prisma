@@ -1512,6 +1512,7 @@ model Conversation {
   @@index([conversationId, callId])
   @@index([channelId, createdAt, conversationId])
   @@index([createdBy])
+  @@index([initialMessageId])
   @@map("conversations")
   @@schema("public")
 }

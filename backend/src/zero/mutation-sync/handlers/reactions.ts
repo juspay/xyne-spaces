@@ -34,11 +34,11 @@ async function syncInitialMessageMdAfterReaction(
   const message = await tx.run(zql.messages.where('messageId', messageId).one());
   if (!message) return;
 
-  const conversation = await tx.run(
-    zql.conversations.where('conversationId', message.conversationId).one()
+  const conversations = await tx.run(
+    zql.conversations.where('initialMessageId', message.messageId)
   );
 
-  if (!conversation || conversation.initialMessageId !== message.messageId) return;
+  if (conversations.length === 0) return;
 
   const summary: InitialMessageSummary = {
     messageId: message.messageId,
@@ -61,12 +61,14 @@ async function syncInitialMessageMdAfterReaction(
   };
 
   const md = serializeInitialMessageMd(summary);
-  if (conversation.initial_message_md === md) return;
 
-  await tx.mutate.conversations.update({
-    conversationId: conversation.conversationId,
-    initial_message_md: md,
-  });
+  for (const conversation of conversations) {
+    if (conversation.initial_message_md === md) continue;
+    await tx.mutate.conversations.update({
+      conversationId: conversation.conversationId,
+      initial_message_md: md,
+    });
+  }
 }
 
 async function handleReactionInsert(
