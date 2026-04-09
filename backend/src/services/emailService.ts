@@ -33,6 +33,8 @@ import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
 import { PrismaClient } from '@prisma/client';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
+import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import type { BoardMetadata } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
 import { workflowManager, WorkflowType } from '@/workflows';
@@ -393,6 +395,24 @@ export class EmailService {
     // Auto-assign ticket based on group and board
     if (groupId && boardId) {
       try {
+        const boardRow = await this.prisma.board.findUnique({ where: { id: boardId }, select: { metadata: true } });
+        const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
+
+        if (boardMetadata?.fullRoleAssignment === true) {
+          const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
+            ticketId: ticket.id,
+            userGroupId: groupId,
+            boardId,
+            createdBy: userId,
+          });
+          if (fullRoles.member) {
+            const updatedTicket = await this.prisma.ticket.update({
+              where: { id: ticket.id },
+              data: { assignedTo: fullRoles.member },
+            });
+            await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
+          }
+        } else {
         const assignmentResult = await evaluateAssignmentRule(groupId, boardId);
         if (assignmentResult.assignedUserId) {
           const updatedTicket = await this.prisma.ticket.update({
@@ -409,6 +429,7 @@ export class EmailService {
           } catch (workloadError) {
             logger.error('[EmailService] Error syncing workload:', workloadError);
             // Don't fail the assignment if workload sync fails
+            }
           }
         }
       } catch (error) {
@@ -733,6 +754,24 @@ export class EmailService {
     // Auto-assign ticket if userGroupId is provided
     if (userGroupId && boardId) {
       try {
+        const boardRow = await this.prisma.board.findUnique({ where: { id: boardId }, select: { metadata: true } });
+        const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
+
+        if (boardMetadata?.fullRoleAssignment === true) {
+          const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
+            ticketId: ticket.id,
+            userGroupId,
+            boardId,
+            createdBy: userId,
+          });
+          if (fullRoles.member) {
+            const updatedTicket = await this.prisma.ticket.update({
+              where: { id: ticket.id },
+              data: { assignedTo: fullRoles.member },
+            });
+            await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
+          }
+        } else {
         const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId);
         if (assignmentResult.assignedUserId) {
           const updatedTicket = await this.prisma.ticket.update({
@@ -747,6 +786,7 @@ export class EmailService {
             logger.info(`[EmailService] Synced workload for user ${assignmentResult.assignedUserId}`);
           } catch (workloadError) {
             logger.error('[EmailService] Error syncing workload:', workloadError);
+            }
           }
         }
       } catch (error) {

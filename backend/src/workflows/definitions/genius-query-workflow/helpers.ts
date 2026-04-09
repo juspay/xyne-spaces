@@ -27,6 +27,8 @@ import {
 import { DatabaseClient } from '@/database/client';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { syncUserWorkload } from '@/utils/workloadUtils';
+import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import type { BoardMetadata } from '@xyne/shared';
 import {logger} from '@/utils/logger';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
@@ -887,6 +889,28 @@ export const assignTicketByQueryType = async (
     if (!ticket || !ticket.boardId) {
       logger.warn(`[assignTicketByQueryType] Ticket or boardId not found for ticketId: ${ticketId}`);
       return { success: false, groupName };
+    }
+
+    // Check board toggle
+    const boardRow = await prisma.board.findUnique({ where: { id: ticket.boardId }, select: { metadata: true } });
+    const boardMetadata = boardRow?.metadata as BoardMetadata | undefined;
+
+    if (boardMetadata?.fullRoleAssignment === true) {
+      const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
+        ticketId,
+        userGroupId: userGroup.id,
+        boardId: ticket.boardId,
+        createdBy: userId,
+      });
+      // Update ticket group and assignedTo (member)
+      await prisma.ticket.update({
+        where: { id: ticketId },
+        data: {
+          userGroupId: userGroup.id,
+          ...(fullRoles.member && { assignedTo: fullRoles.member }),
+        },
+      });
+      return { success: true, assignedUserId: fullRoles.member, groupName };
     }
 
     // Call assignment engine

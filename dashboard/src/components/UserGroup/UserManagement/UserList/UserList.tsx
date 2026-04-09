@@ -47,7 +47,7 @@ export const UserList = ({
   const responsibilityOptions = [
     { label: 'Manager', value: UserResponsibility.MANAGER },
     { label: 'Team Lead', value: UserResponsibility.TEAM_LEAD },
-    { label: 'Member', value: UserResponsibility.MEMBER },
+    { label: 'Dev', value: UserResponsibility.MEMBER },
     { label: 'PR Reviewer', value: UserResponsibility.PR_REVIEWER },
     { label: 'QA', value: UserResponsibility.QA },
   ];

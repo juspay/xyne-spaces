@@ -120,6 +120,7 @@ const BoardStageConfigScreen = ({
   // ── Transfer Toggle State ────────────────────────────────────────────────────
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isAllowedToTransfer, setIsAllowedToTransfer] = useState(false);
+  const [fullRoleAssignment, setFullRoleAssignment] = useState(false);
 
   // ── Local state ─────────────────────────────────────────────────────────────
   // Default stages for new boards (when no stages exist)
@@ -194,6 +195,9 @@ const BoardStageConfigScreen = ({
       const metadata = board.metadata as Record<string, unknown>;
       if (metadata?.['isAllowedToTransfer'] !== undefined) {
         setIsAllowedToTransfer(Boolean(metadata['isAllowedToTransfer']));
+      }
+      if (metadata?.['fullRoleAssignment'] !== undefined) {
+        setFullRoleAssignment(Boolean(metadata['fullRoleAssignment']));
       }
     }
   }, [board]);
@@ -729,6 +733,7 @@ const BoardStageConfigScreen = ({
         metadata: {
           ...existingMetadata,
           isAllowedToTransfer,
+          fullRoleAssignment,
         },
         timestamp: Date.now(),
         stageIds,
@@ -757,7 +762,7 @@ const BoardStageConfigScreen = ({
         duration: 5000,
       });
     }
-  }, [boardId, board, stages, onSave, onClose, zero, isAllowedToTransfer]);
+  }, [boardId, board, stages, onSave, onClose, zero, isAllowedToTransfer, fullRoleAssignment]);
 
   if (!isOpen) return null;
 
@@ -875,6 +880,38 @@ const BoardStageConfigScreen = ({
                       <span
                         className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
                           isAllowedToTransfer ? 'left-[18px]' : 'left-[2px]'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+                <div className='px-4 py-3 border-t border-border'>
+                  <div className='flex items-start justify-between gap-3'>
+                    <div>
+                      <label
+                        htmlFor='full-role-assignment-toggle'
+                        className='text-[13px] font-medium text-foreground block'
+                      >
+                        Full Role Assignment
+                      </label>
+                      <p className='text-[11px] text-muted-foreground mt-0.5 leading-[14px]'>
+                        Auto-assign Manager, Team Lead, Dev, PR Reviewer &amp; QA when a ticket is
+                        assigned to a user group
+                      </p>
+                    </div>
+                    <button
+                      id='full-role-assignment-toggle'
+                      onClick={() => setFullRoleAssignment(v => !v)}
+                      className={`w-[36px] h-[20px] rounded-full relative transition-colors flex-shrink-0 ${
+                        fullRoleAssignment ? 'bg-[#6276be]' : 'bg-muted'
+                      }`}
+                      data-track-category='board_config'
+                      data-track-name='toggle_full_role_assignment'
+                      type='button'
+                    >
+                      <span
+                        className={`absolute top-[2px] w-[16px] h-[16px] bg-background rounded-full transition-transform ${
+                          fullRoleAssignment ? 'left-[18px]' : 'left-[2px]'
                         }`}
                       />
                     </button>

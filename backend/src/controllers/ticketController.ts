@@ -20,6 +20,9 @@ import {
 } from '../types/ticket';
 import { evaluateAssignmentRule } from '../utils/assignmentEngine';
 import { syncUserWorkload } from '../utils/workloadUtils';
+import { ticketAssignmentService } from '../services/ticketAssignmentService';
+import type { BoardMetadata } from '@xyne/shared';
+import { syncConversationTicketMdFromPrismaTicket } from '../utils/ticketMd';
 import { notificationHooks } from '@/hooks/notificationHooks';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
@@ -416,11 +419,21 @@ export class TicketController {
 
       // Auto-assign ticket if userGroupId is provided but assignedTo is not
       let finalAssignedTo = assignedTo;
+      let pendingFullRoleAssignment = false;
+
       if (userGroupId && !assignedTo) {
         try {
+          const boardMetaRow = await prisma.board.findUnique({ where: { id: boardId }, select: { metadata: true } });
+          const boardMeta = boardMetaRow?.metadata as BoardMetadata | undefined;
+
+          if (boardMeta?.fullRoleAssignment === true) {
+            // Full role assignment will be done after ticket creation
+            pendingFullRoleAssignment = true;
+          } else {
           const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId);
           if (assignmentResult.assignedUserId) {
             finalAssignedTo = assignmentResult.assignedUserId;
+            }
           }
         } catch (error) {
           logger.error('[Ticket Creation] Error during auto-assignment:', error);
@@ -853,6 +866,28 @@ export class TicketController {
         title: ticket.title,
         boardId: ticket.boardId,
       });
+
+      // Full role assignment when toggle is ON (runs after ticket is committed)
+      if (pendingFullRoleAssignment && userGroupId) {
+        try {
+          const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
+            ticketId: ticket.id,
+            userGroupId,
+            boardId,
+            createdBy: userId,
+          });
+          if (fullRoles.member) {
+            const updatedTicket = await prisma.ticket.update({
+              where: { id: ticket.id },
+              data: { assignedTo: fullRoles.member },
+            });
+            await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+          }
+          logger.info(`[Ticket Creation] Full role assignment complete for ticket ${ticket.id}`);
+        } catch (error) {
+          logger.error('[Ticket Creation] Error during full role assignment:', error);
+        }
+      }
 
       // Sync workload mapping if ticket was assigned to a user
       if (ticket.assignedTo && userGroupId) {
