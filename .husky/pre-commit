@@ -70,5 +70,9 @@ echo "Running service change analysis..."
 cd "$REPO_ROOT"
 bash scripts/change-analysis.sh || exit 1
 
+# Run schema-migration validation for all schema files
+echo "Running schema-migration validation..."
+bash scripts/validate-schema-migrations.sh || exit 1
+
 echo ""
 echo "✅ All pre-commit checks passed!"
