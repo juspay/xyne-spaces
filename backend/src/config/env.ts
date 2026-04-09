@@ -72,6 +72,7 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
+  ACTIVITY_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
   PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default(''),
   PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
@@ -220,6 +221,7 @@ export const config = {
     requestTimeoutMs: envVars.LLM_REQUEST_TIMEOUT_MS,
   },
   activityClassification: {
+    litellmApiKey: envVars.ACTIVITY_CLASSIFICATION_LITELLM_API_KEY,
     model: envVars.ACTIVITY_CLASSIFICATION_MODEL,
     maxRetries: envVars.ACTIVITY_CLASSIFICATION_MAX_RETRIES,
   },

@@ -175,7 +175,7 @@ export class ActivityClassificationService {
         provider: {
           type: 'litellm',
           config: {
-            apiKey: envConfig.litellm.apiKey,
+            apiKey: envConfig.activityClassification.litellmApiKey,
             baseUrl: envConfig.litellm.baseUrl,
             timeout: envConfig.llm?.requestTimeoutMs,
             customHeaders: {
@@ -242,8 +242,8 @@ export class ActivityClassificationService {
       };
     }
 
-    if (!envConfig.litellm.apiKey) {
-      logger.warn('[ActivityClassification] LITELLM_API_KEY is not set. Skipping classification.', {
+    if (!envConfig.activityClassification.litellmApiKey) {
+      logger.warn('[ActivityClassification] ACTIVITY_CLASSIFICATION_LITELLM_API_KEY is not set. Skipping classification.', {
         activityId,
       });
       return { status: 'pending', usedLLM: false, reason: 'llm_unavailable' };
@@ -358,8 +358,8 @@ export class ActivityClassificationService {
       return { status: 'skipped', reason: 'empty_audience' };
     }
 
-    if (!envConfig.litellm.apiKey) {
-      logger.warn('[ActivityClassification] LITELLM_API_KEY is not set. Skipping audience classification.', {
+    if (!envConfig.activityClassification.litellmApiKey) {
+      logger.warn('[ActivityClassification] ACTIVITY_CLASSIFICATION_LITELLM_API_KEY is not set. Skipping audience classification.', {
         messageId,
         channelId,
         activityCount: activityIds.length,
