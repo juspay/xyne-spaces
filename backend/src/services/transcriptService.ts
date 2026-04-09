@@ -207,7 +207,7 @@ export class TranscriptService {
    */
   private createAgent(): Agent | null {
     try {
-      const apiKey = config.llm.litellmApiKey;
+      const apiKey = config.llm.callLitellmApiKey;
       const baseUrl = config.llm.litellmBaseUrl;
 
       if (!apiKey || !baseUrl) {
@@ -225,7 +225,7 @@ export class TranscriptService {
               timeout: 300000,
             },
           },
-          defaultModel: config.llm.litellmModel || 'glm-latest',
+          defaultModel: config.llm.callLitellmModel || 'glm-latest',
         },
         tools: {
           enabled: [],
@@ -827,7 +827,7 @@ Output ONLY the processed transcript, nothing else.`;
     if (!agent) return null;
 
     logger.info(
-      `[${logCallId}] ai_summary_generation_started | summary_type=call_summary, model=${config.llm.litellmModel || 'glm-latest'}`
+      `[${logCallId}] ai_summary_generation_started | summary_type=call_summary, model=${config.llm.callLitellmModel || 'glm-latest'}`
     );
     const prompt = CALL_SUMMARY_PROMPT.replace('{transcript}', transcript);
 

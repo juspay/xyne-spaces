@@ -73,6 +73,9 @@ const envSchema = Joi.object({
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
   ACTIVITY_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  // LiteLLM config specifically for call features (transcript summary, PRD, detailed summary)
+  CALL_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  CALL_LITELLM_MODEL: Joi.string().default(''),
   ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
   PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default(''),
   PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
@@ -219,6 +222,9 @@ export const config = {
     litellmBaseUrl: envVars.LITELLM_BASE_URL,
     litellmModel: envVars.ACTIVITY_CLASSIFICATION_MODEL,
     requestTimeoutMs: envVars.LLM_REQUEST_TIMEOUT_MS,
+    // Call-specific LiteLLM config (falls back to main litellm if not set)
+    callLitellmApiKey: envVars.CALL_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
+    callLitellmModel: envVars.CALL_LITELLM_MODEL,
   },
   activityClassification: {
     litellmApiKey: envVars.ACTIVITY_CLASSIFICATION_LITELLM_API_KEY,
