@@ -2,6 +2,7 @@ import Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { VespaJob } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
+import { registerVespaBackfillQueueMetrics } from '@/services/otel/vespaMetrics';
 
 class VespaQueue {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -51,6 +52,8 @@ class VespaQueue {
 
 			this.isInitialized = true;
 			logger.info('✓ VespaQueue initialized for all schemas');
+
+			registerVespaBackfillQueueMetrics(() => this.getStats());
 		} catch (error) {
 			logger.error('Failed to initialize vespa queue:', error);
 			this.isInitialized = false;
