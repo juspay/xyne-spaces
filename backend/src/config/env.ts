@@ -166,6 +166,7 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
+  ENABLE_FILE_INDEXING: Joi.boolean().default(false),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -397,4 +398,5 @@ export const config = {
     migrationBotEmail: envVars.JIRA_MIGRATION_BOT_EMAIL as string,
     migrationBotAuthToken: envVars.JIRA_MIGRATION_BOT_AUTH_TOKEN as string,
   },
+  enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
 };
