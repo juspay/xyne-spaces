@@ -59,6 +59,7 @@ class WorkerService {
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
           // Only schedule recovery if not disabled (recovery should run in separate pod)
     const enableRecovery = appConfig.workflowRecoveryEnabled
+    const workflowType = process.env.WORKFLOW_TYPE
     if (enableRecovery) {
       await recoveryService.start()
     } else {
@@ -84,11 +85,16 @@ class WorkerService {
         
         logger.info('Starting call timeout worker service...')
         await callTimeoutWorker.startWorker()
-      } else {
+      } 
+      if(workflowType){
+        logger.info(`WORKFLOW_TYPE is set to ${workflowType}. Only starting workers compatible with this workflow type.`)
         await Promise.all([
           pollingService.start(),
           eventPollingService.start(),
         ])
+      }
+      else{
+        logger.info('WORKFLOW_TYPE is not set. workflow polling and event polling workers will not be started.')
       }
 
       if (gcsPollingEnabled) {
@@ -167,6 +173,7 @@ class WorkerService {
       const proactiveNudgeWorkerEnabled = process.env.ENABLE_PROACTIVE_NUDGE_WORKER === 'true'
       const callValidationEnabled = process.env.ENABLE_CALL_VALIDATION_WORKER === 'true'
       const enableRecovery = process.env.ENABLE_WORKFLOW_RECOVERY !== 'false'
+      const workflowType = process.env.WORKFLOW_TYPE
       if (enableRecovery) {
         await recoveryService.stop()
       }
@@ -180,7 +187,9 @@ class WorkerService {
         await notificationWorker.shutdown()
         await callTimeoutWorker.shutdown()
         await redisService.disconnect()
-      } else {
+      }  
+      if(workflowType){
+        logger.info(`WORKFLOW_TYPE is set to ${workflowType}. Only stopping workers compatible with this workflow type.`)
         await Promise.all([
           pollingService.stop(),
           eventPollingService.stop(),
