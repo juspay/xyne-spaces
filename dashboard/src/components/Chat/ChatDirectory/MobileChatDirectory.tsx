@@ -13,6 +13,7 @@ import {
 } from '../../../services/Chat/channelService';
 import { AddDmForm, CreateDmFormData } from '../AddDmForm/AddDmForm';
 import AddChannelForm from '../AddChannelForm/AddChannelForm';
+import { AddPeopleForm } from '../AddPeopleForm/AddPeopleForm';
 import Dialog from '../../ui/Dialog';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import {
@@ -39,6 +40,8 @@ const MobileChatDirectory = ({
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
+  const [newlyCreatedChannelId, setNewlyCreatedChannelId] = useState<string | null>(null);
 
   // Get unread counts for all channels (for DMs)
   const unreadCounts = useAllUnreadCount();
@@ -51,6 +54,9 @@ const MobileChatDirectory = ({
       });
       setShowAddChannelForm(false);
       void navigate(`/chat/dir/${response.id}`);
+      // Auto-open add people dialog after channel creation
+      setNewlyCreatedChannelId(response.id);
+      setShowAddPeopleDialog(true);
     },
   });
 
@@ -283,6 +289,20 @@ const MobileChatDirectory = ({
           />
         </div>
       </Dialog>
+
+      {newlyCreatedChannelId && (
+        <Dialog
+          open={showAddPeopleDialog}
+          onOpenChange={setShowAddPeopleDialog}
+          title='Add Members'
+        >
+          <AddPeopleForm
+            channelId={newlyCreatedChannelId}
+            onSuccess={() => setShowAddPeopleDialog(false)}
+            onCancel={() => setShowAddPeopleDialog(false)}
+          />
+        </Dialog>
+      )}
       <ChannelCommandMenu
         channels={channels}
         starred={starred}
