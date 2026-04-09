@@ -196,12 +196,11 @@ async function handleMessageUpdate(
     return;
   }
 
-  // Check if this message is the initial message of its conversation
-  const conversation = await tx.run(
-    zql.conversations.where('conversationId', message.conversationId).one()
+  const initialMessageConversations = await tx.run(
+    zql.conversations.where('initialMessageId', message.messageId)
   );
 
-  if (conversation && conversation.initialMessageId === message.messageId) {
+  for (const conversation of initialMessageConversations) {
     await syncInitialMessageMd(message, conversation, tx);
   }
 
