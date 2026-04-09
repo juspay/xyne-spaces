@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   FileText,
   Trash2,
@@ -35,6 +35,7 @@ import { CanvasParticipantsTray, type ParticipantItem } from '../CanvasParticipa
 import { useNavigate } from 'react-router-dom';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
+import { VirtualizedList } from '../../VirtualizedList';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 
@@ -49,6 +50,15 @@ const CreatorName: React.FC<{ userId: string; isCurrentUser: boolean }> = ({
   }
   return <span>{displayName}</span>;
 };
+
+const CanvasListVirtuosoList = React.forwardRef<
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement>
+>((props, ref) => (
+  <div ref={ref} {...props} className={`divide-y divide-border ${props.className ?? ''}`} />
+));
+
+CanvasListVirtuosoList.displayName = 'CanvasListVirtuosoList';
 
 const ParticipantsTray: React.FC<{
   isOpen: boolean;
@@ -80,13 +90,11 @@ const ParticipantsTray: React.FC<{
 };
 
 export const CanvasList: React.FC<CanvasListProps> = ({
-  canvases,
   onSelect,
   onDelete,
   onDuplicate,
-  loading = false,
   currentUserId,
-  quartoDocs = [],
+  channelId,
   showQuartoDocsFilter = false,
   activeFilter: externalActiveFilter,
   onFilterChange,
@@ -99,11 +107,13 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const [internalActiveFilter, setInternalActiveFilter] = useState<FilterTab>('all');
   const [shareCanvas, setShareCanvas] = useState<Canvas | null>(null);
   const [participantsTrayCanvas, setParticipantsTrayCanvas] = useState<Canvas | null>(null);
+  const [rawItems, setRawItems] = useState<Canvas[]>([]);
 
   const { prefetchTopCanvases, handleMouseEnter, handleMouseLeave } = useCanvasPrefetch();
 
   // Use external filter if provided, otherwise use internal state
   const activeFilter = externalActiveFilter ?? internalActiveFilter;
+  const isQuartoDocs = activeFilter === 'quarto_docs';
 
   const setActiveFilter = (filter: FilterTab): void => {
     if (onFilterChange) {
@@ -114,8 +124,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   };
 
   useEffect(() => {
-    if (canvases.length > 0 && activeFilter !== 'quarto_docs') {
-      const collaborativeCanvases = canvases.filter(c => c.isCollaborative !== false);
+    if (rawItems.length > 0 && activeFilter !== 'quarto_docs') {
+      const collaborativeCanvases = rawItems.filter((c: Canvas) => c.isCollaborative !== false);
       void prefetchTopCanvases(
         collaborativeCanvases.map(c => ({
           id: c.id,
@@ -127,36 +137,280 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         3,
       );
     }
-  }, [canvases, activeFilter, prefetchTopCanvases]);
+  }, [rawItems, activeFilter, prefetchTopCanvases]);
 
-  const filteredCanvases = useMemo(() => {
-    // If showing Quarto docs filter, return Quarto docs when that filter is active
-    if (activeFilter === 'quarto_docs') {
-      let filtered = quartoDocs;
+  const transformCanvases = useCallback(
+    (items: Canvas[]) => {
+      let filtered = items;
+
+      if (isQuartoDocs) {
+        if (searchQuery) {
+          filtered = filtered.filter(
+            canvas =>
+              canvas.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              (canvas.userRepo?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false),
+          );
+        }
+        return filtered;
+      }
+
+      if (activeFilter === 'created_by_me' && currentUserId) {
+        filtered = filtered.filter(canvas => canvas.createdBy === currentUserId);
+      }
+
       if (searchQuery) {
-        filtered = filtered.filter(
-          canvas =>
-            canvas.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (canvas.userRepo?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false),
+        filtered = filtered.filter(canvas =>
+          canvas.title.toLowerCase().includes(searchQuery.toLowerCase()),
         );
       }
       return filtered;
-    }
+    },
+    [activeFilter, currentUserId, isQuartoDocs, searchQuery],
+  );
 
-    let filtered = canvases;
+  const renderCanvasItem = useCallback(
+    (canvas: Canvas) => {
+      const canvasWithParticipants = canvas as Canvas & {
+        participants?: { userId: string; role: CanvasRole }[];
+      };
 
-    if (activeFilter === 'created_by_me' && currentUserId) {
-      filtered = filtered.filter(canvas => canvas.createdBy === currentUserId);
-    }
+      const participantUserIds = [
+        canvas.createdBy,
+        ...(canvasWithParticipants.participants
+          ?.map(p => p.userId)
+          .filter(id => id !== canvas.createdBy) || []),
+      ];
 
-    if (searchQuery) {
-      filtered = filtered.filter(canvas =>
-        canvas.title.toLowerCase().includes(searchQuery.toLowerCase()),
+      const isQuartoDoc = canvas.docType === DocType.Quarto;
+      const isSelected = selectedCanvasId === canvas.id;
+
+      return (
+        <div
+          key={canvas.id}
+          role='button'
+          tabIndex={0}
+          className={`group flex items-center px-6 py-4 transition-colors cursor-pointer ${
+            isSelected ? 'bg-accent' : 'hover:bg-accent'
+          }`}
+          onClick={e => (isQuartoDoc ? handleQuartoDocClick(e, canvas) : onSelect(e, canvas))}
+          data-track-category='CANVAS'
+          data-track-name={isQuartoDoc ? 'Open_Quarto_Doc' : 'Open_Canvas'}
+          data-track-metadata={JSON.stringify({
+            canvasId: canvas.id,
+            title: canvas.title,
+            isQuartoDoc,
+          })}
+          data-testid={`canvas-item-${canvas.id}`}
+          onMouseEnter={() => {
+            if (!isQuartoDoc && canvas.isCollaborative !== false) {
+              handleMouseEnter({
+                id: canvas.id,
+                ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
+                ...(canvas.viewAccessId ? { viewAccessId: canvas.viewAccessId } : {}),
+                ...(canvas.isCollaborative !== undefined
+                  ? { isCollaborative: canvas.isCollaborative }
+                  : {}),
+                title: canvas.title,
+              });
+            }
+          }}
+          onMouseLeave={handleMouseLeave}
+          onKeyDown={(e: React.KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              if (isQuartoDoc) {
+                handleQuartoDocClick(e as unknown as KeyboardEvent, canvas);
+              } else {
+                onSelect(e as unknown as KeyboardEvent, canvas);
+              }
+            }
+          }}
+        >
+          <div className='flex-shrink-0 mr-4'>
+            <div
+              className={`w-8 h-8 flex items-center justify-center rounded ${
+                isQuartoDoc ? 'bg-blue-50' : 'bg-muted'
+              }`}
+            >
+              {isQuartoDoc ? (
+                <BookMarked className='w-4 h-4 text-blue-500' strokeWidth={2.5} />
+              ) : (
+                <FileText className='w-4 h-4 text-muted-foreground' strokeWidth={2.5} />
+              )}
+            </div>
+          </div>
+
+          <div className='flex-1 min-w-0'>
+            <div className='flex items-center gap-2 mb-1'>
+              <h3 className='font-medium text-foreground truncate' title={canvas.title}>
+                {canvas.title}
+              </h3>
+              {isQuartoDoc && canvas.quartoDocumentType && canvas.quartoDocumentType !== 'docs' && (
+                <span className='px-2 py-0.5 text-xs font-medium rounded-full bg-muted text-muted-foreground'>
+                  {canvas.quartoDocumentType}
+                </span>
+              )}
+            </div>
+
+            <div className='flex flex-wrap items-center gap-3 text-sm text-muted-foreground'>
+              <UserHoverWrapper userId={canvas.createdBy}>
+                <span className='flex items-center gap-1.5 cursor-pointer'>
+                  <Avatar userId={canvas.createdBy} size='sm' />
+                  <span className='hidden md:inline'>
+                    <CreatorName
+                      userId={canvas.createdBy}
+                      isCurrentUser={canvas.createdBy === currentUserId}
+                    />
+                  </span>
+                </span>
+              </UserHoverWrapper>
+
+              <span className='text-muted-foreground'>|</span>
+
+              {isQuartoDoc && canvas.userRepo ? (
+                <span
+                  className='flex items-center gap-1 text-xs truncate max-w-[200px]'
+                  title={canvas.userRepo}
+                >
+                  <ExternalLink className='w-3 h-3' />
+                  {canvas.userRepo}
+                </span>
+              ) : (
+                <span className='flex items-center gap-1'>
+                  {canvas.visibility === CanvasVisibility.PUBLIC ? (
+                    <>
+                      <Globe className='w-3.5 h-3.5 text-green-500' strokeWidth={2.5} />
+                      <span className='text-green-600'>Public</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2.5} />
+                      <span>Private</span>
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className='flex items-center gap-3 ml-4'>
+            {isSelected && (
+              <div className='flex-shrink-0 w-5 h-5 rounded-full bg-primary flex items-center justify-center'>
+                <Check className='w-3 h-3 text-primary-foreground' strokeWidth={3} />
+              </div>
+            )}
+            {!isQuartoDoc && (
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  setParticipantsTrayCanvas(canvas);
+                }}
+                className='cursor-pointer'
+                data-track-category='CANVAS'
+                data-track-name='Open_Participants_Tray'
+                data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+              >
+                <div className='md:hidden'>
+                  <AvatarGroup userIds={participantUserIds} size='sm' count={2} />
+                </div>
+                <div className='hidden md:block'>
+                  <AvatarGroup userIds={participantUserIds} size='sm' count={3} />
+                </div>
+              </button>
+            )}
+
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  onClick={e => e.stopPropagation()}
+                  className='p-1.5 rounded hover:bg-accent'
+                  data-track-category='CANVAS'
+                  data-track-name='Open_Canvas_Menu'
+                  data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+                >
+                  <MoreVertical className='w-4 h-4 text-muted-foreground' strokeWidth={2.5} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='end' className='w-48'>
+                {!isQuartoDoc && onDuplicate && (
+                  <DropdownMenuItem
+                    onClick={e => {
+                      e.stopPropagation();
+                      onDuplicate(canvas);
+                    }}
+                    className='flex items-center gap-2 cursor-pointer'
+                    data-track-category='CANVAS'
+                    data-track-name='Duplicate_Canvas'
+                    data-track-metadata={JSON.stringify({
+                      canvasId: canvas.id,
+                      title: canvas.title,
+                    })}
+                  >
+                    <Copy className='w-4 h-4' />
+                    Duplicate
+                  </DropdownMenuItem>
+                )}
+
+                {canPerformAction(canvas, 'share') && (
+                  <DropdownMenuItem
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (isQuartoDoc && canvas.userRepo) {
+                        const docsLink = `${window.location.origin}/docs/${canvas.userRepo}`;
+                        void navigator.clipboard.writeText(docsLink);
+                      } else {
+                        setShareCanvas(canvas);
+                      }
+                    }}
+                    className='flex items-center gap-2 cursor-pointer'
+                    data-track-category='CANVAS'
+                    data-track-name={isQuartoDoc ? 'Copy_Quarto_Doc_Link' : 'Share_Canvas'}
+                    data-track-metadata={JSON.stringify({
+                      canvasId: canvas.id,
+                      title: canvas.title,
+                      isQuartoDoc,
+                    })}
+                  >
+                    <Share2 className='w-4 h-4' />
+                    {isQuartoDoc ? 'Copy Link' : 'Share'}
+                  </DropdownMenuItem>
+                )}
+
+                {onDelete && canPerformAction(canvas, 'delete') && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={e => {
+                        e.stopPropagation();
+                        setDeletingCanvasId(canvas.id);
+                      }}
+                      className='flex items-center gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50'
+                      data-testid='canvas-delete-button'
+                      data-track-category='CANVAS'
+                      data-track-name='DELETE_CANVAS'
+                      data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+                    >
+                      <Trash2 className='w-4 h-4' />
+                      Delete
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
       );
-    }
-
-    return filtered;
-  }, [canvases, quartoDocs, activeFilter, currentUserId, searchQuery]);
+    },
+    [
+      currentUserId,
+      handleMouseEnter,
+      handleMouseLeave,
+      onDelete,
+      onDuplicate,
+      onSelect,
+      selectedCanvasId,
+    ],
+  );
 
   const handleQuartoDocClick = (e: React.MouseEvent | KeyboardEvent, canvas: Canvas): void => {
     const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
@@ -204,14 +458,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     }
   };
 
-  if (loading) {
-    return (
-      <div className='flex items-center justify-center h-64'>
-        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
-      </div>
-    );
-  }
-
   return (
     <div className='flex flex-col h-full bg-background' data-testid='canvas-list'>
       <div className='px-4 md:px-6 py-4 border-b border-border'>
@@ -227,7 +473,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               data-testid='canvas-filter-all'
               data-track-category='CANVAS'
               data-track-name='FILTER_ALL'
-              data-track-metadata={JSON.stringify({ filter: 'all', canvasCount: canvases.length })}
+              data-track-metadata={JSON.stringify({
+                filter: 'all',
+                canvasCount: isQuartoDocs ? 0 : rawItems.length,
+              })}
             >
               All
             </button>
@@ -258,7 +507,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 data-track-name='FILTER_QUARTO_DOCS'
                 data-track-metadata={JSON.stringify({
                   filter: 'quarto_docs',
-                  quartoCount: quartoDocs.length,
+                  quartoCount: isQuartoDocs ? rawItems.length : 0,
                 })}
               >
                 <BookMarked className='w-3.5 h-3.5' />
@@ -281,268 +530,69 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       </div>
 
       <div className='flex-1 overflow-auto'>
-        {filteredCanvases.length === 0 ? (
-          <div className='flex flex-col items-center justify-center h-full text-center py-16'>
-            <FileText className='w-16 h-16 text-muted-foreground mb-4' />
-            <h3 className='text-lg font-medium text-foreground mb-2'>
-              {searchQuery ? 'No canvases found' : 'No canvases yet'}
-            </h3>
-            <p className='text-muted-foreground text-sm'>
-              {searchQuery
-                ? 'Try adjusting your search'
-                : 'Create your first canvas to get started'}
-            </p>
-          </div>
-        ) : (
-          <div className='divide-y divide-border'>
-            {filteredCanvases.map(canvas => {
-              const canvasWithParticipants = canvas as Canvas & {
-                participants?: { userId: string; role: CanvasRole }[];
-              };
+        <VirtualizedList<Canvas, { id: string; updatedAt: number }>
+          pagination={{
+            createQuery: ({ cursor }) => {
+              if (channelId) {
+                return isQuartoDocs
+                  ? queries.channelQuartoDocsPaginated({
+                      channelId,
+                      limit: 25,
+                      start: cursor,
+                    })
+                  : queries.channelCanvasesPaginated({
+                      channelId,
+                      includeQuartoDocs: false,
+                      limit: 25,
+                      start: cursor,
+                    });
+              }
 
-              const participantUserIds = [
-                canvas.createdBy,
-                ...(canvasWithParticipants.participants
-                  ?.map(p => p.userId)
-                  .filter(id => id !== canvas.createdBy) || []),
-              ];
-
-              const isQuartoDoc = canvas.docType === DocType.Quarto;
-
-              const isSelected = selectedCanvasId === canvas.id;
-
-              return (
-                <div
-                  key={canvas.id}
-                  role='button'
-                  tabIndex={0}
-                  className={`group flex items-center px-6 py-4 transition-colors cursor-pointer ${
-                    isSelected ? 'bg-accent' : 'hover:bg-accent'
-                  }`}
-                  onClick={e =>
-                    isQuartoDoc ? handleQuartoDocClick(e, canvas) : onSelect(e, canvas)
-                  }
-                  data-track-category='CANVAS'
-                  data-track-name={isQuartoDoc ? 'Open_Quarto_Doc' : 'Open_Canvas'}
-                  data-track-metadata={JSON.stringify({
-                    canvasId: canvas.id,
-                    title: canvas.title,
-                    isQuartoDoc,
-                  })}
-                  data-testid={`canvas-item-${canvas.id}`}
-                  onMouseEnter={() => {
-                    if (!isQuartoDoc && canvas.isCollaborative !== false) {
-                      handleMouseEnter({
-                        id: canvas.id,
-                        ...(canvas.channelId ? { channelId: canvas.channelId } : {}),
-                        ...(canvas.viewAccessId ? { viewAccessId: canvas.viewAccessId } : {}),
-                        ...(canvas.isCollaborative !== undefined
-                          ? { isCollaborative: canvas.isCollaborative }
-                          : {}),
-                        title: canvas.title,
-                      });
-                    }
-                  }}
-                  onMouseLeave={handleMouseLeave}
-                  onKeyDown={(e: React.KeyboardEvent) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      if (isQuartoDoc) {
-                        handleQuartoDocClick(e as unknown as KeyboardEvent, canvas);
-                      } else {
-                        onSelect(e as unknown as KeyboardEvent, canvas);
-                      }
-                    }
-                  }}
-                >
-                  <div className='flex-shrink-0 mr-4'>
-                    <div
-                      className={`w-8 h-8 flex items-center justify-center rounded ${
-                        isQuartoDoc ? 'bg-blue-50' : 'bg-muted'
-                      }`}
-                    >
-                      {isQuartoDoc ? (
-                        <BookMarked className='w-4 h-4 text-blue-500' strokeWidth={2.5} />
-                      ) : (
-                        <FileText className='w-4 h-4 text-muted-foreground' strokeWidth={2.5} />
-                      )}
-                    </div>
-                  </div>
-
-                  <div className='flex-1 min-w-0'>
-                    <div className='flex items-center gap-2 mb-1'>
-                      <h3 className='font-medium text-foreground truncate' title={canvas.title}>
-                        {canvas.title}
-                      </h3>
-                      {isQuartoDoc &&
-                        canvas.quartoDocumentType &&
-                        canvas.quartoDocumentType !== 'docs' && (
-                          <span className='px-2 py-0.5 text-xs font-medium rounded-full bg-muted text-muted-foreground'>
-                            {canvas.quartoDocumentType}
-                          </span>
-                        )}
-                    </div>
-
-                    <div className='flex flex-wrap items-center gap-3 text-sm text-muted-foreground'>
-                      <UserHoverWrapper userId={canvas.createdBy}>
-                        <span className='flex items-center gap-1.5 cursor-pointer'>
-                          <Avatar userId={canvas.createdBy} size='sm' />
-                          <span className='hidden md:inline'>
-                            <CreatorName
-                              userId={canvas.createdBy}
-                              isCurrentUser={canvas.createdBy === currentUserId}
-                            />
-                          </span>
-                        </span>
-                      </UserHoverWrapper>
-
-                      <span className='text-muted-foreground'>|</span>
-
-                      {isQuartoDoc && canvas.userRepo ? (
-                        <span
-                          className='flex items-center gap-1 text-xs truncate max-w-[200px]'
-                          title={canvas.userRepo}
-                        >
-                          <ExternalLink className='w-3 h-3' />
-                          {canvas.userRepo}
-                        </span>
-                      ) : (
-                        <span className='flex items-center gap-1'>
-                          {canvas.visibility === CanvasVisibility.PUBLIC ? (
-                            <>
-                              <Globe className='w-3.5 h-3.5 text-green-500' strokeWidth={2.5} />
-                              <span className='text-green-600'>Public</span>
-                            </>
-                          ) : (
-                            <>
-                              <Lock
-                                className='w-3.5 h-3.5 text-muted-foreground'
-                                strokeWidth={2.5}
-                              />
-                              <span>Private</span>
-                            </>
-                          )}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className='flex items-center gap-3 ml-4'>
-                    {isSelected && (
-                      <div className='flex-shrink-0 w-5 h-5 rounded-full bg-primary flex items-center justify-center'>
-                        <Check className='w-3 h-3 text-primary-foreground' strokeWidth={3} />
-                      </div>
-                    )}
-                    {!isQuartoDoc && (
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          setParticipantsTrayCanvas(canvas);
-                        }}
-                        className='cursor-pointer'
-                        data-track-category='CANVAS'
-                        data-track-name='Open_Participants_Tray'
-                        data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                      >
-                        {/* Mobile: show 2 participants */}
-                        <div className='md:hidden'>
-                          <AvatarGroup userIds={participantUserIds} size='sm' count={2} />
-                        </div>
-                        {/* Desktop: show 3 participants */}
-                        <div className='hidden md:block'>
-                          <AvatarGroup userIds={participantUserIds} size='sm' count={3} />
-                        </div>
-                      </button>
-                    )}
-
-                    <DropdownMenu modal={false}>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          onClick={e => e.stopPropagation()}
-                          className='p-1.5 rounded hover:bg-accent'
-                          data-track-category='CANVAS'
-                          data-track-name='Open_Canvas_Menu'
-                          data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                        >
-                          <MoreVertical
-                            className='w-4 h-4 text-muted-foreground'
-                            strokeWidth={2.5}
-                          />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align='end' className='w-48'>
-                        {!isQuartoDoc && onDuplicate && (
-                          <DropdownMenuItem
-                            onClick={e => {
-                              e.stopPropagation();
-                              onDuplicate(canvas.id);
-                            }}
-                            className='flex items-center gap-2 cursor-pointer'
-                            data-track-category='CANVAS'
-                            data-track-name='Duplicate_Canvas'
-                            data-track-metadata={JSON.stringify({
-                              canvasId: canvas.id,
-                              title: canvas.title,
-                            })}
-                          >
-                            <Copy className='w-4 h-4' />
-                            Duplicate
-                          </DropdownMenuItem>
-                        )}
-
-                        {canPerformAction(canvas, 'share') && (
-                          <DropdownMenuItem
-                            onClick={e => {
-                              e.stopPropagation();
-                              if (isQuartoDoc && canvas.userRepo) {
-                                // For Quarto docs, copy the docs link directly
-                                const docsLink = `${window.location.origin}/docs/${canvas.userRepo}`;
-                                void navigator.clipboard.writeText(docsLink);
-                              } else {
-                                setShareCanvas(canvas);
-                              }
-                            }}
-                            className='flex items-center gap-2 cursor-pointer'
-                            data-track-category='CANVAS'
-                            data-track-name={isQuartoDoc ? 'Copy_Quarto_Doc_Link' : 'Share_Canvas'}
-                            data-track-metadata={JSON.stringify({
-                              canvasId: canvas.id,
-                              title: canvas.title,
-                              isQuartoDoc,
-                            })}
-                          >
-                            <Share2 className='w-4 h-4' />
-                            {isQuartoDoc ? 'Copy Link' : 'Share'}
-                          </DropdownMenuItem>
-                        )}
-
-                        {onDelete && canPerformAction(canvas, 'delete') && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={e => {
-                                e.stopPropagation();
-                                setDeletingCanvasId(canvas.id);
-                              }}
-                              className='flex items-center gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50'
-                              data-testid='canvas-delete-button'
-                              data-track-category='CANVAS'
-                              data-track-name='DELETE_CANVAS'
-                              data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                            >
-                              <Trash2 className='w-4 h-4' />
-                              Delete
-                            </DropdownMenuItem>
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
+              return isQuartoDocs
+                ? queries.userQuartoDocsPaginated({ limit: 25, start: cursor })
+                : queries.userCanvasesPaginated({
+                    limit: 25,
+                    start: cursor,
+                    includeQuartoDocs: false,
+                  });
+            },
+            getCursor: canvas => ({ id: canvas.id, updatedAt: canvas.updatedAt }),
+            getKey: canvas => canvas.id,
+            mergePages: (prev, next) => {
+              const map = new Map(prev.map(item => [item.id, item]));
+              for (const item of next) map.set(item.id, item);
+              return [...map.values()].sort(
+                (a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id),
               );
-            })}
-          </div>
-        )}
+            },
+            windowSize: 25,
+            threshold: 10,
+            resetKey: ['canvasList', channelId ?? 'user', activeFilter],
+          }}
+          transformItems={transformCanvases}
+          onItemsChange={setRawItems}
+          renderItem={renderCanvasItem}
+          emptyState={
+            <div className='flex flex-col items-center justify-center h-full text-center py-16'>
+              <FileText className='w-16 h-16 text-muted-foreground mb-4' />
+              <h3 className='text-lg font-medium text-foreground mb-2'>
+                {searchQuery ? 'No canvases found' : 'No canvases yet'}
+              </h3>
+              <p className='text-muted-foreground text-sm'>
+                {searchQuery
+                  ? 'Try adjusting your search'
+                  : 'Create your first canvas to get started'}
+              </p>
+            </div>
+          }
+          className='h-full'
+          style={{ height: '100%' }}
+          virtuoso={{
+            components: {
+              List: CanvasListVirtuosoList,
+            },
+          }}
+        />
       </div>
 
       <Dialog
@@ -558,7 +608,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               setDeletingCanvasId(null);
             }
           }}
-          canvasTitle={canvases.find(c => c.id === deletingCanvasId)?.title}
+          canvasTitle={rawItems.find(c => c.id === deletingCanvasId)?.title}
         />
       </Dialog>
 

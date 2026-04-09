@@ -4,8 +4,6 @@ import { CanvasList } from '../CanvasList';
 import { Button } from '../../ui/Button';
 import type { Canvas } from '../Canvas.types';
 import { useAuth } from '../../../hooks/useAuth';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { queries } from '../../../zero/queries';
 import { DocType } from '@xyne/shared';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
@@ -36,13 +34,6 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
   const { user } = useAuth();
   const [selectedCanvas, setSelectedCanvas] = useState<Canvas | null>(null);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
-
-  // Fetch canvases - reuse same queries as CanvasPanel
-  const [allCanvases] = useCachedQuery(queries.userCanvases());
-  const [allQuartoDocs] = useCachedQuery(queries.userQuartoDocs());
-
-  const canvases = (allCanvases as unknown as Canvas[]) || [];
-  const quartoDocs = (allQuartoDocs as unknown as Canvas[]) || [];
 
   const handleSelectCanvas = useCallback((_e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => {
     // Only allow selecting non-Quarto canvases for attachment
@@ -124,11 +115,8 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
         {/* Canvas List - Reuse existing component */}
         <div className='flex-1 overflow-y-auto min-h-0'>
           <CanvasList
-            canvases={canvases}
             onSelect={handleSelectCanvas}
-            loading={!allCanvases}
             currentUserId={user?.id}
-            quartoDocs={quartoDocs}
             showQuartoDocsFilter={true}
             activeFilter={activeFilter}
             onFilterChange={setActiveFilter}
