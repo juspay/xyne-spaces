@@ -1761,7 +1761,7 @@ const ChannelCommandMenu = ({
       <div className='flex flex-1 min-h-0 overflow-hidden'>
         {/* Tabs, Results, Footer Container - modal overlays everything below search input */}
         <div
-          className='relative flex-1 flex flex-col min-h-0'
+          className='relative flex-1 flex flex-col min-h-0 overflow-x-hidden'
           role='presentation'
           data-track-category='CHANNEL_SEARCH'
           data-track-name='ClickSearchResultsArea'
