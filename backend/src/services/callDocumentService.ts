@@ -578,7 +578,7 @@ export class CallDocumentService {
    */
   private createAgent(): Agent | null {
     try {
-      const apiKey = config.llm.litellmApiKey;
+      const apiKey = config.llm.callLitellmApiKey;
       const baseUrl = config.llm.litellmBaseUrl;
 
       if (!apiKey || !baseUrl) {
@@ -597,7 +597,7 @@ export class CallDocumentService {
               retries: 2,
             },
           },
-          defaultModel: config.llm.litellmModel || 'glm-latest',
+          defaultModel: config.llm.callLitellmModel || 'glm-latest',
         },
         tools: {
           enabled: [],
