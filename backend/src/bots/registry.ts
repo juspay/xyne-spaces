@@ -35,7 +35,7 @@ import '@/bots/implementations/xyne-release-bot/xyne-release-bot.js';
 // Ask AI Bot - responds to DM conversations and channel/thread @mentions
 import '@/bots/implementations/ask-ai/ask-ai.js';
 
-import {logger} from '@/utils/logger';
+import { logger } from '@/utils/logger';
 
 // Bitbucket Bot - system bot for Bitbucket webhook events
 import '@/bots/implementations/bitbucket-bot/bitbucket-bot.js';
@@ -95,7 +95,8 @@ const externalBots: ExternalBotDefinition[] = [
     name: 'Genius Deep RCA',
     email: 'genius-deep-rca@bot.xyne.ai',
     picture: '/assets/bots/genius-avatar.png',
-    description: 'AI-powered deep investigation assistant for root cause analysis of complex incidents',
+    description:
+      'AI-powered deep investigation assistant for root cause analysis of complex incidents',
     runtimeType: 'external',
     scope: 'all',
     interactionMode: 'dm',
@@ -112,6 +113,40 @@ const externalBots: ExternalBotDefinition[] = [
       requestBodyTemplate: {
         query: '{{message}}',
         agent: 'investigation',
+        source: 'xyne_spaces',
+        email: '{{userEmail}}',
+      },
+      contextConfig: {
+        includeHistory: false,
+        maxHistoryMessages: 0,
+      },
+      sseParser: 'genius',
+      toolOutputTransformer: 'genius',
+    },
+  },
+  {
+    id: 'genius_upi_analytics',
+    name: 'Genius UPI Analytics',
+    email: 'genius-upi-analytics@bot.xyne.ai',
+    picture: '/assets/bots/genius-avatar.png',
+    description: 'AI-powered UPI analytics assistant for transaction insights and monitoring',
+    runtimeType: 'external',
+    scope: 'all',
+    interactionMode: 'dm',
+    externalApi: {
+      endpoint: config.geniusUpiAnalytics.apiUrl + '/genius/api/v3/analytics/',
+      method: 'POST',
+      authType: 'api_key',
+      authEnvVar: 'GENIUS_UPI_ANALYTICS_API_KEY',
+      authHeader: 'Authorization',
+      responseType: 'streaming',
+      headers: {
+        Accept: 'text/event-stream',
+        'x-username': config.geniusUpiAnalytics.username,
+      },
+      requestBodyTemplate: {
+        query: '{{message}}',
+        agent: 'analytics',
         source: 'xyne_spaces',
         email: '{{userEmail}}',
       },
