@@ -10,7 +10,6 @@ import {
   useSearchParams,
 } from 'react-router-dom';
 import ConversationPanelV2 from '../ConversationPannel/ConversationPanelV2';
-import { useChannelCache } from '../../../hooks/useChannelCache';
 import CanvasScreen from '../../Canvas/CanvasScreen';
 import { ChannelSummary, ThreadSummary } from '../Summary';
 import { ThreadMessages } from '../ThreadPannel';
@@ -55,9 +54,6 @@ const ChatView = (): ReactElement => {
 
   // Track previous channelId for navigation back on leave
   const previousChannelId = usePreviousChannelId(channelId);
-
-  // Keep-alive cache: maintain up to 10 channel instances (VS Code-style tabs)
-  const cachedChannels = useChannelCache(channelId);
 
   // Query channel data to check if it's a DM and if user's participation is closed
   const channel = useChannel(channelId || '');
@@ -340,23 +336,10 @@ const ChatView = (): ReactElement => {
                     {shouldStackThreadFromParent && conversationId ? (
                       <Outlet />
                     ) : (
-                      <>
-                        {cachedChannels.map(cached => (
-                          <div
-                            key={cached.channelId}
-                            className='h-full'
-                            style={{
-                              display: cached.channelId === channelId ? 'block' : 'none',
-                            }}
-                          >
-                            <ConversationPanelV2
-                              channelId={cached.channelId}
-                              previousChannelId={previousChannelId}
-                              isActive={cached.channelId === channelId}
-                            />
-                          </div>
-                        ))}
-                      </>
+                      <ConversationPanelV2
+                        channelId={channelId ?? ''}
+                        previousChannelId={previousChannelId}
+                      />
                     )}
                   </div>
                 </Panel>
