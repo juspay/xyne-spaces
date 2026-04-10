@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { Download, MessageSquare, X, Check, HelpCircle, Headphones } from 'lucide-react';
+import {
+  Download,
+  MessageSquare,
+  X,
+  Check,
+  HelpCircle,
+  Headphones,
+  ChevronDown,
+  Users,
+} from 'lucide-react';
 import { RRule } from 'rrule';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import { Call } from './callHistoryItem.utils';
@@ -89,9 +98,9 @@ function ParticipantItem({
         <Avatar userId={userId} size='sm' showActiveStatus={false} rounded />
         <RsvpBadge status={meetingStatus} />
       </div>
-      <div className='flex flex-col min-w-0'>
-        <span className='text-sm text-foreground truncate'>{user?.name ?? '…'}</span>
-        {isOrganizer && <span className='text-[11px] text-muted-foreground'>Organizer</span>}
+      <div className='flex flex-row gap-2 items-center min-w-0'>
+        <span className='text-[12px] text-foreground truncate'>{user?.name ?? '…'}</span>
+        {isOrganizer && <span className='text-[10px] text-muted-foreground'>Organizer</span>}
       </div>
     </div>
   );
@@ -118,6 +127,7 @@ const CalendarCallPopup = ({
   const [seriesPrompt, setSeriesPrompt] = useState<RsvpChoice | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [localRsvp, setLocalRsvp] = useState<MeetingStatus | null>(null);
+  const [isGuestsExpanded, setIsGuestsExpanded] = useState(false);
 
   const currentParticipant = call.participants?.find(p => p.userId === currentUserId);
   const currentMeetingStatus: MeetingStatus =
@@ -215,6 +225,25 @@ const CalendarCallPopup = ({
   // ── Main popup view ───────────────────────────────────────────────────────
   const participants = call.participants ?? [];
 
+  const rsvpCounts = new Map<MeetingStatus, number>();
+  for (const p of participants) {
+    const status = p.userId === currentUserId && localRsvp !== null ? localRsvp : p.meetingStatus;
+    rsvpCounts.set(status, (rsvpCounts.get(status) ?? 0) + 1);
+  }
+  const yesCount = rsvpCounts.get(MeetingStatus.ACCEPTED) ?? 0;
+  const noCount = rsvpCounts.get(MeetingStatus.DECLINED) ?? 0;
+  const waitingCount = participants.length - yesCount - noCount;
+  const rsvpSummaryParts: string[] = [];
+  if (yesCount > 0) rsvpSummaryParts.push(`${yesCount} yes`);
+  if (noCount > 0) rsvpSummaryParts.push(`${noCount} no`);
+  if (waitingCount > 0) rsvpSummaryParts.push(`${waitingCount} waiting`);
+
+  const sortedParticipants = [...participants].sort((a, b) => {
+    if (a.userId === organizerUserId) return -1;
+    if (b.userId === organizerUserId) return 1;
+    return 0;
+  });
+
   return (
     <div className='p-4'>
       {/* Header: title + (message icon for ended) + close */}
@@ -266,35 +295,52 @@ const CalendarCallPopup = ({
         </p>
       )}
 
-      {/* Participants section */}
+      {/* Guests section */}
       {participants.length > 0 && (
-        <div className='mb-3 mt-1'>
-          <p className='text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide'>
-            Participants
-          </p>
-          <div className='flex flex-col gap-1 max-h-48 overflow-y-auto'>
-            {[...participants]
-              .sort((a, b) => {
-                if (a.userId === organizerUserId) return -1;
-                if (b.userId === organizerUserId) return 1;
-                return 0;
-              })
-              .map(p => {
-                const status =
-                  p.userId === currentUserId && localRsvp !== null
-                    ? localRsvp
-                    : ((p.meetingStatus as MeetingStatus | undefined) ?? MeetingStatus.PENDING);
-                const isOrganizer = p.userId === organizerUserId;
-                return (
-                  <ParticipantItem
-                    key={p.userId}
-                    userId={p.userId}
-                    meetingStatus={status}
-                    isOrganizer={isOrganizer}
-                  />
-                );
-              })}
-          </div>
+        <div className='mb-3 mt-2'>
+          {/* Collapsible header */}
+          <button
+            onClick={() => setIsGuestsExpanded(prev => !prev)}
+            data-track-category='Calls'
+            data-track-name='toggle-guests-list'
+            className='w-full flex items-center justify-between cursor-pointer group'
+          >
+            <div className='flex items-center gap-1.5'>
+              <span className='text-sm font-medium text-foreground'>
+                {participants.length} Guest{participants.length !== 1 ? 's' : ''}
+              </span>
+              <Users className='size-4 text-muted-foreground' />
+            </div>
+            <ChevronDown
+              className={cn(
+                'size-4 text-muted-foreground transition-transform duration-200',
+                isGuestsExpanded && 'rotate-180',
+              )}
+            />
+          </button>
+
+          {/* RSVP summary counts */}
+          {rsvpSummaryParts.length > 0 && (
+            <p className='text-xs text-muted-foreground mt-0.5'>{rsvpSummaryParts.join(', ')}</p>
+          )}
+
+          {/* Expanded participants list */}
+          {isGuestsExpanded && (
+            <div className='flex flex-col gap-1 max-h-48 overflow-y-auto mt-2'>
+              {sortedParticipants.map(p => (
+                <ParticipantItem
+                  key={p.userId}
+                  userId={p.userId}
+                  meetingStatus={
+                    p.userId === currentUserId && localRsvp !== null
+                      ? localRsvp
+                      : ((p.meetingStatus as MeetingStatus | undefined) ?? MeetingStatus.PENDING)
+                  }
+                  isOrganizer={p.userId === organizerUserId}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -306,7 +352,7 @@ const CalendarCallPopup = ({
                 onClick={onDownloadTranscript}
                 data-track-category='Calls'
                 data-track-name='popup-download-transcript'
-                className='flex items-center gap-2 text-sm text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors cursor-pointer w-full'
+                className='flex items-center gap-2 text-sm text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors cursor-pointer'
               >
                 <Download className='size-3.5 shrink-0' />
                 Download transcript
