@@ -36,6 +36,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { replaceCustomEmojiShortcodesWithImg } from '@/utils/customEmojiUtils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 
 interface UserInfo {
@@ -321,11 +322,13 @@ export class ConversationService {
       processedFiles.push(...uploadedFiles);
     }
 
+    const messageContent = await replaceCustomEmojiShortcodesWithImg(content?.trim() || '');
+
     // First create the message
     const messageData: CreateMessageInput = {
       conversationId: 'temp', // Will be updated after conversation creation
       senderId: userId,
-      content: content?.trim() || '',
+      content: messageContent,
       msgType: msgType || MessageType.USER,
       hasAttachment: processedFiles.length > 0,
       metadata: {
@@ -358,7 +361,7 @@ export class ConversationService {
       );
     }
 
-    const mentionedUserIds = extractMentionedUserIdsFromContent(content);
+    const mentionedUserIds = extractMentionedUserIdsFromContent(messageContent);
     for (const userId of mentionedUserIds) {
       if (await this.userRepository.findById(userId)) {
         await this.conversationParticipantRepository.createOrUpdateConversationParticipant(
@@ -518,6 +521,8 @@ export class ConversationService {
       processedFiles.push(...uploadedFiles);
     }
 
+    const messageContent = await replaceCustomEmojiShortcodesWithImg(content?.trim() || '');
+
     // Create message
     // Generate child conversation ID if replyBroadcast is true
     const childConversationId = replyBroadcast ? uuidv4() : undefined;
@@ -525,7 +530,7 @@ export class ConversationService {
     const messageData: CreateMessageInput = {
       conversationId,
       senderId: userId,
-      content: content?.trim() || '',
+      content: messageContent,
       msgType: msgType || MessageType.USER,
       hasAttachment: processedFiles.length > 0,
       showInChannel: replyBroadcast,
@@ -543,7 +548,7 @@ export class ConversationService {
       );
     }
 
-    const mentionedUserIds = extractMentionedUserIdsFromContent(content);
+    const mentionedUserIds = extractMentionedUserIdsFromContent(messageContent);
     for (const userId of mentionedUserIds) {
       if (
         (await this.userRepository.findById(userId)) &&
@@ -728,7 +733,7 @@ export class ConversationService {
     const updateData: UpdateData = {};
 
     if (content !== undefined) {
-      updateData.content = content.trim();
+      updateData.content = await replaceCustomEmojiShortcodesWithImg(content.trim());
     }
 
     if (metadata !== undefined) {
@@ -782,6 +787,10 @@ export class ConversationService {
     logger.info(
       `[ConversationService] Updated message ${messageId} in conversation ${conversation.conversationId}`
     );
+
+    if (conversation.initialMessageId === messageId) {
+      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
+    }
 
     // Push Vespa job for message update indexing
     this.pushVespaJobForMessage(updatedMessage.messageId, message.senderId).catch((error) => {
