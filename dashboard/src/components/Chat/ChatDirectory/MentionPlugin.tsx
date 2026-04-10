@@ -503,14 +503,14 @@ export function MentionPlugin({
           trigger = {
             type: 'user',
             text: 'from:',
-            query: fromMatch[1] || '',
+            query: (fromMatch[1] || '').replace(/^@/, '').trim(),
             index: textBeforeCursor.lastIndexOf('from:'),
           };
         } else if (assigneeMatch) {
           trigger = {
             type: 'user',
             text: 'assignee:',
-            query: assigneeMatch[1] || '',
+            query: (assigneeMatch[1] || '').replace(/^@/, '').trim(),
             index: textBeforeCursor.lastIndexOf('assignee:'),
           };
         } else if (atMatch) {
@@ -524,7 +524,7 @@ export function MentionPlugin({
           trigger = {
             type: 'channel',
             text: 'in:',
-            query: inMatch[1] || '',
+            query: (inMatch[1] || '').replace(/^#/, '').trim(),
             index: textBeforeCursor.lastIndexOf('in:'),
           };
         } else if (hashMatch) {

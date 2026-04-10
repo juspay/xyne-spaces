@@ -101,7 +101,6 @@ const ChannelCommandItem = ({
   channel,
   currentUserID,
   unreadCount,
-  search,
   onSelect,
   getChannelIcon,
   isSelected = false,
@@ -109,7 +108,6 @@ const ChannelCommandItem = ({
   channel: Channel;
   currentUserID: string;
   unreadCount: number;
-  search: string;
   onSelect: (displayName: string) => void;
   getChannelIcon: (channel: Channel) => ReactElement;
   isSelected?: boolean;
@@ -117,13 +115,8 @@ const ChannelCommandItem = ({
   const { displayName } = useChannelDisplayName(channel, currentUserID);
   const { isMobile } = usePlatform();
 
-  if (
-    search.trim() &&
-    !displayName.toLowerCase().includes(search.toLowerCase()) &&
-    !isDMChannel(channel.scopeType)
-  ) {
-    return null;
-  }
+  // No inline filter needed: both regular channels and DMs are pre-filtered upstream
+  // in useSearchMetrics (regular channels via fuzzy searchChannels, DMs via searchableNames).
 
   return (
     <Command.Item
@@ -408,6 +401,7 @@ const ChannelCommandMenu = ({
   // Suppress hover highlights when dialog first opens to prevent dual-highlight
   // (CSS :hover on one item + aria-selected on another) when mouse is already resting in the dialog area
   const [suppressHover, setSuppressHover] = useState(false);
+  const hasNavigatedRef = useRef(false);
 
   // Platform detection - needs to be before useEffects that depend on it
   const { isMobile } = usePlatform();
@@ -1021,6 +1015,34 @@ const ChannelCommandMenu = ({
 
   const showEmptyState = searchText.trim() && !isLoading && !hasResults;
 
+  // Auto-select first result when search results change
+  // Reset navigation flag when search text changes so auto-select resumes
+  useEffect(() => {
+    hasNavigatedRef.current = false;
+  }, [searchText]);
+
+  useEffect(() => {
+    if (!searchText.trim() || !hasResults || hasNavigatedRef.current) return;
+    // Small delay to let DOM render the items
+    const timer = setTimeout(() => {
+      if (hasNavigatedRef.current) return;
+      const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
+      if (items && items.length > 0) {
+        items.forEach((item, i) => {
+          item.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+        });
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [
+    searchText,
+    hasResults,
+    activeTab,
+    filteredLocalChannels.length,
+    filteredLocalUsers.length,
+    backendResults.length,
+  ]);
+
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
     <>
@@ -1203,7 +1225,6 @@ const ChannelCommandMenu = ({
                         channel={channel}
                         currentUserID={currentUserID}
                         unreadCount={unreadCount}
-                        search={search}
                         onSelect={displayName =>
                           handleChannelSelect(channel, displayName, index + 1)
                         }
@@ -1334,7 +1355,6 @@ const ChannelCommandMenu = ({
                       channel={channel}
                       currentUserID={currentUserID}
                       unreadCount={unreadCount}
-                      search={search}
                       onSelect={displayName => handleChannelSelect(channel, displayName, index + 1)}
                       getChannelIcon={getChannelIcon}
                       isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
@@ -1374,7 +1394,6 @@ const ChannelCommandMenu = ({
                         channel={channel}
                         currentUserID={currentUserID}
                         unreadCount={unreadCount}
-                        search={search}
                         onSelect={displayName =>
                           handleChannelSelect(channel, displayName, index + 1)
                         }
@@ -1438,7 +1457,6 @@ const ChannelCommandMenu = ({
                           channel={channel}
                           currentUserID={currentUserID}
                           unreadCount={unreadCount}
-                          search={search}
                           onSelect={displayName =>
                             handleChannelSelect(channel, displayName, index + 1)
                           }
@@ -1544,6 +1562,7 @@ const ChannelCommandMenu = ({
 
       // Suppress mouse hover highlights while navigating with keyboard.
       setSuppressHover(true);
+      hasNavigatedRef.current = true;
 
       e.preventDefault();
       return;

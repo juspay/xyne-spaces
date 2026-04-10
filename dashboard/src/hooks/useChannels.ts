@@ -45,8 +45,37 @@ export function searchChannels(channels: Channel[], query: string, limit = 10): 
 
   const q = query.toLowerCase();
 
-  const fuse = new Fuse(channels, {
-    keys: ['name'],
+  // For short queries (1-2 chars), use prefix matching for precise results
+  // Prioritize full-name prefix matches over mid-segment matches
+  if (q.length <= 2) {
+    const primaryMatches: Channel[] = [];
+    const secondaryMatches: Channel[] = [];
+
+    for (const channel of channels) {
+      const name = channel.name.toLowerCase();
+      if (name.startsWith(q)) {
+        primaryMatches.push(channel);
+      } else if (name.split('-').some(part => part.startsWith(q))) {
+        secondaryMatches.push(channel);
+      }
+    }
+
+    primaryMatches.sort((a, b) => a.name.localeCompare(b.name));
+    secondaryMatches.sort((a, b) => a.name.localeCompare(b.name));
+
+    return [...primaryMatches, ...secondaryMatches].slice(0, limit);
+  }
+
+  // For longer queries (3+ chars), use fuzzy search
+  // Include hyphen-stripped name so "ppd" matches "pp-design-review" via "ppdesignreview"
+  const searchableChannels = channels.map(channel => ({
+    channel,
+    name: channel.name,
+    nameStripped: channel.name.replace(/-/g, ''),
+  }));
+
+  const fuse = new Fuse(searchableChannels, {
+    keys: ['name', 'nameStripped'],
     threshold: 0.3,
     ignoreLocation: true,
     includeScore: true,
@@ -54,7 +83,7 @@ export function searchChannels(channels: Channel[], query: string, limit = 10): 
     isCaseSensitive: false,
   });
 
-  const results = fuse.search(query);
+  const results = fuse.search(q);
 
   const rescored = results.map(r => {
     const name = r.item.name.toLowerCase();
@@ -67,7 +96,7 @@ export function searchChannels(channels: Channel[], query: string, limit = 10): 
     }
 
     return {
-      item: r.item,
+      item: r.item.channel,
       score: finalScore,
     };
   });
