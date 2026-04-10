@@ -962,6 +962,12 @@ export const roomMachine = setup({
 
     showPermissionErrorToast: ({ event }) => {
       if (event.type === 'PERMISSION_ERROR' && event.errorType) {
+        const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
+
+        // In web, cancelling the native screen picker fires the same NotAllowedError
+        // as a real denial — don't show a toast for screen in non-Electron environments.
+        if (event.errorType === 'screen' && !isElectron) return;
+
         const deviceName =
           event.errorType === 'microphone'
             ? 'Microphone'
@@ -969,7 +975,6 @@ export const roomMachine = setup({
               ? 'Camera'
               : 'Screen recording';
         const settingsUrl = MACOS_PRIVACY_URLS[event.errorType];
-        const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
         toast.error(`${deviceName} access is blocked`, {
           description: 'Please allow access in your system settings and reload.',

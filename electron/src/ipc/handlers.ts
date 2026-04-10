@@ -12,6 +12,7 @@ import { Logger } from '../services/logger/Logger';
 import {
   requestAllMediaPermissions,
 } from '../services/media-permission';
+import { setCustomScreenPickerEnabled } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
@@ -220,6 +221,10 @@ export function setupIpcHandlers(): void {
   ipcMain.on('open-external', (_event, url: string) => {
     const newUrl = url.startsWith("/api/auth/login") ? `${config.MTLS_BACKEND_URL}${url}` : url;
     void shell.openExternal(newUrl);
+  });
+
+  ipcMain.on('screen-picker:set-enabled', (_event, enabled: boolean) => {
+    setCustomScreenPickerEnabled(enabled);
   });
 
   ipcMain.on('set-user-email', (_event, email: string) => {

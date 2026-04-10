@@ -5,6 +5,7 @@ import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import Logger from 'electron-log';
 import { EnrollmentEvent } from './logger/enrollment-events';
+import { showScreenPicker } from './screen-picker';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -75,9 +76,9 @@ export function setupRequestInterceptor(): void {
     }
   );
   
-  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
-    callback({ video: true, audio: true, useSystemPicker: true } as unknown as Electron.Streams);
-  }, { useSystemPicker: true });
+  // Start with native OS picker by default — matches the CAC default (customPickerEnabled: false).
+  // CustomLiveKitRoom will call setCustomScreenPickerEnabled(true) if CAC enables the custom picker.
+  setCustomScreenPickerEnabled(false);
 
   session.defaultSession.webRequest.onErrorOccurred(
     { urls: [`${config.BACKEND_URL}/*`] },
@@ -88,4 +89,46 @@ export function setupRequestInterceptor(): void {
       });
     }
   );
+}
+
+/**
+ * Installs the custom display-media handler that shows the in-app screen picker.
+ * Called on startup and re-called after a native OS picker fallback completes.
+ */
+function setupDisplayMediaHandler(): void {
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    const safeCallback = (streams: Electron.Streams): void => {
+      try {
+        callback(streams);
+      } catch (err) {
+        // Electron throws "Video was requested, but no video stream was provided"
+        // when callback({}) is called after user cancellation — suppress it.
+        Logger.info('[ScreenShare] Cancelled or no stream provided:', String(err));
+      }
+    };
+    showScreenPicker(safeCallback);
+  });
+}
+
+/**
+ * Switch between the custom in-app screen picker and the native macOS picker.
+ * When disabled, re-registers the handler with useSystemPicker: true so Electron
+ * delegates to the native OS picker instead of our custom UI.
+ */
+export function setCustomScreenPickerEnabled(enabled: boolean): void {
+  if (enabled) {
+    setupDisplayMediaHandler();
+    Logger.info('[ScreenShare] Custom screen picker enabled');
+  } else {
+    // useSystemPicker: true tells Electron to use the native macOS picker.
+    // The handler is still registered but never actually invoked when the
+    // system picker is available — macOS handles the entire flow natively.
+    session.defaultSession.setDisplayMediaRequestHandler(
+      (_request, callback) => {
+        callback({ video: true, audio: true, useSystemPicker: true } as unknown as Electron.Streams);
+      },
+      { useSystemPicker: true },
+    );
+    Logger.info('[ScreenShare] Custom screen picker disabled — using native OS picker');
+  }
 }

@@ -32,6 +32,7 @@ import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
 import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarningModal';
 import { IncomingCallModal } from '../components/Call/CallModals/IncomingCallModal';
+import { ScreenPickerModal } from '../components/ScreenPicker/ScreenPickerModal';
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
@@ -473,6 +474,7 @@ const AppRoot = (): ReactElement => {
                   </PanelGroup>
                 </div>
               )}
+              <ScreenPickerModal />
               <IncomingCallModal />
               <GlobalCallOverlay />
               <RecordingOverlay />
