@@ -83,6 +83,17 @@ export class CustomEmojiRepository {
     });
   }
 
+  async findManyByNames(
+    names: string[],
+    select: { id: true; name: true } = { id: true, name: true }
+  ): Promise<Array<{ id: string; name: string }>> {
+    if (!names.length) return [];
+    return await this.db.customEmoji.findMany({
+      where: { name: { in: names } },
+      select,
+    });
+  }
+
   async delete(id: string): Promise<CustomEmoji> {
     return await this.db.customEmoji.delete({
       where: { id },
