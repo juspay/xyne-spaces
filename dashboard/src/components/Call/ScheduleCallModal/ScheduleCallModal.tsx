@@ -3,7 +3,7 @@ import { RRule } from 'rrule';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import { ChannelScopeType, UserStatus, ChannelVisibility } from '@xyne/shared';
-import { useSelf } from '../../../hooks/useUsers';
+import { useSelf, useUsers } from '../../../hooks/useUsers';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { callService } from '../../../services/Call/callService';
 import { queries } from '../../../zero/queries';
@@ -134,6 +134,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   onSuccess,
 }) => {
   const user = useSelf();
+  const allUsers = useUsers();
   const allVisibleChannels = useAllVisibleChannels();
   const isEditMode = mode === 'edit' && !!initialCall;
   const [showCustomPanel, setShowCustomPanel] = React.useState(false);
@@ -329,26 +330,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const callStart = new Date(initialCall.startsAt);
       const callEnd = new Date(initialCall.endsAt);
 
-      // Build participant values:
-      // - DEFAULT channel → show the channel pill
-      // - DM / Group DM channel → show individual user pills (exclude organizer/self)
-      // - No channel → show individual user pills
-      const participantValues: string[] = [];
-      if (initialCall.channelId) {
-        const callChannel = allVisibleChannels.find(c => c.id === initialCall.channelId);
-        if (callChannel?.scopeType === ChannelScopeType.DEFAULT) {
-          participantValues.push(`channel:${initialCall.channelId}`);
-        } else {
-          // DM or Group DM — show users (excluding current user)
-          initialCall.participants
-            .filter(p => p.userId !== user?.id)
-            .forEach(p => participantValues.push(`user:${p.userId}`));
-        }
-      } else {
-        initialCall.participants
-          .filter(p => p.userId !== user?.id)
-          .forEach(p => participantValues.push(`user:${p.userId}`));
-      }
+      // Always pre-fill from the individual participants list.
+      // The channelId is an internal routing detail; users expect to see the
+      // people they invited, regardless of what channel backs the call.
+      const participantValues: string[] = initialCall.participants
+        .filter(p => p.userId !== user?.id)
+        .map(p => `user:${p.userId}`);
 
       reset({
         title: initialCall.title,
@@ -437,44 +424,43 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     }
   }, [showCustomPanel, recurrenceFrequency, recurrenceDays.length, startsAt]);
 
+  const buildUserOption = (u: (typeof allUsers)[number]) => ({
+    ...u,
+    label: getUserDisplayName(u),
+    value: `user:${u.id}`,
+    icon: (
+      <Avatar
+        userId={u.id}
+        size={'sm'}
+        showActiveStatus={false}
+        className='rounded-md size-[18px] flex items-center justify-center bg-white'
+      />
+    ),
+    children: (
+      <div className='flex items-center gap-2'>
+        <Avatar
+          userId={u.id}
+          size={'sm'}
+          showActiveStatus={false}
+          className='rounded-md size-[18px] flex items-center justify-center bg-white'
+        />
+        <div className='flex-1 w-full flex items-center gap-1.5'>
+          <span className='text-sm'>{getUserDisplayName(u).split(' ')[0]}</span>
+          {u.status === UserStatus.ACTIVE ? (
+            <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
+          ) : (
+            <span className='w-[5px] h-[5px] border border-gray-500 rounded-full'></span>
+          )}
+          <span className='text-sm text-gray-500'>{getUserDisplayName(u)}</span>
+        </div>
+      </div>
+    ),
+    type: 'user' as const,
+  });
+
   // Build participant options
   const inviteUserOrChannelOptions = useMemo(() => {
-    const userOptions =
-      users
-        .filter(u => u.id !== user?.id) // filter the current user from the list
-        .map(user => ({
-          ...user,
-          label: getUserDisplayName(user),
-          value: `user:${user.id}`,
-          icon: (
-            <Avatar
-              userId={user.id}
-              size={'sm'}
-              showActiveStatus={false}
-              className='rounded-md size-[18px] flex items-center justify-center bg-white'
-            />
-          ),
-          children: (
-            <div className='flex items-center gap-2'>
-              <Avatar
-                userId={user.id}
-                size={'sm'}
-                showActiveStatus={false}
-                className='rounded-md size-[18px] flex items-center justify-center bg-white'
-              />
-              <div className='flex-1 w-full flex items-center gap-1.5'>
-                <span className='text-sm'>{getUserDisplayName(user).split(' ')[0]}</span>
-                {user.status === UserStatus.ACTIVE ? (
-                  <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
-                ) : (
-                  <span className='w-[5px] h-[5px] border border-gray-500 rounded-full'></span>
-                )}
-                <span className='text-sm text-gray-500'>{getUserDisplayName(user)}</span>
-              </div>
-            </div>
-          ),
-          type: 'user' as const,
-        })) || [];
+    const userOptions = users.filter(u => u.id !== user?.id).map(buildUserOption);
 
     const channelOptions = channels.map(channel => ({
       ...channel,
@@ -490,7 +476,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     }));
 
     // In edit mode, the call's existing channel may be a DM (filtered out of `channels`).
-    // Inject it so the pre-filled chip renders correctly.
+    // Inject it into options so it remains searchable/selectable.
     if (isEditMode && initialCall?.channelId) {
       const alreadyIncluded = channelOptions.some(
         c => c.value === `channel:${initialCall.channelId}`,
@@ -514,8 +500,22 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       }
     }
 
+    // Pre-filled participants may not appear in the current search results
+    // (useUserSearch is limited). Inject them so their pills always render.
+    if (isEditMode && initialCall?.participants) {
+      initialCall.participants
+        .filter(p => p.userId !== user?.id)
+        .forEach(p => {
+          const alreadyIncluded = userOptions.some(u => u.value === `user:${p.userId}`);
+          if (!alreadyIncluded) {
+            const fullUser = allUsers.find(u => u.id === p.userId);
+            if (fullUser) userOptions.push(buildUserOption(fullUser));
+          }
+        });
+    }
+
     return [...userOptions, ...channelOptions].sort((a, b) => a.label.localeCompare(b.label));
-  }, [users, channels, user?.id, isEditMode, initialCall?.channelId, allVisibleChannels]);
+  }, [users, channels, user?.id, isEditMode, initialCall, allVisibleChannels, allUsers]);
 
   const parseTimeAndUpdateDate = useCallback(
     (timeString?: string, currentDate?: Date | null): Date | null => {

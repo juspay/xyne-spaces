@@ -204,7 +204,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
   };
 
   const renderTrigger = () => (
-    <div className='relative space-y-1'>
+    <div className='relative'>
       <div
         onClick={() => {
           if (!hasChannelSelected) {
@@ -222,65 +222,33 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
         data-track-category='calls'
         data-track-name='search-participants-input'
       >
-        {/* Render selected options as chips */}
         <span className='px-2 bg-background'>
-          <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 size-4 text-muted-foreground z-50 pointer-events-none bg-background ' />
+          <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 size-4 text-muted-foreground z-50 pointer-events-none bg-background' />
         </span>
-        <span className='bg-gradient-to-r from-background via-background to-transparent absolute left-3 top-0 h-full w-8 pointer-events-none z-10 rounded-lg' />
-        <div className='flex overflow-x-scroll no-scrollbar items-center gap-1 pl-5 flex-1'>
-          {selectedOptions.map(option => (
-            <div
-              key={option.value}
-              className='flex items-center justify-center gap-1 p-1 bg-card rounded-md text-sm border border-border'
-            >
-              {option.icon && <span>{option.icon}</span>}
-              <span className='truncate max-w-80 text-foreground'>{option.label}</span>
-              <button
-                type='button'
-                onClick={e => {
-                  e.stopPropagation();
-                  toggleValue(option.value);
-                }}
-                className='ml-1 hover:bg-muted rounded p-0.5 text-foreground'
-                data-track-category='calls'
-                data-track-name='remove-participant'
-              >
-                <X className='size-3' />
-              </button>
-            </div>
-          ))}
-
-          {/* Search input */}
-          <div ref={inputContainerRef} className='flex-1 min-w-64'>
-            <Input
-              type='text'
-              role='combobox'
-              maxLength={56}
-              ref={ref}
-              placeholder={selectedValues.length === 0 ? 'Search by user or channel name' : ''}
-              value={!hasChannelSelected ? searchQuery : ''}
-              disabled={hasChannelSelected}
-              onKeyDown={handleKeyDown}
-              onChange={e => setSearchQuery(e.target.value)}
-              className='pl-0.5 w-full border-0 shadow-none placeholder:text-muted-foreground text-foreground focus-visible:ring-0 bg-background'
-              aria-expanded={isOpen}
-              aria-controls='participant-listbox'
-              aria-activedescendant={
-                isOpen && filteredOptions[index]
-                  ? `option-${filteredOptions[index].value}`
-                  : undefined
-              }
-              aria-autocomplete='list'
-              data-testid='search-participants-input'
-            />
-          </div>
+        <div ref={inputContainerRef} className='flex-1 pl-6'>
+          <Input
+            type='text'
+            role='combobox'
+            maxLength={56}
+            ref={ref}
+            placeholder='Search by user or channel name'
+            value={!hasChannelSelected ? searchQuery : ''}
+            disabled={hasChannelSelected}
+            onKeyDown={handleKeyDown}
+            onChange={e => setSearchQuery(e.target.value)}
+            className='pl-0.5 w-full border-0 shadow-none placeholder:text-muted-foreground text-foreground focus-visible:ring-0 bg-background'
+            aria-expanded={isOpen}
+            aria-controls='participant-listbox'
+            aria-activedescendant={
+              isOpen && filteredOptions[index]
+                ? `option-${filteredOptions[index].value}`
+                : undefined
+            }
+            aria-autocomplete='list'
+            data-testid='search-participants-input'
+          />
         </div>
       </div>
-      {hasChannelSelected && (
-        <p className='text-xs text-muted-foreground mt-1 px-1'>
-          Only one channel selection is allowed
-        </p>
-      )}
     </div>
   );
 
@@ -368,6 +336,39 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
+
+      {/* Selected participants rendered below the search bar */}
+      {selectedOptions.length > 0 && (
+        <div className='flex flex-wrap gap-1.5 mt-2 max-h-32 overflow-y-auto'>
+          {selectedOptions.map(option => (
+            <div
+              key={option.value}
+              className='flex items-center gap-1 px-2 py-1 bg-card rounded-md text-sm border border-border'
+            >
+              {option.icon && <span>{option.icon}</span>}
+              <span className='truncate max-w-60 text-foreground'>{option.label}</span>
+              <button
+                type='button'
+                onClick={e => {
+                  e.stopPropagation();
+                  toggleValue(option.value);
+                }}
+                className='ml-0.5 hover:bg-muted rounded p-0.5 text-foreground'
+                data-track-category='calls'
+                data-track-name='remove-participant'
+              >
+                <X className='size-3' />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {hasChannelSelected && (
+        <p className='text-xs text-muted-foreground mt-1 px-1'>
+          Only one channel selection is allowed
+        </p>
+      )}
     </div>
   );
 };
