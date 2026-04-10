@@ -1,4 +1,4 @@
-import { DatabaseClient } from '../client';
+import { DatabaseClient, readReplicaDb } from '../client';
 import { Prisma } from '@prisma/client';
 import { WorkflowType, getWorkflowTypeDisplayName } from '@/workflows/types/workflow-enums';
 import { getTodayISTDateRange, IST_OFFSET_MS, HOUR_MS } from '@/utils/dateUtils';
@@ -170,6 +170,19 @@ export function getDateFilter(filters: AnalyticsFilters): Date | { gte: Date; lt
 
 export class AnalyticsRepository {
   /**
+   * Uses read replica if available, falls back to main database
+   */
+  private getDbInstance() {
+    const replica = readReplicaDb;
+    if (replica) {
+      logger.info('Using read replica database for analytics queries');
+      return replica;
+    }
+    logger.info('Read replica not available, using main database for analytics queries');
+    return DatabaseClient.getInstance();
+  }
+
+  /**
    * Centralized helper to fetch and filter valid messages
    * Accepts a Prisma where clause and returns only valid messages
    */
@@ -227,7 +240,7 @@ export class AnalyticsRepository {
 
     return messages;
   }
-  private prisma = DatabaseClient.getInstance();
+  private prisma = this.getDbInstance();
 
   /**
    * Get IDs of real users (userType: 'USER'), excludes bots
