@@ -57,10 +57,11 @@ export class NotificationHooks {
 
   static async onWorkflowCompletion(
     workflowId: string,
-    status: string
+    status: string,
+    executionId: string
   ): Promise<void> {
     try {
-      await notificationService.sendWorkflowCompletionNotification(workflowId, status);
+      await notificationService.sendWorkflowCompletionNotification(workflowId, status, executionId);
     } catch (error) {
       logger.error('Failed to send workflow completion notification:', error);
     }

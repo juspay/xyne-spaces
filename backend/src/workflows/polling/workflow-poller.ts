@@ -264,7 +264,7 @@ export class WorkflowPoller {
       })
 
     // Send workflow completion notification
-    await notificationHooks.onWorkflowCompletion(execution.workflowId, 'SUCCESS')
+    await notificationHooks.onWorkflowCompletion(execution.workflowId, 'SUCCESS', execution.id)
 
     // If this is a child execution, trigger parent resume
     if (execution.parentWorkflowExecutionId) {
