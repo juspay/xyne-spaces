@@ -1,6 +1,6 @@
 import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGetChannelUserStatus, useVisibleChannel } from '../../../hooks/useChannels';
 //eslint-disable-next-line local-rules/no-rocicorp-use-zero
 import { useZero } from '@rocicorp/zero/react';
@@ -188,7 +188,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   // triggered by atTopStateChange during the initial mount/scroll race.
   const initialPositionSetRef = useRef(false);
 
-  const lastAutoScrolledIdRef = useRef<string | undefined>(undefined);
+  const lastAutoScrollKeyRef = useRef<string | undefined>(undefined);
 
   /** Tracks the new-message boundary: its array index and whether user has seen it. */
   type NewConversationBoundary = { index: number; seenConvId: string | null };
@@ -210,6 +210,11 @@ const ChatListV3: React.FC<ChatListProps> = ({
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
+  const lastConversationAutoScrollKey = useMemo(() => {
+    const lastConversation = conversations[conversations.length - 1];
+    if (!lastConversation) return '';
+    return `${lastConversation.conversationId}:${lastConversation.initial_message_md ?? ''}`;
+  }, [conversations]);
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const isFetchingRef = useRef(false);
@@ -439,9 +444,9 @@ const ChatListV3: React.FC<ChatListProps> = ({
     }
 
     setInitialTopMostItemIndex(computed);
-    lastAutoScrolledIdRef.current = conversations[conversations.length - 1]?.conversationId;
+    lastAutoScrollKeyRef.current = lastConversationAutoScrollKey || undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isInitialLoadComplete, combinedMessages]);
+  }, [isInitialLoadComplete, combinedMessages, lastConversationAutoScrollKey]);
 
   useEffect(() => {
     if (!linkedItemCreatedAt || !linkedConversationId || !isInitialLoadComplete) return;
@@ -468,16 +473,16 @@ const ChatListV3: React.FC<ChatListProps> = ({
   useEffect(() => {
     if (!isInitialLoadComplete) return;
     const last = conversations[conversations.length - 1];
-    if (!last || last.conversationId === lastAutoScrolledIdRef.current) return;
+    if (!last || lastConversationAutoScrollKey === lastAutoScrollKeyRef.current) return;
     const lastInitMsg = getInitialMessageFromConversation(last);
     const isOwnMessage = lastInitMsg?.senderId === user?.id;
     if (isNearBottomRef.current || isOwnMessage) {
-      lastAutoScrolledIdRef.current = last.conversationId;
+      lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
       setTimeout(() => {
         virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end', behavior: 'auto' });
       }, 80);
     }
-  }, [conversations, isInitialLoadComplete]);
+  }, [conversations, isInitialLoadComplete, lastConversationAutoScrollKey, user?.id]);
 
   useEffect(() => {
     if (updatedConversationsDetails.type === 'complete' && isInitialLoadComplete) {

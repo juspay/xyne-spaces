@@ -30,6 +30,7 @@ import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
+import { messageMetadataService } from '@/services/messageMetadataService';
 
 const LARGE_GROUP_DM_THRESHOLD = 8;
 const messageAttachmentRepository = new MessageAttachmentRepository();
@@ -60,7 +61,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // Resolve link preview asynchronously (fire-and-forget)
     // Tries internal app link first, then external OG preview
     if (message.content && message.msgType === 'USER') {
-      this.resolveLinkPreview(message.messageId, message.content).catch(error => {
+      this.resolveLinkPreview(message.messageId, message.conversationId, message.content).catch(error => {
         logger.error('[MessagesSideEffect] Failed to resolve link preview:', {
           messageId,
           error: error instanceof Error ? error.message : String(error),
@@ -393,25 +394,37 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
    * Resolve link preview for a message: tries internal app link first,
    * falls back to external OG metadata.
    */
-  private async resolveLinkPreview(messageId: string, content: string): Promise<void> {
+  private async resolveLinkPreview(
+    messageId: string,
+    conversationId: string,
+    content: string,
+  ): Promise<void> {
     const contentWithoutMentions = content.replace(
       /<span[^>]*class="[^"]*chat-input-mention[^"]*"[^>]*>@[^<]+<\/span>/g,
       ''
     );
 
     // 1) Try internal app link first (DB lookup, no HTTP fetch)
-    const resolvedInternal = await this.resolveInternalLinkPreview(messageId, contentWithoutMentions);
+    const resolvedInternal = await this.resolveInternalLinkPreview(
+      messageId,
+      conversationId,
+      contentWithoutMentions,
+    );
     if (resolvedInternal) return;
 
     // 2) Fall through to external OG-based preview
-    await this.resolveExternalLinkPreview(messageId, contentWithoutMentions);
+    await this.resolveExternalLinkPreview(messageId, conversationId, contentWithoutMentions);
   }
 
   /**
    * Fetch external OG metadata for the first URL in the content,
    * then write the result to message.link_preview_md.
    */
-  private async resolveExternalLinkPreview(messageId: string, content: string): Promise<void> {
+  private async resolveExternalLinkPreview(
+    messageId: string,
+    conversationId: string,
+    content: string,
+  ): Promise<void> {
     const url = extractFirstUrl(content);
     if (!url) return;
 
@@ -434,6 +447,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       data: { link_preview_md: md },
     });
 
+    await this.syncConversationMessageMetadata(conversationId);
+
     logger.info(`[MessagesSideEffect] Updated message ${messageId} with external link preview`);
   }
 
@@ -441,7 +456,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
    * Detect an internal app URL in content and resolve it via DB lookups.
    * Returns true if an internal preview was written, false otherwise.
    */
-  private async resolveInternalLinkPreview(messageId: string, content: string): Promise<boolean> {
+  private async resolveInternalLinkPreview(
+    messageId: string,
+    sourceConversationId: string,
+    content: string,
+  ): Promise<boolean> {
     const rawUrl = extractInternalUrl(content);
     if (!rawUrl) return false;
 
@@ -451,10 +470,19 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     logger.info('[MessagesSideEffect] Detected internal URL:', rawUrl);
 
     let targetMessageId: string | undefined = info.messageId;
+    let targetConversationId = info.conversationId;
 
-    if (!targetMessageId && info.conversationId) {
+    if (!targetConversationId && info.ticketId) {
+      const ticket = await db.ticket.findUnique({
+        where: { id: info.ticketId },
+        select: { conversationId: true },
+      });
+      targetConversationId = ticket?.conversationId ?? undefined;
+    }
+
+    if (!targetMessageId && targetConversationId) {
       const conv = await db.conversation.findUnique({
-        where: { conversationId: info.conversationId },
+        where: { conversationId: targetConversationId },
         select: { initialMessageId: true },
       });
       targetMessageId = conv?.initialMessageId ?? undefined;
@@ -577,8 +605,22 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       data: { link_preview_md: md },
     });
 
+    await this.syncConversationMessageMetadata(sourceConversationId);
+
     logger.info(`[MessagesSideEffect] Updated message ${messageId} with internal link preview`);
     return true;
+  }
+
+  /**
+   * Keep denormalized conversation message metadata in sync after direct Prisma updates
+   * to a message row, such as link_preview_md side-effect writes.
+   */
+  private async syncConversationMessageMetadata(conversationId?: string): Promise<void> {
+    if (!conversationId) {
+      return;
+    }
+
+    await messageMetadataService.syncInitialMessageMd(conversationId);
   }
 
   private async createReplyActivity(

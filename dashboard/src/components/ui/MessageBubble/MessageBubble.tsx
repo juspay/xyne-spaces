@@ -4,6 +4,7 @@ import { AvatarSize, Tooltip, TooltipSide } from '@juspay/blend-design-system';
 import * as Popover from '@radix-ui/react-popover';
 import {
   MessageType,
+  parsePreviewMd,
   parseForwardedMessageXml,
   isForwardedMessageXml,
   parseReactionsMd,
@@ -33,6 +34,8 @@ import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
 import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
 import { BotBubble } from '../../Chat/BotBubble';
+import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
+import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import Markdown from 'react-markdown';
@@ -394,15 +397,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   isFirstInThread = false,
   allThreadAttachments,
   workflowNumber,
+  showLinkPreview: shouldRenderLinkPreview = true,
 }) => {
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
   const attachments = message.attachments || [];
+  const [showLinkPreview, setShowLinkPreview] = useState(true);
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
   const isBotMessage = message.msgType === MessageType.BOT;
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
+  const previewResult = parsePreviewMd(message.link_preview_md);
 
   // Parse forwarded message XML content
   const forwardedMessageData = useMemo(() => {
@@ -1068,6 +1074,25 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   ticketId={conversation.ticketId}
                   metadata={parsedWorkflowActions.workflowActions}
                 />
+              )}
+
+              {shouldRenderLinkPreview && showLinkPreview && previewResult && (
+                <div className='mt-2 max-w-full'>
+                  {previewResult.type === 'message_preview' ? (
+                    <InternalMessagePreview
+                      metadata={{
+                        type: 'internal_message',
+                        ...previewResult.data,
+                      }}
+                      onClose={() => setShowLinkPreview(false)}
+                    />
+                  ) : (
+                    <LinkPreview
+                      metadata={previewResult.data}
+                      onClose={() => setShowLinkPreview(false)}
+                    />
+                  )}
+                </div>
               )}
 
               {!contentOnly && (

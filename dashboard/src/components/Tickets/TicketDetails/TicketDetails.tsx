@@ -1402,7 +1402,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!ticket) return;
 
     // Use shareable origin from environment variable
-    const minimizedTicketViewRoute = `${SHAREABLE_ORIGIN}chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`;
+    const minimizedTicketViewRoute = `${SHAREABLE_ORIGIN}/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`;
     void navigator.clipboard.writeText(minimizedTicketViewRoute);
     toast.success('Link copied', {
       description: 'Ticket link copied to clipboard',

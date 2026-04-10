@@ -126,19 +126,28 @@ export function extractFirstUrl(text: string): string | null {
 
 const INTERNAL_HOSTS = [
   'spaces.xyne.juspay.net',
-  'spaces.sandbox.xyne.juspay.net'
+  'spaces.sandbox.xyne.juspay.net',
+  'app.spaces.xyne.juspay.net',
+  'xyne-spaces.web.app',
+];
+
+const INTERNAL_HOSTS_WITH_PORT = [
+  'localhost:5173',
+  '127.0.0.1:5173',
 ];
 
 // Pre-compiled regex for internal URL extraction (avoids creating new RegExp on each call)
 // Matches: production and sandbox domains
-const INTERNAL_URL_REGEX = /https?:\/\/(?:spaces\.xyne\.juspay\.net|spaces\.sandbox\.xyne\.juspay\.net)\/chat\/[^\s<>"'\)\]]*/i;
+const INTERNAL_URL_REGEX =
+  /https?:\/\/(?:spaces\.xyne\.juspay\.net|spaces\.sandbox\.xyne\.juspay\.net|app\.spaces\.xyne\.juspay\.net|xyne-spaces\.web\.app|localhost:\d+|127\.0\.0\.1:\d+)\/chat\/[^\s<>"'\)\]]*/i;
 
 export interface InternalLinkInfo {
-  type: 'channel_message' | 'thread_message';
+  type: 'message' | 'conversation' | 'ticket';
   url: string;
   channelId: string;
   conversationId?: string;
   messageId?: string;
+  ticketId?: string;
 }
 
 /**
@@ -159,27 +168,65 @@ export function extractInternalUrl(text: string): string | null {
 export function parseInternalUrl(url: string): InternalLinkInfo | null {
   try {
     const parsed = new URL(url);
-    if (!INTERNAL_HOSTS.includes(parsed.hostname)) return null;
+    const isAllowedHost =
+      INTERNAL_HOSTS.includes(parsed.hostname) || INTERNAL_HOSTS_WITH_PORT.includes(parsed.host);
+    if (!isAllowedHost) return null;
 
-    // /chat/(dir|dm|bookmarks|activity)/:channelId[/:conversationId]
+    // /chat/(dir|dm|bookmarks|activity)/:channelId[/:conversationId][/:ticketId]
+    // /chat/(dir|dm|bookmarks|activity)/:channelId/tickets/:ticketId
     const pathMatch = parsed.pathname.match(
-      /^\/chat\/(?:dir|dm|bookmarks|activity)\/([^/]+)(?:\/([^/]+))?/
+      /^\/chat\/(?:dir|dm|bookmarks|activity)\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?$/
     );
     if (!pathMatch) return null;
 
     const channelId = pathMatch[1];
-    const pathConversationId = pathMatch[2];
+    const secondSegment = pathMatch[2];
+    const thirdSegment = pathMatch[3];
+    const isTicketSubroute = secondSegment === 'tickets' && !!thirdSegment;
 
     const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
     const messageId = hashParams.get('messageId') ?? undefined;
     const originConversationId = hashParams.get('origin') ?? undefined;
+    const queryConversationId = parsed.searchParams.get('conversationId') ?? undefined;
+    const queryTicketId = parsed.searchParams.get('ticketId') ?? undefined;
 
-    const conversationId = pathConversationId || originConversationId;
+    if (isTicketSubroute) {
+      return {
+        type: 'ticket',
+        url,
+        channelId,
+        conversationId: queryConversationId,
+        ticketId: thirdSegment,
+      };
+    }
+
+    if (thirdSegment) {
+      return {
+        type: 'ticket',
+        url,
+        channelId,
+        conversationId: secondSegment,
+        ticketId: thirdSegment,
+      };
+    }
+
+    const conversationId = secondSegment || queryConversationId || originConversationId;
+
+    if (queryTicketId) {
+      return {
+        type: 'ticket',
+        url,
+        channelId,
+        conversationId,
+        ticketId: queryTicketId,
+      };
+    }
 
     if (messageId && conversationId) {
-      return { type: 'thread_message', url, channelId, conversationId, messageId };
+      return { type: 'message', url, channelId, conversationId, messageId };
     }
-    return { type: 'channel_message', url, channelId, conversationId };
+
+    return { type: 'conversation', url, channelId, conversationId };
   } catch {
     return null;
   }
