@@ -209,6 +209,7 @@ async function processBatch(
     includeThreads: syncOptions?.includes('include_threads'),
     includeAttachments: syncOptions?.includes('include_attachments'),
     includeDeactivatedUsers: syncOptions?.includes('include_deactivated_users'),
+    includeBotMessages: syncOptions?.includes('include_bot_messages'),
   });
 
   if (ENABLE_NOTIFICATIONS && messageTs) {
@@ -298,7 +299,8 @@ async function addChannelParticipantsBeforeMigration(
     const memberId = channelMemberIds[i];
     try {
       const userInfo = await getUserInfo(memberId, userInfoCache);
-      if (userInfo?.botId) {
+      if (userInfo?.isBot) {
+        logger.info('[Migration] Skipping bot member', { memberId });
         continue;
       }
       if (userInfo && (userInfo.userId || (userInfo.userEmail && userInfo.userName))) {
