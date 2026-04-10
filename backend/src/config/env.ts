@@ -29,6 +29,7 @@ const envSchema = Joi.object({
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').default(''),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
+  SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
   // Google Cloud Storage Configuration (Workload Identity)
@@ -402,6 +403,9 @@ export const config = {
   },
   jwt: {
     expirationSeconds: envVars.JWT_EXPIRATION_SECONDS,
+  },
+  session: {
+    expiryDays: envVars.SESSION_EXPIRY_DAYS,
   },
   pulse: {
     // Comma-separated channel IDs that have Pulse enabled (empty = disabled everywhere)

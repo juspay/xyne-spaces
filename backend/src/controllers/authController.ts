@@ -273,7 +273,7 @@ export class AuthController {
           
           // Google refresh tokens don't expire, but we'll set a far future date
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30); // 30 days
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
           
           const accessTokenExpiry = payload.exp ? new Date(payload.exp * 1000) : undefined;
 
@@ -321,11 +321,11 @@ export class AuthController {
         maxAge: config.jwt.expirationSeconds * 1000,
       });
 
-      // Set session ID cookie (expires in 30 days)
+      // Set session ID cookie
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
 
@@ -661,7 +661,7 @@ export class AuthController {
           logger.info(`💾 [${requestId}] Creating user session...`);
           
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30); // 30 days
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
           
           const accessTokenExpiry = payload.exp ? new Date(payload.exp * 1000) : undefined;
           
@@ -704,11 +704,11 @@ export class AuthController {
         maxAge: config.jwt.expirationSeconds * 1000,
       });
 
-      // Set session ID cookie (expires in 30 days)
+      // Set session ID cookie
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
 

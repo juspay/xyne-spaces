@@ -273,7 +273,7 @@ export class AuthV2Controller {
           logger.info(`[${requestId}] Creating user session`);
 
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const accessTokenExpiry = payload.exp ? new Date(payload.exp * 1000) : undefined;
 
@@ -317,7 +317,7 @@ export class AuthV2Controller {
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
 
@@ -328,7 +328,7 @@ export class AuthV2Controller {
           secure: isProduction,
           sameSite: 'strict',
           path: '/',
-          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
         logger.info(`[${requestId}] Set is_new_user cookie for new user: ${user.email}`);
       }
@@ -552,7 +552,7 @@ export class AuthV2Controller {
           logger.info(`[${requestId}] Creating user session`);
 
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const accessTokenExpiry = payload.exp ? new Date(payload.exp * 1000) : undefined;
 
@@ -596,7 +596,7 @@ export class AuthV2Controller {
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
 
@@ -607,7 +607,7 @@ export class AuthV2Controller {
           secure: isProduction,
           sameSite: 'strict',
           path: '/',
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
         logger.info(`[${requestId}] Set is_new_user cookie for new user: ${user.email}`);
       }
@@ -739,7 +739,7 @@ export class AuthV2Controller {
           logger.info(`[${requestId}] Creating user session`);
 
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const accessTokenExpiry = payload.exp ? new Date(payload.exp * 1000) : undefined;
 
@@ -785,7 +785,7 @@ export class AuthV2Controller {
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
 
@@ -796,7 +796,7 @@ export class AuthV2Controller {
           secure: isProduction || isMobileNative,
           sameSite: isMobileNative ? 'none' : 'strict',
           path: '/',
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
         logger.info(`[${requestId}] Set is_new_user cookie for new user: ${user.email}`);
       }
