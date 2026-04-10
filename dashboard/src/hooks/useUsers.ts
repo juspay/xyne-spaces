@@ -30,6 +30,34 @@ export function searchUsers(users: User[], query: string, limit = 10): User[] {
 
   const q = query.toLowerCase();
 
+  // For short queries (1-2 chars), use prefix matching for precise results
+  // Prioritize first-name/full-name prefix matches over last-name/secondary matches
+  if (q.length <= 2) {
+    const primaryMatches: User[] = [];
+    const secondaryMatches: User[] = [];
+
+    for (const user of users) {
+      const name = user.name.toLowerCase();
+      const email = user.email.toLowerCase();
+      const displayName = user.displayName?.toLowerCase() || '';
+
+      if (name.startsWith(q) || displayName.startsWith(q) || email.startsWith(q)) {
+        primaryMatches.push(user);
+      } else if (
+        name.split(' ').some(part => part.startsWith(q)) ||
+        displayName.split(' ').some(part => part.startsWith(q))
+      ) {
+        secondaryMatches.push(user);
+      }
+    }
+
+    primaryMatches.sort((a, b) => a.name.localeCompare(b.name));
+    secondaryMatches.sort((a, b) => a.name.localeCompare(b.name));
+
+    return [...primaryMatches, ...secondaryMatches].slice(0, limit);
+  }
+
+  // For longer queries (3+ chars), use fuzzy search
   const fuse = new Fuse(users, {
     keys: [
       { name: 'name', weight: 2 },
@@ -37,7 +65,7 @@ export function searchUsers(users: User[], query: string, limit = 10): User[] {
       { name: 'displayName', weight: 1.5 },
     ],
 
-    threshold: 0.2,
+    threshold: 0.3,
     ignoreLocation: true,
     includeScore: true,
     minMatchCharLength: 2,

@@ -18,7 +18,9 @@ import {
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
 import { useUserSearch } from './useUsers';
+import { searchChannels } from './useChannels';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
+import { isDMChannel } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 import {
   parseSearchFilters,
   parseTypeFilter,
@@ -86,17 +88,35 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     if (!options.allChannels || !cleanedSearchText.trim()) return options.allChannels || [];
 
     const searchLower = cleanedSearchText.toLowerCase();
-    const keywords = searchLower.split(',').map(k => k.trim().toLowerCase());
+    // Split on commas or whitespace so "Shivral, vaibha" and "Shivral vaibha" both work
+    const keywords = searchLower
+      .split(/[,\s]+/)
+      .map(k => k.trim())
+      .filter(Boolean);
 
-    return options.allChannels.filter(({ channel, searchableNames }) => {
-      if (searchableNames && searchableNames.length > 0) {
-        const namesLower = searchableNames.map(n => n.toLowerCase());
-        return keywords.some(
-          keyword => keyword !== '' && namesLower.some(name => name.includes(keyword)),
-        );
-      }
-      return channel.name.toLowerCase().includes(searchLower);
+    // Separate DMs (match by participant names) from regular channels (use fuzzy search)
+    const dmItems = options.allChannels.filter(({ channel }) => isDMChannel(channel.scopeType));
+    const regularItems = options.allChannels.filter(
+      ({ channel }) => !isDMChannel(channel.scopeType),
+    );
+
+    // DMs: match against participant searchableNames
+    // Every keyword must match at least one participant name (AND semantics)
+    const matchedDms = dmItems.filter(({ searchableNames }) => {
+      if (!searchableNames || searchableNames.length === 0) return false;
+      if (keywords.length === 0) return false;
+      const namesLower = searchableNames.map(n => n.toLowerCase());
+      return keywords.every(keyword => namesLower.some(name => name.includes(keyword)));
     });
+
+    // Regular channels: use fuzzy searchChannels for better matching
+    const regularChannels = regularItems.map(item => item.channel);
+    const matchedChannelSet = new Set(
+      searchChannels(regularChannels, cleanedSearchText, regularChannels.length).map(c => c.id),
+    );
+    const matchedRegular = regularItems.filter(({ channel }) => matchedChannelSet.has(channel.id));
+
+    return [...matchedDms, ...matchedRegular];
   }, [options.allChannels, cleanedSearchText]);
 
   const [currentSearchContext, setCurrentSearchContext] = useState<{
