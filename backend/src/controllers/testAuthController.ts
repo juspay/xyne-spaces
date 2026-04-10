@@ -171,7 +171,7 @@ export class TestAuthController {
                 logger.info(`[${requestId}] Creating test user session`);
 
                 const refreshTokenExpiry = new Date();
-                refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+                refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
                 const deviceInfo = JSON.stringify({
                     userAgent: req.headers['user-agent'] || 'Test Automation',
@@ -210,7 +210,7 @@ export class TestAuthController {
             if (sessionId) {
                 res.cookie('user_session_id', sessionId, {
                     ...cookieOptions,
-                    maxAge: 30 * 24 * 60 * 60 * 1000,
+                    maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
                 });
             }
 
@@ -220,7 +220,7 @@ export class TestAuthController {
                     secure: false,
                     sameSite: 'strict',
                     path: '/',
-                    maxAge: 30 * 24 * 60 * 60 * 1000,
+                    maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
                 });
             }
 
