@@ -11,7 +11,7 @@ import { activityClassificationWorkerService } from '@/services/activity/activit
 import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
 import { gcsPollingService } from './services/gcsPollingService'
 import { notificationWorker } from '@/notification-service/consumers/notificationWorker'
-import { notificationService as realTimeNotificationService } from '@/notification-service'
+import { notificationService, notificationService as realTimeNotificationService } from '@/notification-service'
 import { redisService } from '@/services/redisService'
 //import { vespaWorker } from '@/workers/vespaWorker'
 import { workerScheduler } from './workers';
@@ -65,6 +65,7 @@ class WorkerService {
     } else {
       logger.info('Recovery worker is disabled ')
     }
+      const enableNotificationProducer = process.env.ENABLE_NOTIFICATION_PRODUCER === 'true';
 
       if (vespaEnabled) {
         await vespaWorker.start()
@@ -142,6 +143,11 @@ class WorkerService {
       if (documentIngestionWorkerEnabled) {
         logger.info('Starting document ingestion worker...');
         await documentIngestionWorker.start();
+      }
+
+      if (enableNotificationProducer) {
+        logger.info('Starting notification producer for real-time notifications...');
+        await notificationService.initialize();
       }
 
       process.on('SIGINT', () => this.shutdown())

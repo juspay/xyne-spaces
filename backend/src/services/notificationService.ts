@@ -87,7 +87,7 @@ class NotificationService {
       logger.warn('VAPID keys not configured. Push notifications will not work.');
     }
   }
-  async sendWorkflowCompletionNotification(workflowId: string, status: string): Promise<void> {
+  async sendWorkflowCompletionNotification(workflowId: string, status: string, executionId: string): Promise<void> {
     logger.info(
       `[TicketBot] sendWorkflowCompletionNotification called for workflow ${workflowId} with status ${status}`
     );
@@ -116,6 +116,37 @@ class NotificationService {
         `[TicketBot] Found workflow with ticket ${ticket.id}, conversationId: ${ticket.conversationId || 'none'}`
       );
 
+      const execution = await repositories.workflowExecutions.findById(executionId);
+      if (!execution || !execution.createdBy) {
+        logger.warn(`Execution not found or has no createdBy for notification: ${executionId}`);
+        return;
+      }
+      const createdBy = execution.createdBy;
+
+      const isSuccess = status.toUpperCase() === 'SUCCESS';
+      const notificationType = isSuccess
+        ? NotificationType.WORKFLOW_COMPLETION
+        : NotificationType.WORKFLOW_FAILURE;
+
+      const title = isSuccess ? 'Workflow Completed' : 'Workflow Failed';
+      const ticketIdDisplay = ticket.xyneId || ticket.id;
+      const message = `Workflow for ticket ${ticketIdDisplay} has ${isSuccess ? 'completed successfully' : 'failed'}.`;
+
+      await this.createNotification(createdBy, {
+        title,
+        message,
+        type: notificationType,
+        relatedEntityType: 'workflow',
+        relatedEntityId: workflowId,
+        actionUrl: `/tickets/${ticket.id}`,
+        metadata: {
+          workflowId,
+          ticketId: ticket.id,
+          xyneId: ticket.xyneId,
+          status
+        }
+      });
+      logger.info(`[Notification] Sent push notification to user ${createdBy} for workflow ${workflowId} completion.`);
 
       // Note: Slack notification functionality removed as slackChannelId/slackThreadId fields no longer exist on Ticket model
       logger.info(

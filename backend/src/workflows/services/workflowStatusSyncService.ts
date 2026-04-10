@@ -186,7 +186,8 @@ export class WorkflowStatusSyncService {
       // Send completion notification
       await notificationService.sendWorkflowCompletionNotification(
         targetWorkflowId,
-        workflowStatus
+        workflowStatus,
+        workflowExecutionId
       )
 
       logger.info(`Workflow ${targetWorkflowId} status updated to ${workflowStatus}`, {
