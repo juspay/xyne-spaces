@@ -140,11 +140,9 @@ const ExpandedTicketView = ({
 const ConversationPanelV2 = ({
   channelId,
   previousChannelId,
-  isActive = true,
 }: {
   channelId: string;
   previousChannelId: string | null;
-  isActive?: boolean;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
@@ -207,7 +205,7 @@ const ConversationPanelV2 = ({
     <ConversationTabContext.Provider
       value={{ setActiveTab: handleTabChange, setSkipMarkAsRead, skipMarkAsReadRef }}
     >
-      <div className='w-full relative h-full flex flex-col'>
+      <div key={`${channelId}-conversation-panel`} className='w-full relative h-full flex flex-col'>
         <ConversationHeader
           channelId={channelId}
           previousChannelId={previousChannelId}
@@ -236,7 +234,6 @@ const ConversationPanelV2 = ({
                   projectId={channel?.projectId}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
-                  isActive={isActive}
                 ></ChatListV3>
               )}
               {shouldShowJoinChannel ? (
