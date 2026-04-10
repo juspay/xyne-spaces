@@ -37,6 +37,8 @@ class ApnsService {
           token: tokenConfig,
           production: isProduction,
           requestTimeout: 10000,
+          // @ts-ignore - needed when network has broken IPv6 then then fall back to IPv4
+          family: 4,
         });
 
         this.bundleId = config.apns.bundleId;
