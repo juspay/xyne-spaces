@@ -116,6 +116,16 @@ const Info = ({
     [channel?.scopeType, channel?.name, context.userID],
   );
 
+  const targetUser = useUser(targetUserId || '');
+
+  const hasValidStatus = useMemo(() => {
+    return (
+      targetUser?.presenceStatus?.statusEmoji &&
+      (!targetUser?.presenceStatus?.statusExpiryAt ||
+        !isStatusExpired(targetUser.presenceStatus.statusExpiryAt))
+    );
+  }, [targetUser?.presenceStatus]);
+
   const handleAddPeopleClick = (): void => {
     setShowAddPeopleDialog(true);
   };
@@ -243,6 +253,16 @@ const Info = ({
             <div className='text-[17px] font-medium text-foreground visual-regression-hide'>
               {channelDisplayName}
             </div>
+            {isDM && hasValidStatus && (
+              <div className='flex items-center gap-1.5 mt-0.5'>
+                <span className='text-sm leading-none flex items-center justify-center'>
+                  {renderEmoji(targetUser?.presenceStatus?.statusEmoji || '')}
+                </span>
+                <span className='text-muted-foreground text-[13px] truncate'>
+                  {targetUser?.presenceStatus?.statusContent}
+                </span>
+              </div>
+            )}
             <div className='flex items-center gap-x-2'>
               <div className='flex items-center gap-1'>
                 <LucideKanbanSquare className='text-muted-foreground' size={14} />

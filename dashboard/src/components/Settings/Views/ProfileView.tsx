@@ -26,6 +26,7 @@ import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { isElectronApp } from '../../../utils/electronApp';
 import { cn } from '../../../utils/classNames';
 import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { Switch } from '../../ui/Switch';
 import { useSelf } from '../../../hooks/useUsers';
 import { mutators } from '../../../zero/mutators';
@@ -225,7 +226,7 @@ const ProfileView = ({
           <Avatar userId={user?.id || ''} size='lg' showActiveStatus={false} />
         </div>
         <div className='flex-1 min-w-0 space-y-1'>
-          <p className='text-sm font-medium text-foreground truncate'>{user?.name || 'User'}</p>
+          <p className='text-sm font-medium text-foreground truncate'>{getUserDisplayName(user)}</p>
 
           {/* Presence Status Dropdown - inline for mobile compatibility */}
           <div className='relative'>

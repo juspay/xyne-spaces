@@ -19,7 +19,7 @@ import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { getTargetUserIdForCall } from './ConversationHeader.utils';
 import { useUser } from '../../../hooks/useUsers';
 import { isDMChannel, isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
-import { StatusIndicator } from '../../ui/StatusIndicator';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useNavigate } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
@@ -122,16 +122,11 @@ const ConversationHeader = ({
             data-track-name='OPEN_CHANNEL_INFO'
             data-track-metadata={JSON.stringify({ channelId: channel.id, isDM })}
           >
-            <span className='visual-regression-hide truncate'>{displayName}</span>
-            {isDM && (
-              <StatusIndicator
-                statusEmoji={dmUser?.presenceStatus?.statusEmoji}
-                statusContent={dmUser?.presenceStatus?.statusContent}
-                statusExpiryAt={dmUser?.presenceStatus?.statusExpiryAt}
-                size='md'
-                showOnHover={true}
-              />
-            )}
+            <span className='visual-regression-hide truncate'>
+              {isOneToOneDMChannel(channel.scopeType)
+                ? getUserDisplayName(dmUser, true)
+                : displayName}
+            </span>
           </button>
         </div>
         <div className='flex items-center gap-2'>
