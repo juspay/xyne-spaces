@@ -1,3 +1,11 @@
+export interface ScreenSource {
+  id: string;
+  name: string;
+  thumbnail: string; // base64 data URL
+  displayId: string;
+  type: 'screen' | 'window';
+}
+
 export interface ElectronAPI {
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
@@ -148,6 +156,15 @@ export interface ElectronAPI {
     onHide: (callback: () => void) => () => void;
     dismiss: () => void;
     startRecording: () => void;
+  };
+  screenPicker?: {
+    onShow: (
+      callback: (data: { sources: ScreenSource[]; permissionError: 'denied' | null }) => void,
+    ) => () => void;
+    onClose: (callback: () => void) => () => void;
+    select: (sourceId: string, shareAudio: boolean) => void;
+    cancel: () => void;
+    setEnabled: (enabled: boolean) => void;
   };
 }
 

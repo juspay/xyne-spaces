@@ -12,6 +12,7 @@ import { useChannel } from '../../../hooks/useChannels';
 import { useAuth } from '../../../hooks/useAuth';
 import { EndCallModal } from '../EndCallModal/EndCallModal';
 import { useIsCallHost, useIsOnlyParticipant, useCallParticipants } from '../../../hooks/useCalls';
+import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
 
 export interface CustomLiveKitRoomProps {
   token: string;
@@ -30,6 +31,9 @@ export function CustomLiveKitRoom({
   externalId,
   zero,
 }: CustomLiveKitRoomProps): React.ReactElement {
+  // Sync custom screen picker on/off from CAC — only active while in a call
+  useScreenPickerFlag();
+
   // Subscribe to room state from global XState machine using a single snapshot
   const snapshot = useSelector(roomActor, state => state);
   const { isMobile } = usePlatform();

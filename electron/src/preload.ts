@@ -245,5 +245,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     dismiss: () => ipcRenderer.send('meeting-popup:dismiss'),
     startRecording: () => ipcRenderer.send('meeting-popup:start-recording'),
   },
+
+  // Screen Picker — in-app overlay instead of macOS native picker
+  screenPicker: {
+    onShow: (callback: (data: { sources: { id: string; name: string; thumbnail: string; displayId: string; type: 'screen' | 'window' }[]; permissionError: 'denied' | null }) => void) => {
+      const listener = (_event: unknown, data: { sources: { id: string; name: string; thumbnail: string; displayId: string; type: 'screen' | 'window' }[]; permissionError: 'denied' | null }) => callback(data);
+      ipcRenderer.on('screen-picker:show', listener);
+      return () => ipcRenderer.removeListener('screen-picker:show', listener);
+    },
+    onClose: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('screen-picker:close', listener);
+      return () => ipcRenderer.removeListener('screen-picker:close', listener);
+    },
+    select: (sourceId: string, shareAudio: boolean) => {
+      ipcRenderer.send('screen-picker:select', sourceId, shareAudio);
+    },
+    cancel: () => {
+      ipcRenderer.send('screen-picker:cancel');
+    },
+    setEnabled: (enabled: boolean) => {
+      ipcRenderer.send('screen-picker:set-enabled', enabled);
+    },
+  },
 });
 
