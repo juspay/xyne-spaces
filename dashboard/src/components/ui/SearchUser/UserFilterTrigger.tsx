@@ -4,6 +4,7 @@ import { CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { useUserSearch } from '../../../hooks/useUsers';
 import Avatar from '../Avatar/Avatar';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
 import type { User } from '@xyne/shared';
 
 interface UserFilterTriggerProps {
@@ -97,7 +98,7 @@ export const UserFilterTrigger: React.FC<UserFilterTriggerProps> = ({
 
   const triggerLabel = useMemo(() => {
     if (selectedUsers.length === 0) return null;
-    if (selectedUsers.length === 1) return selectedUsers[0]?.name ?? '1 selected';
+    if (selectedUsers.length === 1) return getUserDisplayName(selectedUsers[0]) ?? '1 selected';
     return `${selectedUsers.length} selected`;
   }, [selectedUsers]);
 
@@ -194,7 +195,7 @@ export const UserFilterTrigger: React.FC<UserFilterTriggerProps> = ({
                     )}
                   >
                     <Avatar userId={user.id} size='sm' showActiveStatus={false} />
-                    <span className='truncate'>{user.name}</span>
+                    <span className='truncate'>{getUserDisplayName(user, true)}</span>
                     {isSelected && (
                       <span className='absolute right-2 flex size-3.5 items-center justify-center'>
                         <CheckIcon className='size-4 text-foreground' />

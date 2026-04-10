@@ -12,6 +12,8 @@ import { AvatarSize } from '@juspay/blend-design-system';
 import { formatDistanceToNow, isToday } from 'date-fns';
 import { formatTimeAmPm } from '../../utils/dateUtils';
 import { UserHoverWrapper } from '../ui/UserMentionPopover/UserMentionPopover';
+import { useUser } from '../../hooks/useUsers';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { cn } from '../../utils/classNames';
 import { Button } from '../ui/Button';
 import { GenericMentionHoverPopover } from '../ui/GenericMentionPopover/GenericMentionPopover';
@@ -52,6 +54,7 @@ export const ActivityItemCard = ({
 
   const channel = useChannel(channelId || '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
+  const actor = useUser(actorId);
 
   const handleClick = () => {
     if (!activity.isRead) {
@@ -116,7 +119,9 @@ export const ActivityItemCard = ({
         <div className='flex w-full items-start justify-between gap-2 flex-wrap'>
           <div className='flex flex-wrap items-baseline gap-x-1.5 text-sm leading-snug min-w-0 flex-1'>
             {isMobile ? (
-              <span className='font-semibold text-foreground'>{actorName}</span>
+              <span className='font-semibold text-foreground'>
+                {getUserDisplayName(actor) || actorName}
+              </span>
             ) : (
               <UserHoverWrapper userId={actorId}>
                 <button
@@ -126,7 +131,7 @@ export const ActivityItemCard = ({
                   data-track-name='VIEW_USER_PROFILE'
                   data-track-metadata={JSON.stringify({ activityId: activity.id, userId: actorId })}
                 >
-                  {actorName}
+                  {getUserDisplayName(actor) || actorName}
                 </button>
               </UserHoverWrapper>
             )}

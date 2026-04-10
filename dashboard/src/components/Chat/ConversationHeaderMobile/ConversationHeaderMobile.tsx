@@ -27,6 +27,9 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { cn } from '../../../utils/classNames';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
+import { useUser } from '../../../hooks/useUsers';
+import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { isStatusExpired } from '../../../utils/statusUtils';
 import { VisibleChannel } from '../../../machines/stateMachine';
 
 interface ConversationHeaderMobileProps {
@@ -56,6 +59,8 @@ const ConversationHeaderMobile = ({
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
   const [isInfoDrawerOpen, setIsInfoDrawerOpen] = useState<boolean>(false);
   const [isAddPeopleDrawerOpen, setIsAddPeopleDrawerOpen] = useState<boolean>(false);
+  const { avatarUserId } = useChannelDisplayName(channel, context.userID);
+  const dmUser = useUser(avatarUserId || '');
   const { setActiveTab } = useContext(ConversationTabContext);
   const channelScopeType = channel.scopeType;
   const location = useLocation();
@@ -145,9 +150,18 @@ const ConversationHeaderMobile = ({
               <p className='text-sm font-medium whitespace-nowrap overflow-hidden text-foreground'>
                 {displayName}
               </p>
-              <small className='text-muted-foreground text-xs'>
-                {channel.channelStats?.participantCount} members
-              </small>
+              {channel && isOneToOneDMChannel(channel.scopeType) && dmUser?.presenceStatus ? (
+                <small className='text-muted-foreground text-xs truncate max-w-[200px]'>
+                  {dmUser.presenceStatus.statusEmoji}{' '}
+                  {(!dmUser.presenceStatus.statusExpiryAt ||
+                    !isStatusExpired(dmUser.presenceStatus.statusExpiryAt)) &&
+                    dmUser.presenceStatus.statusContent}
+                </small>
+              ) : (
+                <small className='text-muted-foreground text-xs'>
+                  {channel.channelStats?.participantCount} members
+                </small>
+              )}
             </div>
           </motion.div>
 

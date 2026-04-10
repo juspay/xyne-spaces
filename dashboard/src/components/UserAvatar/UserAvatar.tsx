@@ -3,6 +3,7 @@ import { ReactElement } from 'react';
 import { useUser } from '../../hooks/useUsers';
 import { useUserPresence } from '../../hooks/usePresence';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 
 const UserAvatar = ({
   userId,
@@ -30,12 +31,12 @@ const UserAvatar = ({
     <Avatar
       className='visual-regression-hide'
       src={pictureUrl || ''}
-      alt={user?.name || 'User avatar'}
+      alt={getUserDisplayName(user) || 'User avatar'}
       online={showActiveStatus ? isOnline : false}
       shape={shape || AvatarShape.ROUNDED}
       onlinePosition={AvatarOnlinePosition.BOTTOM}
       size={size || AvatarSize.SM}
-      fallback={user?.name
+      fallback={getUserDisplayName(user)
         ?.split(' ')
         .map(n => n[0])
         .join('')}

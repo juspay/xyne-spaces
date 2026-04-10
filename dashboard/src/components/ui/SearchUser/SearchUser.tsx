@@ -284,7 +284,11 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                       <Avatar userId={user.id} size='sm' showActiveStatus={false} />
                     </div>
                     <div className='flex flex-col min-w-0 flex-1'>
-                      <span className='font-medium truncate'>{getUserDisplayName(user)}</span>
+                      <div className='flex items-center gap-1.5'>
+                        <span className='font-medium truncate'>
+                          {getUserDisplayName(user, true)}
+                        </span>
+                      </div>
                       <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
                     </div>
                   </li>

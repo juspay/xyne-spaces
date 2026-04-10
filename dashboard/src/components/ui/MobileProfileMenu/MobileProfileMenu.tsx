@@ -9,6 +9,9 @@ import {
 } from '../../Settings/Views/SetStatusView';
 import { useMeasure } from 'react-use';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useUser } from '../../../hooks/useUsers';
+import { isStatusExpired } from '../../../utils/statusUtils';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 interface MobileProfileMenuProps {
   userId: string;
 }
@@ -24,6 +27,15 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
     setView(newView);
     setStatusData(data);
   }, []);
+
+  const user = useUser(userId);
+  const hasValidStatus = useMemo(() => {
+    return (
+      user?.presenceStatus?.statusEmoji &&
+      (!user?.presenceStatus?.statusExpiryAt ||
+        !isStatusExpired(user.presenceStatus.statusExpiryAt))
+    );
+  }, [user?.presenceStatus]);
 
   const content = useMemo(() => {
     switch (view) {
@@ -44,13 +56,18 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
     <>
       <button
         type='button'
-        className='relative'
+        className='relative flex items-center'
         aria-label='Open user menu'
         onClick={() => {
           setView('default');
           setIsOpen(true);
         }}
       >
+        {hasValidStatus && (
+          <span className='mr-1.5 text-[19px] leading-none flex items-center justify-center'>
+            {renderEmoji(user?.presenceStatus?.statusEmoji || '')}
+          </span>
+        )}
         <Avatar userId={userId} size='md' />
       </button>
       <Drawer.Root open={isOpen} onOpenChange={setIsOpen}>

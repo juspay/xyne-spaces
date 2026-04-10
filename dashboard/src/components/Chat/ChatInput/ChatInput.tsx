@@ -22,6 +22,9 @@ import {
 import { ALLOWED_FILE_TYPES } from '../../ui/utils/files';
 import { queries } from '../../../zero/queries';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
+import { useUser } from '../../../hooks/useUsers';
+import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { isStatusExpired } from '../../../utils/statusUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
@@ -281,10 +284,26 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       return undefined;
     }, [initialContent, messageId, messagesData, draft]);
 
-    const { displayName: channelName } = useChannelDisplayName(channel, context.userID);
+    const { displayName: channelName, avatarUserId } = useChannelDisplayName(
+      channel,
+      context.userID,
+    );
+    const isDM = channel && isDMChannel(channel.scopeType);
+    const dmUser = useUser(avatarUserId || '');
+    const hasValidStatus =
+      dmUser?.presenceStatus?.statusEmoji &&
+      (!dmUser.presenceStatus.statusExpiryAt ||
+        !isStatusExpired(dmUser.presenceStatus.statusExpiryAt));
+
     const placeholderText =
       placeholder ||
-      (channelName ? `Message ${isTestEnv ? '' : channelName}`.trim() : 'Type a message...');
+      (channelName
+        ? `Message ${isTestEnv ? '' : channelName}${
+            isDM && hasValidStatus
+              ? ` ${dmUser.presenceStatus.statusEmoji}${dmUser.presenceStatus.statusContent ? ` ${dmUser.presenceStatus.statusContent}` : ''}`
+              : ''
+          }`.trim()
+        : 'Type a message...');
 
     const handleMentionSearch = useCallback(
       (query: string) => {

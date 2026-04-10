@@ -7,6 +7,9 @@ import { detectMentionTrigger, detectChannelTrigger, createVirtualAnchor } from 
 import { mentionPluginKey, channelMentionPluginKey } from '../TipTapExtensions';
 import { BasePopoverSelector, type BaseSelectorPluginState } from './BasePopoverSelector';
 import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
+import { useUser } from '../../../hooks/useUsers';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { isStatusExpired } from '../../../utils/statusUtils';
 
 /**
  * Sub-component to render user avatar with resolved profile picture URL.
@@ -14,6 +17,17 @@ import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
  */
 const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
   const { url: pictureUrl } = useProfilePictureUrl(item.id, item.picture);
+  const user = useUser(item.id);
+  const presenceStatus = user?.presenceStatus;
+  const hasValidStatus =
+    presenceStatus?.statusEmoji &&
+    (!presenceStatus.statusExpiryAt || !isStatusExpired(presenceStatus.statusExpiryAt));
+  const statusText =
+    hasValidStatus && presenceStatus?.statusContent
+      ? `${presenceStatus.statusEmoji} ${presenceStatus.statusContent}`
+      : hasValidStatus
+        ? (presenceStatus?.statusEmoji ?? undefined)
+        : undefined;
 
   return (
     <>
@@ -25,12 +39,17 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
         shape={AvatarShape.CIRCULAR}
       />
       <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
-        <div className='flex items-center gap-2'>
-          <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-            {item.name}
+        <div className='flex items-center gap-1.5 min-w-0'>
+          <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis shrink-0'>
+            {getUserDisplayName(user)}
           </span>
+          {statusText && (
+            <span className='text-sm text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+              {statusText}
+            </span>
+          )}
           {item.isChannelMember === false && (
-            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
               Not in channel
             </span>
           )}

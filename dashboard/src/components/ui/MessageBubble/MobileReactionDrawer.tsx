@@ -9,6 +9,7 @@ import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { AnimatePresence, motion, Variants } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { type User } from '../../../machines/stateMachine';
 
 type ActivationDirection = 'left' | 'right' | 'none';
 
@@ -31,14 +32,14 @@ const getAnimationVariants = (direction: ActivationDirection): Variants => {
 interface GroupedReaction {
   emojiName: string;
   count: number;
-  users: Array<{ userId: string; name: string }>;
+  users: Array<{ userId: string; name: string; user?: User | undefined }>;
   orderIndex: number;
 }
 
 // Helper: Group reactions by emoji
 const groupReactionsByEmoji = (
   reactionsData: ReactionsData,
-  usersById: Map<string, { name: string }>,
+  usersById: Map<string, User>,
 ): GroupedReaction[] => {
   const emojiOrder = Object.keys(reactionsData);
   const grouped = emojiOrder.reduce(
@@ -47,10 +48,14 @@ const groupReactionsByEmoji = (
       acc[emoji] = {
         emojiName: emoji,
         count: userIds.length,
-        users: userIds.map(userId => ({
-          userId,
-          name: usersById.get(userId)?.name || 'Unknown User',
-        })),
+        users: userIds.map(userId => {
+          const user = usersById.get(userId);
+          return {
+            userId,
+            name: user ? getUserDisplayName(user, true) : 'Unknown User',
+            user,
+          };
+        }),
         orderIndex: index,
       };
       return acc;
@@ -80,9 +85,9 @@ export default function MobileReactionDrawer({
   const navigate = useNavigate();
   const location = useLocation();
   const usersById = useMemo(() => {
-    const map = new Map<string, { name: string }>();
+    const map = new Map<string, User>();
     for (const u of users) {
-      map.set(u.id, { name: getUserDisplayName(u) });
+      map.set(u.id, u);
     }
     return map;
   }, [users]);
