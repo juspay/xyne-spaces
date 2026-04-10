@@ -17,6 +17,7 @@ import { logger } from '@/utils/logger';
 export const ALLOWED_DOMAINS = [
   'spaces.xyne.juspay.net',        // web
   'app.spaces.xyne.juspay.net',    // app
+  'xyne-spaces.web.app',
   'localhost:5173',                // local development
 ] as const;
 

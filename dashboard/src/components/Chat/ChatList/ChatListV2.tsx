@@ -279,6 +279,12 @@ const ChatListV2: React.FC<ChatListProps> = ({
     }
   }, [updatedConveresations, channelId]);
 
+  const lastConversationAutoScrollKey = useMemo(() => {
+    const lastConversation = conversations[conversations.length - 1];
+    if (!lastConversation) return '';
+    return `${lastConversation.conversationId}:${lastConversation.initial_message_md ?? ''}`;
+  }, [conversations]);
+
   useEffect(() => {
     if (!scrollState.isAtPosition) return;
 
@@ -298,7 +304,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
         }
       }, 100);
     }
-  }, [currentNewestConversation.conversationId]);
+  }, [currentNewestConversation.conversationId, lastConversationAutoScrollKey]);
 
   useEffect(() => {
     const latesMessageExists = conversations.find(

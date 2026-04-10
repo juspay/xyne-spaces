@@ -255,11 +255,6 @@ export const mutators = defineMutators({
             updatedAt: timestamp,
           });
         }
-
-        console.info('[ZeroMutator] joinChannel success', {
-          channelId,
-          userId: _ctx.userID,
-        });
       },
     ),
     promoteToChannel: defineMutator(

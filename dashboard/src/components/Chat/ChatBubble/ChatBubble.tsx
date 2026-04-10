@@ -749,6 +749,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             context={context}
             channelScopeType={channelScopeType}
             isFirstInThread={isFirstInThread}
+            showLinkPreview={false}
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
             {...(conversation && { conversation: conversation })}
@@ -918,7 +919,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         </div>
       )}
       {variant !== 'pinned' && canvasId && showCanvasPreview && (
-        <div className='mt-2 ml-12 max-w-lg flex-1'>
+        <div
+          className={cn(
+            'pr-3 max-w-full pl-4 ml-14 transition-colors rounded-r border-l-4 border-l-gray-300 dark:border-l-gray-600',
+            message.senderId === user?.id && 'max-[500px]:mb-5',
+            showHoverActions && 'bg-accent/50',
+          )}
+        >
           <CanvasPreview canvasId={canvasId} onClose={() => setShowCanvasPreview(false)} />
         </div>
       )}

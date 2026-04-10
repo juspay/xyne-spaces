@@ -1,8 +1,25 @@
 import React, { JSX, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { Lock, Users, Clock } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  FileText,
+  Lock,
+  MessageSquare,
+  Ticket as TicketIcon,
+  Users,
+  Clock,
+} from 'lucide-react';
 import { highlightCodeBlocks } from './utils';
+import {
+  getAnchorTargetProps,
+  getInternalLinkLabel,
+  isExternalUrl,
+  parseInternalXyneLink,
+  shouldReplaceWithSemanticLabel,
+  type InternalXyneLinkKind,
+} from './internalLinkUtils';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover';
 import { useChannel } from '../../../hooks/useChannels';
@@ -17,6 +34,7 @@ import { cn } from '../../../utils/classNames';
 import { isElectronApp, isElectronStandaloneWindow } from '../../../utils/electronApp';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -31,25 +49,149 @@ const MAX_HTML_LENGTH = 100000;
 
 const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
 
+const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
+  switch (kind) {
+    case 'ticket':
+      return <TicketIcon className='h-3.5 w-3.5' />;
+    case 'canvas':
+      return <FileText className='h-3.5 w-3.5' />;
+    default:
+      return <MessageSquare className='h-3.5 w-3.5' />;
+  }
+};
+
+const InternalXyneLink = ({
+  href,
+  children,
+  className,
+  onClick,
+  ...props
+}: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element => {
+  const resolvedHref = href ?? '';
+  const parsedLink = parseInternalXyneLink(resolvedHref);
+  const channel = useChannel(parsedLink?.channelId ?? '');
+  const [ticket] = useCachedQuery(queries.ticketById({ ticketId: parsedLink?.ticketId ?? '' }), {
+    enabled: !!parsedLink?.ticketId,
+  });
+  const [canvas] = useCachedQuery(queries.getCanvas({ canvasId: parsedLink?.canvasId ?? '' }), {
+    enabled: !!parsedLink?.canvasId,
+  });
+  const [copied, setCopied] = useState(false);
+
+  if (!resolvedHref || !parsedLink) {
+    return (
+      <a
+        href={href}
+        className={className}
+        onClick={onClick}
+        data-track-category='MESSAGE'
+        data-track-name='OPEN_MESSAGE_LINK'
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  }
+
+  const handleCopy = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    void navigator.clipboard.writeText(resolvedHref).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    });
+  };
+
+  const linkLabel = getInternalLinkLabel(parsedLink, channel?.name, ticket?.xyneId, canvas?.title);
+  const leadingIcon = getInternalLinkIcon(parsedLink.kind);
+
+  if (!shouldReplaceWithSemanticLabel(children, resolvedHref)) {
+    return (
+      <a
+        href={href}
+        className={className}
+        onClick={onClick}
+        data-track-category='MESSAGE'
+        data-track-name='OPEN_INTERNAL_LINK'
+        data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  }
+
+  const linkClassName = cn(
+    'inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 text-primary no-underline transition-colors hover:bg-muted hover:no-underline',
+    className,
+  );
+
+  const linkContent = (
+    <>
+      <span className='shrink-0 text-muted-foreground'>{leadingIcon}</span>
+      <span className='truncate'>{linkLabel}</span>
+    </>
+  );
+
+  return (
+    <span className='group/internal-link inline-flex items-center gap-1.5 align-baseline max-w-full'>
+      {parsedLink.kind === 'canvas' ? (
+        <CanvasLink href={href} className={linkClassName} onClick={onClick} {...props}>
+          {linkContent}
+        </CanvasLink>
+      ) : (
+        <a
+          href={resolvedHref}
+          className={linkClassName}
+          onClick={onClick}
+          data-track-category='MESSAGE'
+          data-track-name='OPEN_INTERNAL_LINK'
+          data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
+          {...props}
+        >
+          {linkContent}
+        </a>
+      )}
+      <button
+        type='button'
+        onClick={handleCopy}
+        className='inline-flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-muted group-hover/internal-link:opacity-100 focus-visible:opacity-100'
+        aria-label='Copy original link'
+        title='Copy original link'
+        data-track-category='MESSAGE'
+        data-track-name='COPY_INTERNAL_LINK'
+        data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
+      >
+        {copied ? (
+          <Check className='h-3 w-3 text-green-600' />
+        ) : (
+          <Copy className='h-3 w-3 text-muted-foreground' />
+        )}
+      </button>
+    </span>
+  );
+};
+
 const CanvasLink = ({
   href,
   children,
   ...props
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element => {
+  const resolvedHref = href ?? '';
   const navigate = useNavigate();
   const location = useLocation();
   const { channelId } = useParams<{ channelId: string }>();
   const { isMobile } = usePlatform();
 
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
-    if (!href) return;
-    const url = new URL(href, window.location.origin);
+    if (!resolvedHref) return;
+    const url = new URL(resolvedHref, window.location.origin);
 
     // Check for Cmd/Ctrl+Click to open in new tab (desktop only)
     const isCmdClick = event.metaKey || event.ctrlKey;
     if (!isMobile && isCmdClick) {
       event.preventDefault();
-      window.open(href, '_blank');
+      window.open(resolvedHref, '_blank');
       return;
     }
 
@@ -74,12 +216,12 @@ const CanvasLink = ({
 
   return (
     <a
-      href={href}
+      href={resolvedHref}
       onClick={handleClick}
       {...props}
       data-track-category='MESSAGE'
       data-track-name='OPEN_CANVAS_LINK'
-      data-track-metadata={JSON.stringify({ href })}
+      data-track-metadata={JSON.stringify({ href: resolvedHref })}
     >
       {children}
     </a>
@@ -488,42 +630,26 @@ const parseNode = (
         addTokenizedNodes(parts, textBeforeUrl, skipEmojiWrapping, `emoji-url-${offset}`);
       }
 
-      // Check if this is a canvas link
-      const isCanvasLink = ((): boolean => {
-        try {
-          const urlObj = new URL(url, window.location.origin);
-          return (
-            urlObj.origin === window.location.origin && urlObj.pathname.startsWith('/chat/canvas/')
-          );
-        } catch {
-          return false;
-        }
-      })();
+      if (parseInternalXyneLink(url)) {
+        const external = isExternalUrl(url);
+        const linkProps = getAnchorTargetProps(url);
 
-      if (isCanvasLink) {
         parts.push(
-          <CanvasLink
+          <InternalXyneLink
             key={`${keyPrefix}-url-${offset}`}
             href={url}
-            className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
+            {...linkProps}
+            className={cn('text-primary', breakLongLinks && 'break-all')}
+            data-track-category='MESSAGE'
+            data-track-name={external ? 'ClickExternalLink' : 'ClickInternalLink'}
+            data-track-metadata={JSON.stringify({ url, isExternal: external })}
           >
             {url}
-          </CanvasLink>,
+          </InternalXyneLink>,
         );
       } else {
-        // Check if URL is external before setting target
-        const isExternalUrl = ((): boolean => {
-          try {
-            const urlObj = new URL(url, window.location.origin);
-            return urlObj.origin !== window.location.origin;
-          } catch {
-            return true; // Treat invalid URLs as external for safety
-          }
-        })();
-
-        const linkProps = isExternalUrl
-          ? { target: '_blank' as const, rel: 'noopener noreferrer' }
-          : {};
+        const external = isExternalUrl(url);
+        const linkProps = getAnchorTargetProps(url);
 
         parts.push(
           <a
@@ -533,7 +659,7 @@ const parseNode = (
             className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
             data-track-category='MESSAGE'
             data-track-name='ClickExternalLink'
-            data-track-metadata={JSON.stringify({ url, isExternal: isExternalUrl })}
+            data-track-metadata={JSON.stringify({ url, isExternal: external })}
           >
             {url}
           </a>,
@@ -611,22 +737,6 @@ const parseNode = (
           @here
         </span>
       </GenericMentionHoverPopover>
-    );
-  }
-
-  if (el.hasAttribute('data-channel-mention')) {
-    const channelName = el.getAttribute('data-channel-name') || '';
-    const channelId = el.getAttribute('data-channel-id') || '';
-    const isPrivate = el.getAttribute('data-is-private') === 'true';
-
-    return (
-      <ChannelMentionRenderer
-        key={`${keyPrefix}-channel-${idx}`}
-        channelId={channelId}
-        channelName={channelName}
-        isPrivate={isPrivate}
-        navigate={navigate}
-      />
     );
   }
 
@@ -813,23 +923,28 @@ const parseNode = (
     const href = el.getAttribute('href');
     if (href && isValidURL(href)) {
       const urlObj = new URL(href, window.location.origin);
-      if (urlObj.origin === window.location.origin && urlObj.pathname.startsWith('/chat/canvas/')) {
+      if (parseInternalXyneLink(href)) {
         const { key, ...restProps } = props;
         const linkProps = { ...restProps, href };
+        const external = isExternalUrl(href);
+        if (external) {
+          (linkProps as { target?: string; rel?: string }).target = '_blank';
+          (linkProps as { target?: string; rel?: string }).rel = 'noopener noreferrer';
+        }
         return (
-          <CanvasLink
+          <InternalXyneLink
             key={key as string}
             {...(linkProps as React.AnchorHTMLAttributes<HTMLAnchorElement>)}
           >
             {children}
-          </CanvasLink>
+          </InternalXyneLink>
         );
       }
 
       (props as { href: string; target: string; rel: string }).href = href;
 
       // Only open external links in new tab
-      const isExternal = urlObj.origin !== window.location.origin;
+      const isExternal = isExternalUrl(href);
 
       if (isExternal) {
         (props as { href: string; target: string; rel: string }).target = '_blank';

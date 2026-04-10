@@ -66,4 +66,5 @@ export interface MessageBubbleProps {
   isFirstInThread?: boolean;
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
+  showLinkPreview?: boolean;
 }
