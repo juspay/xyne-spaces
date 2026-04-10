@@ -1,7 +1,7 @@
 import { repositories } from '@/database/repositories';
 import { AuthProvider, UserType } from '@prisma/client';
 import { logger } from '@/utils/logger';
-import { encrypt } from '@/services/encryptionService';
+import { encrypt, decrypt } from '@/services/encryptionService';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { isValidUrl } from '@/utils/urlUtils';
@@ -114,6 +114,43 @@ export async function configureWebhook(appId: string, webhookUrl: string) {
     };
   } catch (error) {
     logger.error(`[CONFIGURE-WEBHOOK] Error configuring webhook for app ${appId}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Regenerate JWT token for an installed app
+ *
+ * @param appId - The ID of the app
+ * @returns The new JWT token
+ */
+export async function regenerateJwt(appId: string) {
+  try {
+    const installedApp = await repositories.installedApps.findFirst({
+      where: { appId: appId }
+    });
+
+    if (!installedApp) {
+      throw new Error(`[REGENERATE-JWT] Installed app with appId ${appId} not found`);
+    }
+
+    // Decrypt the signing secret
+    const signingSecret = decrypt(installedApp.signingSecret);
+
+    // Generate new JWT token
+    const jwtToken = jwt.sign(
+      { appId, userId: installedApp.userId },
+      signingSecret,
+      { noTimestamp: true }
+    );
+
+    logger.info(`[REGENERATE-JWT] Regenerated JWT for app ${appId}`);
+
+    return {
+      jwtToken: jwtToken,
+    };
+  } catch (error) {
+    logger.error(`[REGENERATE-JWT] Error regenerating JWT for app ${appId}:`, error);
     throw error;
   }
 }

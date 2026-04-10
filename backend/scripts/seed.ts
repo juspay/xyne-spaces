@@ -27,6 +27,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'ANALYTICS', description: 'Analytics endpoints (/api/analytics/*)' },
   { name: 'HEALTH', description: 'Health check endpoints (/api/health/*)' },
   { name: 'AUTH', description: 'Authentication endpoints (/api/auth/*)' },
+  { name: 'XYNE-APPS', description: 'Xyne Apps management endpoints (/api/apps/*)' },
 ];
 
 // Default user groups with their permissions
@@ -207,6 +208,34 @@ async function main() {
           userGroupId: createdGroups.get('ADMIN')
         });
         console.log('  ✅ Updated admin user group membership');
+      }
+
+      // Grant direct ADMIN access to XYNE-APPS resource for admin user
+      const xyneAppsResourceId = createdResources.get('XYNE-APPS');
+      if (xyneAppsResourceId) {
+        try {
+          const existingDirectAccess = await prisma.resourceAccess.findFirst({
+            where: {
+              userId: adminUser.id,
+              resourceId: xyneAppsResourceId,
+              accessType: AccessType.ADMIN
+            }
+          });
+
+          if (!existingDirectAccess) {
+            await repositories.resourceAccess.create({
+              userId: adminUser.id,
+              resourceId: xyneAppsResourceId,
+              accessType: AccessType.ADMIN
+            });
+            console.log('  ✅ Granted direct ADMIN access to XYNE-APPS for admin user');
+          } else {
+            console.log('  ✅ Admin user already has direct ADMIN access to XYNE-APPS');
+          }
+        } catch (error) {
+          console.error('  ❌ Failed to grant direct XYNE-APPS access:', error);
+          // Don't throw - this is not critical
+        }
       }
     } catch (error) {
       console.error('  ❌ Failed to create default admin user:', error);

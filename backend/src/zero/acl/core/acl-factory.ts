@@ -49,6 +49,7 @@ import { SurfaceNudgesACL } from '../tables/surface-nudges-acl';
 import { SurfaceLinksACL } from '../tables/surface-links-acl';
 import { SavedUserConfigurationsACL } from '../tables/saved-user-configurations-acl';
 import { SavedUserConfigurationValuesACL } from '../tables/saved-user-configuration-values-acl';
+import { AppsACL } from '../tables/apps-acl';
 
 export class ACLFactory {
   /**
@@ -65,6 +66,8 @@ export class ACLFactory {
     switch (table) {
       case 'activities':
         return new ActivitiesACL(ctx);
+      case 'apps':
+        return new AppsACL(ctx);
       case 'agent_tools_mappings':
         return new NoAcl<'agent_tools_mappings'>(ctx);
       case 'agents':
