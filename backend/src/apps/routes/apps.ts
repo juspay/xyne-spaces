@@ -10,7 +10,7 @@ import userRoutes from './user';
 import channelRoutes from './channel';
 import userGroupRoutes from './usergroups';
 import { authenticateApp } from '../middelware/authenticator';
-import { uploadMultiple } from '@/middleware/upload';
+import { uploadMultiple, uploadConfig } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
 
 const router = Router();
@@ -20,6 +20,8 @@ const chatController = new ChatController();
 router.post('/create', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.createApp);
 router.post('/install/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appController.installApp);
 router.post('/configureWebhook/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.configureWebhook);
+router.post('/regenerate-jwt/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.regenerateJwt);
+router.post('/upload-picture/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), uploadConfig.single('picture'), appController.uploadBotPicture);
 
 // User-initiated app action dispatch (user auth, not app token)
 router.post('/chat/action', authMiddleware.authenticate, chatController.dispatchAction);

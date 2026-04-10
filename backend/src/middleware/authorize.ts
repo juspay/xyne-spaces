@@ -34,11 +34,19 @@ export const authorize = (resourceName: string, requiredAccess: AccessType, allo
       }
 
       // Check for direct user access in resource_access table
+      // Support permission hierarchy: ADMIN > WRITE > READ
+      const accessTypesToCheck: AccessType[] = [requiredAccess];
+      if (requiredAccess === AccessType.READ) {
+        accessTypesToCheck.push(AccessType.WRITE, AccessType.ADMIN);
+      } else if (requiredAccess === AccessType.WRITE) {
+        accessTypesToCheck.push(AccessType.ADMIN);
+      }
+
       const userAccess = await prisma.resourceAccess.findFirst({
         where: {
           userId: userId,
           resourceId: resource.id,
-          accessType: requiredAccess,
+          accessType: { in: accessTypesToCheck },
         },
       });
       logger.info(`User-specific access check result: ${userAccess ? 'Found' : 'Not Found'}`);

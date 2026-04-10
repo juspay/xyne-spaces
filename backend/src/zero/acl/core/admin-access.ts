@@ -94,3 +94,24 @@ export async function verifyManagerOrTeamLead(ctx: { userID: string }, userGroup
     throw new MutationACLError('Operation failed: only MANAGER or TEAM_LEAD can perform this operation', tableName);
   }
 }
+
+/**
+ * Checks if the current user has ADMIN access to the XYNE-APPS resource (direct or via group).
+ */
+export async function hasXyneAppsAdminAccess(ctx: { userID: string }, tx: Transaction<Schema>): Promise<boolean> {
+  const xyneAppsResource = await tx.run(
+    (zql.resources).where('name', 'XYNE-APPS').one()
+  );
+  if (!xyneAppsResource) return false;
+
+  // Direct user access
+  const access = await tx.run(
+    (zql.resource_access)
+      .where('userId', ctx.userID)
+      .where('resourceId', xyneAppsResource.id)
+      .where('accessType', AccessType.ADMIN)
+      .one()
+  );
+
+  return !!access;
+}

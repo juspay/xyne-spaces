@@ -65,6 +65,7 @@ import RecordingsScreen from './RecordingsScreen/RecordingsScreen';
 import RecordingDetailScreen from './RecordingDetailScreen/RecordingDetailScreen';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import FormScreen from './FormScreen/FormScreen';
+import AppsScreen from './AppsScreen/AppsScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
 import { useSwipeBack } from '../hooks/useSwipeBack';
@@ -856,6 +857,10 @@ export const router = createBrowserRouter([
                     <FormScreen />
                   </ResourceProtectedRoute>
                 ),
+              },
+              {
+                path: '/apps',
+                element: <AppsScreen />,
               },
               {
                 path: '/docs/*',

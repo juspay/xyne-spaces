@@ -40,6 +40,7 @@ import {
   Brain,
   Sparkles,
   ArrowRightLeft,
+  AppWindow,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -74,6 +75,7 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/support', label: 'Support', icon: LifeBuoy },
   { path: '/browser', label: 'Browser', icon: Globe },
   { path: '/forms', label: 'Forms', icon: Clipboard },
+  { path: '/apps', label: 'Apps', icon: AppWindow },
 ];
 
 const mobileNavigationItems = [

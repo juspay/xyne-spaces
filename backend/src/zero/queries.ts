@@ -2169,4 +2169,19 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('values')
       .orderBy('createdAt', 'desc');
   }),
+
+  // Apps Queries
+  getAllAppsPaginated: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ createdAt: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ args: { limit, start } }) => {
+      let query = zql.apps.orderBy('createdAt', 'desc').orderBy('id', 'desc');
+      if (start) {
+        query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
+      }
+      return query.limit(limit).related('installations');
+    },
+  ),
 });
