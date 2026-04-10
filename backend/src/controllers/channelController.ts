@@ -549,7 +549,6 @@ export class ChannelController {
           copiedAttachments,
         };
       });
-
       await messageMetadataService.syncInitialMessageMd(result.conversation.conversationId);
 
       // Get channel participants for notifications and unread count

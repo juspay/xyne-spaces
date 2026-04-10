@@ -493,8 +493,8 @@ export class JiraMigrationController {
         data: { lastActivityAt: now },
       });
     });
-
     await messageMetadataService.syncInitialMessageMd(conversationId);
+
   }
 
   private async handleProgressUpdate(
