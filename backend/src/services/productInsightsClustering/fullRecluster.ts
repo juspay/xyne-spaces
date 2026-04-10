@@ -1,7 +1,13 @@
-import crypto from 'crypto';
 import vespaConfig from '@/vespa/vespaConfig';
 import { ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
+
+// let PCA: any;
+// let HDBSCAN: any;
+// try { PCA = require('ml-pca').PCA; } catch {}
+// try { HDBSCAN = require('hdbscan-ts').HDBSCAN; } catch {}
+import { PCA } from 'ml-pca';
+import { HDBSCAN } from 'hdbscan-ts';
 
 const VESPA_URL = `${vespaConfig.vespaEndpoint.queryEndpoint}/search/`;
 const SCHEMA = ticketSchema;
@@ -10,7 +16,6 @@ const EMBED_FIELD = 'description_clean_embeddings';
 const BATCH_SIZE = 400;
 const TIMEOUT_MS = 10000;
 const SLEEP_BETWEEN_BATCHES_MS = 20;
-const K_MAX = 25;
 
 // ================= TYPES =================
 
@@ -50,6 +55,17 @@ export interface ClusterOutput {
   meta_themes: MetaTheme[];
 }
 
+interface ClusterEntry {
+  representative_embedding: number[];
+  group_ids: number[];
+}
+
+interface Group {
+  group_id: number;
+  representative_embedding: number[];
+  member_ids: string[];
+}
+
 // ================= UTILS =================
 
 function sleep(ms: number): Promise<void> {
@@ -64,26 +80,6 @@ function dot(a: number[], b: number[]): number {
   return s;
 }
 
-function l2Norm(v: number[]): number {
-  let s = 0;
-  for (const x of v) s += x * x;
-  return Math.sqrt(s);
-}
-
-function normalizeRows(X: number[][]): number[][] {
-  return X.map(row => {
-    const n = l2Norm(row);
-    if (n === 0) return row.slice();
-    return row.map(x => x / n);
-  });
-}
-
-function percentile(values: number[], p: number): number {
-  if (values.length === 0) return 0;
-  const sorted = values.slice().sort((a, b) => a - b);
-  const idx = Math.floor((p / 100) * (sorted.length - 1));
-  return sorted[idx];
-}
 
 // ================= VESPA =================
 
@@ -165,7 +161,7 @@ async function fetch_all_tickets(
       projectId,
       fromTimestamp,
       toTimestamp,
-      BATCH_SIZE + offset,
+      BATCH_SIZE,
       offset,
     );
     if (!batch.length) break;
@@ -183,403 +179,318 @@ async function fetch_all_tickets(
 
 // ================= DUPLICATES =================
 
-function embedding_hash(v: number[]): string {
-  // Simple, stable hash of embedding contents
-  const json = JSON.stringify(v);
-  return crypto.createHash('sha256').update(json).digest('hex');
+function normalize(v: number[]): number[] {
+  const norm = Math.sqrt(v.reduce((sum, val) => sum + val * val, 0));
+  return norm === 0 ? v : v.map(x => x / norm);
 }
-
 function group_exact_duplicates(rows: TicketRow[]): {
-  reps: TicketRow[];
-  rep_to_members: Record<string, TicketRow[]>;
+  groups: Group[];
 } {
-  logger.info('[ProductInsightsClustering] Grouping exact duplicate embeddings...');
-  const hmap: Record<string, TicketRow[]> = {};
+  logger.info('[ProductInsightsClustering] Grouping near-duplicate embeddings...');
 
-  for (const r of rows) {
-    const h = embedding_hash(r.embedding);
-    if (!hmap[h]) hmap[h] = [];
-    hmap[h].push(r);
+  const normalised = rows.map(r => normalize(r.embedding));
+  const groups: Group[] = [];
+  const repVecs: number[][] = [];
+  const THRESHOLD = 0.95;
+
+  for (let i = 0; i < rows.length; i++) {
+    const curr = normalised[i];
+    let assigned = false;
+
+    if (repVecs.length > 0) {
+      let bestIdx = 0;
+      let bestSim = -Infinity;
+      for (let j = 0; j < repVecs.length; j++) {
+        const sim = dot(repVecs[j], curr);
+        if (sim > bestSim) { bestSim = sim; bestIdx = j; }
+      }
+      if (bestSim > THRESHOLD) {
+        groups[bestIdx].member_ids.push(rows[i].docId);
+        assigned = true;
+      }
+    }
+
+    if (!assigned) {
+      groups.push({
+        group_id: groups.length + 1,
+        representative_embedding: rows[i].embedding,
+        member_ids: [rows[i].docId],
+      });
+      repVecs.push(curr);
+    }
   }
 
-  const reps: TicketRow[] = [];
-  const rep_to_members: Record<string, TicketRow[]> = {};
-
-  for (const group of Object.values(hmap)) {
-    const rep = group[0];
-    reps.push(rep);
-    rep_to_members[rep.docId] = group;
-  }
-
-  logger.info(`[ProductInsightsClustering] Unique after duplicates: ${reps.length}`);
-  return { reps, rep_to_members };
+  logger.info(`[ProductInsightsClustering] Unique after duplicates: ${groups.length}`);
+  return { groups };
 }
 
-// ================= KNN / GROUPING =================
+// ================= PCA =================
 
-function compute_knn(
-  X: number[][],
-  k_max: number,
-): { knn_dists: number[][]; knn_indices: number[][] } {
-  const n = X.length;
-  const knn_dists: number[][] = Array.from({ length: n }, () => []);
-  const knn_indices: number[][] = Array.from({ length: n }, () => []);
+function reduce_dimensions(groups: Group[], need = 100): Group[] {
+  if (need === 100) return groups;
+  const embeddings = groups.map(g => g.representative_embedding);
+  const originalDim = embeddings[0].length;
+  const targetDim = Math.max(1, Math.floor(originalDim * (need / 100)));
+  logger.info(`Reducing dimensions ${originalDim} -> ${targetDim}`);
+  const pca = new PCA(embeddings);
+  const reduced = pca.predict(embeddings, { nComponents: targetDim }).to2DArray();
+
+  groups.forEach((g, i) => {
+    g.representative_embedding = reduced[i];
+  });
+
+  return groups;
+}
+
+// ================= CLUSTERING =================
+
+function compute_median_index(pts: number[][]): number {
+
+  const n = pts.length;
+
+  const distSums = new Array(n).fill(0);
 
   for (let i = 0; i < n; i++) {
-    const dists: { idx: number; dist: number }[] = [];
+
     for (let j = 0; j < n; j++) {
-      if (i === j) continue;
-      // cosine distance = 1 - cosine similarity (dot product on normalized vectors)
-      const dist = 1 - dot(X[i], X[j]);
-      dists.push({ idx: j, dist });
-    }
 
-    dists.sort((a, b) => a.dist - b.dist);
-    const k = Math.min(k_max, dists.length);
-    knn_dists[i] = dists.slice(0, k).map(d => d.dist);
-    knn_indices[i] = dists.slice(0, k).map(d => d.idx);
-  }
+      let d = 0;
 
-  return { knn_dists, knn_indices };
-}
-
-function eps_from_knn(knn_dists: number[][], k: number, p = 10): number {
-  const col: number[] = [];
-  for (const row of knn_dists) {
-    if (row.length >= k) {
-      col.push(row[k - 1]);
-    }
-  }
-  return percentile(col, p);
-}
-
-// Connected components in radius-graph under cosine distance
-function radius_components(X: number[][], eps: number): number[][] {
-  const n = X.length;
-  const neighbors: number[][] = Array.from({ length: n }, () => []);
-
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      const dist = 1 - dot(X[i], X[j]); // X assumed normalized
-      if (dist <= eps) {
-        neighbors[i].push(j);
-        neighbors[j].push(i);
+      for (let k = 0; k < pts[i].length; k++) {
+        d += (pts[i][k] - pts[j][k]) ** 2;
       }
+
+      distSums[i] += Math.sqrt(d);
     }
   }
 
-  const visited = new Array<boolean>(n).fill(false);
-  const comps: number[][] = [];
-
-  for (let i = 0; i < n; i++) {
-    if (visited[i]) continue;
-    const stack = [i];
-    const comp: number[] = [];
-
-    while (stack.length) {
-      const cur = stack.pop()!;
-      if (visited[cur]) continue;
-      visited[cur] = true;
-      comp.push(cur);
-      for (const nb of neighbors[cur]) {
-        if (!visited[nb]) stack.push(nb);
-      }
-    }
-
-    comps.push(comp);
-  }
-
-  return comps;
+  return distSums.indexOf(Math.min(...distSums));
 }
 
-function medoid_index(X: number[][], idxs: number[]): number {
-  if (idxs.length === 1) return idxs[0];
+function build_clusters(groups: Group[], minClusterSize = 2) {
 
-  let bestIdx = idxs[0];
-  let bestAvg = Number.POSITIVE_INFINITY;
+  const data = groups.map(g => g.representative_embedding);
 
-  for (const i of idxs) {
-    let sumDist = 0;
-    for (const j of idxs) {
-      const sim = dot(X[i], X[j]); // X is normalized
-      const dist = 1 - sim;
-      sumDist += dist;
-    }
-    const avgDist = sumDist / idxs.length;
-    if (avgDist < bestAvg) {
-      bestAvg = avgDist;
-      bestIdx = i;
-    }
-  }
+  const hdbscan = new HDBSCAN({
+    minClusterSize,
+    minSamples: minClusterSize
+  });
 
-  return bestIdx;
-}
+  const labels = hdbscan.fit(data) as number[];
 
-function compress(
-  reps: TicketRow[],
-  rep_to_members: Record<string, TicketRow[]>,
-  comps: number[][],
-  X: number[][],
-): { new_reps: TicketRow[]; new_map: Record<string, TicketRow[]> } {
-  const new_reps: TicketRow[] = [];
-  const new_map: Record<string, TicketRow[]> = {};
+  const clusters: Record<string, ClusterEntry> = {};
 
-  for (const comp of comps) {
-    const ridx = medoid_index(X, comp);
-    const rep = reps[ridx];
+  const uniqueLabels = [...new Set(labels)].filter(l => l !== -1);
 
-    const merged: TicketRow[] = [];
-    for (const i of comp) {
-      const key = reps[i].docId;
-      merged.push(...(rep_to_members[key] ?? []));
-    }
+  uniqueLabels.forEach(label => {
 
-    new_reps.push(rep);
-    new_map[rep.docId] = merged;
-  }
+    const indices = labels
+      .map((l, i) => l === label ? i : -1)
+      .filter(i => i !== -1);
 
-  return { new_reps, new_map };
-}
+    const pts = indices.map(i => data[i]);
 
-// ================= BUILD CLUSTERS =================
+    const medianIdx = compute_median_index(pts);
 
-function build_clusters(
-  reps: TicketRow[],
-  rep_to_members: Record<string, TicketRow[]>,
-  comps: number[][],
-): { clusters: ClusterDetails; unclustered: TicketRow[] } {
-  const clusters: ClusterDetails = {};
-  const unclustered: TicketRow[] = [];
+    const actualIdx = indices[medianIdx];
 
-  let cid = 1;
-  for (const comp of comps) {
-    const merged: TicketRow[] = [];
-    for (const i of comp) {
-      merged.push(...(rep_to_members[reps[i].docId] ?? []));
-    }
+    clusters[`cluster_${label + 1}`] = {
+      representative_embedding: groups[actualIdx].representative_embedding,
+      group_ids: indices.map(i => groups[i].group_id)
+    };
+  });
 
-    const uniq: Record<string, ClusterTicket> = {};
-    for (const t of merged) {
-      uniq[t.docId] = {
-        docId: t.docId,
-        title: t.title,
-        description: t.description,
+  labels.forEach((l, i) => {
+
+    if (l === -1) {
+
+      clusters[`misc_${i + 1}`] = {
+        representative_embedding: groups[i].representative_embedding,
+        group_ids: [groups[i].group_id]
       };
     }
+  });
 
-    const uniqTickets = Object.values(uniq);
-    if (uniqTickets.length >= 2) {
-      const key = `cluster_${cid}`;
-      clusters[key] = uniqTickets;
-      cid += 1;
-    } else {
-      for (const t of merged) {
-        unclustered.push({
-          docId: t.docId,
-          title: t.title,
-          description: t.description,
-          embedding: t.embedding,
-        });
-      }
-    }
-  }
-
-  return { clusters, unclustered };
+  return clusters;
 }
 
 // ================= META THEMES =================
 
 function build_meta_themes(
-  cluster_details: ClusterDetails,
-  cluster_reps: number[][],
-  cluster_rep_ids: Array<['cluster' | 'ticket', string]>,
-  unclustered_tickets: TicketRow[],
-  eps_meta: number,
-): { meta_themes: MetaTheme[]; cluster_details: ClusterDetails } {
-  const X = normalizeRows(cluster_reps);
-  const comps = radius_components(X, eps_meta);
+  clusters: Record<string, ClusterEntry>,
+  minClusterSize = 3
+) {
 
-  const meta_themes: MetaTheme[] = [];
-  const used_clusters = new Set<string>();
-  let misc_counter = 1;
+  const keys = Object.keys(clusters);
 
-  const unclustered_tickets_added_to_misc = new Set<string>();
+  const embeddings = keys.map(k => clusters[k].representative_embedding);
 
-  for (const comp of comps) {
-    const impacted: string[] = [];
-    const misc_tickets: ClusterTicket[] = [];
+  const hdbscan = new HDBSCAN({
+    minClusterSize,
+    minSamples: minClusterSize
+  });
 
-    const distinctIds = new Set<string>(comp.map(i => cluster_rep_ids[i][1]));
-    if (distinctIds.size < 2) continue;
+  const labels = hdbscan.fit(embeddings) as number[];
 
-    for (const i of comp) {
-      const [label, id] = cluster_rep_ids[i];
-      if (label === 'cluster') {
-        if (used_clusters.has(id)) continue;
-        impacted.push(id);
-        used_clusters.add(id);
-      } else {
-        const ticket = unclustered_tickets.find(t => t.docId === id);
-        if (!ticket) continue;
-        if (unclustered_tickets_added_to_misc.has(ticket.docId)) {
-          logger.info('[ProductInsightsClustering] Skipping already added ticket to misc', {
-            docId: ticket.docId,
-          });
-          continue;
-        }
-        misc_tickets.push({
-          docId: ticket.docId,
-          title: ticket.title,
-          description: ticket.description,
-        });
-        unclustered_tickets_added_to_misc.add(ticket.docId);
-      }
-    }
+  const metaThemes: Record<string, { source_keys: string[] }> = {};
 
-    if (misc_tickets.length > 0) {
-      const mid = `misc_${misc_counter}`;
-      misc_counter += 1;
-      cluster_details[mid] = misc_tickets;
-      impacted.push(mid);
-    }
+  const uniqueLabels = [...new Set(labels)];
 
-    meta_themes.push({
-      meta_theme: `Meta Theme ${meta_themes.length + 1}`,
-      description: 'Dummy meta theme description',
-      impacted_clusters: impacted,
-    });
-  }
+  uniqueLabels.forEach(label => {
 
-  // remaining clusters → Misc meta theme
-  const remaining: string[] = Object.keys(cluster_details).filter(
-    c => !used_clusters.has(c) && !c.startsWith('misc_'),
-  );
+    const name = label !== -1 ? `Meta Theme ${label + 1}` : 'Misc';
 
-  // add misc cluster inside Misc meta theme
-  if (unclustered_tickets.length) {
-    const misc_tickets: ClusterTicket[] = [];
-    for (const t of unclustered_tickets) {
-      if (unclustered_tickets_added_to_misc.has(t.docId)) continue;
-      misc_tickets.push({
-        docId: t.docId,
-        title: t.title,
-        description: t.description,
-      });
-    }
-    const mid = `misc_${misc_counter}`;
-    cluster_details[mid] = misc_tickets;
-    remaining.push(mid);
-  }
+    const indices = labels
+      .map((l, i) => l === label ? i : -1)
+      .filter(i => i !== -1);
 
-  if (remaining.length) {
-    meta_themes.push({
-      meta_theme: 'Misc',
-      description: 'Unclassified clusters and tickets',
-      impacted_clusters: remaining,
-    });
-  }
+    metaThemes[name] = {
+      source_keys: indices.map(i => keys[i])
+    };
+  });
 
-  return { meta_themes, cluster_details };
+  return metaThemes;
 }
 
-// ================= PUBLIC ENTRYPOINT =================
+// ================= SINGLETON MERGING =================
 
-/**
- * Full clustering pipeline.
- *
- * @param projectId   Project id to filter tickets on.
- * @param fromTs      Start timestamp (e.g. epoch millis) for time range.
- * @param toTs        End timestamp (e.g. epoch millis) for time range.
- */
+function regroupSingletonClustersWithinMetaThemes(
+  clusters: Record<string, ClusterEntry>,
+  metaThemes: Record<string, { source_keys: string[] }>
+) {
+
+  for (const [themeName, themeData] of Object.entries(metaThemes)) {
+
+    const singletonClusters: string[] = [];
+    const retainedClusters: string[] = [];
+
+    themeData.source_keys.forEach(clusterKey => {
+
+      const cluster = clusters[clusterKey];
+
+      if (!cluster) return;
+
+      if (cluster.group_ids.length === 1) {
+        singletonClusters.push(clusterKey);
+      } else {
+        retainedClusters.push(clusterKey);
+      }
+    });
+
+    if (singletonClusters.length > 1) {
+
+      const miscClusterKey = `${themeName.replace(/\s+/g, "_")}_Misc`;
+
+      const mergedGroupIds: number[] = [];
+
+      let repEmbedding: number[] | null = null;
+
+      singletonClusters.forEach(key => {
+
+        const cluster = clusters[key];
+
+        if (!repEmbedding) {
+          repEmbedding = cluster.representative_embedding;
+        }
+
+        mergedGroupIds.push(...cluster.group_ids);
+
+        delete clusters[key];
+      });
+
+      clusters[miscClusterKey] = {
+        representative_embedding: repEmbedding!,
+        group_ids: mergedGroupIds
+      };
+
+      themeData.source_keys = [
+        ...retainedClusters,
+        miscClusterKey
+      ];
+    }
+  }
+
+  return metaThemes;
+}
+
+// ================= ENTRYPOINT =================
+
 export async function buildTicketClusters(
   projectId: string,
   fromTs: number,
-  toTs: number,
+  toTs: number
 ): Promise<ClusterOutput> {
+
   const rows = await fetch_all_tickets(projectId, fromTs, toTs);
-  const { reps: reps0, rep_to_members: map0 } = group_exact_duplicates(rows);
 
-  const X0 = normalizeRows(reps0.map(r => r.embedding));
-  const { knn_dists: knn0 } = compute_knn(X0, K_MAX);
+  const {groups} = group_exact_duplicates(rows);
 
-  // very similar (k=2)
-  const eps_sim = eps_from_knn(knn0, 2, 10);
-  const comps_sim = radius_components(X0, eps_sim);
-  const { new_reps: reps1, new_map: map1 } = compress(reps0, map0, comps_sim, X0);
+  const reducedGroups = reduce_dimensions(groups, 100);
 
-  logger.info(`[ProductInsightsClustering] Unique after similar compression: ${reps1.length}`);
+  const clusters = build_clusters(reducedGroups, 2);
 
-  const X1 = normalizeRows(reps1.map(r => r.embedding));
-  const { knn_dists: knn1 } = compute_knn(X1, K_MAX);
+  let metaThemes = build_meta_themes(clusters, 3);
 
-  // clusters (k=5)
-  const eps_cluster = eps_from_knn(knn1, 5, 10);
-  const comps_cluster = radius_components(X1, eps_cluster);
+  metaThemes = regroupSingletonClustersWithinMetaThemes(clusters, metaThemes);
 
-  const { clusters: cluster_details_initial, unclustered } = build_clusters(
-    reps1,
-    map1,
-    comps_cluster,
+  const ticketLookup = new Map(rows.map(r => [r.docId, r]));
+
+  const groupIdToMembers = new Map(
+    reducedGroups.map(g => [g.group_id, g.member_ids])
   );
 
-  logger.info(
-    `[ProductInsightsClustering] Initial clusters formed: ${Object.keys(cluster_details_initial).length}`,
-  );
-  logger.info(`[ProductInsightsClustering] Unclustered tickets: ${unclustered.length}`);
+  const cluster_details: ClusterDetails = {};
 
-  // cluster reps for meta
-  const cluster_reps: number[][] = [];
-  const cluster_rep_ids: Array<['cluster' | 'ticket', string]> = [];
+  for (const [clusterKey, clusterData] of Object.entries(clusters)) {
 
-  // one representative embedding per cluster
-  for (const r of reps1) {
-    const did = r.docId;
-    for (const [cid, tickets] of Object.entries(cluster_details_initial)) {
-      if (cluster_rep_ids.some(([, id]) => id === cid)) continue;
-      if (tickets.some(t => t.docId === did)) {
-        cluster_reps.push(r.embedding);
-        cluster_rep_ids.push(['cluster', cid]);
-        break;
-      }
-    }
+    const tickets: ClusterTicket[] = [];
+
+    clusterData.group_ids.forEach(gid => {
+
+      (groupIdToMembers.get(gid) || []).forEach(docId => {
+
+        const t = ticketLookup.get(docId);
+
+        if (t) {
+
+          tickets.push({
+            docId,
+            title: t.title,
+            description: t.description
+          });
+        }
+      });
+    });
+
+    cluster_details[clusterKey] = tickets;
   }
-
-  // unclustered tickets as their own reps
-  for (const ticket of unclustered) {
-    cluster_reps.push(ticket.embedding);
-    cluster_rep_ids.push(['ticket', ticket.docId]);
-  }
-
-  const X_meta = normalizeRows(cluster_reps);
-  const { knn_dists: knn_meta } = compute_knn(X_meta, K_MAX);
-  const eps_meta = eps_from_knn(knn_meta, 5, 10);
-
-  let cluster_details = { ...cluster_details_initial };
-  const res = build_meta_themes(
-    cluster_details,
-    cluster_reps,
-    cluster_rep_ids,
-    unclustered,
-    eps_meta,
-  );
-  const meta_themes = res.meta_themes;
-  cluster_details = res.cluster_details;
 
   const cluster_themes: ClusterThemes = {};
-  for (const cid of Object.keys(cluster_details)) {
-    const isCluster = cid.startsWith('cluster');
-    cluster_themes[cid] = {
-      theme_title: `Dummy ${isCluster ? 'cluster' : 'misc tickets'} title`,
-      theme_description: `Dummy ${isCluster ? 'cluster' : 'misc tickets'} description`,
-    };
-  }
 
-  logger.info(`[ProductInsightsClustering] Final clusters: ${Object.keys(cluster_details).length}`);
-  logger.info(`[ProductInsightsClustering] Final meta themes: ${meta_themes.length}`);
+  Object.keys(cluster_details).forEach(clusterId => {
+
+    const tickets = cluster_details[clusterId];
+
+    cluster_themes[clusterId] = {
+      theme_title: tickets[0]?.title || 'Untitled',
+      theme_description: 'Dummy cluster description'
+    };
+  });
+
+  const meta_themes: MetaTheme[] = Object.entries(metaThemes).map(
+    ([name, data]) => ({
+      meta_theme: name,
+      description: 'Dummy meta theme description',
+      impacted_clusters: data.source_keys
+    })
+  );
+
+  logger.info(`[ProductInsightsClustering] clusters: ${Object.keys(cluster_details).length}`);
+  logger.info(`[ProductInsightsClustering] meta themes: ${meta_themes.length}`);
 
   return {
     cluster_details,
     cluster_themes,
-    meta_themes,
+    meta_themes ,
   };
 }
