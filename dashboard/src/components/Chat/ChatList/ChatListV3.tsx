@@ -17,7 +17,7 @@ import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { formatDatePill } from '../../../utils/dateUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { ArrowDown } from 'lucide-react';
 import { mutators } from '../../../zero/mutators';
@@ -583,6 +583,40 @@ const ChatListV3: React.FC<ChatListProps> = ({
       conversations: conversations,
     });
   }, [conversations]);
+
+  // When a thread is opened (conversationId appears in URL), scroll the parent message into view
+  // after the panel resize settles, so it doesn't jump out of the user's viewport.
+  const { conversationId: activeThreadConversationId } = useParams<{ conversationId?: string }>();
+  const prevActiveThreadRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    // Only act when a thread is newly opened (not on close or same thread)
+    if (
+      !activeThreadConversationId ||
+      activeThreadConversationId === prevActiveThreadRef.current ||
+      !isInitialLoadComplete
+    ) {
+      prevActiveThreadRef.current = activeThreadConversationId;
+      return;
+    }
+    prevActiveThreadRef.current = activeThreadConversationId;
+
+    const idx = combinedMessages.findIndex(
+      item => item.data.conversationId === activeThreadConversationId,
+    );
+    if (idx === -1) return;
+
+    // Use a delay to let the PanelGroup resize animation settle before scrolling
+    const timer = setTimeout(() => {
+      virtuosoRef.current?.scrollIntoView({
+        index: idx === combinedMessages.length - 1 ? firstItemIndex + idx : idx,
+        align: 'center',
+        behavior: 'auto',
+      });
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [activeThreadConversationId, combinedMessages, firstItemIndex, isInitialLoadComplete]);
 
   const handleOpenThread = useCallback(
     (conversationId: string, e?: React.MouseEvent): void => {
