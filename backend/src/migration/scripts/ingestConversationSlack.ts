@@ -5,12 +5,15 @@
 
 import { logger } from '../../utils/logger';
 import { UserRepository } from '../../database/repositories/users';
+import { AppsRepository } from '../../database/repositories/appsRepository';
+import { InstalledAppsRepository } from '../../database/repositories/installedAppsRepository';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { AuthProvider, ExternalEntityType, MessageDirection } from '@prisma/client';
-import { SlackMessage, SlackFile } from '../slack/utils/extractConversation';
+import { SlackMessage, SlackFile, UserInfoCache } from '../slack/utils/extractConversation';
+import { installApp } from '../../apps/core/appUtils';
 import {
   ExternalAttachmentService,
   ExternalAttachment,
@@ -100,6 +103,43 @@ export const findOrCreateUser = async (
   return user.id;
 };
 
+// Helper: Find or create app user for a Slack bot (throws on failure)
+export const findOrCreateApp = async (
+  botName: string,
+  botId: string,
+  botCache: UserInfoCache
+): Promise<string> => {
+  if (botCache.has(botId)) {
+    return botCache.get(botId)!.userId!;
+  }
+
+  const userRepo = new UserRepository();
+  const existingUser = await userRepo.findByMetadataField('slackId', botId);
+  if (existingUser) {
+    botCache.set(botId, { userId: existingUser.id });
+    return existingUser.id;
+  }
+
+  const creatorUser = await userRepo.findByEmail('john.doe@gmail.com');
+  if (!creatorUser) {
+    throw new Error('Creator user john.doe@gmail.com not found');
+  }
+
+  const appRepo = new AppsRepository();
+  const app = await appRepo.createApp({ name: botName, createdBy: creatorUser.id });
+  await installApp(app.id);
+
+  const installedAppsRepo = new InstalledAppsRepository();
+  const installed = await installedAppsRepo.findFirst({ where: { appId: app.id } });
+  if (!installed) {
+    throw new Error(`Failed to find installed app for ${app.id}`);
+  }
+
+  await userRepo.upsertMetaDataField(installed.userId, 'slackId', botId);
+  botCache.set(botId, { userId: installed.userId });
+  return installed.userId;
+};
+
 // ============================================================================
 // Main Function
 // ============================================================================
@@ -156,6 +196,7 @@ export async function ingestConversationSlack(
 
     // User cache for lookups
     const userCache = new Map<string, { id: string; isDeactivated: boolean }>();
+    const botCache: UserInfoCache = new Map();
 
     // Helper: Download attachments (returns empty array on failure)
     const downloadAttachments = async (
@@ -217,24 +258,30 @@ export async function ingestConversationSlack(
       userName?: string,
       isDeactivated: boolean = false,
       slackFiles?: SlackFile[],
-      replyBroadcast?: boolean
+      replyBroadcast?: boolean,
+      botId?: string,
+      botName?: string,
     ): Promise<MessageIngestionResult> => {
 
       let resolvedUserId = userId;
 
       if (!resolvedUserId) {
-        if (!userEmail || !userName) {
-          throw new Error(
-            `Missing user information: userId=${userId}, email=${userEmail}, name=${userName}`
+        if (botId) {
+          resolvedUserId = await findOrCreateApp(botName ?? botId, botId, botCache);
+        } else {
+          if (!userEmail || !userName) {
+            throw new Error(
+              `Missing user information: userId=${userId}, email=${userEmail}, name=${userName}`
+            );
+          }
+          resolvedUserId = await findOrCreateUser(
+            userEmail,
+            userName,
+            isDeactivated,
+            userRepo,
+            userCache
           );
         }
-        resolvedUserId = await findOrCreateUser(
-          userEmail,
-          userName,
-          isDeactivated,
-          userRepo,
-          userCache
-        );
       }
 
       // Parse timestamp (throws if fails)
@@ -320,7 +367,7 @@ export async function ingestConversationSlack(
           }
 
           // Ingest top-level message (throws on failure)
-          // Use userId if available, otherwise use userEmail and userName
+          // Use userId if available, otherwise use userEmail/userName or botId
           await ingestMessage(
             slackMessage.externalId,
             slackMessage.externalId, // externalThreadId same for top-level
@@ -329,7 +376,10 @@ export async function ingestConversationSlack(
             slackMessage.userEmail,
             slackMessage.userName,
             slackMessage.isDeactivated || false,
-            slackMessage.files
+            slackMessage.files,
+            undefined,
+            slackMessage.botId,
+            slackMessage.botName,
           );
         }
 
@@ -348,7 +398,7 @@ export async function ingestConversationSlack(
               }
 
               // Ingest reply (throws on failure)
-              // Use userId if available, otherwise use userEmail and userName
+              // Use userId if available, otherwise use userEmail/userName or botId
               await ingestMessage(
                 reply.externalThreadId,
                 slackMessage.externalId, // parent thread ID
@@ -358,7 +408,9 @@ export async function ingestConversationSlack(
                 reply.userName,
                 reply.isDeactivated || false,
                 reply.files,
-                reply.showInChannel ?? false
+                reply.showInChannel ?? false,
+                reply.botId,
+                reply.botName,
               );
             } catch (error) {
               const errorMsg = `Failed to ingest reply ${reply.externalThreadId}: ${

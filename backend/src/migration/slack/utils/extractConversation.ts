@@ -10,9 +10,11 @@ import {
   ConversationsRepliesResponse,
 } from '@slack/web-api';
 import { logger } from '../../../utils/logger';
+import { config } from '../../../config/env';
 import { fetchSlackUserInfo, resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { escapeForSlackWithMarkdown } from '@clearfeed-ai/slack-to-html';
 import { UserRepository } from '../../../database/repositories/users';
+import { SlackBlockKitParser } from '../../../integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 
 // ============================================================================
 // Types & Interfaces
@@ -25,6 +27,7 @@ export interface ChannelHistoryOptions {
   includeThreads?: boolean; // Fetch all thread replies (default: true)
   includeAttachments?: boolean; // Fetch all attachments (default: true)
   includeDeactivatedUsers?: boolean; // Fetch deactivated users (default: true)
+  includeBotMessages?: boolean; // Include bot messages when allowedBots is empty (default: false)
 }
 
 export interface SlackFile {
@@ -43,6 +46,8 @@ export interface SlackReply {
   showInChannel?: boolean;
   isDeactivated?: boolean;
   files?: SlackFile[];
+  botId?: string;
+  botName?: string;
 }
 
 export interface SlackMessage {
@@ -54,6 +59,8 @@ export interface SlackMessage {
   isDeactivated?: boolean;
   replies?: SlackReply[];
   files?: SlackFile[];
+  botId?: string;
+  botName?: string;
 }
 
 export type UserInfoCache = Map<
@@ -63,7 +70,7 @@ export type UserInfoCache = Map<
     userName?: string;
     userId?: string;
     isDeactivated?: boolean;
-    botId?: string;
+    isBot?: boolean;
   }
 >;
 
@@ -209,13 +216,17 @@ async function processBatch<T>(
  * Check if message should be included in conversation
  * - Filters out system messages
  * - Includes human messages (non-bot)
- * - Includes bot messages only if bot name exists in allowedBots array
- * @param allowedBots - Array of bot names (case-insensitive) to include in messages (default: [])
+ * - Includes bot messages only if:
+ *     allowedBots is non-empty and bot name matches, OR
+ *     allowedBots is empty AND includeBotMessages is true
+ * @param allowedBots - Array of bot names (case-insensitive) to include (default: [])
+ * @param includeBotMessages - When allowedBots is empty, include all (non-ignored) bot messages (default: false)
  */
 function isHumanMessage(
   message: any,
   context: 'channel' | 'thread' = 'channel',
-  allowedBots: string[] = []
+  allowedBots: string[] = [],
+  includeBotMessages = false
 ): boolean {
   // Filter out system messages (with exceptions for threads)
   if (message.subtype && SYSTEM_SUBTYPES.includes(message.subtype)) {
@@ -225,16 +236,20 @@ function isHumanMessage(
     return false;
   }
 
-  // If it's a bot message, only include if bot name exists in allowedBots array
+  // If it's a bot message: filter by allowedBots name list, or by the includeBotMessages flag
   if (message.bot_id) {
-    if (allowedBots.length === 0) {
+    if (allowedBots.length > 0) {
+      const botName = message.username?.toLowerCase() ||
+                      message.app_name?.toLowerCase() ||
+                      message.bot_profile?.name?.toLowerCase() ||
+                      '';
+      return allowedBots.some(allowed => botName.includes(allowed.toLowerCase()));
+    }
+    // When no allowedBots filter: skip if bot is in the env-level ignore list
+    if (config.slackIgnoredBotIds.includes(message.bot_id)) {
       return false;
     }
-    const botName = message.username?.toLowerCase() ||
-                    message.app_name?.toLowerCase() ||
-                    message.bot_profile?.name?.toLowerCase() ||
-                    '';
-    return allowedBots.some(allowed => botName.includes(allowed.toLowerCase()));
+    return includeBotMessages;
   }
 
   // Include all user messages (non-bot)
@@ -272,8 +287,7 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
   userName?: string;
   userId?: string;
   isDeactivated?: boolean;
-  botId?: string;
-
+  isBot?: boolean;
 }> {
   if (cache.has(slackUID)) {
     return cache.get(slackUID)!;
@@ -309,8 +323,14 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
       userEmail: userInfo?.profile?.email,
       userName: userInfo?.profile?.real_name,
       isDeactivated: userInfo?.deleted,
-      botId: userInfo?.profile?.bot_id,
+      isBot: userInfo?.is_bot,
     };
+    cache.set(slackUID, result);
+    return result;
+  }
+
+  if (userInfo.is_bot) {
+    const result = { isBot: true };
     cache.set(slackUID, result);
     return result;
   }
@@ -353,12 +373,12 @@ function extractUniqueUserIds(rawMessages: any[], threadRepliesMap: Map<string, 
   const userIds = new Set<string>();
 
   for (const msg of rawMessages) {
-    if (msg.user) userIds.add(msg.user);
+    if (msg.user && !msg.bot_id) userIds.add(msg.user);
   }
 
   for (const replies of threadRepliesMap.values()) {
     for (const reply of replies) {
-      if (reply.user) userIds.add(reply.user);
+      if (reply.user && !reply.bot_id) userIds.add(reply.user);
     }
   }
 
@@ -409,7 +429,8 @@ export async function fetchThreadReplies(
   client: WebClient,
   channelId: string,
   threadTs: string,
-  allowedBots: string[] = []
+  allowedBots: string[] = [],
+  includeBotMessages = false
 ): Promise<any[]> {
   const replies: any[] = [];
   let cursor: string | undefined;
@@ -434,7 +455,7 @@ export async function fetchThreadReplies(
     }
 
     if (result.messages && result.messages.length > 0) {
-      const humanReplies = result.messages.slice(1).filter((msg) => isHumanMessage(msg, 'thread', allowedBots));
+      const humanReplies = result.messages.slice(1).filter((msg) => isHumanMessage(msg, 'thread', allowedBots, includeBotMessages));
       replies.push(...humanReplies);
     }
 
@@ -451,7 +472,8 @@ async function fetchChannelMessages(
   client: WebClient,
   channelId: string,
   oldestTimestamp: string,
-  latestTimestamp: string
+  latestTimestamp: string,
+  includeBotMessages = false
 ): Promise<any[]> {
   const messages: any[] = [];
   let cursor: string | undefined;
@@ -473,7 +495,7 @@ async function fetchChannelMessages(
     }
 
     if (result.messages && result.messages.length > 0) {
-      const humanMessages = result.messages.filter((msg) => isHumanMessage(msg, 'channel'));
+      const humanMessages = result.messages.filter((msg) => isHumanMessage(msg, 'channel', [], includeBotMessages));
       messages.push(...humanMessages);
 
       logger.debug('[Migration] Fetched message batch', {
@@ -495,7 +517,8 @@ async function fetchChannelMessages(
 async function fetchAllThreadReplies(
   client: WebClient,
   channelId: string,
-  rawMessages: any[]
+  rawMessages: any[],
+  includeBotMessages = false
 ): Promise<Map<string, any[]>> {
   const threadRepliesMap = new Map<string, any[]>();
   const messagesWithThreads = rawMessages.filter((msg) => msg.reply_count && msg.reply_count > 0);
@@ -510,7 +533,7 @@ async function fetchAllThreadReplies(
 
   for (const rawMessage of messagesWithThreads) {
     try {
-      const threadReplies = await fetchThreadReplies(client, channelId, rawMessage.ts);
+      const threadReplies = await fetchThreadReplies(client, channelId, rawMessage.ts, [], includeBotMessages);
 
       if (threadReplies.length > 0) {
         threadRepliesMap.set(rawMessage.ts, threadReplies);
@@ -537,6 +560,18 @@ async function fetchAllThreadReplies(
 /**
  * Transform a single reply with user info and content
  */
+const blockKitParser = new SlackBlockKitParser();
+
+async function extractMessageContent(msg: any, resolvedText: string): Promise<string> {
+  if (msg.blocks?.length || msg.attachments?.length) {
+    const token = process.env.SLACK_BOT_TOKEN || '';
+    const blocksJson = JSON.stringify({ blocks: msg.blocks, attachments: msg.attachments });
+    const resolvedJson = await resolveSlackMentions(blocksJson, token, true);
+    return blockKitParser.parse(JSON.parse(resolvedJson));
+  }
+  return escapeForSlackWithMarkdown(resolvedText);
+}
+
 export async function transformReply(
   reply: any,
   cache: UserInfoCache,
@@ -544,8 +579,8 @@ export async function transformReply(
   allowedBots: string[] = []
 ): Promise<SlackReply> {
   const userInfo = await getUserInfo(reply.user, cache);
-  const resolvedText = await resolveSlackMentions(reply.text, process.env.SLACK_BOT_TOKEN || '');
-  const htmlContent = escapeForSlackWithMarkdown(resolvedText);
+  const resolvedText = await resolveSlackMentions(reply.text ?? '', process.env.SLACK_BOT_TOKEN || '');
+  const htmlContent = await extractMessageContent(reply, resolvedText);
 
   // Check if this is a bot message that matches allowedBots
   let botEmail: string | undefined;
@@ -559,10 +594,9 @@ export async function transformReply(
       const allowedLower = allowed.toLowerCase();
       return botName.includes(allowedLower) || allowedLower.includes(botName);
     });
-    
+
     // If bot matches and userEmail is missing, create bot email (userName can exist)
     if (matchesAllowed && !userInfo?.userEmail && botName) {
-      // Use the bot name (or username/app_name) to create email
       const emailUsername = reply.username || reply.app_name || reply.bot_profile?.name || botName;
       botEmail = `${emailUsername.toLowerCase().replace(/[^a-z0-9]/g, '')}@xyne.bot.in`;
     }
@@ -591,8 +625,11 @@ async function transformMessage(
   includeAttachments: boolean,
   includeDeactivatedUsers: boolean
 ): Promise<SlackMessage> {
-  // Get user info for main message
-  const userInfo = await getUserInfo(rawMessage.user, cache);
+  const isBot = !!rawMessage.bot_id;
+  const userInfo = !isBot && rawMessage.user ? await getUserInfo(rawMessage.user, cache) : {};
+  const botName = isBot
+    ? (rawMessage.username || rawMessage.app_name || rawMessage.bot_profile?.name)
+    : undefined;
 
   // Transform thread replies
   let replies: SlackReply[] | undefined;
@@ -614,8 +651,8 @@ async function transformMessage(
   }
 
   // Transform message content
-  const resolvedText = await resolveSlackMentions(rawMessage.text, process.env.SLACK_BOT_TOKEN || '');
-  const htmlContent = escapeForSlackWithMarkdown(resolvedText);
+  const resolvedText = await resolveSlackMentions(rawMessage.text ?? '', process.env.SLACK_BOT_TOKEN || '');
+  const htmlContent = await extractMessageContent(rawMessage, resolvedText);
 
   return {
     content: htmlContent,
@@ -626,6 +663,8 @@ async function transformMessage(
     ...(userInfo?.isDeactivated === true && { isDeactivated: true }),
     replies,
     files: transformFiles(rawMessage.files, includeAttachments),
+    ...(rawMessage.bot_id && { botId: rawMessage.bot_id }),
+    ...(botName && { botName }),
   };
 }
 
@@ -647,6 +686,7 @@ export async function extractChannelHistory(
     includeThreads = false,
     includeAttachments = true,
     includeDeactivatedUsers = true,
+    includeBotMessages = false,
   } = options;
 
   // Validate inputs
@@ -668,20 +708,21 @@ export async function extractChannelHistory(
     includeThreads,
     includeAttachments,
     includeDeactivatedUsers,
+    includeBotMessages,
   });
 
   const client = getSlackClient();
   const userCache: UserInfoCache = new Map();
 
   // Step 1: Fetch all top-level messages
-  const rawMessages = await fetchChannelMessages(client, channelId, oldestTimestamp, latestTimestamp);
+  const rawMessages = await fetchChannelMessages(client, channelId, oldestTimestamp, latestTimestamp, includeBotMessages);
   logger.info('[Migration] Fetched top-level messages', {
     totalMessages: rawMessages.length,
   });
 
   // Step 2: Fetch thread replies (if needed)
   const threadRepliesMap = includeThreads
-    ? await fetchAllThreadReplies(client, channelId, rawMessages)
+    ? await fetchAllThreadReplies(client, channelId, rawMessages, includeBotMessages)
     : new Map<string, any[]>();
 
   // Step 3: Pre-fetch all user info

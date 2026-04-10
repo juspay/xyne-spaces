@@ -100,6 +100,13 @@ export function getSyncModal(channelId?: string) {
               },
               value: 'include_deactivated_users',
             },
+            {
+              text: {
+                type: 'plain_text',
+                text: 'Include bot messages',
+              },
+              value: 'include_bot_messages',
+            },
           ],
         },
         optional: true,
