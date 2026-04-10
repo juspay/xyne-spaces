@@ -738,8 +738,6 @@ export class CallRepository {
   }): Promise<void> {
     const { call: callParam, initiatorName, now } = params;
 
-    let newConversationId: string | null = null;
-
     await DatabaseClient.getInstance().$transaction(async (tx) => {
       // Re-read the call inside the transaction to ensure fresh data
       const call = await tx.call.findUnique({
@@ -759,8 +757,6 @@ export class CallRepository {
         // First join: create conversation + system message, then activate
         const conversationId = uuidv4();
         const messageId = uuidv4();
-        newConversationId = conversationId;
-
         await this.createConversationAndSystemMessage(tx, {
           conversationId,
           messageId,
@@ -808,8 +804,15 @@ export class CallRepository {
       }
     });
 
-    if (newConversationId) {
-      await messageMetadataService.syncInitialMessageMd(newConversationId);
+    // Sync eagerly so initial_message_md is populated before the response returns.
+    // The middleware also covers this via setImmediate, but the deferred sync is too
+    // late for clients that render the channel immediately after the call is created.
+    const activatedCallMeta = (await DatabaseClient.getInstance().call.findUnique({
+      where: { id: callParam.id },
+      select: { metadata: true },
+    }))?.metadata as { conversationId?: string } | null;
+    if (activatedCallMeta?.conversationId) {
+      await messageMetadataService.syncInitialMessageMd(activatedCallMeta.conversationId);
     }
   }
 
@@ -969,7 +972,6 @@ export class CallRepository {
       return { call, invitedParticipantIds };
     });
 
-    // Sync initial_message_md after transaction commits (conversation + message now visible)
     await messageMetadataService.syncInitialMessageMd(conversationId);
 
     return result;

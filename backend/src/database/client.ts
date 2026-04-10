@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
+import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
@@ -47,6 +48,8 @@ export class DatabaseClient {
       if (config.logging.logUserSessionChanges) {
         setupUserSessionLogging(DatabaseClient.instance, true);
       }
+
+      setupMessageMetadataSync(DatabaseClient.instance);
 
       (DatabaseClient.instance as any).$on('error', (e: any) => {
         logger.error('Database error:', e);

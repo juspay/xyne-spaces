@@ -23,8 +23,8 @@ import { SendMessageResponse, GetMessagesResponse } from '../api/types/MessageTy
 import { config } from '../config/env';
 import { z } from 'zod';
 import { logger } from '../utils/logger';
-import { messageMetadataService } from '@/services/messageMetadataService';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
+import { messageMetadataService } from '@/services/messageMetadataService';
 import { unreadService } from '../services/unreadService';
 import { MessagesSideEffectHandler } from '../zero/side-effects/tables/messages-handler';
 import { vespaQueue } from '@/queues/vespaQueue';

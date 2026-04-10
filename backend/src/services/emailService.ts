@@ -477,7 +477,7 @@ export class EmailService {
     });
     await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
-    // Create SYSTEM message for WorkflowBubble (only when workflow is enabled, AFTER ticket message)
+    //Create SYSTEM message for WorkflowBubble (only when workflow is enabled, AFTER ticket message)
     if (config.zoho.autoWorkflowEnabled) {
       const messageDataSys: CreateMessageInput = {
         conversationId: conversation.conversationId,
@@ -815,7 +815,7 @@ export class EmailService {
     });
     await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
-    // Update channel last activity
+    //Update channel last activity
     await this.channelRepository.updateLastActivity(channelId);
 
     return {
