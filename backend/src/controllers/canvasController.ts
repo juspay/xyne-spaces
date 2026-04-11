@@ -12,6 +12,7 @@ import { slackService } from '../services/slackService.js';
 import { activityService } from '../services/activity/activityService.js';
 import { DatabaseClient } from '@/database/client';
 import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
+import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { ActivityClassification } from '@prisma/client';
 
@@ -268,14 +269,21 @@ export class CanvasController {
       const senderName = sender?.name ?? 'Someone';
       // Filter to only users with access for email notifications
       const usersWithAccessSet = new Set(usersWithAccessIds);
-      const mentionedEmails = mentionedUserRecords
-        .filter(u => u.email && usersWithAccessSet.has(u.id))
-        .map(u => u.email!);
+      const userEmailMap = new Map(
+        mentionedUserRecords
+          .filter(u => u.email && usersWithAccessSet.has(u.id))
+          .map(u => [u.id, u.email!])
+      );
+      const mentionedEmails = Array.from(userEmailMap.values());
 
-      // Create activities and send notifications in parallel
-      await Promise.all([
-        activityService.createActivities(activities),
-        notificationService.createCanvasMentionNotifications(
+      // Step 1: Create activities
+      await activityService.createActivities(activities);
+
+      // Step 2: Send app notifications first and collect delivered user IDs.
+      // On failure, fall back to sending Slack to everyone (fail-open).
+      let slackRecipientEmails = mentionedEmails;
+      try {
+        const { deliveredUserIds } = await notificationService.createCanvasMentionNotifications(
           usersWithAccessIds,
           canvasId,
           canvasTitle ?? 'Canvas',
@@ -283,14 +291,20 @@ export class CanvasController {
           senderName,
           channelName,
           blockId,
-        ),
-        slackService.sendCanvasMentionNotifications(
-          mentionedEmails,
-          senderName,
-          canvasTitle ?? 'Canvas',
-          slackUrl!,
-        ),
-      ]);
+        );
+
+        slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
+      } catch (error) {
+        logger.error('[CANVAS-MENTIONS] Spaces notification failed — sending Slack to all recipients', { error });
+      }
+
+      // Step 3: Send Slack notifications only to users who didn't receive app notification
+      await slackService.sendCanvasMentionNotifications(
+        slackRecipientEmails,
+        senderName,
+        canvasTitle ?? 'Canvas',
+        slackUrl!,
+      );
 
       res.status(200).json({
         success: true,

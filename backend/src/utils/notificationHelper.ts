@@ -3,6 +3,20 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 
+export function getSlackRecipientEmails(
+  allEmails: string[],
+  deliveredUserIds: string[],
+  userIdToEmailMap: Map<string, string>
+): string[] {
+  if (!deliveredUserIds.length) return allEmails;
+  
+  const deliveredEmailSet = new Set(
+    deliveredUserIds.map(id => userIdToEmailMap.get(id)).filter((e): e is string => !!e)
+  );
+  
+  return allEmails.filter(e => !deliveredEmailSet.has(e));
+}
+
 interface MessageNotificationData {
   messageId: string;
   conversationId: string;
