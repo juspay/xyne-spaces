@@ -6,7 +6,7 @@ import { Button } from '../Button/Button';
 import { UserHoverWrapperProps } from './types';
 import { useAuth } from '../../../hooks/useAuth';
 import { channelService } from '../../../services/Chat/channelService';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useUser } from '../../../hooks/useUsers';
 import { useTypingState } from '../../../contexts/TypingStateContext';
@@ -15,6 +15,7 @@ import { StatusIndicator } from '../StatusIndicator';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { useRouteContext } from '../../../hooks/useRouteContext';
 
 /**
  * UserHoverWrapper Component
@@ -27,6 +28,8 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
   const { isMobile } = usePlatform();
   const user = useUser(userId);
   const [dmChannelId, setDmChannelId] = useState<string | null>(null);
+  const { baseRoute } = useRouteContext();
+  const { channelId } = useParams<{ channelId: string }>();
   const shouldTriggerCallRef = useRef(false);
 
   // Don't show hover card when user has typed (until they move cursor)
@@ -98,7 +101,13 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
 
   const isCurrentUser = user.id === currentUser?.id;
 
-  // On mobile: directly navigate to DM on tap (skip popover)
+  const handleProfileClick = (): void => {
+    if (channelId) {
+      void navigate(`${baseRoute}/${channelId}/profile/${userId}`);
+    }
+  };
+
+  // On mobile: navigate to profile on tap (skip popover)
   if (isMobile) {
     return (
       <span
@@ -107,12 +116,12 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
         onClick={e => {
           e.preventDefault();
           e.stopPropagation();
-          if (!isCurrentUser) handleSendMessage();
+          handleProfileClick();
         }}
         onKeyDown={e => {
-          if ((e.key === 'Enter' || e.key === ' ') && !isCurrentUser) {
+          if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            handleSendMessage();
+            handleProfileClick();
           }
         }}
         className='cursor-pointer'
@@ -125,7 +134,26 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
 
   return (
     <HoverCard
-      trigger={children}
+      trigger={
+        <span
+          role='button'
+          tabIndex={0}
+          onClick={e => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleProfileClick();
+          }}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleProfileClick();
+            }
+          }}
+          style={{ display: 'inline' }}
+        >
+          {children}
+        </span>
+      }
       side='top'
       align='start'
       openDelay={400}
