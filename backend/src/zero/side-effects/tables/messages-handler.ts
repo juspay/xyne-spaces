@@ -28,6 +28,7 @@ import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/u
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
 import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
+import { getSlackRecipientEmails } from '@/utils/notificationHelper';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -321,16 +322,19 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelParticipants,
         senderId
       );
-      const mentionedUsers = await Promise.all(
-        notificationUserIds.map(userId => db.user.findUnique({
-          where: { id: userId },
-          select: { email: true }
-        }))
+      const userEmailMap = new Map(
+        notificationUserIds
+          .map(id => channelParticipants.find(p => p.userId === id))
+          .filter(p => p?.user?.email)
+          .map(p => [p!.userId, p!.user.email])
       );
-      const mentionedEmails = mentionedUsers.filter(u => u?.email).map(u => u!.email);
+      const mentionedEmails = Array.from(userEmailMap.values());
 
-      await Promise.all([
-        notificationService.createMentionNotifications(
+      // Send app notifications first and collect delivered user IDs.
+      // On failure, fall back to sending Slack to everyone (fail-open).
+      let slackRecipientEmails = mentionedEmails;
+      try {
+        const { deliveredUserIds } = await notificationService.createMentionNotifications(
           notificationUserIds,
           messageId,
           conversationId,
@@ -341,18 +345,23 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           cleanContent,
           mentionType,
           isDMChannel,
-          !!isReply  // isThreadMessage: true when this mention is inside a thread reply
-        ),
-        slackService.sendMentionNotifications(
-          mentionedEmails,
-          senderName,
-          channelName,
-          channelId,
-          conversationId,
-          messageId,
-          mentionType
-        )
-      ]);
+          !!isReply
+        );
+
+        slackRecipientEmails = getSlackRecipientEmails(mentionedEmails, deliveredUserIds, userEmailMap);
+      } catch (error) {
+        logger.error('[SIDE-EFFECT] Spaces mention notifications failed — sending Slack to all recipients', { error });
+      }
+
+      await slackService.sendMentionNotifications(
+        slackRecipientEmails,
+        senderName,
+        channelName,
+        channelId,
+        conversationId,
+        messageId,
+        mentionType
+      );
     }
 
     await this.handleSpecialMentionActivities(
@@ -382,7 +391,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelName,
         senderName,
         cleanContent,
-        channelParticipantIds
+        channelParticipants
       );
     }
 
@@ -632,8 +641,9 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     channelName: string,
     senderName: string,
     cleanContent: string,
-    channelParticipantIds: Set<string>
+    channelParticipants: Array<{ userId: string; user: { email: string; name: string } }>
   ): Promise<void> {
+    const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
     const participants = await db.conversationParticipant.findMany({
       where: {
         conversationId,
@@ -666,14 +676,16 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       )
     );
 
-    const replyUsers = await db.user.findMany({
-      where: { id: { in: validParticipantIds } },
-      select: { email: true }
-    });
-    const replyEmails = replyUsers.filter(u => u.email).map(u => u.email);
+    const userEmailMap = new Map(
+      channelParticipants
+        .filter(p => validParticipantIds.includes(p.userId) && p.user?.email)
+        .map(p => [p.userId, p.user.email])
+    );
+    const replyEmails = Array.from(userEmailMap.values());
 
-    await Promise.all([
-      notificationService.createThreadReplyNotifications(
+    let slackRecipientEmails = replyEmails;
+    try {
+      const { deliveredUserIds } = await notificationService.createThreadReplyNotifications(
         validParticipantIds,
         replyMessageId,
         conversationId,
@@ -682,16 +694,21 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         senderUserId,
         senderName,
         cleanContent
-      ),
-      slackService.sendThreadReplyNotifications(
-        replyEmails,
-        senderName,
-        channelName,
-        channelId,
-        conversationId,
-        replyMessageId
-      )
-    ]);
+      );
+
+      slackRecipientEmails = getSlackRecipientEmails(replyEmails, deliveredUserIds, userEmailMap);
+    } catch (error) {
+      logger.error('[SIDE-EFFECT] Spaces thread reply notifications failed — sending Slack to all recipients', { error });
+    }
+
+    await slackService.sendThreadReplyNotifications(
+      slackRecipientEmails,
+      senderName,
+      channelName,
+      channelId,
+      conversationId,
+      replyMessageId
+    );
   }
 
   private async handleDMChannelMessage(
@@ -744,7 +761,6 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
     const isReply = initialMessageId && initialMessageId !== messageId;
     if (isReply && conversationId) {
-      const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
       await this.createReplyActivity(
         conversationId,
         messageId,
@@ -754,7 +770,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelName,
         senderName,
         cleanContent,
-        channelParticipantIds
+        channelParticipants
       );
     } else {
       if (!mentionType && !isLargeGroupDm) {
@@ -765,12 +781,18 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         .map(p => p.userId)
         .filter(userId => userId !== senderId);
 
+      const userEmailMap = new Map(
+        channelParticipants
+          .filter(p => p.user?.email)
+          .map(p => [p.userId, p.user.email])
+      );
       const recipientEmails = channelParticipants
         .filter(p => p.userId !== senderId && p.user?.email)
         .map(p => p.user.email);
 
-      await Promise.all([
-        notificationService.createDirectMessageNotifications(
+      let slackRecipientEmails = recipientEmails;
+      try {
+        const { deliveredUserIds } = await notificationService.createDirectMessageNotifications(
           recipientIds,
           messageId,
           conversationId,
@@ -778,14 +800,19 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           senderId,
           senderName,
           cleanContent
-        ),
-        slackService.sendDirectMessageNotifications(
-          recipientEmails,
-          senderName,
-          cleanContent,
-          channelId
-        )
-      ]);
+        );
+
+        slackRecipientEmails = getSlackRecipientEmails(recipientEmails, deliveredUserIds, userEmailMap);
+      } catch (error) {
+        logger.error('[SIDE-EFFECT] Spaces DM notifications failed — sending Slack to all recipients', { error });
+      }
+
+      await slackService.sendDirectMessageNotifications(
+        slackRecipientEmails,
+        senderName,
+        cleanContent,
+        channelId
+      );
     }
 
     // Queue Vespa indexing for message attachments in DM channels

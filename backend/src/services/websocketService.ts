@@ -1135,8 +1135,13 @@ class WebSocketService {
   }
 
   async isUserOnline(userId: string): Promise<boolean> {
-    const connections = await redisService.getUserConnections(userId);
-    return connections.length > 0;
+    try {
+      const connections = await redisService.getUserConnections(userId);
+      return connections.length > 0;
+    } catch (error) {
+      logger.warn(`[WebSocketService] Failed to check online status for user ${userId}`, { error });
+      return false;
+    }
   }
 
   // Send call notification to user

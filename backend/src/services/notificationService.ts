@@ -707,12 +707,21 @@ class NotificationService {
    *
    * Callers that do not use the pause filter (calls, canvas, tickets, etc.) should omit
    * the options parameter so that both channels are used by default.
+   *
+   * Returns delivery status indicating whether the notification was successfully delivered
+   * via the app (WebSocket or mobile push). This is used to skip redundant Slack notifications.
+   *
+   * Note: The desktop delivery check is a probabilistic heuristic — it verifies active WebSocket
+   * connections AFTER sending, which narrows but does not eliminate the race window. A user could
+   * disconnect between send and check, or WebSocket "send" only confirms server push, not client
+   * receipt. This is acceptable for reducing duplicate notifications but is not deterministic.
    */
   async createNotification(
     userId: string,
     data: NotificationData,
     { sendDesktop, sendMobile }: { sendDesktop: boolean; sendMobile: boolean } = { sendDesktop: true, sendMobile: true }
-  ): Promise<void> {
+  ): Promise<{ deliveredViaApp: boolean }> {
+    let deliveredViaApp = false;
 
     try {
       logger.info(`[NOTIFICATION-SERVICE] createNotification called`, {
@@ -763,6 +772,9 @@ class NotificationService {
               await realTimeNotificationService.queueMobilePush(userId, session, mobilePayload);
             }
             logger.info(`[NOTIFICATION-SERVICE] MOBILE QUEUED: ${sessions.length} sessions for user ${userId}`);
+
+            deliveredViaApp = true;
+            logger.info(`[NOTIFICATION-SERVICE] Mobile delivery tracked for user ${userId}, type: ${data.type}`);
           } catch (error) {
             logger.error(`[NOTIFICATION-SERVICE] MOBILE FAILED: User ${userId}`, { error });
           }
@@ -789,6 +801,16 @@ class NotificationService {
           },
           data.actionUrl
         );
+
+        // Probabilistic heuristic: check active connections AFTER sending.
+        // This narrows the race window vs checking before, but does not guarantee
+        // the client received the message — only that the server pushed it and
+        // the user had active WebSocket connections at check time.
+        const hasActiveConnections = await websocketService.isUserOnline(userId);
+        if (hasActiveConnections) {
+          deliveredViaApp = true;
+          logger.info(`[NOTIFICATION-SERVICE] Spaces delivery detected for user ${userId}, type: ${data.type}`);
+        }
       } else {
         logger.info(`[NOTIFICATION-SERVICE] DESKTOP SKIPPED (sendDesktop=false): User ${userId} | Type: ${data.type}`);
       }
@@ -796,6 +818,8 @@ class NotificationService {
       logger.error('[NOTIFICATION-SERVICE] FAILED to create notification:', { userId, type: data.type, error });
       throw error;
     }
+
+    return { deliveredViaApp };
   }
 
   async createMentionNotifications(
@@ -810,7 +834,7 @@ class NotificationService {
     mentionType?: string,
     isDMChannel: boolean = false,
     isThreadMessage: boolean = false
-  ): Promise<void> {
+  ): Promise<{ deliveredUserIds: string[] }> {
     const title = mentionType
       ? `${mentionType} in ${channelName}`
       : `You were mentioned in ${channelName}`;
@@ -860,19 +884,35 @@ class NotificationService {
 
     // Send desktop-only notifications (pauseFilter already determined these users should get desktop)
     getNotificationJobsExpected().add(desktopUsers.length, { platform: 'desktop', message_type: 'channel' });
-    await Promise.allSettled(
-      desktopUsers.map(userId =>
-        this.createNotification(userId, notificationData, { sendDesktop: true, sendMobile: false })
-      )
+    const desktopResults = await Promise.allSettled(
+      desktopUsers.map(async userId => {
+        const result = await this.createNotification(userId, notificationData, { sendDesktop: true, sendMobile: false });
+        return { userId, deliveredViaApp: result.deliveredViaApp };
+      })
     );
 
     // Send mobile-only notifications (pauseFilter already determined these users should get mobile)
     getNotificationJobsExpected().add(mobileUsers.length, { platform: 'mobile', message_type: 'channel' });
-    await Promise.allSettled(
-      mobileUsers.map(userId =>
-        this.createNotification(userId, notificationData, { sendDesktop: false, sendMobile: true })
-      )
+    const mobileResults = await Promise.allSettled(
+      mobileUsers.map(async userId => {
+        const result = await this.createNotification(userId, notificationData, { sendDesktop: false, sendMobile: true });
+        return { userId, deliveredViaApp: result.deliveredViaApp };
+      })
     );
+
+    // Collect all users who were successfully notified via Spaces (WebSocket only)
+    const deliveredUserIds = [
+      ...desktopResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+      ...mobileResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+    ];
+
+    return { deliveredUserIds: [...new Set(deliveredUserIds)] };
   }
 
   /**
@@ -887,7 +927,7 @@ class NotificationService {
     senderName: string,
     channelName?: string,
     blockId?: string,
-  ): Promise<void> {
+  ): Promise<{ deliveredUserIds: string[] }> {
     logger.info(`[NOTIFICATION-SERVICE] createCanvasMentionNotifications called`, {
       userIds,
       canvasId,
@@ -907,7 +947,7 @@ class NotificationService {
 
     if (recipientIds.length === 0) {
       logger.info(`[NOTIFICATION-SERVICE] No recipients after filtering, skipping notification creation`);
-      return;
+      return { deliveredUserIds: [] };
     }
 
     getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
@@ -927,8 +967,8 @@ class NotificationService {
     });
 
     const results = await Promise.allSettled(
-      recipientIds.map(userId =>
-        this.createNotification(userId, {
+      recipientIds.map(async userId => {
+        const result = await this.createNotification(userId, {
           title,
           message,
           type: NotificationType.MENTION,
@@ -942,23 +982,31 @@ class NotificationService {
             senderName,
             ...(blockId ? { blockId } : {}),
           },
-        })
-      )
+        });
+        return { userId, deliveredViaApp: result.deliveredViaApp };
+      })
     );
 
     const successCount = results.filter(r => r.status === 'fulfilled').length;
     const failureCount = results.filter(r => r.status === 'rejected').length;
+    const deliveredUserIds = results
+      .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+      .filter(r => r.value.deliveredViaApp)
+      .map(r => r.value.userId);
 
     logger.info(`[NOTIFICATION-SERVICE] Canvas mention notification creation completed`, {
       total: recipientIds.length,
       success: successCount,
       failures: failureCount,
+      deliveredViaApp: deliveredUserIds.length,
       results: results.map((r, idx) => ({
         userId: recipientIds[idx],
         status: r.status,
         error: r.status === 'rejected' ? (r.reason instanceof Error ? r.reason.message : String(r.reason)) : undefined,
       })),
     });
+
+    return { deliveredUserIds };
   }
 
   async createThreadReplyNotifications(
@@ -971,7 +1019,7 @@ class NotificationService {
     senderName: string,
     cleanContent: string,
     isDMChannel: boolean = false
-  ): Promise<void> {
+  ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
     getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'channel' });
@@ -1012,19 +1060,35 @@ class NotificationService {
 
     // Send desktop-only notifications (pauseFilter already determined these users should get desktop)
     getNotificationJobsExpected().add(desktopUsers.length, { platform: 'desktop', message_type: 'channel' });
-    await Promise.allSettled(
-      desktopUsers.map(userId =>
-        this.createNotification(userId, notificationData, { sendDesktop: true, sendMobile: false })
-      )
+    const desktopResults = await Promise.allSettled(
+      desktopUsers.map(async userId => {
+        const result = await this.createNotification(userId, notificationData, { sendDesktop: true, sendMobile: false });
+        return { userId, deliveredViaApp: result.deliveredViaApp };
+      })
     );
 
     // Send mobile-only notifications (pauseFilter already determined these users should get mobile)
     getNotificationJobsExpected().add(mobileUsers.length, { platform: 'mobile', message_type: 'channel' });
-    await Promise.allSettled(
-      mobileUsers.map(userId =>
-        this.createNotification(userId, notificationData, { sendDesktop: false, sendMobile: true })
-      )
+    const mobileResults = await Promise.allSettled(
+      mobileUsers.map(async userId => {
+        const result = await this.createNotification(userId, notificationData, { sendDesktop: false, sendMobile: true });
+        return { userId, deliveredViaApp: result.deliveredViaApp };
+      })
     );
+
+    // Collect all users who were successfully notified via Spaces
+    const deliveredUserIds = [
+      ...desktopResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+      ...mobileResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+    ];
+
+    return { deliveredUserIds };
   }
 
   async createDirectMessageNotifications(
@@ -1036,8 +1100,8 @@ class NotificationService {
     senderName: string,
     cleanContent: string,
     isDMChannel: boolean = true
-  ): Promise<void> {
-    if (recipientIds.length === 0) return;
+  ): Promise<{ deliveredUserIds: string[] }> {
+    if (recipientIds.length === 0) return { deliveredUserIds: [] };
 
     getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'dm' });
     // For DM channels, only apply device filter (skips pause and notification level checks)
@@ -1072,19 +1136,34 @@ class NotificationService {
 
     // Send desktop-only notifications (pauseFilter already determined these users should get desktop)
     getNotificationJobsExpected().add(desktopUsers.length, { platform: 'desktop', message_type: 'dm' });
-    await Promise.allSettled(
-      desktopUsers.map(recipientId =>
-        this.createNotification(recipientId, notificationData, { sendDesktop: true, sendMobile: false })
-      )
+    const desktopResults = await Promise.allSettled(
+      desktopUsers.map(async recipientId => {
+        const result = await this.createNotification(recipientId, notificationData, { sendDesktop: true, sendMobile: false });
+        return { userId: recipientId, deliveredViaApp: result.deliveredViaApp };
+      })
     );
 
     // Send mobile-only notifications (pauseFilter already determined these users should get mobile)
     getNotificationJobsExpected().add(mobileUsers.length, { platform: 'mobile', message_type: 'dm' });
-    await Promise.allSettled(
-      mobileUsers.map(recipientId =>
-        this.createNotification(recipientId, notificationData, { sendDesktop: false, sendMobile: true })
-      )
+    const mobileResults = await Promise.allSettled(
+      mobileUsers.map(async recipientId => {
+        const result = await this.createNotification(recipientId, notificationData, { sendDesktop: false, sendMobile: true });
+        return { userId: recipientId, deliveredViaApp: result.deliveredViaApp };
+      })
     );
+
+    const deliveredUserIds = [
+      ...desktopResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+      ...mobileResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+    ];
+
+    return { deliveredUserIds: [...new Set(deliveredUserIds)] };
   }
 
   async createParticipantAddedNotifications(

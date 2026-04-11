@@ -32,7 +32,6 @@ class SlackService {
       logger.info('Successfully sent message to Slack.');
     } catch (error) {
       logger.error('Failed to send message to Slack:', error);
-      // Do not re-throw the error to avoid crashing the application
     }
   }
 
@@ -115,11 +114,11 @@ class SlackService {
     emails: string[],
     senderName: string,
     canvasTitle: string,
-    url: string,
+    url: string
   ): Promise<void> {
     if (!this.client || emails.length === 0) return;
 
-    const message =`You were mentioned by ${senderName} in canvas "${canvasTitle}": <${url}|View in xyne-spaces>`;
+    const message = `You were mentioned by ${senderName} in canvas "${canvasTitle}": <${url}|View in xyne-spaces>`;
 
     await Promise.allSettled(
       emails.map((email) =>
