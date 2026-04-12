@@ -7,6 +7,7 @@ export {
   ActivitiesACL,
   BoardsACL,
   BookmarksACL,
+  EmailSignaturesACL,
   CallParticipantsACL,
   CallsACL,
   CanvasParticipantsACL,

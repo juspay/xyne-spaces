@@ -1,11 +1,25 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tooltip } from '../Tooltip';
-import { Bold, Italic, Code, FileCode, Link, List, ListOrdered, TextQuote, X } from 'lucide-react';
+import {
+  Bold,
+  Italic,
+  Code,
+  FileCode,
+  Image,
+  Link,
+  List,
+  ListOrdered,
+  TextQuote,
+  X,
+} from 'lucide-react';
 import type { EditorToolbarProps } from './EditorToolbar.types';
 import Dialog from '../Dialog';
 import Button from '../Button';
 
-export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
+export const EditorToolbar: React.FC<EditorToolbarProps> = ({
+  editor,
+  showImageUpload = false,
+}) => {
   const [isActive, setIsActive] = useState({
     bold: false,
     italic: false,
@@ -20,6 +34,11 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
   const [linkText, setLinkText] = useState('');
   const [hasSelection, setHasSelection] = useState(false);
   const [open, setOpen] = useState(false);
+  const [imageOpen, setImageOpen] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageTab, setImageTab] = useState<'url' | 'upload'>('upload');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagePopoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!editor) return;
@@ -44,6 +63,18 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
       editor.off('transaction', updateActiveStates);
     };
   }, [editor]);
+
+  useEffect(() => {
+    if (!imageOpen) return;
+    const handler = (e: MouseEvent): void => {
+      if (imagePopoverRef.current && !imagePopoverRef.current.contains(e.target as Node)) {
+        setImageOpen(false);
+        setImageUrl('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return (): void => document.removeEventListener('mousedown', handler);
+  }, [imageOpen]);
 
   const handleBold = useCallback(() => {
     editor?.chain().focus().toggleBold().run();
@@ -173,6 +204,30 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
   const handleBlockquote = useCallback(() => {
     editor?.chain().focus().toggleBlockquote().run();
   }, [editor]);
+
+  const insertImageFromUrl = useCallback(() => {
+    if (!editor || !imageUrl.trim()) return;
+    editor.chain().focus().setImage({ src: imageUrl.trim() }).run();
+    setImageUrl('');
+    setImageOpen(false);
+  }, [editor, imageUrl]);
+
+  const handleImageFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !editor) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const src = ev.target?.result as string;
+        editor.chain().focus().setImage({ src }).run();
+        setImageOpen(false);
+      };
+      reader.readAsDataURL(file);
+      // reset so the same file can be re-selected
+      e.target.value = '';
+    },
+    [editor],
+  );
 
   if (!editor) return null;
 
@@ -317,6 +372,86 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor }) => {
               </div>
             </div>
           </Dialog>
+
+          {showImageUpload && (
+            <div ref={imagePopoverRef} className='relative'>
+              <input
+                ref={fileInputRef}
+                type='file'
+                accept='image/*'
+                className='hidden'
+                onChange={handleImageFileChange}
+              />
+              <Tooltip content='Insert Image'>
+                <button
+                  type='button'
+                  onClick={() => {
+                    setImageTab('upload');
+                    setImageOpen(prev => !prev);
+                  }}
+                  className={buttonClass(imageOpen)}
+                  aria-label='Insert image'
+                >
+                  <Image className='h-4 w-4' />
+                </button>
+              </Tooltip>
+
+              {imageOpen && (
+                <div className='absolute top-full left-0 mt-1 z-50 bg-popover border border-border rounded-xl shadow-lg w-64 overflow-hidden'>
+                  {/* Tabs */}
+                  <div className='flex border-b border-border'>
+                    <button
+                      type='button'
+                      onClick={() => setImageTab('upload')}
+                      className={`flex-1 py-2 text-xs font-medium transition-colors ${imageTab === 'upload' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      Upload
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => setImageTab('url')}
+                      className={`flex-1 py-2 text-xs font-medium transition-colors ${imageTab === 'url' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      URL
+                    </button>
+                  </div>
+
+                  <div className='p-3'>
+                    {imageTab === 'upload' ? (
+                      <button
+                        type='button'
+                        onClick={() => fileInputRef.current?.click()}
+                        className='w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-accent rounded-lg transition-colors'
+                      >
+                        <Image className='h-4 w-4 shrink-0' />
+                        Choose from device
+                      </button>
+                    ) : (
+                      <div className='space-y-2'>
+                        <input
+                          type='url'
+                          value={imageUrl}
+                          onChange={e => setImageUrl(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && insertImageFromUrl()}
+                          placeholder='https://example.com/image.png'
+                          autoFocus // eslint-disable-line jsx-a11y/no-autofocus
+                          className='w-full px-2.5 py-1.5 text-xs border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring'
+                        />
+                        <button
+                          type='button'
+                          onClick={insertImageFromUrl}
+                          disabled={!imageUrl.trim()}
+                          className='w-full py-1.5 text-xs font-medium bg-sidebar-badge-accent text-white rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity'
+                        >
+                          Insert
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <Tooltip content='Blockquote (⌘⇧B)'>
             <button

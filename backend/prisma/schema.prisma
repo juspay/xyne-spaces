@@ -1578,7 +1578,21 @@ model EmailDraft {
   @@map("email_drafts")
   @@schema("public")
 }
- 
+
+model EmailSignature {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  content   String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("email_signatures")
+  @@schema("public")
+}
+
 // Message Models
 model Message {
   messageId           String      @id @default(cuid())

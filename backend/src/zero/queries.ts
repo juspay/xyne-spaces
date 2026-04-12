@@ -2184,4 +2184,8 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       return query.limit(limit).related('installations');
     },
   ),
+
+  userEmailSignatures: defineQuery(({ ctx }) => {
+    return zql.email_signatures.where('userId', ctx.userID).orderBy('name', 'asc');
+  }),
 });
