@@ -3,6 +3,7 @@ import { EmojiClickData } from 'emoji-picker-react';
 
 export interface EditorToolbarProps {
   editor: Editor | null;
+  showImageUpload?: boolean;
 }
 
 export interface EmojiPickerButtonProps {

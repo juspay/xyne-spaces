@@ -6204,4 +6204,104 @@ export const mutators = defineMutators({
       },
     ),
   },
+  emailSignature: {
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        content: z.string(),
+        timestamp: z.number(),
+        isDefault: z.boolean().optional(),
+      }),
+      async ({ tx, ctx, args: { id, name, content, timestamp, isDefault } }) => {
+        if (isDefault) {
+          const allSignatures = await tx.run(zql.email_signatures.where('userId', ctx.userID));
+          for (const sig of allSignatures) {
+            if (sig.isDefault) {
+              await tx.mutate.email_signatures.update({
+                id: sig.id,
+                isDefault: false,
+                updatedAt: timestamp,
+              });
+            }
+          }
+        }
+
+        await tx.mutate.email_signatures.insert({
+          id,
+          userId: ctx.userID,
+          name,
+          content,
+          isDefault: isDefault ?? false,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    update: defineMutator(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        content: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, name, content, timestamp } }) => {
+        const existing = await tx.run(
+          zql.email_signatures.where('id', id).where('userId', ctx.userID).one(),
+        );
+        if (!existing) {
+          throw new Error('Email signature not found');
+        }
+        await tx.mutate.email_signatures.update({
+          id,
+          name,
+          content,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    delete: defineMutator(
+      z.object({
+        id: z.string(),
+      }),
+      async ({ tx, ctx, args: { id } }) => {
+        const existing = await tx.run(
+          zql.email_signatures.where('id', id).where('userId', ctx.userID).one(),
+        );
+        if (!existing) {
+          throw new Error('Email signature not found');
+        }
+        await tx.mutate.email_signatures.delete({ id });
+      },
+    ),
+    setDefault: defineMutator(
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, timestamp } }) => {
+        const existing = await tx.run(
+          zql.email_signatures.where('id', id).where('userId', ctx.userID).one(),
+        );
+        if (!existing) {
+          throw new Error('Email signature not found');
+        }
+        const allSignatures = await tx.run(zql.email_signatures.where('userId', ctx.userID));
+        for (const sig of allSignatures) {
+          if (sig.isDefault && sig.id !== id) {
+            await tx.mutate.email_signatures.update({
+              id: sig.id,
+              isDefault: false,
+              updatedAt: timestamp,
+            });
+          }
+        }
+        await tx.mutate.email_signatures.update({
+          id,
+          isDefault: true,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
 });

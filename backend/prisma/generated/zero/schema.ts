@@ -1320,6 +1320,18 @@ export const emailDraftTable = table("email_drafts")
   })
   .primaryKey("id");
 
+export const emailSignatureTable = table("email_signatures")
+  .columns({
+    id: string(),
+    userId: string(),
+    name: string(),
+    content: string(),
+    isDefault: boolean(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
 export const messageTable = table("messages")
   .columns({
     messageId: string(),
@@ -3134,6 +3146,7 @@ export const schema = createSchema(
       conversationParticipantTable,
       emailTable,
       emailDraftTable,
+      emailSignatureTable,
       messageTable,
       messageSearchTable,
       messageAttachmentTable,
@@ -3307,6 +3320,7 @@ export type Conversation = Row<typeof schema.tables.conversations>;
 export type ConversationParticipant = Row<typeof schema.tables.conversation_participants>;
 export type Email = Row<typeof schema.tables.emails>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
+export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type Message = Row<typeof schema.tables.messages>;
 export type MessageSearch = Row<typeof schema.tables.message_search>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;

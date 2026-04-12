@@ -14,7 +14,16 @@ import {
   Store,
   Split,
   Paperclip,
+  Settings,
+  PenLine,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../../components/ui/dropdown-menu';
 import { EmailType } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
@@ -74,6 +83,7 @@ import { EmailTagWithAvatar } from '../../components/xyne-desk/EmailTagWithAvata
 import { useEmailDraft, useEmailDraftOperations } from '../../hooks/useEmailDraft';
 import { AttachmentPreview } from '../../components/ui/files/AttachmentPreview';
 import { MediaViewer } from '../../components/ui/files';
+import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFiltered>[number];
@@ -181,6 +191,7 @@ type ViewMode = 'kanban' | 'list';
 const SupportScreen = (): ReactElement => {
   const { ticketId } = useParams<{ ticketId?: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const zero = useZero();
   const { userID } = useAuthContextValues();
   const { isMobile } = usePlatform();
@@ -194,6 +205,21 @@ const SupportScreen = (): ReactElement => {
     const saved = localStorage.getItem('support-view-mode');
     return (saved as ViewMode) || 'kanban';
   });
+  const [isSettingsOpen, setIsSettingsOpen] = useState(
+    () =>
+      searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
+  );
+
+  // Sync panel open/close with the URL so back button works correctly
+  useEffect(() => {
+    const isOpen =
+      searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures';
+    setIsSettingsOpen(isOpen);
+    // Clean up the openSettings param (used by "Add signature" deep-link)
+    if (searchParams.get('openSettings') === 'signatures') {
+      void navigate('/support?settings=open', { replace: true });
+    }
+  }, [searchParams, navigate]);
 
   useEffect(() => {
     localStorage.setItem('support-view-mode', viewMode);
@@ -438,6 +464,26 @@ const SupportScreen = (): ReactElement => {
                       <List size={16} />
                     </button>
                   </div>
+                  <button
+                    onClick={() => {
+                      if (isSettingsOpen) {
+                        void navigate(-1);
+                      } else {
+                        void navigate('/support?settings=open');
+                      }
+                    }}
+                    className={cn(
+                      'p-1.5 rounded transition-colors',
+                      isSettingsOpen
+                        ? 'bg-gray-100 text-gray-900'
+                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+                    )}
+                    title='Inbox settings'
+                    data-track-category='Support'
+                    data-track-name='ToggleInboxSettings'
+                  >
+                    <Settings size={16} />
+                  </button>
                   {ticketId && (
                     <Button
                       size='sm'
@@ -451,6 +497,24 @@ const SupportScreen = (): ReactElement => {
                   )}
                 </div>
               </div>
+              {isSettingsOpen && (
+                <div className='absolute inset-0 z-10 bg-white flex flex-col overflow-y-auto'>
+                  <div className='flex-shrink-0 h-14 px-4 border-b border-gray-200 flex items-center justify-between'>
+                    <span className='text-sm font-semibold text-gray-800'>Inbox Settings</span>
+                    <button
+                      onClick={() => void navigate(-1)}
+                      className='p-1.5 rounded hover:bg-gray-100 text-gray-500 transition-colors'
+                      data-track-category='inbox-settings'
+                      data-track-name='close-inbox-settings'
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div className='p-4'>
+                    <SignatureEditor />
+                  </div>
+                </div>
+              )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
                 {viewMode === 'kanban' ? (
                   <DndContext
@@ -1365,6 +1429,24 @@ const EmailComposer = ({
   const [emailContent, setEmailContent] = useState<string>('');
   const [isSending, setIsSending] = useState<boolean>(false);
   const users = useUsers();
+  const [signatures] = useCachedQuery(queries.userEmailSignatures());
+  const [selectedSignatureId, setSelectedSignatureId] = useState<string | null | undefined>(
+    undefined,
+  );
+  const composerNavigate = useNavigate();
+  const signatureAutoAppend = localStorage.getItem('signature-auto-append-enabled') !== 'false';
+
+  useEffect(() => {
+    if (
+      signatures &&
+      signatures.length > 0 &&
+      signatureAutoAppend &&
+      selectedSignatureId === undefined
+    ) {
+      const defaultSig = signatures.find(s => s.isDefault);
+      setSelectedSignatureId(defaultSig?.id ?? signatures[0]?.id ?? null);
+    }
+  }, [signatures, signatureAutoAppend, selectedSignatureId]);
 
   // Attachment state
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -1481,8 +1563,14 @@ const EmailComposer = ({
         attachmentIds = await uploadAttachments(attachments);
       }
 
+      const activeSig = selectedSignatureId
+        ? signatures?.find(s => s.id === selectedSignatureId)
+        : null;
+      const bodyHtml = activeSig
+        ? `<p>${emailContent.trim().replace(/\n/g, '<br>')}</p><br>--<br>${activeSig.content}`
+        : emailContent;
       await apiInstance.post(`/email/${conversationId}/reply`, {
-        body: emailContent,
+        body: bodyHtml,
         type: 'REPLY_ALL',
         to: toEmails,
         cc: ccEmails,
@@ -1893,36 +1981,105 @@ const EmailComposer = ({
           </div>
         )}
 
-        <div className='px-4 py-3 flex items-center justify-between border-t border-border'>
-          {/* Attachment button */}
-          <div>
-            <input
-              ref={fileInputRef}
-              type='file'
-              multiple
-              className='hidden'
-              onChange={handleFileSelect}
-              disabled={isSending || isUploadingAttachments}
-            />
-            <button
-              type='button'
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isSending || isUploadingAttachments}
-              className='p-2 hover:bg-muted rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-              title='Attach files'
-              aria-label='Attach files'
-              data-track-category='SUPPORT'
-              data-track-name='AddEmailAttachment'
-              data-track-metadata={JSON.stringify({
-                conversationId,
-                attachmentCount: attachments.length,
-              })}
-            >
-              <Paperclip size={18} className='text-muted-foreground' />
-            </button>
+        {selectedSignatureId && (
+          <div className='px-4 pb-3'>
+            <div className='border-t border-gray-200 pt-2'>
+              <p className='text-xs text-gray-400 mb-1'>--</p>
+              <div
+                className='text-sm text-gray-600 prose prose-sm max-w-none'
+                dangerouslySetInnerHTML={{
+                  __html: signatures?.find(s => s.id === selectedSignatureId)?.content ?? '',
+                }}
+              />
+            </div>
           </div>
+        )}
 
-          {/* Send button */}
+        <div className='px-4 py-3 flex items-center justify-between border-t border-border'>
+          <div className='flex items-center gap-2'>
+            {/* Attachment button */}
+            <div>
+              <input
+                ref={fileInputRef}
+                type='file'
+                multiple
+                className='hidden'
+                onChange={handleFileSelect}
+                disabled={isSending || isUploadingAttachments}
+              />
+              <button
+                type='button'
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isSending || isUploadingAttachments}
+                className='p-2 hover:bg-muted rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                title='Attach files'
+                aria-label='Attach files'
+                data-track-category='SUPPORT'
+                data-track-name='AddEmailAttachment'
+                data-track-metadata={JSON.stringify({
+                  conversationId,
+                  attachmentCount: attachments.length,
+                })}
+              >
+                <Paperclip size={18} className='text-muted-foreground' />
+              </button>
+            </div>
+
+            {/* Signature selector */}
+            {signatures.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type='button'
+                    className='flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors'
+                    title={
+                      selectedSignatureId
+                        ? (signatures.find(s => s.id === selectedSignatureId)?.name ?? 'Signature')
+                        : 'No signature'
+                    }
+                    data-track-category='email-compose'
+                    data-track-name='select-signature'
+                  >
+                    <PenLine size={14} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='start' side='top'>
+                  <DropdownMenuItem
+                    onClick={() => void composerNavigate('/support?openSettings=signatures')}
+                    className='text-xs text-gray-500'
+                  >
+                    Manage signatures
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setSelectedSignatureId(null)}
+                    className={!selectedSignatureId ? 'font-medium' : ''}
+                  >
+                    No signature
+                  </DropdownMenuItem>
+                  {signatures.map(sig => (
+                    <DropdownMenuItem
+                      key={sig.id}
+                      onClick={() => setSelectedSignatureId(sig.id)}
+                      className={selectedSignatureId === sig.id ? 'font-medium' : ''}
+                    >
+                      {sig.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <button
+                type='button'
+                onClick={() => void composerNavigate('/support?openSettings=signatures')}
+                className='flex items-center gap-1 text-xs text-[#6276be] hover:text-[#4f62a8] transition-colors'
+                data-track-category='email-compose'
+                data-track-name='add-signature'
+              >
+                + Add signature
+              </button>
+            )}
+          </div>
           <button
             className='size-8 flex items-center justify-center rounded-full bg-gray-400 text-white hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
             onClick={() => void handleSendEmail()}

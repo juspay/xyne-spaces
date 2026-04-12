@@ -2,6 +2,7 @@ export { ActivitiesACL } from './activities-acl';
 export { BoardComplexityScoresACL } from './board-complexity-scores-acl';
 export { BoardsACL } from './boards-acl';
 export { BookmarksACL } from './bookmarks-acl';
+export { EmailSignaturesACL } from './email-signatures-acl';
 export { CallParticipantsACL } from './call-participants-acl';
 export { CallsACL } from './calls-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';

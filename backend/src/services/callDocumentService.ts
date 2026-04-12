@@ -1368,7 +1368,7 @@ A comprehensive detailed summary has been generated from this call.
         version
       );
 
-      return { success: true, canvasUrl};
+      return { success: true, canvasUrl };
     } catch (error) {
       logger.error('[CallDocumentService] Error in generateAndPostDetailedSummary:', error);
       return {

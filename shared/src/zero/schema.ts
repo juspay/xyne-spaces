@@ -1557,6 +1557,18 @@ export const emailDraftTable = table('email_drafts')
   })
   .primaryKey('id');
 
+export const emailSignatureTable = table('email_signatures')
+  .columns({
+    id: string(),
+    userId: string(),
+    name: string(),
+    content: string(),
+    isDefault: boolean(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const formTable = table('forms')
   .columns({
     id: string(),
@@ -3070,6 +3082,14 @@ export const emailDraftTableRelationships = relationships(emailDraftTable, ({ on
   }),
 }));
 
+export const emailSignatureTableRelationships = relationships(emailSignatureTable, ({ one }) => ({
+  user: one({
+    sourceField: ['userId'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+}));
+
 export const formTableRelationships = relationships(formTable, ({ one, many }) => ({
   createdByUser: one({
     sourceField: ['createdBy'],
@@ -3374,6 +3394,7 @@ export const schema = createSchema({
     repoTable,
     emailTable,
     emailDraftTable,
+    emailSignatureTable,
     formTable,
     formContextMappingTable,
     formFieldsTable,
@@ -3465,6 +3486,7 @@ export const schema = createSchema({
     linkAccessTableRelationships,
     emailTableRelationships,
     emailDraftTableRelationships,
+    emailSignatureTableRelationships,
     formTableRelationships,
     formContextMappingTableRelationships,
     formFieldsTableRelationships,
@@ -3557,6 +3579,7 @@ export type LinkAccess = Row<typeof schema.tables.link_access>;
 export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
+export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
 export type FormFields = Row<typeof schema.tables.form_fields>;

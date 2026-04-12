@@ -1284,6 +1284,10 @@ export const queries = defineQueries({
       return query.limit(limit);
     },
   ),
+  // Query for user's email signatures
+  userEmailSignatures: defineQuery(({ ctx }) => {
+    return zql.email_signatures.where('userId', ctx.userID).orderBy('createdAt', 'asc');
+  }),
   // Query for attachments from initial message only - used when creating ticket from conversation
   attachmentsByInitialMessage: defineQuery(
     z.object({ initialMessageId: z.string() }),
