@@ -8,7 +8,7 @@ import type {
   QueryRequest,
   ReadonlyJSONValue,
 } from '@rocicorp/zero';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useCachedQuery, type UseCachedQueryOptions } from '../../hooks/useCachedQuery';
 
 export type PaginationDirection = 'forward' | 'backward';
 
@@ -27,6 +27,8 @@ export interface PaginationConfig<TItem, TCursor> {
   threshold?: number;
   resetKey: string | number | Array<string | number>;
   isEnabled?: boolean;
+  /** Enable cursor pagination mode. Cursor fields are automatically derived from the query's orderBy. */
+  cursorEnabled?: boolean;
 }
 
 export interface VirtualizedListProps<TItem, TCursor> {
@@ -74,6 +76,7 @@ export const VirtualizedList = <TItem, TCursor>({
     threshold: rawThreshold = 10,
     resetKey,
     isEnabled = true,
+    cursorEnabled,
   } = pagination;
 
   const threshold = Math.min(rawThreshold, Math.max(0, windowSize - 1));
@@ -107,6 +110,16 @@ export const VirtualizedList = <TItem, TCursor>({
     [createQuery, cursor, direction, windowSize],
   );
 
+  // Build useCachedQuery options.
+  const queryOptions = useMemo<UseCachedQueryOptions | boolean>(() => {
+    if (cursorEnabled) {
+      const opts: UseCachedQueryOptions = { cursorEnabled: true };
+      if (!isEnabled) opts.enabled = false;
+      return opts;
+    }
+    return isEnabled;
+  }, [isEnabled, cursorEnabled]);
+
   const [page, queryDetails] = useCachedQuery(
     query as QueryRequest<
       keyof DefaultSchema['tables'],
@@ -116,7 +129,7 @@ export const VirtualizedList = <TItem, TCursor>({
       ReadonlyArray<TItem>,
       DefaultContext
     >,
-    isEnabled,
+    queryOptions,
   );
 
   useEffect(() => {

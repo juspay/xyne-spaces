@@ -493,6 +493,7 @@ const ActivityListView = (): ReactElement => {
             },
             windowSize: PAGE_SIZE,
             resetKey: [activeTab, currentTypes.join(','), classificationFilter?.join(',') ?? 'all'],
+            cursorEnabled: true,
           }}
           transformItems={transformActivities}
           onItemsChange={handleItemsChange}
