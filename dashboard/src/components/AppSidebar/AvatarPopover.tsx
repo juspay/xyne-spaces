@@ -18,10 +18,10 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 
-  // Get status fields from user presence status
-  const statusEmoji = user?.presenceStatus?.statusEmoji;
-  const statusContent = user?.presenceStatus?.statusContent;
-  const statusExpiryAt = user?.presenceStatus?.statusExpiryAt;
+  // Get status fields directly from user (promoted from user_presence)
+  const statusEmoji = user?.statusEmoji;
+  const statusContent = user?.statusContent;
+  const statusExpiryAt = user?.statusExpiryAt;
 
   const hasStatus = statusEmoji && (!statusExpiryAt || !isStatusExpired(statusExpiryAt));
 
@@ -54,9 +54,9 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
             {hasStatus && (
               <div className='h-4 flex items-center justify-center bg-muted rounded-full px-2 min-w-[16px]'>
                 <StatusIndicator
-                  statusEmoji={user?.presenceStatus?.statusEmoji}
-                  statusContent={user?.presenceStatus?.statusContent}
-                  statusExpiryAt={user?.presenceStatus?.statusExpiryAt}
+                  statusEmoji={user?.statusEmoji}
+                  statusContent={user?.statusContent}
+                  statusExpiryAt={user?.statusExpiryAt}
                   size='sm'
                 />
               </div>

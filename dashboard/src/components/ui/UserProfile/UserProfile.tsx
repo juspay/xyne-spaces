@@ -287,9 +287,9 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
     }
   };
 
-  const statusEmoji = user?.presenceStatus?.statusEmoji;
-  const statusContent = user?.presenceStatus?.statusContent;
-  const statusExpiryAt = user?.presenceStatus?.statusExpiryAt;
+  const statusEmoji = user?.statusEmoji;
+  const statusContent = user?.statusContent;
+  const statusExpiryAt = user?.statusExpiryAt;
   const hasStatus = statusEmoji && (!statusExpiryAt || !isStatusExpired(statusExpiryAt));
 
   if (!user) {
@@ -476,15 +476,15 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                   <div className='flex items-center gap-2 min-w-0 flex-1'>
                     <div className='flex-shrink-0'>
                       <StatusIndicator
-                        statusEmoji={user?.presenceStatus?.statusEmoji}
-                        statusContent={user?.presenceStatus?.statusContent}
-                        statusExpiryAt={user?.presenceStatus?.statusExpiryAt}
+                        statusEmoji={user?.statusEmoji}
+                        statusContent={user?.statusContent}
+                        statusExpiryAt={user?.statusExpiryAt}
                         size='sm'
                         showOnHover={false}
                       />
                     </div>
                     <div className='text-xs font-medium text-foreground truncate'>
-                      {user?.presenceStatus?.statusContent}
+                      {user?.statusContent}
                     </div>
                   </div>
                   <Button
@@ -504,9 +504,9 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                 </div>
               )}
             </div>
-            {hasStatus && user?.presenceStatus?.statusExpiryAt && (
+            {hasStatus && user?.statusExpiryAt && (
               <div className='text-xs text-muted-foreground'>
-                {formatExpiryTime(user.presenceStatus.statusExpiryAt, true)}
+                {formatExpiryTime(user.statusExpiryAt, true)}
               </div>
             )}
           </div>

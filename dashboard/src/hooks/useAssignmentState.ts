@@ -17,10 +17,7 @@ export const useCurrentUserAssignmentState = (): UseCurrentUserAssignmentStateRe
   const { user } = useAuth();
   const currentUser = useSelf();
 
-  // Get assignmentUnavailableUntil from user presence (synced via Zero)
-  const assignmentUnavailableUntil = currentUser?.presenceStatus?.assignmentUnavailableUntil as
-    | number
-    | undefined;
+  const assignmentUnavailableUntil = currentUser?.assignmentUnavailableUntil as number | undefined;
   const isCurrentlyUnavailable = assignmentUnavailableUntil
     ? assignmentUnavailableUntil > Date.now()
     : false;

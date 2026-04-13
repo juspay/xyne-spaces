@@ -137,9 +137,9 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
             <span className='truncate'>{displayName}</span>
             {is1on1DM && (
               <StatusIndicator
-                statusEmoji={dmUser?.presenceStatus?.statusEmoji}
-                statusContent={dmUser?.presenceStatus?.statusContent}
-                statusExpiryAt={dmUser?.presenceStatus?.statusExpiryAt}
+                statusEmoji={dmUser?.statusEmoji}
+                statusContent={dmUser?.statusContent}
+                statusExpiryAt={dmUser?.statusExpiryAt}
                 size='sm'
                 showOnHover={true}
               />

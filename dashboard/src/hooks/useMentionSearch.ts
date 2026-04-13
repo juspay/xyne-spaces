@@ -165,10 +165,7 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
           .sort((a, b) => {
             const userA = usersById.get(a);
             const userB = usersById.get(b);
-            return (
-              (userB?.presenceStatus?.lastActiveAt || 0) -
-              (userA?.presenceStatus?.lastActiveAt || 0)
-            );
+            return (userB?.lastActiveAt || 0) - (userA?.lastActiveAt || 0);
           })
           .map(p => {
             const u = usersById.get(p);
@@ -186,9 +183,7 @@ export const useMentionSearch = (channelId?: string): UseMentionSearchResult => 
         .sort((a, b) => {
           const userA = usersById.get(a.id);
           const userB = usersById.get(b.id);
-          return (
-            (userB?.presenceStatus?.lastActiveAt || 0) - (userA?.presenceStatus?.lastActiveAt || 0)
-          );
+          return (userB?.lastActiveAt || 0) - (userA?.lastActiveAt || 0);
         })
         .slice(0, 10);
     }

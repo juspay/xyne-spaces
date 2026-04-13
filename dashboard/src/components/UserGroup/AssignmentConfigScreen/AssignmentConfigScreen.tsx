@@ -603,9 +603,7 @@ export const AssignmentConfigScreen = ({
 
   const renderUserRow = (user: User): ReactElement => {
     const localState = getUserLocalState(user.id);
-    const assignmentUnavailableUntil = (
-      user?.presenceStatus as { assignmentUnavailableUntil?: number } | undefined
-    )?.assignmentUnavailableUntil;
+    const assignmentUnavailableUntil = user.assignmentUnavailableUntil as number | undefined;
     const isUnavailable = assignmentUnavailableUntil
       ? assignmentUnavailableUntil > Date.now()
       : false;

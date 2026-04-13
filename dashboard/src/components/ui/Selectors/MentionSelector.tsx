@@ -18,15 +18,13 @@ import { isStatusExpired } from '../../../utils/statusUtils';
 const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
   const { url: pictureUrl } = useProfilePictureUrl(item.id, item.picture);
   const user = useUser(item.id);
-  const presenceStatus = user?.presenceStatus;
   const hasValidStatus =
-    presenceStatus?.statusEmoji &&
-    (!presenceStatus.statusExpiryAt || !isStatusExpired(presenceStatus.statusExpiryAt));
+    user?.statusEmoji && (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
   const statusText =
-    hasValidStatus && presenceStatus?.statusContent
-      ? `${presenceStatus.statusEmoji} ${presenceStatus.statusContent}`
+    hasValidStatus && user?.statusContent
+      ? `${user.statusEmoji} ${user.statusContent}`
       : hasValidStatus
-        ? (presenceStatus?.statusEmoji ?? undefined)
+        ? (user?.statusEmoji ?? undefined)
         : undefined;
 
   return (

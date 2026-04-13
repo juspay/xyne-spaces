@@ -36,8 +36,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
   const [isHoverOpen, setIsHoverOpen] = React.useState(false);
   // Check if user has a valid status
   const hasValidStatus =
-    user?.presenceStatus?.statusEmoji &&
-    (!user?.presenceStatus?.statusExpiryAt || !isStatusExpired(user.presenceStatus.statusExpiryAt));
+    user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
 
   // Use useCallActions hook - channelId will be empty string initially, then update
   const { handleCallClick } = useCallActions({
@@ -182,13 +181,13 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
             {hasValidStatus && (
               <div className='flex items-center gap-2 mt-2 text-sm text-foreground'>
                 <StatusIndicator
-                  statusEmoji={user.presenceStatus?.statusEmoji}
-                  statusContent={user.presenceStatus?.statusContent}
-                  statusExpiryAt={user.presenceStatus?.statusExpiryAt}
+                  statusEmoji={user.statusEmoji}
+                  statusContent={user.statusContent}
+                  statusExpiryAt={user.statusExpiryAt}
                   size='sm'
                   showOnHover={false}
                 />
-                <span>{user.presenceStatus?.statusContent}</span>
+                <span>{user.statusContent}</span>
               </div>
             )}
           </div>

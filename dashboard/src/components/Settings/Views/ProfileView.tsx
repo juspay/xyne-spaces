@@ -110,7 +110,7 @@ const ProfileView = ({
   };
 
   // Notification pause handlers
-  const notificationsPausedUntil = user?.presenceStatus?.notificationsPausedUntil;
+  const notificationsPausedUntil = user?.notificationsPausedUntil;
   const isNotificationsPaused = useMemo(() => {
     return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
   }, [notificationsPausedUntil]);
@@ -167,8 +167,7 @@ const ProfileView = ({
 
   // Check if user has a valid (non-expired) status
   const hasValidStatus =
-    user?.presenceStatus?.statusEmoji &&
-    (!user?.presenceStatus?.statusExpiryAt || !isStatusExpired(user.presenceStatus.statusExpiryAt));
+    user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
 
   const handleStatusClick = (): void => {
     if (hasValidStatus) {
@@ -324,15 +323,15 @@ const ProfileView = ({
               <div className='flex items-center gap-2 min-w-0 flex-1'>
                 <div className='flex-shrink-0'>
                   <StatusIndicator
-                    statusEmoji={user?.presenceStatus?.statusEmoji}
-                    statusContent={user?.presenceStatus?.statusContent}
-                    statusExpiryAt={user?.presenceStatus?.statusExpiryAt}
+                    statusEmoji={user?.statusEmoji}
+                    statusContent={user?.statusContent}
+                    statusExpiryAt={user?.statusExpiryAt}
                     size='lg'
                     showOnHover={false}
                   />
                 </div>
                 <div className='text-sm font-medium text-foreground truncate'>
-                  {user?.presenceStatus?.statusContent}
+                  {user?.statusContent}
                 </div>
               </div>
               <Button
@@ -352,9 +351,9 @@ const ProfileView = ({
             </div>
           )}
         </div>
-        {hasValidStatus && user?.presenceStatus?.statusExpiryAt && (
+        {hasValidStatus && user?.statusExpiryAt && (
           <div className='text-xs text-muted-foreground px-2'>
-            {formatExpiryTime(user.presenceStatus.statusExpiryAt, true)}
+            {formatExpiryTime(user.statusExpiryAt, true)}
           </div>
         )}
       </div>

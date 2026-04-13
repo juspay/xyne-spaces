@@ -117,6 +117,7 @@ import emojiRoutes from '@/routes/emojis';
 import applicationBackfillRoutes from '@/routes/applicationBackfill';
 import { appRoutes } from '@/apps';
 import { ChatController } from '@/apps/controllers/chatController';
+import userMigrationRoutes from '@/routes/userMigration';
 
 export class App {
   public app: Application;
@@ -249,6 +250,8 @@ export class App {
 
     // Application backfill admin routes (auth required)
     this.app.use('/api/admin/applications', authMiddleware.authenticate, applicationBackfillRoutes);
+
+    this.app.use('/migrate/api/users-data-migration', authMiddleware.authenticate, userMigrationRoutes);
 
     // Apply general rate limiter to all API routes from this point onward
 

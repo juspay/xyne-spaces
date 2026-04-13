@@ -120,11 +120,10 @@ const Info = ({
 
   const hasValidStatus = useMemo(() => {
     return (
-      targetUser?.presenceStatus?.statusEmoji &&
-      (!targetUser?.presenceStatus?.statusExpiryAt ||
-        !isStatusExpired(targetUser.presenceStatus.statusExpiryAt))
+      targetUser?.statusEmoji &&
+      (!targetUser?.statusExpiryAt || !isStatusExpired(targetUser.statusExpiryAt))
     );
-  }, [targetUser?.presenceStatus]);
+  }, [targetUser?.statusEmoji, targetUser?.statusExpiryAt]);
 
   const handleAddPeopleClick = (): void => {
     setShowAddPeopleDialog(true);
@@ -256,10 +255,10 @@ const Info = ({
             {isDM && hasValidStatus && (
               <div className='flex items-center gap-1.5 mt-0.5'>
                 <span className='text-sm leading-none flex items-center justify-center'>
-                  {renderEmoji(targetUser?.presenceStatus?.statusEmoji || '')}
+                  {renderEmoji(targetUser?.statusEmoji || '')}
                 </span>
                 <span className='text-muted-foreground text-[13px] truncate'>
-                  {targetUser?.presenceStatus?.statusContent}
+                  {targetUser?.statusContent}
                 </span>
               </div>
             )}
@@ -536,8 +535,7 @@ const ParticipantListItem = ({
     channelCreatedBy !== participant.userId;
 
   const hasValidStatus =
-    user?.presenceStatus?.statusEmoji &&
-    (!user?.presenceStatus?.statusExpiryAt || !isStatusExpired(user.presenceStatus.statusExpiryAt));
+    user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
 
   const popoverStyle = `w-full flex items-center gap-x-1 p-2 cursor-pointer hover:bg-accent rounded-md pr-6`;
   return (
@@ -549,13 +547,13 @@ const ParticipantListItem = ({
             <span className='text-sm truncate text-foreground'>{user?.name}</span>
             {hasValidStatus && (
               <Tooltip
-                content={`${user?.presenceStatus?.statusContent || 'Status'}`}
+                content={`${user?.statusContent || 'Status'}`}
                 side='top'
                 sideOffset={8}
                 delayDuration={500}
               >
                 <span className='text-lg leading-none flex items-center justify-center'>
-                  {renderEmoji(user?.presenceStatus?.statusEmoji || '')}
+                  {renderEmoji(user?.statusEmoji || '')}
                 </span>
               </Tooltip>
             )}
