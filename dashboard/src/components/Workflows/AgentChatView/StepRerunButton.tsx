@@ -239,7 +239,7 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
       {isDropdownOpen && (
         <div
           ref={dropdownRef}
-          className='absolute right-0 mt-1 w-64 bg-background border border-border rounded-lg shadow-lg z-50 p-3'
+          className='absolute right-0 mt-1 w-80 bg-background border border-border rounded-lg shadow-lg z-50 p-3'
         >
           <div className='space-y-2.5'>
             {isAgentic ? (
@@ -259,7 +259,7 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
                   onKeyDown={handleKeyDown}
                   placeholder='Type your message to Rerun from this step or just press Enter'
                   className='w-full px-2 py-1.5 text-xs border border-border rounded-md bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-sky-500 resize-none'
-                  rows={3}
+                  rows={6}
                   disabled={isLoading}
                   data-track-category='Workflows'
                   data-track-name='StepRerunContextInput'

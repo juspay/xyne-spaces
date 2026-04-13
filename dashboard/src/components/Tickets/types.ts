@@ -3,6 +3,12 @@
  * Shared types for ticket creation and workflow management
  */
 
+export interface LabelAction {
+  label: string;
+  icon?: string;
+  href: string;
+}
+
 export interface WorkflowFieldSchema {
   name: string;
   type: string;
@@ -11,6 +17,7 @@ export interface WorkflowFieldSchema {
   enumValues?: string[];
   defaultValue?: unknown;
   nestedFields?: WorkflowFieldSchema[];
+  labelActions?: LabelAction[];
 }
 
 export interface WorkflowTypeSchema {
