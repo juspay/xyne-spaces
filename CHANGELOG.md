@@ -1,3 +1,26 @@
+## [1.113.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.112.0...v1.113.0) (2026-04-13)
+
+
+### Features
+
+* Fix .pem file upload failure in thread ([1cc6ddd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1cc6ddd4a64052a7734bd329509016e5a4b47af8))
+* indicate download attachment in electron ([674a321](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/674a321dfa96b97e19a219b07019ad2197c52b45)), closes [#4927](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4927)
+* Optimize user and channel queries ([6920b4e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6920b4eb9f75143aa7515e7dd75e25007d78c84e)), closes [#4904](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4904)
+
+
+### Bug Fixes
+
+* can remove from public also ([934bc47](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/934bc47cbf723828dab9f53904d65ea3361df88a)), closes [#4965](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4965)
+* channel-participant acl fix for dms ([aed3976](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aed3976baf9e47b5da80450fb99bd777fcbdf75b))
+* Cmd+F opens Cmd+K with in: filter for current channel/DM ([410cfeb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/410cfebcd068052162d36385f371af1ba35b7406)), closes [#4872](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4872)
+* creator can leave channel ([2b588d3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2b588d35634908ebac82a78b9ef02f3e3fed4626)), closes [#4943](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4943)
+* disabled the review step when triggering through pr ([e2c6f30](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e2c6f30e763d82d23a6cb29984ae5b911a2ee952)), closes [#4847](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4847)
+* fix mobile header padding in activity section ([c17c7c2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c17c7c2d070361e21c943a2a73420f85e555c6d2))
+* fix timezone bug in recurring call series ([9725fa8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9725fa885f1b20bb0564d228f99ec0bd4459d378))
+* Fixed isInGrid UI for grouped attachments ([8d8babc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8d8babceab13a1f074054e32cf4feef40ace27de))
+* ra on description ([1c3bd48](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1c3bd4836415179d8eaac0bb1b211520b6fee814)), closes [#4886](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4886)
+* wrap long channel descriptions in Browse Channels UI ([98812f1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/98812f1113fad2797e68851fc12556ee80e187d6)), closes [#4914](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4914)
+
 ## [1.112.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.111.0...v1.112.0) (2026-04-13)
 
 
