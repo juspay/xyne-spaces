@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { ChannelRole, ChannelVisibility, Schema } from '@xyne/shared';
+import { ChannelRole, ChannelScopeType, ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import {MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
@@ -11,6 +11,14 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
 
     if (channel?.isArchived) {
       throw new MutationACLError('Channel participant insert failed: cannot join archived channel', 'channel_participants');
+    }
+
+    if (channel?.scopeType === ChannelScopeType.DM) {
+      const existingParticipants = await tx.run(zql.channel_participants
+        .where('channelId', '=', args.channelId));
+      if (existingParticipants.length >= 2) {
+        throw new MutationACLError('Channel participant insert failed: cannot add more than 2 participants to a DM channel', 'channel_participants');
+      }
     }
 
     const existingParticipant = await tx.run(zql.channel_participants
