@@ -225,6 +225,15 @@ export const fidoServerWorkflow: WorkflowDefinition<
   tags: ['feature', 'server', 'rust', 'security', 'authentication', 'conformance', 'validation'],
   inputSchema: fidoServerWorkflowInputSchema,
   contextMapper: FidoServerWorkflowContextMapper,
+  fieldLabelActions: {
+    description: [
+      {
+        label: 'Plan from RA',
+        icon: 'ExternalLink',
+        href: 'RA_URL',
+      },
+    ],
+  },
   async execute(workflow: WorkflowEngine<FidoServerWorkflowContext,typeof FidoEnhancedWorkflowStepsEnum>, _preExecuteResult: EmptyPreExecuteResult): Promise<fidoServerWorkflowOutput> {
     const context = workflow.getContext()
     let { 

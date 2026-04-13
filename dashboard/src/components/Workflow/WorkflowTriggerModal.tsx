@@ -12,7 +12,7 @@ import { useWorkflowTypes, type WorkflowType } from '../../hooks/useWorkflowType
 import { useWorkflowFormPersistence } from '../../hooks/useWorkflowFormPersistence';
 import { useAuth } from '../../hooks/useAuth';
 import type { WorkflowTypeSchema } from '../Tickets/types';
-import { Play, X } from 'lucide-react';
+import { Play, X, ExternalLink } from 'lucide-react';
 import {
   validateCustomField,
   updateFormWithTicketData,
@@ -20,6 +20,9 @@ import {
   type TicketData,
 } from './utils';
 import { ArrayObjectField } from '../ui/ArrayObjectField';
+import { RA_URL } from '../Workflows/constants';
+import { browserPanelActor } from '../../machines/browserPanelMachine';
+import { isElectronApp } from '../../utils/electronApp';
 
 interface WorkflowTriggerModalProps {
   isOpen: boolean;
@@ -450,10 +453,41 @@ export default function WorkflowTriggerModal({
         }}
         render={({ field: controllerField, fieldState }) => (
           <div className='space-y-1'>
-            <label className='block text-sm font-medium text-foreground'>
-              {field.name}
-              {field.required && <span className='text-red-500 ml-1'>*</span>}
-            </label>
+            <div className='flex items-center justify-between'>
+              <label className='block text-sm font-medium text-foreground'>
+                {field.name}
+                {field.required && <span className='text-red-500 ml-1'>*</span>}
+              </label>
+              {field.labelActions && field.labelActions.length > 0 && (
+                <div className='flex items-center gap-2'>
+                  {field.labelActions.map((action, index) => (
+                    <button
+                      key={index}
+                      type='button'
+                      onClick={() => {
+                        if (isElectronApp()) {
+                          const browserPanelState =
+                            browserPanelActor.getSnapshot().context.browserPanelState;
+                          if (browserPanelState === 'open') {
+                            browserPanelActor.send({ type: 'OPEN_URLS', urls: [RA_URL] });
+                          } else {
+                            browserPanelActor.send({ type: 'OPEN', urls: [RA_URL] });
+                          }
+                        } else {
+                          window.open(RA_URL, '_blank');
+                        }
+                      }}
+                      className='inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 transition-colors'
+                      data-track-category='Workflows'
+                      data-track-name='PlanFromRA'
+                    >
+                      {action.icon === 'ExternalLink' && <ExternalLink size={12} />}
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Render enum fields as select dropdowns */}
             {field.enumValues && field.enumValues.length > 0 ? (

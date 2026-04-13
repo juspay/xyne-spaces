@@ -16,6 +16,12 @@ import { WorkflowExternalWaitException } from '../exceptions/workflow-exceptions
 // Type alias for workflows without preExecute
 export type EmptyPreExecuteResult = Record<string, never>
 
+export interface LabelAction {
+  label: string;
+  icon?: string;
+  href: string;
+}
+
 export interface WorkflowDefinition<
   TContext extends BaseWorkflowContext,
   TOutput,
@@ -40,6 +46,8 @@ export interface WorkflowDefinition<
   experimental?: boolean;
   inputSchema: ZodSchema<any>;
   contextMapper: (payload: any) => TContext;
+  // Optional label actions for fields
+  fieldLabelActions?: Record<string, LabelAction[]>;
 }
 
 // API response interfaces
@@ -66,6 +74,7 @@ export interface WorkflowFieldSchema {
   enumValues?: string[];
   defaultValue?: any;
   nestedFields?: WorkflowFieldSchema[];
+  labelActions?: LabelAction[];
 }
 
 export interface WorkflowTypesAPIResponse {
@@ -354,6 +363,16 @@ export class WorkflowRegistry {
         if (modelNames.length > 0) {
           modelField.type = 'enum';
           modelField.enumValues = modelNames;
+        }
+      }
+
+      // Merge fieldLabelActions into schema fields if defined
+      if (def.fieldLabelActions) {
+        for (const field of schemaFields) {
+          const labelActions = def.fieldLabelActions[field.name];
+          if (labelActions && labelActions.length > 0) {
+            field.labelActions = labelActions;
+          }
         }
       }
 
