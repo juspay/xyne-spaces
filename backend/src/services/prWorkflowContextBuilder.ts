@@ -32,6 +32,7 @@ export function buildPRWorkflowContext(
       };
 
     case WorkflowType.FIDO_SERVER_WORKFLOW:
+      params.originalContext['reviewCode'] = false; // FIDO workflows don't require code review
       return {
         ...params.originalContext,
         description: params.description,
