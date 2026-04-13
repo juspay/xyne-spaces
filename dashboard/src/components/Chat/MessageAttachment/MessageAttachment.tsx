@@ -948,8 +948,17 @@ const InlineVideoPlayer: React.FC<{
 
   return (
     <>
-      <div style={{ contain: 'layout', width: dimensions.width, height: dimensions.height }}>
-        <div className='relative bg-black rounded-lg overflow-hidden border border-border shadow-sm w-full h-full max-w-md'>
+      <div
+        className={isInGrid ? 'w-full h-full' : undefined}
+        style={
+          isInGrid
+            ? { contain: 'layout' }
+            : { contain: 'layout', width: dimensions.width, height: dimensions.height }
+        }
+      >
+        <div
+          className={`relative bg-black rounded-lg overflow-hidden border border-border shadow-sm w-full h-full ${isInGrid ? '' : 'max-w-md'}`}
+        >
           {/* Show thumbnail on mobile or until user clicks to play on desktop */}
           {loading ? (
             <div className='bg-muted animate-pulse flex items-center justify-center w-full h-full' />
