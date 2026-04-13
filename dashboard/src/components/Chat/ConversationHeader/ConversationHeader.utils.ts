@@ -15,7 +15,7 @@ export const getTargetUserIdForCall = (
 
   if (isDM && !isGroupDM && channelName) {
     const participantIds = channelName.split(',');
-    return participantIds.find(id => id !== currentUserId) || currentUserId;
+    return participantIds.find(id => id !== currentUserId);
   }
 
   return undefined;

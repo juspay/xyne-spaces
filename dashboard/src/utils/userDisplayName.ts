@@ -1,5 +1,3 @@
-import { isStatusExpired } from './statusUtils';
-
 /**
  * Get the display name for a user.
  * Priority: displayName > name > email
@@ -7,44 +5,27 @@ import { isStatusExpired } from './statusUtils';
 export function getUserDisplayName(
   user:
     | {
-        id?: string | undefined;
-        name?: string | null | undefined;
-        email?: string | null | undefined;
-        displayName?: string | null | undefined;
-        presenceStatus?:
-          | {
-              statusEmoji?: string | null | undefined;
-              statusContent?: string | null | undefined;
-              statusExpiryAt?: number | null | undefined;
-            }
-          | null
-          | undefined;
+        id?: string;
+        name?: string | null;
+        email?: string | null;
+        displayName?: string | null;
       }
     | undefined
     | null,
-  includeStatus: boolean = false,
 ): string {
   if (!user) {
     return 'Unknown';
   }
-  let baseName = 'Unknown';
   if (user.displayName) {
-    baseName = user.displayName;
-  } else if (user.name) {
-    baseName = user.name;
-  } else if (user.email) {
-    baseName = user.email;
+    return user.displayName;
   }
-
-  if (includeStatus && user.presenceStatus) {
-    const { statusEmoji, statusExpiryAt } = user.presenceStatus;
-    const hasValidStatus = statusEmoji && (!statusExpiryAt || !isStatusExpired(statusExpiryAt));
-    if (hasValidStatus) {
-      return `${baseName} ${statusEmoji}`;
-    }
+  if (user.name) {
+    return user.name;
   }
-
-  return baseName;
+  if (user.email) {
+    return user.email;
+  }
+  return 'Unknown';
 }
 
 /**
@@ -75,10 +56,10 @@ export function getUserDisplayNameById(
 export function getUserLabel(
   user:
     | {
-        id?: string | undefined;
-        name?: string | null | undefined;
-        email?: string | null | undefined;
-        displayName?: string | null | undefined;
+        id?: string;
+        name?: string | null;
+        email?: string | null;
+        displayName?: string | null;
       }
     | undefined
     | null,

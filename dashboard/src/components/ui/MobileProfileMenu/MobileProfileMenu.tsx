@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useUser } from '../../../hooks/useUsers';
 import { isStatusExpired } from '../../../utils/statusUtils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
+
 interface MobileProfileMenuProps {
   userId: string;
 }
@@ -52,7 +53,7 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
     <>
       <button
         type='button'
-        className='relative flex items-center'
+        className='relative'
         aria-label='Open user menu'
         onClick={() => {
           setView('default');

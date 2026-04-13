@@ -12,7 +12,6 @@ interface StatusIndicatorProps {
   statusExpiryAt?: number | null | undefined;
   size?: StatusIndicatorSize;
   showOnHover?: boolean;
-  showContent?: boolean;
   className?: string;
 }
 
@@ -28,7 +27,6 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   statusExpiryAt,
   size = 'sm',
   showOnHover = true,
-  showContent = false,
   className,
 }) => {
   // Check if user has a valid (non-expired) status
@@ -44,21 +42,14 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   const statusIndicator = (
     <div
       className={cn(
-        'inline-flex items-center justify-center gap-1',
+        'inline-flex items-center justify-center',
         'flex-shrink-0',
-        !showContent && sizeClass,
+        sizeClass,
         className,
       )}
       title={showOnHover ? undefined : `${statusContent}`}
     >
-      <span className={cn('leading-none', showContent && sizeClass)}>
-        {renderEmoji(statusEmoji)}
-      </span>
-      {showContent && statusContent && (
-        <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
-          {statusContent}
-        </span>
-      )}
+      <span className='leading-none'>{renderEmoji(statusEmoji)}</span>
     </div>
   );
 

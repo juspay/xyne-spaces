@@ -22,9 +22,6 @@ import {
 import { ALLOWED_FILE_TYPES } from '../../ui/utils/files';
 import { queries } from '../../../zero/queries';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
-import { useUser } from '../../../hooks/useUsers';
-import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
-import { isStatusExpired } from '../../../utils/statusUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
@@ -48,6 +45,9 @@ import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
+import { useUser } from '../../../hooks/useUsers';
+import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { isStatusExpired } from '../../../utils/statusUtils';
 
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
