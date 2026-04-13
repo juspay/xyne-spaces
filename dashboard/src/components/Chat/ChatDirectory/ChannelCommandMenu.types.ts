@@ -1,6 +1,7 @@
 // Types for ChannelCommandMenu component (using const objects due to erasableSyntaxOnly)
 import type { Channel } from '@xyne/shared';
 import type { ContextItem } from '../ThreadContextPanel/ThreadContextPanel.types';
+import type { MentionData } from './MentionNode';
 
 /**
  * Searchable type constants for the type: filter
@@ -106,6 +107,8 @@ export interface ChannelCommandMenuProps {
   onContextItemToggle?: (item: ContextItem) => void;
   /** Called when user confirms selection ("Add to Thread") */
   onContextSelectionConfirm?: () => void;
+  /** Pre-populated mention filter (e.g., from Cmd+F for current channel) */
+  initialMention?: MentionData | null;
   /**
    * Controls which tabs are visible. When omitted, defaults to all
    * pre-existing tabs (users, channels, messages, gmail, tickets, attachments).

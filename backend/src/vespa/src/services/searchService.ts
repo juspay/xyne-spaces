@@ -207,7 +207,7 @@ export class SearchService {
         `Fallback completed: ${fallbackResult.exactCount} exact + ${fallbackResult.fuzzyCount} fuzzy results`
       );
     }
-       if (process.env.NODE_ENV !== 'development') {
+       if (process.env.NODE_ENV === 'development') {
         // Log only specific fields
         const simplifiedResults = response.root?.children?.map((child: any) => ({
           id: child.fields?.docId,

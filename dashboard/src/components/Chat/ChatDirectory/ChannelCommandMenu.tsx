@@ -167,6 +167,7 @@ const ChannelCommandMenu = ({
   contextItems = [],
   onContextItemToggle,
   onContextSelectionConfirm,
+  initialMention,
   enabledTabs,
   inline = false,
   onTabChange,
@@ -1703,6 +1704,7 @@ const ChannelCommandMenu = ({
               onInsertTextReady={insertText => {
                 insertTextRef.current = insertText;
               }}
+              initialMention={initialMention}
             />
           )}
           {/* Search/Close Icon */}

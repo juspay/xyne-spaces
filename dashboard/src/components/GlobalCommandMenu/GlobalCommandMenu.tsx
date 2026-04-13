@@ -1,16 +1,24 @@
-import { ReactElement, useState, useMemo } from 'react';
+import { ReactElement, useState, useMemo, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import {
   useAllChannels,
   useAllVisibleChannels,
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
-import { groupChannelsByScope } from '../Chat/ChatDirectory/ChatDirectory.utils';
+import {
+  groupChannelsByScope,
+  isDMChannel,
+  getDMParticipantIdsToFetch,
+} from '../Chat/ChatDirectory/ChatDirectory.utils';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
 import type { TabType } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { VisibleChannel } from '../../machines/stateMachine';
+import { useShortcutById } from '../../shortcuts';
+import type { MentionData } from '../Chat/ChatDirectory/MentionNode';
+import { useUsers } from '../../hooks/useUsers';
 
 interface GlobalCommandMenuProps {
   open?: boolean;
@@ -40,12 +48,79 @@ const GlobalCommandMenu = ({
   const visibleAllChannels = useAllVisibleChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
   const [internalOpen, setInternalOpen] = useState(false);
+  const [initialMention, setInitialMention] = useState<MentionData | null>(null);
+  const location = useLocation();
+  const allUsers = useUsers();
 
   // Get unread counts for all channels
   const unreadCounts = useAllUnreadCount();
 
   const open = controlledOpen ?? internalOpen;
   const onOpenChange = controlledOnOpenChange ?? setInternalOpen;
+
+  const handleOpenChange = useCallback(
+    (newOpen: boolean) => {
+      onOpenChange(newOpen);
+      if (!newOpen) {
+        setInitialMention(null);
+      }
+    },
+    [onOpenChange],
+  );
+
+  const handleFindInChannel = useCallback(() => {
+    // Extract channelId from URL
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    const chatIndex = pathParts.indexOf('chat');
+    let channelId: string | null = null;
+
+    if (chatIndex !== -1) {
+      const nextSegment = pathParts[chatIndex + 1];
+      if (
+        nextSegment === 'dir' ||
+        nextSegment === 'dm' ||
+        nextSegment === 'bookmarks' ||
+        nextSegment === 'activity'
+      ) {
+        channelId = pathParts[chatIndex + 2] || null;
+      }
+    }
+
+    if (!channelId) {
+      // No channel context — just open regular Cmd+K
+      onOpenChange(true);
+      return;
+    }
+
+    // Find the channel
+    const channel = channelData.find(c => c.id === channelId);
+    if (!channel) {
+      onOpenChange(true);
+      return;
+    }
+
+    // Build channel display name
+    let channelName = channel.name;
+    if (isDMChannel(channel.scopeType)) {
+      const participantIds = getDMParticipantIdsToFetch(channel, context.userID ?? '');
+      const participantNames = participantIds
+        .map(id => allUsers.find(u => u.id === id)?.name)
+        .filter((name): name is string => !!name);
+      if (participantNames.length > 0) {
+        channelName = participantNames.join(', ');
+      }
+    }
+
+    setInitialMention({
+      id: channel.id,
+      name: channelName,
+      type: 'channel',
+      prefix: 'in:',
+    });
+    onOpenChange(true);
+  }, [location.pathname, channelData, allUsers, onOpenChange, context.userID]);
+
+  useShortcutById('global.findInChannel', handleFindInChannel);
 
   // Group channels by scope type
   const { starred, channels, directMessages } = useMemo(() => {
@@ -86,7 +161,8 @@ const GlobalCommandMenu = ({
       currentUserID={context.userID}
       unreadCounts={unreadCounts}
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={handleOpenChange}
+      initialMention={initialMention}
       {...(contextSelectionMode !== undefined ? { contextSelectionMode } : {})}
       {...(contextItems !== undefined ? { contextItems } : {})}
       {...(onContextItemToggle !== undefined ? { onContextItemToggle } : {})}
