@@ -5,10 +5,12 @@ import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { CallMessageOverlay } from '../../Chat/CallMessageOverlay/CallMessageOverlay';
 import { useGeneratePRD } from '../../../hooks/useGeneratePRD';
+import { useGenerateDetailedSummary } from '../../../hooks/useGenerateDetailedSummary';
 import { MessageMetadata } from './MessageBubble.utils';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { ENABLE_SUMMARY_ACTION_BUTTON } from '../../../config';
 
 type AttachmentType = QueryResultType<
   typeof queries.conversationMessagesV2
@@ -79,6 +81,58 @@ export const GeneratePRDButton: React.FC<{
         customOptionLabel='Custom Instructions'
         customOptionSubtext='Provide specific details or focus areas for the PRD.'
         customInputPlaceholder='E.g., Focus on the API authentication flow and error handling...'
+      />
+    </>
+  );
+};
+
+/**
+ * Button component for generating a detailed summary from call transcript
+ */
+const GenerateSummaryButton: React.FC<{
+  callId: string;
+  messageId: string;
+  isCanvasCreated?: boolean;
+}> = ({ callId, messageId, isCanvasCreated }) => {
+  const { generateDetailedSummary, isLoading } = useGenerateDetailedSummary();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleGenerate = async (customPrompt?: string): Promise<void> => {
+    setIsModalOpen(false);
+    await generateDetailedSummary(callId, messageId, customPrompt);
+  };
+
+  return (
+    <>
+      <button
+        type='button'
+        onClick={() => setIsModalOpen(true)}
+        disabled={isLoading}
+        className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
+        style={{ color: 'var(--call-action-button-color, #0077FF)' }}
+      >
+        {isLoading ? (
+          <>
+            <Loader2 className='w-4 h-4 animate-spin' />
+            <span>Generating...</span>
+          </>
+        ) : (
+          <span>{isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}</span>
+        )}
+      </button>
+
+      <CreateDocumentModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onGenerate={handleGenerate}
+        isLoading={isLoading}
+        title='Generate Summary'
+        description='Choose how you want to generate the detailed summary.'
+        standardOptionLabel='Standard Summary'
+        standardOptionSubtext='Generate a detailed summary based on the entire call transcript.'
+        customOptionLabel='Custom Instructions'
+        customOptionSubtext='Provide specific details or focus areas for the summary.'
+        customInputPlaceholder='E.g., Focus on action items and decisions made...'
       />
     </>
   );
@@ -237,17 +291,29 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
           {/* Action buttons for ended calls with transcript */}
           {!isActiveCall && message.hasAttachment && (
             <div className='flex flex-wrap items-center gap-2 mt-2'>
-              {/* PRD Button - always show to allow generating multiple PRDs */}
+              {/* Generate PRD Button — always visible */}
               <GeneratePRDButton
                 callId={callId}
                 messageId={message.messageId}
                 isCanvasCreated={!!metadata?.prdCanvasUrl}
               />
 
+              {/* Generate Summary Button — only shown when VITE_ENABLE_SUMMARY_ACTION_BUTTON=true */}
+              {ENABLE_SUMMARY_ACTION_BUTTON && (
+                <>
+                  <span className='text-muted-foreground'>•</span>
+                  <GenerateSummaryButton
+                    callId={callId}
+                    messageId={message.messageId}
+                    isCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
+                  />
+                </>
+              )}
+
               {/* Separator */}
               <span className='text-muted-foreground'>•</span>
 
-              {/* Chat with Transcript Button */}
+              {/* Chat with Transcript Button — always visible */}
               <ChatWithAskAIButton
                 channelId={channelId}
                 conversationId={conversationId}
