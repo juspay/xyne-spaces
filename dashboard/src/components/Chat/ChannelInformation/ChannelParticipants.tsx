@@ -116,9 +116,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
 
   // Compute authorization directly from props without state
   const isAuthorizedToRemoveParticipant =
-    channel.visibility === ChannelVisibility.PRIVATE &&
-    channel.scopeType === ChannelScopeType.DEFAULT &&
-    isParticipant?.role === ChannelRole.ADMIN;
+    channel.scopeType === ChannelScopeType.DEFAULT && isParticipant?.role === ChannelRole.ADMIN;
 
   const handleFilterChange = (value: FilterType): void => {
     setSelectedFilter(value);

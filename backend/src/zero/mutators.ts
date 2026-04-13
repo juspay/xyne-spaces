@@ -757,27 +757,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error("Channel doesn't exist");
           }
 
-          // Check if channel is private
-          if (
-            channel.visibility !== ChannelVisibility.PRIVATE ||
-            channel.scopeType !== ChannelScopeType.DEFAULT
-          ) {
-            throw new Error('Participants can only be removed from private channels');
-          }
-
-          // Check if requesting user is a participant and has ADMIN role
           const participationOfRequestingUser = await tx.run(zql.channel_participants
             .where('channelId', channelId)
             .where('userId', authData.sub)
             .one());
 
           if (!participationOfRequestingUser) {
-            throw new Error('Only channel members can remove participants from private channels');
+            throw new Error('Only channel members can remove participants');
           }
 
-          // Only admins can remove participants
           if (participationOfRequestingUser.role !== ChannelRole.ADMIN) {
-            throw new Error('Only channel admins can remove participants from channels');
+            throw new Error('Only channel admins can remove participants');
           }
 
           // Check if target user exists to enforce data integrity

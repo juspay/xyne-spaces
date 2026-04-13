@@ -798,11 +798,8 @@ const ChannelMembers = ({
   const isChannelCreator = channel.createdBy === context.userID;
   const currentUserIsAdmin = currentUserParticipant?.role === ChannelRole.ADMIN;
 
-  // Only admins can remove participants from private default channels
   const isAuthorizedToRemoveParticipant =
-    channel.visibility === ChannelVisibility.PRIVATE &&
-    channel.scopeType === ChannelScopeType.DEFAULT &&
-    currentUserIsAdmin; // Only admins can remove participants from channels
+    channel.scopeType === ChannelScopeType.DEFAULT && currentUserIsAdmin;
 
   const filteredParticipants = useMemo(() => {
     // Helper to check if name starts with query (first or any word)
