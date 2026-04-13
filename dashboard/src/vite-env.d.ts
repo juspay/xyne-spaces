@@ -15,6 +15,7 @@ interface ImportMetaEnv {
   readonly VITE_GOOGLE_CLIENT_ID: string;
   readonly VITE_GENIUS_API_KEY: string;
   readonly VITE_GENIUS_URL: string;
+  readonly VITE_ENABLE_SUMMARY_ACTION_BUTTONS: string;
 }
 
 interface ImportMeta {

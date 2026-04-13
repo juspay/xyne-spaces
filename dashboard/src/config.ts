@@ -66,3 +66,8 @@ export const LOGGER_BASE_URL = isElectronBundled
 export const MAX_RETRIES = 3;
 
 export const SHAREABLE_ORIGIN = window.location.origin;
+
+// Feature flag: show manual GENERATE SUMMARY action button (Generate PRD, Generate Summary, Chat with Transcript)
+// Auto-generation still runs regardless of this flag
+export const ENABLE_SUMMARY_ACTION_BUTTON: boolean =
+  import.meta.env['VITE_ENABLE_SUMMARY_ACTION_BUTTON'] === 'true';
