@@ -1,3 +1,62 @@
+## [1.112.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.111.0...v1.112.0) (2026-04-13)
+
+
+### Features
+
+* add pre-commit hook for enforcing migration file changes presence when schema changed ([16ca7a3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/16ca7a33daf81eca3a6aa05ac534dcd4b8f2073e)), closes [#4764](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4764)
+* Add UPI Analytics bot and update related configuration ([0a765c0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0a765c006772b544695e87f2c5d8c1ef7a7e81f9)), closes [#4822](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4822)
+* Add vespa metrics and vespa queue metrics ([d3499b9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d3499b91d7986bf50279c895edbb065dbff4e7f6)), closes [#4815](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4815)
+* added caching logic for paginated queries and applied it for activities ([7597bf3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7597bf3c6bc2e90d3719541f1fe5a0215ef1b4a1)), closes [#4777](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4777)
+* adding dedicated litellm key ([7f785ce](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7f785ce6215d5318b951e8b858749ebc504db545)), closes [#4819](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4819)
+* adding env for the button's visibility ([6a66b8c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6a66b8c37360c6291ab1f2762c20e2e79b6afa7e)), closes [#4867](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4867)
+* changes for ios notification and /register fix ([211eff2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/211eff21a442541302f3d35ea155a36094737da9)), closes [#4826](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4826)
+* Clustering tickets using PCA= ([6c7b050](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6c7b050577e897af382448edeefe3850ce78961b)), closes [#4015](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4015)
+* corrected prisma file ([4c7b785](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4c7b7853e64a209a04ffc5bf0e213b680c2695ca)), closes [#4831](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4831)
+* custom screen share picker ([9e1f8a1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9e1f8a16b8acf086184df6f41e52b5d6b6328d97)), closes [#4808](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4808)
+* Display user active status ([bce28f2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bce28f28ff0fb35da115bfd0acd746a9dcd1ec1c)), closes [#4838](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4838)
+* fix thread header color tokens and routing gesture consistency ([a4ac549](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a4ac549760933e5044fa4416f700ed1de3e0ca43))
+* full role auto assign in user Groups ([fe33372](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fe33372fd6ec1a90a03b501522a20107cd8d644f)), closes [#4750](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4750)
+* Implement user email signatures and database storage ([1194e51](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1194e5154aa78d7578f12153eb525881827192e2)), closes [#3970](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3970)
+* making a common component to render the virtualised lists ([0ed400e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0ed400e295469b621ffd89341dc817ee49478d02)), closes [#4609](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4609)
+* native app edit message action ([d33d83e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d33d83e557942de7ce989dec815a9add3648942b)), closes [#4804](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4804)
+* New UI for Call Calendar participants list ([ab0d80a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ab0d80ae3452799fb07900fb2218bf9fd15792ae)), closes [#4848](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4848)
+* Prevent duplicate Slack notifications in Spaces ([5e42bcc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5e42bcc30e42afc8ef25b40114d2c81948e5cbc0)), closes [#4837](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4837)
+* Removed pre-execute check ([df92903](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/df92903d1ff00bed48b67bbc06fc0027b40203c6)), closes [#4747](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4747)
+* seperate env for litellm calls ([afffa08](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/afffa08f6865271ba7a353dc248ed0e0da037653)), closes [#4828](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4828)
+* Support for all bots migration ([d148044](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d148044337c8f17e8e8fbe8930b4416282f883d3)), closes [#4800](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4800)
+* unfurl xynepsaces url ([2746016](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/274601605e344e194026cfa81bb9a2265a1581d9)), closes [#4846](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4846)
+* xyne apps screen ([2b11e54](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2b11e54006bdcda773a28ec00d44ab94841b2815)), closes [#4755](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4755)
+
+
+### Bug Fixes
+
+* : resolved horizontal scroll fix i command menu ([cba86aa](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cba86aa11a025e722687cdefd574322a8a893e2b))
+* Add Config based file indexing ([f6dee4e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f6dee4e00b4a4cd8aa9ae565d062c045f7277ef9)), closes [#4832](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4832)
+* Add show all calls in my channel toggle ([72e2d17](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/72e2d17af5753d0c328ebb207062c5acfdc4168c)), closes [#4809](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4809)
+* added enabled to getAllRepos query ([72e8c4f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/72e8c4f18b1a4127318940fe32842ee47c929e89)), closes [#4821](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4821)
+* Added middleware for message and conversations updates ([723f6e7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/723f6e73f462606a492e10fd38dfb7e12bc85a0e)), closes [#4865](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4865)
+* Auto-open add people dialog on channel creation ([758716b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/758716bec048620905631dc24d808e38eebee0ec)), closes [#4759](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4759)
+* Direct call navigation on cold start from notification and call iniate handler ([33d44da](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/33d44dae1217ddff9a7f036e8ba17ee2dc4151f8)), closes [#4852](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4852)
+* fix conversation message position when opening its thread message ([f1aa22b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f1aa22bce9c56deff12029bdead4f7fd8d0fcb44))
+* Fix sendToChannel message updates ([157ebb3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/157ebb34b65103ae581042c544115da6a1ceb4ea))
+* fixed native app dm chat ui issues ([53953a7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/53953a7250a006738a081ab74705e06cad8c30e0))
+* mention yourself in canvas ([7e98cf9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7e98cf97361f400b422bb794c223c8653454fa2b)), closes [#4879](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4879)
+* Migration Fix ([12fd480](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/12fd480fb45a080bb2e65d9560c2777b2c018745)), closes [#4930](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4930)
+* Migration Fix ([f06b4c3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f06b4c3265384f73fe2adc509ae3e24f2b327996)), closes [#4890](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4890)
+* moving-to-env ([f47b1bd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f47b1bd7db7b4f99ef588bfe0a017aded13c398a)), closes [#4888](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4888)
+* native app chat ui refactor ([c8e1bda](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c8e1bda5fb69d18acd1087e7fe073885af995c4f)), closes [#4880](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4880)
+* Open profile instead of DM for tagged users web and mobile ([5d77b62](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5d77b621bd472d1647e1c8e3da1ff443e0a9e651)), closes [#4142](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4142)
+* order users in CMD+N by conversation history ([56b4e18](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/56b4e18c840823123d968b0dabd8c894aa103e9f)), closes [#4779](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4779)
+* read replica for analytics ([692ee67](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/692ee67360b3e35fbb5e808376e68e6dff9d78c9)), closes [#4883](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4883)
+* removing the intermidently failing changes temporarily ([93a1b79](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/93a1b79cf9ad11afea0fa5a8dacddef1254ee974)), closes [#4928](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4928)
+* replaced new application with old one ([e7fa67e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e7fa67ed1b8ca491030b5c00262ae9bb9a883ddf)), closes [#4881](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4881)
+* revert optimise frontend channel loadingg ([6b48bfe](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6b48bfef4fef57512a4d37547a428184ff42c875)), closes [#4769](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4769)
+* search ux improvement ([b161ec2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b161ec2f967918b8916e1880b74511c60c3cba03)), closes [#4810](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4810)
+* show notification after workflow completion ([c8c7a9c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c8c7a9c84d508449ba27cfb4d55aa98ff02a18fa)), closes [#3647](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/3647)
+* workflow poller fix ([4cbcd6a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4cbcd6a4f9da443d60d3560c1768529c97b4fcc7)), closes [#4827](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4827)
+* xyne apps board check ([4b000b0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4b000b046ea15fbe1db8ad83b10141862263f1ed)), closes [#4906](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4906)
+* Xyne Apps Bug ([083180e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/083180e262347c4a020bbfb93860d11485b2b043)), closes [#4866](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4866)
+
 ## [1.111.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.110.0...v1.111.0) (2026-04-08)
 
 
