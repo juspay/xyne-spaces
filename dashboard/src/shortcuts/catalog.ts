@@ -22,6 +22,15 @@ export const shortcuts = {
     description: 'Global search',
     category: 'Navigation',
   },
+  'global.findInChannel': {
+    keys: 'mod+f',
+    scope: 'global',
+    allowInInputs: true,
+    priority: 50,
+    description: 'Search in current',
+    category: 'Navigation',
+    preventDefault: true,
+  },
   'global.openCanvasTab': {
     keys: ['mod+shift+n'],
     scope: 'channel',

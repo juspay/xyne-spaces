@@ -1,12 +1,21 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { ContentEditable } from '@lexical/react/LexicalContentEditable';
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { $getRoot, $getSelection, EditorState, $isElementNode, LexicalNode } from 'lexical';
-import { MentionNode, $isMentionNode } from './MentionNode';
+import {
+  $getRoot,
+  $getSelection,
+  EditorState,
+  $isElementNode,
+  LexicalNode,
+  $createTextNode,
+  $createParagraphNode,
+} from 'lexical';
+import { MentionNode, $isMentionNode, $createMentionNode } from './MentionNode';
+import type { MentionData } from './MentionNode';
 import { MentionPlugin } from './MentionPlugin';
 import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
@@ -38,6 +47,42 @@ interface LexicalSearchInputProps {
   onManualKeystroke?: () => void;
   autocompleteSuffix?: string;
   onInsertTextReady?: (insertText: (text: string) => void) => void;
+  initialMention?: MentionData | null | undefined;
+}
+
+function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData | null }) {
+  const [editor] = useLexicalComposerContext();
+  const appliedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!initialMention) {
+      appliedRef.current = null;
+      return;
+    }
+
+    const mentionKey = `${initialMention.id}-${initialMention.prefix}`;
+    if (appliedRef.current === mentionKey) return;
+    appliedRef.current = mentionKey;
+
+    const timeoutId = setTimeout(() => {
+      editor.update(() => {
+        const root = $getRoot();
+        root.clear();
+        const paragraph = $createParagraphNode();
+        root.append(paragraph);
+
+        const mentionNode = $createMentionNode(initialMention);
+        const spaceNode = $createTextNode(' ');
+        paragraph.append(mentionNode);
+        paragraph.append(spaceNode);
+        spaceNode.selectEnd();
+      });
+    }, 50);
+
+    return () => clearTimeout(timeoutId);
+  }, [initialMention, editor]);
+
+  return null;
 }
 
 function PlaceholderPlugin({ placeholder }: { placeholder?: string }) {
@@ -252,6 +297,7 @@ export function LexicalSearchInput({
   onManualKeystroke,
   autocompleteSuffix,
   onInsertTextReady,
+  initialMention,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
   const [suffixLeft, setSuffixLeft] = useState(0);
@@ -308,6 +354,7 @@ export function LexicalSearchInput({
             />
           )}
           <ClearEditorPlugin value={value} />
+          {initialMention && <InitialMentionPlugin initialMention={initialMention} />}
           {onInsertTextReady && <InsertTextPlugin onInsertTextReady={onInsertTextReady} />}
           <CursorPositionPlugin onPositionChange={handlePositionChange} />
           <MentionPlugin
