@@ -1,5 +1,9 @@
 import { config } from '../config/env';
 import { logger } from '../utils/logger';
+import {
+  ALLOWED_MIME_TYPES,
+  DANGEROUS_EXTENSIONS,
+} from '@xyne/shared';
 
 export interface FileValidationInput {
   buffer: Buffer;
@@ -19,81 +23,16 @@ export class FileValidationService {
   private static instance: FileValidationService;
 
   // Allowed file types and their MIME types
-  private readonly allowedMimeTypes = new Set([
-    // Images
-    'image/jpeg',
-    'image/jpg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/svg+xml',
-
-    // Documents
-    'application/pdf',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-powerpoint',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-
-    // Text files
-    'text/plain',
-    'text/markdown',
-    'text/csv',
-    'application/json',
-    'application/xml',
-    'text/xml',
-    'text/html',
-    'text/yaml',
-    'application/x-yaml',
-
-    // Source code files (MIME types browsers actually send)
-    'text/x-python',
-    'text/x-c',
-    'text/x-csrc',
-    'text/x-c++src',
-    'text/x-c++',
-    'text/x-java-source',
-    'text/x-java',
-    'text/x-go',
-    'text/x-ruby',
-    'application/x-ruby',
-    'text/x-csharp',
-    'application/sql',
-    'text/x-sql',
-    'text/typescript',
-    'text/x-typescript',
-    'text/tsx',
-
-    // Archive files
-    'application/zip',
-    'application/x-7z-compressed',
-    'application/x-tar',
-    'application/gzip',
-
-    // Video files (common formats)
-    'video/mp4',
-    'video/webm',
-    'video/avi',
-    'video/quicktime',
-
-    // Audio files (common formats)
-    'audio/mpeg',
-    'audio/wav',
-    'audio/ogg',
-    'audio/mp3',
-
-    // Binary files
-    'application/octet-stream',
-    'binary/octet-stream',
-  ]);
+  // Uses shared constants from @xyne/shared to ensure consistency with frontend
+  // SECURITY NOTE: Certificate files (.pem) can contain sensitive private keys.
+  // Ensure upload handling includes appropriate security measures such as:
+  // - Encryption at rest
+  // - Access logging
+  // - Clear retention policies
+  private readonly allowedMimeTypes: Set<string> = new Set(ALLOWED_MIME_TYPES);
 
   // File extensions that are potentially dangerous
-  private readonly dangerousExtensions = new Set([
-    '.exe', '.bat', '.cmd', '.com', '.pif', '.scr', '.vbs', '.js', '.jar',
-    '.msi', '.dll', '.sys', '.bin', '.sh', '.ps1', '.php', '.asp', '.jsp'
-  ]);
+  private readonly dangerousExtensions: Set<string> = new Set(DANGEROUS_EXTENSIONS);
 
   private readonly maxFileSizeBytes: number;
 
