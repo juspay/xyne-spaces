@@ -15,11 +15,19 @@ import { useSelector } from '@xstate/react';
 import { useQuery } from './useQuery';
 import { useZero } from './useZero';
 import { Event, logger } from '../utils/logger';
+import {
+  PAGE_BREAK_MARKER,
+  getId,
+  insertPageWithBreaks,
+  computeCachedWindow,
+} from '../utils/paginatedCacheUtils';
 
 export interface UseCachedQueryOptions {
   ttl?: TTL | undefined;
   enabled?: boolean | undefined;
   updatedAtEnabled?: boolean;
+  /** Enable cursor pagination mode. Cursor fields are automatically derived from the query's orderBy. */
+  cursorEnabled?: boolean;
 }
 
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
@@ -48,10 +56,6 @@ function extractMaxUpdatedAt(data: unknown): number {
   }
   traverse(data);
   return maxValues.length > 0 ? Math.max(...maxValues) : 0;
-}
-
-function getId(item: unknown): string | undefined {
-  return item && typeof item === 'object' && 'id' in item ? (item as { id: string }).id : undefined;
 }
 
 function mergeWithExistingData<T>(existing: T | undefined, incoming: T, lastUpdatedAt: number): T {
@@ -118,16 +122,56 @@ export function useCachedQuery<
       ? options.updatedAtEnabled
       : false;
 
+  // Cursor mode is active when cursorEnabled flag is set.
+  const cursorEnabled =
+    typeof options === 'object' && options !== null && 'cursorEnabled' in options
+      ? !!options.cursorEnabled
+      : false;
+
+  // Extract cursor (start), limit, and direction from query args for filtering
+  const queryArgs = query.args as Record<string, unknown> | undefined;
+  const cursor = queryArgs?.['start'];
+  const limit = (queryArgs?.['limit'] as number) || 0;
+  const direction = queryArgs?.['direction'] as 'forward' | 'backward' | undefined;
+
   const zero = useZero();
 
-  // Compute hash using the query's internal fn which returns a QueryImpl with hash()
-  const hash = useMemo(() => {
+  // Compute hash and extract all orderBy fields from query AST
+  const { hash, orderBy } = useMemo(() => {
+    // Default: hash the full query as-is (no cursor stripping)
     // @ts-expect-error - accessing internal query structure
-    const queryImpl = query.query.fn({ ctx: zero.context, args: query.args });
-    // @ts-expect-error - hash() is part of QueryInternals, not public Query interface
+    const fullQueryImpl = query.query.fn({ ctx: zero.context, args: query.args });
+    // Extract orderBy from AST — Zero stores it as [field, direction] tuples.
+    // Normalize to { field, direction } objects for downstream utilities.
+    // @ts-expect-error - accessing internal query structure
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const ast = fullQueryImpl.ast;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const rawOrderBy = ast?.orderBy as readonly [string, 'asc' | 'desc'][] | undefined;
+    const extractedOrderBy = rawOrderBy?.map(([field, direction]) => ({ field, direction }));
+
+    if (cursorEnabled) {
+      // For cursor-paginated queries, strip `start` and `direction` from args so that
+      // all pages of the same query (both directions) share a single cache bucket.
+      const rawArgs = (query.args ?? {}) as Record<string, unknown>;
+      const strippedArgs: Record<string, unknown> = { ...rawArgs, start: null };
+      delete strippedArgs['direction'];
+      try {
+        // @ts-expect-error - accessing internal query structure
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        const queryImpl = query.query.fn({ ctx: zero.context, args: strippedArgs });
+        // @ts-expect-error - accessing internal query structure
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        const computedHash = queryImpl.hash() as string;
+        return { hash: computedHash, orderBy: extractedOrderBy };
+      } catch {
+        // Fall through to default hash below
+      }
+    }
+    // @ts-expect-error - accessing internal query structure
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-    return queryImpl.hash() as string;
-  }, [query, zero.context]);
+    return { hash: fullQueryImpl.hash() as string, orderBy: extractedOrderBy };
+  }, [query, zero.context, cursorEnabled]);
 
   const cacheEntry = useSelector(queryCacheActor, state => {
     return hash ? state.context.cache.get(hash) : undefined;
@@ -182,14 +226,69 @@ export function useCachedQuery<
     }
   }, [updatedAtEnabled, hasCachedData, hash, zero, query]);
 
-  const [freshData, freshDetails] = useQuery(modifiedQueryRequest as typeof query, options);
+  // Strip UseCachedQueryOptions-specific fields before passing to Zero's useQuery.
+  // Zero only accepts { enabled?, ttl? }. Passing unknown fields like cursorFields
+  // causes Zero to error-state and retry, multiplying subscriptions → 429.
+  const zeroCompatibleOptions = useMemo(() => {
+    const enabled =
+      typeof options === 'object' && options !== null && 'enabled' in options
+        ? (options as { enabled?: boolean }).enabled
+        : undefined;
+    const ttl =
+      typeof options === 'object' && options !== null && 'ttl' in options
+        ? (options as { ttl?: TTL }).ttl
+        : undefined;
+    if (enabled === undefined && ttl === undefined) return undefined;
+    return {
+      ...(enabled !== undefined && { enabled }),
+      ...(ttl !== undefined && { ttl }),
+    };
+  }, [options]);
+
+  const [freshData, freshDetails] = useQuery(
+    modifiedQueryRequest as typeof query,
+    zeroCompatibleOptions,
+  );
+
+  // Compute cursor pagination window (pure function, no side effects)
+  const cursorWindow = useMemo(() => {
+    if (!cursorEnabled) {
+      return { hasCachedWindow: false, data: null, details: null };
+    }
+    return computeCachedWindow({
+      cacheEntry,
+      cursor,
+      limit,
+      direction,
+      ...(orderBy && { orderBy }),
+    });
+  }, [cursorEnabled, cacheEntry, cursor, limit, direction, orderBy]);
 
   // Update cache when fresh data arrives
   useEffect(() => {
     if (freshDetails.type === 'complete' && hash && freshData !== prevFreshDataRef.current) {
       prevFreshDataRef.current = freshData;
 
-      if (updatedAtEnabled) {
+      if (cursorEnabled) {
+        // Cursor pagination: merge with breaks for non-contiguous jumps
+        const existingData = cacheEntry?.data?.[0];
+        const mergedData =
+          existingData && Array.isArray(existingData) && Array.isArray(freshData)
+            ? insertPageWithBreaks(
+                // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+                existingData as (Record<string, unknown> | typeof PAGE_BREAK_MARKER)[],
+                freshData as Record<string, unknown>[],
+                cursor,
+                orderBy,
+              )
+            : freshData;
+        queryCacheActor.send({
+          type: 'SET_KEY',
+          hash,
+          data: [mergedData, freshDetails],
+        });
+      } else if (updatedAtEnabled) {
+        // Delta sync: merge by updatedAt
         const existingData = cacheEntry?.data?.[0];
         const currentLastUpdatedAt = cacheEntry?.lastUpdatedAt ?? 0;
         const newMaxUpdatedAt = extractMaxUpdatedAt(freshData);
@@ -208,6 +307,7 @@ export function useCachedQuery<
           lastUpdatedAt: effectiveLastUpdatedAt,
         });
       } else {
+        // Default: just cache the fresh data
         queryCacheActor.send({
           type: 'SET_KEY',
           hash,
@@ -215,10 +315,34 @@ export function useCachedQuery<
         });
       }
     }
-  }, [freshData, freshDetails, hash, cacheEntry]);
+  }, [
+    freshData,
+    freshDetails,
+    hash,
+    cursorEnabled,
+    updatedAtEnabled,
+    cacheEntry,
+    cursor,
+    orderBy,
+    shouldEnableDelta,
+  ]);
 
+  // Return based on mode
   if (updatedAtEnabled && hasCachedData) {
     return cacheEntry.data;
+  }
+
+  if (cursorEnabled && cursorWindow.hasCachedWindow) {
+    return [cursorWindow.data, cursorWindow.details] as QueryResult<TReturn>;
+  }
+
+  // For cursor-paginated queries, when the cache doesn't have the requested window
+  // (cursor not found or cache empty), always return the live Zero query result so
+  // the component sees the correct loading→complete lifecycle and fresh page data.
+  // Returning cacheEntry.data here would expose the raw accumulated cache array
+  // (which may contain PAGE_BREAK_MARKERs) as activitiesPage, breaking accumulation.
+  if (cursorEnabled) {
+    return [freshData, freshDetails];
   }
 
   return cacheEntry?.data ?? [freshData, freshDetails];
