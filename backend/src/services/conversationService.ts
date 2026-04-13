@@ -623,6 +623,7 @@ export class ConversationService {
 
     // Update conversation reply count and last activity
     await this.conversationRepository.incrementReplyCount(conversationId);
+    await messageMetadataService.addReply(conversationId, userId);
 
     // Update reply count for previous message's child conversation if it exists
     // This matches the mutator logic - get the most recent previous message and check if it has showInChannel
