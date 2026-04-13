@@ -153,7 +153,7 @@ const BrowseChannels = (): ReactElement => {
                           {channel.name}
                         </div>
                         {channel.description && (
-                          <div className='text-xs text-muted-foreground truncate'>
+                          <div className='text-xs text-muted-foreground break-words'>
                             {channel.description}
                           </div>
                         )}
