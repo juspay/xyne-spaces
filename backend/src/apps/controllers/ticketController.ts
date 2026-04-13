@@ -89,6 +89,38 @@ export class TicketController {
         userId,
       } = bodyResult.data;
 
+      const board = await repositories.boards.findById(boardId);
+      if (!board) {
+        res.status(404).json({
+          error: `Board with ID ${boardId} not found`,
+          code: 'BOARD_NOT_FOUND',
+        });
+        return;
+      }
+      if (board.projectId !== projectId) {
+        res.status(400).json({
+          error: `Board does not belong to the specified project`,
+          code: 'BOARD_PROJECT_MISMATCH',
+        });
+        return;
+      }
+
+      const channel = await repositories.channels.findById(channelId);
+      if (!channel) {
+        res.status(404).json({
+          error: `Channel with ID ${channelId} not found`,
+          code: 'CHANNEL_NOT_FOUND',
+        });
+        return;
+      }
+      if (channel.projectId !== projectId) {
+        res.status(400).json({
+          error: `Channel does not belong to the specified project`,
+          code: 'CHANNEL_PROJECT_MISMATCH',
+        });
+        return;
+      }
+
       // Resolve assignedToEmail to userId if provided
       let assignedTo: string | undefined;
       if (assignedToEmail) {
