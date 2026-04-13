@@ -4,6 +4,8 @@
 // Shared utilities for file type detection, formatting, and validation
 // ============================================================================
 
+import { ALLOWED_FILE_TYPES as SHARED_ALLOWED_FILE_TYPES } from '@xyne/shared';
+
 /**
  * File type categories for UI rendering
  */
@@ -19,60 +21,11 @@ export type FileCategory =
 
 /**
  * Allowed file types for upload (matches backend validation)
- * Kept in sync with backend/src/services/fileValidationService.ts
+ * Uses shared constants from @xyne/shared to ensure consistency
+ * SECURITY NOTE: Certificate files (.pem) can contain sensitive private keys.
+ * Ensure upload handling includes appropriate security measures.
  */
-export const ALLOWED_FILE_TYPES = [
-  // Images
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'image/svg+xml',
-  // Documents
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  // Text files
-  'text/plain',
-  'text/markdown',
-  'text/csv',
-  'application/json',
-  'application/xml',
-  'text/xml',
-  // Archive files
-  'application/zip',
-  'application/x-7z-compressed',
-  'application/x-tar',
-  'application/gzip',
-  // Video files
-  'video/mp4',
-  'video/webm',
-  'video/avi',
-  'video/quicktime',
-  // Audio files
-  'audio/mpeg',
-  'audio/wav',
-  'audio/ogg',
-  'audio/mp3',
-  // Source code / text-based files (matched by extension on frontend)
-  '.ts',
-  '.tsx',
-  '.py',
-  '.rb',
-  '.go',
-  '.java',
-  '.c',
-  '.cpp',
-  '.cs',
-  '.sql',
-  '.yml',
-  '.yaml',
-] as const;
+export const ALLOWED_FILE_TYPES = SHARED_ALLOWED_FILE_TYPES;
 
 /**
  * Extension to color mapping for file badges
@@ -104,6 +57,10 @@ const EXTENSION_COLORS: Record<string, string> = {
   sql: 'bg-slate-600',
   yml: 'bg-slate-600',
   yaml: 'bg-slate-600',
+  pem: 'bg-slate-600',
+  crt: 'bg-slate-600',
+  key: 'bg-slate-600',
+  cer: 'bg-slate-600',
 };
 
 /**
@@ -134,6 +91,10 @@ export const getFileCategory = (file: { type: string; name: string | undefined }
     '.sql',
     '.yml',
     '.yaml',
+    '.pem',
+    '.crt',
+    '.key',
+    '.cer',
   ];
   if (type.startsWith('text/') || codeExtensions.some(ext => name.endsWith(ext))) {
     return 'text';

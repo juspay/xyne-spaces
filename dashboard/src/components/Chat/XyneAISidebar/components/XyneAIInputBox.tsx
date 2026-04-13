@@ -44,6 +44,7 @@ import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines
 import type { VisibleChannel } from '../../../../machines/stateMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
+import { CERTIFICATE_MIME_TYPES } from '@xyne/shared';
 
 // Hash icon component
 const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
@@ -643,6 +644,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       // Data
       'application/json',
       'application/xml',
+      // Certificate files
+      // SECURITY NOTE: PEM files can contain sensitive private keys alongside certificates.
+      // Ensure upload handling includes appropriate security measures.
+      ...CERTIFICATE_MIME_TYPES,
     ];
 
     // Validate base64 string
@@ -1515,7 +1520,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   ref={fileInputRef}
                   type='file'
                   multiple
-                  accept='image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,text/markdown,.docx,.xlsx,.doc,.xls,application/json,application/xml'
+                  accept='image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,text/markdown,.docx,.xlsx,.doc,.xls,application/json,application/xml,.pem,.crt,.key,.cer,application/x-pem-file,application/x-x509-ca-cert,application/pkix-cert,application/pkcs8'
                   onChange={e => void handleFileChange(e)}
                   className='hidden'
                   aria-label='Upload files'

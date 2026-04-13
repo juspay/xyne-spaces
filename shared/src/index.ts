@@ -15,6 +15,7 @@ export * from './utils/activityMetadataParser';
 export * from './utils/origins';
 export * from './utils/linkPreviewParser';
 export * from './utils/ticketMetadata';
+export * from './utils/fileTypes';
 export {
   parseTicketMd,
   serializeTicketMd,
