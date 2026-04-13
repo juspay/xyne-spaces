@@ -826,6 +826,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             ...(channelId && { channelId }),
             ...(userIds.length > 0 && { targetUserIds: userIds }),
             recurrenceRule: buildRrule(),
+            timezone,
             startTime: recurringStartTime,
             endTime: recurringEndTime,
             startsOn: data.startsAt.getTime(),
