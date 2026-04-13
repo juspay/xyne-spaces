@@ -1,3 +1,10 @@
+## [1.114.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.113.0...v1.114.0) (2026-04-13)
+
+
+### Features
+
+* Display user active status ([fb7063c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fb7063c4a2c9b05ffababf11c507b8f6b850b1a2)), closes [#4982](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4982)
+
 ## [1.113.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.112.0...v1.113.0) (2026-04-13)
 
 
