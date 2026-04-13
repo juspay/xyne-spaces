@@ -446,15 +446,6 @@ export const mutators = defineMutators({
           throw new Error('Not a channel participant');
         }
 
-        // Don't allow channel creator to leave if there are other participants
-        if (channel.createdBy === ctx.userID) {
-          const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
-
-          if (participants.length > 1) {
-            throw new Error('Channel creator cannot leave while other participants remain');
-          }
-        }
-
         // Remove participant
         await tx.mutate.channel_participants.delete({
           id: participant.id,

@@ -886,7 +886,9 @@ const ChannelMembers = ({
             Remove {userToRemove?.name} from {channelDisplayName}?
           </h2>
           <p className='text-sm text-muted-foreground mb-6'>
-            This person will no longer have access to the channel and can only rejoin by invitation.
+            {channel.visibility === ChannelVisibility.PRIVATE
+              ? 'This person will no longer have access to the channel and can only rejoin by invitation.'
+              : 'This person will lose access to the channel but may rejoin later.'}
           </p>
           <div className='flex justify-end gap-3'>
             <Button variant='secondary' onClick={() => setRemoveDialogOpen(false)} className='px-6'>

@@ -54,6 +54,15 @@ export class ChannelParticipantsACL extends BaseACL<'channel_participants'> {
     }
 
     if (participant.userId === this.ctx.userID) {
+      if (participant.role === ChannelRole.ADMIN) {
+        const otherAdmins = await tx.run(zql.channel_participants
+          .where('channelId', '=', participant.channelId)
+          .where('role', '=', ChannelRole.ADMIN));
+
+        if (otherAdmins.length === 1) {
+          throw new MutationACLError('Cannot leave channel: you are the only admin', 'channel_participants');
+        }
+      }
       return;
     }
 
