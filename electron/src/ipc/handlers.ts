@@ -403,5 +403,16 @@ export function setupIpcHandlers(): void {
     await clearBrowserTabsData();
     return { success: true };
   });
+
+  // Open downloads folder
+  ipcMain.handle('open-downloads-folder', async () => {
+    try {
+      const downloadsPath = app.getPath('downloads');
+      await shell.openPath(downloadsPath);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
 }
 

@@ -124,6 +124,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setBrowserSettings: (settings: any) => ipcRenderer.invoke('set-browser-settings', settings),
   clearSiteData: () => ipcRenderer.invoke('clear-site-data'),
 
+  // File Management APIs
+  openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
+
   // Code Server APIs
   codeServer: {
     start: () => ipcRenderer.invoke('code-server:start'),
