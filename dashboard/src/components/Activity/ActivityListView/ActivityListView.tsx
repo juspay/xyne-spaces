@@ -694,7 +694,7 @@ const ActivityListView = (): ReactElement => {
           onValueChange={handleTabChange}
           style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}
         >
-          <div className='overflow-x-auto border-b border-border no-scrollbar'>
+          <div className='overflow-x-auto border-b border-border no-scrollbar px-4'>
             <Tabs.List
               className='flex items-center sm:justify-start min-w-max'
               data-testid='activity-tabs-list'
