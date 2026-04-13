@@ -27,10 +27,10 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { cn } from '../../../utils/classNames';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
+import { VisibleChannel } from '../../../machines/stateMachine';
 import { useUser } from '../../../hooks/useUsers';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { isStatusExpired } from '../../../utils/statusUtils';
-import { VisibleChannel } from '../../../machines/stateMachine';
 
 interface ConversationHeaderMobileProps {
   channelId: string;
@@ -53,14 +53,14 @@ const ConversationHeaderMobile = ({
   const ROOT_SIZE = 44;
   const GAP_SIZE = 8;
   const context = useAuthContextValues();
-  const { displayName } = useChannelDisplayName(channel, context.userID);
+  const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
+  const dmUser = useUser(avatarUserId || '');
+
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
   const [isInfoDrawerOpen, setIsInfoDrawerOpen] = useState<boolean>(false);
   const [isAddPeopleDrawerOpen, setIsAddPeopleDrawerOpen] = useState<boolean>(false);
-  const { avatarUserId } = useChannelDisplayName(channel, context.userID);
-  const dmUser = useUser(avatarUserId || '');
   const { setActiveTab } = useContext(ConversationTabContext);
   const channelScopeType = channel.scopeType;
   const isDM = isOneToOneDMChannel(channel.scopeType);
@@ -162,6 +162,9 @@ const ConversationHeaderMobile = ({
                   {channel.channelStats?.participantCount} members
                 </small>
               )}
+              <small className='text-muted-foreground text-xs'>
+                {channel.channelStats?.participantCount} members
+              </small>
             </div>
           </motion.div>
 
