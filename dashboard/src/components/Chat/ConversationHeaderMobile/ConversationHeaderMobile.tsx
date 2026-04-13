@@ -63,6 +63,7 @@ const ConversationHeaderMobile = ({
   const dmUser = useUser(avatarUserId || '');
   const { setActiveTab } = useContext(ConversationTabContext);
   const channelScopeType = channel.scopeType;
+  const isDM = isOneToOneDMChannel(channel.scopeType);
   const location = useLocation();
   const { baseRoute } = useRouteContext();
 
@@ -166,16 +167,18 @@ const ConversationHeaderMobile = ({
 
           <div className='p-2'>
             <div className='flex items-center justify-between gap-2'>
-              <button
-                onClick={() => setIsAddPeopleDrawerOpen(true)}
-                className='w-full border border-border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2  h-[34px]'
-                data-track-category='CHANNELS_MOBILE_VIEW'
-                data-track-name='ADD_PEOPLE_MOBILE'
-                data-track-metadata={JSON.stringify({ channelId: channel.id })}
-              >
-                <UserRoundPlus className='size-4' />
-                <span className='text-sm font-medium text-foreground'>Add</span>
-              </button>
+              {!isDM && (
+                <button
+                  onClick={() => setIsAddPeopleDrawerOpen(true)}
+                  className='w-full border border-border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2  h-[34px]'
+                  data-track-category='CHANNELS_MOBILE_VIEW'
+                  data-track-name='ADD_PEOPLE_MOBILE'
+                  data-track-metadata={JSON.stringify({ channelId: channel.id })}
+                >
+                  <UserRoundPlus className='size-4' />
+                  <span className='text-sm font-medium text-foreground'>Add</span>
+                </button>
+              )}
               <button
                 onClick={handleStarToggle}
                 className={cn(
