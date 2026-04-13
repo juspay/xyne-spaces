@@ -50,11 +50,11 @@ const DmSearchResultItem = ({
       <div className='flex-1 min-w-0'>
         <div className='flex items-center gap-1.5'>
           <span className='text-sm font-medium text-foreground truncate'>{displayName}</span>
-          {is1on1DM && targetUser?.presenceStatus && (
+          {is1on1DM && (targetUser?.statusEmoji || targetUser?.statusContent) && (
             <StatusIndicator
-              statusEmoji={targetUser.presenceStatus.statusEmoji}
-              statusContent={targetUser.presenceStatus.statusContent}
-              statusExpiryAt={targetUser.presenceStatus.statusExpiryAt}
+              statusEmoji={targetUser.statusEmoji}
+              statusContent={targetUser.statusContent}
+              statusExpiryAt={targetUser.statusExpiryAt}
               size='sm'
             />
           )}

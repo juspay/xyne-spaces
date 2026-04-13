@@ -161,9 +161,8 @@ const AppSidebar = (): ReactElement => {
 
   // Check if user has a valid (non-expired) status
   const hasValidStatus =
-    currentUser?.presenceStatus?.statusEmoji &&
-    (!currentUser?.presenceStatus?.statusExpiryAt ||
-      !isStatusExpired(currentUser.presenceStatus.statusExpiryAt));
+    currentUser?.statusEmoji &&
+    (!currentUser?.statusExpiryAt || !isStatusExpired(currentUser.statusExpiryAt));
 
   const handleStatusClick = (): void => {
     setIsStatusModalOpen(true);
@@ -340,9 +339,9 @@ const AppSidebar = (): ReactElement => {
                   aria-label='Update status'
                 >
                   <StatusIndicator
-                    statusEmoji={currentUser?.presenceStatus?.statusEmoji}
-                    statusContent={currentUser?.presenceStatus?.statusContent}
-                    statusExpiryAt={currentUser?.presenceStatus?.statusExpiryAt}
+                    statusEmoji={currentUser?.statusEmoji}
+                    statusContent={currentUser?.statusContent}
+                    statusExpiryAt={currentUser?.statusExpiryAt}
                     size='lg'
                     showOnHover={true}
                   />
@@ -392,9 +391,9 @@ const AppSidebar = (): ReactElement => {
         currentStatus={
           hasValidStatus
             ? {
-                emoji: currentUser?.presenceStatus?.statusEmoji || '',
-                content: currentUser?.presenceStatus?.statusContent || '',
-                expiryAt: currentUser?.presenceStatus?.statusExpiryAt || null,
+                emoji: currentUser?.statusEmoji || '',
+                content: currentUser?.statusContent || '',
+                expiryAt: currentUser?.statusExpiryAt || null,
               }
             : null
         }

@@ -902,6 +902,13 @@ model User {
   displayName    String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+  // Presence display fields promoted from user_presence for query performance (dual-written)
+  statusEmoji    String?      // @see user_presence.statusEmoji
+  statusContent  String?      // @see user_presence.statusContent
+  statusExpiryAt DateTime?    // @see user_presence.statusExpiryAt
+  lastActiveAt   DateTime?    // @see user_presence.lastActiveAt
+  notificationsPausedUntil DateTime? // @see user_presence.notificationsPausedUntil
+  assignmentUnavailableUntil DateTime? // @see user_presence.assignmentUnavailableUntil
 
   // Relations
   resourceAccess            ResourceAccess[]
@@ -1082,15 +1089,15 @@ model UserPresence {
   id            String            @id @default(cuid())
   userId        String            @unique // One-to-one with User
   status        UserPresenceStatus @default(OFFLINE)
-  lastActiveAt  DateTime          @default(now())
+  lastActiveAt  DateTime          @default(now()) // @deprecated — use User.lastActiveAt
   lastSeenAt    DateTime          @default(now())
   isManual      Boolean           @default(false) // If user manually set status
   deviceInfo    String?           // Optional: which device/browser
-  statusEmoji   String?           // Current status emoji
-  statusContent String?           // Current status text
-  statusExpiryAt DateTime?         // Status expiry timestamp
-  assignmentUnavailableUntil DateTime?  // When user will be available for ticket assignment again
-  notificationsPausedUntil DateTime?    // Global notification pause (Slack-style "Pause notifications") - applies to all channels
+  statusEmoji   String?           // @deprecated — use User.statusEmoji
+  statusContent String?           // @deprecated — use User.statusContent
+  statusExpiryAt DateTime?        // @deprecated — use User.statusExpiryAt
+  assignmentUnavailableUntil DateTime?  //  @deprecated — use User.assignmentUnavailableUntil When user will be available for ticket assignment again
+  notificationsPausedUntil DateTime?    // @deprecated — use User.notificationsPausedUntil; Global notification pause (Slack-style "Pause notifications") - applies to all channels
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 

@@ -30,12 +30,8 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
 
   const user = useUser(userId);
   const hasValidStatus = useMemo(() => {
-    return (
-      user?.presenceStatus?.statusEmoji &&
-      (!user?.presenceStatus?.statusExpiryAt ||
-        !isStatusExpired(user.presenceStatus.statusExpiryAt))
-    );
-  }, [user?.presenceStatus]);
+    return user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
+  }, [user?.statusEmoji, user?.statusExpiryAt]);
 
   const content = useMemo(() => {
     switch (view) {
@@ -65,7 +61,7 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
       >
         {hasValidStatus && (
           <span className='mr-1.5 text-[19px] leading-none flex items-center justify-center'>
-            {renderEmoji(user?.presenceStatus?.statusEmoji || '')}
+            {renderEmoji(user?.statusEmoji || '')}
           </span>
         )}
         <Avatar userId={userId} size='md' />

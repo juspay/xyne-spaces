@@ -208,6 +208,13 @@ export enum InvitationResponse {
   LEFT = "LEFT",
 }
 
+export enum MeetingStatus {
+  PENDING = "PENDING",
+  ACCEPTED = "ACCEPTED",
+  DECLINED = "DECLINED",
+  MAYBE = "MAYBE",
+}
+
 export enum RecurringCallSeriesStatus {
   ACTIVE = "ACTIVE",
   ENDED = "ENDED",
@@ -949,6 +956,12 @@ export const userTable = table("users")
     displayName: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+    statusEmoji: string().optional(),
+    statusContent: string().optional(),
+    statusExpiryAt: number().optional(),
+    lastActiveAt: number().optional(),
+    notificationsPausedUntil: number().optional(),
+    assignmentUnavailableUntil: number().optional(),
   })
   .primaryKey("id");
 
@@ -961,6 +974,16 @@ export const userPreferenceTable = table("user_preferences")
     updatedAt: number(),
   })
   .primaryKey("id");
+
+export const userSkillTable = table("user_skills")
+  .columns({
+    userId: string(),
+    name: string(),
+    description: string().optional(),
+    instructions: string().optional(),
+    enabled: boolean(),
+  })
+  .primaryKey("userId", "name");
 
 export const userGroupMappingTable = table("user_group_mappings")
   .columns({
@@ -1256,7 +1279,7 @@ export const channelUserStatusTable = table("channel_user_status")
     desktopNotificationLevel: enumeration<NotificationLevel>(),
     mobileNotificationLevel: enumeration<NotificationLevel>(),
     isDeleted: boolean(),
-    updatedAt: number(),
+    updatedAt: number().optional(),
   })
   .primaryKey("id");
 
@@ -1612,6 +1635,7 @@ export const callParticipantTable = table("call_participants")
     invitedBy: string(),
     invitedAt: number(),
     response: enumeration<InvitationResponse>().optional(),
+    meetingStatus: enumeration<MeetingStatus>(),
     respondedAt: number().optional(),
     joinedAt: number().optional(),
     leftAt: number().optional(),
@@ -1684,7 +1708,7 @@ export const bookmarkTable = table("bookmarks")
     entityId: string(),
     entityType: enumeration<BookmarkEntityType>(),
     createdAt: number(),
-    updatedAt: number(),
+    updatedAt: number().optional(),
     isDeleted: boolean(),
     metadata: json().optional(),
   })
@@ -2969,6 +2993,11 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     sourceField: ["messageId"],
     destField: ["messageId"],
     destSchema: reactionCountTable,
+  }),
+  externalMessages: many({
+    sourceField: ["messageId"],
+    destField: ["entityId"],
+    destSchema: externalMessageTable,
   })
 }));
 
@@ -2991,6 +3020,14 @@ export const reactionTableRelationships = relationships(reactionTable, ({ one })
 export const reactionCountTableRelationships = relationships(reactionCountTable, ({ one }) => ({
   message: one({
     sourceField: ["messageId"],
+    destField: ["messageId"],
+    destSchema: messageTable,
+  })
+}));
+
+export const externalMessageTableRelationships = relationships(externalMessageTable, ({ one }) => ({
+  entity: one({
+    sourceField: ["entityId"],
     destField: ["messageId"],
     destSchema: messageTable,
   })
@@ -3121,6 +3158,7 @@ export const schema = createSchema(
       userSessionTable,
       userTable,
       userPreferenceTable,
+      userSkillTable,
       userGroupMappingTable,
       userAssignmentStateTable,
       boardComplexityScoreTable,
@@ -3252,6 +3290,7 @@ export const schema = createSchema(
       messageSearchTableRelationships,
       reactionTableRelationships,
       reactionCountTableRelationships,
+      externalMessageTableRelationships,
       callTableRelationships,
       callParticipantTableRelationships,
       recurringCallSeriesTableRelationships,
@@ -3295,6 +3334,7 @@ export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type UserSession = Row<typeof schema.tables.user_sessions>;
 export type User = Row<typeof schema.tables.users>;
 export type UserPreference = Row<typeof schema.tables.user_preferences>;
+export type UserSkill = Row<typeof schema.tables.user_skills>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
 export type UserAssignmentState = Row<typeof schema.tables.user_assignment_states>;
 export type BoardComplexityScore = Row<typeof schema.tables.board_complexity_scores>;

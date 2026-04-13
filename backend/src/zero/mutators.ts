@@ -6498,6 +6498,18 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           };
 
           await tx.mutate.user_presence.upsert(presenceData);
+
+          // Dual-write presence display fields to users table for faster getUsers query
+          await tx.mutate.users.update({
+            id: authData.sub,
+            lastActiveAt: now,
+            updatedAt: now,
+            ...(statusEmoji !== undefined && { statusEmoji: validatedEmoji || null }),
+            ...(statusContent !== undefined && { statusContent }),
+            ...(statusExpiryAt !== undefined && { statusExpiryAt }),
+            ...(notificationsPausedUntil !== undefined && { notificationsPausedUntil }),
+            ...(assignmentUnavailableUntil !== undefined && { assignmentUnavailableUntil }),
+          });
         },
       ),
     },

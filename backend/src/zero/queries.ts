@@ -495,6 +495,13 @@ export const queries = defineQueries({
       p.where('isClosed', false).where('isDeleted', false).where('userId', ctx.userID)
     ).related('channelStats');
   }),
+  userVisibleChannelsV2: defineQuery(({ ctx }) => {
+    return zql.channel_user_status
+      .where('userId', ctx.userID)
+      .where('isClosed', false)
+      .where('isDeleted', false)
+      .related('channel', ch => ch.related('channelStats'));
+  }),
 
   browsableChannels: defineQuery(({ ctx }) => {
     return zql.channels
@@ -687,6 +694,14 @@ export const queries = defineQueries({
       return query.related('presenceStatus');
     },
   ),
+
+  getUsersV2: defineQuery(z.object({ updatedAt: z.number().optional() }).optional(), ({ args }) => {
+    let query = zql.users;
+    if (args?.updatedAt !== undefined) {
+      query = query.where('updatedAt', '>', args.updatedAt);
+    }
+    return query
+  }),
 
   getUserProfilesByIds: defineQuery(
     z.object({ userIds: z.array(z.string()) }),

@@ -150,12 +150,11 @@ const ConversationHeaderMobile = ({
               <p className='text-sm font-medium whitespace-nowrap overflow-hidden text-foreground'>
                 {displayName}
               </p>
-              {channel && isOneToOneDMChannel(channel.scopeType) && dmUser?.presenceStatus ? (
+              {channel && isOneToOneDMChannel(channel.scopeType) && dmUser?.statusEmoji ? (
                 <small className='text-muted-foreground text-xs truncate max-w-[200px]'>
-                  {dmUser.presenceStatus.statusEmoji}{' '}
-                  {(!dmUser.presenceStatus.statusExpiryAt ||
-                    !isStatusExpired(dmUser.presenceStatus.statusExpiryAt)) &&
-                    dmUser.presenceStatus.statusContent}
+                  {dmUser.statusEmoji}{' '}
+                  {(!dmUser.statusExpiryAt || !isStatusExpired(dmUser.statusExpiryAt)) &&
+                    dmUser.statusContent}
                 </small>
               ) : (
                 <small className='text-muted-foreground text-xs'>

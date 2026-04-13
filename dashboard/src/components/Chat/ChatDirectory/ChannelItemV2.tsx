@@ -187,9 +187,9 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
             {isSupportChannel && <SupportChannelBadge />}
             {is1on1DM && (
               <StatusIndicator
-                statusEmoji={dmUser?.presenceStatus?.statusEmoji}
-                statusContent={dmUser?.presenceStatus?.statusContent}
-                statusExpiryAt={dmUser?.presenceStatus?.statusExpiryAt}
+                statusEmoji={dmUser?.statusEmoji}
+                statusContent={dmUser?.statusContent}
+                statusExpiryAt={dmUser?.statusExpiryAt}
                 size='sm'
                 showOnHover={true}
               />

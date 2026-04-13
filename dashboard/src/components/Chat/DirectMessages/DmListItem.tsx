@@ -127,9 +127,9 @@ export const DmListItem = ({
               </p>
               {isDM && (
                 <StatusIndicator
-                  statusEmoji={targetUser?.presenceStatus?.statusEmoji}
-                  statusContent={targetUser?.presenceStatus?.statusContent}
-                  statusExpiryAt={targetUser?.presenceStatus?.statusExpiryAt}
+                  statusEmoji={targetUser?.statusEmoji}
+                  statusContent={targetUser?.statusContent}
+                  statusExpiryAt={targetUser?.statusExpiryAt}
                   size='sm'
                   className='text-[14px]'
                 />
@@ -196,9 +196,9 @@ export const DmListItem = ({
               </h4>
               {isDM && (
                 <StatusIndicator
-                  statusEmoji={targetUser?.presenceStatus?.statusEmoji}
-                  statusContent={targetUser?.presenceStatus?.statusContent}
-                  statusExpiryAt={targetUser?.presenceStatus?.statusExpiryAt}
+                  statusEmoji={targetUser?.statusEmoji}
+                  statusContent={targetUser?.statusContent}
+                  statusExpiryAt={targetUser?.statusExpiryAt}
                   size='sm'
                   className='text-[14px]'
                 />

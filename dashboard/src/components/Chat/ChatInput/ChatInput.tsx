@@ -291,16 +291,14 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const isDM = channel && isDMChannel(channel.scopeType);
     const dmUser = useUser(avatarUserId || '');
     const hasValidStatus =
-      dmUser?.presenceStatus?.statusEmoji &&
-      (!dmUser.presenceStatus.statusExpiryAt ||
-        !isStatusExpired(dmUser.presenceStatus.statusExpiryAt));
+      dmUser?.statusEmoji && (!dmUser.statusExpiryAt || !isStatusExpired(dmUser.statusExpiryAt));
 
     const placeholderText =
       placeholder ||
       (channelName
         ? `Message ${isTestEnv ? '' : channelName}${
             isDM && hasValidStatus
-              ? ` ${dmUser.presenceStatus.statusEmoji}${dmUser.presenceStatus.statusContent ? ` ${dmUser.presenceStatus.statusContent}` : ''}`
+              ? ` ${dmUser.statusEmoji}${dmUser.statusContent ? ` ${dmUser.statusContent}` : ''}`
               : ''
           }`.trim()
         : 'Type a message...');

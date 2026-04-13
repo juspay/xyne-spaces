@@ -84,7 +84,7 @@ const Settings = (): ReactElement => {
   const [customDate, setCustomDate] = useState<Date | null>(null);
 
   // Check if notifications are globally paused
-  const notificationsPausedUntil = user?.presenceStatus?.notificationsPausedUntil;
+  const notificationsPausedUntil = user?.notificationsPausedUntil;
   const isNotificationsPaused = useMemo(() => {
     return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
   }, [notificationsPausedUntil]);
@@ -146,8 +146,7 @@ const Settings = (): ReactElement => {
 
   // Check if user has a valid (non-expired) status
   const hasValidStatus =
-    user?.presenceStatus?.statusEmoji &&
-    (!user?.presenceStatus?.statusExpiryAt || !isStatusExpired(user.presenceStatus.statusExpiryAt));
+    user?.statusEmoji && (!user?.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
 
   const handleStatusClick = (): void => {
     setIsStatusModalOpen(true);
@@ -302,15 +301,15 @@ const Settings = (): ReactElement => {
               <div className='flex items-center gap-2 min-w-0 flex-1'>
                 <div className='flex-shrink-0'>
                   <StatusIndicator
-                    statusEmoji={user?.presenceStatus?.statusEmoji}
-                    statusContent={user?.presenceStatus?.statusContent}
-                    statusExpiryAt={user?.presenceStatus?.statusExpiryAt}
+                    statusEmoji={user?.statusEmoji}
+                    statusContent={user?.statusContent}
+                    statusExpiryAt={user?.statusExpiryAt}
                     size='lg'
                     showOnHover={false}
                   />
                 </div>
                 <div className='text-sm font-medium text-foreground truncate'>
-                  {user?.presenceStatus?.statusContent}
+                  {user?.statusContent}
                 </div>
               </div>
               <Button
@@ -332,9 +331,9 @@ const Settings = (): ReactElement => {
             </div>
           )}
         </div>
-        {hasValidStatus && user?.presenceStatus?.statusExpiryAt && (
+        {hasValidStatus && user?.statusExpiryAt && (
           <div className='text-xs text-muted-foreground'>
-            {formatExpiryTime(user.presenceStatus.statusExpiryAt, true)}
+            {formatExpiryTime(user.statusExpiryAt, true)}
           </div>
         )}
       </div>
@@ -650,9 +649,9 @@ const Settings = (): ReactElement => {
         currentStatus={
           hasValidStatus
             ? {
-                emoji: user?.presenceStatus?.statusEmoji || '',
-                content: user?.presenceStatus?.statusContent || '',
-                expiryAt: user?.presenceStatus?.statusExpiryAt || null,
+                emoji: user?.statusEmoji || '',
+                content: user?.statusContent || '',
+                expiryAt: user?.statusExpiryAt || null,
               }
             : null
         }

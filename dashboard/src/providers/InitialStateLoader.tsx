@@ -82,9 +82,7 @@ const MODAL_DELAY_MS = 60000;
 const computeUsersWatermark = (users: User[]): number =>
   users.reduce((max, u) => {
     const userWm = u.updatedAt ?? 0;
-    const presenceWm = u.presenceStatus?.updatedAt ?? 0;
-    const rowMax = userWm > presenceWm ? userWm : presenceWm;
-    return rowMax > max ? rowMax : max;
+    return userWm > max ? userWm : max;
   }, 0);
 
 const computeChannelsWatermark = (channels: Channel[]): number =>
@@ -378,7 +376,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
 
   // Users: initial bulk fetch + live delta subscription via generic hook
   const { isInitialFetchDone: usersLoaded } = useDeltaSubscription({
-    query: queries.getUsers(),
+    query: queries.getUsersV2(),
     watermark: usersUpdatedAt,
     computeWatermark: computeUsersWatermark,
     isLoaded: usersUpdatedAt > 0,
@@ -419,16 +417,15 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   const [bookmarks, bookmarksDetails] = useCachedQuery(queries.userBookmarks(), {
     ttl: '10m',
   });
-  const [visibleChannels, visibleChannelsDetails] = useCachedQuery(queries.userVisibleChannels(), {
-    ttl: '10m',
-  });
+  const [visibleChannels, visibleChannelsDetails] = useCachedQuery(
+    queries.userVisibleChannelsV2(),
+    {
+      ttl: '10m',
+    },
+  );
   const [allUserGroups, allUserGroupsDetails] = useCachedQuery(queries.getAllUserGroups(), {
     updatedAtEnabled: true,
   });
-  const [userChannelStatus, userChannelStatusDetails] = useCachedQuery(
-    queries.getAllChannelsUserStatus(),
-    { ttl: '10m' },
-  );
 
   const [userDrafts, userDraftsDetails] = useCachedQuery(queries.userDrafts(), { ttl: '10m' });
 
@@ -444,20 +441,20 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
 
   useEffect(() => {
     if (isQueryCompleted(visibleChannelsDetails)) {
-      stateMachineActor.send({ type: 'ADD_VISIBLE_CHANNELS', channels: visibleChannels || [] });
+      const channels = (visibleChannels || [])
+        .map(s => s.channel)
+        .filter((c): c is NonNullable<typeof c> => c !== undefined);
+      stateMachineActor.send({ type: 'ADD_VISIBLE_CHANNELS', channels });
+      stateMachineActor.send({
+        type: 'ADD_USER_CHANNEL_STATUSES',
+        userChannelStatuses: visibleChannels || [],
+      });
     }
 
     if (permissionsQuery.isSuccess && permissionsQuery.data?.success) {
       stateMachineActor.send({
         type: 'SET_USER_PERMISSIONS',
         permissions: permissionsQuery.data.permissions || [],
-      });
-    }
-
-    if (isQueryCompleted(userChannelStatusDetails)) {
-      stateMachineActor.send({
-        type: 'ADD_USER_CHANNEL_STATUSES',
-        userChannelStatuses: userChannelStatus,
       });
     }
 
@@ -478,8 +475,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     visibleChannels,
     visibleChannelsDetails.type,
     permissionsQuery.data,
-    userChannelStatus,
-    userChannelStatusDetails.type,
     bookmarks,
     bookmarksDetails.type,
     allUserGroups,
@@ -491,7 +486,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   const areAllQueriesCompleted =
     usersLoaded &&
     channelsLoaded &&
-    areQueriesCompleted([bookmarksDetails, visibleChannelsDetails, userChannelStatusDetails]) &&
+    areQueriesCompleted([bookmarksDetails, visibleChannelsDetails]) &&
     permissionsQuery.isSuccess;
 
   if (areAllQueriesCompleted) {

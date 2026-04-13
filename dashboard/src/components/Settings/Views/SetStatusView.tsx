@@ -266,10 +266,9 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
       setExpiryOption(initialData.expiry || 'today');
       setIsEmojiAutoAssigned(false);
     } else {
-      const currentStatus = user?.presenceStatus;
-      if (currentStatus?.statusEmoji || currentStatus?.statusContent) {
-        setStatusText(currentStatus.statusContent || '');
-        setSelectedEmoji(currentStatus.statusEmoji || undefined);
+      if (user?.statusEmoji || user?.statusContent) {
+        setStatusText(user.statusContent || '');
+        setSelectedEmoji(user.statusEmoji || undefined);
         setIsEmojiAutoAssigned(false);
       }
     }

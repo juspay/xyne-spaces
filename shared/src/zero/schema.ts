@@ -988,6 +988,15 @@ export const userTable = table('users')
     displayName: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+    // Presence display fields promoted from user_presence for query performance (dual-written)
+    statusEmoji: string().optional(),
+    statusContent: string().optional(),
+    statusExpiryAt: number().optional(),
+    lastActiveAt: number().optional(),
+    /** Global notification pause promoted from user_presence for query performance (dual-written) */
+    notificationsPausedUntil: number().optional(),
+    /** Assignment availability promoted from user_presence for query performance (dual-written) */
+    assignmentUnavailableUntil: number().optional(),
   })
   .primaryKey('id');
 
@@ -996,14 +1005,19 @@ export const userPresenceTable = table('user_presence')
     id: string(),
     userId: string(),
     status: enumeration<UserPresenceStatus>(),
+    /** @deprecated use users.lastActiveAt — dual-written for backward compat */
     lastActiveAt: number(),
     lastSeenAt: number(),
     isManual: boolean(),
     deviceInfo: string().optional(),
-    statusEmoji: string().optional(), // Current status emoji 
-    statusContent: string().optional(), // Current status text
-    statusExpiryAt: number().optional(), // Status expiry timestamp
+    /** @deprecated use users.statusEmoji — dual-written for backward compat */
+    statusEmoji: string().optional(),
+    /** @deprecated use users.statusContent — dual-written for backward compat */
+    statusContent: string().optional(),
+    /** @deprecated use users.statusExpiryAt — dual-written for backward compat */
+    statusExpiryAt: number().optional(),
     assignmentUnavailableUntil: number().optional(), // When user will be available for ticket assignment again
+    /** @deprecated use users.notificationsPausedUntil — dual-written for backward compat */
     notificationsPausedUntil: number().optional(), // Global notification pause (Slack-style "Pause notifications") - applies to all channels
     createdAt: number(),
     updatedAt: number(),
