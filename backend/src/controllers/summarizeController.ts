@@ -5,6 +5,7 @@ import {
   type SummarizerContext,
   type StreamChunk,
 } from '@/agents/summariser';
+import { AgentsConfig } from '@/agents/config';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 
@@ -25,6 +26,7 @@ export class SummarizeController {
     }
 
     const userId = (req as any).user?.id || 'anonymous';
+    const agentsConfig = await AgentsConfig.fetch({ email: (req as any).user?.email });
 
     try {
       logger.info(`Fetching messages for conversation: ${conversationId}`);
@@ -84,6 +86,7 @@ export class SummarizeController {
         conversationId,
         channelId: conversation.channelId,
         summarizationType: 'thread',
+        modelName: agentsConfig.summariserModelName,
       };
 
       const messageIdMappingObj: { [index: number]: string } = {};
@@ -135,6 +138,7 @@ export class SummarizeController {
     }
 
     const userId = (req as any).user?.id || 'anonymous';
+    const agentsConfig = await AgentsConfig.fetch({ email: (req as any).user?.email });
 
     try {
       logger.info(`Fetching messages for channel: ${channelId}`);
@@ -238,6 +242,7 @@ export class SummarizeController {
         conversationId: '',
         channelId,
         summarizationType: 'channel',
+        modelName: agentsConfig.summariserModelName,
       };
 
       const messageIdMappingObj: { [index: number]: string } = {};
@@ -315,6 +320,7 @@ summarizeSearchMessage = async (req: Request, res: Response): Promise<void> => {
 
   // Get user ID from auth context
   const userId = (req as any).user?.id || 'anonymous';
+  const agentsConfig = await AgentsConfig.fetch({ email: (req as any).user?.email });
 
   try {
     logger.info(`Summarizing ${messages.length} search results for query: "${searchQuery}"`);
@@ -358,6 +364,7 @@ summarizeSearchMessage = async (req: Request, res: Response): Promise<void> => {
       channelId: '', // Not tied to a specific channel
       summarizationType: 'searchMessage',
       searchQuery, // Include search query in context
+      modelName: agentsConfig.summariserModelName,
     };
 
     // Create message index to ID and conversationId mapping for citations (1-based index)

@@ -3,8 +3,9 @@
  * Styled as a floating card/modal that appears on top of the results area
  */
 import { ReactElement, useEffect, useMemo, useState } from 'react';
-import { X, Sparkles, Loader2 } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 import { parseStreamingContent } from '../Summary';
+import XyneAIStar from '../../icons/xyne-ai/XyneAIStar';
 
 // ============================================================================
 // Type Definitions
@@ -116,7 +117,7 @@ export const SearchSummaryModal = ({
         {/* Header */}
         <div className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0 bg-muted/50'>
           <div className='flex items-center gap-2'>
-            <Sparkles className='w-5 h-5 text-purple-600' />
+            <XyneAIStar size={16} />
             <h3 className='font-semibold text-foreground'>AI Summary</h3>
           </div>
           <button
@@ -144,18 +145,23 @@ export const SearchSummaryModal = ({
           )}
 
           {/* Error State */}
-          {state === 'error' && (
-            <div className='bg-red-50 text-red-700 rounded-lg p-4'>
-              {error || 'Failed to generate summary'}
+          {(state === 'error' ||
+            (state === 'complete' && !displaySummary && displayKeypoints.length === 0)) && (
+            <div className='flex flex-col items-center justify-center py-8 gap-3'>
+              <XyneAIStar size={24} />
+              <p className='text-foreground font-medium text-center'>
+                Couldn&apos;t generate summary
+              </p>
+              <p className='text-muted-foreground text-sm text-center max-w-xs'>
+                {error || 'Something went wrong while summarizing. Please try again.'}
+              </p>
             </div>
           )}
 
           {/* No Messages State */}
           {state === 'no_messages' && (
             <div className='flex flex-col items-center justify-center py-8'>
-              <div className='w-14 h-14 rounded-full bg-purple-50 flex items-center justify-center mb-4'>
-                <Sparkles className='w-7 h-7 text-purple-400' />
-              </div>
+              <XyneAIStar size={28} />
               <p className='text-foreground text-lg font-medium text-center mb-2'>
                 No messages to summarize
               </p>
@@ -167,7 +173,8 @@ export const SearchSummaryModal = ({
           )}
 
           {/* Summary Content */}
-          {(state === 'streaming' || state === 'complete') && (
+          {(state === 'streaming' ||
+            (state === 'complete' && (displaySummary || displayKeypoints.length > 0))) && (
             <div className='space-y-4'>
               {(visibleChars > 0 || state === 'complete') && (
                 <div className='text-muted-foreground leading-relaxed whitespace-pre-wrap'>
