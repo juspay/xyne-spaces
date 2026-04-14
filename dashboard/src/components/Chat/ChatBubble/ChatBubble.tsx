@@ -183,6 +183,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const isScrollingRef = useRef(false);
   const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchEndedInsideRef = useRef(false);
 
   useEffect(() => {
     setIsEditing(editingMessageId === message.messageId);
@@ -647,6 +648,30 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const shouldShowMarkAsUnread =
     context === 'channel' && !isSystemMessage && !isMessageDeleted && !isTicketCreationMessage;
 
+  const shouldEnableMobileThreadOpen =
+    isMobile &&
+    (!isSystemMessage || isTicketCreationMessage || isCallMessage) &&
+    !isShowInChannel &&
+    (!isMessageDeleted || context === 'channel') &&
+    !!replies?.onOpenThread;
+
+  const handleMobileBubbleThreadOpen = (e?: React.MouseEvent<HTMLDivElement>): void => {
+    if (!shouldEnableMobileThreadOpen || !replies?.onOpenThread) return;
+
+    // Guard against synthetic click after cancelled touch interactions.
+    if (!touchEndedInsideRef.current) return;
+    touchEndedInsideRef.current = false;
+
+    if (e?.target instanceof HTMLElement) {
+      // Do not open thread when tapping interactive controls inside the bubble.
+      if (e.target.closest('a, button, input, textarea, [role="button"], [data-prevent-thread]')) {
+        return;
+      }
+    }
+
+    replies.onOpenThread(e);
+  };
+
   // Render ticket activity message with special styling
   if (isTicketActivity) {
     return <TicketActivityMessage message={message} />;
@@ -661,8 +686,33 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }}
       data-testid={`chat-message-${message.messageId}`}
       data-show-avatar={showAvatar}
-      className='no-select-mobile relative transition-all duration-200 ease-in-out'
-      style={{ touchAction: 'pan-y' }}
+      className={cn(
+        isMobile && 'no-select-mobile',
+        'relative transition-all duration-200 ease-in-out',
+      )}
+      style={
+        isMobile
+          ? {
+              touchAction: 'pan-y',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              WebkitTouchCallout: 'none',
+            }
+          : { touchAction: 'pan-y' }
+      }
+      onContextMenu={e => {
+        if (!isMobile) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (pressTimerRef.current) {
+          clearTimeout(pressTimerRef.current);
+          pressTimerRef.current = null;
+        }
+
+        handleActionsDrawerOpenChange(true);
+      }}
       onTouchStart={e => {
         if (isMobile) {
           // Skip long-press when touch is inside a modal/preview overlay
@@ -695,12 +745,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         }
       }}
       onTouchEnd={() => {
+        if (isMobile) {
+          touchEndedInsideRef.current = true;
+        }
         if (pressTimerRef.current) {
           clearTimeout(pressTimerRef.current);
           pressTimerRef.current = null;
         }
       }}
       onTouchCancel={() => {
+        // Cancelled touch (scroll/swipe) — reset so onClick won't open the thread
+        touchEndedInsideRef.current = false;
         if (pressTimerRef.current) {
           clearTimeout(pressTimerRef.current);
           pressTimerRef.current = null;
@@ -753,6 +808,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             {...(allThreadAttachments && { allThreadAttachments })}
             workflowNumber={workflowNumber}
             {...(conversation && { conversation: conversation })}
+            {...(shouldEnableMobileThreadOpen && {
+              onClick: handleMobileBubbleThreadOpen,
+            })}
             {...(isShowInChannel &&
               parentMessage &&
               threadPreviewText &&

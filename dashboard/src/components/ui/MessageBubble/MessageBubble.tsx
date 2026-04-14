@@ -510,6 +510,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         channelScopeType={channelScopeType}
         isFirstInThread={isFirstInThread}
         workflowNumber={workflowNumber}
+        {...(onClick && { onClick })}
       />
     );
   }

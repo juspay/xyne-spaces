@@ -467,6 +467,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         attributes: {
           class: 'tiptap chat-input-editor prose prose-sm focus:outline-none',
           style: 'min-height: 20px; max-height: 140px; overflow-y: auto;',
+          role: 'textbox',
+          'aria-multiline': 'true',
+          spellcheck: 'true',
+          autocorrect: 'on',
+          autocapitalize: 'sentences',
+          autocomplete: 'on',
         },
         handleKeyDown: (view, event) => {
           // Open context modal when '/' is typed
