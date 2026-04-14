@@ -5,6 +5,7 @@ import { userActivityService } from '@/services/userActivityService';
 import { superpositionClient } from '@/services/superpositionClient';
 import { SurfaceAreaType, type UserActivityEvent, type Platform } from '@prisma/client';
 import { nudgeRegistry } from './registry';
+import { AgentsConfig } from '@/agents/config';
 import { activityContextResolver } from './services/activityContextResolver';
 import { nudgeService } from './services/surfaceNudgeService';
 import { surfaceLinkService } from './services/surfaceLinkService';
@@ -140,7 +141,10 @@ export class NudgeEvaluationEngine {
       };
     }
 
-    // 6. Run evaluate() in parallel for all enabled definitions
+    // 6. Fetch agents config for nudge model names (once per trigger, shared across all definitions)
+    const agentsConfig = await AgentsConfig.fetch().catch(() => AgentsConfig.defaults());
+
+    // 7. Run evaluate() in parallel for all enabled definitions
     const evaluationResults = await Promise.allSettled(
       enabledDefinitions.map(async (def) => {
         const startedAt = Date.now();
@@ -149,6 +153,7 @@ export class NudgeEvaluationEngine {
             event,
             enrichedActivity,
             messagePayload,
+            agentsConfig,
           });
           let candidates = await def.evaluate(context, effectivePayload);
 
@@ -172,7 +177,7 @@ export class NudgeEvaluationEngine {
       }),
     );
 
-    // 7. Collect and persist/execute all surviving candidates
+    // 8. Collect and persist/execute all surviving candidates
     const allCandidates: Array<{
       definition: NudgeDefinition<any>;
       candidates: NudgeCandidate[];

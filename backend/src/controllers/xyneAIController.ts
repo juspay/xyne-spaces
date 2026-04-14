@@ -10,8 +10,6 @@ import {
   getAskAIQueryDuration,
   getAskAIContextChannels,
   getAskAIFeedbackTotal,
-  getWebSearchEnabledTotal,
-  getDeepResearchEnabledTotal
 } from '@/services/otel';
 import { researchAgentService } from '@/services/researchAgentService';
 
@@ -202,14 +200,6 @@ export class XyneAIController {
 
       // Track metrics: context channels count
       getAskAIContextChannels().record(channel_ids.length);
-
-      // Track web search query if enabled
-      if (web_search_enabled) {
-        getWebSearchEnabledTotal().add(1);
-      }
-      if (deep_research_enabled) {
-        getDeepResearchEnabledTotal().add(1);
-      }
 
       const startTime = Date.now();
       let status = 'success';

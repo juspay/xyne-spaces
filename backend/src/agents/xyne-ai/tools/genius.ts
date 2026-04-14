@@ -9,7 +9,6 @@ import { logger } from '../../../utils/logger.js';
 import { config } from '../../../config/env.js';
 import type { XyneAIAgentContext } from './types.js';
 import { getDescription, getISTTimestampForGenius } from './helpers.js';
-import { getAskAIGeniusUsedTotal } from '@/services/otel';
 
 // ============================================================================
 // Tool Factory
@@ -168,13 +167,6 @@ export function createGeniusTool(): Tool<{ query: string }, XyneAIAgentContext> 
         }
 
         logger.info(`[Tool] [${context.sessionId}] genius: completed with ${eventCount} events`);
-
-        // Track Genius tool usage
-        try {
-          getAskAIGeniusUsedTotal().add(1);
-        } catch (metricsError) {
-          logger.error('[Tool] genius: Error recording metrics:', metricsError);
-        }
 
         return finalResult || 'Genius query completed but no text content was returned.';
       } catch (error) {

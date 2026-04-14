@@ -5,6 +5,7 @@
  * Uses Web Worker for streaming to run on a separate thread
  */
 import { BASE_URL } from '../clients/apiClient';
+import { trackCitationsGenerated } from '../otel/xyneAIMetrics';
 import { parsePartialSummarizerJSON } from '../../utils/partialJsonParser';
 import {
   parseStreamingContent,
@@ -1087,6 +1088,17 @@ class XyneAIStreamManager {
     if (data['output'] && typeof data['output'] === 'object') {
       const output = data['output'] as Record<string, unknown>;
       if ('keyPoints' in output && Array.isArray(output['keyPoints'])) {
+        const summarizerCitationCount = (output['keyPoints'] as Array<unknown>).filter(
+          (kp): kp is Record<string, unknown> =>
+            kp !== null &&
+            typeof kp === 'object' &&
+            'citation' in kp &&
+            (kp as Record<string, unknown>)['citation'] !== null,
+        ).length;
+        if (summarizerCitationCount > 0) {
+          trackCitationsGenerated('summarizer', summarizerCitationCount);
+        }
+
         updateMessages(prev =>
           prev.map(msg => {
             if (msg.id !== botMessageId) return msg;
@@ -1111,6 +1123,10 @@ class XyneAIStreamManager {
 
     // Genius response
     const finalParsed = parseStreamingContent(rawContent);
+    const geniusCitationCount = Object.keys(finalParsed.citations ?? {}).length;
+    if (geniusCitationCount > 0) {
+      trackCitationsGenerated('genius', geniusCitationCount);
+    }
 
     updateMessages(prev =>
       prev.map(msg => {

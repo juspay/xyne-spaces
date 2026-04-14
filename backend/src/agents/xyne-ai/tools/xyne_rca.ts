@@ -10,7 +10,6 @@ import { logger } from '../../../utils/logger.js';
 import { config } from '../../../config/env.js';
 import type { XyneAIAgentContext } from './types.js';
 import { getDescription } from './helpers.js';
-import { getAskAIGeniusUsedTotal } from '@/services/otel';
 
 // ============================================================================
 // Tool Factory
@@ -166,13 +165,6 @@ export function createXyneRcaTool(): Tool<{ query: string }, XyneAIAgentContext>
         }
 
         logger.info(`[Tool] [${context.sessionId}] xyne_rca: completed with ${eventCount} events`);
-
-        // Track Xyne RCA tool usage
-        try {
-          getAskAIGeniusUsedTotal().add(1); // You may want to create a separate metric for xyne_rca
-        } catch (metricsError) {
-          logger.error('[Tool] xyne_rca: Error recording metrics:', metricsError);
-        }
 
         return finalResult || 'Xyne RCA query completed but no text content was returned.';
 

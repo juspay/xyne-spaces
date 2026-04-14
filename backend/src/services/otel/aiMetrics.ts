@@ -60,30 +60,6 @@ export function getAskAIFeedbackTotal(): Counter {
   return _askAIFeedbackTotal;
 }
 
-// Web Search Enabled Total Counter
-let _webSearchEnabledTotal: Counter | null = null;
-export function getWebSearchEnabledTotal(): Counter {
-  if (!_webSearchEnabledTotal) {
-    _webSearchEnabledTotal = getMeter().createCounter('web_search_enabled_total', {
-      description: 'Total number of Ask AI queries submitted with web search enabled',
-      unit: '1',
-    });
-  }
-  return _webSearchEnabledTotal;
-}
-
-// Deep Research Enabled Total Counter
-let _deepResearchEnabledTotal: Counter | null = null;
-export function getDeepResearchEnabledTotal(): Counter {
-  if (!_deepResearchEnabledTotal) {
-    _deepResearchEnabledTotal = getMeter().createCounter('deep_research_enabled_total', {
-      description: 'Total number of Ask AI queries submitted with deep research enabled',
-      unit: '1',
-    });
-  }
-  return _deepResearchEnabledTotal;
-}
-
 // Web Search Tool Used Total Counter
 let _webSearchToolUsedTotal: Counter | null = null;
 export function getWebSearchToolUsedTotal(): Counter {
@@ -96,30 +72,6 @@ export function getWebSearchToolUsedTotal(): Counter {
   return _webSearchToolUsedTotal;
 }
 
-// Ask AI Attachment Used Total Counter
-let _askAIAttachmentUsedTotal: Counter | null = null;
-export function getAskAIAttachmentUsedTotal(): Counter {
-  if (!_askAIAttachmentUsedTotal) {
-    _askAIAttachmentUsedTotal = getMeter().createCounter('ask_ai_attachment_used_total', {
-      description: 'Total number of times attachments were used in Ask AI queries',
-      unit: '1',
-    });
-  }
-  return _askAIAttachmentUsedTotal;
-}
-
-// Ask AI Genius Used Total Counter
-let _askAIGeniusUsedTotal: Counter | null = null;
-export function getAskAIGeniusUsedTotal(): Counter {
-  if (!_askAIGeniusUsedTotal) {
-    _askAIGeniusUsedTotal = getMeter().createCounter('ask_ai_genius_used_total', {
-      description: 'Total number of times Genius tool was used in Ask AI',
-      unit: '1',
-    });
-  }
-  return _askAIGeniusUsedTotal;
-}
-
 // Ask AI Research Agent Used Total Counter
 let _askAIResearchAgentUsedTotal: Counter | null = null;
 export function getAskAIResearchAgentUsedTotal(): Counter {
@@ -130,4 +82,16 @@ export function getAskAIResearchAgentUsedTotal(): Counter {
     });
   }
   return _askAIResearchAgentUsedTotal;
+}
+
+// Ask AI Tool Used Total Counter (one counter, tool_name label)
+let _askAIToolUsedTotal: Counter | null = null;
+export function getAskAIToolUsedTotal(): Counter {
+  if (!_askAIToolUsedTotal) {
+    _askAIToolUsedTotal = getMeter().createCounter('ask_ai_tool_used_total', {
+      description: 'Total number of times each Ask AI tool was called',
+      unit: '1',
+    });
+  }
+  return _askAIToolUsedTotal;
 }
