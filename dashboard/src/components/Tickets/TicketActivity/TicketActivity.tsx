@@ -307,6 +307,21 @@ const getActivityDescription = (
         details: '',
       };
 
+    case ActivityType.TAGS: {
+      const action = value?.action;
+      const labelName = value?.newValue || value?.oldValue || '';
+      if (action === 'removed') {
+        return {
+          description: 'removed a label:',
+          details: <span className='font-semibold'>{labelName}</span>,
+        };
+      }
+      return {
+        description: 'added a label:',
+        details: <span className='font-semibold'>{labelName}</span>,
+      };
+    }
+
     case ActivityType.PR: {
       const parts = formatPRActivityParts(value as PRActivityValue);
 
@@ -354,22 +369,22 @@ const getActivityDescription = (
 export const getActivityIcon = (activity: TicketActivityType): ReactElement => {
   switch (activity.activityType) {
     case ActivityType.PRIORITY:
-      return <TicketPriorityIcon />;
+      return <TicketPriorityIcon size={12} />;
     case ActivityType.STATUS:
     case ActivityType.STAGE_NAME:
     case ActivityType.PR:
-      return <TicketStatusIcon />;
+      return <TicketStatusIcon size={12} />;
     case ActivityType.TAGS:
-      return <Tag />;
+      return <Tag size={12} className='text-gray-400' />;
     case ActivityType.ETA:
     case ActivityType.STAGE_ETA:
-      return <Calendar />;
+      return <Calendar size={12} />;
     case ActivityType.SUBTICKET_CREATED:
-      return <FileText size={18} className='text-blue-600' />;
+      return <FileText size={12} className='text-blue-600' />;
     case ActivityType.BOARD:
-      return <SquareKanban size={18} className='text-purple-600' />;
+      return <SquareKanban size={12} className='text-purple-600' />;
     case ActivityType.IS_ARCHIVED:
-      return <Archive size={18} className='text-amber-600' />;
+      return <Archive size={12} className='text-amber-600' />;
     case ActivityType.PR_REVIEWER:
     case ActivityType.QA:
     case ActivityType.ASSIGNED_TO:
@@ -478,13 +493,13 @@ export const ActivityComponent = ({
 
       {/* Content */}
       <div className='flex-1 min-w-0 mt-1 pb-6'>
-        <div className='flex items-center gap-2'>
+        <div className='flex items-center justify-between gap-3'>
           <p className='text-sm text-muted-foreground'>
             {activity.activityType !== ActivityType.PR && (activityUser?.name || 'Someone')}{' '}
             {description}
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>
-          <span className='text-xs text-muted-foreground whitespace-nowrap'>
+          <span className='text-xs text-muted-foreground whitespace-nowrap flex-shrink-0'>
             {formatTimestamp(activity.timestamp)}
           </span>
         </div>

@@ -36,12 +36,18 @@ export interface MessagePreviousValue {
   msgType: string;
 }
 
+export interface TicketTagPreviousValue {
+  tagName: string;
+  ticketId: string;
+}
+
 export type PreviousValue =
   | ConversationPreviousValue
   | TicketPreviousValue
   | TicketStageEtaPreviousValue
   | ReactionPreviousValue
-  | MessagePreviousValue;
+  | MessagePreviousValue
+  | TicketTagPreviousValue;
 
 export interface SideEffectJobConfig {
   entityType: TableName;
@@ -60,6 +66,7 @@ export type SideEffectOperationConfigMap = {
 export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   reactions: ['insert', 'delete'],
   messages: ['insert', 'delete'],
+  ticket_tags: ['insert', 'delete'],
   call_participants: ["insert", "update"],
   channel_participants: ['insert'],
   conversations: ['insert', 'delete'],
