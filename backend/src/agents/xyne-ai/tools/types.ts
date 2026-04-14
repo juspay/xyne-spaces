@@ -289,6 +289,7 @@ export interface ToolDescriptions {
   get_memories: string;
   update_memory: string;
   user_activity: string;
+  list_user_channels: string;
 }
 
 // ============================================================================

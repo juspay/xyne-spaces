@@ -353,8 +353,8 @@ export async function* summarizeStream(
   input: ThreadSummaryInput,
   context: SummarizerContext
 ): AsyncGenerator<StreamChunk, void, unknown> {
-  logger.info(`[Summariser] Calling "${envConfig.summariserModel}" with "LITELLM_API_KEY"`);
   const modelProvider = createModelProvider();
+  logger.info(`[Summariser] Calling "${context.modelName}" with "LITELLM_API_KEY"`);
 
   const isSearchMessage = context.summarizationType === 'searchMessage';
   const idMapping = isSearchMessage ? undefined : input.messageIdMapping;
@@ -407,7 +407,7 @@ export async function* summarizeStream(
       // Handle different event types
       switch (event.type) {
         case 'llm_call_start': {
-          const callModel = (event.data as { model?: string }).model ?? envConfig.summariserModel;
+          const callModel = (event.data as { model?: string }).model ?? context.modelName;
           logger.info(`[Summariser] Calling "${callModel}" with "LITELLM_API_KEY"`);
           break;
         }
@@ -565,8 +565,8 @@ export async function summarizeThread(
   context: SummarizerContext,
   onEvent?: (event: TraceEvent) => void
 ): Promise<SummaryOutput> {
-  logger.info(`[Summariser] Calling "${envConfig.summariserModel}" with "LITELLM_API_KEY"`);
   const modelProvider = createModelProvider();
+  logger.info(`[Summariser] Calling "${context.modelName}" with "LITELLM_API_KEY"`);
 
   const idMapping = input.messageIdMapping;
   const entityMapping = input.entityMapping;  // NEW: Extract entity mapping

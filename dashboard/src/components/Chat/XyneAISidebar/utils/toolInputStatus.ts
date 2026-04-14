@@ -391,6 +391,9 @@ export const generateToolInputStatus = (
         ];
       }
 
+      case 'list_user_channels':
+        return 'Fetching your channels';
+
       default:
         return 'Processing';
     }

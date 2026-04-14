@@ -80,6 +80,7 @@ import { createFetchSkillInstructionsTool, getFetchSkillInstructionsTool } from 
 import { createGetMemoriesTool, getGetMemoriesTool } from './get_memories.js';
 import { createUpdateMemoryTool, getUpdateMemoryTool } from './update_memory.js';
 import { createUserActivityTool, getUserActivityTool } from './user_activity.js';
+import { createListUserChannelsTool } from './list_user_channels.js';
 
 import type { XyneAIAgentContext } from './types.js';
 
@@ -144,6 +145,9 @@ export { createUpdateMemoryTool, getUpdateMemoryTool };
 // User Activity
 export { createUserActivityTool, getUserActivityTool };
 
+// List User Channels
+export { createListUserChannelsTool };
+
 // ============================================================================
 // Get All Tools
 // ============================================================================
@@ -184,6 +188,7 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createCreatePptTool(),
     createFetchSkillInstructionsTool(),
     createUserActivityTool(),
+    createListUserChannelsTool(),
   ];
 
   // These 4 tools are purely dependent on XYNE_AI_EXTENDED_URL

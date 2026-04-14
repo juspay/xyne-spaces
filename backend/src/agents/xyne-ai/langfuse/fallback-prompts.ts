@@ -1422,6 +1422,20 @@ keypoints: newline-separated bullet points, each starting with •.
 
 Do not invent information.`;
 
+const LIST_USER_CHANNELS_FALLBACK = `List all channels the current user is a member of, grouped by visibility.
+
+Use this tool when the user asks questions like:
+- "What channels am I in?"
+- "List my channels"
+- "Show me all my public/private channels"
+- "Which channels do I have access to?"
+
+Returns two groups:
+- Public channels: open channels visible to all workspace members
+- Private channels: invite-only channels
+
+No input required — the user's channels are automatically determined from their membership.`;
+
 export const FALLBACK_PROMPTS: Record<string, string> = {
   'xyne-ai': XYNE_AI_SYSTEM_FALLBACK,
   'ask-ai-chat': XYNE_AI_CHAT_SYSTEM_FALLBACK,
@@ -1445,6 +1459,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'user_activity': USER_ACTIVITY_FALLBACK,
   'update_memory': UPDATE_MEMORY_FALLBACK,
   'deep_research': DEEP_RESEARCH_FALLBACK,
+  'list_user_channels': LIST_USER_CHANNELS_FALLBACK,
   'ticket_description_cleaner': TICKET_DESCRIPTION_CLEANER_FALLBACK,
   'cluster_theme_single': CLUSTER_THEME_SINGLE_FALLBACK,
   'meta_theme_single': META_THEME_SINGLE_FALLBACK,
