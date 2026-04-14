@@ -869,8 +869,10 @@ const ChatListV3: React.FC<ChatListProps> = ({
     >
       {/* Sticky date pill overlay */}
       {stickyDate && (
-        <div className='absolute top-0 left-0 right-0 z-10 flex justify-center pointer-events-none py-2'>
-          <DatePill dateText={stickyDate} />
+        <div className='absolute top-0 left-0 right-0 z-10 pointer-events-none'>
+          <div className='relative flex justify-center py-2'>
+            <DatePill dateText={stickyDate} />
+          </div>
         </div>
       )}
 
@@ -899,8 +901,10 @@ const ChatListV3: React.FC<ChatListProps> = ({
           if (!item) return null;
 
           const prevItem = arrayIndex > 0 ? combinedMessages[arrayIndex - 1] : null;
+          const dateText = formatDatePill(item.createdAt);
           const showDatePill =
             !prevItem || item.createdAt.toDateString() !== prevItem.createdAt.toDateString();
+          const shouldHideInlineDatePill = showDatePill && dateText === stickyDate;
 
           const isNewMessageBoundary =
             newConversationBoundary !== null && arrayIndex === newConversationBoundary.index;
@@ -908,8 +912,11 @@ const ChatListV3: React.FC<ChatListProps> = ({
           return (
             <div data-item-timestamp={item.createdAt.getTime()} ref={itemRef}>
               {showDatePill && (
-                <div>
-                  <DatePill dateText={formatDatePill(item.createdAt)} />
+                <div
+                  className={shouldHideInlineDatePill ? 'invisible' : 'block'}
+                  aria-hidden={shouldHideInlineDatePill}
+                >
+                  <DatePill dateText={dateText} />
                 </div>
               )}
               {isNewMessageBoundary && (
