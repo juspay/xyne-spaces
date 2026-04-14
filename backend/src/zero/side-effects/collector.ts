@@ -60,6 +60,16 @@ export async function collectSideEffectJobs(
     }
   }
 
+  if (operation === 'delete' && table === 'ticket_tags') {
+    const tag = await tx.run(zql.ticket_tags.where('id', entityId).one());
+    if (tag) {
+      previousValue = {
+        tagName: tag.name,
+        ticketId: tag.ticketId,
+      };
+    }
+  }
+
   // Capture previous ticket state for update operations
   if (operation === 'update' && table === 'tickets') {
     const entity = await tx.run(zql.tickets.where('id', entityId).one());
@@ -167,6 +177,7 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'email_drafts':
     case 'form_entity_values':
     case 'ticket_reference_mappings':
+    case 'ticket_tags':
     case 'dashboards':
     case 'queries':
     case 'dashboard_queries_mapping':
