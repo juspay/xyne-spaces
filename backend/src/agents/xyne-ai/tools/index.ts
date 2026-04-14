@@ -4,7 +4,7 @@
  * This file re-exports all tools and types for external use.
  */
 
-import { type Tool } from '@xynehq/jaf';
+import { type Tool } from '@juspay-jaf/jaf';
 import { config } from '../../../config/env.js';
 
 // ============================================================================

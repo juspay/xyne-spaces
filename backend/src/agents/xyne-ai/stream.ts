@@ -2,8 +2,8 @@
  * Xyne AI Streaming Execution
  */
 
-import type { Message, Attachment } from '@xynehq/jaf';
-import { Streaming } from '@xynehq/jaf';
+import type { Message, Attachment } from '@juspay-jaf/jaf';
+import { Streaming } from '@juspay-jaf/jaf';
 
 import { logger } from '../../utils/logger.js';
 import { config } from '../../config/env.js';

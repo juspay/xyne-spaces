@@ -10,7 +10,7 @@
  */
 
 import { z } from 'zod';
-import { type Tool } from '@xynehq/jaf';
+import { type Tool } from '@juspay-jaf/jaf';
 import { DatabaseClient } from '../../../database/client.js';
 import { logger } from '../../../utils/logger.js';
 import type { XyneAIAgentContext } from './types.js';

@@ -1,10 +1,10 @@
 /**
  * Web Search Tool
- * Uses the @xynehq/jaf package's websearch tool internally
+ * Uses the @juspay-jaf/jaf package's websearch tool internally
  */
 
 import { z } from 'zod';
-import { type Tool, webSearchTool } from '@xynehq/jaf';
+import { type Tool, webSearchTool } from '@juspay-jaf/jaf';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
 import { redisService } from '../../../services/redisService.js';
@@ -59,7 +59,7 @@ interface JafToolResult<T> {
 
 /**
  * Create web_search tool with description from Langfuse
- * Uses the @xynehq/jaf package's websearch tool internally
+ * Uses the @juspay-jaf/jaf package's websearch tool internally
  */
 export function createWebSearchTool(): Tool<{ query: string }, XyneAIAgentContext> {
     const webSearchUrl = config.xyneAiExtended.url;

@@ -2,7 +2,7 @@
  * Types and Interfaces for Xyne AI Agent Tools
  */
 
-import { Streaming } from '@xynehq/jaf';
+import { Streaming } from '@juspay-jaf/jaf';
 import type { SelectionContext } from '../types.js';
 
 // Re-export types from JAF Streaming module

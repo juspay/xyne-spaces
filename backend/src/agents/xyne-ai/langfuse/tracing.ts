@@ -7,7 +7,7 @@ import {
   type TraceCollector,
   type TraceEvent,
   type Message,
-} from '@xynehq/jaf';
+} from '@juspay-jaf/jaf';
 import { logger } from '../../../utils/logger.js';
 import { getLangfuseConfig } from './config.js';
 import type { AgentsConfig } from '../../config.js';

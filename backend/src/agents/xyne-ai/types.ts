@@ -4,7 +4,7 @@
  * API request, streaming chunks, and output types.
  */
 
-import type { Attachment } from '@xynehq/jaf';
+import type { Attachment } from '@juspay-jaf/jaf';
 import type { UserInfo, ResearchContext } from './tools/index.js';
 
 // ============================================================================

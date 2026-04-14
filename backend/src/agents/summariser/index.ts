@@ -19,7 +19,7 @@ import {
   type RunConfig,
   type Message,
   type TraceEvent,
-} from '@xynehq/jaf';
+} from '@juspay-jaf/jaf';
 
 // Import config for environment variables
 import { config as envConfig } from '../../config/env.js';
