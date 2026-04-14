@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { xyneAIStream, type XyneAIStreamRequest, type UserInfo, AgentsConfig } from '@/agents/xyne-ai';
-import { getOtelTraceId } from '@xynehq/jaf';
+import { getOtelTraceId } from '@juspay-jaf/jaf';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { config } from '@/config/env';

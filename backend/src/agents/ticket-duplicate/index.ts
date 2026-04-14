@@ -12,7 +12,7 @@ import {
   type RunState,
   type RunConfig,
   type TraceEvent,
-} from '@xynehq/jaf';
+} from '@juspay-jaf/jaf';
 import { config } from '../../config/env.js';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { AgentsConfig } from '../config.js';

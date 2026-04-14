@@ -9,7 +9,7 @@ import {
   type RunConfig,
   type RunState,
   type Tool,
-} from '@xynehq/jaf';
+} from '@juspay-jaf/jaf';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';

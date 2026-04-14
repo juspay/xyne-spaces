@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { type Tool } from '@xynehq/jaf';
+import { type Tool } from '@juspay-jaf/jaf';
 import { config } from '../../../config/env.js';
 import { logger } from '../../../utils/logger.js';
 import type { XyneAIAgentContext } from './types.js';

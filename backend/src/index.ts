@@ -1,5 +1,8 @@
 import { App } from './app.js';
 import { logger } from '@/utils/logger';
+import { configureJAF } from '@juspay-jaf/jaf';
+
+configureJAF({ verbose: false });
 
 function serializeError(err: unknown) {
   if (err instanceof Error) {

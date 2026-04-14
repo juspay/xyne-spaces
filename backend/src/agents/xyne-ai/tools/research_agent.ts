@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod';
-import { type Tool } from '@xynehq/jaf';
+import { type Tool } from '@juspay-jaf/jaf';
 import { logger } from '../../../utils/logger.js';
 import { researchAgentService, type ResearchAgentResponse } from '../../../services/researchAgentService.js';
 import type { XyneAIAgentContext } from './types.js';

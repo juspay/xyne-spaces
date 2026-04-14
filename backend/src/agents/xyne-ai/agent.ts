@@ -12,7 +12,7 @@ import {
   type RunConfig,
   type Message,
   type TraceEvent,
-} from '@xynehq/jaf';
+} from '@juspay-jaf/jaf';
 
 import { config } from '../../config/env.js';
 import { db } from '../../database/client.js';

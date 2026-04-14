@@ -9,7 +9,7 @@
  */
 
 import { z } from 'zod';
-import { type Tool } from '@xynehq/jaf';
+import { type Tool } from '@juspay-jaf/jaf';
 import { logger } from '../../../utils/logger.js';
 import { getCanvasByViewAccessId } from '../../../services/canvasService.js';
 import { readFromYSweet } from '../../../utils/ysweetUtils.js';

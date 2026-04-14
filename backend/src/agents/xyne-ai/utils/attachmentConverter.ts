@@ -3,12 +3,12 @@
  * Converts attachment data from request format to JAF Attachment format
  */
 
-import type { Attachment } from '@xynehq/jaf';
+import type { Attachment } from '@juspay-jaf/jaf';
 import {
   makeImageAttachment,
   makeDocumentAttachment,
   makeFileAttachment,
-} from '@xynehq/jaf/utils';
+} from '@juspay-jaf/jaf/utils';
 import type { AttachmentData } from '../types.js';
 import { logger } from '../../../utils/logger.js';
 

@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod';
-import { type Tool } from '@xynehq/jaf';
+import { type Tool } from '@juspay-jaf/jaf';
 import { logger } from '../../../utils/logger.js';
 import { vespaService } from '../../../services/vespaSearch/index.js';
 import type { MeetingFilters } from '../../../vespa/src/utils/YqlBuilder.js';

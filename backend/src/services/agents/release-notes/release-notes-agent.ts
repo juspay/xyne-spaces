@@ -7,7 +7,7 @@ import {
   type RunState,
   type RunConfig,
   type TraceEvent,
-} from '@xynehq/jaf';
+} from '@juspay-jaf/jaf';
 import { config } from '@/config/env';
 import { getReleaseNotesSystemPrompt, buildReleaseNotesUserPrompt } from './prompts';
 import { AgentsConfig } from '@/agents/config';

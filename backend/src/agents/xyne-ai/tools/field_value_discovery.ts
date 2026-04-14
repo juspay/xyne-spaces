@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { type Tool } from '@xynehq/jaf';
+import { type Tool } from '@juspay-jaf/jaf';
 import { db } from '../../../database/client.js';
 import { logger } from '../../../utils/logger.js';
 import { findBestMatches } from '../utils/sequenceMatcher.js';

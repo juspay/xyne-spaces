@@ -9,7 +9,7 @@ import {
   type RunConfig,
   type RunState,
   type Tool,
-} from '@xynehq/jaf';
+} from '@juspay-jaf/jaf';
 import { DatabaseClient, db } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';

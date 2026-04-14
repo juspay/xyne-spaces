@@ -97,4 +97,4 @@ export {
   type GetPromptOptions,
 } from './langfuse/index.js';
 
-export type { Message } from '@xynehq/jaf';
+export type { Message } from '@juspay-jaf/jaf';

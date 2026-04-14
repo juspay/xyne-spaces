@@ -9,7 +9,7 @@
 
 import { z } from 'zod';
 import https from 'node:https';
-import { type Tool } from '@xynehq/jaf';
+import { type Tool } from '@juspay-jaf/jaf';
 import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '../../../../utils/logger.js';
 import type { XyneAIAgentContext } from '../types.js';

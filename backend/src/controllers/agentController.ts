@@ -9,7 +9,7 @@ import {
   type Agent,
   type RunState,
   type RunConfig,
-} from '@xynehq/jaf';
+} from '@juspay-jaf/jaf';
 import { config } from '../config/env.js';
 import {logger} from '@/utils/logger';
 
