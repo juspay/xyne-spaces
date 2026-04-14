@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, TicketReferenceRelation, ChannelType } from '@prisma/client';
+import { Ticket, TicketStatusV2, TicketPriority, AttachmentEntityType, MessageAttachment, ChannelType } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
@@ -48,7 +48,6 @@ import { workflowManager } from '@/workflows/services/workflowManager';
 import { WorkflowType } from '@/workflows/types/workflow-enums';
 
 const prisma = DatabaseClient.getInstance();
-const DUPLICATE_REFERENCE_LIMIT = 10;
 
 export class TicketController {
   private ticketRepository: TicketRepository;
@@ -239,13 +238,14 @@ export class TicketController {
       return ticket;
     });
 
-    this.persistDuplicateReferences({
-      ticket,
+    ticketDuplicateService.persistDuplicateReferences({
+      ticketId: ticket.id,
+      ticketCreatedBy: ticket.createdBy,
       title,
       description,
       projectId,
       userId: createdBy,
-    }).catch(error => {
+    }).catch((error: Error) => {
       logger.error('Failed to persist duplicate references for ticket', {
         ticketId: ticket.id,
         error,
@@ -909,8 +909,9 @@ export class TicketController {
         }
       }
 
-      this.persistDuplicateReferences({
-        ticket,
+      ticketDuplicateService.persistDuplicateReferences({
+        ticketId: ticket.id,
+        ticketCreatedBy: ticket.createdBy,
         title,
         description,
         projectId,
@@ -1052,60 +1053,6 @@ export class TicketController {
       res.status(500).json({ error: 'Failed to check ticket duplicates' });
     }
   };
-
-  private async persistDuplicateReferences(params: {
-    ticket: Ticket;
-    title: string;
-    description: string;
-    projectId: string;
-    userId: string;
-    parentTicketId?: string;
-  }): Promise<void> {
-    try {
-      const { ticket, title, description, projectId, userId, parentTicketId } = params;
-      const { candidates, analysis } = await ticketDuplicateService.checkDuplicates({
-        title,
-        description,
-        projectId,
-        userId,
-        limit: DUPLICATE_REFERENCE_LIMIT,
-        excludeTicketId: ticket.id,
-        parentTicketId,
-      });
-
-      if (candidates.length === 0) {
-        return;
-      }
-
-      if (!analysis.isDuplicate || !analysis.duplicateTicketId) {
-        return;
-      }
-
-      const duplicateCandidate = candidates.find(
-        candidate => candidate.id === analysis.duplicateTicketId,
-      );
-
-      if (!duplicateCandidate) {
-        return;
-      }
-
-      const referenceRows = [
-        {
-          sourceTicketId: ticket.id,
-          targetTicketId: duplicateCandidate.id,
-          relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
-          createdBy: ticket.createdBy,
-        },
-      ];
-
-      await prisma.ticketReferenceMapping.createMany({
-        data: referenceRows,
-        skipDuplicates: true,
-      });
-    } catch (error) {
-      logger.error('Failed to persist duplicate ticket references', error);
-    }
-  }
 
   getPendingHumanIntervention = async (req: Request, res: Response): Promise<void> => {
     try {

@@ -2,6 +2,7 @@ import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { vespaService } from '@/services/vespaSearch';
+import { TicketReferenceRelation } from '@prisma/client';
 import type {
   TicketDuplicateCandidate,
   TicketDuplicateCheckAnalysis,
@@ -13,6 +14,7 @@ import {
 } from '@/agents/ticket-duplicate';
 
 const prisma = DatabaseClient.getInstance();
+const DUPLICATE_REFERENCE_LIMIT = 10;
 
 class TicketDuplicateService {
   async checkDuplicates(params: {
@@ -203,6 +205,61 @@ class TicketDuplicateService {
     }
 
     return candidates.filter(candidate => !excludeIds.has(candidate.id));
+  }
+
+  async persistDuplicateReferences(params: {
+    ticketId: string;
+    ticketCreatedBy: string;
+    title: string;
+    description: string;
+    projectId: string;
+    userId: string;
+    parentTicketId?: string;
+  }): Promise<void> {
+    try {
+      const { ticketId, ticketCreatedBy, title, description, projectId, userId, parentTicketId } = params;
+      const { candidates, analysis } = await this.checkDuplicates({
+        title,
+        description,
+        projectId,
+        userId,
+        limit: DUPLICATE_REFERENCE_LIMIT,
+        excludeTicketId: ticketId,
+        parentTicketId,
+      });
+
+      if (candidates.length === 0) {
+        return;
+      }
+
+      if (!analysis.isDuplicate || !analysis.duplicateTicketId) {
+        return;
+      }
+
+      const duplicateCandidate = candidates.find(
+        candidate => candidate.id === analysis.duplicateTicketId,
+      );
+
+      if (!duplicateCandidate) {
+        return;
+      }
+
+      const referenceRows = [
+        {
+          sourceTicketId: ticketId,
+          targetTicketId: duplicateCandidate.id,
+          relationType: TicketReferenceRelation.DUPLICATE_POSSIBLE,
+          createdBy: ticketCreatedBy,
+        },
+      ];
+
+      await prisma.ticketReferenceMapping.createMany({
+        data: referenceRows,
+        skipDuplicates: true,
+      });
+    } catch (error) {
+      logger.error('Failed to persist duplicate ticket references', error);
+    }
   }
 }
 
