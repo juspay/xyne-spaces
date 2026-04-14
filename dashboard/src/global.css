@@ -391,6 +391,48 @@
     word-break: break-word;
   }
 
+  /* Nested Bullet List Styles - repeating cycle: disc → circle → square */
+  .chat-input-field ul {
+    list-style-type: disc;
+  }
+
+  .chat-input-field ul ul {
+    list-style-type: circle;
+  }
+
+  .chat-input-field ul ul ul {
+    list-style-type: square;
+  }
+
+  .chat-input-field ul ul ul ul {
+    list-style-type: disc;
+  }
+
+  .chat-input-field ul ul ul ul ul {
+    list-style-type: circle;
+  }
+
+  /* Nested Ordered List Styles - repeating cycle: decimal → lower-alpha → lower-roman */
+  .chat-input-field ol {
+    list-style-type: decimal;
+  }
+
+  .chat-input-field ol ol {
+    list-style-type: lower-alpha;
+  }
+
+  .chat-input-field ol ol ol {
+    list-style-type: lower-roman;
+  }
+
+  .chat-input-field ol ol ol ol {
+    list-style-type: decimal;
+  }
+
+  .chat-input-field ol ol ol ol ol {
+    list-style-type: lower-alpha;
+  }
+
   /* Inline Code */
   .chat-input-field code:not(pre code) {
     @apply bg-gray-100 border border-gray-200 rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-gray-700;
@@ -1192,8 +1234,41 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   @apply list-disc pl-6 my-2;
 }
 
+.jp-message-html ul ul {
+  list-style-type: circle;
+}
+
+.jp-message-html ul ul ul {
+  list-style-type: square;
+}
+
+.jp-message-html ul ul ul ul {
+  list-style-type: disc;
+}
+
+.jp-message-html ul ul ul ul ul {
+  list-style-type: circle;
+}
+
 .jp-message-html ol {
-  @apply list-decimal pl-6 my-2;
+  @apply pl-6 my-2;
+  list-style-type: decimal;
+}
+
+.jp-message-html ol ol {
+  list-style-type: lower-alpha;
+}
+
+.jp-message-html ol ol ol {
+  list-style-type: lower-roman;
+}
+
+.jp-message-html ol ol ol ol {
+  list-style-type: decimal;
+}
+
+.jp-message-html ol ol ol ol ol {
+  list-style-type: lower-alpha;
 }
 
 .jp-message-html li {
