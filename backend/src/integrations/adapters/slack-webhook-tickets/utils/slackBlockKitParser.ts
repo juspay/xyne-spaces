@@ -360,9 +360,13 @@ export class SlackBlockKitParser {
       case 'emoji':
         return escapeForSlackWithMarkdown(`:${element.name}:`);
       case 'user':
-        return `<span style="color: #2563eb;">@${element.user_id}</span>`;
+        return `<@${element.user_id}>`;
+      case 'usergroup':
+        return `<!subteam^${element.usergroup_id}>`;
       case 'channel':
         return `<span style="color: #2563eb;">#${element.channel_id}</span>`;
+      case 'broadcast':
+        return `<!${element.range}>`;
       default:
         return '';
     }

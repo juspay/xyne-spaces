@@ -106,15 +106,18 @@ export const findOrCreateUser = async (
 // Helper: Find or create app user for a Slack bot (throws on failure)
 export const findOrCreateApp = async (
   botName: string,
-  botId: string,
-  botCache: UserInfoCache
+  botId: string,       
+  botCache: UserInfoCache,
+  botUserId?: string, 
 ): Promise<string> => {
   if (botCache.has(botId)) {
     return botCache.get(botId)!.userId!;
   }
 
   const userRepo = new UserRepository();
-  const existingUser = await userRepo.findByMetadataField('slackId', botId);
+
+  // Look up by slackBotId (BXXXXXXX) — explicit bot identifier
+  const existingUser = await userRepo.findByMetadataField('slackBotId', botId);
   if (existingUser) {
     botCache.set(botId, { userId: existingUser.id });
     return existingUser.id;
@@ -135,7 +138,10 @@ export const findOrCreateApp = async (
     throw new Error(`Failed to find installed app for ${app.id}`);
   }
 
-  await userRepo.upsertMetaDataField(installed.userId, 'slackId', botId);
+  if (botUserId) {
+    await userRepo.upsertMetaDataField(installed.userId, 'slackId', botUserId);
+  }
+  await userRepo.upsertMetaDataField(installed.userId, 'slackBotId', botId);
   botCache.set(botId, { userId: installed.userId });
   return installed.userId;
 };
@@ -261,13 +267,14 @@ export async function ingestConversationSlack(
       replyBroadcast?: boolean,
       botId?: string,
       botName?: string,
+      botUserId?: string,
     ): Promise<MessageIngestionResult> => {
 
       let resolvedUserId = userId;
 
       if (!resolvedUserId) {
         if (botId) {
-          resolvedUserId = await findOrCreateApp(botName ?? botId, botId, botCache);
+          resolvedUserId = await findOrCreateApp(botName ?? botId, botId, botCache, botUserId);
         } else {
           if (!userEmail || !userName) {
             throw new Error(
@@ -380,6 +387,7 @@ export async function ingestConversationSlack(
             undefined,
             slackMessage.botId,
             slackMessage.botName,
+            slackMessage.botUserId,
           );
         }
 
@@ -411,6 +419,7 @@ export async function ingestConversationSlack(
                 reply.showInChannel ?? false,
                 reply.botId,
                 reply.botName,
+                reply.botUserId,
               );
             } catch (error) {
               const errorMsg = `Failed to ingest reply ${reply.externalThreadId}: ${

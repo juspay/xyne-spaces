@@ -94,7 +94,9 @@ export type SlackRichTextInlineElement =
   | SlackRichTextLinkElement
   | { type: 'emoji'; name: string }
   | { type: 'user'; user_id: string }
-  | { type: 'channel'; channel_id: string };
+  | { type: 'channel'; channel_id: string }
+  | { type: 'broadcast'; range: 'channel' | 'here' | 'everyone' }
+  | { type: 'usergroup'; usergroup_id: string };
 
 export interface SlackRichTextSection {
   type: 'rich_text_section';
