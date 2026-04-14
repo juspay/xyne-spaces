@@ -15,6 +15,56 @@
       "types": "./dist/zero/index.d.ts",
       "import": "./dist/zero/index.js",
       "default": "./dist/zero/index.js"
+    },
+    "./zero/queries": {
+      "types": "./dist/zero/queries.d.ts",
+      "import": "./dist/zero/queries.js",
+      "default": "./dist/zero/queries.js"
+    },
+    "./zero/mutators": {
+      "types": "./dist/zero/mutators.d.ts",
+      "import": "./dist/zero/mutators.js",
+      "default": "./dist/zero/mutators.js"
+    },
+    "./zero/messageMetadata": {
+      "types": "./dist/zero/messageMetadata.d.ts",
+      "import": "./dist/zero/messageMetadata.js",
+      "default": "./dist/zero/messageMetadata.js"
+    },
+    "./zero/ticketMetadata": {
+      "types": "./dist/zero/ticketMetadata.d.ts",
+      "import": "./dist/zero/ticketMetadata.js",
+      "default": "./dist/zero/ticketMetadata.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks/index.d.ts",
+      "import": "./dist/hooks/index.js",
+      "default": "./dist/hooks/index.js"
+    },
+    "./machines": {
+      "types": "./dist/machines/index.d.ts",
+      "import": "./dist/machines/index.js",
+      "default": "./dist/machines/index.js"
+    },
+    "./platform": {
+      "types": "./dist/platform/index.d.ts",
+      "import": "./dist/platform/index.js",
+      "default": "./dist/platform/index.js"
+    },
+    "./providers": {
+      "types": "./dist/providers/index.d.ts",
+      "import": "./dist/providers/index.js",
+      "default": "./dist/providers/index.js"
+    },
+    "./logger": {
+      "types": "./dist/logger/index.d.ts",
+      "import": "./dist/logger/index.js",
+      "default": "./dist/logger/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.js",
+      "default": "./dist/utils/index.js"
     }
   },
   "files": [
@@ -28,9 +78,30 @@
   "dependencies": {
     "@rocicorp/zero": "0.26.1",
     "fast-xml-parser": "^5.3.3",
+    "fuse.js": "^7.1.0",
+    "xstate": "^5.24.0",
     "zod": "^3.25.76"
   },
+  "peerDependencies": {
+    "@tanstack/react-query": ">=5.0.0",
+    "@xstate/react": ">=4.0.0",
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "@xstate/react": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@tanstack/react-query": "^5.96.0",
+    "@types/react": "^19.0.0",
+    "@xstate/react": "^6.1.0",
     "typescript": "^5.3.3"
   }
 }

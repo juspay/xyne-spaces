@@ -30,6 +30,7 @@ import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
 import { Channel } from '@xyne/shared/index';
+import { SharedAuthProvider } from '@xyne/shared/hooks';
 
 interface InitialStateLoaderProps {
   children: ReactNode;
@@ -491,10 +492,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
 
   if (areAllQueriesCompleted) {
     return (
-      <>
+      <SharedAuthProvider value={context}>
         {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
         {children}
-      </>
+      </SharedAuthProvider>
     );
   }
 
