@@ -7,6 +7,7 @@ import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
+import { ticketDuplicateService } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
@@ -184,6 +185,23 @@ export class TicketController {
         userGroupId,
         text,
       });
+
+      // Check for duplicate tickets and persist references
+      if (result.ticketId) {
+        ticketDuplicateService.persistDuplicateReferences({
+          ticketId: result.ticketId,
+          ticketCreatedBy: userId,
+          title,
+          description,
+          projectId,
+          userId,
+        }).catch(error => {
+          logger.error('[Apps Ticket Creation] Failed to persist duplicate references for ticket', {
+            ticketId: result.ticketId,
+            error,
+          });
+        });
+      }
 
       if (pendingFullRoleAssignment && userGroupId && result.ticketId) {
         try {
