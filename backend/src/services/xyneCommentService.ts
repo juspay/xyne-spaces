@@ -350,6 +350,7 @@ export class XyneCommentService {
         createdBy: originalExecution.createdBy ?? undefined,
         metadata: {
           originalRequest: {
+            ...workflowContext,
             title: `PR Review Fixes: ${ticket.title}`,
             description: prCommentsDescription,
           },
