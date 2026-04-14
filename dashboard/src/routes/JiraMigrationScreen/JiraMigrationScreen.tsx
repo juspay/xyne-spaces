@@ -14,6 +14,8 @@ import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
 import Dialog from '../../components/ui/Dialog';
 import { toast } from 'sonner';
+import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
+import { FolderKanban, LayoutTemplate, Hash } from 'lucide-react';
 
 const actionClassMap: Record<string, string> = {
   create_board_custom_field: 'bg-blue-100 text-blue-800',
@@ -40,6 +42,18 @@ const ISSUE_EXECUTION_DETAILS_PER_PAGE = 10;
 
 type TicketRange = 'all' | 'last_1_month' | 'last_6_months' | 'last_1_year';
 type PreviewSection = 'overview' | 'fields' | 'issues';
+type TicketStatusV2Option = 'TODO' | 'STARTED' | 'COMPLETED' | 'PAUSED' | 'CANCELLED';
+type MigrationPhase = 'setup' | 'map-statuses' | 'migrate';
+
+const TICKET_STATUS_V2_OPTIONS: TicketStatusV2Option[] = [
+  'TODO',
+  'STARTED',
+  'COMPLETED',
+  'PAUSED',
+  'CANCELLED',
+];
+
+const normalizeStatusKey = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 const ticketRangeLabelMap: Record<TicketRange, string> = {
   all: 'All Time',
@@ -132,7 +146,10 @@ const JiraMigrationScreen = (): ReactElement => {
   const [customFieldPage, setCustomFieldPage] = useState(0);
   const [issueSamplePage, setIssueSamplePage] = useState(0);
   const [issueResultPage, setIssueResultPage] = useState(0);
+  const [statusV2Mappings, setStatusV2Mappings] = useState<Record<string, string>>({});
+  const [skippedCustomFieldIds, setSkippedCustomFieldIds] = useState<Record<string, boolean>>({});
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [migrationPhase, setMigrationPhase] = useState<MigrationPhase>('setup');
   const channels = useChannelsByProjectId(selectedProjectId || undefined);
 
   const [boards] = useCachedQuery(
@@ -208,6 +225,40 @@ const JiraMigrationScreen = (): ReactElement => {
     if (!result) return 1;
     return Math.max(1, Math.ceil(result.issueResults.length / ISSUE_EXECUTION_DETAILS_PER_PAGE));
   }, [result]);
+
+  const statusesMissingV2Mapping = useMemo(() => {
+    if (!preview) return [];
+
+    return preview.statusMappings
+      .map(mapping => mapping.jiraStatus)
+      .filter(
+        status =>
+          !TICKET_STATUS_V2_OPTIONS.includes(statusV2Mappings[status] as TicketStatusV2Option),
+      );
+  }, [preview, statusV2Mappings]);
+
+  const hasCompleteStatusV2Mappings = Boolean(preview) && statusesMissingV2Mapping.length === 0;
+
+  const mappedStatusMappings = useMemo(() => {
+    if (!preview) return [];
+
+    return preview.statusMappings.filter(mapping =>
+      TICKET_STATUS_V2_OPTIONS.includes(
+        statusV2Mappings[mapping.jiraStatus] as TicketStatusV2Option,
+      ),
+    );
+  }, [preview, statusV2Mappings]);
+
+  const newStatusMappings = useMemo(() => {
+    if (!preview) return [];
+
+    return preview.statusMappings.filter(
+      mapping =>
+        !TICKET_STATUS_V2_OPTIONS.includes(
+          statusV2Mappings[mapping.jiraStatus] as TicketStatusV2Option,
+        ),
+    );
+  }, [preview, statusV2Mappings]);
 
   const loadMigrationHistory = async (): Promise<void> => {
     try {
@@ -346,12 +397,44 @@ const JiraMigrationScreen = (): ReactElement => {
         buildPayload(nextPageToken),
       );
 
+      const boardStatusByNormalizedStageName = new Map<string, string>(
+        previewResult.target.stages.map(stage => [
+          normalizeStatusKey(stage.name),
+          stage.defaultTicketStatusV2,
+        ]),
+      );
+
       setPreview(previewResult);
+      setStatusV2Mappings(previous =>
+        Object.fromEntries(
+          previewResult.statusMappings.map(mapping => [
+            mapping.jiraStatus,
+            previous[mapping.jiraStatus] ||
+              (TICKET_STATUS_V2_OPTIONS.includes(
+                boardStatusByNormalizedStageName.get(
+                  normalizeStatusKey(mapping.jiraStatus),
+                ) as TicketStatusV2Option,
+              )
+                ? boardStatusByNormalizedStageName.get(normalizeStatusKey(mapping.jiraStatus))
+                : '') ||
+              '',
+          ]),
+        ),
+      );
+      setSkippedCustomFieldIds(previous =>
+        Object.fromEntries(
+          previewResult.customFieldMappings.map(mapping => [
+            mapping.jiraFieldId,
+            previous[mapping.jiraFieldId] || false,
+          ]),
+        ),
+      );
       setResult(null);
       setIssueResultPage(0);
       setPreviewSection('overview');
       setCustomFieldPage(0);
       setIssueSamplePage(0);
+      setMigrationPhase(prev => (prev === 'setup' ? 'map-statuses' : prev));
       toast.success('Jira migration preview loaded');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to preview migration';
@@ -367,6 +450,30 @@ const JiraMigrationScreen = (): ReactElement => {
       return;
     }
 
+    if (!preview) {
+      toast.error('Preview is required before migration');
+      return;
+    }
+
+    if (!hasCompleteStatusV2Mappings) {
+      toast.error('Map all Jira statuses to StatusV2 before migration');
+      return;
+    }
+
+    const strictStatusV2Mappings = Object.fromEntries(
+      preview.statusMappings.map(({ jiraStatus }) => [
+        jiraStatus,
+        statusV2Mappings[jiraStatus]?.trim() || '',
+      ]),
+    );
+    const selectedSkipCustomFieldIds = preview.customFieldMappings
+      .filter(
+        mapping =>
+          mapping.action === 'create_board_custom_field' &&
+          skippedCustomFieldIds[mapping.jiraFieldId],
+      )
+      .map(mapping => mapping.jiraFieldId);
+
     setIsImportLoading(true);
     setResult(null);
     setMigrationProgress(null);
@@ -377,8 +484,14 @@ const JiraMigrationScreen = (): ReactElement => {
           ? {
               ...buildPayload(pageTokens[pageIndex]),
               issueKeys: preview?.issueSamples.map(issue => issue.key) || [],
+              statusV2Mappings: strictStatusV2Mappings,
+              skipCustomFieldIds: selectedSkipCustomFieldIds,
             }
-          : buildPayload();
+          : {
+              ...buildPayload(),
+              statusV2Mappings: strictStatusV2Mappings,
+              skipCustomFieldIds: selectedSkipCustomFieldIds,
+            };
 
       const startResult = await jiraMigrationService.startMigration(payload);
       persistJiraMigrationJob({
@@ -496,6 +609,9 @@ const JiraMigrationScreen = (): ReactElement => {
                       value={jiraProjectKey}
                       onChange={(e: ChangeEvent<HTMLInputElement>) => {
                         setJiraProjectKey(e.target.value.toUpperCase());
+                        setStatusV2Mappings({});
+                        setSkippedCustomFieldIds({});
+                        setMigrationPhase('setup');
                         setPreview(null);
                         setResult(null);
                         setPageTokens([undefined]);
@@ -515,29 +631,30 @@ const JiraMigrationScreen = (): ReactElement => {
                     >
                       Target Project
                     </label>
-                    <select
-                      id='jira-target-project'
-                      data-track-category='jira_migration'
-                      data-track-name='select_target_project'
-                      value={selectedProjectId}
-                      onChange={e => {
-                        setSelectedProjectId(e.target.value);
+                    <EntitySelector
+                      options={(projects || []).map(project => ({
+                        value: project.id,
+                        label: project.name,
+                        icon: <FolderKanban className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                      selectedValue={selectedProjectId || null}
+                      onSelect={value => {
+                        setSelectedProjectId(value ?? '');
                         setSelectedBoardId('');
                         setTargetChannelId('');
+                        setStatusV2Mappings({});
+                        setSkippedCustomFieldIds({});
+                        setMigrationPhase('setup');
                         setPreview(null);
                         setResult(null);
                         setPageTokens([undefined]);
                         setPageIndex(0);
                       }}
-                      className='w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground shadow-sm'
-                    >
-                      <option value=''>Select project</option>
-                      {(projects || []).map(project => (
-                        <option key={project.id} value={project.id}>
-                          {project.name}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder='Select project'
+                      searchPlaceholder='Search projects...'
+                      width='100%'
+                      testId='jira-target-project'
+                    />
                   </div>
 
                   <div className='rounded-2xl border border-border/70 bg-white/80 p-4 shadow-sm'>
@@ -547,28 +664,28 @@ const JiraMigrationScreen = (): ReactElement => {
                     >
                       Target Board
                     </label>
-                    <select
-                      id='jira-target-board'
-                      data-track-category='jira_migration'
-                      data-track-name='select_target_board'
-                      value={selectedBoardId}
-                      onChange={e => {
-                        setSelectedBoardId(e.target.value);
+                    <EntitySelector
+                      options={(boards || []).map(board => ({
+                        value: board.id,
+                        label: board.name,
+                        icon: <LayoutTemplate className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                      selectedValue={selectedBoardId || null}
+                      onSelect={value => {
+                        setSelectedBoardId(value ?? '');
+                        setStatusV2Mappings({});
+                        setSkippedCustomFieldIds({});
+                        setMigrationPhase('setup');
                         setPreview(null);
                         setResult(null);
                         setPageTokens([undefined]);
                         setPageIndex(0);
                       }}
-                      disabled={!selectedProjectId}
-                      className='w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground shadow-sm disabled:opacity-60'
-                    >
-                      <option value=''>Select board</option>
-                      {(boards || []).map(board => (
-                        <option key={board.id} value={board.id}>
-                          {board.name}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder='Select board'
+                      searchPlaceholder='Search boards...'
+                      width='100%'
+                      testId='jira-target-board'
+                    />
                   </div>
 
                   <div className='rounded-2xl border border-border/70 bg-white/80 p-4 shadow-sm'>
@@ -578,28 +695,28 @@ const JiraMigrationScreen = (): ReactElement => {
                     >
                       Target Channel
                     </label>
-                    <select
-                      id='jira-target-channel'
-                      data-track-category='jira_migration'
-                      data-track-name='select_target_channel'
-                      value={targetChannelId}
-                      onChange={e => {
-                        setTargetChannelId(e.target.value);
+                    <EntitySelector
+                      options={channels.map(channel => ({
+                        value: channel.id,
+                        label: channel.name,
+                        icon: <Hash className='w-4 h-4 text-muted-foreground' />,
+                      }))}
+                      selectedValue={targetChannelId || null}
+                      onSelect={value => {
+                        setTargetChannelId(value ?? '');
+                        setStatusV2Mappings({});
+                        setSkippedCustomFieldIds({});
+                        setMigrationPhase('setup');
                         setPreview(null);
                         setResult(null);
                         setPageTokens([undefined]);
                         setPageIndex(0);
                       }}
-                      disabled={!selectedProjectId}
-                      className='w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground shadow-sm disabled:opacity-60'
-                    >
-                      <option value=''>Select channel</option>
-                      {channels.map(channel => (
-                        <option key={channel.id} value={channel.id}>
-                          {channel.name}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder='Select channel'
+                      searchPlaceholder='Search channels...'
+                      width='100%'
+                      testId='jira-target-channel'
+                    />
                   </div>
                 </div>
 
@@ -617,6 +734,9 @@ const JiraMigrationScreen = (): ReactElement => {
                     value={ticketRange}
                     onChange={e => {
                       setTicketRange(e.target.value as TicketRange);
+                      setStatusV2Mappings({});
+                      setSkippedCustomFieldIds({});
+                      setMigrationPhase('setup');
                       setPreview(null);
                       setResult(null);
                       setPageTokens([undefined]);
@@ -654,14 +774,7 @@ const JiraMigrationScreen = (): ReactElement => {
                       }}
                       disabled={isPreviewLoading || isImportLoading || !canPreview}
                     >
-                      {isPreviewLoading ? 'Fetching Jira Preview...' : 'Preview Migration'}
-                    </Button>
-                    <Button
-                      variant='secondary'
-                      onClick={() => void handleImport('all')}
-                      disabled={isPreviewLoading || isImportLoading || !canPreview}
-                    >
-                      {isImportLoading ? 'Importing Jira Project...' : 'Import All Issues'}
+                      {isPreviewLoading ? 'Loading Jira Statuses...' : 'Start Migration'}
                     </Button>
                     <Button
                       variant='outline'
@@ -675,6 +788,193 @@ const JiraMigrationScreen = (): ReactElement => {
               </div>
             </div>
           </section>
+
+          {/* Step Indicator */}
+          {migrationPhase !== 'setup' && (
+            <nav className='flex flex-wrap items-center gap-2 px-1'>
+              {[
+                { phase: 'setup' as MigrationPhase, label: '1. Configure' },
+                { phase: 'map-statuses' as MigrationPhase, label: '2. Map Statuses' },
+                { phase: 'migrate' as MigrationPhase, label: '3. Migrate Tickets' },
+              ].map(({ phase, label }, idx) => {
+                const phaseOrder: MigrationPhase[] = ['setup', 'map-statuses', 'migrate'];
+                const isCompleted = phaseOrder.indexOf(phase) < phaseOrder.indexOf(migrationPhase);
+                const isCurrent = phase === migrationPhase;
+                return (
+                  <span key={phase} className='flex items-center gap-2'>
+                    {idx > 0 && <span className='text-muted-foreground text-xs'>›</span>}
+                    <span
+                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                        isCompleted
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : isCurrent
+                            ? 'bg-sky-100 text-sky-800 ring-1 ring-sky-300'
+                            : 'bg-muted/30 text-muted-foreground'
+                      }`}
+                    >
+                      {isCompleted ? `✓ ${label}` : label}
+                    </span>
+                  </span>
+                );
+              })}
+            </nav>
+          )}
+
+          {/* Step 2: Map Statuses */}
+          {preview && migrationPhase === 'map-statuses' && (
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+              <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
+                <div className='flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between'>
+                  <div>
+                    <div className='inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-sky-800'>
+                      Step 2 of 3
+                    </div>
+                    <h3 className='mt-2 text-sm font-semibold text-foreground'>
+                      Map Jira Statuses to StatusV2
+                    </h3>
+                    <p className='mt-1 text-xs text-muted-foreground'>
+                      Assign a StatusV2 category to each Jira status. Xyne stages will be
+                      auto-created using the exact Jira status names.
+                    </p>
+                  </div>
+                  <span className='text-xs text-muted-foreground'>
+                    {preview.jiraProject.totalIssues} total issues · {preview.statusMappings.length}{' '}
+                    project-wide statuses (fetched from Jira project config, not just preview page)
+                  </span>
+                </div>
+              </div>
+              <div className='p-5'>
+                {statusesMissingV2Mapping.length > 0 ? (
+                  <div className='mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800'>
+                    {statusesMissingV2Mapping.length}{' '}
+                    {statusesMissingV2Mapping.length === 1 ? 'new status' : 'new statuses'} still
+                    need a StatusV2 mapping.
+                  </div>
+                ) : (
+                  <div className='mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800'>
+                    All Jira statuses mapped — you can proceed to migration.
+                  </div>
+                )}
+                {mappedStatusMappings.length > 0 && (
+                  <div className='mb-5 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4'>
+                    <div className='flex items-center justify-between gap-2'>
+                      <h4 className='text-xs font-semibold uppercase tracking-[0.08em] text-emerald-900'>
+                        Already Mapped
+                      </h4>
+                      <span className='text-xs text-emerald-800'>
+                        {mappedStatusMappings.length} mapped
+                      </span>
+                    </div>
+                    <div className='mt-3 flex flex-wrap gap-2'>
+                      {mappedStatusMappings.map(mapping => (
+                        <div
+                          key={`mapped-${mapping.jiraStatus}`}
+                          className='inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs text-foreground'
+                        >
+                          <span className='font-medium'>{mapping.jiraStatus}</span>
+                          <span className='text-muted-foreground'>→</span>
+                          <span className='font-semibold text-emerald-700'>
+                            {statusV2Mappings[mapping.jiraStatus]}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3'>
+                  {newStatusMappings.map(mapping => (
+                    <div
+                      key={mapping.jiraStatus}
+                      className='rounded-lg border border-border bg-muted/10 p-3'
+                    >
+                      <div className='flex items-start justify-between gap-2'>
+                        <p className='text-sm font-medium text-foreground'>{mapping.jiraStatus}</p>
+                        <span
+                          className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${confidenceClassMap[mapping.confidence]}`}
+                        >
+                          {mapping.confidence}
+                        </span>
+                      </div>
+                      <div className='mt-3'>
+                        <label
+                          htmlFor={`status-v2-${mapping.jiraStatus}`}
+                          className='text-xs text-muted-foreground'
+                        >
+                          StatusV2
+                        </label>
+                        <select
+                          id={`status-v2-${mapping.jiraStatus}`}
+                          data-track-category='jira_migration'
+                          data-track-name='select_status_v2_mapping'
+                          value={statusV2Mappings[mapping.jiraStatus] || ''}
+                          onChange={event => {
+                            const selectedStatusV2 = event.target.value;
+                            setStatusV2Mappings(previous => ({
+                              ...previous,
+                              [mapping.jiraStatus]: selectedStatusV2,
+                            }));
+                          }}
+                          className='mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                        >
+                          <option value=''>Select StatusV2</option>
+                          {TICKET_STATUS_V2_OPTIONS.map(statusV2 => (
+                            <option key={statusV2} value={statusV2}>
+                              {statusV2}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className='mt-6 flex flex-wrap items-center gap-3 border-t border-border/60 pt-5'>
+                  <Button variant='outline' onClick={() => setMigrationPhase('setup')}>
+                    ← Back to Configure
+                  </Button>
+                  <Button
+                    onClick={() => setMigrationPhase('migrate')}
+                    disabled={!hasCompleteStatusV2Mappings}
+                  >
+                    Proceed to Migration →
+                  </Button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Step 3: Migrate action bar */}
+          {preview && migrationPhase === 'migrate' && (
+            <section className='overflow-hidden rounded-3xl border border-emerald-200/60 bg-[linear-gradient(135deg,rgba(16,185,129,0.06),rgba(255,255,255,0.96))] shadow-sm'>
+              <div className='flex flex-wrap items-center justify-between gap-3 px-5 py-4'>
+                <div>
+                  <div className='inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-emerald-800'>
+                    Step 3 of 3
+                  </div>
+                  <h3 className='mt-2 text-sm font-semibold text-foreground'>Ready to Migrate</h3>
+                  <p className='mt-1 text-xs text-muted-foreground'>
+                    All {preview.statusMappings.length} Jira statuses are mapped. Review the preview
+                    below and run the migration when ready.
+                  </p>
+                </div>
+                <div className='flex flex-wrap items-center gap-2'>
+                  <Button
+                    variant='outline'
+                    onClick={() => setMigrationPhase('map-statuses')}
+                    disabled={isImportLoading}
+                  >
+                    ← Edit Status Mappings
+                  </Button>
+                  <Button
+                    onClick={() => void handleImport('all')}
+                    disabled={isImportLoading || !hasCompleteStatusV2Mappings}
+                  >
+                    {isImportLoading ? 'Migrating...' : 'Migrate Tickets'}
+                  </Button>
+                </div>
+              </div>
+            </section>
+          )}
 
           {migrationProgress && (
             <section className='rounded-2xl border border-emerald-200 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(255,255,255,0.92))] p-5 shadow-sm'>
@@ -1033,17 +1333,17 @@ const JiraMigrationScreen = (): ReactElement => {
             </div>
           </Dialog>
 
-          {!preview && (
+          {migrationPhase === 'setup' && !preview && (
             <section className='rounded-2xl border border-dashed border-border bg-muted/10 p-10 text-center'>
               <h3 className='text-sm font-semibold text-foreground'>No preview yet</h3>
               <p className='mt-2 text-xs text-muted-foreground'>
-                Run a preview to see Jira issue counts, board stage suggestions, and custom field
-                creation/reuse decisions.
+                Fill in your Jira project key, target project, board, and channel, then click
+                &ldquo;Start Migration&rdquo; to load statuses and begin mapping.
               </p>
             </section>
           )}
 
-          {preview && (
+          {preview && migrationPhase === 'migrate' && (
             <>
               <section className='grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4'>
                 <div className='rounded-2xl border border-border bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(255,255,255,0.96))] p-5 shadow-sm'>
@@ -1234,39 +1534,37 @@ const JiraMigrationScreen = (): ReactElement => {
                     <div className='rounded-xl border border-border p-4'>
                       <div className='flex items-center justify-between gap-3'>
                         <div>
-                          <h4 className='text-sm font-semibold text-foreground'>
-                            Status Suggestions
-                          </h4>
+                          <h4 className='text-sm font-semibold text-foreground'>Status Mappings</h4>
                           <p className='mt-1 text-xs text-muted-foreground'>
-                            Recommended board-stage matches for Jira statuses seen in this project.
+                            StatusV2 assigned in Step 2.
                           </p>
                         </div>
-                        <span className='text-xs text-muted-foreground'>
-                          {preview.statusMappings.length} statuses
-                        </span>
+                        <button
+                          type='button'
+                          data-track-category='jira_migration'
+                          data-track-name='click_edit_status_mappings'
+                          onClick={() => setMigrationPhase('map-statuses')}
+                          className='text-xs font-medium text-sky-700 hover:underline'
+                        >
+                          Edit
+                        </button>
                       </div>
-                      <div className='mt-4 space-y-3'>
+                      <div className='mt-4 space-y-2'>
                         {preview.statusMappings.map(mapping => (
                           <div
                             key={mapping.jiraStatus}
-                            className='rounded-lg border border-border bg-muted/10 p-3'
+                            className='flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/10 px-3 py-2'
                           >
-                            <div className='flex items-start justify-between gap-3'>
-                              <div>
-                                <p className='text-xs text-muted-foreground'>Jira Status</p>
-                                <p className='mt-1 text-sm font-medium text-foreground'>
-                                  {mapping.jiraStatus}
-                                </p>
-                              </div>
-                              <span
-                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${confidenceClassMap[mapping.confidence]}`}
-                              >
-                                {mapping.confidence}
-                              </span>
-                            </div>
-                            <p className='mt-3 text-sm text-foreground'>
-                              {mapping.suggestedStageName || 'No clear board-stage match yet'}
-                            </p>
+                            <p className='text-sm text-foreground'>{mapping.jiraStatus}</p>
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                statusV2Mappings[mapping.jiraStatus]
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {statusV2Mappings[mapping.jiraStatus] || 'Unmapped'}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -1325,11 +1623,31 @@ const JiraMigrationScreen = (): ReactElement => {
                                 {mapping.jiraFieldId}
                               </p>
                             </div>
-                            <span
-                              className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${actionClassMap[mapping.action]}`}
-                            >
-                              {mapping.action.replaceAll('_', ' ')}
-                            </span>
+                            <div className='flex flex-col items-start gap-2 lg:items-end'>
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${actionClassMap[mapping.action]}`}
+                              >
+                                {mapping.action.replaceAll('_', ' ')}
+                              </span>
+                              {mapping.action === 'create_board_custom_field' && (
+                                <label className='inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground'>
+                                  <input
+                                    type='checkbox'
+                                    data-track-category='jira_migration'
+                                    data-track-name='toggle_skip_custom_field'
+                                    checked={Boolean(skippedCustomFieldIds[mapping.jiraFieldId])}
+                                    onChange={event => {
+                                      const checked = event.target.checked;
+                                      setSkippedCustomFieldIds(previous => ({
+                                        ...previous,
+                                        [mapping.jiraFieldId]: checked,
+                                      }));
+                                    }}
+                                  />
+                                  Skip this field in import
+                                </label>
+                              )}
+                            </div>
                           </div>
                           <div className='mt-4 grid grid-cols-1 gap-3 md:grid-cols-3'>
                             <div>

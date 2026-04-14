@@ -115,6 +115,8 @@ export interface JiraMigrationExecuteInput {
   targetChannelId: string;
   issueKeys?: string[];
   dateFrom?: string;
+  statusV2Mappings: Record<string, string>;
+  skipCustomFieldIds?: string[];
 }
 
 export interface JiraMigrationIssueResult {
@@ -431,54 +433,6 @@ const buildJiraMigrationProjectLogPrefix = (jiraProjectKey: string): string =>
 const buildJiraMigrationIssueLogPrefix = (jiraProjectKey: string, issue: JiraIssue): string =>
   `${buildJiraMigrationProjectLogPrefix(jiraProjectKey)}[${issue.id}]`;
 
-const inferStageStatusV2 = (jiraStatus: string): TicketStatusV2 => {
-  const lower = jiraStatus.toLowerCase();
-
-  if (
-    lower.includes('done') ||
-    lower.includes('closed') ||
-    lower.includes('resolved') ||
-    lower.includes('complete') ||
-    lower.includes('deployed') ||
-    lower.includes('prod') ||
-    lower.includes('production') ||
-    lower.includes('sbx') ||
-    lower.includes('sandbox') ||
-    lower.includes('release') ||
-    lower.includes('live') ||
-    lower.includes('signoff')
-  ) {
-    return TicketStatusV2.COMPLETED;
-  }
-
-  if (
-    lower.includes('progress') ||
-    lower.includes('review') ||
-    lower.includes('qa') ||
-    lower.includes('testing') ||
-    lower.includes('blocked') ||
-    lower.includes('hold') ||
-    lower.includes('dev') ||
-    lower.includes('development') ||
-    lower.includes('uat') ||
-    lower.includes('verification') ||
-    lower.includes('validate') ||
-    lower.includes('staging')
-  ) {
-    return TicketStatusV2.STARTED;
-  }
-
-  if (lower.includes('cancel') || lower.includes('wont')) {
-    return TicketStatusV2.CANCELLED;
-  }
-
-  if (lower.includes('pause') || lower.includes('waiting') || lower.includes('pending')) {
-    return TicketStatusV2.PAUSED;
-  }
-
-  return TicketStatusV2.TODO;
-};
-
 type JiraStageSummary = {
   id: string;
   name: string;
@@ -486,66 +440,23 @@ type JiraStageSummary = {
   defaultTicketStatusV2: TicketStatusV2;
 };
 
-const inferStatusMatch = (
-  jiraStatus: string,
-  stages: Array<{ name: string; sequenceNumber: number; defaultTicketStatusV2: TicketStatusV2 }>,
-): { stageName: string; statusV2: TicketStatusV2 } => {
-  const exact = stages.find(stage => normalize(stage.name) === normalize(jiraStatus));
-  if (exact) {
-    return { stageName: exact.name, statusV2: exact.defaultTicketStatusV2 };
-  }
+const parseTicketStatusV2 = (value: string): TicketStatusV2 | null => {
+  const normalizedValue = value.trim().toUpperCase();
 
-  const contains = stages.find(stage => {
-    const stageValue = normalize(stage.name);
-    const jiraValue = normalize(jiraStatus);
-    return stageValue.includes(jiraValue) || jiraValue.includes(stageValue);
-  });
-
-  if (contains) {
-    return { stageName: contains.name, statusV2: contains.defaultTicketStatusV2 };
+  switch (normalizedValue) {
+    case TicketStatusV2.TODO:
+      return TicketStatusV2.TODO;
+    case TicketStatusV2.STARTED:
+      return TicketStatusV2.STARTED;
+    case TicketStatusV2.COMPLETED:
+      return TicketStatusV2.COMPLETED;
+    case TicketStatusV2.CANCELLED:
+      return TicketStatusV2.CANCELLED;
+    case TicketStatusV2.PAUSED:
+      return TicketStatusV2.PAUSED;
+    default:
+      return null;
   }
-
-  const lower = jiraStatus.toLowerCase();
-  if (
-    lower.includes('done') ||
-    lower.includes('closed') ||
-    lower.includes('resolved') ||
-    lower.includes('complete') ||
-    lower.includes('deployed') ||
-    lower.includes('prod') ||
-    lower.includes('production') ||
-    lower.includes('sbx') ||
-    lower.includes('sandbox') ||
-    lower.includes('release') ||
-    lower.includes('live') ||
-    lower.includes('signoff')
-  ) {
-    const completed = stages.find(stage => stage.defaultTicketStatusV2 === TicketStatusV2.COMPLETED);
-    if (completed) return { stageName: completed.name, statusV2: completed.defaultTicketStatusV2 };
-  }
-  if (
-    lower.includes('progress') ||
-    lower.includes('review') ||
-    lower.includes('qa') ||
-    lower.includes('testing') ||
-    lower.includes('blocked') ||
-    lower.includes('hold') ||
-    lower.includes('dev') ||
-    lower.includes('development') ||
-    lower.includes('uat') ||
-    lower.includes('verification') ||
-    lower.includes('validate') ||
-    lower.includes('staging')
-  ) {
-    const started = stages.find(stage => stage.defaultTicketStatusV2 === TicketStatusV2.STARTED);
-    if (started) return { stageName: started.name, statusV2: started.defaultTicketStatusV2 };
-  }
-
-  const first = stages[0];
-  return {
-    stageName: first?.name || jiraStatus,
-    statusV2: first?.defaultTicketStatusV2 || TicketStatusV2.TODO,
-  };
 };
 
 
@@ -993,6 +904,7 @@ export class JiraMigrationImportService {
     fieldDefinitions: JiraFieldDefinition[],
     issues: JiraIssue[],
     existingFieldMap: Map<string, { fieldId: string; fieldType: string }>,
+    skippedCustomFieldIds: Set<string>,
   ): Promise<{
     formId: string | null;
     createdCount: number;
@@ -1006,6 +918,7 @@ export class JiraMigrationImportService {
       for (const [fieldId, rawValue] of Object.entries(issue.fields)) {
         if (!fieldId.startsWith('customfield_')) continue;
         if (existingFieldMap.has(fieldId)) continue;
+        if (skippedCustomFieldIds.has(fieldId)) continue;
         if (shouldSkipJiraCustomField(fieldDefinitionMap.get(fieldId))) continue;
         if (rawValue === null || rawValue === undefined) continue;
         if (Array.isArray(rawValue) && rawValue.length === 0) continue;
@@ -1045,6 +958,10 @@ export class JiraMigrationImportService {
     }> = [];
 
     for (const [fieldId, stats] of customFieldStats.entries()) {
+      if (skippedCustomFieldIds.has(fieldId)) {
+        continue;
+      }
+
       const definition = fieldDefinitionMap.get(fieldId);
       const jiraFieldName = definition?.name || fieldId;
       const sampleValues = Array.from(stats.values).slice(0, 50);
@@ -1146,49 +1063,73 @@ export class JiraMigrationImportService {
     actorUserId: string,
     issues: JiraIssue[],
     stages: JiraStageSummary[],
+    statusV2ByStatus: Map<string, TicketStatusV2>,
   ): Promise<JiraStageSummary[]> {
-    const existingStageNames = new Set(stages.map(stage => normalize(stage.name)));
-    const missingStageNames: string[] = [];
+    const stageByNormalizedName = new Map(
+      stages.map(stage => [normalize(stage.name), stage] as const),
+    );
+
+    let nextSequenceNumber =
+      stages.reduce((maxValue, stage) => Math.max(maxValue, stage.sequenceNumber), 0) + 1;
 
     for (const issue of issues) {
       const statusName = issue.fields.status?.name?.trim();
       if (!statusName) continue;
 
       const normalizedStatusName = normalize(statusName);
-      if (!normalizedStatusName || existingStageNames.has(normalizedStatusName)) {
+      if (!normalizedStatusName) continue;
+
+      const mappedStatusV2 = statusV2ByStatus.get(normalizedStatusName);
+      if (!mappedStatusV2) {
+        throw new Error(
+          `Missing StatusV2 mapping for Jira status '${statusName}'. Add mappings for all statuses before migrating.`,
+        );
+      }
+
+      const existingStage = stageByNormalizedName.get(normalizedStatusName);
+
+      if (!existingStage) {
+        const createdStage = await db.stage.create({
+          data: {
+            name: statusName,
+            boardId,
+            sequenceNumber: nextSequenceNumber,
+            createdBy: actorUserId,
+            defaultTicketStatusV2: mappedStatusV2,
+          },
+        });
+
+        const createdStageSummary: JiraStageSummary = {
+          id: createdStage.id,
+          name: createdStage.name,
+          sequenceNumber: createdStage.sequenceNumber,
+          defaultTicketStatusV2: createdStage.defaultTicketStatusV2,
+        };
+
+        stages.push(createdStageSummary);
+        stageByNormalizedName.set(normalizedStatusName, createdStageSummary);
+        nextSequenceNumber += 1;
         continue;
       }
 
-      existingStageNames.add(normalizedStatusName);
-      missingStageNames.push(statusName);
-    }
+      if (existingStage.defaultTicketStatusV2 !== mappedStatusV2) {
+        const updatedStage = await db.stage.update({
+          where: { id: existingStage.id },
+          data: { defaultTicketStatusV2: mappedStatusV2 },
+          select: {
+            id: true,
+            name: true,
+            sequenceNumber: true,
+            defaultTicketStatusV2: true,
+          },
+        });
 
-    if (missingStageNames.length === 0) {
-      return stages;
-    }
-
-    let nextSequenceNumber =
-      stages.reduce((maxValue, stage) => Math.max(maxValue, stage.sequenceNumber), 0) + 1;
-
-    for (const stageName of missingStageNames) {
-      const createdStage = await db.stage.create({
-        data: {
-          name: stageName,
-          boardId,
-          sequenceNumber: nextSequenceNumber,
-          createdBy: actorUserId,
-          defaultTicketStatusV2: inferStageStatusV2(stageName),
-        },
-      });
-
-      stages.push({
-        id: createdStage.id,
-        name: createdStage.name,
-        sequenceNumber: createdStage.sequenceNumber,
-        defaultTicketStatusV2: createdStage.defaultTicketStatusV2,
-      });
-
-      nextSequenceNumber += 1;
+        const stageIndex = stages.findIndex(stage => stage.id === updatedStage.id);
+        if (stageIndex !== -1) {
+          stages[stageIndex] = updatedStage;
+        }
+        stageByNormalizedName.set(normalizedStatusName, updatedStage);
+      }
     }
 
     stages.sort((left, right) => left.sequenceNumber - right.sequenceNumber);
@@ -2513,6 +2454,25 @@ export class JiraMigrationImportService {
     if (board.projectId !== project.id) throw new Error('Board does not belong to target project');
     if (channel.projectId !== project.id) throw new Error('Channel does not belong to target project');
 
+    const normalizedStatusV2Mappings = new Map<string, TicketStatusV2>();
+    for (const [rawStatus, rawStatusV2] of Object.entries(input.statusV2Mappings || {})) {
+      const normalizedStatus = normalize(rawStatus || '');
+      const parsedStatusV2 = parseTicketStatusV2(rawStatusV2 || '');
+
+      if (!normalizedStatus || !parsedStatusV2) {
+        continue;
+      }
+      normalizedStatusV2Mappings.set(normalizedStatus, parsedStatusV2);
+    }
+
+    if (normalizedStatusV2Mappings.size === 0) {
+      throw new Error('Migration requires explicit Jira status to StatusV2 mappings');
+    }
+
+    const skippedCustomFieldIds = new Set(
+      (input.skipCustomFieldIds || []).map(fieldId => fieldId.trim()).filter(Boolean),
+    );
+
     const parentFieldIds = fieldDefinitions
       .filter(field => {
         const normalizedName = normalize(field.name || '');
@@ -2587,8 +2547,28 @@ export class JiraMigrationImportService {
         ...issuesChunk.map(issue => this.buildIssueRelationshipSnapshot(issue, parentFieldIds)),
       );
 
+      for (const issue of issuesChunk) {
+        const statusName = issue.fields.status?.name?.trim();
+        if (!statusName) {
+          throw new Error(`Jira issue ${issue.key} is missing status; StatusV2 mapping cannot continue`);
+        }
+
+        const mappedStatusV2 = normalizedStatusV2Mappings.get(normalize(statusName));
+        if (!mappedStatusV2) {
+          throw new Error(
+            `Missing StatusV2 mapping for Jira status '${statusName}'. Add mappings for all statuses before migrating.`,
+          );
+        }
+      }
+
       await this.preloadExistingTickets(externalSourceId, issuesChunk);
-      stages = await this.ensureExactJiraStages(board.id, actorUserId, issuesChunk, stages);
+      stages = await this.ensureExactJiraStages(
+        board.id,
+        actorUserId,
+        issuesChunk,
+        stages,
+        normalizedStatusV2Mappings,
+      );
 
       const incrementalFieldSetup = await this.ensureBoardCustomFieldsIncremental(
         board.id,
@@ -2597,6 +2577,7 @@ export class JiraMigrationImportService {
         fieldDefinitions,
         issuesChunk,
         fieldMap,
+        skippedCustomFieldIds,
       );
       createdCount += incrementalFieldSetup.createdCount;
       reusedCount += incrementalFieldSetup.reusedCount;
@@ -2628,6 +2609,21 @@ export class JiraMigrationImportService {
         const reporter = issue.fields.reporter as JiraUser | undefined;
         const assignee = issue.fields.assignee as JiraUser | undefined;
         const statusName = issue.fields.status?.name || 'Open';
+        const mappedStatusV2 = normalizedStatusV2Mappings.get(normalize(statusName));
+
+        if (!mappedStatusV2) {
+          throw new Error(
+            `Missing StatusV2 mapping for Jira status '${statusName}'. Add mappings for all statuses before migrating.`,
+          );
+        }
+
+        const mappedStage = stages.find(stage => normalize(stage.name) === normalize(statusName));
+        if (!mappedStage) {
+          throw new Error(
+            `Stage '${statusName}' was not found or could not be created on board '${board.name}'`,
+          );
+        }
+
         const summary = issue.fields.summary || issue.key;
         const description = adfToText(issue.fields.description).trim() || `[Imported from Jira ${issue.key}]`;
         const rootMessageContent = await this.renderJiraMessageContent(
@@ -2648,7 +2644,10 @@ export class JiraMigrationImportService {
         try {
           const resolvedReporterId = await this.userResolver.resolveUser(reporter, actorUserId, unresolvedUsers);
           const resolvedAssigneeId = await this.userResolver.resolveUser(assignee, actorUserId, unresolvedUsers);
-          const stageMatch = inferStatusMatch(statusName, stages);
+          const stageMatch = {
+            stageName: mappedStage.name,
+            statusV2: mappedStatusV2,
+          };
           let initialMessageIdForTicket: string | null = null;
 
           if (!existingTicket) {
