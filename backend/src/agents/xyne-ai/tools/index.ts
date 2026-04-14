@@ -79,6 +79,7 @@ import { createCreatePptTool, getCreatePptTool } from './create_ppt/index.js';
 import { createFetchSkillInstructionsTool, getFetchSkillInstructionsTool } from './skills.js';
 import { createGetMemoriesTool, getGetMemoriesTool } from './get_memories.js';
 import { createUpdateMemoryTool, getUpdateMemoryTool } from './update_memory.js';
+import { createUserActivityTool, getUserActivityTool } from './user_activity.js';
 
 import type { XyneAIAgentContext } from './types.js';
 
@@ -140,6 +141,9 @@ export { createGetMemoriesTool, getGetMemoriesTool };
 // Update Memory
 export { createUpdateMemoryTool, getUpdateMemoryTool };
 
+// User Activity
+export { createUserActivityTool, getUserActivityTool };
+
 // ============================================================================
 // Get All Tools
 // ============================================================================
@@ -179,6 +183,7 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createFetchLinkContentTool(),
     createCreatePptTool(),
     createFetchSkillInstructionsTool(),
+    createUserActivityTool(),
   ];
 
   // These 4 tools are purely dependent on XYNE_AI_EXTENDED_URL

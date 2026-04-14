@@ -288,6 +288,7 @@ export interface ToolDescriptions {
   fetch_skill_instructions: string;
   get_memories: string;
   update_memory: string;
+  user_activity: string;
 }
 
 // ============================================================================

@@ -1347,6 +1347,28 @@ Use ONLY HTML tags. NEVER markdown syntax (**bold**, - item, \`code\`, ### headi
  * Uses exact prompt names as keys (same as PROMPT_NAMES values in prompts.ts)
  */
 /**
+ * Fallback description for user_activity tool
+ */
+const USER_ACTIVITY_FALLBACK = `Fetch the current user's activity events within a specific time range.
+
+## When to use
+Use when the user asks about their own recent activity, what they did, what they worked on, or any question scoped to their personal interactions within a time window (e.g. "what did I do today?", "show my activity", "what did I work on yesterday?").
+
+## Parameters
+- **start_time** (required): ISO 8601 timestamp for the start of the range (e.g. "2025-04-01T00:00:00.000Z")
+- **end_time** (required): ISO 8601 timestamp for the end of the range (e.g. "2025-04-13T23:59:59.999Z")
+
+## Constraints
+- **Maximum 3-day window**: The tool enforces a strict 3-day maximum time range. Requests exceeding this will be rejected.
+
+## Output
+Returns a chronologically ordered list of activity events — each with timestamp, event category, event name, and context metadata (channel, message, ticket, or canvas details where available).
+
+## Notes
+- Always scoped to the current user only
+- Blacklisted and aliased event types are handled automatically`;
+
+/**
  * Fallback description for get_memories tool
  */
 const GET_MEMORIES_FALLBACK = `Retrieve all stored memories for the current user from the memory service.
@@ -1420,6 +1442,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'fetch_skill_instructions': FETCH_SKILL_INSTRUCTIONS_FALLBACK,
   'create_ppt': CREATE_PPT_FALLBACK,
   'get_memories': GET_MEMORIES_FALLBACK,
+  'user_activity': USER_ACTIVITY_FALLBACK,
   'update_memory': UPDATE_MEMORY_FALLBACK,
   'deep_research': DEEP_RESEARCH_FALLBACK,
   'ticket_description_cleaner': TICKET_DESCRIPTION_CLEANER_FALLBACK,

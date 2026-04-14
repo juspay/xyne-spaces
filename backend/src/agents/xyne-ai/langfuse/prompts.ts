@@ -171,6 +171,7 @@ export const PROMPT_NAMES = {
   FETCH_SKILL_INSTRUCTIONS: 'fetch_skill_instructions',
   GET_MEMORIES: 'get_memories',
   UPDATE_MEMORY: 'update_memory',
+  USER_ACTIVITY: 'user_activity',
   TICKET_DESCRIPTION_CLEANER: 'ticket_description_cleaner',
   CLUSTER_THEME_SINGLE: 'cluster_theme_single',
   META_THEME_SINGLE: 'meta_theme_single',
