@@ -3195,19 +3195,6 @@ export const mutators = defineMutators({
           throw new Error('User group not found');
         }
 
-        // Bulk validate users exist using individual queries (Zero doesn't support IN with arrays directly)
-        const users = await Promise.all(
-          userIds.map(userId => tx.run(zql.users.where('id', userId).one())),
-        );
-        const allUsersExist = users.every(user => user !== undefined);
-        if (!allUsersExist) {
-          const foundUserIds = new Set(
-            users.filter((u): u is NonNullable<typeof u> => u !== undefined).map(u => u.id),
-          );
-          const notFound = userIds.filter(id => !foundUserIds.has(id));
-          throw new Error(`Users with ids '${notFound.join(', ')}' not found`);
-        }
-
         // Bulk check for existing mappings to avoid duplicates
         const existingMappings = await Promise.all(
           userIds.map(userId =>
