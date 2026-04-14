@@ -395,6 +395,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           'data-testid': 'message-input',
           role: 'textbox',
           'aria-multiline': 'true',
+          spellcheck: 'true',
+          autocorrect: 'on',
+          autocapitalize: 'sentences',
+          autocomplete: 'on',
         },
         handleKeyDown: (view, event) => {
           // Check if screen width is below 500px

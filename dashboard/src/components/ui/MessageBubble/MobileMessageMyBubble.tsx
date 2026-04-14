@@ -50,6 +50,7 @@ export interface MobileMessageMyBubbleProps {
   channelScopeType?: ChannelScopeType | undefined;
   isFirstInThread?: boolean;
   workflowNumber?: number | undefined;
+  onClick?: ((e: React.MouseEvent<HTMLDivElement>) => void) | undefined;
 }
 
 /**
@@ -74,6 +75,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   channelScopeType,
   isFirstInThread = false,
   workflowNumber,
+  onClick,
 }) => {
   const { toggleReaction } = useReactions();
   const attachments = message.attachments || [];
@@ -170,6 +172,20 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               'relative p-2 mobile-my-bubble rounded-tl-2xl rounded-bl-2xl rounded-br-2xl rounded-tr-[4px] text-foreground flex',
               isMobile ? 'flex-col-reverse gap-1' : 'flex-col',
             )}
+            onClick={onClick}
+            onKeyDown={
+              onClick
+                ? e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onClick(e as unknown as React.MouseEvent<HTMLDivElement>);
+                    }
+                  }
+                : undefined
+            }
+            role={onClick ? 'button' : undefined}
+            tabIndex={onClick ? 0 : undefined}
+            style={{ cursor: onClick ? 'pointer' : undefined }}
           >
             {/* Timestamp - Above bubble */}
             <div className='flex items-center justify-end w-full'>

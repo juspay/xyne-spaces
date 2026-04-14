@@ -328,7 +328,12 @@ export function LexicalSearchInput({
             contentEditable={
               <span className='flex items-center gap-2'>
                 {!isMobile && <Search size={16} className='ml-3 text-[#788187]' />}
-                <ContentEditable className='min-h-5 py-1 text-sm focus:outline-none flex-1' />
+                <ContentEditable
+                  className='min-h-5 py-1 text-sm focus:outline-none flex-1'
+                  spellCheck={true}
+                  autoCorrect='on'
+                  autoCapitalize='none'
+                />
                 {autocompleteSuffix && (
                   <span
                     className='text-[#C9CCCF] pointer-events-none text-sm absolute top-1/2 -translate-y-1/2 whitespace-nowrap'
