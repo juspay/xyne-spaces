@@ -39,6 +39,7 @@ import {
   type ImperativePanelHandle,
 } from 'react-resizable-panels';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { mutators } from '../../../zero/mutators';
 import Button from '../../ui/Button';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -150,6 +151,7 @@ const actionableValues = new Set<ActivityTab>(['actionable', 'fyi']);
 
 const ActivityListView = (): ReactElement => {
   const { isMobile } = usePlatform();
+  const lastVisitedChannelId = useLastVisitedChannel();
   const location = useLocation();
   const isOnIndexRoute = location.pathname === '/chat/activity';
 
@@ -524,7 +526,7 @@ const ActivityListView = (): ReactElement => {
         <div className='flex items-center gap-2'>
           {!isMobile && (
             <Link
-              to='/chat/dir'
+              to={lastVisitedChannelId ? `/chat/dir/${lastVisitedChannelId}` : '/chat/dir'}
               className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
               aria-label='Go back'
             >
