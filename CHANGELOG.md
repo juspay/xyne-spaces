@@ -1,3 +1,10 @@
+## [1.115.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.115.0...v1.115.1) (2026-04-14)
+
+
+### Bug Fixes
+
+* add label addition/removal to ticket audit trail ([5f1952b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5f1952bd2df3687faca7e790dbf4bd0956e48df6)), closes [#4984](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4984)
+
 ## [1.115.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.114.0...v1.115.0) (2026-04-14)
 
 
