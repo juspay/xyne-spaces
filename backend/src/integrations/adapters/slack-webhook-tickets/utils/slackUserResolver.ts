@@ -111,20 +111,25 @@ async function fetchSlackGroupInfo(slackGroupId: string, botOauthToken: string):
   }
 }
 
-async function resolveApiUser(slackUserId: string, botOauthToken: string): Promise<string | undefined> {
+async function resolveApiUser(
+  slackUserId: string,
+  botOauthToken: string
+): Promise<{ dbUserId?: string; displayName?: string }> {
   if (!slackUserId || !botOauthToken) {
-    return undefined;
+    return {};
+  }
+  const slackUser = await fetchSlackUserInfo(slackUserId, botOauthToken);
+  const displayName =
+    slackUser?.profile?.real_name ||
+    slackUser?.profile?.display_name ||
+    undefined;
+
+  if (!slackUser?.profile?.email) {
+    return { displayName };
   }
   const userRepo = new UserRepository();
-  const slackUser = await fetchSlackUserInfo(slackUserId, botOauthToken);
-  if (!slackUser || !slackUser.profile?.email) {
-    return undefined;
-  }
   const user = await userRepo.findByEmail(slackUser.profile.email);
-  if (!user) {
-    return undefined;
-  }
-  return user.id;
+  return { dbUserId: user?.id, displayName };
 }
 
 async function resolveApiGroup(slackGroupId: string, botOauthToken: string): Promise<string | undefined> {
@@ -169,24 +174,34 @@ async function resolveApiGroup(slackGroupId: string, botOauthToken: string): Pro
 }
 
 
-async function resolveSlackIds(slackUserId: Array<string>, botOauthToken: string, type: 'user' | 'group'): Promise<Map<string, string | null> | undefined> {
+type ResolvedEntry = { dbId?: string; displayName?: string };
+
+async function resolveSlackIds(
+  slackUserId: string[],
+  botOauthToken: string,
+  type: 'user' | 'group'
+): Promise<Map<string, ResolvedEntry> | undefined> {
   if (slackUserId.length === 0 || (type !== 'user' && type !== 'group')) {
     return undefined;
   }
   const userRepo = new UserRepository();
   const groupRepo = new UserGroupRepository();
-  const userMapper = new Map<string, string | null>();
-  
+  const userMapper = new Map<string, ResolvedEntry>();
+
   const dbResults = await Promise.allSettled(
-    slackUserId.map((slackId) => type === 'user' ? userRepo.findByMetadataField('slackId', slackId) : groupRepo.findByMetadataField('slackGroupId', slackId))
+    slackUserId.map((slackId) =>
+      type === 'user'
+        ? userRepo.findByMetadataField('slackId', slackId)
+        : groupRepo.findByMetadataField('slackGroupId', slackId)
+    )
   );
-  
+
   const slackIdsToFetch: string[] = [];
-  
+
   slackUserId.forEach((slackId, i) => {
     const result = dbResults[i];
     if (result.status === 'fulfilled' && result.value) {
-      userMapper.set(slackId, result.value.id);
+      userMapper.set(slackId, { dbId: result.value.id });
     } else {
       slackIdsToFetch.push(slackId);
     }
@@ -194,15 +209,19 @@ async function resolveSlackIds(slackUserId: Array<string>, botOauthToken: string
 
   if (slackIdsToFetch.length > 0) {
     const apiResults = await Promise.allSettled(
-      slackIdsToFetch.map((slackId) => type === 'user' ? resolveApiUser(slackId, botOauthToken) : resolveApiGroup(slackId, botOauthToken))
+      slackIdsToFetch.map((slackId) =>
+        type === 'user'
+          ? resolveApiUser(slackId, botOauthToken)
+          : resolveApiGroup(slackId, botOauthToken).then((id) => ({ dbUserId: id, displayName: undefined }))
+      )
     );
-    
+
     slackIdsToFetch.forEach((slackId, i) => {
       const result = apiResults[i];
-      if (result.status === 'fulfilled' && result.value) {
-        userMapper.set(slackId, result.value);
+      if (result.status === 'fulfilled') {
+        userMapper.set(slackId, { dbId: result.value.dbUserId, displayName: result.value.displayName });
       } else {
-        userMapper.set(slackId, null);
+        userMapper.set(slackId, {});
       }
     });
   }
@@ -212,10 +231,13 @@ async function resolveSlackIds(slackUserId: Array<string>, botOauthToken: string
 
 
 function resolveSpecialMentions(text: string): string {
-  const regex = /<!channel>|<!here>|@channel|@here/g;
-  return text.replace(regex, (match: string) => {
-    return `<span class="chat-input-special-mention" data-mention-type="${match.toLowerCase()}">${match}</span>`;
+  const broadcastRegex = /<!channel>|<!here>|<!everyone>|@channel|@here|@everyone/g;
+  text = text.replace(broadcastRegex, (match: string) => {
+    const display = match.startsWith('<!') ? `@${match.slice(2, -1)}` : match;
+    return `<span class="chat-input-special-mention" data-mention-type="${display}">${display}</span>`;
   });
+
+  return text;
 }
 
 export async function resolveSlackMentions(
@@ -241,30 +263,34 @@ export async function resolveSlackMentions(
   }
 
   if (userMapper) {
-    for (const [slackId, userId] of userMapper.entries()) {
-      if (userId) {
-        const user = await userRepo.findById(userId);
+    for (const [slackId, { dbId, displayName }] of userMapper.entries()) {
+      if (dbId) {
+        const user = await userRepo.findById(dbId);
         if (user) {
           text = replaceMention(text, true, slackId, `<span ${buildMentionAttrs(user.id, user.name, false, quote, undefined, undefined, user.email, user.picture || undefined).join(' ')}>@${user.name}</span>`);
-        } else {
-          text = replaceMention(text, true, slackId, `<span>@unknown user</span>`);
-        }
       } else {
-        text = replaceMention(text, true, slackId, `<span>@unknown user</span>`);
+        const name = displayName ?? 'unknown user';
+        text = replaceMention(text, true, slackId, `<span>@${name}</span>`);
+      }
+      } else {
+        const name = displayName ?? 'unknown user';
+        text = replaceMention(text, true, slackId, `<span>@${name}</span>`);
       }
     }
   }
   if (groupMapper) {
-    for (const [slackId, groupId] of groupMapper.entries()) {
-      if (groupId) {
-        const group = await groupRepo.findById(groupId);
+    for (const [slackId, { dbId, displayName }] of groupMapper.entries()) {
+      if (dbId) {
+        const group = await groupRepo.findById(dbId);
         if (group) {
           text = replaceMention(text, false, slackId, `<span ${buildMentionAttrs(group.id, group.name, true, quote, group.alias || undefined, group.description || undefined).join(' ')}>@${group.alias}</span>`);
         } else {
-          text = replaceMention(text, false, slackId, `<span>@unknown group</span>`);
+          const name = displayName ?? 'unknown group';
+          text = replaceMention(text, false, slackId, `<span>@${name}</span>`);
         }
       } else {
-        text = replaceMention(text, false, slackId, `<span>@unknown group</span>`);
+        const name = displayName ?? 'unknown group';
+        text = replaceMention(text, false, slackId, `<span>@${name}</span>`);
       }
     }
   }

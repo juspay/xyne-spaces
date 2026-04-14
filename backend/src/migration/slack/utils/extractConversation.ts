@@ -12,7 +12,6 @@ import {
 import { logger } from '../../../utils/logger';
 import { config } from '../../../config/env';
 import { fetchSlackUserInfo, resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
-import { escapeForSlackWithMarkdown } from '@clearfeed-ai/slack-to-html';
 import { UserRepository } from '../../../database/repositories/users';
 import { SlackBlockKitParser } from '../../../integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 
@@ -46,7 +45,8 @@ export interface SlackReply {
   showInChannel?: boolean;
   isDeactivated?: boolean;
   files?: SlackFile[];
-  botId?: string;
+  botId?: string;  
+  botUserId?: string;
   botName?: string;
 }
 
@@ -60,6 +60,7 @@ export interface SlackMessage {
   replies?: SlackReply[];
   files?: SlackFile[];
   botId?: string;
+  botUserId?: string;
   botName?: string;
 }
 
@@ -557,19 +558,32 @@ async function fetchAllThreadReplies(
 // Message Transformation
 // ============================================================================
 
-/**
- * Transform a single reply with user info and content
- */
 const blockKitParser = new SlackBlockKitParser();
 
-async function extractMessageContent(msg: any, resolvedText: string): Promise<string> {
-  if (msg.blocks?.length || msg.attachments?.length) {
-    const token = process.env.SLACK_BOT_TOKEN || '';
-    const blocksJson = JSON.stringify({ blocks: msg.blocks, attachments: msg.attachments });
-    const resolvedJson = await resolveSlackMentions(blocksJson, token, true);
-    return blockKitParser.parse(JSON.parse(resolvedJson));
+async function extractMessageContent(msg: any): Promise<string> {
+  const token = process.env.SLACK_BOT_TOKEN || '';
+  let resolvedBlocks = msg.blocks;
+  if (msg.blocks?.length) {
+    const resolved = await resolveSlackMentions(JSON.stringify(msg.blocks), token, true);
+    resolvedBlocks = JSON.parse(resolved);
   }
-  return escapeForSlackWithMarkdown(resolvedText);
+
+  let resolvedAttachments = msg.attachments;
+  if (msg.attachments?.length) {
+    const resolved = await resolveSlackMentions(JSON.stringify(msg.attachments), token, true);
+    resolvedAttachments = JSON.parse(resolved);
+  }
+
+  const resolvedText = !msg.blocks?.length && msg.text
+    ? await resolveSlackMentions(msg.text, token)
+    : undefined;
+  const html = blockKitParser.parse({
+    text: resolvedText,
+    blocks: resolvedBlocks,
+    attachments: resolvedAttachments,
+  });
+
+  return resolveSlackMentions(html, token);
 }
 
 export async function transformReply(
@@ -578,26 +592,30 @@ export async function transformReply(
   includeAttachments: boolean,
   allowedBots: string[] = []
 ): Promise<SlackReply> {
-  const userInfo = await getUserInfo(reply.user, cache);
-  const resolvedText = await resolveSlackMentions(reply.text ?? '', process.env.SLACK_BOT_TOKEN || '');
-  const htmlContent = await extractMessageContent(reply, resolvedText);
+  const isBot = !!reply.bot_id;
+  const userInfo = !isBot && reply.user ? await getUserInfo(reply.user, cache) : {};
+  const botName = isBot
+    ? (reply.username || reply.app_name || reply.bot_profile?.name)
+    : undefined;
+
+  const htmlContent = await extractMessageContent(reply);
 
   // Check if this is a bot message that matches allowedBots
   let botEmail: string | undefined;
   if (reply.bot_id && allowedBots.length > 0) {
-    const botName = reply.username?.toLowerCase() ||
+    const botNameLower = reply.username?.toLowerCase() ||
                     reply.app_name?.toLowerCase() ||
                     reply.bot_profile?.name?.toLowerCase() ||
                     '';
     // Case-insensitive matching: check if bot name includes any allowed bot name
     const matchesAllowed = allowedBots.some(allowed => {
       const allowedLower = allowed.toLowerCase();
-      return botName.includes(allowedLower) || allowedLower.includes(botName);
+      return botNameLower.includes(allowedLower) || allowedLower.includes(botNameLower);
     });
 
     // If bot matches and userEmail is missing, create bot email (userName can exist)
-    if (matchesAllowed && !userInfo?.userEmail && botName) {
-      const emailUsername = reply.username || reply.app_name || reply.bot_profile?.name || botName;
+    if (matchesAllowed && !userInfo?.userEmail && botNameLower) {
+      const emailUsername = reply.username || reply.app_name || reply.bot_profile?.name || botNameLower;
       botEmail = `${emailUsername.toLowerCase().replace(/[^a-z0-9]/g, '')}@xyne.bot.in`;
     }
   }
@@ -612,6 +630,9 @@ export async function transformReply(
     ...(userInfo?.isDeactivated === true && { isDeactivated: true }),
     showInChannel: reply.subtype === 'thread_broadcast',
     files: transformFiles(reply.files, includeAttachments),
+    ...(reply.bot_id && { botId: reply.bot_id }),
+    ...(reply.bot_id && reply.user && { botUserId: reply.user }),
+    ...(botName && { botName }),
   };
 }
 
@@ -651,8 +672,7 @@ async function transformMessage(
   }
 
   // Transform message content
-  const resolvedText = await resolveSlackMentions(rawMessage.text ?? '', process.env.SLACK_BOT_TOKEN || '');
-  const htmlContent = await extractMessageContent(rawMessage, resolvedText);
+  const htmlContent = await extractMessageContent(rawMessage);
 
   return {
     content: htmlContent,
@@ -664,6 +684,7 @@ async function transformMessage(
     replies,
     files: transformFiles(rawMessage.files, includeAttachments),
     ...(rawMessage.bot_id && { botId: rawMessage.bot_id }),
+    ...(rawMessage.bot_id && rawMessage.user && { botUserId: rawMessage.user }),
     ...(botName && { botName }),
   };
 }
