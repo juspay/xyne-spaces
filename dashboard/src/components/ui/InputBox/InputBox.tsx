@@ -7,8 +7,10 @@ import React, {
   useEffect,
 } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
-import { NodeType as PMNodeType } from '@tiptap/pm/model';
+import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Extension } from '@tiptap/core';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
@@ -64,6 +66,45 @@ import { canvasService } from '../../../services/Canvas/canvasService';
 import { v4 as uuidv4 } from 'uuid';
 
 const lowlight = createLowlight(common);
+
+const MAX_LIST_DEPTH = 5;
+const LIST_TYPES = new Set(['bulletList', 'orderedList']);
+
+const getMaxListDepth = (doc: PMNode): number => {
+  let maxDepth = 0;
+  const stack: { node: PMNode; depth: number }[] = [{ node: doc, depth: 0 }];
+
+  while (stack.length > 0) {
+    const { node, depth } = stack.pop()!;
+    const currentDepth = LIST_TYPES.has(node.type.name) ? depth + 1 : depth;
+
+    if (currentDepth > maxDepth) {
+      maxDepth = currentDepth;
+    }
+
+    node.content.forEach(child => {
+      stack.push({ node: child, depth: currentDepth });
+    });
+  }
+
+  return maxDepth;
+};
+
+const MaxListDepthPlugin = Extension.create({
+  name: 'maxListDepth',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('maxListDepth'),
+        filterTransaction: transaction => {
+          if (!transaction.docChanged) return true;
+          const maxDepth = getMaxListDepth(transaction.doc);
+          return maxDepth <= MAX_LIST_DEPTH;
+        },
+      }),
+    ];
+  },
+});
 
 export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
   (
@@ -313,12 +354,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           },
           bulletList: {
             HTMLAttributes: {
-              class: 'list-disc pl-6 my-2',
+              class: 'pl-6 my-2',
             },
           },
           orderedList: {
             HTMLAttributes: {
-              class: 'list-decimal pl-6 my-2',
+              class: 'pl-6 my-2',
             },
           },
           listItem: {
@@ -332,6 +373,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             },
           },
         }),
+        MaxListDepthPlugin,
         InlineEmoji,
         ColonEmojiExtension.configure({
           getCustomEmojis: () => customEmojisRef.current || [],
