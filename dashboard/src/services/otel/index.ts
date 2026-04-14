@@ -28,7 +28,17 @@ export { loadingAnimationDuration, dataLoadDuration } from './loadingMetrics';
 
 export { askAIOpenedTotal } from './xyneAIMetrics';
 
-export { trackAskAIOpened } from './xyneAIMetrics';
+export {
+  trackAskAIOpened,
+  trackWebSearchQuery,
+  trackCitationsGenerated,
+  trackCitationClicked,
+  trackDeepResearchQuery,
+  trackCanvasModeQuery,
+  trackAttachmentsAdded,
+} from './xyneAIMetrics';
+
+export { trackNudgeActed, trackNudgeDismissed } from './nudgeMetrics';
 
 export function safeRecordMetric(fn: () => void): void {
   try {

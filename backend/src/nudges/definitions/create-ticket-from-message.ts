@@ -27,7 +27,6 @@ import { isEligibleMessage, buildMessageNudgeContext } from './helpers';
 
 const CREATE_TICKET_PROMPT_NAME = 'nudge_create_ticket_from_message';
 const CREATE_TICKET_PROMPT_LABEL = 'production';
-const DEFAULT_CREATE_TICKET_MODEL = 'glm-flash-experimental';
 
 type CreateTicketNudgeLLMContext = {
   messageId: string;
@@ -83,6 +82,7 @@ async function resolveCreateTicketPrompt(): Promise<string> {
 async function runCreateTicketNudgeExtraction(
   input: CreateTicketNudgeLLMInput,
   context: CreateTicketNudgeLLMContext,
+  modelName: string,
 ): Promise<ProactiveNudgeOutputLenient> {
   const systemPrompt = await resolveCreateTicketPrompt();
   const agent: Agent<CreateTicketNudgeLLMContext, ProactiveNudgeOutputLenient> = {
@@ -105,7 +105,7 @@ async function runCreateTicketNudgeExtraction(
     agentRegistry: new Map([['CreateTicketFromMessageNudgeAgent', agent]]),
     modelProvider: provider as RunConfig<CreateTicketNudgeLLMContext>['modelProvider'],
     maxTurns: 2,
-    modelOverride: DEFAULT_CREATE_TICKET_MODEL,
+    modelOverride: modelName,
     onEvent: createAgentEventLogger('CreateTicketNudge', 'LITELLM_API_KEY'),
   };
 
@@ -150,7 +150,8 @@ export const createTicketFromMessage: NudgeDefinition<
   direction: { from: 'MESSAGE', to: 'TICKET' },
 
   async buildContext(payload, activityContext, runtime) {
-    return buildMessageNudgeContext(payload, activityContext, runtime);
+    const base = await buildMessageNudgeContext(payload, activityContext, runtime);
+    return { ...base, modelName: runtime.agentsConfig?.nudgeCreateTicketModelName };
   },
 
   async evaluate(
@@ -197,7 +198,7 @@ export const createTicketFromMessage: NudgeDefinition<
       messageId: context.message.messageId,
       channelId: context.message.channelId,
       projectId: context.message.projectId,
-    });
+    }, context.modelName ?? 'glm-flash-experimental');
 
     const createTicketNudges = (output.nudges ?? []).filter(
       (nudge) => nudge.type === 'CREATE_TICKET',

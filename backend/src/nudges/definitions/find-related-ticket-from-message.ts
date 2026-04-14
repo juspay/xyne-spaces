@@ -32,7 +32,6 @@ const prisma = DatabaseClient.getInstance();
 const VESPA_CANDIDATE_LIMIT = 10;
 const RELATED_TICKET_PROMPT_NAME = 'nudge_find_related_ticket_from_message';
 const RELATED_TICKET_PROMPT_LABEL = 'production';
-const RELATED_TICKET_MODEL = 'glm-flash-experimental';
 
 // --- Output schema for the agent's final answer ---
 
@@ -212,7 +211,7 @@ async function runRelatedTicketAgent(
     agentRegistry: new Map([['FindRelatedTicketAgent', agent]]),
     modelProvider: provider as RunConfig<NudgeToolContext>['modelProvider'],
     maxTurns: 6,
-    modelOverride: RELATED_TICKET_MODEL,
+    modelOverride: context.modelName ?? 'glm-flash-experimental',
     onEvent: createAgentEventLogger('FindRelatedTicketNudge', 'LITELLM_API_KEY'),
   };
 
@@ -285,7 +284,8 @@ export const findRelatedTicketFromMessage: NudgeDefinition<
   direction: { from: 'MESSAGE', to: 'TICKET' },
 
   async buildContext(payload, activityContext, runtime) {
-    return buildMessageNudgeContext(payload, activityContext, runtime);
+    const base = await buildMessageNudgeContext(payload, activityContext, runtime);
+    return { ...base, modelName: runtime.agentsConfig?.nudgeRelatedTicketModelName };
   },
 
   async evaluate(

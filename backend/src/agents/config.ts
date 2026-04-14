@@ -36,6 +36,11 @@ const DEFAULT_TITLE_GENERATOR_MODEL = 'glm-flash-experimental';
 const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash-experimental';
 const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
+
+// Nudge agents defaults
+const DEFAULT_NUDGE_CREATE_TICKET_MODEL = 'glm-flash-experimental';
+const DEFAULT_NUDGE_RELATED_TICKET_MODEL = 'glm-flash-experimental';
+const DEFAULT_NUDGE_RELATED_MESSAGE_MODEL = 'glm-flash-experimental';
 // ============================================================================
 // CAC Keys
 // ============================================================================
@@ -52,6 +57,9 @@ const CAC_KEYS = {
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   summariserModel: 'summariser_model_name',
+  nudgeCreateTicketModel: 'nudge_create_ticket_model_name',
+  nudgeRelatedTicketModel: 'nudge_related_ticket_model_name',
+  nudgeRelatedMessageModel: 'nudge_related_message_model_name',
 } as const;
 
 // ============================================================================
@@ -76,6 +84,11 @@ export class AgentsConfig {
   public readonly releaseNotesGeneratorModelName: string;
   public readonly summariserModelName: string;
 
+  // Nudge agents config
+  public readonly nudgeCreateTicketModelName: string;
+  public readonly nudgeRelatedTicketModelName: string;
+  public readonly nudgeRelatedMessageModelName: string;
+
   private constructor(
     xyneAiTracingEnabled: boolean,
     xyneAiMaskingEnabled: boolean,
@@ -85,7 +98,10 @@ export class AgentsConfig {
     titleGeneratorModelName: string,
     ticketBoardModelName: string,
     releaseNotesGeneratorModelName: string,
-    summariserModelName: string
+    summariserModelName: string,
+    nudgeCreateTicketModelName: string,
+    nudgeRelatedTicketModelName: string,
+    nudgeRelatedMessageModelName: string,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -96,6 +112,9 @@ export class AgentsConfig {
     this.ticketBoardModelName = ticketBoardModelName;
     this.releaseNotesGeneratorModelName = releaseNotesGeneratorModelName;
     this.summariserModelName = summariserModelName;
+    this.nudgeCreateTicketModelName = nudgeCreateTicketModelName;
+    this.nudgeRelatedTicketModelName = nudgeRelatedTicketModelName;
+    this.nudgeRelatedMessageModelName = nudgeRelatedMessageModelName;
   }
 
   /**
@@ -142,6 +161,11 @@ export class AgentsConfig {
       const ticketBoardModelName = getValue<string>(CAC_KEYS.ticketBoardModel, DEFAULT_TICKET_BOARD_MODEL);
       const releaseNotesGeneratorModelName = getValue<string>(CAC_KEYS.releaseNotesGeneratorModel, DEFAULT_RELEASE_NOTES_GENERATOR_MODEL);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
+
+      // Extract nudge agents values
+      const nudgeCreateTicketModelName = getValue<string>(CAC_KEYS.nudgeCreateTicketModel, DEFAULT_NUDGE_CREATE_TICKET_MODEL);
+      const nudgeRelatedTicketModelName = getValue<string>(CAC_KEYS.nudgeRelatedTicketModel, DEFAULT_NUDGE_RELATED_TICKET_MODEL);
+      const nudgeRelatedMessageModelName = getValue<string>(CAC_KEYS.nudgeRelatedMessageModel, DEFAULT_NUDGE_RELATED_MESSAGE_MODEL);
 
       // Check which values were actually fetched from CAC vs using defaults
       const fromCAC: string[] = [];
@@ -203,7 +227,25 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.summariserModel);
       }
 
-      const totalKeys = 9;
+      if (CAC_KEYS.nudgeCreateTicketModel in allConfigs) {
+        fromCAC.push(CAC_KEYS.nudgeCreateTicketModel);
+      } else {
+        usingDefaults.push(CAC_KEYS.nudgeCreateTicketModel);
+      }
+
+      if (CAC_KEYS.nudgeRelatedTicketModel in allConfigs) {
+        fromCAC.push(CAC_KEYS.nudgeRelatedTicketModel);
+      } else {
+        usingDefaults.push(CAC_KEYS.nudgeRelatedTicketModel);
+      }
+
+      if (CAC_KEYS.nudgeRelatedMessageModel in allConfigs) {
+        fromCAC.push(CAC_KEYS.nudgeRelatedMessageModel);
+      } else {
+        usingDefaults.push(CAC_KEYS.nudgeRelatedMessageModel);
+      }
+
+      const totalKeys = 12;
       if (usingDefaults.length === totalKeys) {
         logger.debug('[Agents Config] All configs using DEFAULTS (not configured in CAC)', {
           xyneAiTracingEnabled: `${xyneAiTracingEnabled} (default)`,
@@ -271,7 +313,10 @@ export class AgentsConfig {
         titleGeneratorModelName,
         ticketBoardModelName,
         releaseNotesGeneratorModelName,
-        summariserModelName
+        summariserModelName,
+        nudgeCreateTicketModelName,
+        nudgeRelatedTicketModelName,
+        nudgeRelatedMessageModelName,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -285,7 +330,10 @@ export class AgentsConfig {
         DEFAULT_TITLE_GENERATOR_MODEL,
         DEFAULT_TICKET_BOARD_MODEL,
         DEFAULT_RELEASE_NOTES_GENERATOR_MODEL,
-        DEFAULT_SUMMARISER_MODEL
+        DEFAULT_SUMMARISER_MODEL,
+        DEFAULT_NUDGE_CREATE_TICKET_MODEL,
+        DEFAULT_NUDGE_RELATED_TICKET_MODEL,
+        DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,
       );
     }
   }
@@ -300,7 +348,10 @@ export class AgentsConfig {
       DEFAULT_TITLE_GENERATOR_MODEL,
       DEFAULT_TICKET_BOARD_MODEL,
       DEFAULT_RELEASE_NOTES_GENERATOR_MODEL,
-      DEFAULT_SUMMARISER_MODEL
+      DEFAULT_SUMMARISER_MODEL,
+      DEFAULT_NUDGE_CREATE_TICKET_MODEL,
+      DEFAULT_NUDGE_RELATED_TICKET_MODEL,
+      DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,
     );
   }
 }

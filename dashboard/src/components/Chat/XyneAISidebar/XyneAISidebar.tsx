@@ -17,6 +17,13 @@ import {
 } from '../../../utils/xyneAIStorage';
 import type { Message, SummarizerCitation, MessageAttachment, UserTag } from './utils/XyneAITypes';
 import { buildCitationUrl } from './utils/citationUrlBuilder';
+import {
+  trackCitationClicked,
+  trackWebSearchQuery,
+  trackDeepResearchQuery,
+  trackCanvasModeQuery,
+  trackAttachmentsAdded,
+} from '../../../services/otel/xyneAIMetrics';
 import { XyneAISuggestions } from './components/XyneAISuggestions';
 import { XyneAIInputBox, type Attachment } from './components/XyneAIInputBox';
 import {
@@ -821,6 +828,8 @@ const XyneAISidebar = ({
 
       if (!convId || !citationChannelId) return;
 
+      trackCitationClicked('genius');
+
       // Navigate - XyneAI will stay open via xstate machine
       if (msgId) {
         void navigate(
@@ -848,6 +857,8 @@ const XyneAISidebar = ({
         console.warn('[XyneAI] Cannot build URL for citation:', citation);
         return;
       }
+
+      trackCitationClicked(citation.isExternal ? 'summarizer_external' : 'summarizer_internal');
 
       // Use explicit isExternal flag to determine routing behavior
       if (citation.isExternal) {
@@ -992,6 +1003,12 @@ const XyneAISidebar = ({
     // The user message will show original query + selectionContexts as visual cards
 
     const currentAttachments = attachments;
+
+    // Track submission-time metrics
+    if (webSearchEnabled) trackWebSearchQuery();
+    if (deepResearchEnabled) trackDeepResearchQuery();
+    if (createCanvasEnabled) trackCanvasModeQuery();
+    if (currentAttachments.length > 0) trackAttachmentsAdded(currentAttachments.length);
 
     // Convert attachments to MessageAttachment format for display
     const messageAttachments: MessageAttachment[] = currentAttachments.map(att => ({

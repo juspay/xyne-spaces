@@ -6,6 +6,7 @@ import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 import { TicketPriority, NudgeState, NudgeKind, type SurfaceNudge } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
+import { trackNudgeActed, trackNudgeDismissed } from '../../../services/otel/nudgeMetrics';
 import { SurfaceNudgeResult } from './SurfaceNudgeResult';
 import { useChannel } from '../../../hooks/useChannels';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -225,6 +226,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
 
     if (actionsPayload.onSuccess !== 'none' || actionsPayload.createSurfaceLink) {
       setIsActing(true);
+      trackNudgeActed(nudge.nudgeKind);
       const nextActionResult: ActionResult = {
         actionType: 'OPEN_TICKET',
         result: {
@@ -274,6 +276,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
 
     if (actionsPayload.onSuccess !== 'none' || actionsPayload.createSurfaceLink) {
       setIsActing(true);
+      trackNudgeActed(nudge.nudgeKind);
       const nextActionResult: ActionResult = {
         actionType: 'OPEN_RELATED_MESSAGE',
         result: {
@@ -304,6 +307,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
   const handleDismiss = (): void => {
     if (isActing) return;
     setIsActing(true);
+    trackNudgeDismissed(nudge.nudgeKind);
     void zero.mutate(
       mutators.nudges.dismiss({
         nudgeId: nudge.id,
@@ -453,6 +457,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
           sourceConversation={sourceConversation}
           onTicketCreated={ticket => {
             setIsEditModalOpen(false);
+            trackNudgeActed(nudge.nudgeKind);
             const nextActionResult: ActionResult = {
               actionType: 'CREATE_TICKET_FROM_MESSAGE',
               result: {

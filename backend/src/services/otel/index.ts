@@ -5,3 +5,4 @@ export * from './httpMetrics';
 export * from './dbMetrics';
 export * from './notificationMetrics';
 export * from './aiMetrics';
+export * from './nudgeMetrics';

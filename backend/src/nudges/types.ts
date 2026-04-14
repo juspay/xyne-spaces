@@ -1,5 +1,6 @@
 import type { NudgeKind, SurfaceAreaType } from '@prisma/client';
 import type { ActivityWithRelatedData } from '@/services/userActivityService';
+import type { AgentsConfig } from '@/agents/config';
 
 export type NudgeMode = 'explicit' | 'implicit';
 export type NudgeActionMode = 'read' | 'write';
@@ -99,6 +100,7 @@ export interface NudgeBuildContextRuntime {
   event: ActivityEventNudgePayload;
   enrichedActivity: ActivityWithRelatedData;
   messagePayload?: MessageNudgePayload;
+  agentsConfig?: AgentsConfig;
 }
 
 export interface NudgeEvaluationContext {
@@ -110,6 +112,7 @@ export interface NudgeEvaluationContext {
     sourceType?: SurfaceAreaType;
   };
   activityContext: ActivityContextOutput;
+  modelName?: string;
   data?: Record<string, unknown>;
 }
 

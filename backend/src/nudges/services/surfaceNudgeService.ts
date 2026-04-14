@@ -2,6 +2,7 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import type { Prisma, NudgeKind, SurfaceAreaType } from '@prisma/client';
 import { rebuildSurfaceNudgeAudienceCounts } from './surfaceNudgeAudienceCountService';
+import { getNudgeCreatedTotal } from '@/services/otel';
 import type { NudgeCandidate } from '../types';
 
 interface PersistCandidatesInput {
@@ -66,6 +67,12 @@ class NudgeService {
           sourceType,
         });
       });
+
+      try {
+        getNudgeCreatedTotal().add(candidates.length, { nudge_kind: nudgeKind });
+      } catch (_metricsError) {
+        // non-blocking
+      }
 
       logger.info('[NudgeService] Persisted nudge candidates', {
         sourceId,

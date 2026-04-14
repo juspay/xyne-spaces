@@ -21,7 +21,7 @@ import { createOnEventHandler, buildProvidedContextCitationRefs, finalizeTrace }
 import { createAgentRunner } from './agent.js';
 import { AgentsConfig } from '../config.js';
 import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
-import { getAskAIAttachmentUsedTotal } from '@/services/otel';
+import { getAskAIToolUsedTotal } from '@/services/otel';
 
 import type {
   XyneAIRequest,
@@ -414,14 +414,6 @@ const {
   try {
     jafAttachments = convertAttachmentsToJAF(allAttachments.length > 0 ? allAttachments : undefined);
     
-    // Track attachment usage if any attachments were successfully converted
-    if (jafAttachments.length > 0) {
-      try {
-        getAskAIAttachmentUsedTotal().add(1);
-      } catch (metricsError) {
-        logger.error('[XyneAI] Error recording attachment metrics:', metricsError);
-      }
-    }
   } catch (error) {
     logger.error(`[XyneAI] [${session.sessionId}] Failed to convert attachments:`, error);
     yield {
@@ -614,6 +606,13 @@ const {
         }
 
         case 'tool_call_end':
+          // Track tool usage metric
+          try {
+            getAskAIToolUsedTotal().add(1, { tool_name: event.data.toolName });
+          } catch (_metricsError) {
+            // non-blocking
+          }
+
           // Handle stream provider events
           if (streamProvider) {
             const toolEvents = streamProvider.getEvents(session.sessionId);
