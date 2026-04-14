@@ -7,7 +7,7 @@
  *   const composed = composeEventHandlers(agentLogger, existingOnEvent);
  */
 
-import type { TraceEvent } from '@xynehq/jaf';
+import type { TraceEvent } from '@juspay-jaf/jaf';
 import { logger } from '../utils/logger.js';
 
 const MAX_OUTPUT_LOG_LENGTH = 1000;

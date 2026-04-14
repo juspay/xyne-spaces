@@ -176,6 +176,7 @@ export const PROMPT_NAMES = {
   CLUSTER_THEME_SINGLE: 'cluster_theme_single',
   META_THEME_SINGLE: 'meta_theme_single',
   NUDGE_EXTRACTOR: 'nudge_extractor',
+  LIST_USER_CHANNELS: 'list_user_channels',
 } as const;
 
 export type PromptName = typeof PROMPT_NAMES[keyof typeof PROMPT_NAMES];
