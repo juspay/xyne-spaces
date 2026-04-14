@@ -25,8 +25,11 @@ export interface ElectronAPI {
     callback: (data: { callId: string; action: 'accept' | 'reject' }) => void,
   ) => () => void;
   onNavigateTo: (callback: (url: string) => void) => () => void;
+  onBrowserNewTab: (callback: () => void) => () => void;
+  onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
   onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
+  onReloadActiveBrowserTab: (callback: () => void) => () => void;
   onOpenXyneAIWithContext: (
     callback: (data: {
       text: string;

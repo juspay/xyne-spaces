@@ -250,3 +250,42 @@ function initializeAskAI() {
     currentSelection = null;
   });
 }
+
+// Handle browser shortcuts inside the webview
+function setupBrowserShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
+    const modifierKey = isMac ? e.metaKey : e.ctrlKey;
+    
+    // Soft reload: Cmd/Ctrl+R
+    if (modifierKey && e.key.toLowerCase() === 'r' && !e.shiftKey) {
+      e.preventDefault();
+      window.location.reload();
+    }
+    
+    // Hard reload: Cmd/Ctrl+Shift+R
+    if (modifierKey && e.shiftKey && e.key.toLowerCase() === 'r') {
+      e.preventDefault();
+      window.location.reload(true);
+    }
+
+    // New tab: Cmd/Ctrl+T
+    if (modifierKey && e.key.toLowerCase() === 't') {
+      e.preventDefault();
+      ipcRenderer.sendToHost('webview-shortcut', 'new-tab');
+    }
+
+    // Find in page: Cmd/Ctrl+F
+    if (modifierKey && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      ipcRenderer.sendToHost('webview-shortcut', 'find-in-page');
+    }
+  });
+}
+
+// Also set up browser shortcuts
+if (document.readyState !== 'loading') {
+  setupBrowserShortcuts();
+} else {
+  document.addEventListener('DOMContentLoaded', setupBrowserShortcuts);
+}

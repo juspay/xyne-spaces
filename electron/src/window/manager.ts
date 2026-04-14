@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, dialog, Menu, MenuItem, app } from 'electron';
+import { BrowserWindow, shell, dialog, Menu, MenuItem, app, webContents } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
@@ -203,7 +203,20 @@ export async function createMainWindow(): Promise<BrowserWindow> {
       try {
         if (mainWindow) {
           isReloading = true;
-          await loadUrl(mainWindow, mainWindow.webContents.getURL());
+          
+          // Check if a webview is focused
+          const focusedWC = webContents.getFocusedWebContents();
+          const mainWCId = mainWindow.webContents.id;
+          
+          if (focusedWC && focusedWC.id !== mainWCId) {
+            // A webview is focused - reload it
+            log.info('[WindowManager] Reloading focused webview');
+            focusedWC.reload();
+          } else {
+            // Main window is focused - reload the dashboard app
+            log.info('[WindowManager] Reloading main window (dashboard)');
+            await loadApp(mainWindow);
+          }
         }
       } catch (error) {
         log.error('[WindowManager] Error during reload:', error);
