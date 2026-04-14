@@ -472,15 +472,13 @@ const {
     },
   };
 
-  const LITELLM_API_KEY = config.litellm.apiKey;
-
   // Determine which model to use based on attachments
   // Only use vision model for images; documents/files are converted to text by JAF
   const hasImageAttachment = allAttachments.some(att => att.mime_type?.startsWith('image/'));
 
   // Use model names from CAC config
   const modelName = hasImageAttachment ? cacConfig.xyneAiVisionModelName : cacConfig.xyneAiModelName;
-  const apiKey = LITELLM_API_KEY;
+  const apiKey = config.litellm.askAiApiKey;
 
   logger.info(`[XyneAI] [${session.sessionId}] Using model: ${modelName} (hasImageAttachment: ${hasImageAttachment}, tracingEnabled: ${cacConfig.xyneAiTracingEnabled}, maskingEnabled: ${cacConfig.xyneAiMaskingEnabled})`);
 

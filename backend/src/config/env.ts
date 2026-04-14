@@ -75,6 +75,7 @@ const envSchema = Joi.object({
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
+  ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
   ACTIVITY_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // LiteLLM config specifically for call features (transcript summary, PRD, detailed summary)
   CALL_LITELLM_API_KEY: Joi.string().allow('').default(''),
@@ -308,6 +309,7 @@ export const config = {
   litellm: {
     baseUrl: envVars.LITELLM_BASE_URL,
     apiKey: envVars.LITELLM_API_KEY,
+    askAiApiKey: envVars.ASK_AI_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
   },
   productInsights: {
     recluster: {
