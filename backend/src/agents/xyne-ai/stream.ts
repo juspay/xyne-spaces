@@ -17,7 +17,7 @@ import {
 } from './storage/index.js';
 
 import { getAndClearSessionMappings, appendEnhancedSessionMappings, type EnhancedCitationMappings, type StreamProvider, type StreamEventCallback } from './tools/index.js';
-import { createOnEventHandler, buildProvidedContextCitationRefs } from './langfuse/index.js';
+import { createOnEventHandler, buildProvidedContextCitationRefs, finalizeTrace } from './langfuse/index.js';
 import { createAgentRunner } from './agent.js';
 import { AgentsConfig } from '../config.js';
 import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
@@ -33,6 +33,8 @@ import type {
   Citation,
 } from './types.js';
 import { fetchProvidedContexts, type ProvidedContexts } from './utils/contextFetcher.js';
+import { getChannelInfo } from './utils/channelResolver.js';
+import { buildCitationUrl } from '@xyne/shared';
 
 type InMemoryStreamProvider = ReturnType<typeof Streaming.createInMemoryStreamProvider>;
 
@@ -195,6 +197,21 @@ async function parseStringOutput(
   } catch (e) {
     throw new Error(`Failed to parse output: ${e instanceof Error ? e.message : 'Unknown error'}`);
   }
+}
+
+// ============================================================================
+// Citation URL Builder (mirrors frontend citationUrlBuilder.ts)
+// ============================================================================
+
+function buildCitationUrlsForTrace(keyPoints: XyneAIOutput['keyPoints']): Record<string, string> {
+  const urls: Record<string, string> = {};
+  for (const kp of keyPoints) {
+    const { citation } = kp;
+    if (!citation?.prefixedRef) continue;
+    const url = buildCitationUrl(citation);
+    if (url) urls[citation.prefixedRef] = url;
+  }
+  return urls;
 }
 
 // ============================================================================
@@ -446,6 +463,66 @@ const {
     logger.error(`[XyneAI] [${session.sessionId}] Failed to fetch custom instruction:`, error);
   }
 
+  // Resolve channel names for readable trace context
+  let traceChannelNames: string[] = [];
+  try {
+    const { channelNames } = await getChannelInfo(channelIds);
+    traceChannelNames = channelNames;
+  } catch (e) {
+    logger.warn(`[XyneAI] [${session.sessionId}] Failed to fetch channel names for trace:`, e);
+  }
+
+  // Build complete request context for tracing
+  const agentRequestContext = {
+    // Channel and Thread Context — readable names for traces
+    channelNames: traceChannelNames,
+    conversationId,
+    source,
+
+    // Feature Flags
+    webSearchEnabled: request.webSearchEnabled,
+    deepResearchEnabled,
+    createCanvasEnabled,
+
+    // Research Context
+    researchContext,
+
+    // Canvas Context
+    canvasViewAccessId,
+    selectionContexts,
+
+    // Attachments — full data (base64 included) for traces
+    attachments: allAttachments.map(att => ({
+      mime_type: att.mime_type,
+      filename: att.filename,
+      data: att.data,
+    })),
+    messageAttachmentIds: messageAttachmentIds || [],
+
+    // Provided Contexts — readable summaries extracted from already-fetched data
+    canvasSummaries: (providedContexts?.canvases ?? []).map(c => ({
+      id: c.id,
+      title: c.title || c.id,
+    })),
+    ticketSummaries: (providedContexts?.tickets ?? []).map(t => ({
+      id: t.id,
+      xyneId: t.xyneId || t.id,
+      title: t.title || t.id,
+    })),
+    callSummaries: (providedContexts?.calls ?? []).map(c => ({
+      id: c.id,
+      title: c.title || c.id,
+    })),
+
+    // Message/Branching Info
+    parentMessageId,
+    isRegenerate,
+
+    // Model and Prompt Info
+    modelName: cacConfig.xyneAiModelName,
+    agentPromptName: request.agentPromptName,
+  };
+
   const agentContext = {
     channelIds,
     conversationId,
@@ -470,6 +547,7 @@ const {
       channelNameToId: new Map<string, string>(),
       userNameToId: new Map<string, string>(),
     },
+    agentRequestContext,
   };
 
   // Determine which model to use based on attachments
@@ -586,22 +664,27 @@ const {
           if (event.data.outcome.status === 'completed') {
             const rawOutput = event.data.outcome.output;
             const mappings = await getAndClearSessionMappings(session.sessionId);
-            
+
             // Parse the final LLM output
             const responseText = typeof rawOutput === 'string' ? rawOutput : accumulatedContent;
-            
+
             let parsedOutput: XyneAIOutput;
-            
+            let citationUrls: Record<string, string> = {};
+
             try {
               parsedOutput = await parseStringOutput(responseText, mappings, channelIds[0]);
+              citationUrls = buildCitationUrlsForTrace(parsedOutput.keyPoints);
             } catch (parseError) {
               logger.warn(`[XyneAI] [${session.sessionId}] Failed to parse output, using fallback`);
               parsedOutput = {
                 summary: responseText,
                 keyPoints: [],
               };
+            } finally {
+              // Finalize the OTEL span with citation URLs (no-op if tracing disabled)
+              if (currentTraceId) finalizeTrace(currentTraceId, citationUrls);
             }
-            
+
             // Store clean assistant message in DB, chaining to previous step
             const result = await sessionStore.addAssistantMessage(session.sessionId, parsedOutput, currentTraceId, lastStepId);
             if (!result) {
@@ -621,6 +704,9 @@ const {
             const errDetail = (event.data.outcome.error as any).detail || (event.data.outcome.error as any).reason || '';
             logger.error(`[XyneAI] [${session.sessionId}] Agent run failed:`, event.data.outcome.error);
 
+            // Finalize span even on error
+            if (currentTraceId) finalizeTrace(currentTraceId, {});
+
             // On error, save what we have as fallback
             if (accumulatedContent) {
               const fallbackOutput: XyneAIOutput = {
@@ -636,7 +722,10 @@ const {
     }
   } catch (error) {
     logger.error(`[XyneAI] [${session.sessionId}] Stream error:`, error);
-    
+
+    // Ensure the OTEL span is finalized even if an exception cut the run short
+    if (currentTraceId) finalizeTrace(currentTraceId, {});
+
     // Save whatever we have as fallback even on exception
     if (accumulatedContent) {
       const fallbackOutput: XyneAIOutput = {
@@ -645,7 +734,7 @@ const {
       };
       await sessionStore.addAssistantMessage(session.sessionId, fallbackOutput, currentTraceId, lastStepId);
     }
-    
+
     yield { type: 'error', error: 'Unexpected error occurred' };
   }
   

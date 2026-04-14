@@ -3,7 +3,7 @@
  */
 
 import {
-  createCompositeTraceCollector,
+  OpenTelemetryTraceCollector,
   type TraceCollector,
   type TraceEvent,
   type Message,
@@ -18,14 +18,54 @@ import type { AgentsConfig } from '../../config.js';
 const MASKED_OUTPUT_PLACEHOLDER = '[MASKED - Agent Output]';
 const MASKED_TOOL_OUTPUT_PLACEHOLDER = '[MASKED - Tool Output]';
 
+let otelCollector: OpenTelemetryTraceCollector | null = null;
 let traceCollector: TraceCollector | null = null;
 let isInitialized = false;
 
+// Holds extra span attributes keyed by JAF traceId, pending until OTEL creates the span
+const pendingSpanAttributes = new Map<string, Record<string, unknown>>();
+
+// Holds masked run_end events until citation URLs are computed, then finalizes the span
+const pendingRunEnd = new Map<string, TraceEvent>();
+
+function getTraceIdFromEvent(event: TraceEvent): string | null {
+  const data = (event as unknown as { data?: Record<string, unknown> }).data;
+  return (data?.traceId || data?.runId || data?.trace_id || data?.run_id) as string | null;
+}
+
 function getTraceCollector(): TraceCollector {
   if (!traceCollector) {
-    traceCollector = createCompositeTraceCollector();
+    otelCollector = new OpenTelemetryTraceCollector();
+
+    // Wrap the OTEL collector so that after it processes run_start (creating the
+    // root span), we immediately set our enriched request-context attributes on it.
+    const otel = otelCollector;
+    traceCollector = {
+      collect(event: TraceEvent) {
+        otel.collect(event);
+
+        if (event.type === 'run_start') {
+          const traceId = getTraceIdFromEvent(event);
+          if (traceId) {
+            const attrs = pendingSpanAttributes.get(String(traceId));
+            if (attrs) {
+              // traceSpans is private in TS but exists at runtime
+              const span = (otel as unknown as { traceSpans: Map<string, { setAttributes(a: Record<string, unknown>): void }> })
+                .traceSpans.get(String(traceId));
+              if (span?.setAttributes) {
+                span.setAttributes(attrs);
+              }
+              pendingSpanAttributes.delete(String(traceId));
+            }
+          }
+        }
+      },
+      getTrace: (id) => otel.getTrace(id),
+      getAllTraces: () => otel.getAllTraces(),
+      clear: (id) => otel.clear(id),
+    };
   }
-  
+
   return traceCollector;
 }
 
@@ -135,7 +175,7 @@ export function createOnEventHandler(agentsConfig: AgentsConfig): (event: TraceE
   
   return (event: TraceEvent) => {
     try {
-      handleEventWithEnrichment(event, collector, maskMessage, maskMessages, maskToolOutput, maskOutcomeOutput);
+      handleEventWithEnrichment(event, collector, agentsConfig.xyneAiMaskingEnabled, maskMessage, maskMessages, maskToolOutput, maskOutcomeOutput);
     } catch (error) {
       logger.error('[Langfuse] Error handling event:', error);
     }
@@ -157,6 +197,7 @@ const SKIP_EVENTS = new Set([
 function handleEventWithEnrichment(
   event: TraceEvent,
   collector: TraceCollector,
+  maskingEnabled: boolean,
   maskMessage: (message: Message) => { role: 'user' | 'assistant' | 'tool'; content: string },
   maskMessages: (messages: readonly Message[]) => readonly { role: 'user' | 'assistant' | 'tool'; content: string }[],
   maskToolOutput: (result: unknown) => string,
@@ -178,6 +219,64 @@ function handleEventWithEnrichment(
       const userName = userInfo?.userName;
       
       const agentName = context?.agentPromptName ?? 'ask-ai-agent';
+
+      // Extract rich request context metadata
+      const agentRequestContext = context?.agentRequestContext || {};
+
+      const attachments = (agentRequestContext.attachments || []) as Array<{ mime_type?: string; filename?: string; data?: string }>;
+      const canvasSummaries = (agentRequestContext.canvasSummaries || []) as Array<{ id: string; title: string }>;
+      const ticketSummaries = (agentRequestContext.ticketSummaries || []) as Array<{ id: string; xyneId: string; title: string }>;
+      const callSummaries = (agentRequestContext.callSummaries || []) as Array<{ id: string; title: string }>;
+
+      const enrichedMetadata = {
+        // Channel and Thread Context — channel names instead of raw IDs
+        channelNames: (agentRequestContext.channelNames || []) as string[],
+        channelCount: ((agentRequestContext.channelNames || []) as string[]).length,
+        conversationId: agentRequestContext.conversationId || null,
+        isThreadContext: !!agentRequestContext.conversationId,
+
+        // Source Info
+        source: agentRequestContext.source || null,
+
+        // Feature Flags
+        webSearchEnabled: agentRequestContext.webSearchEnabled || false,
+        deepResearchEnabled: agentRequestContext.deepResearchEnabled || false,
+        createCanvasEnabled: agentRequestContext.createCanvasEnabled || false,
+
+        // Research Context
+        researchContext: agentRequestContext.researchContext || null,
+
+        // Canvas Context
+        canvasViewAccessId: agentRequestContext.canvasViewAccessId || null,
+        selectionContextsCount: ((agentRequestContext.selectionContexts || []) as unknown[]).length,
+
+        // Attachments — mime types and base64 data (masked when masking is enabled)
+        attachmentsCount: attachments.length,
+        attachmentTypes: attachments.map(att => att.mime_type || 'unknown'),
+        attachmentData: JSON.stringify(maskingEnabled
+          ? attachments.map(att => ({ mime_type: att.mime_type, filename: att.filename, data: '[MASKED - Attachment Data]' }))
+          : attachments.map(att => ({ mime_type: att.mime_type, filename: att.filename, data: att.data || '' }))),
+        messageAttachmentIdsCount: ((agentRequestContext.messageAttachmentIds || []) as unknown[]).length,
+
+        // Provided Contexts — readable titles instead of raw IDs
+        canvasContext: canvasSummaries.map(c => c.title),
+        ticketContext: ticketSummaries.map(t => `${t.xyneId}: ${t.title}`),
+        callContext: callSummaries.map(c => c.title),
+        providedContextSummary: {
+          canvases: canvasSummaries.length,
+          tickets: ticketSummaries.length,
+          calls: callSummaries.length,
+        },
+
+        // Message/Branching Info
+        parentMessageId: agentRequestContext.parentMessageId || null,
+        isRegenerate: agentRequestContext.isRegenerate || false,
+
+        // Model and Prompt Info
+        modelName: agentRequestContext.modelName || null,
+        agentPromptName: agentRequestContext.agentPromptName || null,
+      };
+
       const maskedContext = {
         ...context,
         agentName,
@@ -188,11 +287,24 @@ function handleEventWithEnrichment(
           userName: userName,
           userEmail: userEmail,
         },
+        requestMetadata: enrichedMetadata,
       };
 
       // Mask the input messages
       const maskedMessages = messages ? maskMessages(messages) : undefined;
       const eventDataAny = event.data as Record<string, unknown>;
+
+      // Flatten metadata into top-level event attributes for Langfuse
+      const flattenedMetadata: Record<string, unknown> = {};
+      Object.entries(enrichedMetadata).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          flattenedMetadata[`request.${key}`] = value.join(',');
+        } else if (value !== null && typeof value === 'object') {
+          flattenedMetadata[`request.${key}`] = JSON.stringify(value);
+        } else {
+          flattenedMetadata[`request.${key}`] = value;
+        }
+      });
 
       const enrichedEvent = {
         type: 'run_start' as const,
@@ -206,10 +318,17 @@ function handleEventWithEnrichment(
           context: maskedContext,
         },
       };
-      
+
+      // Queue the extra attributes so the wrapper sets them on the span right
+      // after OpenTelemetryTraceCollector.collect() creates it for run_start.
+      const pendingKey = traceId || runId;
+      if (pendingKey) {
+        pendingSpanAttributes.set(String(pendingKey), flattenedMetadata);
+      }
+
       collector.collect(enrichedEvent);
       
-      logger.info(`[Langfuse] [${sessionId || 'no-session'}] Started trace. runId: ${runId}, langfuseTraceId: ${traceId}`);
+      logger.info(`[Langfuse] [${sessionId || 'no-session'}] Started trace. runId: ${runId}, langfuseTraceId: ${traceId}`, enrichedMetadata);
       break;
     }
     
@@ -272,7 +391,7 @@ function handleEventWithEnrichment(
       const { runId } = event.data;
       const outcome = event.data.outcome;
       const maskedOutcome = maskOutcomeOutput(outcome) as typeof outcome;
-      
+
       const maskedEvent = {
         type: 'run_end' as const,
         data: {
@@ -280,15 +399,55 @@ function handleEventWithEnrichment(
           outcome: maskedOutcome,
         },
       };
-      
-      collector.collect(maskedEvent);
-      
-      logger.info(`[Langfuse] Ended trace. runId: ${runId}, status: ${outcome.status}`);
+
+      // Delay ending the span until finalizeTrace() is called with citation URLs.
+      // stream.ts parses citations AFTER this event fires, so we hold the event here.
+      const pendingTraceId = (event.data as unknown as Record<string, unknown>).traceId
+        || (event.data as unknown as Record<string, unknown>).runId;
+      if (pendingTraceId) {
+        pendingRunEnd.set(String(pendingTraceId), maskedEvent as unknown as TraceEvent);
+      } else {
+        // No trace ID available — collect immediately as fallback
+        collector.collect(maskedEvent);
+      }
+
+      logger.info(`[Langfuse] Queued run_end for trace finalization. runId: ${runId}, status: ${outcome.status}`);
       break;
     }
     
     default:
       collector.collect(event);
       break;
+  }
+}
+
+/**
+ * Finalize a trace by setting citation URLs as span attributes, then ending the span.
+ * Must be called from stream.ts after the agent output has been parsed and citations resolved.
+ * If tracing is not configured this is a no-op.
+ *
+ * @param jafTraceId - JAF trace ID (same as currentTraceId in stream.ts)
+ * @param citationUrls - map of citation ref (e.g. "A1") → resolved URL
+ */
+export function finalizeTrace(jafTraceId: string, citationUrls: Record<string, string>): void {
+  const pendingEvent = pendingRunEnd.get(jafTraceId);
+  if (!pendingEvent) {
+    // Tracing disabled or already finalized
+    return;
+  }
+  pendingRunEnd.delete(jafTraceId);
+
+  // Set citation URLs on the span before JAF ends it
+  if (otelCollector && Object.keys(citationUrls).length > 0) {
+    const span = (otelCollector as unknown as { traceSpans: Map<string, { setAttributes(a: Record<string, unknown>): void }> })
+      .traceSpans.get(jafTraceId);
+    if (span?.setAttributes) {
+      span.setAttributes({ 'request.citationUrls': JSON.stringify(citationUrls) });
+    }
+  }
+
+  // End the span via the OTEL collector directly (bypasses our wrapper to avoid re-queuing)
+  if (otelCollector) {
+    otelCollector.collect(pendingEvent);
   }
 }

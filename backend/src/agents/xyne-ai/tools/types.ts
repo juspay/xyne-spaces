@@ -78,6 +78,46 @@ export interface XyneAIAgentContext {
   modelName?: string;  // LLM model name from CAC config (xyneAiModelName), used by tools that make internal LLM calls
   systemPrompt?: string;  // Direct system prompt override (bypasses Langfuse)
   agentPromptName?: string;  // Langfuse prompt name; defaults to XYNE_AI_SYSTEM
+  // Request context for tracing/metadata purposes
+  agentRequestContext?: AgentRequestContext;
+}
+
+/**
+ * Request context for tracing and metadata collection
+ * Contains all request parameters sent from the controller
+ */
+export interface AgentRequestContext {
+  // Channel and Thread Context
+  channelIds?: string[];
+  conversationId?: string;
+  
+  // Source Info
+  source?: 'thread' | 'channel';
+  
+  // Feature Flags
+  webSearchEnabled?: boolean;
+  deepResearchEnabled?: boolean;
+  createCanvasEnabled?: boolean;
+  
+  // Research Context
+  researchContext?: ResearchContext;
+  
+  // Canvas Context
+  canvasViewAccessId?: string;
+  selectionContexts?: SelectionContext[];
+  
+  // Attachments (data is omitted in tracing context)
+  attachments?: Array<{ mime_type: string; filename?: string; data?: string }>;
+  messageAttachmentIds?: string[];
+  
+  // Provided Contexts
+  canvasIds?: string[];
+  ticketIds?: string[];
+  callIds?: string[];
+  
+  // Message/Branching Info
+  parentMessageId?: string;
+  isRegenerate?: boolean;
 }
 
 // ============================================================================

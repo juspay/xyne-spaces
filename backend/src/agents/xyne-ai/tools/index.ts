@@ -18,6 +18,7 @@ export type {
   UserInfo,
   XyneAIAgentContext,
   ResearchContext,
+  AgentRequestContext,
   ToolMessage,
   ToolResult,
   ToolResultWithCapping,
