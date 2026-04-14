@@ -26,6 +26,7 @@ interface CalendarDayViewProps {
   onCallClick: (call: Call) => void;
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
+  onEditClick?: (call: Call) => void;
 }
 
 const TIME_GUTTER_WIDTH = 90; // slightly wider to fit the time pill
@@ -37,6 +38,7 @@ const CalendarDayView = ({
   onCallClick,
   onGotoMessage,
   onDownloadTranscript,
+  onEditClick,
 }: CalendarDayViewProps): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
@@ -253,6 +255,14 @@ const CalendarDayView = ({
                           setOpenCallId(null);
                           onDownloadTranscript(call);
                         }}
+                        onEditClick={
+                          onEditClick
+                            ? () => {
+                                setOpenCallId(null);
+                                onEditClick(call);
+                              }
+                            : undefined
+                        }
                       />
                     </PopoverPrimitive.Content>
                   </PopoverPrimitive.Portal>

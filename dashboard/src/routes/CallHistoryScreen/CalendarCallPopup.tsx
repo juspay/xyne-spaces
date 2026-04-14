@@ -8,6 +8,7 @@ import {
   Headphones,
   ChevronDown,
   Users,
+  Pencil,
 } from 'lucide-react';
 import { RRule } from 'rrule';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
@@ -27,6 +28,7 @@ interface CalendarCallPopupProps {
   onJoinCall?: () => void;
   onGotoMessage?: () => void;
   onDownloadTranscript?: () => void;
+  onEditClick?: (() => void) | undefined;
 }
 
 function formatPopupDate(startsAt: number | string): string {
@@ -120,6 +122,7 @@ const CalendarCallPopup = ({
   onJoinCall,
   onGotoMessage,
   onDownloadTranscript,
+  onEditClick,
 }: CalendarCallPopupProps): React.ReactElement => {
   const isEnded = call.status === CallStatus.ENDED;
   const isRecurring = !!call.recurringSeriesId;
@@ -256,6 +259,17 @@ const CalendarCallPopup = ({
           {call.title ?? 'Call'}
         </h3>
         <div className='flex items-center gap-1 shrink-0 -mt-0.5'>
+          {!isEnded && currentUserId === organizerUserId && onEditClick && (
+            <button
+              onClick={onEditClick}
+              title='Edit call'
+              data-track-category='Calls'
+              data-track-name='popup-edit-call'
+              className='text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer'
+            >
+              <Pencil className='size-4' />
+            </button>
+          )}
           {isEnded && onGotoMessage && (
             <button
               onClick={onGotoMessage}

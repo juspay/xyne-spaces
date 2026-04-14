@@ -19,6 +19,7 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { blobToBase64 } from '../../services/clients/fileFetchService';
 import { logger, Event as Logger } from '../../utils/logger';
 import { usePaginatedCalls } from '../../hooks/usePaginatedCalls';
+import { EditCallData } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 
 type CallHistoryResult = QueryResultType<typeof queries.userCallHistory>;
 type ScheduledCallsResult = QueryResultType<typeof queries.userScheduledCalls>;
@@ -63,9 +64,9 @@ interface UseCallHistoryReturn {
   handleDeleteConfirm: (cancelEntireSeries: boolean) => void;
   closeDeleteModal: () => void;
   /** Open the edit-call modal for a specific call */
-  handleEditClick: (call: ScheduledCall) => void;
+  handleEditClick: (call: Call) => void;
   editModalOpen: boolean;
-  editModalCall: ScheduledCall | null;
+  editModalCall: EditCallData | null;
   closeEditModal: () => void;
   /** Toggle for showing channel calls */
   showChannelCalls: boolean;
@@ -110,7 +111,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteModalCall, setDeleteModalCall] = useState<ScheduledCall | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editModalCall, setEditModalCall] = useState<ScheduledCall | null>(null);
+  const [editModalCall, setEditModalCall] = useState<EditCallData | null>(null);
   const navigate = useNavigate();
 
   const { isMobile } = usePlatform();
@@ -478,8 +479,17 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     setDeleteModalCall(null);
   };
 
-  const handleEditClick = (call: ScheduledCall): void => {
-    setEditModalCall(call);
+  const handleEditClick = (call: Call): void => {
+    setEditModalCall({
+      id: call.id,
+      externalId: call.externalId,
+      title: call.title ?? '',
+      startsAt: call.startsAt!,
+      endsAt: call.endsAt!,
+      participants: [...(call.participants ?? [])],
+      channelId: call.channelId,
+      recurringSeriesId: call.recurringSeriesId,
+    });
     setEditModalOpen(true);
   };
 
