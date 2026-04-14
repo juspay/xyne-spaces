@@ -1,3 +1,33 @@
+## [1.115.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.114.0...v1.115.0) (2026-04-14)
+
+
+### Features
+
+* Add unread DM counter to Direct Messages sidebar section header ([bb09c5b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bb09c5b5e754c853d611f5b2b7805d6642578d8e)), closes [#4954](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4954)
+* Edit feature for calls from calendar view ([9539933](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/95399332be488c6e1061ea1417341862a1cf6d1a)), closes [#4898](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4898)
+* Extend Manager/Team Lead control config ([e227b08](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e227b084eecdb6e6ece3e105885cce25916face1)), closes [#4946](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4946)
+* status-mapping ([9638105](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/96381056202bd0e74cc06e37358afa00f2221425)), closes [#4989](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4989)
+
+
+### Bug Fixes
+
+* add group Dm in phone ([b993c7b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b993c7b1f45b1a1a832bcf33ab57e50e551ccb34)), closes [#5009](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5009)
+* added context on PR workflow ([e81a599](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e81a599611c0e6a1e8a6659d24d7351123227b1a)), closes [#5018](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5018)
+* added shortcuts fixed reload and fixed new tab issue ([151734e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/151734e90d7924032cd74d0f69bab533cbb738e4))
+* Allow nullish system fingerprint in litellm provider ([aeedde4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aeedde4858b65711804650dfaab1ab2602b00b94)), closes [#4869](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4869)
+* Bot Migration Fix ([2d131e3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2d131e398d03c8e560f100d849f79c0340751f5b)), closes [#5038](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5038)
+* Channel/DM navigation from chat list, system messages UI, and DM list improvement ([207c021](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/207c0213870827267c750e5e22bef726d647f07a)), closes [#4917](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4917)
+* fixes ul and ol bullets nesting ([e2169fd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e2169fdc16496296abe403be078b5ffb274b1b98))
+* have last visited channel in activity back button ([4105679](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/41056791edb0426c679a613d6fefc2226265162e)), closes [#5021](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5021)
+* made the activity tab and its cards as per the figma designs ([a5ec086](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a5ec0864ff392763fdb0a62f3a41c64616d15b95)), closes [#4922](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4922)
+* moving common frontend code to shared ([0853cbc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0853cbceb87ea4f7b45c88237b65dea2bd40acde)), closes [#4567](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4567)
+* native app chat dark theme ([2eca731](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2eca73164b6b15c343ad9fdeadc0d1cdd6e8b5e3)), closes [#4974](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4974)
+* New LiteLLM Key for ASK AI ([e09c0ab](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e09c0abcb7db12c1bfa46615d623581b31d6bb0b)), closes [#4929](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4929)
+* overlappings date chips UIs ([f793367](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f7933671282aaa9b2ed7a3c3b940f946be886e34)), closes [#4942](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4942)
+* user group mutator fix ([e6781ba](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e6781babc3dfe035e945990ee0bf80a1214076a9)), closes [#4996](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4996)
+* xyne apps duplicate ticket ([9eaf10b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9eaf10bb0b2e8b6ce3abbc57b6f06f8aaf5f95a9)), closes [#4994](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4994)
+* XYNE-12274 XYNE-12262  added one tap spell cehck ([7670b65](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7670b65ca78ad8be1aadffeda310834631816d93)), closes [#4973](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4973)
+
 ## [1.114.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.113.0...v1.114.0) (2026-04-13)
 
 
