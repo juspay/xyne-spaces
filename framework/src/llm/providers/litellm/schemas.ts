@@ -158,7 +158,7 @@ export const LiteLLMResponseSchema = z.object({
   model: z.string(),
   choices: z.array(LiteLLMChoiceSchema),
   usage: LiteLLMUsageSchema.optional(),
-  system_fingerprint: z.string().optional()
+  system_fingerprint: z.string().nullish()
 });
 
 export type LiteLLMResponse = z.infer<typeof LiteLLMResponseSchema>;
