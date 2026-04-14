@@ -163,6 +163,11 @@ const ChatDirectory = ({
     };
   }, [channelData, allChannelsUserStatus, context.userID]);
 
+  // Sum unread counts across all DM channels
+  const dmCount = useMemo(() => {
+    return directMessages.reduce((total, channel) => total + (unreadCounts[channel.id] || 0), 0);
+  }, [directMessages, unreadCounts]);
+
   // Redirect to last visited channel or first available channel when at /chat/dir root
   useEffect(() => {
     if (isMobile) return; // Don't redirect on mobile
@@ -291,7 +296,10 @@ const ChatDirectory = ({
         </button>
         <button
           className={cn(
-            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
+            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
+            dmCount > 0
+              ? 'text-sidebar-primary-foreground'
+              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
           )}
           onClick={() => {
             void navigate('/chat/dm');
@@ -299,11 +307,22 @@ const ChatDirectory = ({
           data-testid='open-dms-button'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='OPEN_DMS'
+          data-track-metadata={JSON.stringify({ dmCount })}
         >
           <span className='size-5 flex items-center justify-center shrink-0'>
             <MessageCircle className='size-4' />
           </span>
           <span className='flex-1 min-w-0 text-left truncate block'>DMs</span>
+          {dmCount > 0 && (
+            <span className='size-5 flex items-center justify-center shrink-0'>
+              <Badge
+                variant='success'
+                className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-badge-accent text-sidebar-badge-accent-foreground'
+              >
+                {dmCount > 9 ? '9+' : dmCount}
+              </Badge>
+            </span>
+          )}
         </button>
         <button
           className={cn(
