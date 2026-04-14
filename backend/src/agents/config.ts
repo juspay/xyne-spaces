@@ -35,6 +35,7 @@ const DEFAULT_TICKET_DUPLICATE_MODEL = 'glm-flash-experimental';
 const DEFAULT_TITLE_GENERATOR_MODEL = 'glm-flash-experimental';
 const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash-experimental';
 const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
+const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 // ============================================================================
 // CAC Keys
 // ============================================================================
@@ -50,6 +51,7 @@ const CAC_KEYS = {
   titleGeneratorModel: 'title_generator_model_name',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
+  summariserModel: 'summariser_model_name',
 } as const;
 
 // ============================================================================
@@ -72,6 +74,7 @@ export class AgentsConfig {
   public readonly titleGeneratorModelName: string;
   public readonly ticketBoardModelName: string;
   public readonly releaseNotesGeneratorModelName: string;
+  public readonly summariserModelName: string;
 
   private constructor(
     xyneAiTracingEnabled: boolean,
@@ -81,7 +84,8 @@ export class AgentsConfig {
     ticketDuplicateModelName: string,
     titleGeneratorModelName: string,
     ticketBoardModelName: string,
-    releaseNotesGeneratorModelName: string
+    releaseNotesGeneratorModelName: string,
+    summariserModelName: string
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -91,6 +95,7 @@ export class AgentsConfig {
     this.titleGeneratorModelName = titleGeneratorModelName;
     this.ticketBoardModelName = ticketBoardModelName;
     this.releaseNotesGeneratorModelName = releaseNotesGeneratorModelName;
+    this.summariserModelName = summariserModelName;
   }
 
   /**
@@ -136,6 +141,7 @@ export class AgentsConfig {
       const titleGeneratorModelName = getValue<string>(CAC_KEYS.titleGeneratorModel, DEFAULT_TITLE_GENERATOR_MODEL);
       const ticketBoardModelName = getValue<string>(CAC_KEYS.ticketBoardModel, DEFAULT_TICKET_BOARD_MODEL);
       const releaseNotesGeneratorModelName = getValue<string>(CAC_KEYS.releaseNotesGeneratorModel, DEFAULT_RELEASE_NOTES_GENERATOR_MODEL);
+      const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
 
       // Check which values were actually fetched from CAC vs using defaults
       const fromCAC: string[] = [];
@@ -191,7 +197,13 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.releaseNotesGeneratorModel);
       }
 
-      const totalKeys = 8;
+      if (CAC_KEYS.summariserModel in allConfigs) {
+        fromCAC.push(CAC_KEYS.summariserModel);
+      } else {
+        usingDefaults.push(CAC_KEYS.summariserModel);
+      }
+
+      const totalKeys = 9;
       if (usingDefaults.length === totalKeys) {
         logger.debug('[Agents Config] All configs using DEFAULTS (not configured in CAC)', {
           xyneAiTracingEnabled: `${xyneAiTracingEnabled} (default)`,
@@ -202,6 +214,7 @@ export class AgentsConfig {
           titleGeneratorModelName: `${titleGeneratorModelName} (default)`,
           ticketBoardModelName: `${ticketBoardModelName} (default)`,
           releaseNotesGeneratorModelName: `${releaseNotesGeneratorModelName} (default)`,
+          summariserModelName: `${summariserModelName} (default)`,
         });
       } else if (usingDefaults.length > 0) {
         logger.info('[Agents Config] Fetched CAC config (some using defaults)', {
@@ -229,6 +242,9 @@ export class AgentsConfig {
           releaseNotesGeneratorModelName: usingDefaults.includes(CAC_KEYS.releaseNotesGeneratorModel)
             ? `${releaseNotesGeneratorModelName} (default)`
             : `${releaseNotesGeneratorModelName} (CAC)`,
+          summariserModelName: usingDefaults.includes(CAC_KEYS.summariserModel)
+            ? `${summariserModelName} (default)`
+            : `${summariserModelName} (CAC)`,
           fromCAC,
           usingDefaults,
         });
@@ -242,6 +258,7 @@ export class AgentsConfig {
           titleGeneratorModelName: `${titleGeneratorModelName} (CAC)`,
           ticketBoardModelName: `${ticketBoardModelName} (CAC)`,
           releaseNotesGeneratorModelName: `${releaseNotesGeneratorModelName} (CAC)`,
+          summariserModelName: `${summariserModelName} (CAC)`,
         });
       }
 
@@ -253,7 +270,8 @@ export class AgentsConfig {
         ticketDuplicateModelName,
         titleGeneratorModelName,
         ticketBoardModelName,
-        releaseNotesGeneratorModelName
+        releaseNotesGeneratorModelName,
+        summariserModelName
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -266,7 +284,8 @@ export class AgentsConfig {
         DEFAULT_TICKET_DUPLICATE_MODEL,
         DEFAULT_TITLE_GENERATOR_MODEL,
         DEFAULT_TICKET_BOARD_MODEL,
-        DEFAULT_RELEASE_NOTES_GENERATOR_MODEL
+        DEFAULT_RELEASE_NOTES_GENERATOR_MODEL,
+        DEFAULT_SUMMARISER_MODEL
       );
     }
   }
@@ -280,7 +299,8 @@ export class AgentsConfig {
       DEFAULT_TICKET_DUPLICATE_MODEL,
       DEFAULT_TITLE_GENERATOR_MODEL,
       DEFAULT_TICKET_BOARD_MODEL,
-      DEFAULT_RELEASE_NOTES_GENERATOR_MODEL
+      DEFAULT_RELEASE_NOTES_GENERATOR_MODEL,
+      DEFAULT_SUMMARISER_MODEL
     );
   }
 }

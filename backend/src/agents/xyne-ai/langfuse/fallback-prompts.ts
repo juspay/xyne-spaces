@@ -1387,6 +1387,19 @@ Examples:
 
 Note: Use web_search for quick lookups. Use deep_research only for thorough, multi-source synthesis tasks.`;
 
+/**
+ * Fallback system prompt for summarizing Cmd+K / vector search results
+ */
+const SUMMARIZE_SEARCH_MESSAGES_FALLBACK = `Output ONLY valid JSON. No markdown. No code fences. No explanation. Nothing before or after the JSON.
+
+REQUIRED FORMAT (use exactly these two keys):
+{"summary":"...","keypoints":"• ...\n• ..."}
+
+summary: 2-3 sentences covering what the search results say about the query.
+keypoints: newline-separated bullet points, each starting with •.
+
+Do not invent information.`;
+
 export const FALLBACK_PROMPTS: Record<string, string> = {
   'xyne-ai': XYNE_AI_SYSTEM_FALLBACK,
   'ask-ai-chat': XYNE_AI_CHAT_SYSTEM_FALLBACK,
@@ -1395,6 +1408,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'fetch_thread_messages': FETCH_THREAD_MESSAGES_FALLBACK,
   'fetch_link_content': FETCH_LINK_CONTENT_FALLBACK,
   'search_relevant_content': SEARCH_RELEVANT_CONTENT_FALLBACK,
+  'summarize_search_messages': SUMMARIZE_SEARCH_MESSAGES_FALLBACK,
   'genius_as_tool': GENIUS_FALLBACK,
   'xyne_rca': XYNE_RCA_FALLBACK,
   'field_value_discovery': FIELD_VALUE_DISCOVERY_FALLBACK,

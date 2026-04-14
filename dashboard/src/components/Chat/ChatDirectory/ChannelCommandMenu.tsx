@@ -12,7 +12,6 @@ import {
   Bot,
   ArrowRight,
   Send,
-  Sparkles,
   CornerDownLeft,
   MoveUp,
   MoveDown,
@@ -77,6 +76,7 @@ import {
   SearchMessageForSummary,
 } from '../../../services/summarizeService';
 import { SearchSummaryModal, SummaryModalState } from './SearchSummaryModal';
+import XyneAIStar from '../../icons/xyne-ai/XyneAIStar';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
 
@@ -1736,11 +1736,7 @@ const ChannelCommandMenu = ({
           {/* Summarize Button - icon only, left of Esc */}
           {searchText.trim() &&
             !isLoading &&
-            backendResults.some(r => r.type === 'conversation') &&
-            !(
-              (summaryState === 'loading' || summaryState === 'streaming') &&
-              summaryRawContent.length === 0
-            ) && (
+            backendResults.some(r => r.type === 'conversation') && (
               <button
                 onClick={handleSummarize}
                 className='p-1.5 rounded-md text-purple-600 hover:text-purple-700 hover:bg-purple-50 transition-colors flex-shrink-0 hidden sm:flex items-center justify-center'
@@ -1750,7 +1746,7 @@ const ChannelCommandMenu = ({
                 data-track-name='SUMMARIZE_SEARCH_RESULTS'
                 data-track-metadata={JSON.stringify({ searchQuery: searchText })}
               >
-                <Sparkles className='w-4 h-4' />
+                <XyneAIStar size={16} />
               </button>
             )}
           <kbd className='px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground border border-border rounded flex-shrink-0 hidden sm:block'>

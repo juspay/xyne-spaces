@@ -54,6 +54,7 @@ export interface SummarizerContext {
   readonly channelId: string;
   readonly summarizationType?: 'thread' | 'channel' | 'searchMessage' | 'recap';
   readonly searchQuery?: string; // Added for search message context
+  readonly modelName?: string; // CAC-resolved model override
 }
 
 /**
@@ -168,7 +169,7 @@ const SUMMARIZATION_TYPE_TO_PROMPT: Record<string, string> = {
   channel: PROMPT_NAMES.FETCH_CHANNEL_MESSAGES,
   thread: PROMPT_NAMES.FETCH_THREAD_MESSAGES,
   recap: PROMPT_NAMES.FETCH_CHANNEL_MESSAGES_RECAP,
-  searchMessage: PROMPT_NAMES.SEARCH_RELEVANT_CONTENT,
+  searchMessage: PROMPT_NAMES.SUMMARIZE_SEARCH_MESSAGES,
 };
 
 /**
@@ -352,8 +353,9 @@ export async function* summarizeStream(
 ): AsyncGenerator<StreamChunk, void, unknown> {
   const modelProvider = createModelProvider();
 
-  const idMapping = input.messageIdMapping;
-  const entityMapping = input.entityMapping;  // NEW: Extract entity mapping
+  const isSearchMessage = context.summarizationType === 'searchMessage';
+  const idMapping = isSearchMessage ? undefined : input.messageIdMapping;
+  const entityMapping = isSearchMessage ? undefined : input.entityMapping;
 
   // Calculate deterministic counts from input messages
   const { messageCount, participantCount } = calculateCounts(input.messages);
@@ -375,7 +377,7 @@ export async function* summarizeStream(
     agentRegistry,
     modelProvider: modelProvider as RunConfig<SummarizerContext>['modelProvider'],
     maxTurns: 3,
-    modelOverride: envConfig.summariserModel,
+    modelOverride: context.modelName,
   };
 
   // Create initial state - uses unified Summarizer agent
@@ -562,7 +564,7 @@ export async function summarizeThread(
     agentRegistry,
     modelProvider: modelProvider as RunConfig<SummarizerContext>['modelProvider'],
     maxTurns: 3,
-    modelOverride: envConfig.summariserModel,
+    modelOverride: context.modelName,
     onEvent,
   };
 

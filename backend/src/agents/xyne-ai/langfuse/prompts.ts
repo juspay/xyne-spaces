@@ -156,6 +156,7 @@ export const PROMPT_NAMES = {
   FETCH_THREAD_MESSAGES: 'fetch_thread_messages',
   FETCH_LINK_CONTENT: 'fetch_link_content',
   SEARCH_RELEVANT_CONTENT: 'search_relevant_content',
+  SUMMARIZE_SEARCH_MESSAGES: 'summarize_search_messages',
   SEARCH_MEETING_INSIGHTS: 'search_meeting_insights',
   GENIUS: 'genius_as_tool',
   XYNE_RCA: 'xyne_rca',

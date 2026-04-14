@@ -9,6 +9,7 @@ import {
   type SummaryOutput,
   type EnhancedEntityMetadata,
 } from '../agents/summariser';
+import { AgentsConfig } from '../agents/config';
 import { calculateUnreadCount } from '../utils/recapUtils';
 
 interface RecapSummary {
@@ -274,11 +275,13 @@ export class RecapGenerationService {
         entityMapping,
       };
 
+      const agentsConfig = await AgentsConfig.defaults();
       const context: SummarizerContext = {
         userId: 'recap-system',
         conversationId: '',
         channelId,
         summarizationType: 'recap',
+        modelName: agentsConfig.summariserModelName,
       };
 
       const output = await summarizeThread(input, context);
