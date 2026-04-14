@@ -13,6 +13,7 @@ import { channelService } from '../../../services/Chat/channelService';
 import { useMutation } from '@tanstack/react-query';
 import { v4 as uuidv4 } from 'uuid';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 
 interface AddPeopleFormProps {
   channelId: string;
@@ -36,11 +37,26 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   const navigate = useNavigate();
   const channel = useChannel(channelId);
   const [participantsData] = useCachedQuery(queries.channelParticipants({ channelId }));
+  const isDM = channel ? isOneToOneDMChannel(channel.scopeType) : false;
 
   const existingUserIds = useMemo(
     () => propExistingUserIds || (participantsData || []).map(p => p.userId),
     [propExistingUserIds, participantsData],
   );
+
+  const createGroupDmFromDmMutation = useMutation({
+    mutationFn: (participantIds: string[]) => channelService.createDm({ participantIds }),
+    onSuccess: response => {
+      onSuccess?.();
+      void navigate(`/chat/dir/${response.id}`);
+    },
+    onError: () => {
+      toast.error('Failed to create group DM', {
+        description: 'Could not create group DM. Please try again.',
+        duration: 3000,
+      });
+    },
+  });
 
   // Mutation for adding participants to GROUP_DM via backend API
   const addGroupDmParticipantsMutation = useMutation({
@@ -104,19 +120,21 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
 
     const userIds = selectedUsers.map(user => user.id);
 
-    // Check if this is a GROUP_DM channel
+    if (isDM) {
+      const allParticipantIds = [...existingUserIds, ...userIds];
+      createGroupDmFromDmMutation.mutate(allParticipantIds);
+      return;
+    }
+
     if (channel?.scopeType === ChannelScopeType.GROUP_DM) {
-      // Use API for GROUP_DM channels
       addGroupDmParticipantsMutation.mutate({
         channelId,
         userIds,
         includeHistory,
       });
     } else {
-      // Use existing Zero mutation for regular channels
       setIsSubmitting(true);
       try {
-        // Generate IDs for each user
         const participantIds = userIds.reduce(
           (acc, userId) => {
             acc[userId] = uuidv4();
@@ -160,6 +178,12 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
     onCancel?.();
   };
 
+  const isLoading =
+    isSubmitting ||
+    loading ||
+    createGroupDmFromDmMutation.isPending ||
+    addGroupDmParticipantsMutation.isPending;
+
   return (
     <div className='p-4 space-y-6'>
       <div>
@@ -200,7 +224,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
             variant='ghost'
             size='default'
             onClick={handleCancel}
-            disabled={isSubmitting || loading}
+            disabled={isLoading}
             data-track-category='ADD_CHAT_PARTICIPANTS'
             data-track-name='Cancel_Add_People'
             data-track-metadata={JSON.stringify({ selectedUsers: selectedUsers })}
@@ -212,8 +236,8 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           variant='default'
           size='default'
           onClick={() => void handleSubmit()}
-          disabled={selectedUsers.length === 0 || isSubmitting || loading}
-          loading={isSubmitting || loading}
+          disabled={selectedUsers.length === 0 || isLoading}
+          loading={isLoading}
           data-testid='add-people-submit'
           data-track-category='ADD_CHAT_PARTICIPANTS'
           data-track-name='ADD_PEOPLE_SUBMIT'
