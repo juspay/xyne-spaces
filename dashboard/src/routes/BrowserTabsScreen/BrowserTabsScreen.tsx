@@ -11,6 +11,8 @@ import {
   ExternalLink,
   Maximize2,
   Minimize2,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { isElectronApp } from '../../utils/electronApp';
@@ -29,8 +31,26 @@ interface WebviewTag extends HTMLElement {
   canGoForward(): boolean;
   getURL(): string;
   openDevTools(): void;
+  findInPage(
+    text: string,
+    options?: { findNext?: boolean; forward?: boolean; matchCase?: boolean },
+  ): number;
+  stopFindInPage(action: 'clearSelection' | 'keepSelection' | 'activateSelection'): void;
   addEventListener(event: string, callback: (e: Event) => void): void;
   removeEventListener(event: string, callback: (e: Event) => void): void;
+}
+
+// Find in page result
+interface FindInPageResult {
+  requestId: number;
+  activeMatchOrdinal: number;
+  matches: number;
+  selectionArea: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
 
 // Browser context data for Ask AI
@@ -59,6 +79,8 @@ interface WebviewTabProps {
   onUpdate: (tabId: string, patch: Partial<BrowserTab>) => void;
   onUrlUpdate: (tabId: string, url: string) => void;
   onNewWindow: (url: string) => void;
+  onFindResults?: (tabId: string, result: FindInPageResult) => void;
+  onShortcut?: (shortcut: string) => void;
   isPanel: boolean;
   popupsEnabled: boolean;
 }
@@ -70,8 +92,9 @@ function WebviewTab({
   onUpdate,
   onUrlUpdate,
   onNewWindow,
+  onFindResults,
+  onShortcut,
   isPanel,
-  popupsEnabled,
 }: WebviewTabProps) {
   const ref = useRef<WebviewTag>(null);
   const initialUrlRef = useRef(tab.url);
@@ -147,6 +170,26 @@ function WebviewTab({
       }
     };
 
+    // Handle find in page results
+    const onFoundInPage = (e: Event) => {
+      const detail = (e as CustomEvent<FindInPageResult>).detail;
+      onFindResults?.(tab.id, detail);
+    };
+
+    // Handle shortcuts from webview (Cmd+T, Cmd+F, etc.)
+    const onShortcutMessage = (e: Event) => {
+      const ipcEvent = e as WebviewIPCMessageEvent;
+      const channel = ipcEvent.channel;
+      const args = ipcEvent.args || [];
+
+      if (channel !== 'webview-shortcut') return;
+
+      const shortcut = args[0] as string;
+      if (shortcut) {
+        onShortcut?.(shortcut);
+      }
+    };
+
     wv.addEventListener('page-title-updated', onTitle);
     wv.addEventListener('page-favicon-updated', onFavicon);
     wv.addEventListener('did-navigate', onNav);
@@ -155,6 +198,8 @@ function WebviewTab({
     wv.addEventListener('did-stop-loading', onStop);
     wv.addEventListener('new-window', onNewWin);
     wv.addEventListener('ipc-message', onAskAI);
+    wv.addEventListener('ipc-message', onShortcutMessage);
+    wv.addEventListener('found-in-page', onFoundInPage);
 
     return () => {
       wv.removeEventListener('page-title-updated', onTitle);
@@ -165,6 +210,8 @@ function WebviewTab({
       wv.removeEventListener('did-stop-loading', onStop);
       wv.removeEventListener('new-window', onNewWin);
       wv.removeEventListener('ipc-message', onAskAI);
+      wv.removeEventListener('ipc-message', onShortcutMessage);
+      wv.removeEventListener('found-in-page', onFoundInPage);
       delete webviewRefs.current[tab.id];
     };
   }, [tab.id]);
@@ -173,6 +220,9 @@ function WebviewTab({
     ref,
     src: initialUrlRef.current,
     partition: 'persist:browser-tabs',
+    // Always allow popups so we can intercept them via new-window event
+    // Popup blocking is handled in the new-window event handler
+    allowpopups: '',
     // Don't set preload here - let will-attach-webview event in main.ts set it automatically
     // This avoids issues with file paths and ensures the correct absolute path is used
     style: {
@@ -186,13 +236,9 @@ function WebviewTab({
     },
   };
 
-  if (popupsEnabled) {
-    webviewProps['allowpopups'] = '';
-  }
-
   return (
     // eslint-disable-next-line react/no-unknown-property
-    <webview {...webviewProps} allowpopups={true} />
+    <webview {...webviewProps} />
   );
 }
 
@@ -206,7 +252,11 @@ export function BrowserTabsScreen({
   const browserSettings = useSelector(browserPanelActor, state => state.context.browserSettings);
   const [urlInput, setUrlInput] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isFindBarOpen, setIsFindBarOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [findResults, setFindResults] = useState({ activeMatch: 0, matches: 0 });
   const webviewRefs = useRef<Record<string, WebviewTag | null>>({});
+  const findInputRef = useRef<HTMLInputElement>(null);
   const { track } = useActivityTracking();
   const navigate = useNavigate();
 
@@ -272,6 +322,35 @@ export function BrowserTabsScreen({
       });
     }
   }, []);
+
+  useEffect(() => {
+    if (!isFindBarOpen || !activeTabId) return;
+
+    const timeoutId = setTimeout(() => {
+      const wv = webviewRefs.current[activeTabId];
+      if (!wv) return;
+
+      if (findQuery.trim()) {
+        wv.findInPage(findQuery, { findNext: false });
+      } else {
+        wv.stopFindInPage('clearSelection');
+        setFindResults({ activeMatch: 0, matches: 0 });
+      }
+    }, 300); // Wait 300ms after user stops typing
+
+    return () => clearTimeout(timeoutId);
+  }, [findQuery, isFindBarOpen, activeTabId]);
+
+  // Close find bar when switching tabs
+  useEffect(() => {
+    if (isFindBarOpen) {
+      setIsFindBarOpen(false);
+      setFindQuery('');
+      setFindResults({ activeMatch: 0, matches: 0 });
+      const wv = activeTabId ? webviewRefs.current[activeTabId] : null;
+      wv?.stopFindInPage('clearSelection');
+    }
+  }, [activeTabId]);
 
   // Update URL input when active tab changes
   useEffect(() => {
@@ -397,6 +476,40 @@ export function BrowserTabsScreen({
           url,
         },
       });
+    }
+  };
+
+  const handleFindNext = () => {
+    if (!activeTabId || !findQuery.trim()) return;
+    const wv = webviewRefs.current[activeTabId];
+    wv?.findInPage(findQuery, { findNext: true, forward: true });
+  };
+
+  const handleFindPrevious = () => {
+    if (!activeTabId || !findQuery.trim()) return;
+    const wv = webviewRefs.current[activeTabId];
+    wv?.findInPage(findQuery, { findNext: true, forward: false });
+  };
+
+  const handleCloseFindBar = () => {
+    setIsFindBarOpen(false);
+    setFindQuery('');
+    setFindResults({ activeMatch: 0, matches: 0 });
+    if (activeTabId) {
+      const wv = webviewRefs.current[activeTabId];
+      wv?.stopFindInPage('clearSelection');
+    }
+  };
+
+  const handleFindKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      handleCloseFindBar();
+    } else if (e.key === 'Enter') {
+      if (e.shiftKey) {
+        handleFindPrevious();
+      } else {
+        handleFindNext();
+      }
     }
   };
 
@@ -621,10 +734,80 @@ export function BrowserTabsScreen({
             onUpdate={handleUpdateTab}
             onUrlUpdate={handleUrlUpdate}
             onNewWindow={handleCreateTab}
+            onFindResults={(tabId, result) => {
+              if (tabId === activeTabId) {
+                setFindResults({
+                  activeMatch: result.activeMatchOrdinal,
+                  matches: result.matches,
+                });
+              }
+            }}
+            onShortcut={shortcut => {
+              if (shortcut === 'new-tab') {
+                handleCreateTab('https://www.google.com');
+              } else if (shortcut === 'find-in-page') {
+                setIsFindBarOpen(true);
+                setTimeout(() => {
+                  findInputRef.current?.focus();
+                  findInputRef.current?.select();
+                }, 50);
+              }
+            }}
             isPanel={isPanel}
             popupsEnabled={browserSettings.popups}
           />
         ))}
+
+        {/* Find in Page Bar */}
+        {isFindBarOpen && (
+          <div className='absolute top-2 right-2 bg-background border border-border rounded-lg shadow-lg p-2 flex items-center gap-2 z-50 min-w-[300px]'>
+            <input
+              ref={findInputRef}
+              type='text'
+              value={findQuery}
+              onChange={e => setFindQuery(e.target.value)}
+              onKeyDown={handleFindKeyDown}
+              placeholder='Find in page...'
+              className='flex-1 bg-muted px-3 py-1.5 text-sm rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+              data-track-category='BROWSER'
+              data-track-name='FIND_IN_PAGE_INPUT'
+            />
+            {findResults.matches > 0 && (
+              <span className='text-xs text-muted-foreground whitespace-nowrap'>
+                {findResults.activeMatch}/{findResults.matches}
+              </span>
+            )}
+            <button
+              onClick={handleFindPrevious}
+              disabled={findResults.matches === 0}
+              className='p-1.5 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed'
+              title='Previous match (Shift+Enter)'
+              data-track-category='BROWSER'
+              data-track-name='FIND_PREVIOUS_MATCH'
+            >
+              <ChevronUp size={16} />
+            </button>
+            <button
+              onClick={handleFindNext}
+              disabled={findResults.matches === 0}
+              className='p-1.5 rounded-md hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed'
+              title='Next match (Enter)'
+              data-track-category='BROWSER'
+              data-track-name='FIND_NEXT_MATCH'
+            >
+              <ChevronDown size={16} />
+            </button>
+            <button
+              onClick={handleCloseFindBar}
+              className='p-1.5 rounded-md hover:bg-muted text-muted-foreground'
+              title='Close (Esc)'
+              data-track-category='BROWSER'
+              data-track-name='CLOSE_FIND_BAR'
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         {tabs.length === 0 && (
           <div

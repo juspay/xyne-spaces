@@ -53,6 +53,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('navigate-to', listener);
     return () => ipcRenderer.removeListener('navigate-to', listener);
   },
+  onBrowserNewTab: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('browser-new-tab', listener);
+    return () => ipcRenderer.removeListener('browser-new-tab', listener);
+  },
+  onBrowserFindInPage: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('browser-find-in-page', listener);
+    return () => ipcRenderer.removeListener('browser-find-in-page', listener);
+  },
 
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => {
     const listener = (_event: unknown, data: { ticketId: string }) => callback(data);
@@ -70,6 +80,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_event: unknown, url: string) => callback(url);
     ipcRenderer.on('open-in-browser-panel', listener);
     return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
+  },
+
+  onReloadActiveBrowserTab: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('reload-active-browser-tab', listener);
+    return () => ipcRenderer.removeListener('reload-active-browser-tab', listener);
   },
 
   onAuthSuccess: (callback: () => void) => {
