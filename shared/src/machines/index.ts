@@ -1,4 +1,20 @@
 export {
+  queryCacheMachine,
+  queryCacheActor,
+  getChannelConversationsQueryHash,
+  setupQueryCachePersistence,
+  hydrateQueryCacheFromStorage,
+  FINGERPRINT_FIELD,
+} from './queryCacheMachine.js';
+
+export type {
+  Conversation as QueryCacheConversation,
+  CacheEntry,
+  QueryCacheContext,
+  QueryCacheEvent,
+} from './queryCacheMachine.js';
+
+export {
   stateMachine,
   stateMachineActor,
   initialMetricsState,
@@ -8,7 +24,7 @@ export {
   getHasOverlay,
   useHasOverlay,
   useOverlayEffect,
-} from '@xyne/shared/machines';
+} from './stateMachine.js';
 
 export type {
   DraftMessage,
@@ -27,4 +43,4 @@ export type {
   PresenceStatus,
   OnlineUser,
   UserStatusUpdatedEvent,
-} from '@xyne/shared/machines';
+} from './stateMachine.js';
