@@ -34,7 +34,7 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, fetchThread, searchContent, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, deepResearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, fetchSkillInstructions, createPpt, searchMeetingInsights, getMemories, updateMemory] = await Promise.all([
+  const [fetchChannel, fetchThread, searchContent, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, deepResearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, fetchSkillInstructions, createPpt, searchMeetingInsights, getMemories, updateMemory, userActivity] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_CONTENT),
@@ -53,6 +53,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_MEETING_INSIGHTS),
     getPromptFromLangfuse(PROMPT_NAMES.GET_MEMORIES),
     getPromptFromLangfuse(PROMPT_NAMES.UPDATE_MEMORY),
+    getPromptFromLangfuse(PROMPT_NAMES.USER_ACTIVITY),
   ]);
 
   const descriptions = {
@@ -74,6 +75,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     search_meeting_insights: searchMeetingInsights || 'Search for AI-analyzed meeting insights including summaries, action items, pain points, and merchant discussions.',
     get_memories: getMemories || 'Search the user memory store for relevant past preferences, decisions, or facts.',
     update_memory: updateMemory || 'Store a new memory for the user. Fire-and-forget — returns immediately.',
+    user_activity: userActivity || 'Fetch the current user\'s activity events within a specific time range.',
   };
 
   return descriptions;

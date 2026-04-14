@@ -379,6 +379,18 @@ export const generateToolInputStatus = (
         return 'Loaded skill';
       }
 
+      case 'user_activity': {
+        return [
+          'Perusing your activity',
+          'Pondering your activity',
+          'Cogitating your activity',
+          'Contemplating your activity',
+          'Considering your activity',
+          'Musing your activity',
+          'Ruminating your activity',
+        ];
+      }
+
       default:
         return 'Processing';
     }
