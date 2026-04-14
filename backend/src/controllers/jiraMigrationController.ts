@@ -62,6 +62,8 @@ export class JiraMigrationController {
         targetChannelId?: string;
         issueKeys?: string[];
         dateFrom?: string;
+        statusV2Mappings?: Record<string, string>;
+        skipCustomFieldIds?: string[];
       };
 
       if (!jiraProjectKey || !targetProjectId || !targetBoardId || !targetChannelId) {
@@ -84,7 +86,21 @@ export class JiraMigrationController {
         targetChannelId,
         issueKeys: Array.isArray(req.body.issueKeys) ? req.body.issueKeys : undefined,
         dateFrom: typeof req.body.dateFrom === 'string' ? req.body.dateFrom : undefined,
+        statusV2Mappings:
+          req.body.statusV2Mappings && typeof req.body.statusV2Mappings === 'object'
+            ? req.body.statusV2Mappings
+            : {},
+        skipCustomFieldIds: Array.isArray(req.body.skipCustomFieldIds)
+          ? req.body.skipCustomFieldIds.filter((fieldId: unknown): fieldId is string => typeof fieldId === 'string')
+          : [],
       };
+
+      if (Object.keys(input.statusV2Mappings).length === 0) {
+        res.status(400).json({
+          error: 'statusV2Mappings is required and must include Jira status to StatusV2 mappings',
+        });
+        return;
+      }
 
       const jobId = randomUUID();
       await jiraMigrationProgressService.createJob(jobId, input);

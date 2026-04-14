@@ -86,6 +86,8 @@ export interface JiraMigrationPreviewRequest {
 
 export interface JiraMigrationExecuteRequest extends JiraMigrationPreviewRequest {
   issueKeys?: string[];
+  statusV2Mappings: Record<string, string>;
+  skipCustomFieldIds?: string[];
 }
 
 export interface JiraMigrationIssueResult {

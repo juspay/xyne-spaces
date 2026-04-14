@@ -3,6 +3,13 @@ import { config } from '@/config/env';
 import { FormContextType, FormEntityType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 
+const JIRA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const JIRA_MAX_RETRY_ATTEMPTS = 5;
+const JIRA_BASE_RETRY_DELAY_MS = 1000;
+const JIRA_MAX_RETRY_DELAY_MS = 15000;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 type JiraFieldDefinition = {
   id: string;
   key?: string;
@@ -27,12 +34,37 @@ type JiraIssue = {
   fields: Record<string, any>;
 };
 
+type JiraProjectStatusesResponse = Array<{
+  id: string;
+  name: string;
+  subtask: boolean;
+  statuses: Array<{
+    id: string;
+    name: string;
+    description?: string;
+  }>;
+}>;
+
 type JiraSearchResponse = {
   issues: JiraIssue[];
   nextPageToken?: string;
   isLast?: boolean;
   maxResults?: number;
   total?: number;
+};
+
+type JiraProjectResponse = {
+  id: string;
+  key: string;
+  name: string;
+};
+
+type JiraFieldSearchResponse = {
+  values: JiraFieldDefinition[];
+  startAt: number;
+  maxResults: number;
+  total: number;
+  isLast?: boolean;
 };
 
 export interface JiraMigrationPreviewInput {
@@ -175,6 +207,50 @@ const sanitizeFieldName = (value: string): string =>
 const normalize = (value: string): string =>
   value.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+const JIRA_CUSTOM_FIELD_NAME_SKIP_PATTERNS = [
+  'rank',
+  'epiclink',
+  'epiclinkdeprecated',
+  'development',
+  'timeinstatus',
+  'charttimeinstatus',
+  'requiredfields',
+  'go-livechecklist',
+  'golivechecklist',
+  'checklistsheet',
+];
+
+const JIRA_CUSTOM_FIELD_CUSTOM_SCHEMA_SKIP_PATTERNS = [
+  'lexorank',
+  'epiclink',
+  'development',
+  'timeinstatus',
+];
+
+const isOpaqueJiraCustomFieldString = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+
+  return (
+    /\{[a-z]+\=/.test(trimmed) ||
+    trimmed.includes('json={"cachedValue"') ||
+    trimmed.includes('summary={') ||
+    trimmed.includes('dataType=')
+  );
+};
+
+const shouldSkipJiraCustomField = (definition?: JiraFieldDefinition): boolean => {
+  if (!definition) return false;
+
+  const normalizedName = normalize(definition.name || '');
+  const normalizedCustom = normalize(definition.schema?.custom || '');
+
+  return (
+    JIRA_CUSTOM_FIELD_NAME_SKIP_PATTERNS.some(pattern => normalizedName.includes(pattern)) ||
+    JIRA_CUSTOM_FIELD_CUSTOM_SCHEMA_SKIP_PATTERNS.some(pattern => normalizedCustom.includes(pattern))
+  );
+};
+
 const valueToPreviewString = (value: unknown): string => {
   if (value === null || value === undefined) return '';
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
@@ -266,20 +342,156 @@ export class JiraMigrationPreviewService {
   }
 
   private async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${config.jira.baseUrl}${path}`, {
+    const response = await this.fetchJiraWithRetry(`${config.jira.baseUrl}${path}`, {
       ...init,
       headers: {
         ...this.buildHeaders(),
         ...(init?.headers || {}),
       },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Jira request failed (${response.status}): ${errorText}`);
-    }
+    }, path);
 
     return response.json() as Promise<T>;
+  }
+
+  private parseRetryAfterMs(value: string | null): number | null {
+    if (!value) return null;
+
+    const seconds = Number(value);
+    if (!Number.isNaN(seconds) && seconds >= 0) {
+      return seconds * 1000;
+    }
+
+    const retryAt = Date.parse(value);
+    if (Number.isNaN(retryAt)) {
+      return null;
+    }
+
+    return Math.max(0, retryAt - Date.now());
+  }
+
+  private computeRetryDelayMs(attempt: number, retryAfterHeader: string | null): number {
+    const retryAfterMs = this.parseRetryAfterMs(retryAfterHeader);
+    if (retryAfterMs !== null) {
+      return Math.min(retryAfterMs, JIRA_MAX_RETRY_DELAY_MS);
+    }
+
+    const exponentialDelay = Math.min(
+      JIRA_BASE_RETRY_DELAY_MS * 2 ** (attempt - 1),
+      JIRA_MAX_RETRY_DELAY_MS,
+    );
+    const jitter = Math.floor(Math.random() * 250);
+    return Math.min(exponentialDelay + jitter, JIRA_MAX_RETRY_DELAY_MS);
+  }
+
+  private async fetchJiraWithRetry(
+    url: string,
+    init?: RequestInit,
+    context?: string,
+  ): Promise<Response> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= JIRA_MAX_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await fetch(url, init);
+
+        if (response.ok) {
+          return response;
+        }
+
+        if (!JIRA_RETRYABLE_STATUS_CODES.has(response.status) || attempt === JIRA_MAX_RETRY_ATTEMPTS) {
+          const errorText = await response.text();
+          throw new Error(`Jira request failed (${response.status})${context ? ` during ${context}` : ''}: ${errorText}`);
+        }
+
+        const delayMs = this.computeRetryDelayMs(attempt, response.headers.get('Retry-After'));
+        logger.warn('[JiraMigrationPreview] Retrying Jira request after retryable response', {
+          context,
+          attempt,
+          maxAttempts: JIRA_MAX_RETRY_ATTEMPTS,
+          statusCode: response.status,
+          delayMs,
+          url,
+        });
+        await sleep(delayMs);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        lastError = err;
+
+        const isRetryableNetworkError = !('message' in err) || !err.message.includes('Jira request failed (');
+        if (!isRetryableNetworkError || attempt === JIRA_MAX_RETRY_ATTEMPTS) {
+          throw err;
+        }
+
+        const delayMs = this.computeRetryDelayMs(attempt, null);
+        logger.warn('[JiraMigrationPreview] Retrying Jira request after network error', {
+          context,
+          attempt,
+          maxAttempts: JIRA_MAX_RETRY_ATTEMPTS,
+          delayMs,
+          url,
+          error: err.message,
+        });
+        await sleep(delayMs);
+      }
+    }
+
+    throw lastError || new Error(`Jira request failed${context ? ` during ${context}` : ''}`);
+  }
+
+  private async fetchAllProjectStatuses(projectKey: string): Promise<Set<string>> {
+    try {
+      const issueTypes = await this.fetchJson<JiraProjectStatusesResponse>(
+        `/rest/api/3/project/${encodeURIComponent(projectKey)}/statuses`,
+      );
+      const allStatuses = new Set<string>();
+      for (const issueType of issueTypes) {
+        for (const status of issueType.statuses) {
+          if (typeof status.name === 'string' && status.name.trim()) {
+            allStatuses.add(status.name.trim());
+          }
+        }
+      }
+      return allStatuses;
+    } catch (err) {
+      logger.warn('[JiraMigrationPreview] Failed to fetch project statuses from API, will fall back to statuses seen in issues', { projectKey, err });
+      return new Set<string>();
+    }
+  }
+
+  private async fetchAllProjectCustomFields(projectKey: string): Promise<JiraFieldDefinition[]> {
+    try {
+      const project = await this.fetchJson<JiraProjectResponse>(
+        `/rest/api/3/project/${encodeURIComponent(projectKey)}`,
+      );
+
+      const fields: JiraFieldDefinition[] = [];
+      let startAt = 0;
+      const maxResults = 100;
+
+      while (true) {
+        const response = await this.fetchJson<JiraFieldSearchResponse>(
+          `/rest/api/3/field/search?type=custom&projectIds=${encodeURIComponent(project.id)}&startAt=${startAt}&maxResults=${maxResults}`,
+        );
+
+        fields.push(...response.values.filter(field => field.id.startsWith('customfield_')));
+
+        const hasMoreByCount = response.startAt + response.values.length < response.total;
+        const hasMoreByFlag = response.isLast === false;
+        if (!hasMoreByCount && !hasMoreByFlag) {
+          break;
+        }
+
+        startAt += response.values.length;
+        if (response.values.length === 0) {
+          break;
+        }
+      }
+
+      return fields;
+    } catch (err) {
+      logger.warn('[JiraMigrationPreview] Failed to fetch project custom fields from API, will fall back to issue-sampled custom fields', { projectKey, err });
+      return [];
+    }
   }
 
   private async fetchIssuesPage(
@@ -331,7 +543,7 @@ export class JiraMigrationPreviewService {
     const jiraProjectKey = input.jiraProjectKey.trim().toUpperCase();
     const pageSize = Math.min(Math.max(input.maxResults || 25, 1), 100);
 
-    const [project, board, channel, boardStages, fieldDefinitions, existingBoardFields] = await Promise.all([
+    const [project, board, channel, boardStages, fieldDefinitions, existingBoardFields, allProjectStatuses, allProjectCustomFields] = await Promise.all([
       db.project.findUnique({ where: { id: input.targetProjectId } }),
       db.board.findUnique({ where: { id: input.targetBoardId } }),
       db.channel.findUnique({ where: { id: input.targetChannelId } }),
@@ -349,6 +561,8 @@ export class JiraMigrationPreviewService {
           AND fcm."entityType" = CAST(${FormEntityType.TICKET} AS "FormEntityType")
         ORDER BY ff."createdAt" ASC
       `,
+      this.fetchAllProjectStatuses(jiraProjectKey),
+      this.fetchAllProjectCustomFields(jiraProjectKey),
     ]);
 
     if (!project) throw new Error('Target project not found');
@@ -378,6 +592,7 @@ export class JiraMigrationPreviewService {
 
       for (const [fieldId, rawValue] of Object.entries(issue.fields)) {
         if (!fieldId.startsWith('customfield_')) continue;
+        if (shouldSkipJiraCustomField(fieldDefinitionMap.get(fieldId))) continue;
         if (rawValue === null || rawValue === undefined) continue;
         if (Array.isArray(rawValue) && rawValue.length === 0) continue;
         if (typeof rawValue === 'string' && rawValue.trim() === '') continue;
@@ -390,6 +605,9 @@ export class JiraMigrationPreviewService {
         stat.issueCoverageCount += 1;
 
         const previewValue = valueToPreviewString(rawValue);
+        if (previewValue && isOpaqueJiraCustomFieldString(previewValue)) {
+          continue;
+        }
         if (previewValue && stat.values.size < PREVIEW_CUSTOM_FIELD_SAMPLE_LIMIT) {
           stat.values.add(previewValue);
         }
@@ -398,11 +616,19 @@ export class JiraMigrationPreviewService {
       }
     }
 
-    const customFieldMappings = Array.from(customFieldStats.entries())
-      .map(([fieldId, stats]) => {
-        const definition = fieldDefinitionMap.get(fieldId);
+    const allCustomFieldIds = new Set<string>([
+      ...Array.from(customFieldStats.keys()),
+      ...allProjectCustomFields
+        .filter(field => !shouldSkipJiraCustomField(field))
+        .map(field => field.id),
+    ]);
+
+    const customFieldMappings = Array.from(allCustomFieldIds)
+      .map((fieldId) => {
+        const definition = fieldDefinitionMap.get(fieldId) || allProjectCustomFields.find(field => field.id === fieldId);
         const jiraFieldName = definition?.name || fieldId;
-        const sampleValues = Array.from(stats.values).slice(0, 5);
+        const stats = customFieldStats.get(fieldId);
+        const sampleValues = Array.from(stats?.values || []).slice(0, 5);
         const suggestedXyneFieldName = sanitizeFieldName(jiraFieldName);
         const suggestedXyneFieldType = inferXyneFieldType(
           definition || { id: fieldId, name: jiraFieldName },
@@ -424,7 +650,7 @@ export class JiraMigrationPreviewService {
             jiraFieldId: fieldId,
             jiraFieldName,
             jiraFieldType: definition?.schema?.type || 'unknown',
-            issueCoverageCount: stats.issueCoverageCount,
+            issueCoverageCount: stats?.issueCoverageCount || 0,
             sampleValues,
             action: 'reuse_existing_board_custom_field' as const,
             suggestedXyneFieldName,
@@ -439,7 +665,7 @@ export class JiraMigrationPreviewService {
             jiraFieldId: fieldId,
             jiraFieldName,
             jiraFieldType: definition?.schema?.type || 'unknown',
-            issueCoverageCount: stats.issueCoverageCount,
+            issueCoverageCount: stats?.issueCoverageCount || 0,
             sampleValues,
             action: 'store_in_metadata' as const,
             suggestedXyneFieldName,
@@ -452,7 +678,7 @@ export class JiraMigrationPreviewService {
           jiraFieldId: fieldId,
           jiraFieldName,
           jiraFieldType: definition?.schema?.type || 'unknown',
-          issueCoverageCount: stats.issueCoverageCount,
+          issueCoverageCount: stats?.issueCoverageCount || 0,
           sampleValues,
           action: 'create_board_custom_field' as const,
           suggestedXyneFieldName,
@@ -462,7 +688,10 @@ export class JiraMigrationPreviewService {
       })
       .sort((a, b) => a.jiraFieldName.localeCompare(b.jiraFieldName));
 
-    const statusMappings = Array.from(seenStatuses)
+    // Merge statuses from the project API (complete list) with statuses seen in this page's issues
+    const allStatuses = new Set([...allProjectStatuses, ...seenStatuses]);
+
+    const statusMappings = Array.from(allStatuses)
       .sort((a, b) => a.localeCompare(b))
       .map(status => ({
         jiraStatus: status,
