@@ -4005,11 +4005,15 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             }
           }
 
-          // ACL Business Logic: Check ticket transfer permission for assignedTo or userGroupId changes
+          // ACL Business Logic: Check ticket transfer permission for assignedTo, userGroupId,
+          // eta, stageName (which triggers stage ETA recalculation), or boardId changes
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
           const isUserGroupChanging = params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId;
+          const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
+          const isStageChanging = params.stageName !== undefined && params.stageName !== ticket.stageName;
+          const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
 
-          if ((isAssigneeChanging || isUserGroupChanging) && ticket.userGroupId) {
+          if ((isAssigneeChanging || isUserGroupChanging || isEtaChanging || isStageChanging || isBoardChanging) && ticket.userGroupId) {
             // Get board to check if transfer is restricted
             const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
 
@@ -4033,7 +4037,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 // Check responsibility from the mapping
                 const responsibility = userGroupMapping.responsibility;
                 if (responsibility !== UserResponsibility.MANAGER && responsibility !== UserResponsibility.TEAM_LEAD) {
-                  throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can modify ticket assignment or transfer tickets on this board');
+                  throw new Error('Only users with MANAGER or TEAM_LEAD responsibility can modify Assignee, ETA, Stage, or Board on this board');
                 }
               }
             }
