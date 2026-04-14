@@ -22,6 +22,7 @@ export {
 export {
   initializeLangfuseTracing,
   createOnEventHandler,
+  finalizeTrace,
 } from './tracing.js';
 
 export {

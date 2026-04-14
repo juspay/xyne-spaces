@@ -23,6 +23,8 @@ import type { Canvas, Call } from '@prisma/client';
 export interface ProvidedContextItem {
   id: string;
   content: string;
+  title?: string;       // human-readable title (canvas title, ticket title, call title)
+  xyneId?: string;      // ticket xyne-id (e.g. XYNE-123)
   channelId?: string;
   conversationId?: string;
   callType?: string;    // for calls: used to identify recordings (HEADLESS)
@@ -194,7 +196,7 @@ Content Status: ${contentStatus}
 
 ${markdownContent}`;
 
-    return { id: canvasId, content };
+    return { id: canvasId, content, title: canvas.title };
   } catch (error) {
     // Canvas not found in database or other fatal error
     logger.error(`[ContextFetcher] Error fetching canvas ${canvasId}:`, error);
@@ -321,6 +323,8 @@ ${ticket.description || 'No description'}`;
     return {
       id: ticketId,
       content,
+      title: ticket.title,
+      xyneId: ticket.xyneId,
       channelId: ticket.channelId,
       conversationId: ticket.conversationId || undefined,
     };
@@ -459,6 +463,7 @@ ${participantList || '  No participants'}`;
     return {
       id: callId,
       content,
+      title: call.title || 'Untitled Call',
       channelId: call.channelId,
       conversationId,
       callType: call.callType,

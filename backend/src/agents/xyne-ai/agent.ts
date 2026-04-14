@@ -20,6 +20,7 @@ import { db } from '../../database/client.js';
 import { getXyneAITools, type XyneAIAgentContext, type UserInfo, type ResearchContext } from './tools/index.js';
 import { researchAgentService } from '../../services/researchAgentService.js';
 import type { ProvidedContexts } from './utils/contextFetcher.js';
+import { getChannelInfo } from './utils/channelResolver.js';
 
 import {
   getPromptFromLangfuse,
@@ -174,30 +175,6 @@ function createInitialState(
     turnCount: 0,
   };
 }
-/**
- * Fetch channel info from channel IDs - returns both names and a map for lookups
- */
-async function getChannelInfo(channelIds: string[]): Promise<{
-  channelNames: string[];
-  contextChannelMap: Map<string, string>;
-  contextChannelIdToName: Map<string, string>;
-}> {
-  if (!channelIds || channelIds.length === 0) {
-    return { channelNames: [], contextChannelMap: new Map(), contextChannelIdToName: new Map() };
-  }
-  
-  const channels = await db.channel.findMany({
-    where: { id: { in: channelIds } },
-    select: { id: true, name: true },
-  });
-  
-  const channelNames = channels.map(c => c.name);
-  const contextChannelMap = new Map(channels.map(c => [c.name.toLowerCase(), c.id]));
-  const contextChannelIdToName = new Map(channels.map(c => [c.id, c.name]));
-  
-  return { channelNames, contextChannelMap, contextChannelIdToName };
-}
-
 // ============================================================================
 // Agent Runner
 // ============================================================================
