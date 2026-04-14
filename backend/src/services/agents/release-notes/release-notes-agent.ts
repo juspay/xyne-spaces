@@ -11,6 +11,7 @@ import {
 import { config } from '@/config/env';
 import { getReleaseNotesSystemPrompt, buildReleaseNotesUserPrompt } from './prompts';
 import { AgentsConfig } from '@/agents/config';
+import { createAgentEventLogger, composeEventHandlers } from '@/agents/agentLogger';
 
 const LITELLM_BASE_URL = config.litellm.baseUrl;
 const LITELLM_API_KEY = config.litellm.apiKey;
@@ -83,12 +84,16 @@ export async function generateReleaseNotesContent(
 
   const modelProvider = createModelProvider();
   const formattedPrompt = buildReleaseNotesUserPrompt(input);
+
+  const agentLogger = createAgentEventLogger('ReleaseNotes', 'LITELLM_API_KEY');
+  const composedOnEvent = onEvent ? composeEventHandlers(agentLogger, onEvent) : agentLogger;
+
   const runConfig: RunConfig<ReleaseNotesGeneratorContext> = {
     agentRegistry,
     modelProvider,
     maxTurns: 2,
     modelOverride: modelName,
-    onEvent,
+    onEvent: composedOnEvent,
   };
 
   const initialState: RunState<ReleaseNotesGeneratorContext> = {

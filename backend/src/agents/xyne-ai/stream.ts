@@ -561,6 +561,7 @@ const {
   const apiKey = config.litellm.askAiApiKey;
 
   logger.info(`[XyneAI] [${session.sessionId}] Using model: ${modelName} (hasImageAttachment: ${hasImageAttachment}, tracingEnabled: ${cacConfig.xyneAiTracingEnabled}, maskingEnabled: ${cacConfig.xyneAiMaskingEnabled})`);
+  logger.info(`[AskAI] Calling "${modelName}" with "LITELLM_API_KEY"`);
 
   const langfuseHandler = createOnEventHandler(cacConfig);
   const onEventHandler = (event: Parameters<typeof langfuseHandler>[0]): unknown => {
@@ -606,6 +607,12 @@ const {
           };
           break;
         
+        case 'llm_call_start': {
+          const callModel = (event.data as { model?: string }).model ?? modelName;
+          logger.info(`[AskAI] Calling "${callModel}" with "LITELLM_API_KEY"`);
+          break;
+        }
+
         case 'tool_call_end':
           // Handle stream provider events
           if (streamProvider) {
@@ -638,6 +645,8 @@ const {
         case 'llm_call_end':
           if (event.data.choice?.message?.content) {
             const content = event.data.choice.message.content;
+            const truncated = content.length > 1000 ? `${content.slice(0, 1000)}… [truncated]` : content;
+            logger.info(`[AskAI] Success: ${truncated}`);
             if (!accumulatedContent) {
               accumulatedContent = content;
               yield { type: 'delta', content };
@@ -702,8 +711,14 @@ const {
               userTags: parsedOutput.userTags,
             };
           } else if (event.data.outcome.status === 'error') {
-            const errTag = event.data.outcome.error._tag;
-            const errDetail = (event.data.outcome.error as any).detail || (event.data.outcome.error as any).reason || '';
+            const err = event.data.outcome.error as Record<string, unknown>;
+            const errTag = String(err._tag ?? 'UnknownError');
+            const errCode = err.statusCode ?? err.status ?? err.code ?? '';
+            const errDetail = err.message ?? err.detail ?? err.reason ?? '';
+            const errParts = [errCode ? String(errCode) : null, errTag, errDetail ? String(errDetail) : null]
+              .filter(Boolean)
+              .join(': ');
+            logger.error(`[AskAI] Error: ${errParts}`);
             logger.error(`[XyneAI] [${session.sessionId}] Agent run failed:`, event.data.outcome.error);
 
             // Finalize span even on error

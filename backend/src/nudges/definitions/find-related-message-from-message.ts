@@ -13,6 +13,7 @@ import {
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
+import { createAgentEventLogger } from '@/agents/agentLogger';
 import { vespaService } from '@/services/vespaSearch';
 import { parseAgentOutput } from '@/services/agents/utils';
 import type {
@@ -254,6 +255,7 @@ async function runRelatedMessageAgent(
     modelProvider: provider as RunConfig<NudgeToolContext>['modelProvider'],
     maxTurns: 6,
     modelOverride: RELATED_MESSAGE_MODEL,
+    onEvent: createAgentEventLogger('FindRelatedMessageNudge', 'LITELLM_API_KEY'),
   };
 
   const result = await run(initialState, runConfig);

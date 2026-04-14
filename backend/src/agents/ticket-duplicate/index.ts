@@ -16,6 +16,7 @@ import {
 import { config } from '../../config/env.js';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { AgentsConfig } from '../config.js';
+import { createAgentEventLogger, composeEventHandlers } from '../agentLogger.js';
 
 const LITELLM_BASE_URL = config.litellm.baseUrl;
 const LITELLM_API_KEY = config.litellm.apiKey;
@@ -188,12 +189,15 @@ export async function analyzeTicketDuplicates(
   const modelProvider = createModelProvider();
   const prompt = buildPrompt(input);
 
+  const agentLogger = createAgentEventLogger('TicketDuplicate', 'LITELLM_API_KEY');
+  const composedOnEvent = onEvent ? composeEventHandlers(agentLogger, onEvent) : agentLogger;
+
   const runConfig: RunConfig<TicketDuplicateContext> = {
     agentRegistry: ticketDuplicateAgentRegistry,
     modelProvider: modelProvider as RunConfig<TicketDuplicateContext>['modelProvider'],
     maxTurns: 2,
     modelOverride: modelName,
-    onEvent,
+    onEvent: composedOnEvent,
   };
 
   const initialState: RunState<TicketDuplicateContext> = {
