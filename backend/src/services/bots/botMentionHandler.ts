@@ -6,6 +6,7 @@ import { extractUserMentions } from '@/utils/mentionParser';
 import { db } from '@/database/client';
 import { UserType } from '@prisma/client';
 import type { BotDefinition } from '@/bots/unified/types/unified-bot';
+import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 
 export interface BotMentionInfo {
   botUserId: string;
@@ -98,6 +99,7 @@ export async function executeBotForMention({
     });
 
     if (result.stream) {
+      const handler = new MessagesSideEffectHandler({ userID: botUserId });
       for await (const event of result.stream) {
         if (event.type === 'error') {
           logger.error('[BOT-MENTION] Bot error event', {
@@ -105,6 +107,10 @@ export async function executeBotForMention({
             messageId: message.messageId,
             error: event.error,
           });
+        }
+        if (event.type === 'done' && event.messageId) {
+          handler.onInsert({ entityId: event.messageId, entityType: 'messages', operation: 'insert' })
+            .catch(err => logger.error('[BOT-MENTION] Side-effect handler error:', err));
         }
       }
     }

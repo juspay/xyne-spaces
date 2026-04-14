@@ -151,6 +151,7 @@ export interface GetXyneAIToolsOptions {
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   hasThreadContext?: boolean;
+  memoryEnabled?: boolean;
 }
 
 /**
@@ -162,7 +163,7 @@ export interface GetXyneAIToolsOptions {
  * @param options.hasThreadContext Whether to include the fetch_thread_messages tool (when conversationId is present)
  */
 export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneAIAgentContext>[] {
-  const { webSearchEnabled = false, deepResearchEnabled = false, hasThreadContext = false } = options || {};
+  const { webSearchEnabled = false, deepResearchEnabled = false, hasThreadContext = false, memoryEnabled = true } = options || {};
   
   const tools: Tool<any, XyneAIAgentContext>[] = [
     createFetchChannelMessagesTool(),
@@ -184,8 +185,10 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
   if (config.xyneAiExtended.url) {
     if (webSearchEnabled) tools.push(createWebSearchTool());
     if (deepResearchEnabled) tools.push(createDeepResearchTool());
-    tools.push(createGetMemoriesTool());
-    tools.push(createUpdateMemoryTool());
+    if (memoryEnabled) {
+      tools.push(createGetMemoriesTool());
+      tools.push(createUpdateMemoryTool());
+    }
   }
 
   // Add fetch_thread_messages tool if in thread context (conversationId is present)

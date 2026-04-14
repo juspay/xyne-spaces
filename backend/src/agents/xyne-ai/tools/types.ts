@@ -61,6 +61,7 @@ export interface XyneAIAgentContext {
   contextChannelIdToName?: Map<string, string>;
   webSearchEnabled?: boolean;  // Flag to enable/disable web search functionality
   deepResearchEnabled?: boolean;  // Flag to enable/disable deep research functionality
+  memoryEnabled?: boolean;  // Flag to enable/disable memory tools (get_memories, update_memory); default true
   requestMappings?: {  // Request-scoped mappings from FVD tool
     channelNameToId: Map<string, string>;
     userNameToId: Map<string, string>;

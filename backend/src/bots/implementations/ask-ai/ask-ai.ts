@@ -67,6 +67,47 @@ function injectSpecialMentionSpans(html: string): string {
 }
 
 /**
+ * Extract a usable summary string from potentially malformed or double-encoded JSON output.
+ * Tries multiple extraction strategies: direct parse, double-encoded JSON, JSON block extraction.
+ */
+function extractSummaryFromOutput(rawOutput: unknown): string {
+  // If already a string, try to parse as JSON first
+  const rawString = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
+  
+  // Try direct JSON parse
+  try {
+    const direct = JSON.parse(rawString);
+    if (typeof direct === 'string') {
+      // Double-encoded: the response is a JSON string wrapping actual content
+      try {
+        const inner = JSON.parse(direct);
+        return typeof inner.summary === 'string' ? inner.summary : direct;
+      } catch {
+        return direct;
+      }
+    } else if (typeof direct === 'object' && direct !== null) {
+      return typeof direct.summary === 'string' ? direct.summary : rawString;
+    }
+  } catch {
+    // JSON.parse failed — try to find a {...} block and extract summary
+    try {
+      const jsonBlock = rawString.match(/\{[\s\S]*?\}/);
+      if (jsonBlock) {
+        const extracted = JSON.parse(jsonBlock[0]) as Record<string, unknown>;
+        if (typeof extracted.summary === 'string') {
+          return extracted.summary;
+        }
+      }
+    } catch {
+      // All extraction attempts failed
+    }
+  }
+  
+  // Final fallback: return as-is if string, or stringify
+  return typeof rawOutput === 'string' ? rawOutput : rawString;
+}
+
+/**
  * Replace <Full Name> tags produced by the AI with proper Xyne mention spans.
  * Tags are resolved to DB user IDs by stream.ts before this runs.
  * The resulting HTML is stored directly as message content and rendered by RenderMessageWithHTML.
@@ -144,6 +185,7 @@ export class AskAIBot extends UnifiedBaseBot<Input, Output> {
         agentPromptName: PROMPT_NAMES.XYNE_AI_CHAT_SYSTEM,
         userInfo: { userId, userName: userName_, userEmail: userEmail_ },
         agentsConfig,
+        memoryEnabled: false,  // Bot context: disable get_memories/update_memory tools
       });
 
       let response = '';
@@ -166,9 +208,11 @@ export class AskAIBot extends UnifiedBaseBot<Input, Output> {
 
         if (chunk.type === 'complete' && chunk.output?.summary) {
           const tags = chunk.output.userTags as Record<string, { name: string; userId: string }> | undefined;
+          // Apply JSON fallback extraction to handle malformed or double-encoded JSON
+          const extractedSummary = extractSummaryFromOutput(chunk.output.summary);
           const withUserMentions = tags && Object.keys(tags).length > 0
-            ? injectMentionSpans(chunk.output.summary, tags)
-            : chunk.output.summary;
+            ? injectMentionSpans(extractedSummary, tags)
+            : extractedSummary;
           const withSpecialMentions = injectSpecialMentionSpans(withUserMentions);
           response = await injectChannelMentionSpans(withSpecialMentions);
           yield this.createContentEvent(response, { channelId });
@@ -198,4 +242,5 @@ export class AskAIBot extends UnifiedBaseBot<Input, Output> {
       );
     }
   }
+
 }

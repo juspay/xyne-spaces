@@ -221,6 +221,7 @@ function buildCitationUrlsForTrace(keyPoints: XyneAIOutput['keyPoints']): Record
 export interface XyneAIStreamRequest extends XyneAIRequest {
   onStreamEvent?: StreamEventCallback;
   agentsConfig?: AgentsConfig;  // CAC config fetched in controller
+  memoryEnabled?: boolean;  // Whether memory tools are available; default true. Pass false for bot contexts.
 }
 
 export async function* xyneAIStream(
@@ -540,6 +541,7 @@ const {
     deepResearchEnabled,
     researchContext,
     customInstruction,
+    memoryEnabled: request.memoryEnabled !== false,  // default true; false disables get_memories/update_memory
     modelName: cacConfig.xyneAiModelName,
     systemPrompt: request.systemPrompt,
     agentPromptName: request.agentPromptName,
