@@ -14,6 +14,7 @@ import { DatabaseClient, db } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
+import { createAgentEventLogger } from '@/agents/agentLogger';
 import { vespaService } from '@/services/vespaSearch';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { parseAgentOutput } from '@/services/agents/utils';
@@ -212,6 +213,7 @@ async function runRelatedTicketAgent(
     modelProvider: provider as RunConfig<NudgeToolContext>['modelProvider'],
     maxTurns: 6,
     modelOverride: RELATED_TICKET_MODEL,
+    onEvent: createAgentEventLogger('FindRelatedTicketNudge', 'LITELLM_API_KEY'),
   };
 
   const result = await run(initialState, runConfig);

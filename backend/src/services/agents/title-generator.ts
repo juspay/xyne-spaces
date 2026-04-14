@@ -33,6 +33,7 @@ import { BaseTicketType, type ClassifiableTicketType } from '@xyne/shared';
 
 // Import agents config
 import { AgentsConfig } from '../../agents/config.js';
+import { createAgentEventLogger, composeEventHandlers } from '../../agents/agentLogger.js';
 
 // ============================================================================
 // Configuration - Loaded from environment variables
@@ -181,13 +182,16 @@ export async function generateTitle(
   // Format description for the agent using prompt template
   const formattedPrompt = buildTitleGeneratorUserPrompt(input.description, input.maxLength);
 
+  const agentLogger = createAgentEventLogger('TitleGenerator', 'LITELLM_API_KEY');
+  const composedOnEvent = onEvent ? composeEventHandlers(agentLogger, onEvent) : agentLogger;
+
   // Create the run configuration
   const runConfig: RunConfig<TitleGeneratorContext> = {
     agentRegistry,
     modelProvider,
     maxTurns: 2,
     modelOverride: modelName,
-    onEvent,
+    onEvent: composedOnEvent,
   };
 
   // Create initial state

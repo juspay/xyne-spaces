@@ -15,6 +15,7 @@ import {
   type ProactiveNudgeOutputLenient,
 } from '@/services/nudges/proactiveNudgeSchemas';
 import { compileFallbackPrompt, getPromptFromLangfuse } from '@/agents/xyne-ai/langfuse/index.js';
+import { createAgentEventLogger } from '@/agents/agentLogger';
 import type {
   ExplicitNudgeAction,
   MessageNudgeEvaluationContext,
@@ -105,6 +106,7 @@ async function runCreateTicketNudgeExtraction(
     modelProvider: provider as RunConfig<CreateTicketNudgeLLMContext>['modelProvider'],
     maxTurns: 2,
     modelOverride: DEFAULT_CREATE_TICKET_MODEL,
+    onEvent: createAgentEventLogger('CreateTicketNudge', 'LITELLM_API_KEY'),
   };
 
   const result = await run(initialState, runConfig);

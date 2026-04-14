@@ -27,6 +27,8 @@ import { config as envConfig } from '../../config/env.js';
 // Import langfuse for prompt management
 import { getPromptFromLangfuse, PROMPT_NAMES } from '../xyne-ai/langfuse/index.js';
 
+import { logger } from '../../utils/logger.js';
+
 // Import and re-export shared types from helpers
 import type { EnhancedEntityMetadata } from '../xyne-ai/tools/helpers.js';
 export type { EnhancedEntityMetadata };
@@ -351,6 +353,7 @@ export async function* summarizeStream(
   input: ThreadSummaryInput,
   context: SummarizerContext
 ): AsyncGenerator<StreamChunk, void, unknown> {
+  logger.info(`[Summariser] Calling "${envConfig.summariserModel}" with "LITELLM_API_KEY"`);
   const modelProvider = createModelProvider();
 
   const isSearchMessage = context.summarizationType === 'searchMessage';
@@ -403,10 +406,18 @@ export async function* summarizeStream(
     for await (const event of runStream(initialState, config)) {
       // Handle different event types
       switch (event.type) {
+        case 'llm_call_start': {
+          const callModel = (event.data as { model?: string }).model ?? envConfig.summariserModel;
+          logger.info(`[Summariser] Calling "${callModel}" with "LITELLM_API_KEY"`);
+          break;
+        }
+
         case 'llm_call_end':
           // LLM has completed - extract content
           if (event.data.choice?.message?.content) {
             const content = event.data.choice.message.content;
+            const truncated = content.length > 1000 ? `${content.slice(0, 1000)}… [truncated]` : content;
+            logger.info(`[Summariser] Success: ${truncated}`);
             // Only send delta if we haven't already streamed this content
             if (!accumulatedContent) {
               accumulatedContent = content;
@@ -479,6 +490,9 @@ export async function* summarizeStream(
           // Run has ended - check outcome
           if (event.data.outcome.status === 'completed') {
             const rawOutput = event.data.outcome.output;
+            const rawStr = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
+            const truncated = rawStr.length > 1000 ? `${rawStr.slice(0, 1000)}… [truncated]` : rawStr;
+            logger.info(`[Summariser] Success: ${truncated}`);
             let finalOutput: SummaryOutput;
             if (typeof rawOutput === 'string') {
               if (!accumulatedContent && rawOutput) {
@@ -507,6 +521,14 @@ export async function* summarizeStream(
               output: finalOutput,
             };
           } else if (event.data.outcome.status === 'error') {
+            const err = event.data.outcome.error as Record<string, unknown>;
+            const errTag = String(err._tag ?? 'UnknownError');
+            const errCode = err.statusCode ?? err.status ?? err.code ?? '';
+            const errDetail = err.message ?? err.detail ?? '';
+            const errParts = [errCode ? String(errCode) : null, errTag, errDetail ? String(errDetail) : null]
+              .filter(Boolean)
+              .join(': ');
+            logger.error(`[Summariser] Error: ${errParts}`);
             yield {
               type: 'error',
               error: event.data.outcome.error._tag,
@@ -543,6 +565,7 @@ export async function summarizeThread(
   context: SummarizerContext,
   onEvent?: (event: TraceEvent) => void
 ): Promise<SummaryOutput> {
+  logger.info(`[Summariser] Calling "${envConfig.summariserModel}" with "LITELLM_API_KEY"`);
   const modelProvider = createModelProvider();
 
   const idMapping = input.messageIdMapping;
@@ -590,11 +613,22 @@ export async function summarizeThread(
   if (result.outcome.status === 'completed') {
     // Parse the output to strip <think> tags and extract JSON
     const rawOutput = result.outcome.output;
+    const rawStr = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
+    const truncated = rawStr.length > 1000 ? `${rawStr.slice(0, 1000)}… [truncated]` : rawStr;
+    logger.info(`[Summariser] Success: ${truncated}`);
     if (typeof rawOutput === 'string') {
       return parseAgentOutput(rawOutput, idMapping, messageCount, participantCount, entityMapping);
     }
     return rawOutput as SummaryOutput;
   } else if (result.outcome.status === 'error') {
+    const err = result.outcome.error as Record<string, unknown>;
+    const errTag = String(err._tag ?? 'UnknownError');
+    const errCode = err.statusCode ?? err.status ?? err.code ?? '';
+    const errDetail = err.message ?? err.detail ?? '';
+    const errParts = [errCode ? String(errCode) : null, errTag, errDetail ? String(errDetail) : null]
+      .filter(Boolean)
+      .join(': ');
+    logger.error(`[Summariser] Error: ${errParts}`);
     throw new Error(`Thread summarization failed: ${result.outcome.error._tag}`);
   } else {
     throw new Error('Thread summarization was interrupted');
