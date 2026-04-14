@@ -20,6 +20,7 @@ interface CalendarMonthViewProps {
   onCallClick: (call: Call) => void;
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
+  onEditClick?: (call: Call) => void;
 }
 
 const DAYS_OF_WEEK = DAY_NAMES;
@@ -50,6 +51,7 @@ const CalendarMonthView = ({
   onCallClick,
   onGotoMessage,
   onDownloadTranscript,
+  onEditClick,
 }: CalendarMonthViewProps): ReactElement => {
   const today = new Date();
   const year = currentMonth.getFullYear();
@@ -206,6 +208,14 @@ const CalendarMonthView = ({
                                       setOpenCallId(null);
                                       onDownloadTranscript(call);
                                     }}
+                                    onEditClick={
+                                      onEditClick
+                                        ? () => {
+                                            setOpenCallId(null);
+                                            onEditClick(call);
+                                          }
+                                        : undefined
+                                    }
                                   />
                                 </PopoverPrimitive.Content>
                               </PopoverPrimitive.Portal>
@@ -351,6 +361,15 @@ const CalendarMonthView = ({
                                                 setOpenOverflowDay(null);
                                                 onDownloadTranscript(call);
                                               }}
+                                              onEditClick={
+                                                onEditClick
+                                                  ? () => {
+                                                      setOpenOverflowCallId(null);
+                                                      setOpenOverflowDay(null);
+                                                      onEditClick(call);
+                                                    }
+                                                  : undefined
+                                              }
                                             />
                                           </PopoverPrimitive.Content>
                                         </PopoverPrimitive.Portal>

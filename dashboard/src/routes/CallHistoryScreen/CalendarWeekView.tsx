@@ -30,6 +30,7 @@ interface CalendarWeekViewProps {
   onCallClick: (call: Call) => void;
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
+  onEditClick?: (call: Call) => void;
 }
 
 const TIME_GUTTER_WIDTH = 80; // px
@@ -41,6 +42,7 @@ const CalendarWeekView = ({
   onCallClick,
   onGotoMessage,
   onDownloadTranscript,
+  onEditClick,
 }: CalendarWeekViewProps): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
@@ -308,6 +310,14 @@ const CalendarWeekView = ({
                                   setOpenCallId(null);
                                   onDownloadTranscript(call);
                                 }}
+                                onEditClick={
+                                  onEditClick
+                                    ? () => {
+                                        setOpenCallId(null);
+                                        onEditClick(call);
+                                      }
+                                    : undefined
+                                }
                               />
                             </PopoverPrimitive.Content>
                           </PopoverPrimitive.Portal>

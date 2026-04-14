@@ -22,10 +22,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { CallConfirmationModal } from '../../components/Call/CallConfirmationModal';
 import { DeleteCallModal } from '../../components/Call/DeleteCallModal';
 import { InstantCallModal } from '../../components/Call/InstantCallModal/InstantCallModal';
-import {
-  ScheduleCallModal,
-  EditCallData,
-} from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
+import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import Button from '../../components/ui/Button';
 import {
@@ -862,6 +859,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onCallClick={call => handleCallRowClick(call)}
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
+                  onEditClick={call => handleEditClick(call)}
                 />
               )}
               {calendarSubView === 'week' && (
@@ -872,6 +870,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onCallClick={call => handleCallRowClick(call)}
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
+                  onEditClick={call => handleEditClick(call)}
                 />
               )}
               {calendarSubView === 'day' && (
@@ -882,6 +881,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onCallClick={call => handleCallRowClick(call)}
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
+                  onEditClick={call => handleEditClick(call)}
                 />
               )}
             </div>
@@ -989,7 +989,7 @@ const CallHistoryScreen = (): ReactElement => {
         isOpen={editModalOpen}
         onClose={closeEditModal}
         mode='edit'
-        initialCall={editModalCall as EditCallData | null}
+        initialCall={editModalCall}
         onSuccess={closeEditModal}
       />
 
