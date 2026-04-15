@@ -94,6 +94,7 @@ import scheduledMessageRoutes from '@/routes/scheduledMessages';
 import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
+import inspectorToolsRoutes from '@/routes/inspectorTools';
 import activityAliasesRoutes from '@/routes/activityAliases';
 import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
@@ -401,6 +402,9 @@ export class App {
 
     // User activity routes (auth required)
     this.app.use('/api/user-activity', authMiddleware.authenticate, userActivityRoutes);
+
+    // Inspector Tools routes (auth required)
+    this.app.use('/api/inspectorTools', authMiddleware.authenticate, inspectorToolsRoutes);
 
     this.app.use('/api/activity-aliases', authMiddleware.authenticate, activityAliasesRoutes);
 
