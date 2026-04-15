@@ -286,7 +286,7 @@ const AppSidebar = (): ReactElement => {
                   }}
                   className='relative z-10'
                 >
-                  <Tooltip content={item.label} side='right' delayDuration={500}>
+                  <Tooltip content={item.label} side='right' delayDuration={0}>
                     <Link
                       to={item.path}
                       onClick={() => handleNavigationClick(item.label)}

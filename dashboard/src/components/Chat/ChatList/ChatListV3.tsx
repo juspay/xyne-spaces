@@ -883,6 +883,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
         firstItemIndex={firstItemIndex}
         heightEstimates={itemHeights}
         followOutput={false}
+        alignToBottom={true}
         atTopThreshold={400}
         atTopStateChange={atTop => {
           if (atTop && isInitialLoadComplete && initialPositionSetRef.current) {

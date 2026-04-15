@@ -159,7 +159,7 @@ export function BasePopoverSelector<T extends BaseSelectorItem>({
   };
   return (
     <Popover.Root
-      modal
+      modal={false}
       open={isOpen}
       onOpenChange={open => {
         if (!open) {
