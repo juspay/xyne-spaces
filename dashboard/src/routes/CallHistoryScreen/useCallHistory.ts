@@ -129,9 +129,27 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     if (!allScheduledCalls) return undefined;
 
     const now = Date.now();
+
+    // Build sets of active externalIds and series IDs so we can exclude
+    // scheduled calls that are already live (handles Zero replication lag
+    // where the call is ACTIVE in userCallHistory but still SCHEDULED in
+    // userScheduledCalls).
+    const activeExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
+    const activeSeriesIds = new Set(
+      activeCalls?.map(c => c.recurringSeriesId).filter((id): id is string => !!id) ?? [],
+    );
+
     const filtered = allScheduledCalls.filter(call => {
       // Only show scheduled calls that haven't passed their end time
       if (call.status === CallStatus.ACTIVE) {
+        return false;
+      }
+      // Hide if this exact call room is currently live
+      if (activeExternalIds.has(call.externalId)) {
+        return false;
+      }
+      // Hide if another instance of the same recurring series is currently live
+      if (call.recurringSeriesId && activeSeriesIds.has(call.recurringSeriesId)) {
         return false;
       }
       // Don't show calls that have already started
@@ -149,7 +167,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     });
 
     return filtered;
-  }, [allScheduledCalls]);
+  }, [allScheduledCalls, activeCalls]);
 
   const recentCalls = useMemo(() => {
     // When searching, use the full dataset; otherwise use accumulated (paginated) calls
@@ -157,6 +175,14 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     if (!baseCalls) return undefined;
 
     const now = Date.now();
+
+    // Build lookup sets for stale-ACTIVE detection.
+    // activeCalls (userActiveCalls) is the live source of truth: if a call is no longer
+    // in this set it has ended. allScheduledCalls covers the ACTIVE→SCHEDULED reversion
+    // (call ended before endsAt) where the call leaves userCallHistory but the
+    // cumulative accumulator still holds an ACTIVE entry.
+    const activeCallExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
+    const scheduledCallIds = new Set(allScheduledCalls?.map(c => c.id) ?? []);
 
     // Get active scheduled calls that have started
     const activeScheduledCalls =
@@ -166,8 +192,16 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
           (call.startsAt && new Date(call.startsAt).getTime() <= now),
       ) || [];
 
-    // Combine base calls with active scheduled calls
-    let allCalls = [...baseCalls, ...activeScheduledCalls];
+    // Combine base calls with active scheduled calls, filtering out stale ACTIVE entries
+    let allCalls = [...baseCalls, ...activeScheduledCalls].filter(call => {
+      if (call.status === CallStatus.ACTIVE) {
+        // Call has reverted to SCHEDULED (ended before endsAt) — stale accumulator entry
+        if (scheduledCallIds.has(call.id)) return false;
+        // Call has ended — no longer in the live active-calls subscription
+        if (!activeCallExternalIds.has(call.externalId)) return false;
+      }
+      return true;
+    });
 
     // If showChannelCalls is false (default), filter out calls in channels where user wasn't invited
     if (!showChannelCalls) {
@@ -184,7 +218,15 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       const bTime = b.startedAt || b.startsAt || b.createdAt;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
-  }, [calls, allCallsForSearch, searchQuery, allScheduledCalls, showChannelCalls, userId]);
+  }, [
+    calls,
+    allCallsForSearch,
+    searchQuery,
+    allScheduledCalls,
+    activeCalls,
+    showChannelCalls,
+    userId,
+  ]);
 
   // Filter users by search query (excluding current user)
   const filteredUsers = useMemo(() => {
