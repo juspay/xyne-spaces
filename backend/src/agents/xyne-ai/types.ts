@@ -47,8 +47,8 @@ export interface XyneAIRequest {
   messageAttachmentIds?: string[]; // Attachment IDs to fetch from GCS on backend
   parentMessageId?: string; // Parent message ID for branching (tree structure)
   isRegenerate?: boolean; // Whether this is a regenerate request
-  systemPrompt?: string;  // Override system prompt (bypasses Langfuse prompt fetch)
-  agentPromptName?: string;  // Langfuse prompt name to use; defaults to XYNE_AI_SYSTEM
+  agentName?: string;  // Agent identifier: 'ask-ai' (sidebar) or 'ask-ai-chat' (bot). Also selects the Langfuse prompt.
+  displayQuery?: string;  // Original user query (without canvas/selection enhancements) — stored in DB, not sent to LLM
   canvasIds?: string[];  // Canvas IDs to fetch and inject as context
   ticketIds?: string[];  // Ticket IDs to fetch and inject as context
   callIds?: string[];    // Call IDs (transcripts + recordings) to fetch and inject as context

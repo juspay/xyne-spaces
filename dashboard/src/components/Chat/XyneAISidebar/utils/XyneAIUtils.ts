@@ -269,3 +269,72 @@ export function parseStreamingContent(content: string): StreamingParsedContent {
 
   return { summary, keypoints, citations, isComplete };
 }
+
+// ============================================================================
+// Tree Branching Helpers
+// ============================================================================
+
+export const BRANCH_ROOT_KEY = '__root__';
+
+/**
+ * Walk the message tree from root, picking the selected branch at each fork.
+ * Returns the active path of messages to display.
+ */
+export function resolveActivePath<T extends { id: string; parentId?: string | null }>(
+  allMessages: T[],
+  branchSelections: Record<string, string>,
+): T[] {
+  if (allMessages.length === 0) return [];
+
+  // Legacy conversations: no message has parentId set — return as-is, no branching
+  if (allMessages.every(m => m.parentId === null || m.parentId === undefined)) return allMessages;
+
+  // Build children map: parentId → children (sorted by creation order / array index)
+  const childrenMap = new Map<string, T[]>();
+  for (const msg of allMessages) {
+    const key = msg.parentId ?? BRANCH_ROOT_KEY;
+    const children = childrenMap.get(key);
+    if (children) {
+      children.push(msg);
+    } else {
+      childrenMap.set(key, [msg]);
+    }
+  }
+
+  const path: T[] = [];
+  let currentKey: string = BRANCH_ROOT_KEY;
+
+  for (;;) {
+    const children = childrenMap.get(currentKey);
+    if (!children || children.length === 0) break;
+
+    // Pick selected child, or default to the last one (most recent)
+    const parentId = currentKey;
+    const selectedId = branchSelections[parentId];
+    const selected = selectedId
+      ? (children.find(c => c.id === selectedId) ?? children[children.length - 1]!)
+      : children[children.length - 1]!;
+
+    path.push(selected);
+    currentKey = selected.id;
+  }
+
+  return path;
+}
+
+/**
+ * Get siblings (messages sharing the same parentId) and the current message's index.
+ */
+export function getSiblings<T extends { id: string; parentId?: string | null }>(
+  allMessages: T[],
+  messageId: string,
+): { siblings: T[]; currentIndex: number } {
+  const message = allMessages.find(m => m.id === messageId);
+  if (!message) return { siblings: [], currentIndex: -1 };
+
+  const parentKey = message.parentId ?? null;
+  const siblings = allMessages.filter(m => (m.parentId ?? null) === parentKey);
+  const currentIndex = siblings.findIndex(m => m.id === messageId);
+
+  return { siblings, currentIndex };
+}

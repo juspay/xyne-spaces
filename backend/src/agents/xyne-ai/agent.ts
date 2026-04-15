@@ -120,7 +120,9 @@ async function buildAgentPrompt(
     providedContexts
   );
 
-  const prompt = await getPromptFromLangfuse(promptName ?? PROMPT_NAMES.XYNE_AI_SYSTEM, {
+  // 'ask-ai' is the agent identifier; the Langfuse prompt is still registered as 'xyne-ai'
+  const langfusePromptName = promptName === 'ask-ai' ? PROMPT_NAMES.XYNE_AI_SYSTEM : (promptName ?? PROMPT_NAMES.XYNE_AI_SYSTEM);
+  const prompt = await getPromptFromLangfuse(langfusePromptName, {
     templateVariables,
   });
   
@@ -242,7 +244,7 @@ export async function createAgentRunner(
   // Determine if we have thread context (conversationId is present)
   const hasThreadContext = !!context.conversationId;
   
-  const systemPrompt = context.systemPrompt ?? await buildAgentPrompt(
+  const systemPrompt = await buildAgentPrompt(
     source,
     context.timestamp,
     context.userInfo,
@@ -254,7 +256,7 @@ export async function createAgentRunner(
     context.customInstruction,
     hasThreadContext,
     context.userId,
-    context.agentPromptName,
+    context.agentName,
     providedContexts
   );
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, context.deepResearchEnabled, hasThreadContext, context.memoryEnabled);

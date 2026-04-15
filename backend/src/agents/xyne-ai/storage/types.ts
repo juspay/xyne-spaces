@@ -80,6 +80,7 @@ export interface SessionContext {
   channelIds: string[];
   conversationId?: string;
   userId: string;
+  agentName?: string; // 'ask-ai' (sidebar) or 'ask-ai-chat' (bot) — determines workflow name
 }
 
 // Full session data

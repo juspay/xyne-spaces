@@ -218,7 +218,7 @@ function handleEventWithEnrichment(
       const userEmail = userInfo?.userEmail;
       const userName = userInfo?.userName;
       
-      const agentName = context?.agentPromptName ?? 'ask-ai-agent';
+      const agentName = context?.agentName ?? 'ask-ai';
 
       // Extract rich request context metadata
       const agentRequestContext = context?.agentRequestContext || {};

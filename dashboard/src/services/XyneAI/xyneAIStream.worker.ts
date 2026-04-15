@@ -11,6 +11,7 @@ export interface WorkerStartStreamMessage {
     url: string;
     requestBody: {
       query: string;
+      displayQuery?: string;
       channelIds: string[];
       canvasIds?: string[];
       ticketIds?: string[];
@@ -98,6 +99,7 @@ async function executeStream(
       // eslint-disable-next-line @typescript-eslint/naming-convention
       body: JSON.stringify({
         query: requestBody.query,
+        ...(requestBody.displayQuery && { display_query: requestBody.displayQuery }),
         /* eslint-disable @typescript-eslint/naming-convention */
         channel_ids: requestBody.channelIds,
         ...(requestBody.canvasIds &&

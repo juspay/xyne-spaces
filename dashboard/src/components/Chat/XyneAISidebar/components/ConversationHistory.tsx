@@ -2,7 +2,7 @@ import { ReactElement, useState, useRef, useEffect } from 'react';
 import { ChevronDown, X, Search, ArrowLeft, MoreVertical } from 'lucide-react';
 import { Popover } from '../../../ui/Popover';
 import { Drawer } from '../../../ui/Drawer/Drawer';
-import type { ConversationHistory as ConversationHistoryType } from '../../../../utils/xyneAIStorage';
+import type { ConversationHistory as ConversationHistoryType } from '../utils/XyneAITypes';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { XyneStarred, XyneUnstarred, XyneRename, XyneDelete } from '../../../icons/xyne-ai';

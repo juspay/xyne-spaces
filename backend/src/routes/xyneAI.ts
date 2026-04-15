@@ -89,4 +89,52 @@ router.delete('/memories/:id', xyneAIController.deleteMemory);
 // DELETE /api/xyne-ai/memories - Clear all memories for current user
 router.delete('/memories', xyneAIController.clearMemories);
 
+// ============================================================================
+// Session Management Endpoints
+// ============================================================================
+
+/**
+ * GET /api/xyne-ai/sessions
+ *
+ * List all Ask AI sessions for the authenticated user.
+ * Returns lightweight metadata (no messages).
+ */
+router.get('/sessions', xyneAIController.getSessions);
+
+/**
+ * GET /api/xyne-ai/sessions/:sessionId
+ *
+ * Get a single session with all messages transformed to frontend format.
+ */
+router.get('/sessions/:sessionId', xyneAIController.getSessionDetail);
+
+/**
+ * PATCH /api/xyne-ai/sessions/:sessionId/star
+ *
+ * Toggle star status for a session.
+ */
+router.patch('/sessions/:sessionId/star', xyneAIController.toggleStar);
+
+/**
+ * PATCH /api/xyne-ai/sessions/:sessionId/rename
+ *
+ * Rename a session. Body: { title: string }
+ */
+router.patch('/sessions/:sessionId/rename', xyneAIController.renameSession);
+
+/**
+ * PATCH /api/xyne-ai/sessions/:sessionId/metadata
+ *
+ * Update session metadata (branchSelections, feedbackMap, title).
+ * Body: { branchSelections?: Record<string, string>, feedbackMap?: Record<string, number>, title?: string }
+ */
+router.patch('/sessions/:sessionId/metadata', xyneAIController.updateSessionMetadata);
+
+/**
+ * DELETE /api/xyne-ai/sessions/:sessionId
+ *
+ * Delete a session and all its messages.
+ */
+router.delete('/sessions/:sessionId', xyneAIController.deleteSessionEndpoint);
+
 export default router;

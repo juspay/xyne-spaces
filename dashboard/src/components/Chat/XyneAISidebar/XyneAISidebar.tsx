@@ -8,13 +8,14 @@ import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
+import type { ConversationHistory as ConversationHistoryType } from './utils/XyneAITypes';
+import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
 import {
-  xyneAIStorage,
-  resolveActivePath,
-  getSiblings,
-  BRANCH_ROOT_KEY,
-  type ConversationHistory as ConversationHistoryType,
-} from '../../../utils/xyneAIStorage';
+  useSessionsList,
+  useSessionMutations,
+  loadSessionDetail,
+  saveSessionMetadata,
+} from '../../../hooks/useAskAISessions';
 import type { Message, SummarizerCitation, MessageAttachment, UserTag } from './utils/XyneAITypes';
 import { buildCitationUrl } from './utils/citationUrlBuilder';
 import {
@@ -361,6 +362,22 @@ const XyneAISidebar = ({
     return ALL_ONBOARDING_SUGGESTIONS.filter(s => !askedQuestions.has(s)).slice(0, 3);
   }, [aiOnboarding.isActive, messages]);
 
+  // Fetch sessions list from backend (used by history sidebar)
+  const { data: sessionsData, refetch: refetchSessions } = useSessionsList();
+  const {
+    toggleStar: toggleStarMutation,
+    rename: renameMutation,
+    deleteSession: deleteSessionMutation,
+    updateMetadata: _updateMetadataMutation,
+  } = useSessionMutations();
+
+  // Sync sessions list to local state for the ConversationHistory component
+  useEffect(() => {
+    if (sessionsData) {
+      setConversations(sessionsData);
+    }
+  }, [sessionsData]);
+
   // Load most recent conversation on mount
   // Thread context: load thread-specific conversation (channel-specific)
   // Global context: load most recent conversation across all channels
@@ -410,17 +427,42 @@ const XyneAISidebar = ({
           return;
         }
 
-        let mostRecent;
-        if (threadConversationId && channelId) {
-          // Thread context: load thread-specific conversation
-          mostRecent = await xyneAIStorage.loadLatestConversation(channelId, threadConversationId);
-        } else {
-          // Global context: load most recent conversation across all channels
-          mostRecent = await xyneAIStorage.loadLatestGlobalConversation();
+        // Load most recent session from backend
+        // Use the sessions list (already fetched or fetch now) to find the most recent
+        let sessions = sessionsData;
+        if (!sessions) {
+          // Fetch sessions if not yet loaded
+          const result = await refetchSessions();
+          sessions = result.data;
         }
 
         hasLoadedInitialConversationRef.current = true;
 
+        if (!sessions || sessions.length === 0) {
+          setIsLoadingConversation(false);
+          return;
+        }
+
+        // Filter sessions based on context
+        let matchingSessions = sessions;
+        if (threadConversationId && channelId) {
+          // Thread context: find sessions for this specific thread
+          matchingSessions = sessions.filter(s => s.threadConversationId === threadConversationId);
+        } else {
+          // Global context: only non-thread conversations
+          matchingSessions = sessions.filter(s => !s.threadConversationId);
+        }
+
+        if (matchingSessions.length === 0) {
+          setIsLoadingConversation(false);
+          return;
+        }
+
+        // Sessions are already sorted by updatedAt desc from backend, take first
+        const mostRecentSession = matchingSessions[0]!;
+
+        // Fetch full session detail (with messages) from backend
+        const mostRecent = await loadSessionDetail(mostRecentSession.sessionId);
         if (!mostRecent) {
           setIsLoadingConversation(false);
           return;
@@ -430,13 +472,13 @@ const XyneAISidebar = ({
         setConversationChannelId(mostRecent.channelId);
 
         // Clear streaming state and mark aborted messages
-        const messagesWithoutStreaming = mostRecent.messages.map(msg => {
-          // Check if this was a bot message that was streaming but got aborted
+        const messagesWithoutStreaming: Message[] = mostRecent.messages.map(msg => {
+          const toolOutputs = msg.toolOutputs;
           if (
             msg.type === 'bot' &&
             msg.isStreaming &&
             (!msg.content || msg.content.trim().length === 0) &&
-            (!msg.toolOutputs || msg.toolOutputs.length === 0)
+            (!toolOutputs || toolOutputs.length === 0)
           ) {
             return {
               ...msg,
@@ -445,10 +487,7 @@ const XyneAISidebar = ({
               content: 'Answer was aborted. Please try asking your question again.',
             };
           }
-          return {
-            ...msg,
-            isStreaming: false,
-          };
+          return { ...msg, isStreaming: false };
         });
         setMessages(messagesWithoutStreaming);
         setConversationId(mostRecent.sessionId);
@@ -480,85 +519,72 @@ const XyneAISidebar = ({
     };
 
     void loadMostRecentConversation();
-  }, [channelId, activeThreadInfo?.conversationId, scrollToBottom, startFreshChat]);
-
-  // Load conversations list when history sidebar is opened
-  // History is global across all channels, not channel-specific
-  useEffect(() => {
-    if (!showHistorySidebar) return;
-
-    const loadConversations = async (): Promise<void> => {
-      try {
-        const allConversations = await xyneAIStorage.getAllConversations();
-        // Sort by lastUpdated descending to ensure consistent order
-        const sortedConversations = allConversations.sort(
-          (a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime(),
-        );
-        setConversations(sortedConversations);
-      } catch (error) {
-        console.error('[XyneAISidebar] Failed to load conversations:', error);
-      }
-    };
-
-    void loadConversations();
-  }, [showHistorySidebar]);
-
-  // Save conversation history to IndexedDB whenever messages change
-  useEffect(() => {
-    const saveHistory = async (): Promise<void> => {
-      // Don't save empty conversations or conversations without a session ID
-      // Use conversationChannelId (original channel) to prevent duplicates when switching channels
-      const saveChannelId = conversationChannelId || channelId;
-      if (messages.length === 0 || !conversationId || !saveChannelId) {
-        return;
-      }
-
-      // Don't save if there are any streaming messages
-      // The stream manager handles persistence of active streams separately
-      // This prevents saving incomplete/streaming state that would show as "aborted" on reload
-      const hasStreamingMessages = messages.some(m => m.isStreaming);
-      if (hasStreamingMessages) {
-        return;
-      }
-
-      try {
-        const threadConversationId = activeThreadInfo?.conversationId;
-        await xyneAIStorage.saveConversation(
-          saveChannelId,
-          conversationId,
-          messages,
-          threadConversationId,
-          branchSelections,
-        );
-      } catch (error) {
-        console.error('[XyneAISidebar] Failed to save conversation history:', error);
-      }
-    };
-
-    void saveHistory();
   }, [
-    messages,
     channelId,
-    conversationChannelId,
-    conversationId,
     activeThreadInfo?.conversationId,
-    branchSelections,
+    scrollToBottom,
+    startFreshChat,
+    sessionsData,
+    refetchSessions,
   ]);
+
+  // Refetch sessions list when history sidebar is opened to get fresh data
+  useEffect(() => {
+    if (showHistorySidebar) {
+      void refetchSessions();
+    }
+  }, [showHistorySidebar, refetchSessions]);
+
+  // Save session metadata (branchSelections, feedbackMap) to backend when they change
+  // Messages are already persisted by the backend during streaming, so we only save metadata
+  useEffect(() => {
+    if (!conversationId || messages.length === 0) return;
+
+    // Don't save if there are streaming messages
+    const hasStreamingMessages = messages.some(m => m.isStreaming);
+    if (hasStreamingMessages) return;
+
+    // Build feedbackMap from current messages
+    const currentFeedbackMap: Record<string, number> = {};
+    messages.forEach(msg => {
+      if (msg.feedback !== undefined && msg.feedback !== 0) {
+        currentFeedbackMap[msg.id] = msg.feedback;
+      }
+    });
+
+    const metadata: {
+      branchSelections: Record<string, string>;
+      feedbackMap?: Record<string, number>;
+    } = {
+      branchSelections,
+    };
+    if (Object.keys(currentFeedbackMap).length > 0) {
+      metadata.feedbackMap = currentFeedbackMap;
+    }
+    void saveSessionMetadata(conversationId, metadata);
+  }, [branchSelections, conversationId, messages]);
 
   const handleSuggestionClick = (query: string): void => {
     setInputValue(query);
   };
 
-  const handleLoadConversation = (conversation: ConversationHistoryType): void => {
+  const handleLoadConversation = async (conversation: ConversationHistoryType): Promise<void> => {
     try {
+      // Fetch full session detail (with messages) from backend
+      const fullConversation = await loadSessionDetail(conversation.sessionId);
+      if (!fullConversation) {
+        console.error('[XyneAISidebar] Failed to load conversation detail');
+        return;
+      }
+
       // Clear streaming state and mark aborted messages
-      const messagesWithoutStreaming = conversation.messages.map(msg => {
-        // Check if this was a bot message that was streaming but got aborted
+      const messagesWithoutStreaming: Message[] = fullConversation.messages.map(msg => {
+        const toolOutputs = msg.toolOutputs;
         if (
           msg.type === 'bot' &&
           msg.isStreaming &&
           (!msg.content || msg.content.trim().length === 0) &&
-          (!msg.toolOutputs || msg.toolOutputs.length === 0)
+          (!toolOutputs || toolOutputs.length === 0)
         ) {
           return {
             ...msg,
@@ -567,22 +593,19 @@ const XyneAISidebar = ({
             content: 'Answer was aborted. Please try asking your question again.',
           };
         }
-        return {
-          ...msg,
-          isStreaming: false,
-        };
+        return { ...msg, isStreaming: false };
       });
       setMessages(messagesWithoutStreaming);
-      setConversationId(conversation.sessionId);
+      setConversationId(fullConversation.sessionId);
       // Set the original channel ID from the loaded conversation
-      setConversationChannelId(conversation.channelId);
-      setBranchSelections(conversation.branchSelections ?? {});
+      setConversationChannelId(fullConversation.channelId);
+      setBranchSelections(fullConversation.branchSelections ?? {});
       setEditingMessageId(null);
       setShowHistorySidebar(false);
 
       // Restore feedback from stored messages
       const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
-      conversation.messages.forEach(msg => {
+      fullConversation.messages.forEach(msg => {
         if (msg.feedback === 1) {
           restoredFeedbackMap[msg.id] = 'LIKE';
         } else if (msg.feedback === 2) {
@@ -604,17 +627,7 @@ const XyneAISidebar = ({
 
   const handleToggleStar = async (conversation: ConversationHistoryType): Promise<void> => {
     try {
-      await xyneAIStorage.toggleStar(
-        conversation.channelId,
-        conversation.sessionId,
-        conversation.threadConversationId,
-      );
-      // Reload all conversations to update UI (history is global)
-      const allConversations = await xyneAIStorage.getAllConversations();
-      const sortedConversations = allConversations.sort(
-        (a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime(),
-      );
-      setConversations(sortedConversations);
+      await toggleStarMutation.mutateAsync(conversation.sessionId);
     } catch (error) {
       console.error('[XyneAISidebar] Failed to toggle star:', error);
     }
@@ -622,17 +635,7 @@ const XyneAISidebar = ({
 
   const handleDeleteConversation = async (conversation: ConversationHistoryType): Promise<void> => {
     try {
-      await xyneAIStorage.deleteConversation(
-        conversation.channelId,
-        conversation.sessionId,
-        conversation.threadConversationId,
-      );
-      // Reload all conversations (history is global)
-      const allConversations = await xyneAIStorage.getAllConversations();
-      const sortedConversations = allConversations.sort(
-        (a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime(),
-      );
-      setConversations(sortedConversations);
+      await deleteSessionMutation.mutateAsync(conversation.sessionId);
       // If deleted conversation was active, clear messages
       if (conversation.sessionId === conversationId) {
         setMessages([]);
@@ -649,19 +652,7 @@ const XyneAISidebar = ({
     newName: string,
   ): Promise<void> => {
     try {
-      await xyneAIStorage.renameConversation(
-        conversation.channelId,
-        conversation.sessionId,
-        newName,
-        conversation.threadConversationId,
-      );
-
-      // Reload all conversations (history is global)
-      const allConversations = await xyneAIStorage.getAllConversations();
-      const sortedConversations = allConversations.sort(
-        (a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime(),
-      );
-      setConversations(sortedConversations);
+      await renameMutation.mutateAsync({ sessionId: conversation.sessionId, title: newName });
     } catch (error) {
       console.error('[XyneAISidebar] Failed to rename conversation:', error);
     }
@@ -1121,7 +1112,9 @@ const XyneAISidebar = ({
           conversations={conversations}
           conversationId={conversationId}
           onBack={() => setShowHistorySidebar(false)}
-          onLoadConversation={handleLoadConversation}
+          onLoadConversation={(conversation): void => {
+            void handleLoadConversation(conversation);
+          }}
           onToggleStar={handleToggleStar}
           onDeleteConversation={handleDeleteConversation}
           onRenameConversation={handleRenameConversation}

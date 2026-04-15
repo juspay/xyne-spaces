@@ -1,5 +1,48 @@
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 
+// ============================================================================
+// Stored / persisted types (backend PostgreSQL)
+// ============================================================================
+
+export interface StoredMessage {
+  id: string;
+  type: 'user' | 'bot';
+  content: string;
+  timestamp: Date;
+  isStreaming?: boolean;
+  streamingContent?: string;
+  parsedContent?: {
+    summary: string;
+    keypoints: string[];
+    citations: Record<number, number>;
+    isComplete: boolean;
+  };
+  messageIdMapping?: Record<string, string>;
+  conversationIdMapping?: Record<string, string>;
+  channelIdMapping?: Record<string, string>;
+  toolOutputs?: GeniusToolOutput[];
+  feedback?: 0 | 1 | 2; // 0 = no feedback, 1 = like, 2 = dislike
+  attachments?: MessageAttachment[];
+  parentId?: string | null; // Parent message ID for tree branching
+}
+
+export interface ConversationHistory {
+  id: string;
+  channelId: string;
+  sessionId: string;
+  threadConversationId?: string;
+  title: string;
+  messages: StoredMessage[];
+  createdAt: Date;
+  lastUpdated: Date;
+  isStarred?: boolean;
+  branchSelections?: Record<string, string>; // parentId → selected childId for branching
+}
+
+// ============================================================================
+// Streaming / runtime types
+// ============================================================================
+
 export interface StreamingParsedContent {
   summary: string;
   keypoints: string[];
