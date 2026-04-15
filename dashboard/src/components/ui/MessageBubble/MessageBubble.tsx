@@ -56,6 +56,7 @@ import { useUsers, useUser } from '../../../hooks/useUsers';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { StatusIndicator } from '../StatusIndicator';
 import DOMPurify from 'dompurify';
 import { CallBubble } from './CallBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
@@ -754,25 +755,43 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <h3 className='text-sm font-medium text-foreground'>System</h3>
               ) : sender ? (
                 isMobile ? (
-                  <Button
-                    variant='ghost'
-                    onClick={() => handleUserClick(sender.id)}
-                    className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-foreground hover:underline p-0 h-auto min-w-0`}
-                    aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
-                  >
-                    {getUserDisplayName(sender)}
-                  </Button>
-                ) : (
-                  <UserHoverWrapper userId={sender.id}>
+                  <span className='flex items-center gap-1'>
                     <Button
                       variant='ghost'
                       onClick={() => handleUserClick(sender.id)}
-                      className={`text-sm font-medium text-foreground hover:underline p-0 h-auto min-w-0`}
+                      className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-foreground hover:underline p-0 h-auto min-w-0`}
                       aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                     >
                       {getUserDisplayName(sender)}
                     </Button>
-                  </UserHoverWrapper>
+                    <StatusIndicator
+                      statusEmoji={sender?.statusEmoji}
+                      statusContent={sender?.statusContent}
+                      statusExpiryAt={sender?.statusExpiryAt}
+                      size='sm'
+                      showOnHover={true}
+                    />
+                  </span>
+                ) : (
+                  <span className='flex items-center gap-1'>
+                    <UserHoverWrapper userId={sender.id}>
+                      <Button
+                        variant='ghost'
+                        onClick={() => handleUserClick(sender.id)}
+                        className={`text-sm font-medium text-foreground hover:underline p-0 h-auto min-w-0`}
+                        aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
+                      >
+                        {getUserDisplayName(sender)}
+                      </Button>
+                    </UserHoverWrapper>
+                    <StatusIndicator
+                      statusEmoji={sender?.statusEmoji}
+                      statusContent={sender?.statusContent}
+                      statusExpiryAt={sender?.statusExpiryAt}
+                      size='sm'
+                      showOnHover={true}
+                    />
+                  </span>
                 )
               ) : (
                 <h3 className='text-sm font-medium text-foreground cursor-pointer hover:underline'>

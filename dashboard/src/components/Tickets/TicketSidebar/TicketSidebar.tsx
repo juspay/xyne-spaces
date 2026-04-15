@@ -29,6 +29,7 @@ import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { mutators } from '../../../zero/mutators';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { StatusIndicator } from '../../ui/StatusIndicator';
 
 type TabType = 'overview' | 'threads';
 
@@ -631,6 +632,19 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                         users?.find(u => u.id === field.state.value),
                                       )}
                                     </span>
+                                    <StatusIndicator
+                                      statusEmoji={
+                                        users?.find(u => u.id === field.state.value)?.statusEmoji
+                                      }
+                                      statusContent={
+                                        users?.find(u => u.id === field.state.value)?.statusContent
+                                      }
+                                      statusExpiryAt={
+                                        users?.find(u => u.id === field.state.value)?.statusExpiryAt
+                                      }
+                                      size='sm'
+                                      showOnHover={true}
+                                    />
                                   </>
                                 ) : (
                                   <span className='text-sm text-muted-foreground'>Unassigned</span>
@@ -693,8 +707,15 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
                                     >
                                       <UserAvatar userId={user.id} showActiveStatus={false} />
                                       <div className='flex-1 min-w-0'>
-                                        <div className='text-foreground truncate'>
+                                        <div className='text-foreground truncate flex items-center gap-1'>
                                           {getUserDisplayName(user)}
+                                          <StatusIndicator
+                                            statusEmoji={user.statusEmoji}
+                                            statusContent={user.statusContent}
+                                            statusExpiryAt={user.statusExpiryAt}
+                                            size='sm'
+                                            showOnHover={true}
+                                          />
                                         </div>
                                         <div className='text-xs text-muted-foreground truncate'>
                                           {user.email}

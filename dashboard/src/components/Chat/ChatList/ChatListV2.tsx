@@ -514,6 +514,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
         defaultItemHeight={100}
         isScrolling={setScrolling}
         minOverscanItemCount={10}
+        alignToBottom={true}
         groupContent={groupIndex => {
           const dateString = dateGroups[groupIndex];
           if (!dateString) return null;
