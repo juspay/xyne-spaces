@@ -683,8 +683,10 @@ const ChannelMembers = ({
   );
 
   const currentUserParticipant = useMemo(
-    () => participants.find(c => c.userId === context.userID),
-    [participants, context.userID],
+    () =>
+      accumulatedParticipants.find(c => c.userId === context.userID) ??
+      participants.find(c => c.userId === context.userID),
+    [accumulatedParticipants, participants, context.userID],
   );
 
   const allUsers = useUsers();
