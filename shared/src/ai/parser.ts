@@ -10,6 +10,7 @@ import {
   AICreateTicketEvent,
   AIControllerEvent,
   AIControlRequestEvent,
+  AIControlRequestDeniedEvent,
   AIInviteUser,
 } from './types';
 
@@ -64,6 +65,15 @@ export function parseAIDataMessage(data: RawDataMessage): AIEvent | null {
       type: 'AI_CONTROL_REQUEST',
       requesterId: data.requester_id,
       requesterName: data.requester_name,
+    };
+    return event;
+  }
+
+  // Handle control request denied messages
+  if (data.type === 'ai_control_request_denied' && data.requester_id) {
+    const event: AIControlRequestDeniedEvent = {
+      type: 'AI_CONTROL_REQUEST_DENIED',
+      requesterId: data.requester_id,
     };
     return event;
   }

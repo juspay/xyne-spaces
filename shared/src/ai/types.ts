@@ -80,6 +80,14 @@ export interface AIControlTransferMessage {
 }
 
 /**
+ * AI control request denied event (from current controller)
+ */
+export interface AIControlRequestDeniedMessage {
+  type: 'ai_control_request_denied';
+  requester_id: string;
+}
+
+/**
  * AI voice toggle event (enable/disable AI)
  */
 export interface AIVoiceToggleMessage {
@@ -101,6 +109,7 @@ export type AIDataMessage =
   | AIControllerChangedMessage
   | AIControlRequestMessage
   | AIControlTransferMessage
+  | AIControlRequestDeniedMessage
   | AIVoiceToggleMessage;
 
 /**
@@ -172,10 +181,19 @@ export interface AIControlRequestEvent {
 }
 
 /**
+ * Parsed AI control request denied event
+ */
+export interface AIControlRequestDeniedEvent {
+  type: 'AI_CONTROL_REQUEST_DENIED';
+  requesterId: string;
+}
+
+/**
  * All possible parsed AI events
  */
 export type AIEvent =
   | AIInviteEvent
   | AICreateTicketEvent
   | AIControllerEvent
-  | AIControlRequestEvent;
+  | AIControlRequestEvent
+  | AIControlRequestDeniedEvent;
