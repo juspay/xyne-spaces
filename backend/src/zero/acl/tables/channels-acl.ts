@@ -31,6 +31,15 @@ export class ChannelsACL extends BaseACL<'channels'> {
     if (!currentUserParticipantData) {
        throw new MutationACLError('Channel update failed: only channel participants can modify channel settings', 'channels');
     }
+
+    // Only admins or channel creator can rename the channel
+    if (args.name !== undefined) {
+      const isAdmin = currentUserParticipantData.role === ChannelRole.ADMIN;
+      const isCreator = channel.createdBy === this.ctx.userID;
+      if (!isAdmin && !isCreator) {
+        throw new MutationACLError('Channel update failed: only channel admins can rename the channel', 'channels');
+      }
+    }
   }
 
   async canDelete(_args: DeleteID<TableSchema<'channels'>>, _tx: Transaction<Schema>): Promise<void> {
