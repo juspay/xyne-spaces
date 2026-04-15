@@ -744,16 +744,17 @@ const CallHistoryScreen = (): ReactElement => {
                       <span className='font-mono text-muted-foreground text-sm leading-5 font-medium uppercase cursor-default'>
                         upcoming calls
                       </span>
-                      {!searchQuery.trim() && scheduledCalls.length > 3 && (
-                        <Button
-                          variant='secondary'
-                          size='sm'
-                          onClick={() => setShowAllUpcoming(!showAllUpcoming)}
-                          className='font-mono text-[#3B4145] text-sm leading-5 font-medium capitalize rounded-xl h-7'
-                        >
-                          {showAllUpcoming ? 'less' : 'more'}
-                        </Button>
-                      )}
+                      {!searchQuery.trim() &&
+                        (limitedScheduledCalls?.length ?? 0) > MAX_UPCOMING_CALLS_TO_SHOW && (
+                          <Button
+                            variant='secondary'
+                            size='sm'
+                            onClick={() => setShowAllUpcoming(!showAllUpcoming)}
+                            className='font-mono text-[#3B4145] text-sm leading-5 font-medium capitalize rounded-xl h-7'
+                          >
+                            {showAllUpcoming ? 'less' : 'more'}
+                          </Button>
+                        )}
                     </div>
 
                     <div className='grid grid-cols-1 md:grid-cols-3 md:gap-4 border md:border-none border-border rounded-xl'>
