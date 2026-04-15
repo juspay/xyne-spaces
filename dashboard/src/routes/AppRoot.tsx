@@ -406,8 +406,8 @@ const AppRoot = (): ReactElement => {
                       <PanelResizeHandle className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
                         <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
                       </PanelResizeHandle>
-                      <Panel ref={xyneAIRightPanelRef} defaultSize={35} maxSize={50}>
-                        <div className='max-w-[830px] h-full relative'>
+                      <Panel ref={xyneAIRightPanelRef} defaultSize={35} maxSize={50} minSize={25}>
+                        <div className='h-full relative'>
                           <XyneAISidebar
                             channelId={xyneAIChannelId}
                             threadInfo={xyneAIThreadInfo}

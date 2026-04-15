@@ -70,7 +70,7 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
     return (
       <button
         onClick={handleToggleSubscription}
-        className={className}
+        className={`text-foreground ${className}`}
         title={
           isSubscribed
             ? 'Subscribed • Click to unsubscribe from notifications'
@@ -83,7 +83,7 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
         {isSubscribed ? (
           <Bell className='w-4 h-4 fill-blue-600 stroke-blue-600' />
         ) : (
-          <BellOff className='w-4 h-4 stroke-gray-400' />
+          <BellOff className='w-4 h-4 stroke-current' />
         )}
       </button>
     );
@@ -93,14 +93,18 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
     return (
       <button
         onClick={handleToggleSubscription}
-        className={`flex items-center w-full ${className}`}
+        className={`flex items-center w-full text-foreground ${className}`}
         title={isSubscribed ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}
         aria-label={isSubscribed ? 'Unsubscribe from conversation' : 'Subscribe to conversation'}
         data-track-category='CONVERSATION_SUBSCRIPTION'
         data-track-name='TOGGLE_SUBSCRIPTION_DROPDOWN'
       >
-        <span className='w-4 h-4 mr-2 flex items-center justify-center text-[rgba(120,129,135,1)]'>
-          {isSubscribed ? <BellOff className='w-4 h-4' /> : <Bell className='w-4 h-4' />}
+        <span className='w-4 h-4 mr-2 flex items-center justify-center'>
+          {isSubscribed ? (
+            <Bell className='w-4 h-4 fill-blue-600 stroke-blue-600' />
+          ) : (
+            <BellOff className='w-4 h-4 stroke-current' />
+          )}
         </span>
         {isSubscribed ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}
       </button>
