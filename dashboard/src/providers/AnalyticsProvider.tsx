@@ -8,7 +8,7 @@ interface AnalyticsProviderProps {
 
 /**
  * AnalyticsProvider initializes Mixpanel on mount
- * Use mixpanelService.track() directly in components for tracking events
+ * Use mixpanelService.track() or sudoQueryService.track() directly in components for tracking events
  */
 export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }) => {
   const { platform } = usePlatform();
