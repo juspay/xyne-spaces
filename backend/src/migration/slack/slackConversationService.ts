@@ -286,6 +286,20 @@ async function addChannelParticipantsBeforeMigration(
     xyneChannelId,
   });
 
+  // Fetch channel info to get the creator
+  let channelCreatorSlackId: string | undefined;
+  try {
+    const client = new WebClient(config.slackBotToken);
+    const channelInfo = await client.conversations.info({ channel: slackChannelId });
+    channelCreatorSlackId = channelInfo.channel?.creator;
+    logger.info('[Migration] Channel creator fetched', { slackChannelId, channelCreatorSlackId });
+  } catch (error) {
+    logger.warn('[Migration] Failed to fetch channel info for creator', {
+      slackChannelId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+
   const channelMemberIds = await extractChannelMembers(slackChannelId);
   const userRepo = new UserRepository();
   const userInfoCache: UserInfoCache = new Map();
@@ -346,10 +360,7 @@ async function addChannelParticipantsBeforeMigration(
         reason,
       });
     }
-    // Rate limiting: 2 second delay between users to avoid Slack API limits
-    if (i < channelMemberIds.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
+
   }
 
   logger.info('[Migration] Channel participants validation complete', {
@@ -375,24 +386,56 @@ async function addChannelParticipantsBeforeMigration(
   // Phase 3: Batch add all participants since no failures
   if (usersToBeAdded.length > 0) {
     const channelParticipantRepo = new ChannelParticipantRepository();
-    const userIds = usersToBeAdded.map((u) => u.xyneUserId);
 
-    const result = await channelParticipantRepo.addParticipantsBatch(
-      xyneChannelId,
-      userIds,
-      'MEMBER'
-    );
+    // Identify the channel creator to add as ADMIN
+    const creatorUser = channelCreatorSlackId
+      ? usersToBeAdded.find((u) => u.slackUserId === channelCreatorSlackId)
+      : undefined;
 
-    logger.info('[Migration] Channel participants batch added', {
-      xyneChannelId,
-      addedCount: result.addedCount,
-      existingCount: result.existingCount,
-    });
+    const memberUsers = usersToBeAdded.filter((u) => u.slackUserId !== channelCreatorSlackId);
+
+    // Add the creator as ADMIN (handles all cases: new user, existing MEMBER, or already ADMIN)
+    if (creatorUser) {
+      const existingParticipant = await channelParticipantRepo.addParticipant(
+        xyneChannelId,
+        creatorUser.xyneUserId,
+        'ADMIN'
+      );
+      // If the user already existed, addParticipant returns the existing record without
+      // updating the role. Ensure role is ADMIN if they were previously a MEMBER.
+      if (existingParticipant.role !== 'ADMIN') {
+        await channelParticipantRepo.updateParticipantRole(
+          xyneChannelId,
+          creatorUser.xyneUserId,
+          'ADMIN'
+        );
+      }
+      logger.info('[Migration] Channel creator added as ADMIN', {
+        xyneChannelId,
+        creatorSlackId: channelCreatorSlackId,
+        creatorXyneId: creatorUser.xyneUserId,
+      });
+    }
+
+    // Add remaining members as MEMBER
+    const memberUserIds = memberUsers.map((u) => u.xyneUserId);
+    if (memberUserIds.length > 0) {
+      const result = await channelParticipantRepo.addParticipantsBatch(
+        xyneChannelId,
+        memberUserIds,
+        'MEMBER'
+      );
+
+      logger.info('[Migration] Channel participants batch added', {
+        xyneChannelId,
+        addedCount: result.addedCount,
+        existingCount: result.existingCount,
+      });
+    }
 
     // Queue Vespa re-indexing for the channel (single job for all participants)
-    if (result.addedCount > 0) {
-      await pushVespaJobForChannel(xyneChannelId, userIds[0]);
-    }
+    const allUserIds = usersToBeAdded.map((u) => u.xyneUserId);
+    await pushVespaJobForChannel(xyneChannelId, allUserIds[0]);
   }
 }
 
@@ -440,6 +483,13 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
 
     // Add all channel participants before migration (if target channel is specified)
     if (input.xyneSpaceChannelId) {
+      if (ENABLE_NOTIFICATIONS && messageTs) {
+        await postMessage({
+          channelId: input.channelId!,
+          text: '🔄 Syncing channel participants...',
+          threadTs: messageTs,
+        });
+      }
       await addChannelParticipantsBeforeMigration(input.channelId!, input.xyneSpaceChannelId);
     }
 
@@ -519,9 +569,13 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
       const xyneSpacesLink = input.xyneSpaceChannelId
         ? `<https://spaces.xyne.juspay.net/chat/${input.xyneSpaceChannelId}|Xyne Spaces>`
         : 'Xyne Spaces';
+      let finalMessage = `<!channel> This Channel has been migrated to ${xyneSpacesLink}. Please move your conversations there only this channel will be soon archived.`;
+      if (config.slackMigrationFinalMessage) {
+        finalMessage += `\n${config.slackMigrationFinalMessage}`;
+      }
       await postMessage({
         channelId: input.channelId!,
-        text: `<!channel> This Channel has been migrated to ${xyneSpacesLink}. Please move your conversations there only this channel will be soon archived. Use Electron app for desktop and we have mobile apps for both Android & iOS.\n\nFor Android, download from Playstore. Sign in using Juspay Email id.\nFor iOS - Use this - <https://testflight.apple.com/join/xcYk6Cf5>\nFor Desktop, download from kandji\n\nPlease visit <https://auth.spaces.xyne.juspay.net> and then register your devices to use it without VPN and outside Office Wifi.\n*First time registration should happen with VPN turned on.*\n\nPeople who have already installed desktop or mobile apps, please update to the latest versions. If you have previously installed android mobile app using apk, please uninstall that and move to Playstore version. Many things have been improved in the newer versions.\n\nIf you are facing any issues in Spaces, please report in <https://app.spaces.xyne.juspay.net/chat/dir/cmlavlf4w0h2i2egl1vt3ntfz#origin=cmlfmg46o00e012durtnb2ob2|Xyne-Space-Feedback channel in Spaces> or <#C0A2BFNLBB8> in Slack.\n\nThis channel will be archived by today EOD. Request everyone to install app and electron app and onboard before that and start using it from Spaces.\n\nIf you have any queries on what is spaces and its capabilities, you can discuss with *Ask AI in Xyne*. It does much more than what is shown in the video. People are asking it about bugs, issues, features of Spaces. Objective is to expand to all products. You can explore about Xyne Spaces with Ask AI.\n\nOn-boarding doc: <https://docs.google.com/document/d/1dad4KPVMjGWE7nC3OxhXGvrL-g7AlqUprxqKklgAZcc/edit?tab=t.0#heading=h.4gn89kbkbhu8>\n\ncc : <@UREJEPH62> <@U03HFNFAH3M> <@U03RVA12THS> <@U09AJ40QGRF> <@U04GQ5T9S2Y> <@U07BSL1ETDL> \n\nDemo Video : <https://drive.google.com/file/d/1DwdTnE7LtEpdsD2QVsIYeBoB-TghEKBc/view?usp=sharing | Ask AI>`,
+        text: finalMessage,
       });
     }
 

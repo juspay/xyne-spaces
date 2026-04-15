@@ -560,37 +560,61 @@ async function fetchAllThreadReplies(
 
 const blockKitParser = new SlackBlockKitParser();
 
-async function extractMessageContent(msg: any): Promise<string> {
+
+async function deepResolveMentions<T>(obj: T, token: string): Promise<T> {
+  if (typeof obj === 'string') {
+    return (await resolveSlackMentions(obj, token)) as unknown as T;
+  }
+  if (Array.isArray(obj)) {
+    return (await Promise.all(obj.map((item) => deepResolveMentions(item, token)))) as unknown as T;
+  }
+  if (obj !== null && typeof obj === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      result[key] = await deepResolveMentions(value, token);
+    }
+    return result as T;
+  }
+  return obj;
+}
+
+async function extractMessageContent(msg: any, isBotContext: boolean = false): Promise<string> {
   const token = process.env.SLACK_BOT_TOKEN || '';
-  let resolvedBlocks = msg.blocks;
-  if (msg.blocks?.length) {
-    const resolved = await resolveSlackMentions(JSON.stringify(msg.blocks), token, true);
-    resolvedBlocks = JSON.parse(resolved);
+
+  if (!isBotContext) {
+    // Normal messages: text only, no blocks, no attachments
+    const resolvedText = msg.text
+      ? await resolveSlackMentions(msg.text, token)
+      : '';
+    return blockKitParser.parse({ text: resolvedText });
   }
 
-  let resolvedAttachments = msg.attachments;
-  if (msg.attachments?.length) {
-    const resolved = await resolveSlackMentions(JSON.stringify(msg.attachments), token, true);
-    resolvedAttachments = JSON.parse(resolved);
-  }
+  // Bot context: blocks primary, text fallback, attachments always resolved
+  const resolvedBlocks = msg.blocks?.length
+    ? await deepResolveMentions(msg.blocks, token)
+    : undefined;
 
-  const resolvedText = !msg.blocks?.length && msg.text
+  const resolvedText = !resolvedBlocks && msg.text
     ? await resolveSlackMentions(msg.text, token)
     : undefined;
-  const html = blockKitParser.parse({
+
+  const resolvedAttachments = msg.attachments?.length
+    ? await deepResolveMentions(msg.attachments, token)
+    : undefined;
+
+  return blockKitParser.parse({
     text: resolvedText,
     blocks: resolvedBlocks,
     attachments: resolvedAttachments,
   });
-
-  return resolveSlackMentions(html, token);
 }
 
 export async function transformReply(
   reply: any,
   cache: UserInfoCache,
   includeAttachments: boolean,
-  allowedBots: string[] = []
+  allowedBots: string[] = [],
+  includeBotMessages: boolean = false,
 ): Promise<SlackReply> {
   const isBot = !!reply.bot_id;
   const userInfo = !isBot && reply.user ? await getUserInfo(reply.user, cache) : {};
@@ -598,7 +622,8 @@ export async function transformReply(
     ? (reply.username || reply.app_name || reply.bot_profile?.name)
     : undefined;
 
-  const htmlContent = await extractMessageContent(reply);
+  const isBotContext = !!reply.bot_id && (includeBotMessages || allowedBots.length > 0);
+  const htmlContent = await extractMessageContent(reply, isBotContext);
 
   // Check if this is a bot message that matches allowedBots
   let botEmail: string | undefined;
@@ -644,7 +669,8 @@ async function transformMessage(
   threadReplies: any[] | undefined,
   cache: UserInfoCache,
   includeAttachments: boolean,
-  includeDeactivatedUsers: boolean
+  includeDeactivatedUsers: boolean,
+  includeBotMessages: boolean = false,
 ): Promise<SlackMessage> {
   const isBot = !!rawMessage.bot_id;
   const userInfo = !isBot && rawMessage.user ? await getUserInfo(rawMessage.user, cache) : {};
@@ -656,7 +682,7 @@ async function transformMessage(
   let replies: SlackReply[] | undefined;
   if (threadReplies?.length) {
     replies = await Promise.all(
-      threadReplies.map((reply) => transformReply(reply, cache, includeAttachments))
+      threadReplies.map((reply) => transformReply(reply, cache, includeAttachments, [], includeBotMessages))
     );
 
     // Filter replies
@@ -672,7 +698,8 @@ async function transformMessage(
   }
 
   // Transform message content
-  const htmlContent = await extractMessageContent(rawMessage);
+  const isBotContext = !!rawMessage.bot_id && includeBotMessages;
+  const htmlContent = await extractMessageContent(rawMessage, isBotContext);
 
   return {
     content: htmlContent,
@@ -770,7 +797,8 @@ export async function extractChannelHistory(
         threadRepliesMap.get(rawMessage.ts),
         userCache,
         includeAttachments,
-        includeDeactivatedUsers
+        includeDeactivatedUsers,
+        includeBotMessages,
       )
     )
   );
