@@ -1121,6 +1121,52 @@ export const mutators = defineMutators({
         });
       },
     ),
+    renameChannel: defineMutator(
+      z.object({
+        channelId: z.string(),
+        name: z.string().min(2).max(80),
+        messageId: z.string(),
+        conversationId: z.string(),
+        timestamp: z.number(),
+        conversationParticipantId: z.string(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { channelId, name },
+      }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+
+        if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+          throw new Error('Only default channels can be renamed');
+        }
+
+        // Check if user is a participant
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+
+        if (!participant) {
+          throw new Error('Only channel participants can rename the channel');
+        }
+
+        // Only admins or creator can rename
+        if (participant.role !== ChannelRole.ADMIN && channel.createdBy !== ctx.userID) {
+          throw new Error('Only channel admins can rename the channel');
+        }
+
+        // Check for duplicate name
+        const existingChannel = await tx.run(zql.channels.where('name', name).one());
+        if (existingChannel && existingChannel.id !== channelId) {
+          throw new Error('A channel with this name already exists');
+        }
+
+
+      },
+    ),
     archiveChannel: defineMutator(
       z.object({
         channelId: z.string(),
