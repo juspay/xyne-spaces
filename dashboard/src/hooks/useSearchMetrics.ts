@@ -28,6 +28,7 @@ import {
   hasIncompleteType,
   getBackendTypes,
 } from '../utils/searchFilterParser';
+import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
@@ -231,6 +232,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   const pendingSearchCountRef = useRef(0);
   const latestResultsRef = useRef<DisplaySearchResult[]>([]);
+  const sessionFiltersRef = useRef<Set<string>>(new Set());
 
   /**
    * Generate a unique session ID
@@ -257,11 +259,19 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       querySourceRef.current = 'KEYBOARD';
       isModifiedRef.current = false;
 
+      // Reset session filters tracking
+      sessionFiltersRef.current.clear();
+
       searchMetricsService.trackSessionStart(
         newSessionId,
         String(context.userID),
         previousTabRef.current,
       );
+      sudoQueryService.track('search_session_start', {
+        searchSessionId: newSessionId,
+        tab: previousTabRef.current,
+        trigger,
+      });
 
       return newSessionId;
     },
@@ -314,6 +324,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       const queryTextForEnd =
         endReason === 'clear' ? maxQueryLengthTextRef.current : lastQueryTextRef.current;
 
+      // Use accumulated unique filters from entire session
+      const filtersUsed = sessionFiltersRef.current.size;
+      const hasFilters = filtersUsed > 0;
+      const filtersUsedList = Array.from(sessionFiltersRef.current);
+
       // Track session end event
       if (queryTextForEnd || endReason === 'click' || endReason === 'abandon') {
         searchMetricsService.trackSessionEnd({
@@ -327,6 +342,20 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           querySource: querySourceRef.current,
           isModified: isModifiedRef.current,
           tab: previousTabRef.current,
+        });
+        sudoQueryService.track('search_session_end', {
+          searchSessionId,
+          queryText: queryTextForEnd || '',
+          totalImpressions: impressionCountRef.current,
+          dwellTimeMs,
+          endReason,
+          totalSessionDurationMs,
+          querySource: querySourceRef.current,
+          isModified: isModifiedRef.current,
+          tab: previousTabRef.current,
+          filtersUsed,
+          hasFilters,
+          filtersUsedList,
         });
       }
 
@@ -373,6 +402,24 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         ...(options.searchLocation && { searchLocation: options.searchLocation }),
         tab: previousTabRef.current,
       });
+      sudoQueryService.track('search_impression', {
+        searchSessionId,
+        queryText: params.queryText,
+        totalHits: params.totalHits,
+        latencyMs,
+        ...Object.entries(params.facetCounts).reduce(
+          (acc, [key, value]) => {
+            acc[`facetCount_${key}`] = value;
+            return acc;
+          },
+          {} as Record<string, number>,
+        ),
+        searchTrigger: searchTriggerRef.current,
+        querySource: querySourceRef.current,
+        isModified: isModifiedRef.current,
+        ...(options.searchLocation && { searchLocation: options.searchLocation }),
+        tab: previousTabRef.current,
+      });
 
       // Update tracking state for dwell time calculation
       lastImpressionTimeRef.current = now;
@@ -384,10 +431,36 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         maxQueryLengthTextRef.current = params.queryText;
       }
 
+      // Accumulate unique filters used during session
+      const parsedFiltersForImpression = parseSearchFilters(params.queryText);
+
+      if (parsedFiltersForImpression.priority) sessionFiltersRef.current.add('priority');
+      if (parsedFiltersForImpression.board) sessionFiltersRef.current.add('board');
+      if (parsedFiltersForImpression.tags) sessionFiltersRef.current.add('tags');
+      if (parsedFiltersForImpression.before) sessionFiltersRef.current.add('before');
+      if (parsedFiltersForImpression.after) sessionFiltersRef.current.add('after');
+      if (parsedFiltersForImpression.on) sessionFiltersRef.current.add('on');
+      if (parsedFiltersForImpression.range) sessionFiltersRef.current.add('range');
+      if (parsedFiltersForImpression.stage) sessionFiltersRef.current.add('stage');
+      if (parsedFiltersForImpression.status) sessionFiltersRef.current.add('status');
+      if (parsedFiltersForImpression.type) sessionFiltersRef.current.add('type');
+
+      // Track mention-based filters
+      const hasFromMention = selectedMentions.some(
+        m => m.type === MentionType.USER && (m.prefix === 'from:' || !m.prefix),
+      );
+      const hasAssigneeMention = selectedMentions.some(
+        m => m.type === MentionType.USER && m.prefix === 'assignee:',
+      );
+      const hasChannelMention = selectedMentions.some(m => m.type === MentionType.CHANNEL);
+      if (hasFromMention) sessionFiltersRef.current.add('from');
+      if (hasAssigneeMention) sessionFiltersRef.current.add('assignee');
+      if (hasChannelMention) sessionFiltersRef.current.add('in');
+
       // Reset for next search
       impressionStartTimeRef.current = 0;
     },
-    [searchSessionId, context.userID, options.searchLocation],
+    [searchSessionId, context.userID, options.searchLocation, selectedMentions],
   );
 
   /**
@@ -439,6 +512,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       searchMetricsService.trackClick({
         searchSessionId,
         userId: String(context.userID),
+        queryText: params.queryText,
+        clickedDocId: params.clickedDocId,
+        clickedDocType: params.clickedDocType,
+        rankPosition: params.rankPosition,
+        ...(params.channel && { channel: params.channel }),
+        ...(scrollDepth !== undefined && { scrollDepth }),
+        ...(params.resultUrl && { resultUrl: params.resultUrl }),
+        tab: previousTabRef.current,
+      });
+      sudoQueryService.track('search_click', {
+        searchSessionId,
         queryText: params.queryText,
         clickedDocId: params.clickedDocId,
         clickedDocType: params.clickedDocType,
@@ -1210,6 +1294,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     searchMetricsService.trackTabClick({
       searchSessionId,
       userId: String(context.userID),
+      tab: previousTabRef.current,
+    });
+    sudoQueryService.track('search_tab_click', {
+      searchSessionId,
       tab: previousTabRef.current,
     });
   }, [searchSessionId, context.userID, activeTab]);
