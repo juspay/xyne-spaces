@@ -1,5 +1,6 @@
 import { type ILogger } from '@xyne/vespa-ts';
 import { consoleLogger, getErrorMessage } from '../utils';
+import { cleanDocumentFields } from '../../../utils/vespaTextValidation';
 import type { InsertDocument, VespaSchema } from '../types';
 
 type VespaConfigValues = {
@@ -106,13 +107,16 @@ class VespaClient {
 
   async insert(document: InsertDocument, options: VespaConfigValues): Promise<void> {
     try {
+      // Clean document fields to remove Unicode replacement characters before insertion
+      const cleanedDocument = cleanDocumentFields(document);
+
       const url = `${this.feedEndpoint}/document/v1/${options.namespace}/${options.schema}/docid/${document.docId}`;
       const response = await this.fetchWithRetry(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ fields: document }),
+        body: JSON.stringify({ fields: cleanedDocument }),
       });
 
       if (!response.ok) {
@@ -186,7 +190,10 @@ class VespaClient {
     const url = `${this.feedEndpoint}/document/v1/${namespace}/${schema}/docid/${docId}`;
 
     try {
-      const updateObject = Object.entries(updatedFields).reduce(
+      // Clean updated fields to remove Unicode replacement characters
+      const cleanedFields = cleanDocumentFields(updatedFields);
+
+      const updateObject = Object.entries(cleanedFields).reduce(
         (prev, [key, value]) => {
           prev[key] = { assign: value };
           return prev;
@@ -241,6 +248,7 @@ class VespaClient {
       throw new Error(`Error deleting document ${docId}: ${errMessage}`);
     }
   }
+
 }
 
 export default VespaClient;
