@@ -563,7 +563,7 @@ export class RecapGenerationService {
     for (const call of calls) {
       threadMessages.push({
         id: `call-${call.id}`,
-        content: `📞 Call started: ${call.title}\nType: ${call.callType}\nStatus: ${call.status}\nCall ID: ${call.id}`,
+        content: `🎧 Call started: ${call.title}\nType: ${call.callType}\nStatus: ${call.status}\nCall ID: ${call.id}`,
         authorName: 'System',
         createdAt: call.createdAt,
         hasAttachment: false,

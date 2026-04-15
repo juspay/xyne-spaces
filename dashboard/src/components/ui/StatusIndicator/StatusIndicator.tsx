@@ -1,5 +1,6 @@
 import React from 'react';
 import * as Tooltip from '@radix-ui/react-tooltip';
+import { CALL_STATUS_EMOJI } from '../../../hooks/useCallStatusSync';
 import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
 import { cn } from '../../../utils/classNames';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
@@ -13,6 +14,7 @@ interface StatusIndicatorProps {
   size?: StatusIndicatorSize;
   showOnHover?: boolean;
   className?: string;
+  hideCallEmoji?: boolean;
 }
 
 const sizeClasses: Record<StatusIndicatorSize, string> = {
@@ -28,12 +30,15 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   size = 'sm',
   showOnHover = true,
   className,
+  hideCallEmoji = false,
 }) => {
   // Check if user has a valid (non-expired) status
   const hasValidStatus = statusEmoji && (!statusExpiryAt || !isStatusExpired(statusExpiryAt));
 
   // Don't render anything if no valid status
-  if (!hasValidStatus) {
+  // Also hide "In a call" status if:
+  // 1. hideCallEmoji is true (e.g. sidebar already showing green headphone)
+  if (!hasValidStatus || (hideCallEmoji && statusEmoji === CALL_STATUS_EMOJI)) {
     return null;
   }
 
