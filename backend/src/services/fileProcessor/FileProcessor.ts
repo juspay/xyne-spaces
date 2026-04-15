@@ -66,7 +66,7 @@ export class FileProcessor {
     async processBuffer(buffer: Buffer, vespaDocId: string): Promise<ProcessingResult> {
         logger.info(`[FileProcessor] Processing buffer with strategy: ${this.strategy.getName()}`)
         const result = await this.strategy.parse(buffer, vespaDocId)
-        logger.info(`[FileProcessor] Extracted ${result.chunks.length} chunks using ${result.processingMethod}`)
+        logger.info(`[FileProcessor] Extracted ${result.chunks.length} chunks using ${result.processingMethod}`)        
         return result
     }
 
