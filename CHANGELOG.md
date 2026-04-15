@@ -1,3 +1,10 @@
+## [1.115.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.115.1...v1.115.2) (2026-04-15)
+
+
+### Bug Fixes
+
+* Cmd K UX improvements - error, channel, user search ([d5f1930](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d5f1930e312a3bc67ffcfeb848fb2ce803dd2b8d)), closes [#4936](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4936)
+
 ## [1.115.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.115.0...v1.115.1) (2026-04-14)
 
 
