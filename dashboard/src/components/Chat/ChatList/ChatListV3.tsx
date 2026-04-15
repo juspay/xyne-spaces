@@ -155,6 +155,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const { baseRoute } = useRouteContext();
   const { editingMessageId, requestEdit } = useEditContext();
   const channelParticipation = useGetChannelUserStatus(channelId);
+  const isMember = !!channelParticipation;
   const channel = useVisibleChannel(channelId);
 
   const [newConversationsAnchor, setNewConversationsAnchor] = useState<Anchor | null>(
@@ -222,6 +223,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const [updatedConversations, updatedConversationsDetails] = useQuery(
     queries.channelConversationsPaginatedV3({
       channelId,
+      isMember,
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
       direction: inViewAnchor ? inViewAnchor.direction : 'forward',
       limit: PAGE_SIZE,
@@ -234,6 +236,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const [latestConversations, latestConversationsDetails] = useQuery(
     queries.channelLatestMultipleConversationsV3({
       channelId,
+      isMember,
       limit: PAGE_SIZE / 2,
     }),
   );
@@ -243,6 +246,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       zero.run(
         queries.channelConversationsPaginatedV3({
           channelId,
+          isMember,
           start: oldConversationsAnchor,
           direction: 'forward',
           limit: PAGE_SIZE,
@@ -253,6 +257,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
         zero.run(
           queries.channelConversationsPaginatedV3({
             channelId,
+            isMember,
             start: newConversationsAnchor,
             direction: 'backward',
             limit: PAGE_SIZE / 2,
@@ -304,6 +309,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       .run(
         queries.channelConversationsPaginatedV3({
           channelId,
+          isMember,
           start: oldConversationsAnchor,
           direction: 'forward',
           limit: PAGE_SIZE,
@@ -353,6 +359,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       .run(
         queries.channelConversationsPaginatedV3({
           channelId,
+          isMember,
           start: newConversationsAnchor,
           direction: 'backward',
           limit: PAGE_SIZE,

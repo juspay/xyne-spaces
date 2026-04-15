@@ -1,6 +1,6 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
-import type { TableName } from './types';
+import type { TableName, SelectArgs } from './types';
 export class BaseQueryACL<TTable extends TableName> {
   protected readonly ctx: Context;
   protected readonly tableName: TTable;
@@ -10,7 +10,7 @@ export class BaseQueryACL<TTable extends TableName> {
     this.tableName = tableName;
   }
 
-  canSelect<TReturn>(query: Query<TTable, Schema, TReturn>): Query<TTable, Schema, TReturn> {
+  canSelect<TReturn>(query: Query<TTable, Schema, TReturn>, _args?: SelectArgs): Query<TTable, Schema, TReturn> {
     return query;
   }
 }
