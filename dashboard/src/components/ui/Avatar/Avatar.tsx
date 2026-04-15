@@ -171,7 +171,7 @@ const Avatar = ({
     console.warn(`Failed to load avatar image for user ${targetUserId}: ${user?.picture}`);
   };
 
-  // Render online indicator as SVG circle (guaranteed perfect circle)
+  // Render status indicator: dot
   const renderOnlineIndicator = (): ReactElement | null => {
     if (!showActiveStatus) return null;
 

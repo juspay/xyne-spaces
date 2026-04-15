@@ -142,6 +142,7 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
                 statusExpiryAt={dmUser?.statusExpiryAt}
                 size='sm'
                 showOnHover={true}
+                hideCallEmoji={hasActiveCall}
               />
             )}
           </span>
