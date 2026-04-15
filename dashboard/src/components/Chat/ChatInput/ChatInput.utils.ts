@@ -1,5 +1,6 @@
 import type { MentionResult } from '../../ui/Selectors/Selectors.types';
 import { convertCustomEmojiUrls } from '../../../utils/customEmojiUtils';
+import { convertTrailingEmoticonsInHtml } from '../../../utils/emojiLookup';
 /**
  * Escapes special HTML characters to prevent XSS attacks.
  * Must be applied to all user-provided data before inserting into HTML.
@@ -104,6 +105,9 @@ export const processMessageForSending = (htmlContent: string, users?: MentionRes
 
   // Convert blob URLs to stream URLs for custom emojis
   processed = convertCustomEmojiUrls(processed);
+
+  // Convert trailing text emoticons (e.g. ":)" at end of message) to emoji
+  processed = convertTrailingEmoticonsInHtml(processed);
 
   return processed;
 };

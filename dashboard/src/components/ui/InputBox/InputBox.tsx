@@ -42,6 +42,7 @@ import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
 import { ChannelMentionExtension, channelMentionPluginKey } from '../TipTapExtensions';
 import { TableExtensions } from '../TipTapExtensions';
 import { ColonEmojiExtension } from '../TipTapExtensions/ColonEmojiExtension';
+import { TextEmoticonExtension } from '../TipTapExtensions/TextEmoticonExtension';
 import type { InputBoxProps } from './InputBox.types';
 import { formatTypingMessage } from './InputBox.utils';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
@@ -378,6 +379,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         ColonEmojiExtension.configure({
           getCustomEmojis: () => customEmojisRef.current || [],
         }),
+        TextEmoticonExtension,
         CodeBlockLowlight.configure({
           lowlight,
           defaultLanguage: 'plaintext',
