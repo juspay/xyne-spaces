@@ -54,6 +54,7 @@ const envSchema = Joi.object({
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
+  SLACK_MIGRATION_FINAL_MESSAGE: Joi.string().allow('').default(''), // Custom message appended to the final migration notification
   // Zoho Integration
   ZOHO_AUTO_WORKFLOW_ENABLED: Joi.boolean().default(true),
   // SAM Service Configuration
@@ -284,6 +285,7 @@ export const config = {
       .map((id: string) => id.trim())
       .filter(Boolean)
     : [],
+  slackMigrationFinalMessage: envVars.SLACK_MIGRATION_FINAL_MESSAGE,
   zoho: {
     autoWorkflowEnabled: envVars.ZOHO_AUTO_WORKFLOW_ENABLED,
   },
