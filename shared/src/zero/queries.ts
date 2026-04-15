@@ -931,38 +931,7 @@ export const queries = defineQueries({
         );
       }
 
-      return query.orderBy('updatedAt', 'desc').related('participants');
-    },
-  ),
-  channelCanvasesPaginated: defineQuery(
-    z.object({
-      channelId: z.string(),
-      includeQuartoDocs: z.boolean().optional(),
-      limit: z.number(),
-      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
-    }),
-    ({ ctx, args: { channelId, includeQuartoDocs, limit, start } }) => {
-      let query = zql.canvases.where('channelId', channelId).where(helpers => {
-        return helpers.or(
-          helpers.cmp('createdBy', ctx.userID),
-          helpers.cmp('visibility', CanvasVisibility.PUBLIC),
-          helpers.exists('participants', p => p.where('userId', ctx.userID)),
-        );
-      });
-
-      if (!includeQuartoDocs) {
-        query = query.where(helpers =>
-          helpers.or(helpers.cmp('docType', DocType.Canvas), helpers.cmp('docType', 'IS', null)),
-        );
-      }
-
-      query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
-
-      if (start) {
-        query = query.start({ id: start.id, updatedAt: start.updatedAt }, { inclusive: false });
-      }
-
-      return query.limit(limit).related('participants');
+      return query.orderBy('updatedAt', 'desc').related('participants').related('channel');
     },
   ),
   // Query for Quarto docs in a channel
@@ -971,28 +940,9 @@ export const queries = defineQueries({
       .where('channelId', channelId)
       .where('docType', DocType.Quarto)
       .orderBy('updatedAt', 'desc')
-      .related('participants');
+      .related('participants')
+      .related('channel');
   }),
-  channelQuartoDocsPaginated: defineQuery(
-    z.object({
-      channelId: z.string(),
-      limit: z.number(),
-      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
-    }),
-    ({ args: { channelId, limit, start } }) => {
-      let query = zql.canvases
-        .where('channelId', channelId)
-        .where('docType', DocType.Quarto)
-        .orderBy('updatedAt', 'desc')
-        .orderBy('id', 'desc');
-
-      if (start) {
-        query = query.start({ id: start.id, updatedAt: start.updatedAt }, { inclusive: false });
-      }
-
-      return query.limit(limit).related('participants');
-    },
-  ),
 
   // Query for links in a channel (shared + personal + shared with user)
   channelLinks: defineQuery(z.object({ channelId: z.string() }), ({ ctx, args: { channelId } }) => {
@@ -1177,39 +1127,7 @@ export const queries = defineQueries({
         );
       }
 
-      return query.orderBy('updatedAt', 'desc').related('participants');
-    },
-  ),
-  userCanvasesPaginated: defineQuery(
-    z.object({
-      limit: z.number(),
-      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
-      includeQuartoDocs: z.boolean().optional(),
-    }),
-    ({ ctx, args }) => {
-      let query = zql.canvases.where(helpers => {
-        return helpers.or(
-          helpers.cmp('createdBy', ctx.userID),
-          helpers.exists('participants', p => p.where('userId', ctx.userID)),
-        );
-      });
-
-      if (!args.includeQuartoDocs) {
-        query = query.where(helpers =>
-          helpers.or(helpers.cmp('docType', DocType.Canvas), helpers.cmp('docType', 'IS', null)),
-        );
-      }
-
-      query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
-
-      if (args.start) {
-        query = query.start(
-          { id: args.start.id, updatedAt: args.start.updatedAt },
-          { inclusive: false },
-        );
-      }
-
-      return query.limit(args.limit).related('participants');
+      return query.orderBy('updatedAt', 'desc').related('participants').related('channel');
     },
   ),
   // Query for user's Quarto docs
@@ -1223,35 +1141,9 @@ export const queries = defineQueries({
         );
       })
       .orderBy('updatedAt', 'desc')
-      .related('participants');
+      .related('participants')
+      .related('channel');
   }),
-  userQuartoDocsPaginated: defineQuery(
-    z.object({
-      limit: z.number(),
-      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
-    }),
-    ({ ctx, args }) => {
-      let query = zql.canvases
-        .where('docType', DocType.Quarto)
-        .where(helpers => {
-          return helpers.or(
-            helpers.cmp('createdBy', ctx.userID),
-            helpers.exists('participants', p => p.where('userId', ctx.userID)),
-          );
-        })
-        .orderBy('updatedAt', 'desc')
-        .orderBy('id', 'desc');
-
-      if (args.start) {
-        query = query.start(
-          { id: args.start.id, updatedAt: args.start.updatedAt },
-          { inclusive: false },
-        );
-      }
-
-      return query.limit(args.limit).related('participants');
-    },
-  ),
   // Query for all user groups with member counts
   getAllUserGroups: defineQuery(() => {
     return zql.user_groups.orderBy('createdAt', 'desc');
@@ -1282,24 +1174,6 @@ export const queries = defineQueries({
   userBookmarks: defineQuery(() => {
     return zql.bookmarks.where('isDeleted', false).orderBy('createdAt', 'desc');
   }),
-  userBookmarksPaginated: defineQuery(
-    z.object({
-      limit: z.number(),
-      start: z.object({ id: z.string(), createdAt: z.number() }).nullable(),
-    }),
-    ({ args: { limit, start } }) => {
-      let query = zql.bookmarks
-        .where('isDeleted', false)
-        .orderBy('createdAt', 'desc')
-        .orderBy('id', 'desc');
-
-      if (start) {
-        query = query.start({ id: start.id, createdAt: start.createdAt }, { inclusive: false });
-      }
-
-      return query.limit(limit);
-    },
-  ),
   // Query for user's email signatures
   userEmailSignatures: defineQuery(({ ctx }) => {
     return zql.email_signatures.where('userId', ctx.userID).orderBy('createdAt', 'asc');
