@@ -154,6 +154,13 @@ function flattenVespaChildren(children: any[]): any[] {
 // Implementation
 // ============================================================================
 
+const CANVAS_CONTENT_MAX_CHARS = 2000;
+
+function truncateContent(content: string, maxChars: number): string {
+  if (content.length <= maxChars) return content;
+  return content.slice(0, maxChars) + `\n...[truncated, ${content.length - maxChars} more chars]`;
+}
+
 async function searchRelevantContentImpl(
   query: string,
   contentTypes: ContentType[],
@@ -197,13 +204,7 @@ async function searchRelevantContentImpl(
 
     const builtTicketFilters: Partial<TicketFilters> = { ...ticketFilters };
     if (apps.includes('ticket') && channelIds.length > 0) {
-      // Tickets are filtered by projectId (channels → projectId)
-      const channels = await db.channel.findMany({
-        where: { id: { in: channelIds } },
-        select: { projectId: true },
-      });
-      const projectIds = [...new Set(channels.map((c) => c.projectId).filter(Boolean))] as string[];
-      if (projectIds.length > 0) builtTicketFilters.projectId = projectIds;
+      builtTicketFilters.channelId = channelIds;
     }
 
     // Resolve channel name map
@@ -218,25 +219,27 @@ async function searchRelevantContentImpl(
       channelNameMap = new Map(dbChannels.map((c: { id: string; name: string }) => [c.id, c.name]));
     }
 
-    // Single Vespa call for all requested content types
-    const vespaResults = await vespaService.searchService.searchVespa(
-      query,
-      userId,
-      apps,
-      {
-        offset: 0,
-        limit: 100,
-        rankProfile: 'default_native',
-        slack: builtSlackFilters,
-        ticket: builtTicketFilters,
-        file: fileFilters,
-      }
-    );
+    const resultLimit = 50;
 
-    // Vespa returns grouped results (grouped by docType) when multiple apps are
-    // queried simultaneously.  Flatten any group containers so we always pass a
-    // plain array of document hits to transformVespaResults.
-    const hits = flattenVespaChildren(vespaResults.root.children || []);
+    const vespaOpts = {
+      offset: 0,
+      limit: resultLimit,
+      rankProfile: 'default_native',
+      slack: builtSlackFilters,
+      ticket: builtTicketFilters,
+      file: fileFilters,
+    };
+
+    // Run Vespa search with graceful degradation — if Vespa is unavailable (e.g. 503),
+    // log the error and continue with 0 hits.
+    let hits: any[] = [];
+    try {
+      const vespaResults = await vespaService.searchService.searchVespa(query, userId, apps, vespaOpts);
+      hits = flattenVespaChildren(vespaResults.root.children || []);
+    } catch (vespaError) {
+      logger.warn(`[Tool] [${sessionId}] search_relevant_content: Vespa unavailable, falling back to DB-only results. Error: ${vespaError instanceof Error ? vespaError.message : vespaError}`);
+    }
+
     logger.info(`[Tool] [${sessionId}] search_relevant_content: Vespa returned ${hits.length} raw hits (after flattening grouped response)`);
 
     const transformedResults = await transformVespaResults(hits, db);
@@ -250,7 +253,7 @@ async function searchRelevantContentImpl(
       : new Map();
 
     // For recording results, batch-fetch externalId directly from the DB
-    // (same approach as provided context — avoids parsing Vespa metadata JSON)
+    // (avoids parsing Vespa metadata JSON)
     const recordingResultIds = transformedResults
       .filter((r) => r.type === 'attachment' && r.searchContext?.subApp?.toUpperCase() === 'TRANSCRIPT' && r.searchContext?.callType === 'HEADLESS')
       .map((r) => r.id);
@@ -294,7 +297,6 @@ async function searchRelevantContentImpl(
       } else if (result.type === 'attachment') {
         if (subApp === 'CANVAS') contentType = 'canvas';
         else if (subApp === 'TRANSCRIPT') {
-          // Recordings are HEADLESS call-type transcripts; plain calls are everything else
           contentType = result.searchContext?.callType === 'HEADLESS' ? 'recording' : 'call';
         } else contentType = 'message'; // fallback for other file types
       }
@@ -322,25 +324,28 @@ async function searchRelevantContentImpl(
         authorName = creatorName;
         authorId = result.searchContext?.createdBy || '';
         channelId = result.searchContext?.channelId || channelIds[0] || '';
-        channelName = channelNameMap.get(channelId) || '';
+        channelName = channelNameMap.get(channelId) || result.metadata?.channelName || '';
         conversationId = result.searchContext?.conversationId || '';
       } else if (contentType === 'canvas') {
         // Prefer the full content fetched from Y-Sweet / DB; fall back to the
         // Vespa title-only snippet when neither source returned anything.
         const fullContent = canvasContentMap.get(result.id);
-        const bodyText = fullContent ?? stripHtml(result.subtitle || result.context || '');
+        const bodyText = truncateContent(
+          fullContent ?? stripHtml(result.subtitle || result.context || ''),
+          CANVAS_CONTENT_MAX_CHARS
+        );
         content = `Title: ${result.title}\nCreated by: ${result.avatar || 'Unknown'}\n\nContent:\n${bodyText}`;
         authorName = result.avatar || 'Unknown';
         authorId = result.searchContext?.attachmentId ? '' : (result.avatar || '');
         channelId = result.searchContext?.channelId || channelIds[0] || '';
-        channelName = channelNameMap.get(channelId) || '';
+        channelName = channelNameMap.get(channelId) || result.metadata?.channelName || '';
         conversationId = result.searchContext?.conversationId || '';
       } else if (contentType === 'call') {
-        content = `Title: ${result.title}\nTranscript:\n${stripHtml(result.subtitle || result.context || '')}`;
+        content = truncateContent(`Title: ${result.title}\nTranscript:\n${stripHtml(result.subtitle || result.context || '')}`, 3000);
         authorName = result.avatar || 'Unknown';
         authorId = result.avatar || '';
         channelId = result.searchContext?.channelId || channelIds[0] || '';
-        channelName = channelNameMap.get(channelId) || '';
+        channelName = channelNameMap.get(channelId) || result.metadata?.channelName || '';
         conversationId = result.searchContext?.conversationId || '';
       } else {
         // message
@@ -352,7 +357,7 @@ async function searchRelevantContentImpl(
         conversationId = result.searchContext?.conversationId || '';
       }
 
-      // For recordings, the citation URL is /recordings/:externalId — fetch externalId from DB
+      // For recordings the citation URL is /recordings/:externalId
       const entityId = contentType === 'recording'
         ? (recordingExternalIdMap.get(result.id) || result.id)
         : result.id;
@@ -506,45 +511,17 @@ export function createSearchRelevantContentTool(): Tool<{
       if (createdRange) ticketFilters.createdRange = createdRange;
 
       // ── Resolve channels (for messages/tickets scoping) ───────────────────
-      let resolvedChannelIds: string[] = context.channelIds;
+      // Default to empty — no channel scope restriction unless the user explicitly
+      // specifies channels. Vespa's userId-based access control handles permissions,
+      // so we don't need to validate channel access via DB here.
+      let resolvedChannelIds: string[] = [];
 
       if (channels && channels.length > 0) {
-        logger.info(`[Tool] search_relevant_content: resolving channel names=${JSON.stringify(channels)}`);
-
         const { channelIds, notFound } = resolveChannelNames(channels, context.contextChannelMap, context.requestMappings);
         if (notFound.length > 0) {
           return `Error: The following channel names were not found in the session mappings: ${notFound.join(', ')}. Please call field_value_discovery first to validate these channel names.`;
         }
-        if (channelIds.length === 0) {
-          return 'Error: No valid channel IDs could be resolved. Please call field_value_discovery first to validate channel names.';
-        }
-
-        // Validate channels exist in DB
-        const existingChannels = await db.channel.findMany({
-          where: { id: { in: channelIds } },
-          select: { id: true, name: true },
-        });
-        const existingIds = existingChannels.map((c) => c.id);
-        const missing = channelIds.filter((id) => !existingIds.includes(id));
-        if (missing.length > 0) {
-          return `Error: Some of the specified channels do not exist in the database. Please verify the channel names and try again.`;
-        }
-
-        // Validate user has access
-        const userChannels = await db.channelParticipant.findMany({
-          where: { userId: context.userId, channelId: { in: channelIds } },
-          select: { channelId: true },
-        });
-        const accessibleIds = userChannels.map((c) => c.channelId);
-        const inaccessible = channelIds.filter((c) => !accessibleIds.includes(c));
-        if (inaccessible.length > 0) {
-          const inaccessibleNames = existingChannels
-            .filter((c) => inaccessible.includes(c.id))
-            .map((c) => c.name);
-          return `Error: You do not have access to the following channels: ${inaccessibleNames.join(', ')}. Please use field_value_discovery to get a list of channels you have access to.`;
-        }
-
-        resolvedChannelIds = accessibleIds;
+        resolvedChannelIds = channelIds;
       }
 
       logger.info(`[Tool] search_relevant_content: contentTypes=${JSON.stringify(contentTypes)}, channelIds=${JSON.stringify(resolvedChannelIds)}`);

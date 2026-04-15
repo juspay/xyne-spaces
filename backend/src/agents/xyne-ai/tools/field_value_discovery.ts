@@ -201,14 +201,8 @@ async function validateUsernames(
       };
     }
 
-    if (channelIds.length === 0) {
-      return {
-        success: false,
-        field: 'username',
-        results: [],
-        error: 'No channel context provided. Cannot validate usernames without channel context.',
-      };
-    }
+    // Note: empty channelIds is fine — discoverUserByName falls back to global DB search
+    // when no channel users are found.
 
     // Process each username query
     const results: DimensionLookupResult[] = [];

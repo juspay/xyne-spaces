@@ -561,30 +561,33 @@ DO NOT use for basic greetings (hi, hello, thanks) — respond directly without 
 /**
  * Fallback description for field_value_discovery tool (Unified FVD)
  */
-const FIELD_VALUE_DISCOVERY_FALLBACK = `Validate channels and/or usernames in a SINGLE call before using them in search operations.
+const FIELD_VALUE_DISCOVERY_FALLBACK = `Validate channels and/or usernames before using them as FILTERS in search operations.
+
+**WHEN TO CALL FVD:**
+- User names a CHANNEL not in CHANNEL CONTEXT → validate via channels=[...]
+- User wants to filter BY a person (sender / createdBy / assignedTo) → validate via usernames=[...]
+- Validate BOTH in a single FVD call when both are needed.
+
+**WHEN NOT TO CALL FVD:**
+- Channels already in CHANNEL CONTEXT — they are pre-validated, skip FVD.
+- "FOR/ABOUT" queries: if the person's name goes in the query string (not a filter), FVD is NOT needed.
+  - "Find messages about John" → just put "John" in query, no FVD
+  - "What did John say?" → needs sender filter → FVD required
+  - "Tickets assigned to John" → needs assignedTo filter → FVD required
+- Canvas, calls, recordings — no channel filter applies, never need channel FVD for these.
 
 **Parameters:**
 - channels: (optional) List of channel names to validate (max 5)
 - usernames: (optional) List of usernames to validate (max 5)
 - max_results: Maximum matches per query (default: 5)
 
-**Example - Validate both channels AND username in ONE call:**
-field_value_discovery({
-  channels: ["xyne-spaces", "genius-discussions"],
-  usernames: ["Prajwal"]
-})
-
-**Example - Validate only channels:**
-field_value_discovery({ channels: ["xyne-spaces", "genius-discussions"] })
-
-**Example - Validate only usernames:**
-field_value_discovery({ usernames: ["Prajwal", "Aman"] })
+**Example - Validate both in ONE call:**
+field_value_discovery({ channels: ["xyne-spaces"], usernames: ["Prajwal"] })
 
 **IMPORTANT:**
-- You can validate BOTH channels and usernames in a single call - do NOT make separate calls!
-- Always call this tool BEFORE search_relevant_content when user specifies channel names or usernames
-- Use the returned values exactly as provided in the results
-- If no matches found, inform the user that the channel/username was not found`;
+- Always call this BEFORE passing names to sender / createdBy / assignedTo filters.
+- Use the returned exact name in the filter.
+- If no match found, inform the user the name was not found.`;
 
 /**
  * Fallback description for genius tool

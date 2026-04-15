@@ -253,22 +253,25 @@ export async function discoverUserByName(
       };
     }
 
-    // Check if matched users are in this channel (participants)
-    const usersInChannel = matchedUsers.filter(u => {
-      return channelUsers.some(cu => cu.id === u.id);
-    });
+    // When no channel context (global search), skip the "in channel" check —
+    // the global DB fallback already found the right users.
+    const hasChannelContext = channelIdArray.length > 0 && channelUsers.length > 0;
 
-    if (usersInChannel.length === 0 && matchedUsers.length > 0) {
-      // Found users but none are in this channel
-      const userNames = matchedUsers.slice(0, 3).map(u => u.name || u.email || 'Unknown').join(', ');
-      return {
-        success: false,
-        error: `Found user(s) matching "${query}": ${userNames}, but they are not in this channel.`,
-      };
+    let finalMatches: MatchedUser[];
+    if (hasChannelContext) {
+      const usersInChannel = matchedUsers.filter(u => channelUsers.some(cu => cu.id === u.id));
+      if (usersInChannel.length === 0 && matchedUsers.length > 0) {
+        const userNames = matchedUsers.slice(0, 3).map(u => u.name || u.email || 'Unknown').join(', ');
+        return {
+          success: false,
+          error: `Found user(s) matching "${query}": ${userNames}, but they are not in this channel.`,
+        };
+      }
+      finalMatches = usersInChannel.length > 0 ? usersInChannel : matchedUsers;
+    } else {
+      // No channel context: use all DB matches directly
+      finalMatches = matchedUsers;
     }
-
-    // Filter to only users in this channel
-    const finalMatches = usersInChannel.length > 0 ? usersInChannel : matchedUsers;
 
     // If multiple matches, always ask for clarification to ensure correct user selection
     if (finalMatches.length > 1) {
