@@ -5,7 +5,7 @@ import {
 } from '@rocicorp/zero';
 import { schema, type Schema, type Context } from '../schema';
 import { QueryACLFactory } from './core/query-acl-factory';
-import type { TableName } from './core/types';
+import type { TableName, SelectArgs } from './core/types';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 
@@ -54,12 +54,13 @@ function getTableNameFromQuery(query: unknown): TableName {
 
 function applyQueryACL<TQuery>(
   query: TQuery,
-  ctx: Context
+  ctx: Context,
+  args?: SelectArgs
 ): TQuery {
   const tableName = getTableNameFromQuery(query);
   const acl = QueryACLFactory.getACL(tableName, { userID: ctx.userID });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return acl.canSelect(query as any) as TQuery;
+  return acl.canSelect(query as any, args) as TQuery;
 }
 
 type QueryDefinitionFunction<TTable extends TableName, TOutput, TReturn> = (
@@ -104,7 +105,7 @@ export function defineQuery<
     return zeroDefineQuery(defaultValidator, (params: any) => {
       const { lastUpdatedAt, ..._restArgs } = params.args || {};
       const query = (queryFn as any)({ ctx: params.ctx });
-      const queryWithACL = applyQueryACL(query, params.ctx);
+      const queryWithACL = applyQueryACL(query, params.ctx, params.args);
       if (lastUpdatedAt && hasQueryAST(queryWithACL)) {
         const tableName = getTableNameFromQuery(queryWithACL);
         
@@ -129,7 +130,7 @@ export function defineQuery<
     const { lastUpdatedAt, ...restArgs } = params.args || {};
     
     const query = queryFn({ ctx: params.ctx, args: restArgs });
-    const queryWithACL = applyQueryACL(query, params.ctx);
+    const queryWithACL = applyQueryACL(query, params.ctx, params.args as SelectArgs);
     
     // Apply delta filter if lastUpdatedAt is provided and table has updatedAt column
     if (lastUpdatedAt && hasQueryAST(queryWithACL)) {

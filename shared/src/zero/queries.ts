@@ -30,7 +30,7 @@ export const zql = createBuilder(schema);
 
 export const queries = defineQueries({
   channelConversations: defineQuery(
-    z.object({ channelId: z.string() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -65,7 +65,7 @@ export const queries = defineQueries({
     },
   ),
   channelConversationsV2: defineQuery(
-    z.object({ channelId: z.string() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -266,7 +266,7 @@ export const queries = defineQueries({
     },
   ),
   getConversationByTimestamp: defineQuery(
-    z.object({ channelId: z.string(), timestamp: z.number() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional(), timestamp: z.number() }),
     ({ args: { channelId, timestamp } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1342,6 +1342,7 @@ export const queries = defineQueries({
   channelConversationsPaginated: defineQuery(
     z.object({
       channelId: z.string(),
+      isMember: z.boolean().optional(),
       limit: z.number(),
       start: z.object({ conversationId: z.string(), createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
@@ -1401,6 +1402,7 @@ export const queries = defineQueries({
   channelConversationsPaginatedV2: defineQuery(
     z.object({
       channelId: z.string(),
+      isMember: z.boolean().optional(),
       limit: z.number(),
       start: z.object({ createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
@@ -1444,6 +1446,7 @@ export const queries = defineQueries({
   channelConversationsPaginatedV3: defineQuery(
     z.object({
       channelId: z.string(),
+      isMember: z.boolean().optional(),
       limit: z.number(),
       start: z.object({ createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
@@ -1475,7 +1478,7 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversations: defineQuery(
-    z.object({ channelId: z.string(), limit: z.number() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional(), limit: z.number() }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1509,7 +1512,7 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV2: defineQuery(
-    z.object({ channelId: z.string(), limit: z.number() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional(), limit: z.number() }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1538,7 +1541,7 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV3: defineQuery(
-    z.object({ channelId: z.string(), limit: z.number() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional(), limit: z.number() }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1556,7 +1559,7 @@ export const queries = defineQueries({
     },
   ),
   channelLatestConversation: defineQuery(
-    z.object({ channelId: z.string() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
     ({ args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1614,7 +1617,7 @@ export const queries = defineQueries({
     },
   ),
   getPinnedMesseges: defineQuery(
-    z.object({ channelId: z.string() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1641,7 +1644,7 @@ export const queries = defineQueries({
     },
   ),
   getPinnedMessegesV2: defineQuery(
-    z.object({ channelId: z.string() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1666,7 +1669,7 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMessage: defineQuery(
-    z.object({ channelId: z.string() }),
+    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
