@@ -966,6 +966,25 @@ model UserSkill {
   @@schema("non_zero")
 }
 
+// Scheduled Messages – recurring messages posted to channels via Bull cron jobs
+model ScheduledMessage {
+  id             String   @id @default(cuid())
+  title          String
+  messageContent String   @db.Text
+  channelId      String
+  daysOfWeek     String   // "0,1,2,3,4,5,6" for all days, "1,2,3,4,5" for weekdays (0=Sun...6=Sat)
+  scheduledTime  String   // "HH:mm" in UTC
+  isActive       Boolean  @default(true)
+  createdBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([channelId])
+  @@index([createdBy])
+  @@map("scheduled_messages")
+  @@schema("non_zero")
+}
+
 // User-Team membership (many-to-many, no FK constraints)
 model UserGroupMapping {
   id             String              @id @default(cuid())

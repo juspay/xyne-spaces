@@ -33,6 +33,7 @@ import {
   PieChart,
   FileText,
   Mic,
+  CalendarClock,
   MoreHorizontal,
   Bookmark,
   Globe,
@@ -75,6 +76,7 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/support', label: 'Support', icon: LifeBuoy },
   { path: '/browser', label: 'Browser', icon: Globe },
   { path: '/forms', label: 'Forms', icon: Clipboard },
+  { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarClock },
   { path: '/apps', label: 'Apps', icon: AppWindow },
 ];
 

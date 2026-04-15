@@ -64,6 +64,7 @@ import RecordingsScreen from './RecordingsScreen/RecordingsScreen';
 import RecordingDetailScreen from './RecordingDetailScreen/RecordingDetailScreen';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
 import FormScreen from './FormScreen/FormScreen';
+import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
 import { InstrumentationProvider, type Instrumentation } from '@xyne/shared/hooks';
@@ -895,6 +896,10 @@ export const router = createBrowserRouter([
                     <FormScreen />
                   </ResourceProtectedRoute>
                 ),
+              },
+              {
+                path: '/scheduled-messages',
+                element: <ScheduledMessageScreen />,
               },
               {
                 path: '/docs/*',
