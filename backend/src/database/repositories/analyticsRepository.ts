@@ -197,46 +197,29 @@ export class AnalyticsRepository {
     'cmlpgdr0a09rj11uzf3xql7ad', 'cmkmhn5c803k3skfrc836863n'
   ];
 
-  /**
-   * Centralized helper to fetch and filter valid messages.
-   * Uses a single SQL query with JOINs to push ALL filtering to the database:
-   *   1. Excludes external messages (LEFT JOIN workflow.external_messages)
-   *   2. Excludes messages in excluded channels (INNER JOIN conversations + channel filter)
-   *   3. Excludes ticket-linked messages (metadata->>'ticketId' check)
-   *
-   * Accepts a date condition ({ gte, lte? }) and returns only valid USER messages.
-   */
-  private async getFilteredMessages(dateCondition: { gte: Date; lte?: Date }): Promise<FilteredMessage[]> {
+  private async getFilteredMessages(): Promise<FilteredMessage[]> {
     const excludedChannels = AnalyticsRepository.EXCLUDED_CHANNEL_IDS;
 
-    const createdAtFilter: Prisma.DateTimeFilter = dateCondition.lte
-      ? { gte: dateCondition.gte, lte: dateCondition.lte }
-      : { gte: dateCondition.gte };
-
-    const messages = await this.prisma.message.findMany({
-      where: {
-        msgType: 'USER',
-        createdAt: createdAtFilter,
-        conversation: {
-          channelId: { notIn: excludedChannels },
-        },
-        externalMessages: {
-          none: {},
-        },
-        OR: [
-          { metadata: { equals: Prisma.DbNull } },
-          { metadata: { path: ['ticketId'], equals: Prisma.DbNull } },
-          { metadata: { path: ['ticketId'], equals: '' } },
-        ],
-      },
-      select: {
-        messageId: true,
-        senderId: true,
-        conversationId: true,
-        metadata: true,
-        createdAt: true,
-      },
-    });
+    const messages = await this.prisma.$queryRaw<FilteredMessage[]>(Prisma.sql`
+      SELECT 
+        m."messageId", 
+        m."senderId", 
+        m."conversationId", 
+        m."metadata", 
+        m."createdAt"
+      FROM "public"."messages" m
+      INNER JOIN "public"."conversations" c 
+        ON c."conversationId" = m."conversationId"
+      WHERE 
+        m."msgType" = 'USER'
+        AND c."channelId" NOT IN (${Prisma.join(excludedChannels)})
+        AND NOT EXISTS (
+          SELECT 1 
+          FROM "workflow"."external_sources" es
+          WHERE es."channelId" = c."channelId"
+            AND m."createdAt" < es."createdAt"
+        )
+    `);
 
     return messages;
   }
@@ -1397,7 +1380,7 @@ export class AnalyticsRepository {
       : { gte: dateFilter };
 
     // Use getFilteredMessages for robust message filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages();
 
     // Get all user IDs from different activity types using Promise.all for parallel execution
     const [reactionUsers, attachmentUsers] = await Promise.all([
@@ -1473,15 +1456,8 @@ export class AnalyticsRepository {
   /**
    * Get overall messages per user average for the entire time period
    */
-  async getOverallMessagesPerUser(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-    // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
-
-    // Use getFilteredMessages for robust filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+  async getOverallMessagesPerUser(_filters: AnalyticsFilters): Promise<number> {
+    const validMessages = await this.getFilteredMessages();
 
     const totalMessages = validMessages.length;
     const uniqueUserCount = new Set(validMessages.map(m => m.senderId).filter(id => !!id)).size;
@@ -1551,7 +1527,7 @@ export class AnalyticsRepository {
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Use centralized helper for filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages();
 
     // Get all channelIds from valid messages
     const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
@@ -1671,7 +1647,7 @@ export class AnalyticsRepository {
     const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
 
     // Use getFilteredMessages for robust filtering
-    const validMessages = await this.getFilteredMessages({ gte: allTimeStartDate });
+    const validMessages = await this.getFilteredMessages();
 
     const allActiveUserIds = new Set<string>();
 
@@ -1739,7 +1715,7 @@ export class AnalyticsRepository {
       : { gte: dateFilter };
 
     // Use getFilteredMessages for robust filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages();
 
     const allActiveUserIds = new Set<string>();
 
@@ -1812,7 +1788,7 @@ export class AnalyticsRepository {
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Use getFilteredMessages for robust filtering
-    const validMessageActivities = await this.getFilteredMessages(dateCondition);
+    const validMessageActivities = await this.getFilteredMessages();
 
     // Get other activity types (reactions, attachments, tickets, ticket activities, canvas, canvas participants)
     const [reactionUsers, attachmentUsers, ticketCreators, ticketActivityUsers, canvasCreators, canvasParticipants] = await Promise.all([
@@ -1935,7 +1911,7 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
     // Use centralized helper for filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages();
 
     // Generate time buckets
     const timeBuckets = this.generateDailyTimeBuckets(startDate, endDate);
@@ -1978,13 +1954,8 @@ export class AnalyticsRepository {
    * Returns unique channels that had activity based on messages over the entire period
    * Uses the same logic as the time-series to ensure consistency
    */
-  async getActiveChannels(filters: AnalyticsFilters): Promise<number> {
-    const dateFilter = getDateFilter(filters);
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
-    // Use centralized helper for filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+  async getActiveChannels(_filters: AnalyticsFilters): Promise<number> {
+    const validMessages = await this.getFilteredMessages();
     if (validMessages.length === 0) {
       return 0;
     }
@@ -2031,7 +2002,7 @@ export class AnalyticsRepository {
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
     // Use centralized helper for filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessages = await this.getFilteredMessages();
 
     // Get all channelIds from valid messages
     const conversationIds = Array.from(new Set(validMessages.map(m => m.conversationId)));
@@ -2601,15 +2572,8 @@ export class AnalyticsRepository {
    * Returns the top N users who sent the most messages in the selected time period
    * Uses database aggregation for optimal performance
    */
-  async getTopUsersByMessages(filters: AnalyticsFilters, limit: number = 10): Promise<{ userId: string; userName: string; messageCount: number }[]> {
-    const dateFilter = getDateFilter(filters);
-
-    // Build date condition for Prisma query
-    const dateCondition = typeof dateFilter === 'object' && 'gte' in dateFilter
-      ? dateFilter
-      : { gte: dateFilter };
-    // Use centralized helper for filtering
-    const validMessages = await this.getFilteredMessages(dateCondition);
+  async getTopUsersByMessages(_filters: AnalyticsFilters, limit: number = 10): Promise<{ userId: string; userName: string; messageCount: number }[]> {
+    const validMessages = await this.getFilteredMessages();
     // userType : USER ensures we only count messages from real users, excluding bots
     const userIds = new Set(await this.getUsersId());
 
