@@ -1156,7 +1156,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     data-track-name='ClickThreadContextPill'
                     data-track-metadata={JSON.stringify({ thread: activeThreadInfo })}
                   >
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
                       {activeThreadInfo.senderName} • {activeThreadInfo.previewText}
                     </span>
                   </button>
@@ -1191,7 +1191,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     })}
                   >
                     <FileText className='w-3.5 h-3.5 text-gray-600' />
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
                       {activeCanvasInfo.title || 'Untitled Canvas'}
                     </span>
                   </button>
@@ -1268,7 +1268,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     })}
                   >
                     <Globe className='w-3.5 h-3.5 text-[#667eea] flex-shrink-0' />
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
                       {browserContext.text.slice(0, 50)}
                       {browserContext.text.length > 50 ? '...' : ''} • {browserContext.domain}
                     </span>
@@ -1301,7 +1301,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         <HashIcon />
                       )}
                     </div>
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
                       {channel.name}
                     </span>
                   </div>
@@ -1332,7 +1332,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         <Code2 className='w-3.5 h-3.5 text-muted-foreground' />
                       )}
                     </div>
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
                       {selectedResearch.name}
                     </span>
                   </div>
@@ -1358,7 +1358,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     <div className='flex-shrink-0'>
                       <FileText className='w-3.5 h-3.5 text-muted-foreground' />
                     </div>
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
                       {attachment.name}
                     </span>
                   </div>
@@ -1385,7 +1385,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     <div className='flex-shrink-0'>
                       <Ticket className='w-3.5 h-3.5 text-muted-foreground' />
                     </div>
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
                       {ticket.xyneId ? `${ticket.xyneId}` : ticket.title}
                     </span>
                   </div>
@@ -1412,7 +1412,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     <div className='flex-shrink-0'>
                       <FileText className='w-3.5 h-3.5 text-muted-foreground' />
                     </div>
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
                       {canvas.title}
                     </span>
                   </div>
@@ -1439,7 +1439,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     <div className='flex-shrink-0'>
                       <Phone className='w-3.5 h-3.5 text-muted-foreground' />
                     </div>
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
                       {transcript.title}
                     </span>
                   </div>
@@ -1466,7 +1466,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     <div className='flex-shrink-0'>
                       <Mic className='w-3.5 h-3.5 text-muted-foreground' />
                     </div>
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[120px] truncate">
                       {recording.title}
                     </span>
                   </div>
@@ -1487,7 +1487,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {selectedActivities.length > 0 && (
                 <div className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'>
                   <div className='flex items-center gap-1'>
-                    <span className="text-[#181B1D] font-['Inter'] text-sm font-[450] whitespace-nowrap">
+                    <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
                       {selectedActivities.length}{' '}
                       {selectedActivities.length === 1 ? 'activity' : 'activities'}
                     </span>

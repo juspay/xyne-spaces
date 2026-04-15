@@ -124,7 +124,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             isAlone || isNotMember ? 'opacity-50 cursor-not-allowed' : '',
             isMobile
               ? 'p-3 rounded-full border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
-              : 'rounded-lg bg-background border-border hover:bg-muted',
+              : 'rounded-lg bg-background border-[#E4E6E7] hover:bg-muted text-foreground',
             className,
           )}
         >
@@ -133,7 +133,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
           ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
             <HuddleIcon color={isMobile ? 'black' : '#FFFFFF'} />
           ) : (
-            <HuddleIcon />
+            <HuddleIcon size={14} color='currentColor' />
           )}
         </button>
       </Tooltip>

@@ -1,4 +1,4 @@
-import { RefObject, useCallback, useEffect, useState } from 'react';
+import { RefObject, useCallback, useEffect, useRef, useState } from 'react';
 
 type UseMeasureProps = {
   ref?: RefObject<HTMLElement | null>;
@@ -71,6 +71,8 @@ type UseMeasureReturn = {
  */
 const useMeasure = ({ ref, observeResize = false }: UseMeasureProps): UseMeasureReturn => {
   const [size, setSize] = useState({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
+  const observedElementRef = useRef<HTMLElement | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   const updateMeasurements = useCallback((): void => {
     if (!ref) {
@@ -120,6 +122,27 @@ const useMeasure = ({ ref, observeResize = false }: UseMeasureProps): UseMeasure
       resizeObserver.disconnect();
     };
   }, [ref, observeResize, updateMeasurements]);
+
+  // Detect when ref.current changes (e.g. conditionally rendered elements)
+  // and re-attach the ResizeObserver to the new element
+  useEffect(() => {
+    const currentElement = ref?.current ?? null;
+    if (currentElement === observedElementRef.current) return;
+    observedElementRef.current = currentElement;
+
+    resizeObserverRef.current?.disconnect();
+    resizeObserverRef.current = null;
+
+    updateMeasurements();
+
+    if (observeResize && currentElement) {
+      const resizeObserver = new ResizeObserver((): void => {
+        updateMeasurements();
+      });
+      resizeObserver.observe(currentElement);
+      resizeObserverRef.current = resizeObserver;
+    }
+  });
 
   return size;
 };
