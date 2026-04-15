@@ -31,7 +31,7 @@ interface LexicalSearchInputProps {
     mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
   ) => void;
   onUserSearch?: (query: string | null) => void;
-  onChannelSearch?: (query: string | null) => void;
+  onChannelSearch?: (query: string | null, trigger?: '#' | 'in:') => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
   availableChannels?: Array<{ id: string; name: string }>;
   className?: string;

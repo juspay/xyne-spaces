@@ -54,7 +54,7 @@ import {
 import { ChannelCategory } from './ChatDirectory.types';
 import { navigateToSearchResult } from '../../../utils/searchNavigation';
 import { useAllChannels } from '../../../hooks/useChannels';
-import { useUsers } from '../../../hooks/useUsers';
+import { useUsers, useUserSearch } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -64,11 +64,15 @@ import {
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
 import { LexicalSearchInput } from './LexicalSearchInput';
-import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { botService, UnifiedBotInfo, ToolOutput } from '../../../services/Bot/botService';
 import { channelService } from '../../../services/Chat/channelService';
 import { ToolOutputRenderer } from 'cosmic-ai-genius';
-import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
+import {
+  useSearchMetrics,
+  filterChannelsBySearchableNames,
+  rankUsers,
+  CMDK_USER_LIMIT,
+} from '../../../hooks/useSearchMetrics';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { usePlatform } from '../../../hooks/usePlatform';
 import {
@@ -257,6 +261,23 @@ const ChannelCommandMenu = ({
     return result;
   }, [channels, starred, directMessages, usersById]);
 
+  // Map of user IDs the current user has a 1:1 DM with → recency index
+  // (0 = first DM in `directMessages`, which is the recency-ordered list also
+  // used by the empty-state DIRECT MESSAGES section). `rankUsers` uses this
+  // both as a "frequent contact" signal AND as a tie-breaker so the `from:`
+  // typeahead's empty state mirrors the plain-search DM ordering.
+  const dmContactRecency = useMemo(() => {
+    const map = new Map<string, number>();
+    directMessages.forEach(channel => {
+      if (isOneToOneDMChannel(channel.scopeType)) {
+        const participants = parseDMParticipantIds(channel);
+        const otherUserId = participants.find(id => id !== currentUserID);
+        if (otherUserId && !map.has(otherUserId)) map.set(otherUserId, map.size);
+      }
+    });
+    return map;
+  }, [directMessages, currentUserID]);
+
   const {
     searchResults: backendResults,
     isSearching: isLoading,
@@ -319,6 +340,10 @@ const ChannelCommandMenu = ({
   // Mention search
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [mentionSearchType, setMentionSearchType] = useState<MentionType | null>(null);
+  // Which trigger opened the channel typeahead: '#' acts like Slack's quick
+  // switcher (navigate on select, show only regular channels); 'in:' creates a
+  // filter chip and includes DMs/Group DMs.
+  const [channelTrigger, setChannelTrigger] = useState<'#' | 'in:' | null>(null);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
 
   const insertMentionRef = useRef<
@@ -326,8 +351,6 @@ const ChannelCommandMenu = ({
   >(null);
 
   const insertTextRef = useRef<((text: string) => void) | null>(null);
-
-  const { results: mentionSearchResults, searchMentions } = useMentionSearch();
 
   // Type autocomplete - derived from searchText
   const typeAutocomplete = useMemo(() => {
@@ -660,9 +683,21 @@ const ChannelCommandMenu = ({
     [onClose, onOpen],
   );
 
-  // Handle mention selection from search results
+  // Handle mention selection from search results.
+  // For `#`-triggered channel picks (Slack-style quick switcher) we navigate to
+  // the channel and close the dialog instead of inserting a filter chip.
   const handleMentionSelect = useCallback(
     (mention: { id: string; name: string; type: MentionType; email?: string }) => {
+      if (mention.type === MentionType.CHANNEL && channelTrigger === '#') {
+        setMentionSearchType(null);
+        setMentionSearchQuery('');
+        setChannelTrigger(null);
+        setSelectedMentionIndex(0);
+        onOpenChange(false);
+        void navigate(`/chat/dir/${mention.id}`);
+        return;
+      }
+
       if (insertMentionRef.current) {
         insertMentionRef.current({
           id: mention.id,
@@ -674,11 +709,12 @@ const ChannelCommandMenu = ({
         setTimeout(() => {
           setMentionSearchType(null);
           setMentionSearchQuery('');
+          setChannelTrigger(null);
           setSelectedMentionIndex(0);
         }, 100);
       }
     },
-    [],
+    [channelTrigger, onOpenChange, navigate],
   );
 
   // Store the insertMention function when it's ready
@@ -690,25 +726,7 @@ const ChannelCommandMenu = ({
   );
 
   // Handle user search from mention plugin
-  const handleUserSearch = useCallback(
-    (query: string | null) => {
-      if (query === null) {
-        // Mention search was cancelled/cleared
-        setMentionSearchType(null);
-        setMentionSearchQuery('');
-        setSelectedMentionIndex(0);
-        return;
-      }
-      setMentionSearchQuery(query);
-      setMentionSearchType(MentionType.USER);
-      setSelectedMentionIndex(0); // Reset selection when search changes
-      searchMentions(query);
-    },
-    [searchMentions],
-  );
-
-  // Handle channel search from mention plugin
-  const handleChannelSearch = useCallback((query: string | null) => {
+  const handleUserSearch = useCallback((query: string | null) => {
     if (query === null) {
       // Mention search was cancelled/cleared
       setMentionSearchType(null);
@@ -717,60 +735,71 @@ const ChannelCommandMenu = ({
       return;
     }
     setMentionSearchQuery(query);
-    setMentionSearchType(MentionType.CHANNEL);
+    setMentionSearchType(MentionType.USER);
     setSelectedMentionIndex(0); // Reset selection when search changes
   }, []);
 
-  // Filter mention results for users
+  // Handle channel search from mention plugin
+  const handleChannelSearch = useCallback((query: string | null, trigger?: '#' | 'in:') => {
+    if (query === null) {
+      // Mention search was cancelled/cleared
+      setMentionSearchType(null);
+      setMentionSearchQuery('');
+      setChannelTrigger(null);
+      setSelectedMentionIndex(0);
+      return;
+    }
+    setMentionSearchQuery(query);
+    setMentionSearchType(MentionType.CHANNEL);
+    setChannelTrigger(trigger ?? 'in:');
+    setSelectedMentionIndex(0); // Reset selection when search changes
+  }, []);
+
+  // `from:` typeahead user candidates. Uses the same data source and rank as
+  // plain user search (useUserSearch + rankUsers) so a query like "abhi"
+  // returns the same Abhisheks in the same order regardless of how the user
+  // typed it. ChatInput `@` mentions still go through useMentionSearch
+  // because they need chat-context signals (channel participants, recency).
+  const mentionUsersQuery = mentionSearchType === MentionType.USER ? mentionSearchQuery : '';
+  const mentionUsers = useUserSearch(mentionUsersQuery, CMDK_USER_LIMIT);
   const availableUsers = useMemo(() => {
     if (mentionSearchType !== MentionType.USER) return [];
-    return mentionSearchResults
-      .filter(result => result.type === MentionType.USER)
-      .map(result => ({
-        id: result.id,
-        name: result.name,
-        ...(result.email && { email: result.email }),
-      }));
-  }, [mentionSearchResults, mentionSearchType]);
+    return rankUsers(mentionUsers, mentionSearchQuery, dmContactRecency).map(user => ({
+      id: user.id,
+      name: user.name,
+      ...(user.email && { email: user.email }),
+    }));
+  }, [mentionUsers, mentionSearchQuery, mentionSearchType, dmContactRecency]);
 
-  // Filter mention results for channels
-  // Channels: space maps to hyphen (e.g., "new test" matches "new-test")
-  // Group DMs: comma or space splits into separate participant name queries
+  // Filter mention results for channels.
+  // Mirrors the plain-search regular/DM split in useSearchMetrics so `in:` typeahead
+  // matches the same channels the rest of the app does (fuzzy + hyphen-strip via
+  // searchChannels). DM/Group DM matching is unchanged: comma-split AND-semantics
+  // against participant searchableNames.
   const availableChannels = useMemo(() => {
     if (mentionSearchType !== MentionType.CHANNEL) return [];
-    const searchLower = mentionSearchQuery.toLowerCase().trim();
 
-    const matchesQuery = ({
-      channel,
-      searchableNames,
-    }: {
-      channel: Channel;
-      searchableNames?: string[];
-    }): boolean => {
-      if (!searchLower) return true;
-
-      if (isDMChannel(channel.scopeType) && searchableNames) {
-        // Group DMs: split on commas, each part must match a participant
-        const queryParts = searchLower
-          .split(',')
-          .map(p => p.trim())
-          .filter(Boolean);
-        const namesLower = searchableNames.map(n => n.toLowerCase());
-        return queryParts.every(part => namesLower.some(name => name.includes(part)));
-      }
-
-      // Regular channels: match against channel name
-      return channel.name.toLowerCase().includes(searchLower);
-    };
-
-    return allChannels.filter(matchesQuery).map(({ channel }) => {
+    const toDisplay = ({ channel }: { channel: Channel; searchableNames?: string[] }) => {
       if (!isDMChannel(channel.scopeType)) return { channel, displayName: channel.name };
       const otherNames = getDMParticipantIdsToFetch(channel, currentUserID)
         .map(id => usersById.get(id)?.name)
         .filter((n): n is string => !!n);
       return { channel, displayName: otherNames.length > 0 ? otherNames.join(', ') : 'Group Chat' };
-    });
-  }, [allChannels, mentionSearchQuery, mentionSearchType, usersById, currentUserID]);
+    };
+
+    // `#` is a Slack-style quick switcher — show only regular channels.
+    // `in:` is a scope filter — DMs/Group DMs are valid targets and stay included.
+    return filterChannelsBySearchableNames(allChannels, mentionSearchQuery, {
+      excludeDMs: channelTrigger === '#',
+    }).map(toDisplay);
+  }, [
+    allChannels,
+    mentionSearchQuery,
+    mentionSearchType,
+    channelTrigger,
+    usersById,
+    currentUserID,
+  ]);
 
   // Use a ref for triggerSummaryFetch to avoid dependency cycles and infinite loops
   const triggerSummaryFetchRef = useRef(triggerSummaryFetch);
@@ -818,6 +847,7 @@ const ChannelCommandMenu = ({
       setSelectedMentions([]);
       setMentionSearchQuery('');
       setMentionSearchType(null);
+      setChannelTrigger(null);
       setActiveTab(TabType.ALL);
       onTabChange?.(TabType.ALL);
       resetSearchState();
@@ -904,6 +934,20 @@ const ChannelCommandMenu = ({
   }, []);
 
   const getChannelIcon = (channel: Channel): ReactElement => {
+    if (isGroupDMChannel(channel.scopeType)) {
+      // Slack-style group icon: people glyph with participant count badge
+      const otherCount = getDMParticipantIdsToFetch(channel, currentUserID).length;
+      return (
+        <div className='relative flex h-5 w-5 items-center justify-center'>
+          <Users size={16} className='text-gray-600' />
+          {otherCount > 0 && (
+            <span className='absolute -bottom-[2px] -right-[2px] min-w-[12px] rounded-full bg-gray-200 px-[3px] text-[9px] font-semibold leading-[12px] text-gray-700'>
+              {otherCount}
+            </span>
+          )}
+        </div>
+      );
+    }
     if (isDMChannel(channel.scopeType)) {
       const userIds = getDMParticipantIdsToFetch(channel, currentUserID);
       if (userIds.length > 0 && userIds[0]) {
@@ -1016,14 +1060,27 @@ const ChannelCommandMenu = ({
 
   const showEmptyState = searchText.trim() && !isLoading && !hasResults;
 
-  // Auto-select first result when search results change
-  // Reset navigation flag when search text changes so auto-select resumes
+  // Auto-select first result when search results change. Reset the
+  // navigation flag when either the free-text query OR the active filter
+  // chips change — both are inputs to the backend search.
   useEffect(() => {
     hasNavigatedRef.current = false;
-  }, [searchText]);
+  }, [searchText, selectedMentions]);
+
+  // The user-facing banner shows a generic "Search is unavailable" message;
+  // log the raw backend error to the console so devs can still triage from
+  // DevTools without exposing implementation details in the UI.
+  useEffect(() => {
+    if (error) console.warn('[Cmd+K search]', error);
+  }, [error]);
 
   useEffect(() => {
-    if (!searchText.trim() || !hasResults || hasNavigatedRef.current) return;
+    // Auto-select fires when there's a query OR an active filter chip — the
+    // latter catches the case where the user typed `from:<name>` / `in:<ch>`,
+    // inserted a chip, and the backend returned results for that filter with
+    // no free-text query.
+    const hasActiveSearch = searchText.trim().length > 0 || selectedMentions.length > 0;
+    if (!hasActiveSearch || !hasResults || hasNavigatedRef.current) return;
     // Small delay to let DOM render the items
     const timer = setTimeout(() => {
       if (hasNavigatedRef.current) return;
@@ -1260,18 +1317,13 @@ const ChannelCommandMenu = ({
         filteredLocalUsers.length > 0 && (
           <div className='mb-4'>
             {(() => {
-              // Map of DM User IDs for fast lookup (to prioritize active DMs)
-              const dmUserIdSet = new Set<string>();
-              groupedChannels['direct-messages']?.forEach(({ channel }) => {
-                if (isOneToOneDMChannel(channel.scopeType)) {
-                  const participants = parseDMParticipantIds(channel);
-                  const otherUserId = participants.find(id => id !== currentUserID);
-                  if (otherUserId) dmUserIdSet.add(otherUserId);
-                }
-              });
-
-              // Convert local users to DisplaySearchResult format
-              const userItems: DisplaySearchResult[] = filteredLocalUsers.map(user => ({
+              // Apply the shared Cmd+K user rank, then map to DisplaySearchResult.
+              const rankedUsers = rankUsers(
+                filteredLocalUsers,
+                cleanedSearchText,
+                dmContactRecency,
+              );
+              const allItems: DisplaySearchResult[] = rankedUsers.map(user => ({
                 id: user.id,
                 type: 'user' as const,
                 title: user.name,
@@ -1279,11 +1331,6 @@ const ChannelCommandMenu = ({
                 relevanceScore: 1,
                 metadata: {},
               }));
-
-              // Prioritize users with active DMs
-              const usersWithDM = userItems.filter(item => dmUserIdSet.has(item.id));
-              const usersNoDM = userItems.filter(item => !dmUserIdSet.has(item.id));
-              const allItems = [...usersWithDM, ...usersNoDM];
 
               const totalItemsCount = allItems.length;
               const displayCount = totalItemsCount;
@@ -2021,7 +2068,6 @@ const ChannelCommandMenu = ({
                         className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                       >
                         {availableChannels.map(({ channel, displayName }, index) => {
-                          const isGroupDM = isGroupDMChannel(channel.scopeType);
                           return (
                             <Command.Item
                               key={channel.id}
@@ -2043,14 +2089,8 @@ const ChannelCommandMenu = ({
                               } ${!isMobile && 'active:bg-gray-200 active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
-                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
-                                {isGroupDM ? (
-                                  <Users size={16} className='text-gray-600' />
-                                ) : channel.visibility === ChannelVisibility.PRIVATE ? (
-                                  <Lock size={16} className='text-gray-600' />
-                                ) : (
-                                  <Hash size={16} className='text-gray-600' />
-                                )}
+                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-gray-600'>
+                                {getChannelIcon(channel)}
                               </div>
                               <div className='flex-1 min-w-0'>
                                 <div className='font-semibold text-xs text-gray-800 truncate'>
@@ -2161,9 +2201,12 @@ const ChannelCommandMenu = ({
                   </Command.Empty>
                 )}
 
-                {error && <div className='p-3 text-xs text-red-600'>{error}</div>}
-
-                {!showEmptyState && !error && !mentionSearchType && (
+                {/* Local results (channels, users, DMs) are computed client-side and
+                    don't depend on the backend search — keep rendering them even
+                    when Vespa fails. The backend-results section below is the part
+                    that gracefully degrades to empty when there's an error. The
+                    error notice itself is rendered after the local results below. */}
+                {!showEmptyState && !mentionSearchType && (
                   <>
                     {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
                     {/* When from:/in: filter is active, backend results appear first */}
@@ -2203,6 +2246,12 @@ const ChannelCommandMenu = ({
                       </>
                     )}
                   </>
+                )}
+
+                {error && !mentionSearchType && (
+                  <div className='px-3 py-2 text-xs text-red-600'>
+                    Search is unavailable. Only People and Channels are accessible.
+                  </div>
                 )}
               </>
             )}

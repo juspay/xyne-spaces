@@ -19,9 +19,11 @@ import {
 import { $createMentionNode, MentionData, $isMentionNode } from './MentionNode';
 import { MentionType } from './ChannelCommandMenu.types';
 
+export type ChannelTriggerType = '#' | 'in:';
+
 interface MentionPluginProps {
   onUserSearch?: (query: string | null) => void;
-  onChannelSearch?: (query: string | null) => void;
+  onChannelSearch?: (query: string | null, trigger?: ChannelTriggerType) => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
   availableChannels?: Array<{ id: string; name: string }>;
   onMentionSelect?: (mention: MentionData) => void;
@@ -64,7 +66,11 @@ export function MentionPlugin({
       if (triggerType === MentionType.USER && onUserSearch) {
         onUserSearch(searchTerm);
       } else if (triggerType === MentionType.CHANNEL && onChannelSearch) {
-        onChannelSearch(searchTerm);
+        // Channel triggers today: '#' or 'in:'. Anything else falls back to
+        // 'in:' (chip semantics) — safer default since '#' navigates away.
+        // If a new channel-type trigger is added, register it explicitly.
+        const channelTrigger: ChannelTriggerType = triggerText.current === '#' ? '#' : 'in:';
+        onChannelSearch(searchTerm, channelTrigger);
       }
     }, 150); // Reduced debounce for better responsiveness
 
@@ -549,7 +555,9 @@ export function MentionPlugin({
           if (trigger.type === 'user' && onUserSearch) {
             onUserSearch(trigger.query.trim());
           } else if (trigger.type === 'channel' && onChannelSearch) {
-            onChannelSearch(trigger.query.trim());
+            // See note in the debounced effect above: '#' or 'in:' only.
+            const channelTrigger: ChannelTriggerType = trigger.text === '#' ? '#' : 'in:';
+            onChannelSearch(trigger.query.trim(), channelTrigger);
           }
 
           return;

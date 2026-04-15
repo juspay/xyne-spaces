@@ -41,6 +41,104 @@ interface UseSearchMetricsOptions {
 
 const BACKEND_RESULTS_LIMIT = 25;
 
+/**
+ * Cap on user rows fetched for any Cmd+K user surface (plain-search USERS
+ * section, and `from:` typeahead). Both surfaces use the same value so a
+ * query like "abhi" returns the same set of candidates regardless of how
+ * the user typed it.
+ */
+export const CMDK_USER_LIMIT = 25;
+
+/**
+ * Rank Cmd+K user candidates:
+ *   1. name-prefix matches first
+ *   2. DM-contact users within each tier
+ *   3. tie-break by DM recency (smaller index = more recent activity), so
+ *      `from:` with no text shows the same people-you-talk-to-most order
+ *      that the plain-search empty state shows in the DIRECT MESSAGES
+ *      section.
+ *
+ * `dmContactRecency` maps a user ID to its position in the recency-ordered
+ * 1:1 DM list (0 = most recent). Users not in the map fall through to the
+ * incoming alphabetical order from `searchUsers`.
+ */
+export function rankUsers<T extends { id: string; name: string }>(
+  users: T[],
+  query: string,
+  dmContactRecency: Map<string, number>,
+): T[] {
+  const q = query.toLowerCase().trim();
+  const isPrefixMatch = (name: string): boolean => !!q && name.toLowerCase().startsWith(q);
+
+  const rank = (user: T): number => {
+    const primary = isPrefixMatch(user.name);
+    const hasDM = dmContactRecency.has(user.id);
+    if (primary && hasDM) return 0;
+    if (primary) return 1;
+    if (hasDM) return 2;
+    return 3;
+  };
+
+  // Stable sort (ES2019+) preserves the incoming `searchUsers` order
+  // (alphabetical for non-DM users) when both rank and recency are equal.
+  return [...users].sort((a, b) => {
+    const diff = rank(a) - rank(b);
+    if (diff !== 0) return diff;
+    const aRecency = dmContactRecency.get(a.id);
+    const bRecency = dmContactRecency.get(b.id);
+    if (aRecency !== undefined && bRecency !== undefined) return aRecency - bRecency;
+    return 0;
+  });
+}
+
+/**
+ * Filter channel entries for Cmd+K search.
+ *
+ * DMs/Group DMs match against `searchableNames` (participant display names)
+ * with AND-semantics: every comma/whitespace-separated token must match some
+ * participant. Regular channels defer to `searchChannels` for fuzzy +
+ * hyphen-strip behaviour shared with the rest of the app.
+ *
+ * Cmd+K-scoped (the participant-name match path is specific to the command
+ * menu's grouped layout). Used by `filteredLocalChannels` below and by the
+ * `in:` / `#` typeahead in ChannelCommandMenu.
+ *
+ * @param options.excludeDMs  Drop DMs/Group DMs entirely — used by the `#`
+ *   Slack-style quick switcher which should show only regular channels.
+ */
+export function filterChannelsBySearchableNames<
+  T extends { channel: Channel; searchableNames?: string[] },
+>(items: T[], query: string, options: { excludeDMs?: boolean } = {}): T[] {
+  const scoped = options.excludeDMs
+    ? items.filter(({ channel }) => !isDMChannel(channel.scopeType))
+    : items;
+
+  const searchLower = query.toLowerCase().trim();
+  if (!searchLower) return scoped;
+
+  const dmItems = scoped.filter(({ channel }) => isDMChannel(channel.scopeType));
+  const regularItems = scoped.filter(({ channel }) => !isDMChannel(channel.scopeType));
+
+  const queryParts = searchLower
+    .split(/[,\s]+/)
+    .map(p => p.trim())
+    .filter(Boolean);
+
+  const matchedDms = dmItems.filter(({ searchableNames }) => {
+    if (!searchableNames || searchableNames.length === 0 || queryParts.length === 0) return false;
+    const namesLower = searchableNames.map(n => n.toLowerCase());
+    return queryParts.every(part => namesLower.some(name => name.includes(part)));
+  });
+
+  const regularChannels = regularItems.map(item => item.channel);
+  const matchedIds = new Set(
+    searchChannels(regularChannels, query, regularChannels.length).map(c => c.id),
+  );
+  const matchedRegular = regularItems.filter(({ channel }) => matchedIds.has(channel.id));
+
+  return [...matchedDms, ...matchedRegular];
+}
+
 export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const context = useAuthContextValues();
   const [searchSessionId, setSearchSessionId] = useState<string | null>(null);
@@ -77,47 +175,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // Filter local users using the search hook - use cleaned searchText
-  const filteredLocalUsers = useUserSearch(cleanedSearchText, BACKEND_RESULTS_LIMIT);
+  const filteredLocalUsers = useUserSearch(cleanedSearchText, CMDK_USER_LIMIT);
 
   // Filter local channels - use cleaned searchText
   const filteredLocalChannels: Array<{
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
-  }> = useMemo(() => {
-    if (!options.allChannels || !cleanedSearchText.trim()) return options.allChannels || [];
-
-    const searchLower = cleanedSearchText.toLowerCase();
-    // Split on commas or whitespace so "Shivral, vaibha" and "Shivral vaibha" both work
-    const keywords = searchLower
-      .split(/[,\s]+/)
-      .map(k => k.trim())
-      .filter(Boolean);
-
-    // Separate DMs (match by participant names) from regular channels (use fuzzy search)
-    const dmItems = options.allChannels.filter(({ channel }) => isDMChannel(channel.scopeType));
-    const regularItems = options.allChannels.filter(
-      ({ channel }) => !isDMChannel(channel.scopeType),
-    );
-
-    // DMs: match against participant searchableNames
-    // Every keyword must match at least one participant name (AND semantics)
-    const matchedDms = dmItems.filter(({ searchableNames }) => {
-      if (!searchableNames || searchableNames.length === 0) return false;
-      if (keywords.length === 0) return false;
-      const namesLower = searchableNames.map(n => n.toLowerCase());
-      return keywords.every(keyword => namesLower.some(name => name.includes(keyword)));
-    });
-
-    // Regular channels: use fuzzy searchChannels for better matching
-    const regularChannels = regularItems.map(item => item.channel);
-    const matchedChannelSet = new Set(
-      searchChannels(regularChannels, cleanedSearchText, regularChannels.length).map(c => c.id),
-    );
-    const matchedRegular = regularItems.filter(({ channel }) => matchedChannelSet.has(channel.id));
-
-    return [...matchedDms, ...matchedRegular];
-  }, [options.allChannels, cleanedSearchText]);
+  }> = useMemo(
+    () => filterChannelsBySearchableNames(options.allChannels ?? [], cleanedSearchText),
+    [options.allChannels, cleanedSearchText],
+  );
 
   const [currentSearchContext, setCurrentSearchContext] = useState<{
     query: string;
