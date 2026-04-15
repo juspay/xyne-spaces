@@ -90,6 +90,7 @@ import docsRoutes from '@/routes/docs';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import userSkillsRoutes from '@/routes/userSkills';
+import scheduledMessageRoutes from '@/routes/scheduledMessages';
 import jenkinsRoutes from '@/routes/jenkins';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -107,6 +108,7 @@ import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
+import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
@@ -391,6 +393,9 @@ export class App {
     // User skills routes (auth required)
     this.app.use('/api/user-skills', authMiddleware.authenticate, userSkillsRoutes);
 
+    // Scheduled messages routes (auth required)
+    this.app.use('/api/scheduled-messages', authMiddleware.authenticate, scheduledMessageRoutes);
+
     // Activity logging routes (auth required)
     this.app.use('/api/activity', authMiddleware.authenticate, activityLogRoutes);
 
@@ -508,6 +513,10 @@ export class App {
     logger.info('Initializing on-call rotation queue...');
     await onCallRotationQueue.initialize();
 
+    // Initialize scheduled message queue (Bull-based scheduling)
+    logger.info('Initializing scheduled message queue...');
+    await scheduledMessageQueue.initialize();
+
     // Initialize WebSocket server
     logger.info('Initializing WebSocket server...');
     websocketService.initialize(this.httpServer);
@@ -613,6 +622,9 @@ export class App {
 
       // Close on-call rotation queue
       await onCallRotationQueue.close();
+
+      // Close scheduled message queue
+      await scheduledMessageQueue.close();
 
       // Shutdown notification service
       await notificationService.shutdown();

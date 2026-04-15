@@ -93,7 +93,7 @@ export abstract class BaseRepository<T, CreateInput, UpdateInput> {
   }
 
   async validateRequired(value: any, fieldName: string): Promise<void> {
-    if (value === undefined || value === null || value === '') {
+    if (value === undefined || value === null) {
       throw new Error(`${fieldName} is required`);
     }
   }

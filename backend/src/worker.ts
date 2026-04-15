@@ -22,6 +22,7 @@ import { callValidationWorker } from '@/workers/callValidationWorker';
 import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
 import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
+import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { recoveryService } from './workflows/services/recovery-service' 
 config()
 
@@ -139,6 +140,17 @@ class WorkerService {
         await conversationIngestionWorker.start();
       }
 
+      logger.info('Initializing scheduled message queue...');
+      const { scheduledMessageQueue } = await import('@/queues/scheduledMessageQueue');
+      await scheduledMessageQueue.initialize();
+
+      if (appConfig.enableScheduledMessageWorker) {
+        logger.info('Initializing notification service for scheduled message worker...');
+        await notificationService.initialize();
+        logger.info('Starting scheduled message worker...');
+        await scheduledMessageWorker.start();
+      }
+
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {
         logger.info('Starting document ingestion worker...');
@@ -228,6 +240,10 @@ class WorkerService {
 
       if (appConfig.enableConversationIngestionWorker) {
         await conversationIngestionWorker.shutdown();
+      }
+
+      if (appConfig.enableScheduledMessageWorker) {
+        await scheduledMessageWorker.shutdown();
       }
 
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';

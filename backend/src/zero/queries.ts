@@ -543,6 +543,12 @@ export const queries = defineQueries({
       return zql.channel_participants.where('channelId', channelId);
     }
   ),
+  myChannelParticipations: defineQuery(
+    z.object({}),
+    ({ ctx }) => {
+      return zql.channel_participants.where('userId', ctx.userID).where('role', ChannelRole.ADMIN);
+    }
+  ),
   userConversationsPaginated: defineQuery(
     z.object({
       userId: z.string(),
