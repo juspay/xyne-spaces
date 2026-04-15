@@ -42,6 +42,7 @@ import {
   Sparkles,
   ArrowRightLeft,
   AppWindow,
+  SearchCode,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -78,6 +79,7 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/forms', label: 'Forms', icon: Clipboard },
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarClock },
   { path: '/apps', label: 'Apps', icon: AppWindow },
+  { path: '/inspector', label: 'Inspector', icon: SearchCode },
 ];
 
 const mobileNavigationItems = [

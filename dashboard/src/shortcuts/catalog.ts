@@ -94,6 +94,23 @@ export const shortcuts = {
     useKey: true,
   },
 
+  'global.openInspector': {
+    keys: 'mod+shift+i',
+    scope: 'global',
+    description: 'Open Inspector panel',
+    category: 'Navigation',
+    priority: 50,
+    allowInInputs: true,
+  },
+  'global.openGrafana': {
+    keys: 'mod+shift+g',
+    scope: 'global',
+    description: 'Open Grafana',
+    category: 'Navigation',
+    priority: 50,
+    allowInInputs: true,
+  },
+
   // ===== SIDEBAR NAVIGATION =====
   'sidebar.resizeLeft': {
     keys: '[',
