@@ -548,6 +548,14 @@ export const roomMachine = setup({
                   } as const);
                 }
                 break;
+
+              case 'AI_CONTROL_REQUEST_DENIED':
+                if (event.type === 'AI_CONTROL_REQUEST_DENIED') {
+                  sendBack({
+                    type: 'AI_CONTROL_REQUEST_DENIED',
+                  } as const);
+                }
+                break;
             }
           },
         );
