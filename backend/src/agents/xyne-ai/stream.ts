@@ -255,7 +255,8 @@ const {
   const timestamp = currentTimestamp || getCurrentTimestamp();
   const source: 'thread' | 'channel' = conversationId ? 'thread' : 'channel';
 
-  const sessionContext: SessionContext = {channelIds, userId };
+  const agentName = request.agentName;
+  const sessionContext: SessionContext = { channelIds, userId, agentName };
   const { session, isNewSession } = await getOrCreateSession(sessionId, sessionContext);
 
   logger.info(`[XyneAI] [${session.sessionId}] Starting query. isNew: ${isNewSession}, source: ${source}, attachments: ${attachments?.length || 0}, messageAttachmentIds: ${messageAttachmentIds?.length || 0}`);
@@ -384,7 +385,7 @@ const {
   } else {
     // Normal / Edit: create user message
     const { session: updatedSessionAfterUser, messageId } = await sessionStore.addUserMessage(
-      session.sessionId, query, timestamp,
+      session.sessionId, request.displayQuery ?? query, timestamp,
       allAttachments.length > 0 ? allAttachments : undefined,
       undefined, // traceId - set later
       parentMessageId, // previousStepId for tree structure
@@ -513,8 +514,40 @@ const {
 
     // Model and Prompt Info
     modelName: cacConfig.xyneAiModelName,
-    agentPromptName: request.agentPromptName,
+    agentPromptName: request.agentName,
   };
+
+  // Wrap onStreamEvent to persist sub-tool events (e.g. q_api inside genius)
+  // These are streamed directly via callback and bypass JAF's tool lifecycle events,
+  // so they must be stored here to appear in session history.
+  // A queue serializes DB writes so rapid sub-tool events chain correctly via lastStepId.
+  let subToolQueue: Promise<void> = Promise.resolve();
+  const wrappedOnStreamEvent: StreamEventCallback | undefined = onStreamEvent
+    ? (event: Record<string, unknown>) => {
+        const eventType = event.type as string;
+        if (eventType === 'tool_input' && event.tool_name) {
+          const toolName = event.tool_name as string;
+          const input = typeof event.input === 'string' ? event.input : JSON.stringify(event.input);
+          subToolQueue = subToolQueue.then(async () => {
+            try {
+              lastStepId = await sessionStore.addToolInput(session.sessionId, toolName, input, undefined, lastStepId);
+            } catch (err) {
+              logger.error(`[XyneAI] [${session.sessionId}] Failed to store sub-tool input:`, err);
+            }
+          });
+        } else if (eventType === 'tool_output' && event.tool_name) {
+          const toolName = event.tool_name as string;
+          subToolQueue = subToolQueue.then(async () => {
+            try {
+              lastStepId = await sessionStore.addToolOutput(session.sessionId, toolName, event.output, undefined, lastStepId);
+            } catch (err) {
+              logger.error(`[XyneAI] [${session.sessionId}] Failed to store sub-tool output:`, err);
+            }
+          });
+        }
+        onStreamEvent(event);
+      }
+    : undefined;
 
   const agentContext = {
     channelIds,
@@ -527,7 +560,7 @@ const {
     source,
     timestamp,
     streamProvider: streamProvider as StreamProvider | undefined,
-    onStreamEvent,
+    onStreamEvent: wrappedOnStreamEvent,
     userInfo: request.userInfo,
     webSearchEnabled: request.webSearchEnabled,
     deepResearchEnabled,
@@ -535,8 +568,7 @@ const {
     customInstruction,
     memoryEnabled: request.memoryEnabled !== false,  // default true; false disables get_memories/update_memory
     modelName: cacConfig.xyneAiModelName,
-    systemPrompt: request.systemPrompt,
-    agentPromptName: request.agentPromptName,
+    agentName: request.agentName,
     requestMappings: {
       channelNameToId: new Map<string, string>(),
       userNameToId: new Map<string, string>(),
@@ -612,6 +644,9 @@ const {
           } catch (_metricsError) {
             // non-blocking
           }
+
+          // Wait for any queued sub-tool writes to finish so lastStepId is up-to-date
+          await subToolQueue;
 
           // Handle stream provider events
           if (streamProvider) {

@@ -44,6 +44,7 @@ export interface StreamState {
 
 export interface StreamRequest {
   query: string;
+  displayQuery?: string;
   channelIds: string[];
   canvasIds?: string[] | undefined;
   ticketIds?: string[] | undefined;
@@ -253,7 +254,7 @@ class XyneAIStreamManager {
         );
 
         // Note: We do NOT add these to activeStreams map or notify subscribers
-        // The sidebar will load messages from xyneAIStorage (conversation history)
+        // The sidebar will load messages from the backend (conversation history)
         // not from stream storage
       }
     } catch (error) {
@@ -728,6 +729,7 @@ class XyneAIStreamManager {
         url: `${BASE_URL}/xyne-ai`,
         requestBody: {
           query: request.query,
+          ...(request.displayQuery && { displayQuery: request.displayQuery }),
           channelIds: request.channelIds,
           ...(request.canvasIds &&
             request.canvasIds.length > 0 && { canvasIds: request.canvasIds }),

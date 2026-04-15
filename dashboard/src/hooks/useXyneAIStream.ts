@@ -246,6 +246,7 @@ export const useXyneAIStream = ({
         threadId,
         {
           query: internalQuery,
+          displayQuery: displayContent ?? query,
           channelIds,
           conversationId,
           threadConversationId,

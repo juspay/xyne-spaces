@@ -182,7 +182,7 @@ export class AskAIBot extends UnifiedBaseBot<Input, Output> {
         createCanvasEnabled: false,
         researchContext: undefined,
         messageAttachmentIds: attachmentIds,
-        agentPromptName: PROMPT_NAMES.XYNE_AI_CHAT_SYSTEM,
+        agentName: PROMPT_NAMES.XYNE_AI_CHAT_SYSTEM,
         userInfo: { userId, userName: userName_, userEmail: userEmail_ },
         agentsConfig,
         memoryEnabled: false,  // Bot context: disable get_memories/update_memory tools

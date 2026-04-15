@@ -14,16 +14,52 @@ import { logger } from '../../../utils/logger.js';
 import type { AttachmentMetadata } from './types.js';
 
 
-const ASK_AI_WORKFLOW_NAME = 'Ask AI';
 const ASK_AI_STATUS = 'INTERACTIVE';
+
+/**
+ * Agent name → Workflow name mapping.
+ * Every agent that uses the xyne-ai storage layer must be registered here.
+ * The sidebar workflow ('Ask AI') is also the default for unknown/undefined agents.
+ */
+const AGENT_WORKFLOW_MAP = new Map<string, string>([
+  ['ask-ai',       'Ask AI'],
+  ['ask-ai-chat',  'Ask AI Chat'],
+]);
+
+const DEFAULT_WORKFLOW_NAME = 'Ask AI';
+
+function getWorkflowNameForAgent(agentName?: string): string {
+  if (!agentName) return DEFAULT_WORKFLOW_NAME;
+  return AGENT_WORKFLOW_MAP.get(agentName) ?? DEFAULT_WORKFLOW_NAME;
+}
 
 export type XyneAIMessageRole = 'USER' | 'ASSISTANT' | 'TOOL_INPUT' | 'TOOL_OUTPUT' | 'SYSTEM';
 export type XyneAIFeedback = 'LIKE' | 'DISLIKE';
 
+export interface SessionMetadata {
+  channelId?: string;
+  channelIds?: string[];
+  conversationId?: string; // threadConversationId
+  title?: string;
+  isStarred?: boolean;
+  branchSelections?: Record<string, string>;
+  feedbackMap?: Record<string, number>; // messageId → 0|1|2
+}
+
 export interface SessionData {
   sessionId: string;
   userId: string;
-  metadata?: Record<string, unknown>;
+  metadata: SessionMetadata;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SessionListItem {
+  sessionId: string;
+  title: string;
+  channelId: string;
+  threadConversationId?: string;
+  isStarred: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,10 +78,11 @@ export interface MessageData {
 }
 
 export interface XyneAIMemoryProvider {
-  createSession(sessionId: string, userId: string, metadata?: Record<string, unknown>): Promise<SessionData>;
+  createSession(sessionId: string, userId: string, metadata?: SessionMetadata, agentName?: string): Promise<SessionData>;
   getSession(sessionId: string): Promise<SessionData | null>;
-  updateSessionMetadata(sessionId: string, metadata: Record<string, unknown>): Promise<boolean>;
+  updateSessionMetadata(sessionId: string, metadata: Partial<SessionMetadata>): Promise<boolean>;
   deleteSession(sessionId: string): Promise<boolean>;
+  getUserSessions(userId: string, agentName?: string): Promise<SessionListItem[]>;
   addMessage(sessionId: string, role: XyneAIMessageRole, content: unknown, traceId?: string, attachmentMetadata?: AttachmentMetadata[], previousStepId?: string): Promise<MessageData>;
   getMessages(sessionId: string): Promise<MessageData[]>;
   getMessagesForPath(sessionId: string, leafMessageId: string): Promise<MessageData[]>;
@@ -57,36 +94,46 @@ export interface XyneAIMemoryProvider {
 }
 
 export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider> {
-  let askAIWorkflowId: string | null = null;
+  // Cache workflow IDs by name to avoid repeated DB lookups
+  const workflowIdCache = new Map<string, string>();
 
-  const getOrCreateAskAIWorkflow = async (): Promise<string> => {
-    if (askAIWorkflowId) return askAIWorkflowId;
-    
+  const getOrCreateWorkflow = async (workflowName: string): Promise<string> => {
+    const cached = workflowIdCache.get(workflowName);
+    if (cached) return cached;
+
     const existing = await db.workflow.findFirst({
-      where: { workflowName: ASK_AI_WORKFLOW_NAME },
+      where: { workflowName },
       select: { id: true },
     });
-    
+
     if (existing) {
-      askAIWorkflowId = existing.id;
-      return askAIWorkflowId;
+      workflowIdCache.set(workflowName, existing.id);
+      return existing.id;
     }
-    
+
     const workflow = await db.workflow.create({
       data: {
-        workflowName: ASK_AI_WORKFLOW_NAME,
+        workflowName,
         status: 'NEW',
       },
     });
-    
-    askAIWorkflowId = workflow.id as string;
-    logger.info(`[XyneAIMemoryProvider] Created Ask AI workflow: ${askAIWorkflowId}`);
-    return askAIWorkflowId;
+
+    const id = workflow.id as string;
+    workflowIdCache.set(workflowName, id);
+    logger.info(`[XyneAIMemoryProvider] Created workflow '${workflowName}': ${id}`);
+    return id;
   };
+
+  /** Get or create the workflow for the given agent name. */
+  const getOrCreateAskAIWorkflow = (agentName?: string): Promise<string> =>
+    getOrCreateWorkflow(getWorkflowNameForAgent(agentName));
 
   const initialize = async (): Promise<void> => {
     try {
-      await getOrCreateAskAIWorkflow();
+      // Ensure workflow rows exist for every registered agent
+      await Promise.all(
+        [...AGENT_WORKFLOW_MAP.values()].map(name => getOrCreateWorkflow(name)),
+      );
       logger.info('[XyneAIMemoryProvider] Initialized');
     } catch (error) {
       logger.error('[XyneAIMemoryProvider] Failed to initialize:', error);
@@ -97,11 +144,13 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
   const createSession = async (
     sessionId: string,
     userId: string,
+    metadata?: SessionMetadata,
+    agentName?: string,
   ): Promise<SessionData> => {
     try {
-      const workflowId = await getOrCreateAskAIWorkflow();
+      const workflowId = await getOrCreateAskAIWorkflow(agentName);
       const uuid = sessionId || randomUUID();
-      
+
       const execution = await db.workflowExecution.create({
         data: {
           id: uuid,
@@ -109,22 +158,23 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
           status: ASK_AI_STATUS,
           tag: 'root',
           ignoreDuration: 0,
+          context: metadata ? JSON.stringify(metadata) : null,
         },
       });
-      
+
       await db.workflowExecutionUsers.create({
         data: {
           userId,
           workflowExecutionId: uuid,
         },
       });
-      
+
       logger.info(`[XyneAIMemoryProvider] [${uuid}] Created session for user ${userId}`);
-      
+
       return {
         sessionId: execution.id,
         userId,
-        metadata: {},
+        metadata: metadata || {},
         createdAt: execution.createdAt,
         updatedAt: execution.updatedAt,
       };
@@ -134,25 +184,36 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     }
   };
 
+  const parseSessionMetadata = (context: string | null): SessionMetadata => {
+    if (!context) return {};
+    try {
+      return JSON.parse(context) as SessionMetadata;
+    } catch {
+      return {};
+    }
+  };
+
   const getSession = async (sessionId: string): Promise<SessionData | null> => {
     try {
       const execution = await db.workflowExecution.findUnique({
         where: { id: sessionId },
         include: { workflow: { select: { workflowName: true } } },
       });
-      
+
       if (!execution) return null;
-      if (execution.workflow.workflowName !== ASK_AI_WORKFLOW_NAME) return null;
-      
+      // Only accept sessions that belong to a registered agent workflow
+      const knownWorkflows = new Set(AGENT_WORKFLOW_MAP.values());
+      if (!execution.workflow.workflowName || !knownWorkflows.has(execution.workflow.workflowName)) return null;
+
       const userMapping = await db.workflowExecutionUsers.findFirst({
         where: { workflowExecutionId: sessionId },
         select: { userId: true },
       });
-      
+
       return {
         sessionId: execution.id,
         userId: userMapping?.userId || '',
-        metadata: {},
+        metadata: parseSessionMetadata(execution.context),
         createdAt: execution.createdAt,
         updatedAt: execution.updatedAt,
       };
@@ -162,7 +223,93 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     }
   };
 
-  const updateSessionMetadata = async (): Promise<boolean> => true;
+  const updateSessionMetadata = async (sessionId: string, metadata: Partial<SessionMetadata>): Promise<boolean> => {
+    try {
+      const execution = await db.workflowExecution.findUnique({
+        where: { id: sessionId },
+        select: { context: true },
+      });
+
+      const existingMetadata = parseSessionMetadata(execution?.context ?? null);
+      const mergedMetadata = { ...existingMetadata, ...metadata };
+
+      await db.workflowExecution.update({
+        where: { id: sessionId },
+        data: { context: JSON.stringify(mergedMetadata) },
+      });
+
+      return true;
+    } catch (error) {
+      logger.error(`[XyneAIMemoryProvider] [${sessionId}] Failed to update metadata:`, error);
+      return false;
+    }
+  };
+
+  const generateTitleFromQuery = (query: string): string => {
+    const trimmed = query.trim();
+    return trimmed.length > 50 ? trimmed.substring(0, 50) + '...' : trimmed;
+  };
+
+  const getUserSessions = async (userId: string): Promise<SessionListItem[]> => {
+    try {
+      const workflowId = await getOrCreateAskAIWorkflow();
+
+      // Find all session IDs for this user
+      const userMappings = await db.workflowExecutionUsers.findMany({
+        where: { userId },
+        select: { workflowExecutionId: true },
+      });
+      const sessionIds = userMappings.map(m => m.workflowExecutionId);
+      if (sessionIds.length === 0) return [];
+
+      const sessions = await db.workflowExecution.findMany({
+        where: {
+          id: { in: sessionIds },
+          workflowId,
+        },
+        include: {
+          workflowSteps: {
+            where: {
+              stepExecutorType: 'agent',
+              stepName: 'USER',
+            },
+            orderBy: { createdAt: 'asc' },
+            take: 1,
+            select: { data: true },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      return sessions.map(session => {
+        const metadata = parseSessionMetadata(session.context);
+
+        // Title: use custom title if set, otherwise auto-generate from first user message
+        let title = metadata.title || 'New conversation';
+        if (!metadata.title && session.workflowSteps.length > 0 && session.workflowSteps[0]!.data) {
+          try {
+            const content = JSON.parse(session.workflowSteps[0]!.data);
+            if (content.query) {
+              title = generateTitleFromQuery(content.query);
+            }
+          } catch { /* keep default */ }
+        }
+
+        return {
+          sessionId: session.id,
+          title,
+          channelId: metadata.channelId || (metadata.channelIds?.[0] ?? ''),
+          threadConversationId: metadata.conversationId,
+          isStarred: metadata.isStarred || false,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+        };
+      });
+    } catch (error) {
+      logger.error(`[XyneAIMemoryProvider] Failed to get sessions for user ${userId}:`, error);
+      throw error;
+    }
+  };
 
   const deleteSession = async (sessionId: string): Promise<boolean> => {
     try {
@@ -385,6 +532,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     getSession,
     updateSessionMetadata,
     deleteSession,
+    getUserSessions,
     addMessage,
     getMessages,
     getMessagesForPath,

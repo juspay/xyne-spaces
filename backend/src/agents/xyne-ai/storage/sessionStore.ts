@@ -4,11 +4,13 @@
 
 import { randomUUID } from 'crypto';
 import { logger } from '../../../utils/logger.js';
-import { 
-  createXyneAIMemoryProvider, 
+import {
+  createXyneAIMemoryProvider,
   type XyneAIMemoryProvider,
   type MessageData,
   type XyneAIFeedback,
+  type SessionListItem,
+  type SessionMetadata,
 } from './customPostgresProvider';
 import { convertMessagesToHistory } from './utils';
 import type {
@@ -22,8 +24,8 @@ import type {
 import type { XyneAIOutput, AttachmentData } from '../types';
 import { uploadXyneAIAttachments } from '../../../services/attachmentUploadService.js';
 
-// Re-export XyneAIFeedback for external use
-export type { XyneAIFeedback };
+// Re-export types for external use
+export type { XyneAIFeedback, SessionListItem, SessionMetadata };
 
 // ============================================================================
 // Session Store Class
@@ -67,13 +69,14 @@ class XyneAISessionStore {
   async create(context: SessionContext): Promise<XyneAISession> {
     const provider = await this.ensureInitialized();
     const sessionId = this.generateSessionId();
-    
-    const metadata = {
+
+    const metadata: SessionMetadata = {
+      channelId: context.channelIds[0],
       channelIds: context.channelIds,
       conversationId: context.conversationId,
     };
-    
-    const sessionData = await provider.createSession(sessionId, context.userId, metadata);
+
+    const sessionData = await provider.createSession(sessionId, context.userId, metadata, context.agentName);
     
     logger.info(`[SessionStore] [${sessionId}] Created new session for user: ${context.userId}`);
     
@@ -255,6 +258,26 @@ class XyneAISessionStore {
   // ============================================================================
   // Utility Methods
   // ============================================================================
+
+  async getUserSessions(userId: string): Promise<SessionListItem[]> {
+    try {
+      const provider = await this.ensureInitialized();
+      return await provider.getUserSessions(userId);
+    } catch (error) {
+      logger.error(`[SessionStore] Error getting sessions for user ${userId}:`, error);
+      return [];
+    }
+  }
+
+  async getRawMessages(sessionId: string): Promise<MessageData[]> {
+    try {
+      const provider = await this.ensureInitialized();
+      return await provider.getMessages(sessionId);
+    } catch (error) {
+      logger.error(`[SessionStore] [${sessionId}] Error getting raw messages:`, error);
+      return [];
+    }
+  }
 
   async updateMetadata(sessionId: string, metadata: Record<string, unknown>): Promise<boolean> {
     try {

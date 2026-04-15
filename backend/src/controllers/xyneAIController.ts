@@ -12,6 +12,11 @@ import {
   getAskAIFeedbackTotal,
 } from '@/services/otel';
 import { researchAgentService } from '@/services/researchAgentService';
+import { sessionStore } from '@/agents/xyne-ai/storage/sessionStore';
+import {
+  transformMessagesToFrontendFormat,
+  applyFeedbackToMessages,
+} from '@/agents/xyne-ai/utils/messageTransformer';
 
 const emptyToUndefined = (val: unknown) => (val === '' ? undefined : val);
 
@@ -65,6 +70,7 @@ const XyneAIRequestSchema = z.object({
   canvas_ids: z.array(z.string().min(1)).optional(), // Canvas IDs to fetch and inject as context
   ticket_ids: z.array(z.string().min(1)).optional(), // Ticket IDs to fetch and inject as context
   call_ids: z.array(z.string().min(1)).optional(), // Call IDs to fetch and inject as context (includes recordings)
+  display_query: z.string().optional(), // Original user query without canvas/selection enhancements — stored in DB
 });
 
 // Feedback request validation schema
@@ -115,6 +121,7 @@ export class XyneAIController {
       canvas_ids,
       ticket_ids,
       call_ids,
+      display_query,
     } = parseResult.data;
 
     const userId = (req as any).user?.id;
@@ -196,6 +203,8 @@ export class XyneAIController {
         agentsConfig,  // Pass CAC config to stream
         parentMessageId: parent_message_id,
         isRegenerate: is_regenerate,
+        agentName: 'ask-ai',
+        displayQuery: display_query,
       };
 
       // Track metrics: context channels count
@@ -484,6 +493,234 @@ export class XyneAIController {
     }
   };
 
+  /**
+   * GET /api/xyne-ai/sessions
+   *
+   * Returns all Ask AI sessions for the authenticated user.
+   * Lightweight: returns metadata only (no messages).
+   */
+  getSessions = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      const sessions = await sessionStore.getUserSessions(userId);
+      res.json({ sessions });
+    } catch (error) {
+      logger.error('[XyneAI] Error fetching sessions:', error);
+      res.status(500).json({ error: 'Failed to fetch sessions' });
+    }
+  };
+
+  /**
+   * GET /api/xyne-ai/sessions/:sessionId
+   *
+   * Returns a single session with all messages transformed to frontend format.
+   */
+  getSessionDetail = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { sessionId } = req.params;
+    if (!sessionId) {
+      res.status(400).json({ error: 'Session ID is required' });
+      return;
+    }
+
+    try {
+      const sessionData = await sessionStore.get(sessionId);
+      if (!sessionData) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      // Verify session belongs to user
+      if (sessionData.context.userId !== userId) {
+        res.status(403).json({ error: 'Access denied' });
+        return;
+      }
+
+      // Get raw messages for transformation
+      const rawMessages = await sessionStore.getRawMessages(sessionId);
+      const frontendMessages = transformMessagesToFrontendFormat(rawMessages);
+
+      // Read metadata from DB for channelId, isStarred, title, branchSelections, feedbackMap
+      const rawMeta = await getRawSessionMetadata(sessionId);
+
+      // Generate title from first user message if no custom title stored
+      let title = rawMeta.title || 'New conversation';
+      if (!rawMeta.title) {
+        const firstUserMsg = frontendMessages.find(m => m.type === 'user');
+        if (firstUserMsg) {
+          const content = firstUserMsg.content.trim();
+          title = content.length > 50 ? content.substring(0, 50) + '...' : content;
+        }
+      }
+
+      const channelId = rawMeta.channelId || rawMeta.channelIds?.[0] || sessionData.context.channelIds?.[0] || '';
+      const threadConversationId = rawMeta.conversationId || sessionData.context.conversationId;
+
+      res.json({
+        id: sessionId,
+        sessionId,
+        channelId,
+        threadConversationId,
+        title,
+        isStarred: rawMeta.isStarred || false,
+        branchSelections: rawMeta.branchSelections || {},
+        createdAt: sessionData.createdAt,
+        updatedAt: sessionData.updatedAt,
+        messages: applyFeedbackToMessages(frontendMessages, rawMeta.feedbackMap || {}),
+      });
+    } catch (error) {
+      logger.error(`[XyneAI] Error fetching session detail for ${req.params.sessionId}:`, error);
+      res.status(500).json({ error: 'Failed to fetch session detail' });
+    }
+  };
+
+  /**
+   * PATCH /api/xyne-ai/sessions/:sessionId/star
+   */
+  toggleStar = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { sessionId } = req.params;
+    if (!sessionId) {
+      res.status(400).json({ error: 'Session ID is required' });
+      return;
+    }
+
+    try {
+      const rawMeta = await getRawSessionMetadata(sessionId);
+      const success = await sessionStore.updateMetadata(sessionId, {
+        isStarred: !rawMeta.isStarred,
+      });
+
+      if (!success) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      res.json({ success: true, isStarred: !rawMeta.isStarred });
+    } catch (error) {
+      logger.error(`[XyneAI] Error toggling star for ${sessionId}:`, error);
+      res.status(500).json({ error: 'Failed to toggle star' });
+    }
+  };
+
+  /**
+   * PATCH /api/xyne-ai/sessions/:sessionId/rename
+   */
+  renameSession = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { sessionId } = req.params;
+    const schema = z.object({ title: z.string().min(1).max(200) });
+    const parseResult = schema.safeParse(req.body);
+    if (!parseResult.success) {
+      res.status(400).json({ error: 'Invalid title' });
+      return;
+    }
+
+    try {
+      const success = await sessionStore.updateMetadata(sessionId, {
+        title: parseResult.data.title,
+      });
+
+      if (!success) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error(`[XyneAI] Error renaming session ${sessionId}:`, error);
+      res.status(500).json({ error: 'Failed to rename session' });
+    }
+  };
+
+  /**
+   * DELETE /api/xyne-ai/sessions/:sessionId
+   */
+  deleteSessionEndpoint = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { sessionId } = req.params;
+    if (!sessionId) {
+      res.status(400).json({ error: 'Session ID is required' });
+      return;
+    }
+
+    try {
+      const success = await sessionStore.delete(sessionId);
+      if (!success) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error(`[XyneAI] Error deleting session ${sessionId}:`, error);
+      res.status(500).json({ error: 'Failed to delete session' });
+    }
+  };
+
+  /**
+   * PATCH /api/xyne-ai/sessions/:sessionId/metadata
+   *
+   * Updates session metadata (branchSelections, feedbackMap, etc.)
+   */
+  updateSessionMetadata = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { sessionId } = req.params;
+    const schema = z.object({
+      branchSelections: z.record(z.string()).optional(),
+      feedbackMap: z.record(z.number()).optional(),
+      title: z.string().min(1).max(200).optional(),
+    });
+    const parseResult = schema.safeParse(req.body);
+    if (!parseResult.success) {
+      res.status(400).json({ error: 'Invalid metadata', details: parseResult.error.errors });
+      return;
+    }
+
+    try {
+      const success = await sessionStore.updateMetadata(sessionId, parseResult.data);
+      if (!success) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      logger.error(`[XyneAI] Error updating metadata for ${sessionId}:`, error);
+      res.status(500).json({ error: 'Failed to update metadata' });
+    }
+  };
+
   private async streamResponse(
     res: Response,
     request: Omit<XyneAIStreamRequest, 'onStreamEvent'>
@@ -526,5 +763,22 @@ export class XyneAIController {
       res.write(`data: ${JSON.stringify({ type: 'error', error: errorMessage })}\n\n`);
       res.end();
     }
+  }
+}
+
+// ============================================================================
+// Helper: Read raw session metadata from DB
+// ============================================================================
+
+async function getRawSessionMetadata(sessionId: string): Promise<Record<string, any>> {
+  try {
+    const execution = await db.workflowExecution.findUnique({
+      where: { id: sessionId },
+      select: { context: true },
+    });
+    if (!execution?.context) return {};
+    return JSON.parse(execution.context);
+  } catch {
+    return {};
   }
 }
