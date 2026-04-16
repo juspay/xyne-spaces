@@ -432,29 +432,31 @@ export class ChannelController {
           },
         });
 
-        // Copy attachments to the new message
-        const copiedAttachments: any[] = [];
-        if (originalAttachments.length > 0) {
-          for (const attachment of originalAttachments) {
-            const copiedAttachment = await tx.messageAttachment.create({
-              data: {
-                entityId: createdMessage.messageId,
-                entityType: AttachmentEntityType.CHAT,
-                originalFilename: attachment.originalFilename,
-                size: attachment.size,
-                mimetype: attachment.mimetype,
-                url: attachment.url,
-                thumbnailUrl: attachment.thumbnailUrl || undefined,
-                uploadedByUserId: senderId,
-                createdBy: senderId,
-                storageProvider: attachment.storageProvider,
-                conversationId: conversation.conversationId,
-                metadata: (attachment.metadata as Record<string, any>) || {},
-              },
-            });
-            copiedAttachments.push(copiedAttachment);
-          }
-        }
+         // Copy attachments to the new message
+         const copiedAttachments: any[] = [];
+         if (originalAttachments.length > 0) {
+           for (const attachment of originalAttachments) {
+             const copiedAttachment = await tx.messageAttachment.create({
+               data: {
+                 entityId: createdMessage.messageId,
+                 entityType: AttachmentEntityType.CHAT,
+                 originalFilename: attachment.originalFilename,
+                 size: attachment.size,
+                 mimetype: attachment.mimetype,
+                 url: attachment.url,
+                 thumbnailUrl: attachment.thumbnailUrl || undefined,
+                 uploadedByUserId: senderId,
+                 createdBy: senderId,
+                 storageProvider: attachment.storageProvider,
+                 conversationId: conversation.conversationId,
+                 metadata: (attachment.metadata as Record<string, any>) || {},
+                 width: attachment.width ?? undefined,
+                 height: attachment.height ?? undefined,
+               },
+             });
+             copiedAttachments.push(copiedAttachment);
+           }
+         }
 
         let totalReplyCount = 0;
 
@@ -513,7 +515,9 @@ export class ChannelController {
                     createdBy: senderId,
                     storageProvider: originalAtt.storageProvider,
                     conversationId: conversation.conversationId,
-                    metadata: (originalAtt.metadata as Prisma.InputJsonValue) || {}
+                    metadata: (originalAtt.metadata as Prisma.InputJsonValue) || {},
+                    width: originalAtt.width ?? undefined,
+                    height: originalAtt.height ?? undefined,
                   }
                 });
               }

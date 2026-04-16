@@ -2010,7 +2010,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             metadata: undefined,
           });
 
-          // Copy attachments from the original message
+           // Copy attachments from the original message
           for (const attachment of attachmentsArray) {
             if (!attachment) continue;
             await tx.mutate.message_attachments.insert({
@@ -2028,6 +2028,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               conversationId: conversationId,
               metadata: attachment.metadata,
               createdAt: now,
+              width: attachment.width ?? null,
+              height: attachment.height ?? null,
             });
           }
 
@@ -2113,6 +2115,8 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                         conversationId: conversationId,
                         metadata: attInfo.metadata as any,
                         createdAt: now,
+                        width: attInfo.width ?? null,
+                        height: attInfo.height ?? null,
                      });
                    }
                 }
