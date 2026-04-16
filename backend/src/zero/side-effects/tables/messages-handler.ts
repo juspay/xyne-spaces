@@ -3,6 +3,7 @@ import { ActivityClassification, ActivityClassificationJobType, AttachmentEntity
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig } from '../types';
 import { db } from '@/database/client';
+import { config } from '@/config/env';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { slackService } from '@/services/slackService';
@@ -403,6 +404,340 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
    * Resolve link preview for a message: tries internal app link first,
    * falls back to external OG metadata.
    */
+  /**
+   * Parse any Bitbucket URL and extract relevant information.
+   * Supports: PRs, commits, files, repos, branches, and generic Bitbucket links.
+   * 
+   * Examples:
+   * - PR: https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/pull-requests/2
+   * - Commit: https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/commits/abc123
+   * - File: https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces/browse/src/file.ts
+   * - Repo: https://bitbucket.example.com/projects/XYNE/repos/xyne-spaces
+   */
+  private parseBitbucketUrl(url: string): {
+    type: 'pr' | 'commit' | 'file' | 'repo' | 'branch' | 'generic';
+    project?: string;
+    repo?: string;
+    prNumber?: number;
+    commitHash?: string;
+    filePath?: string;
+    hostname: string;
+    pathname: string;
+  } | null {
+    try {
+      const urlObj = new URL(url);
+      
+      // Extract Bitbucket domain from config or use default
+      const bitbucketDomain = config.bitbucket.baseUrl 
+        ? new URL(config.bitbucket.baseUrl).hostname 
+        : 'bitbucket.juspay.net';
+      
+      // Only handle configured Bitbucket domain
+      if (!urlObj.hostname.includes(bitbucketDomain)) {
+        return null;
+      }
+
+      const pathname = urlObj.pathname;
+      
+      // Try PR pattern: /projects/{PROJECT}/repos/{REPO}/pull-requests/{NUMBER}
+      const prMatch = pathname.match(/\/projects\/([^/]+)\/repos\/([^/]+)\/pull-requests\/(\d+)/);
+      if (prMatch) {
+        return {
+          type: 'pr',
+          project: prMatch[1],
+          repo: prMatch[2],
+          prNumber: parseInt(prMatch[3], 10),
+          hostname: urlObj.hostname,
+          pathname,
+        };
+      }
+      
+      // Try commit pattern: /projects/{PROJECT}/repos/{REPO}/commits/{HASH}
+      const commitMatch = pathname.match(/\/projects\/([^/]+)\/repos\/([^/]+)\/commits\/([a-f0-9]+)/);
+      if (commitMatch) {
+        return {
+          type: 'commit',
+          project: commitMatch[1],
+          repo: commitMatch[2],
+          commitHash: commitMatch[3],
+          hostname: urlObj.hostname,
+          pathname,
+        };
+      }
+      
+      // Try file/browse pattern: /projects/{PROJECT}/repos/{REPO}/browse/{PATH}
+      const fileMatch = pathname.match(/\/projects\/([^/]+)\/repos\/([^/]+)\/browse\/(.+)/);
+      if (fileMatch) {
+        return {
+          type: 'file',
+          project: fileMatch[1],
+          repo: fileMatch[2],
+          filePath: fileMatch[3],
+          hostname: urlObj.hostname,
+          pathname,
+        };
+      }
+      
+      // Try branch pattern: /projects/{PROJECT}/repos/{REPO}/branches
+      const branchMatch = pathname.match(/\/projects\/([^/]+)\/repos\/([^/]+)\/branches/);
+      if (branchMatch) {
+        return {
+          type: 'branch',
+          project: branchMatch[1],
+          repo: branchMatch[2],
+          hostname: urlObj.hostname,
+          pathname,
+        };
+      }
+      
+      // Try repo home pattern: /projects/{PROJECT}/repos/{REPO}
+      const repoMatch = pathname.match(/\/projects\/([^/]+)\/repos\/([^/]+)\/?$/);
+      if (repoMatch) {
+        return {
+          type: 'repo',
+          project: repoMatch[1],
+          repo: repoMatch[2],
+          hostname: urlObj.hostname,
+          pathname,
+        };
+      }
+      
+      // Generic Bitbucket link (project pages, settings, etc.)
+      return {
+        type: 'generic',
+        hostname: urlObj.hostname,
+        pathname,
+      };
+      
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Extract metadata from Bitbucket API response based on URL type.
+   */
+  private extractBitbucketMetadata(
+    parsedUrl: ReturnType<typeof this.parseBitbucketUrl>,
+    apiData: any,
+    url: string,
+  ): ExternalLinkMetadata {
+    if (!parsedUrl) {
+      return {
+        url,
+        title: 'Bitbucket',
+        description: '',
+        siteName: 'Bitbucket',
+        favicon: 'https://bitbucket.example.com/favicon.ico',
+      };
+    }
+
+    switch (parsedUrl.type) {
+      case 'pr':
+        return {
+          url,
+          title: apiData.title || `Pull Request #${parsedUrl.prNumber}`,
+          description: apiData.description || `${parsedUrl.project}/${parsedUrl.repo}`,
+          siteName: 'Bitbucket',
+          favicon: `https://${parsedUrl.hostname}/favicon.ico`,
+        };
+      
+      case 'commit':
+        return {
+          url,
+          title: `Commit ${parsedUrl.commitHash?.slice(0, 7)}`,
+          description: apiData.message || `${parsedUrl.project}/${parsedUrl.repo}`,
+          siteName: 'Bitbucket',
+          favicon: `https://${parsedUrl.hostname}/favicon.ico`,
+        };
+      
+      case 'repo':
+        return {
+          url,
+          title: apiData.name || parsedUrl.repo || 'Repository',
+          description: apiData.description || `Project: ${parsedUrl.project}`,
+          siteName: 'Bitbucket',
+          favicon: `https://${parsedUrl.hostname}/favicon.ico`,
+        };
+      
+      default:
+        return this.createUrlDerivedBitbucketMetadata(parsedUrl, url);
+    }
+  }
+
+  /**
+   * Create URL-derived Bitbucket metadata fallback for all link types.
+   */
+  private createUrlDerivedBitbucketMetadata(
+    parsedUrl: ReturnType<typeof this.parseBitbucketUrl>,
+    url: string,
+  ): ExternalLinkMetadata {
+    if (!parsedUrl) {
+      return {
+        url,
+        title: 'Bitbucket',
+        description: '',
+        siteName: 'Bitbucket',
+        favicon: 'https://bitbucket.example.com/favicon.ico',
+      };
+    }
+
+    let title: string;
+    let description: string;
+    
+    switch (parsedUrl.type) {
+      case 'pr':
+        title = `Pull Request #${parsedUrl.prNumber}`;
+        description = `${parsedUrl.project}/${parsedUrl.repo}`;
+        break;
+      
+      case 'commit':
+        title = `Commit ${parsedUrl.commitHash?.slice(0, 7)}`;
+        description = `${parsedUrl.project}/${parsedUrl.repo}`;
+        break;
+      
+      case 'file':
+        title = parsedUrl.filePath || 'File';
+        description = `${parsedUrl.project}/${parsedUrl.repo}`;
+        break;
+      
+      case 'repo':
+        title = parsedUrl.repo || 'Repository';
+        description = `Project: ${parsedUrl.project}`;
+        break;
+      
+      case 'branch':
+        title = 'Branches';
+        description = `${parsedUrl.project}/${parsedUrl.repo}`;
+        break;
+      
+      case 'generic':
+        title = parsedUrl.pathname.split('/').filter(Boolean).pop() || 'Bitbucket';
+        description = 'Bitbucket';
+        break;
+      
+      default:
+        title = 'Bitbucket';
+        description = '';
+    }
+    
+    return {
+      url,
+      title,
+      description,
+      siteName: 'Bitbucket',
+      favicon: `https://${parsedUrl.hostname}/favicon.ico`,
+    };
+  }
+
+  /**
+   * Resolve Bitbucket link preview with API-first, URL-derived fallback strategy.
+   * Supports all Bitbucket link types: PRs, commits, files, repos, branches, and generic links.
+   * 1. Try authenticated Bitbucket API call for rich preview (title, description, etc.)
+   * 2. If API fails, extract context from URL for basic preview
+   * 3. Returns true if preview was written, false otherwise
+   */
+  private async resolveBitbucketLinkPreview(
+    messageId: string,
+    conversationId: string,
+    url: string,
+  ): Promise<boolean> {
+    const parsedUrl = this.parseBitbucketUrl(url);
+    if (!parsedUrl) return false;
+
+    logger.info('[MessagesSideEffect] Detected Bitbucket URL:', {
+      url,
+      type: parsedUrl.type,
+      project: parsedUrl.project,
+      repo: parsedUrl.repo,
+    });
+
+    let metadata: ExternalLinkMetadata;
+
+    // Try API-first approach for supported types if credentials are configured
+    if (config.bitbucket.apiToken || config.bitbucket.password) {
+      try {
+        const baseUrl = config.bitbucket.baseUrl || 'https://bitbucket.example.com/rest/api/latest';
+        let apiUrl: string | null = null;
+        
+        // Determine API endpoint based on URL type
+        switch (parsedUrl.type) {
+          case 'pr':
+            if (parsedUrl.project && parsedUrl.repo && parsedUrl.prNumber !== undefined) {
+              apiUrl = `${baseUrl}/projects/${parsedUrl.project}/repos/${parsedUrl.repo}/pull-requests/${parsedUrl.prNumber}`;
+            }
+            break;
+          
+          case 'commit':
+            if (parsedUrl.project && parsedUrl.repo && parsedUrl.commitHash) {
+              apiUrl = `${baseUrl}/projects/${parsedUrl.project}/repos/${parsedUrl.repo}/commits/${parsedUrl.commitHash}`;
+            }
+            break;
+          
+          case 'repo':
+            if (parsedUrl.project && parsedUrl.repo) {
+              apiUrl = `${baseUrl}/projects/${parsedUrl.project}/repos/${parsedUrl.repo}`;
+            }
+            break;
+          
+          // file, branch, generic → skip API, use URL-derived fallback
+          default:
+            apiUrl = null;
+        }
+        
+        if (apiUrl) {
+          const authHeader = config.bitbucket.apiToken
+            ? `Bearer ${config.bitbucket.apiToken}`
+            : config.bitbucket.apiUsername && config.bitbucket.password
+              ? `Basic ${Buffer.from(`${config.bitbucket.apiUsername}:${config.bitbucket.password}`).toString('base64')}`
+              : '';
+
+          const response = await fetch(apiUrl, {
+            headers: {
+              'Authorization': authHeader,
+              'Accept': 'application/json',
+            },
+          });
+
+          if (response.ok) {
+            const apiData = await response.json();
+            metadata = this.extractBitbucketMetadata(parsedUrl, apiData, url);
+            logger.info('[MessagesSideEffect] Fetched Bitbucket metadata from API:', metadata);
+          } else {
+            throw new Error(`Bitbucket API returned ${response.status}`);
+          }
+        } else {
+          // No API endpoint for this type, use URL-derived
+          metadata = this.createUrlDerivedBitbucketMetadata(parsedUrl, url);
+          logger.info('[MessagesSideEffect] Using URL-derived preview (no API for this type)');
+        }
+      } catch (error) {
+        logger.warn('[MessagesSideEffect] Bitbucket API call failed, using URL-derived fallback:', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        metadata = this.createUrlDerivedBitbucketMetadata(parsedUrl, url);
+      }
+    } else {
+      // No credentials configured, use URL-derived preview
+      logger.info('[MessagesSideEffect] No Bitbucket credentials configured, using URL-derived preview');
+      metadata = this.createUrlDerivedBitbucketMetadata(parsedUrl, url);
+    }
+
+    // Write preview to database
+    const md = serializeLinkPreviewMd(metadata);
+    if (!md) return false;
+
+    await db.message.update({
+      where: { messageId },
+      data: { link_preview_md: md },
+    });
+
+    await this.syncConversationMessageMetadata(conversationId);
+
+    logger.info(`[MessagesSideEffect] Updated message ${messageId} with Bitbucket ${parsedUrl.type} preview`);
+    return true;
+  }
+
   private async resolveLinkPreview(
     messageId: string,
     conversationId: string,
@@ -421,7 +756,18 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     );
     if (resolvedInternal) return;
 
-    // 2) Fall through to external OG-based preview
+    // 2) Try Bitbucket PR link preview (API-first with URL-derived fallback)
+    const url = extractFirstUrl(contentWithoutMentions);
+    if (url) {
+      const resolvedBitbucket = await this.resolveBitbucketLinkPreview(
+        messageId,
+        conversationId,
+        url,
+      );
+      if (resolvedBitbucket) return;
+    }
+
+    // 3) Fall through to external OG-based preview
     await this.resolveExternalLinkPreview(messageId, conversationId, contentWithoutMentions);
   }
 
