@@ -13,6 +13,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Extension } from '@tiptap/core';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
+import OrderedList from '@tiptap/extension-ordered-list';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import {
@@ -358,11 +359,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               class: 'pl-6 my-2',
             },
           },
-          orderedList: {
-            HTMLAttributes: {
-              class: 'pl-6 my-2',
-            },
-          },
+          orderedList: false,
           listItem: {
             HTMLAttributes: {
               class: 'my-1',
@@ -372,6 +369,31 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             HTMLAttributes: {
               class: 'm-0 leading-6',
             },
+          },
+        }),
+        OrderedList.extend({
+          addAttributes() {
+            return {
+              ...this.parent?.(),
+              start: {
+                default: 1,
+                parseHTML: (el: HTMLElement) => {
+                  const v = el.getAttribute('start');
+                  return v ? parseInt(v, 10) : 1;
+                },
+                // Size padding-left to the marker's actual width so wide
+                // multi-digit markers (e.g. `10000.`) aren't clipped by the
+                // ProseMirror scroll edge. `ch` scales with font-size.
+                renderHTML: attrs => {
+                  const start = Number(attrs['start']) || 1;
+                  const digits = String(start).length;
+                  return {
+                    start,
+                    style: `padding-left: calc(${digits + 1}ch + 0.5rem);`,
+                  };
+                },
+              },
+            };
           },
         }),
         MaxListDepthPlugin,
