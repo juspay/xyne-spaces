@@ -1325,7 +1325,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           items={[
                             {
                               items: [
-                                ...(!(hasTicket || ticketCreated)
+                                ...(sendMode === 'message' && !(hasTicket || ticketCreated)
                                   ? [
                                       {
                                         label: 'Create a ticket',
@@ -1337,14 +1337,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                       },
                                     ]
                                   : []),
-                                {
-                                  label: 'Send as message',
-                                  slot1: <ArrowUp className='h-4 w-4' />,
-                                  onClick: (): void => {
-                                    setSendMode('message');
-                                    setIsSendMenuOpen(false);
-                                  },
-                                },
+                                ...(sendMode === 'ticket'
+                                  ? [
+                                      {
+                                        label: 'Send as message',
+                                        slot1: <ArrowUp className='h-4 w-4' />,
+                                        onClick: (): void => {
+                                          setSendMode('message');
+                                          setIsSendMenuOpen(false);
+                                        },
+                                      },
+                                    ]
+                                  : []),
                               ],
                             },
                           ]}

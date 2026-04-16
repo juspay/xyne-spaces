@@ -526,7 +526,8 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 alsoSendToChannelChecked: alsoSendToChannel,
               })}
             {...(channel?.scopeType === ChannelScopeType.DEFAULT &&
-              canCreateTicket && {
+              canCreateTicket &&
+              !conversationId && {
                 onCreateTicket: (description: string | undefined) => {
                   void (async () => {
                     if (isSupportChannel && user) {
