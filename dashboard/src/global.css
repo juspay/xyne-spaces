@@ -391,7 +391,7 @@
     @apply leading-6 text-foreground;
     max-width: 100%;
     overflow-wrap: break-word;
-    word-break: break-word;
+    word-break: normal;
   }
 
   /* Nested Bullet List Styles - repeating cycle: disc → circle → square */
@@ -485,7 +485,7 @@
     max-height: 500px;
     white-space: pre-wrap;
     overflow-wrap: break-word;
-    word-break: break-word;
+    word-break: normal;
     padding: 4px 0;
   }
 
@@ -809,12 +809,9 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 @layer utilities {
-  /* Custom utility combining break-all and break-word */
+  /* Custom utility - break text at any character to prevent overflow */
   .break-all-words {
-    overflow-wrap: break-all;
-    /* Break long words when necessary */
-    word-break: break-word;
-    /* Allow breaking anywhere to prevent overflow */
+    word-break: break-all;
   }
 
   /* Hide scrollbar for Chrome, Safari and Opera */
@@ -836,7 +833,9 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   }
 
   .text-wrap {
-    @apply whitespace-pre-wrap break-all;
+    @apply whitespace-pre-wrap;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
 
   .scroll-safe {
@@ -844,8 +843,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   }
 
   .word-break-safe {
-    word-break: break-word;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
 
   /* Ticket description scroll container - uses !important to override .overflow-safe */
@@ -1121,8 +1120,9 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .jp-message-html {
   @apply leading-6 text-foreground;
   max-width: 100%;
-  overflow-wrap: break-all;
+  overflow-wrap: break-word;
   word-wrap: break-word;
+  word-break: normal;
 }
 
 /* Make inline emojis larger than surrounding text */
@@ -1154,23 +1154,23 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    ---------------------------- */
 .jp-message-html pre,
 .jp-message-html div.slack_code {
-  @apply bg-muted border border-border rounded-lg p-4 whitespace-pre-wrap break-all relative mt-3 mb-3;
-  overflow-wrap: break-all;
-  word-break: break-word;
+  @apply bg-muted border border-border rounded-lg p-4 whitespace-pre-wrap relative mt-3 mb-3;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .jp-message-html div.slack_code code {
   @apply !bg-transparent !p-0 !border-0 !text-[0.875rem] !leading-6 !font-mono !text-foreground !block;
   white-space: pre-wrap;
   overflow-wrap: break-word;
-  word-break: break-all;
+  word-break: normal;
 }
 
 .jp-message-html pre code {
   @apply bg-transparent p-0 border-0 text-[0.875rem] leading-6 font-mono text-foreground block;
   white-space: pre-wrap;
   overflow-wrap: break-word;
-  word-break: break-all;
+  word-break: normal;
 }
 
 /* Scrollbar */
@@ -1228,7 +1228,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .jp-message-html blockquote pre code {
   @apply !whitespace-pre-wrap;
   white-space: pre-wrap !important;
-  word-break: break-word;
+  word-break: normal;
 }
 
 /* ----------------------------
@@ -1342,8 +1342,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-id="step-details"] pre,
 [data-id="step-details"] code {
   white-space: pre-wrap;
-  word-break: break-all;
-  overflow-wrap: anywhere;
+  word-break: normal;
+  overflow-wrap: break-word;
   max-width: 100%;
 }
 
@@ -1351,8 +1351,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-id="step-details"] .wmde-markdown,
 [data-id="step-details"] .wmde-markdown * {
   max-width: 100% !important;
-  overflow-wrap: anywhere !important;
-  word-break: break-word !important;
+  overflow-wrap: break-word !important;
+  word-break: normal !important;
 }
 
 [data-id="step-details"] .wmde-markdown pre {
@@ -1362,7 +1362,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 [data-id="step-details"] .wmde-markdown pre code {
   white-space: pre-wrap !important;
-  word-break: break-all !important;
+  word-break: normal !important;
 }
 
 /* Fix Accordion content overflow */
