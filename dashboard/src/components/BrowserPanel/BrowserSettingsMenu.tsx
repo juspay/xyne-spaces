@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Shield, Globe } from 'lucide-react';
+import { Settings, Shield } from 'lucide-react';
 import Popover from '../ui/Popover';
 import { Switch } from '../ui/Switch';
 import { useSelector } from '@xstate/react';
@@ -55,18 +55,6 @@ export const BrowserSettingsMenu: React.FC<BrowserSettingsMenuProps> = ({ isOpen
     >
       <div className='flex flex-col gap-4'>
         <div className='font-medium text-sm text-foreground'>Site Settings</div>
-
-        <div className='flex items-center justify-between'>
-          <div className='flex items-center gap-2 text-sm text-foreground'>
-            <Globe size={16} className='text-muted-foreground' />
-            <span>JavaScript</span>
-          </div>
-          <Switch
-            checked={browserSettings.javascript}
-            onCheckedChange={(val: boolean) => handleUpdateSetting('javascript', val)}
-          />
-        </div>
-
         <div className='flex items-center justify-between'>
           <div className='flex items-center gap-2 text-sm text-foreground'>
             <Shield size={16} className='text-muted-foreground' />

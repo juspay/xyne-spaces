@@ -274,9 +274,8 @@ app.on('web-contents-created', (_event, webContents) => {
     // Disable node integration for security
     webPreferences.nodeIntegration = false;
     
-    // Apply browser settings to the webview
-    const settings = browserSettingsService.getSettings();
-    webPreferences.javascript = settings.javascript;
+    // Always enable JavaScript for all sites (modern web requires it)
+    webPreferences.javascript = true;
     
     log.info('[Main] Webview preferences set:', {
       preload: webPreferences.preload,

@@ -387,6 +387,23 @@ export function BrowserTabsScreen({
     setUrlInput(targetUrl);
   };
 
+  // Always creates a new tab (no deduplication check) - used for keyboard shortcuts
+  const handleCreateNewTab = (url: string = 'https://www.google.com') => {
+    const id = crypto.randomUUID();
+    browserPanelActor.send({
+      type: 'ADD_TAB',
+      tab: {
+        id,
+        url,
+        title: url,
+        canGoBack: false,
+        canGoForward: false,
+        isLoading: true,
+      },
+    });
+    setUrlInput(url);
+  };
+
   const handleSwitchTab = (tabId: string) => {
     browserPanelActor.send({ type: 'SWITCH_TAB', tabId });
   };
@@ -744,7 +761,7 @@ export function BrowserTabsScreen({
             }}
             onShortcut={shortcut => {
               if (shortcut === 'new-tab') {
-                handleCreateTab('https://www.google.com');
+                handleCreateNewTab('https://www.google.com');
               } else if (shortcut === 'find-in-page') {
                 setIsFindBarOpen(true);
                 setTimeout(() => {
