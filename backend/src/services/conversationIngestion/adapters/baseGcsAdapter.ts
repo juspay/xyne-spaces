@@ -1,4 +1,4 @@
-import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { getStorageService, type StorageService } from '@/services/storage';
 import type { ConversationSourceAdapter, MemoryIngestionContext } from '../types';
 
 /**
@@ -16,7 +16,7 @@ export function parseGcsUri(gcsUri: string): { bucketName: string; filePath: str
 export abstract class BaseGcsAdapter implements ConversationSourceAdapter {
   protected readonly bucketName: string;
   protected readonly filePath: string;
-  protected readonly gcsService: ReturnType<typeof GCSServiceFactory.getService>;
+  protected readonly storageService: StorageService;
 
   // Memoized raw payload — avoids double GCS download
   private rawPayloadCache: unknown | undefined = undefined;
@@ -28,7 +28,7 @@ export abstract class BaseGcsAdapter implements ConversationSourceAdapter {
     const parsed = parseGcsUri(gcsUri);
     this.bucketName = parsed.bucketName;
     this.filePath = parsed.filePath;
-    this.gcsService = GCSServiceFactory.getService(this.bucketName);
+    this.storageService = getStorageService(this.bucketName);
   }
 
   /**
@@ -36,7 +36,7 @@ export abstract class BaseGcsAdapter implements ConversationSourceAdapter {
    */
   protected async getRawPayload(): Promise<unknown> {
     if (this.rawPayloadCache === undefined) {
-      const buffer = await this.gcsService.getFileBuffer(this.filePath);
+      const buffer = await this.storageService.getFileBuffer(this.filePath);
       this.rawPayloadCache = JSON.parse(buffer.toString('utf-8'));
     }
     return this.rawPayloadCache;

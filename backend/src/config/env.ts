@@ -32,6 +32,12 @@ const envSchema = Joi.object({
   SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
+  // AWS S3 Configuration
+  AWS_REGION: Joi.string().default(''),
+  AWS_ACCESS_KEY_ID: Joi.string().allow('').default(''),
+  AWS_SECRET_ACCESS_KEY: Joi.string().allow('').default(''),
+  S3_BUCKET_NAME: Joi.string().allow('').default(''),
+  S3_ENDPOINT: Joi.string().allow('').default(''), // for MinIO/LocalStack in dev
   // Google Cloud Storage Configuration (Workload Identity)
   GCS_PROJECT_ID: Joi.string().default(''),
   GCS_BUCKET_NAME: Joi.string().default(''),
@@ -234,6 +240,13 @@ export const config = {
   },
   fileStorage: {
     provider: envVars.STORAGE_PROVIDER,
+  },
+  s3: {
+    region: envVars.AWS_REGION,
+    accessKeyId: envVars.AWS_ACCESS_KEY_ID,
+    secretAccessKey: envVars.AWS_SECRET_ACCESS_KEY,
+    bucketName: envVars.S3_BUCKET_NAME,
+    endpoint: envVars.S3_ENDPOINT,
   },
   llm: {
     litellmApiKey: envVars.LITELLM_API_KEY,

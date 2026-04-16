@@ -521,6 +521,14 @@ export class GCSService {
   }
 
   /**
+   * Move a file within the same bucket from one path to another.
+   */
+  async moveFile(sourcePath: string, destinationPath: string): Promise<void> {
+    await this.bucket.file(sourcePath).move(this.bucket.file(destinationPath));
+    logger.info(`File moved in GCS: ${sourcePath} -> ${destinationPath}`);
+  }
+
+  /**
    * List files in the bucket with a given prefix.
    * Returns an array of objects with name and optional contentType metadata.
    */

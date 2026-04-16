@@ -5,7 +5,9 @@ import {
   CreateCustomEmojiInput,
   CustomEmojiWithRelations,
 } from '../database/repositories/customEmojiRepository';
-import { gcsService } from '../services/gcsService';
+import { getStorageService } from '../services/storage';
+
+const storageService = getStorageService();
 
 /**
  * Transform a Prisma CustomEmoji to the frontend-friendly format
@@ -97,19 +99,19 @@ export class CustomEmojiController {
       });
 
       // Upload file to GCS
-      const uploadResult = await gcsService.uploadFile(file.buffer, {
+      const uploadResult = await storageService.uploadFile(file.buffer, {
         filename: file.originalname,
         contentType: file.mimetype,
         scopeType: 'emojis',
         scopeId: sanitizedName,
       });
 
-      logger.info('Emoji file uploaded to GCS', { gcsPath: uploadResult.gcsPath });
+      logger.info('Emoji file uploaded to GCS', { gcsPath: uploadResult.path });
 
       // Create the custom emoji
       const emojiData: CreateCustomEmojiInput = {
         name: sanitizedName,
-        url: uploadResult.gcsPath,
+        url: uploadResult.path,
         createdBy: userId,
       };
 
@@ -197,7 +199,7 @@ export class CustomEmojiController {
       const gcsPath = emoji.url;
 
       // Check if file exists in GCS
-      const fileExists = await gcsService.fileExists(gcsPath);
+      const fileExists = await storageService.fileExists(gcsPath);
       if (!fileExists) {
         logger.error(`Emoji file not found in GCS: ${gcsPath}`);
         res.status(404).json({ error: 'Emoji image not found' });
@@ -205,7 +207,7 @@ export class CustomEmojiController {
       }
 
       // Get file metadata to determine content type and size
-      const metadata = await gcsService.getFileMetadata(gcsPath);
+      const metadata = await storageService.getFileMetadata(gcsPath);
       const contentType = metadata.contentType || 'image/png';
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
@@ -215,7 +217,7 @@ export class CustomEmojiController {
       res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
 
       // Stream the file directly from GCS
-      const stream = await gcsService.createReadStream(gcsPath);
+      const stream = await storageService.createReadStream(gcsPath);
       stream.pipe(res);
 
       stream.on('error', (error) => {
@@ -257,7 +259,7 @@ export class CustomEmojiController {
 
       // Delete the file from GCS
       try {
-        await gcsService.deleteFile(emoji.url);
+        await storageService.deleteFile(emoji.url);
       } catch (error) {
         logger.warn(`Failed to delete emoji file from GCS: ${emoji.url}`, error);
         // Continue with emoji deletion even if file deletion fails

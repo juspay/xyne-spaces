@@ -2,14 +2,14 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { AttachmentEntityType, CallOrigin } from '@prisma/client';
 import { config } from '@/config/env';
-import { Storage, Bucket } from '@google-cloud/storage';
 import { Agent, createUserMessage, createSystemMessage } from '@framework';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { MessageType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
 import * as yaml from 'js-yaml';
-import { GCSService } from '../services/gcsService';
+import { getStorageService } from '@/services/storage';
+import type { StorageService } from '@/services/storage';
 import { pulseService, type PulseActionItem } from '@/services/pulseService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -180,22 +180,10 @@ export interface TicketSuggestion {
 }
 
 export class TranscriptService {
-  private transcriptBucket: Bucket;
-  private storage: Storage;
+  private transcriptStorage: StorageService;
 
   constructor() {
-    // Initialize dedicated GCS storage for transcripts
-    const isDevelopment = process.env.NODE_ENV === 'development';
-    const storageOptions: any = {
-      projectId: config.gcs.projectId,
-    };
-
-    if (isDevelopment && config.gcs.fakeGcsHost) {
-      storageOptions.apiEndpoint = `http://${config.gcs.fakeGcsHost}`;
-    }
-
-    this.storage = new Storage(storageOptions);
-    this.transcriptBucket = this.storage.bucket(config.gcs.transcriptionBucketName);
+    this.transcriptStorage = getStorageService(config.gcs.transcriptionBucketName);
     logger.info(
       `TranscriptService initialized with transcript bucket: ${config.gcs.transcriptionBucketName}`
     );
@@ -329,13 +317,13 @@ export class TranscriptService {
       );
 
       // 6. Upload raw formatted transcript immediately (no translation yet - non-blocking)
-      const txtGcsPath = await this.uploadFormattedTranscript(callId, formattedTranscript);
+      const txtStoragePath = await this.uploadFormattedTranscript(callId, formattedTranscript);
 
       // 7. Keep the original JSONL file for debugging/archival purposes
       // Note: Not deleting the JSONL file as it may be useful for troubleshooting
 
-      // 8. Build GCS URL using transcript bucket
-      const gcsUrl = `gs://${config.gcs.transcriptionBucketName}/${txtGcsPath}`;
+      // 8. Use plain path (storage abstraction handles bucket routing)
+      const storagePath = txtStoragePath;
 
       // 9. Calculate metadata
       const firstTimestamp = entries[0].timestamp;
@@ -352,7 +340,7 @@ export class TranscriptService {
         // IMPORTANT: Update entityId to point to current message
         // This ensures the attachment shows up with the correct message in the UI
         await repositories.messageAttachments.update(existingTranscriptAttachment.id, {
-          url: gcsUrl,
+          url: storagePath,
           size: formattedTranscript.length,
           metadata: {
             callId,
@@ -375,10 +363,10 @@ export class TranscriptService {
           originalFilename: `call_transcript.txt`,
           size: formattedTranscript.length,
           mimetype: 'text/plain',
-          url: gcsUrl,
+          url: storagePath,
           uploadedByUserId: call.createdByUserId,
           createdBy: call.createdByUserId,
-          storageProvider: 'gcs',
+          storageProvider: config.fileStorage.provider,
           conversationId: callMessage.conversationId,
           metadata: {
             callId,
@@ -391,13 +379,13 @@ export class TranscriptService {
           },
         });
         logger.info(
-          `[${callId}] attachment_created | attachment_id=${attachment.id}, gcs_url=${gcsUrl}`
+          `[${callId}] attachment_created | attachment_id=${attachment.id}, path=${storagePath}`
         );
       }
 
       // 11. Save transcript URL to Call record for easier access (used by recordings feature)
       await repositories.calls.update(call.id, {
-        transcript: gcsUrl,
+        transcript: storagePath,
       });
       logger.info(`[${callId}] call_record_updated | fields_updated=transcript`);
 
@@ -410,7 +398,7 @@ export class TranscriptService {
 
       // 13. Fire-and-forget: Translate transcript asynchronously in background
       // This updates the same GCS file without blocking the response
-      this.translateTranscriptAsync(callId, txtGcsPath).catch((err) => {
+      this.translateTranscriptAsync(callId, txtStoragePath).catch((err) => {
         logger.error(`[${callId}] background_translation_failed | error=${err}`);
       });
     } catch (error) {
@@ -430,30 +418,26 @@ export class TranscriptService {
    * TEST MODE: Set USE_TEST_TRANSCRIPT=true to use local transcript.json file
    */
   private async retrieveTranscript(callId: string): Promise<string | null> {
-    const gcsPath = `transcriptions/${callId}.jsonl`;
+    const storagePath = `transcriptions/${callId}.jsonl`;
     try {
-      logger.info(`[${callId}] transcript_fetch_started | gcs_path=${gcsPath}`);
+      logger.info(`[${callId}] transcript_fetch_started | path=${storagePath}`);
 
-      // Use dedicated transcript bucket
-      const file = this.transcriptBucket.file(gcsPath);
-      const [exists] = await file.exists();
+      const exists = await this.transcriptStorage.fileExists(storagePath);
 
       if (!exists) {
-        logger.error(`[${callId}] gcs_download_failed | error=file_not_found, gcs_path=${gcsPath}`);
-        throw new Error(
-          `Transcript file not found in bucket: gs://${config.gcs.transcriptionBucketName}/${gcsPath}`
-        );
+        logger.error(`[${callId}] transcript_download_failed | error=file_not_found, path=${storagePath}`);
+        throw new Error(`Transcript file not found: ${storagePath}`);
       }
 
-      logger.info(`[${callId}] gcs_download_started`);
+      logger.info(`[${callId}] transcript_download_started`);
       const downloadStart = Date.now();
-      const [buffer] = await file.download();
+      const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
       logger.info(
-        `[${callId}] gcs_download_completed | bytes_downloaded=${buffer.length}, duration_ms=${Date.now() - downloadStart}`
+        `[${callId}] transcript_download_completed | bytes_downloaded=${buffer.length}, duration_ms=${Date.now() - downloadStart}`
       );
       return buffer.toString('utf-8');
     } catch (error) {
-      logger.error(`[${callId}] gcs_download_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}, gcs_path=${gcsPath}`, error);
+      logger.error(`[${callId}] transcript_download_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}, path=${storagePath}`, error);
       throw error;
     }
   }
@@ -551,22 +535,15 @@ export class TranscriptService {
     const filepath = `attachments/${callId}_formatted.txt`;
     const buffer = Buffer.from(content, 'utf-8');
 
-    logger.info(`[${callId}] gcs_upload_started | type=formatted_transcript, gcs_path=${filepath}`);
+    logger.info(`[${callId}] transcript_upload_started | type=formatted_transcript, path=${filepath}`);
 
-    // Use dedicated transcript bucket
-    const file = this.transcriptBucket.file(filepath);
-
-    await file.save(buffer, {
+    await this.transcriptStorage.uploadFileV2(buffer, {
+      path: filepath,
       contentType: 'text/plain',
-      metadata: {
-        callId,
-        type: 'transcript',
-      },
+      metadata: { callId, type: 'transcript' },
     });
 
-    logger.info(
-      `[${callId}] gcs_upload_completed | type=formatted_transcript, gcs_path=${filepath}`
-    );
+    logger.info(`[${callId}] transcript_upload_completed | type=formatted_transcript, path=${filepath}`);
     return filepath;
   }
 
@@ -596,11 +573,10 @@ export class TranscriptService {
       // Try to fetch formatted transcript first
       const formattedPath = `attachments/${callId}_formatted.txt`;
 
-      const formattedFile = this.transcriptBucket.file(formattedPath);
-      const [formattedExists] = await formattedFile.exists();
+      const formattedExists = await this.transcriptStorage.fileExists(formattedPath);
 
       if (formattedExists) {
-        const [buffer] = await formattedFile.download();
+        const buffer = await this.transcriptStorage.getFileBuffer(formattedPath);
         return buffer.toString('utf-8');
       }
 
@@ -629,19 +605,18 @@ export class TranscriptService {
    * @param gcsPath - The GCS path to the formatted transcript
    * @returns Buffer of the transcript file or null if not found
    */
-  async downloadFormattedTranscript(callId: string, gcsPath: string): Promise<Buffer | null> {
+  async downloadFormattedTranscript(callId: string, storagePath: string): Promise<Buffer | null> {
     try {
       logger.info(
-        `[${callId}] formatted_transcript_download_started | gcs_path=${gcsPath}, bucket=${config.gcs.transcriptionBucketName}`
+        `[${callId}] formatted_transcript_download_started | path=${storagePath}, bucket=${config.gcs.transcriptionBucketName}`
       );
 
-      const serviceToUse = new GCSService(config.gcs.transcriptionBucketName);
-      const buffer = await serviceToUse.getFileBuffer(gcsPath);
+      const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
 
       return buffer;
     } catch (error) {
       logger.error(
-        `[${callId}] formatted_transcript_download_failed | gcs_path=${gcsPath}, error=${error}`
+        `[${callId}] formatted_transcript_download_failed | path=${storagePath}, error=${error}`
       );
       return null;
     }
@@ -653,26 +628,22 @@ export class TranscriptService {
    * @param callId - The external call ID
    * @param gcsPath - The GCS path to the transcript file
    */
-  private async translateTranscriptAsync(callId: string, gcsPath: string): Promise<void> {
+  private async translateTranscriptAsync(callId: string, storagePath: string): Promise<void> {
     try {
       logger.info(`Starting background translation for call: ${callId}`);
 
-      // 1. Download raw transcript from GCS
-      const file = this.transcriptBucket.file(gcsPath);
-      const [buffer] = await file.download();
+      // 1. Download raw transcript
+      const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
       const rawTranscript = buffer.toString('utf-8');
 
       // 2. Translate the transcript
       const translatedTranscript = await this.postProcessTranscript(rawTranscript);
 
       // 3. Re-upload translated version (overwrites the same file)
-      await file.save(Buffer.from(translatedTranscript, 'utf-8'), {
+      await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
+        path: storagePath,
         contentType: 'text/plain',
-        metadata: {
-          callId,
-          type: 'transcript',
-          translated: 'true',
-        },
+        metadata: { callId, type: 'transcript', translated: 'true' },
       });
 
       // 4. Update database attachment metadata to mark as translated
@@ -905,7 +876,7 @@ Output ONLY the processed transcript, nothing else.`;
     try {
       const messages = await repositories.messages.getConversationMessages(conversationId);
       const messagesArray = Array.isArray(messages) ? messages : messages.data;
-      
+
       // Filter valid messages once
       const validMessages = messagesArray.filter(
         (msg) => msg.msgType !== 'SYSTEM' && msg.senderId && msg.content?.trim()

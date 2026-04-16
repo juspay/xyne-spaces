@@ -20,7 +20,7 @@ from transcription import (
     LiveKitPublisher,
     TranscriptionHandler,
 )
-from infra import WebhookNotifier, GCSBucketProvider
+from infra import WebhookNotifier, GCSBucketProvider, S3BucketProvider
 from history import ConversationStore
 from ai import AISessionManager
 from orchestration import CleanupManager, ParticipantTracker, RoomLifecycle
@@ -199,18 +199,31 @@ async def entrypoint(ctx: JobContext):
         call_id=call_id,
     )
 
-    # Initialize GCS bucket provider (lazy initialization)
-    gcs_provider = GCSBucketProvider(
-        project_id=config.gcs_project_id,
-        bucket_name=config.gcs_bucket_name,
-    )
-    bucket = gcs_provider.get_bucket()
-    
-    # Log GCS initialization status
-    if bucket:
-        logger.info(f"gcs_bucket_initialized | bucket={config.gcs_bucket_name}, project={config.gcs_project_id}")
+    # Initialize storage bucket provider based on STORAGE_PROVIDER config
+    bucket = None
+    if config.storage_provider == 's3':
+        s3_provider = S3BucketProvider(
+            bucket_name=config.s3_bucket_name,
+            region=config.s3_region,
+            access_key_id=config.s3_access_key_id,
+            secret_access_key=config.s3_secret_access_key,
+            endpoint_url=config.s3_endpoint or None,
+        )
+        bucket = s3_provider.get_bucket()
+        if bucket:
+            logger.info(f"s3_bucket_initialized | bucket={config.s3_bucket_name}, region={config.s3_region}")
+        else:
+            logger.warning(f"s3_bucket_not_available | bucket={config.s3_bucket_name}, fallback=local")
     else:
-        logger.warning(f"gcs_bucket_not_available | project={config.gcs_project_id}, bucket={config.gcs_bucket_name}, fallback=local")
+        gcs_provider = GCSBucketProvider(
+            project_id=config.gcs_project_id,
+            bucket_name=config.gcs_bucket_name,
+        )
+        bucket = gcs_provider.get_bucket()
+        if bucket:
+            logger.info(f"gcs_bucket_initialized | bucket={config.gcs_bucket_name}, project={config.gcs_project_id}")
+        else:
+            logger.warning(f"gcs_bucket_not_available | project={config.gcs_project_id}, bucket={config.gcs_bucket_name}, fallback=local")
 
     # Initialize transcription storage (GCS with buffer, or local fallback)
     use_buffer = bucket is not None  # Always buffer when GCS is available

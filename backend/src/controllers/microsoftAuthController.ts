@@ -14,11 +14,13 @@ export class MicrosoftAuthController {
   private oauthClient: AuthorizationCode | undefined;
   private userService: UserService | undefined;
   private userSessionService: UserSessionService | undefined;
+  private clientId: string | undefined;
+  private tenantId: string = '';
 
   constructor() {
     const clientId = process.env.MICROSOFT_CLIENT_ID;
     const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+    const tenantId = process.env.MICROSOFT_TENANT_ID || undefined;
 
     if (!clientId || !clientSecret) {
       logger.info(`MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET environment variables not set`);
@@ -48,9 +50,12 @@ export class MicrosoftAuthController {
       },
       options: {
         authorizationMethod: 'body',
+        bodyFormat: 'form',
       },
     });
 
+    this.clientId = clientId;
+    this.tenantId = tenantId ?? '';
     this.userService = new UserService();
     this.userSessionService = new UserSessionService();
   }
@@ -71,6 +76,15 @@ export class MicrosoftAuthController {
       throw new Error('FRONTEND_URL environment variable is required');
     }
     return url.trim();
+  }
+
+  private getRedirectUrl(req: Request, platform: string, params: Record<string, string>): string {
+    const query = new URLSearchParams(params).toString();
+    if (platform === 'mobile') {
+      return `xyne-spaces://auth/microsoft/callback?${query}`;
+    }
+    const frontendUrl = this.getFrontendUrl(req);
+    return `${frontendUrl}?${query}`;
   }
 
   private getBackendUrl(req: Request | null = null): string {
@@ -99,10 +113,22 @@ export class MicrosoftAuthController {
         // return an error that MS auth not setup
         logger.info(`[${requestId}] Initiating Microsoft OAuth login`);
 
+        const platformQuery = req.query.platform;
+        const platform: 'mobile' | 'electron' | 'web' =
+          platformQuery === 'mobile'
+            ? 'mobile'
+            : platformQuery === 'electron'
+              ? 'electron'
+              : 'web';
+
         const codeVerifier = pkceServiceV2.generateCodeVerifier();
         const codeChallenge = pkceServiceV2.generateCodeChallenge(codeVerifier);
 
-        const state = await oauthStateServiceV2.generateState('web', codeChallenge);
+        const state = await oauthStateServiceV2.generateState(
+          platform,
+          codeChallenge,
+          'microsoft',
+        );
 
         await pkceServiceV2.storeVerifier(state, codeVerifier);
 
@@ -141,6 +167,7 @@ export class MicrosoftAuthController {
 
   handleCallback = async (req: Request, res: Response): Promise<void> => {
     const requestId = `MS_CALLBACK_${Date.now()}`;
+    let resolvedPlatform: string = 'web';
 
     try {
       if (this.oauthClient && this.userService && this.userSessionService) {
@@ -148,42 +175,64 @@ export class MicrosoftAuthController {
 
         logger.info(`[${requestId}] Microsoft OAuth callback received`);
 
+        // Peek at state early to determine platform for error redirects
+        if (state) {
+          const peekedState = await oauthStateServiceV2.validateState(state as string, false);
+          if (peekedState) {
+            resolvedPlatform = peekedState.platform;
+          }
+        }
+
         if (error) {
           logger.error(`[${requestId}] Microsoft OAuth error: ${error}`);
-          const frontendUrl = this.getFrontendUrl(req);
+          if (state) await oauthStateServiceV2.deleteState(state as string);
           res.redirect(
-            `${frontendUrl}?error=oauth_error&message=${encodeURIComponent(error as string)}`
+            this.getRedirectUrl(req, resolvedPlatform, {
+              error: 'oauth_error',
+              message: error as string,
+            })
           );
           return;
         }
 
         if (!code || !state) {
           logger.error(`[${requestId}] Missing code or state`);
-          const frontendUrl = this.getFrontendUrl(req);
           res.redirect(
-            `${frontendUrl}?error=missing_params&message=${encodeURIComponent('Missing authorization code or state')}`
+            this.getRedirectUrl(req, resolvedPlatform, {
+              error: 'missing_params',
+              message: 'Missing authorization code or state',
+            })
           );
           return;
         }
 
-        // Validate state
-        const stateData = await oauthStateServiceV2.validateState(state as string);
-        if (!stateData) {
-          logger.error(`[${requestId}] Invalid or expired state`);
+        // Electron: defer the MS code exchange to the desktop app.
+        // Redirect the browser to the launch page, which triggers the unified
+        // xyne-spaces://auth/callback deep link. The Electron app then POSTs
+        // to /api/auth/exchange-electron with the original authorization code
+        // + state; the dispatcher there reads the provider off the OAuth state
+        // record and routes Microsoft states to the Microsoft exchange handler.
+        // State and PKCE verifier must remain intact until that exchange.
+        if (resolvedPlatform === 'electron') {
           const frontendUrl = this.getFrontendUrl(req);
-          res.redirect(
-            `${frontendUrl}?error=invalid_state&message=${encodeURIComponent('Invalid or expired session state')}`
-          );
+          const launchUrl = `${frontendUrl}/launch?code=${encodeURIComponent(code as string)}&state=${encodeURIComponent(state as string)}`;
+          logger.info(`[${requestId}] Redirecting electron flow to launch page`);
+          res.redirect(launchUrl);
           return;
         }
+
+        // Now consume the state (delete it)
+        await oauthStateServiceV2.deleteState(state as string);
 
         // Get and delete code verifier for PKCE (atomic operation)
         const codeVerifier = await pkceServiceV2.getAndDeleteVerifier(state as string);
         if (!codeVerifier) {
           logger.error(`[${requestId}] Code verifier not found`);
-          const frontendUrl = this.getFrontendUrl(req);
           res.redirect(
-            `${frontendUrl}?error=pkce_error&message=${encodeURIComponent('PKCE verification failed')}`
+            this.getRedirectUrl(req, resolvedPlatform, {
+              error: 'pkce_error',
+              message: 'PKCE verification failed',
+            })
           );
           return;
         }
@@ -194,7 +243,7 @@ export class MicrosoftAuthController {
         const tokenParams = {
           code: code as string,
           redirect_uri: redirectUri,
-          scope: 'openid email profile User.Read',
+          scope: 'openid email profile User.Read offline_access',
           code_verifier: codeVerifier,
         };
 
@@ -299,6 +348,22 @@ export class MicrosoftAuthController {
           }
         }
 
+        // Handle mobile platform: redirect to app deep link with token
+        if (resolvedPlatform === 'mobile') {
+          const mobileParams = new URLSearchParams({
+            success: 'true',
+            token: customToken,
+            user_id: user.id,
+            email: user.email,
+            name: user.name,
+          });
+
+          const mobileRedirectUrl = `xyne-spaces://auth/microsoft/callback?${mobileParams.toString()}`;
+          logger.info(`[${requestId}] Redirecting to mobile app: xyne-spaces://auth/microsoft/callback`);
+          res.redirect(mobileRedirectUrl);
+          return;
+        }
+
         // Set HTTP-only cookies
         const isProduction = process.env.NODE_ENV === 'production';
         const cookieOptions: {
@@ -345,17 +410,477 @@ export class MicrosoftAuthController {
         res.redirect(`${frontendUrl}?${params.toString()}`);
       } else {
         logger.error(`[${requestId}] Microsoft OAuth client not configured`);
-        const frontendUrl = this.getFrontendUrl(req);
         res.redirect(
-          `${frontendUrl}?error=microsoft_not_configured&message=${encodeURIComponent('Microsoft SSO is not configured')}`
+          this.getRedirectUrl(req, resolvedPlatform, {
+            error: 'microsoft_not_configured',
+            message: 'Microsoft SSO is not configured',
+          })
         );
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error(`[${requestId}] Microsoft OAuth callback failed: ${errorMessage}`);
 
-      const frontendUrl = this.getFrontendUrl(req);
-      res.redirect(`${frontendUrl}?error=auth_failed&message=${encodeURIComponent(errorMessage)}`);
+      res.redirect(
+        this.getRedirectUrl(req, resolvedPlatform, {
+          error: 'auth_failed',
+          message: errorMessage,
+        })
+      );
+    }
+  };
+
+  /**
+   * Electron code-exchange handler for Microsoft login.
+   *
+   * Invoked by the unified /api/auth/exchange-electron dispatcher when the
+   * OAuth state record has provider === 'microsoft'. The Electron app reaches
+   * this after the frontend /launch page triggers xyne-spaces://auth/callback
+   * and the deep-link handler POSTs the MS authorization code + state. This
+   * method runs the MS token exchange, user/session creation, and returns
+   * Set-Cookie headers that Electron applies to its session.
+   */
+  exchangeElectron = async (req: Request, res: Response): Promise<void> => {
+    const requestId = `MS_EXCHANGE_ELECTRON_${Date.now()}`;
+
+    try {
+      if (!this.oauthClient || !this.userService || !this.userSessionService) {
+        logger.error(`[${requestId}] Microsoft OAuth client not configured`);
+        res.status(500).json({
+          success: false,
+          error: 'microsoft_not_configured',
+          message: 'Microsoft SSO is not configured',
+        });
+        return;
+      }
+
+      const code = (req.body?.code as string | undefined)?.trim();
+      const state = (req.body?.state as string | undefined)?.trim();
+
+      if (!code || !state) {
+        logger.error(`[${requestId}] Missing code or state`);
+        res.status(400).json({
+          success: false,
+          error: 'missing_params',
+          message: 'code and state are required',
+        });
+        return;
+      }
+
+      const isCodeUsed = await oauthStateServiceV2.isCodeUsed(code);
+      if (isCodeUsed) {
+        logger.error(`[${requestId}] Authorization code already used`);
+        res.status(409).json({
+          success: false,
+          error: 'code_already_used',
+          message: 'Authorization code has already been exchanged',
+        });
+        return;
+      }
+
+      // Validate + consume state
+      const stateData = await oauthStateServiceV2.validateState(state);
+      if (!stateData) {
+        logger.error(`[${requestId}] Invalid or expired state`);
+        res.status(401).json({
+          success: false,
+          error: 'invalid_state',
+          message: 'State parameter is invalid or expired',
+        });
+        return;
+      }
+
+      if (stateData.platform !== 'electron') {
+        logger.error(`[${requestId}] Invalid platform: ${stateData.platform}`);
+        res.status(400).json({
+          success: false,
+          error: 'invalid_platform',
+          message: 'This endpoint is only for Electron platform',
+        });
+        return;
+      }
+
+      const codeVerifier = await pkceServiceV2.getAndDeleteVerifier(state);
+      if (!codeVerifier) {
+        logger.error(`[${requestId}] PKCE verifier not found`);
+        res.status(401).json({
+          success: false,
+          error: 'pkce_failed',
+          message: 'PKCE verification failed',
+        });
+        return;
+      }
+
+      await oauthStateServiceV2.markCodeAsUsed(code);
+
+      const redirectUri = `${this.getBackendUrl(req)}/api/v2/auth/microsoft/callback`;
+
+      logger.info(`[${requestId}] Exchanging code for tokens`);
+      const tokenResult = await this.oauthClient.getToken({
+        code,
+        redirect_uri: redirectUri,
+        scope: 'openid email profile User.Read offline_access',
+        ...( codeVerifier ? { code_verifier: codeVerifier } : {}),
+      } as Parameters<typeof this.oauthClient.getToken>[0]);
+      const { token } = tokenResult;
+
+      const accessToken = token.access_token as string;
+      if (!accessToken) {
+        throw new Error('No access token received from Microsoft');
+      }
+
+      logger.info(`[${requestId}] Fetching user profile from Microsoft Graph`);
+      const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!graphResponse.ok) {
+        throw new Error(
+          `Microsoft Graph API error: ${graphResponse.status} ${graphResponse.statusText}`
+        );
+      }
+
+      const profile = (await graphResponse.json()) as {
+        id: string;
+        mail?: string;
+        userPrincipalName?: string;
+        displayName: string;
+      };
+
+      const email = profile.mail || profile.userPrincipalName;
+      if (!email) {
+        throw new Error('Email not available in Microsoft profile');
+      }
+
+      logger.info(`[${requestId}] Finding/creating user: ${email}`);
+      const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
+        provider: AuthProvider.MICROSOFT,
+        providerUserId: profile.id,
+        email,
+        name: profile.displayName,
+        picture: undefined,
+      });
+
+      await this.userService.ensureUserPresence(user.id);
+
+      logger.info(
+        `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
+      );
+
+      const customToken = jwtService.generateToken({
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+        picture: user.picture ?? undefined,
+      });
+
+      let sessionId: string | null = null;
+      const refreshToken = token.refresh_token as string | undefined;
+
+      if (refreshToken) {
+        try {
+          const refreshTokenExpiry = new Date();
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+
+          const session = await this.userSessionService.createSession({
+            userId: user.id,
+            refreshToken,
+            refreshTokenExpiry,
+            accessToken,
+            accessTokenExpiry: token.expires_at
+              ? new Date(token.expires_at as string)
+              : undefined,
+            deviceInfo: JSON.stringify({
+              userAgent: req.headers['user-agent'],
+              acceptLanguage: req.headers['accept-language'],
+              timestamp: new Date().toISOString(),
+              platform: 'electron',
+            }),
+            ipAddress: req.ip || req.socket.remoteAddress || undefined,
+          });
+
+          sessionId = session.id;
+          logger.info(`[${requestId}] Session created: ${sessionId}`);
+        } catch (sessionError) {
+          logger.error(`[${requestId}] Error creating user session:`, sessionError);
+          // Continue without session creation - not critical for login
+        }
+      }
+
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieOptions: {
+        httpOnly: boolean;
+        secure: boolean;
+        sameSite: 'strict' | 'lax' | 'none';
+        path: string;
+      } = {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'strict',
+        path: '/',
+      };
+
+      res.cookie('google_access_token', customToken, {
+        ...cookieOptions,
+        maxAge: config.jwt.expirationSeconds * 1000,
+      });
+
+      if (sessionId) {
+        res.cookie('user_session_id', sessionId, {
+          ...cookieOptions,
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        });
+      }
+
+      if (isNewUser) {
+        res.cookie('is_new_user', 'true', {
+          httpOnly: false,
+          secure: isProduction,
+          sameSite: 'strict',
+          path: '/',
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+      }
+
+      logger.info(`[${requestId}] Electron code exchange successful`);
+      res.status(200).json({
+        success: true,
+        message: 'Authentication successful',
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error(`[${requestId}] Microsoft electron exchange failed: ${errorMessage}`);
+      res.status(500).json({
+        success: false,
+        error: 'exchange_failed',
+        message: errorMessage,
+      });
+    }
+  };
+
+  /**
+   * Mobile-native exchange endpoint for Microsoft login.
+   *
+   * The mobile app runs the OAuth authorization step via react-native-app-auth
+   * (with `skipCodeExchange: true`), obtains an authorization code from
+   * Microsoft, and POSTs the code + PKCE verifier here. The backend performs
+   * the code→token exchange with Microsoft server-side (mirrors the Google
+   * flow where `serverAuthCode` is exchanged by the backend), calls Graph to
+   * resolve the user, creates a session, and returns Set-Cookie headers.
+   *
+   * Body: { code: string, code_verifier: string, redirect_uri: string }
+   */
+  exchangeMobile = async (req: Request, res: Response): Promise<void> => {
+    const requestId = `MS_EXCHANGE_MOBILE_${Date.now()}`;
+
+    try {
+      if (!this.oauthClient || !this.userService || !this.userSessionService) {
+        logger.error(`[${requestId}] Microsoft OAuth client not configured`);
+        res.status(500).json({
+          success: false,
+          error: 'microsoft_not_configured',
+          message: 'Microsoft SSO is not configured',
+        });
+        return;
+      }
+
+      const code = (req.body?.code as string | undefined)?.trim();
+      const codeVerifier = (req.body?.code_verifier as string | undefined)?.trim();
+      const redirectUri = (req.body?.redirect_uri as string | undefined)?.trim();
+
+      if (!code || !codeVerifier || !redirectUri) {
+        logger.error(`[${requestId}] Missing code, code_verifier, or redirect_uri`);
+        res.status(400).json({
+          success: false,
+          error: 'missing_params',
+          message: 'code, code_verifier, and redirect_uri are required',
+        });
+        return;
+      }
+
+      // Exchange the authorization code for tokens with Microsoft (server-side).
+      // Bypass simple-oauth2 here and call Microsoft's token endpoint directly
+      // with application/x-www-form-urlencoded which is what Microsoft requires.
+      // simple-oauth2 defaults to JSON body which causes a 401 from Microsoft.
+      logger.info(`[${requestId}] Exchanging code for tokens`);
+      const tokenParams = new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: this.clientId!,
+        code,
+        redirect_uri: redirectUri,
+        scope: 'openid email profile User.Read offline_access',
+        code_verifier: codeVerifier,
+      });
+
+      const tokenResponse = await fetch(
+        `https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/token`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: tokenParams.toString(),
+        }
+      );
+
+      const tokenBody = await tokenResponse.json() as Record<string, unknown>;
+      if (!tokenResponse.ok) {
+        const msError = tokenBody.error as string | undefined;
+        const msDesc = tokenBody.error_description as string | undefined;
+        logger.error(
+          `[${requestId}] Microsoft token endpoint error: ${tokenResponse.status} ${msError} - ${msDesc}`
+        );
+        throw new Error(`Microsoft token exchange failed: ${msError} - ${msDesc}`);
+      }
+
+      const accessToken = tokenBody.access_token as string;
+      if (!accessToken) {
+        throw new Error('No access token received from Microsoft');
+      }
+      const token = tokenBody;
+
+      // Verify the user's profile via Microsoft Graph using the access token
+      logger.info(`[${requestId}] Fetching user profile from Microsoft Graph`);
+      const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!graphResponse.ok) {
+        logger.error(
+          `[${requestId}] Microsoft Graph API error: ${graphResponse.status} ${graphResponse.statusText}`
+        );
+        res.status(401).json({
+          success: false,
+          error: 'graph_api_error',
+          message: `Microsoft Graph API error: ${graphResponse.status}`,
+        });
+        return;
+      }
+
+      const profile = (await graphResponse.json()) as {
+        id: string;
+        mail?: string;
+        userPrincipalName?: string;
+        displayName: string;
+      };
+
+      const email = profile.mail || profile.userPrincipalName;
+      if (!email) {
+        logger.error(`[${requestId}] Email not available in Microsoft profile`);
+        res.status(400).json({
+          success: false,
+          error: 'no_email',
+          message: 'Email not available in Microsoft profile',
+        });
+        return;
+      }
+
+      logger.info(`[${requestId}] Finding/creating user: ${email}`);
+      const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
+        provider: AuthProvider.MICROSOFT,
+        providerUserId: profile.id,
+        email,
+        name: profile.displayName,
+        picture: undefined,
+      });
+
+      await this.userService.ensureUserPresence(user.id);
+
+      logger.info(
+        `[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`
+      );
+
+      const customToken = jwtService.generateToken({
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+        picture: user.picture ?? undefined,
+      });
+
+      // Create a user session with the Microsoft refresh token (held on the
+      // backend so it can refresh access tokens without involving the mobile app).
+      let sessionId: string | null = null;
+      const refreshToken = token.refresh_token as string | undefined;
+      if (refreshToken) {
+        try {
+          const refreshTokenExpiry = new Date();
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+
+          const expiresIn = token.expires_in as number | undefined;
+          const session = await this.userSessionService.createSession({
+            userId: user.id,
+            refreshToken,
+            refreshTokenExpiry,
+            accessToken,
+            accessTokenExpiry: expiresIn
+              ? new Date(Date.now() + expiresIn * 1000)
+              : undefined,
+            deviceInfo: JSON.stringify({
+              userAgent: req.headers['user-agent'],
+              acceptLanguage: req.headers['accept-language'],
+              timestamp: new Date().toISOString(),
+              platform: 'mobile',
+            }),
+            ipAddress: req.ip || req.socket.remoteAddress || undefined,
+          });
+
+          sessionId = session.id;
+          logger.info(`[${requestId}] Session created: ${sessionId}`);
+        } catch (sessionError) {
+          logger.error(`[${requestId}] Error creating user session:`, sessionError);
+          // Continue without session creation - not critical for login
+        }
+      }
+
+      // Set the same cookies that the Google mobile exchange endpoint sets
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieOptions: {
+        httpOnly: boolean;
+        secure: boolean;
+        sameSite: 'strict' | 'lax' | 'none';
+        path: string;
+      } = {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'lax',
+        path: '/',
+      };
+
+      res.cookie('google_access_token', customToken, {
+        ...cookieOptions,
+        maxAge: config.jwt.expirationSeconds * 1000,
+      });
+
+      if (sessionId) {
+        res.cookie('user_session_id', sessionId, {
+          ...cookieOptions,
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+      }
+
+      if (isNewUser) {
+        res.cookie('is_new_user', 'true', {
+          ...cookieOptions,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+      }
+
+      res.json({
+        success: true,
+        userId: user.id,
+        sessionId,
+        isNewUser,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error(`[${requestId}] Microsoft mobile exchange failed: ${errorMessage}`);
+      res.status(500).json({
+        success: false,
+        error: 'exchange_failed',
+        message: errorMessage,
+      });
     }
   };
 }

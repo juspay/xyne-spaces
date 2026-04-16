@@ -21,6 +21,7 @@ import { TrackSource } from 'livekit-server-sdk';
 import { UpdateRsvpSchema } from '@/validators/callValidator';
 import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
+import { normalizeStoragePath } from '@/services/storage/pathUtils';
 
 export class CallController {
   updateMeetingStatus = async (req: Request, res: Response): Promise<void> => {
@@ -720,16 +721,13 @@ export class CallController {
       // Fetch transcript content from GCS URL if available
       let transcriptContent: string | null = null;
 
-      if (call.transcript && call.transcript.startsWith('gs://')) {
+      if (call.transcript) {
         try {
-          // Use transcriptService to fetch from GCS
+          // Fetch transcript content from storage (handles both legacy gs:// URIs and plain paths)
           transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
         } catch (fetchError) {
-          logger.warn(`Failed to fetch transcript from GCS: ${fetchError}`);
+          logger.warn(`Failed to fetch transcript from storage: ${fetchError}`);
         }
-      } else if (call.transcript) {
-        // If transcript is plain text (legacy), use directly
-        transcriptContent = call.transcript;
       }
 
       // Determine AI summary format (markdown if starts with ## or has no HTML tags)
@@ -881,26 +879,19 @@ export class CallController {
 
       logger.info(`[${callId}] download_transcript_call_found | call_status=${call.status}, created_by=${call.createdByUserId}`);
 
-      let gcsPath = call.transcript;
+      const transcriptPath = call.transcript;
 
-      if (!gcsPath || typeof gcsPath !== 'string') {
-        logger.warn(`[${callId}] download_transcript_invalid_gcs_path | gcsPath=${gcsPath}`);
+      if (!transcriptPath || typeof transcriptPath !== 'string') {
+        logger.warn(`[${callId}] download_transcript_invalid_path | path=${transcriptPath}`);
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
       }
 
-
-      if (gcsPath.startsWith('gs://')) {
-        const match = gcsPath.match(/^gs:\/\/([^\/]+)\/(.+)$/);
-        if (match) {
-          const [, , filePath] = match;
-          gcsPath = filePath;
-        }
-      }
-      const transcriptBuffer = await transcriptService.downloadFormattedTranscript(callId, gcsPath);
+      const normalizedPath = normalizeStoragePath(transcriptPath);
+      const transcriptBuffer = await transcriptService.downloadFormattedTranscript(callId, normalizedPath);
 
       if (!transcriptBuffer) {
-        logger.warn(`[${callId}] download_transcript_not_available | gcs_path=${gcsPath}`);
+        logger.warn(`[${callId}] download_transcript_not_available | path=${normalizedPath}`);
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
       }

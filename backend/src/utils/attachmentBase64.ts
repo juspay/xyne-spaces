@@ -5,7 +5,7 @@
  * Supports images, videos, audio, and documents.
  */
 
-import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { MessageAttachment, AttachmentEntityType } from '@prisma/client';
@@ -126,8 +126,8 @@ function parseGcsUrl(url: string): { bucketName: string; filePath: string } {
     return { bucketName: config.gcs.bucketName, filePath: url };
 }
 
-// Note: GCS service caching is now handled by GCSServiceFactory
-// See: /backend/src/services/gcsServiceFactory.ts
+// Note: Storage service caching is now handled by getStorageService
+// See: /backend/src/services/storage
 
 // ============================================================================
 // Main Functions
@@ -182,7 +182,7 @@ export async function convertToBase64(
         const { bucketName, filePath } = parseGcsUrl(urlToFetch);
 
         // Get appropriate GCS service (cached globally to prevent resource leaks)
-        const gcs = GCSServiceFactory.getService(bucketName);
+        const gcs = getStorageService(bucketName);
 
         // Check file size before fetching to prevent memory exhaustion
         // Note: attachment.size is the original file size from DB

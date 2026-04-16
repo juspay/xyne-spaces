@@ -19,7 +19,7 @@
 
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { GCSService } from './gcsService';
+import { getStorageService, type StorageService } from './storage';
 import { redisService } from './redisService';
 import { workflowManager } from '@/workflows/services/workflowManager';
 import { TicketController } from '@/controllers/ticketController';
@@ -43,7 +43,7 @@ const COMPLETED_FOLDER = 'completed';
 
 export class GcsPollingService {
   private static instance: GcsPollingService;
-  private gcsService: GCSService;
+  private storageService: StorageService;
   private ticketController: TicketController;
   private bucketName: string;
   private intervalId: NodeJS.Timeout | null = null;
@@ -58,7 +58,7 @@ export class GcsPollingService {
 
   private constructor() {
     this.bucketName = process.env.NETWORK_DOCUMENTS_GCS_BUCKET || 'xyne-documents';
-    this.gcsService = new GCSService(this.bucketName);
+    this.storageService = getStorageService(this.bucketName);
     this.ticketController = new TicketController();
     this.systemUserId = ''; // Will be set in initializeConfiguration
   }
@@ -126,7 +126,7 @@ export class GcsPollingService {
       systemUserId: this.systemUserId
     });
 
-    await this.gcsService.checkBucketExists();
+    await this.storageService.checkBucketExists();
     logger.info(`[GCS_POLLING] Bucket "${this.bucketName}" is ready`);
   }
 
@@ -202,19 +202,33 @@ export class GcsPollingService {
 
   private async listFilesInPrefix(prefix: string): Promise<GcsFileMetadata[]> {
     try {
-      const [files] = await this.gcsService['bucket'].getFiles({
-        prefix,
-      });
+      const files = await this.storageService.listFiles(prefix);
 
-      return files
-        .filter(f => !f.name?.endsWith('/')) // Exclude folder entries
-        .map(file => ({
-          name: file.name || '',
-          bucket: this.bucketName,
-          size: parseInt(String(file.metadata?.size || '0'), 10),
-          timeCreated: new Date(file.metadata?.timeCreated || Date.now()),
-          contentType: file.metadata?.contentType || 'application/pdf',
-        }));
+      const filtered = files.filter(f => !f.name?.endsWith('/')); // Exclude folder entries
+
+      const results: GcsFileMetadata[] = [];
+      for (const file of filtered) {
+        try {
+          const metadata = await this.storageService.getFileMetadata(file.name);
+          results.push({
+            name: file.name || '',
+            bucket: this.bucketName,
+            size: parseInt(String(metadata?.size ?? 0), 10),
+            timeCreated: metadata?.lastModified ? new Date(metadata.lastModified) : new Date(),
+            contentType: metadata?.contentType || file.contentType || 'application/pdf',
+          });
+        } catch {
+          results.push({
+            name: file.name || '',
+            bucket: this.bucketName,
+            size: 0,
+            timeCreated: new Date(),
+            contentType: file.contentType || 'application/pdf',
+          });
+        }
+      }
+
+      return results;
     } catch (error) {
       logger.error(`[GCS_POLLING] Error listing files:`, error);
       return [];
@@ -225,9 +239,7 @@ export class GcsPollingService {
     const pendingPrefix = `${PENDING_FOLDER}/`;
 
     // Get all items under pending/
-    const [allItems] = await this.gcsService['bucket'].getFiles({
-      prefix: pendingPrefix,
-    });
+    const allItems = await this.storageService.listFiles(pendingPrefix);
 
     // Find subdirectories under pending/
     const subdirs = new Set<string>();
@@ -299,9 +311,7 @@ export class GcsPollingService {
       const completedPath = gcsPath.replace(`${PENDING_FOLDER}`, `${COMPLETED_FOLDER}`);
 
       try {
-        await this.gcsService['bucket'].file(gcsPath).move(
-          this.gcsService['bucket'].file(completedPath)
-        );
+        await this.storageService.moveFile(gcsPath, completedPath);
         logger.info(`[GCS_POLLING] Moved file to completed/: ${completedPath}`);
       } catch (moveError) {
         logger.error(`[GCS_POLLING] Failed to move file to completed/:`, moveError);

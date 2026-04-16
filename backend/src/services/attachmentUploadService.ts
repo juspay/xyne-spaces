@@ -9,16 +9,15 @@
  * - Returns metadata for database storage
  */
 
-import { GCSService } from './gcsService.js';
+import { getStorageService } from './storage/index.js';
 import { fileValidationService } from './fileValidationService.js';
 import { redisService } from './redisService.js';
 import { logger } from '../utils/logger.js';
-import { config } from '../config/env.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { AttachmentData } from '../agents/xyne-ai/types.js';
 
-// Create GCS service instance for Xyne AI attachments (uses main chat documents bucket)
-const askaiGcsService = new GCSService(config.gcs.bucketName);
+// Create storage service instance for Xyne AI attachments
+const askaiStorageService = getStorageService();
 
 // Redis cache configuration
 const REDIS_CACHE_PREFIX = 'xyne-ai:askai-attachment:';
@@ -89,8 +88,8 @@ export async function uploadXyneAIAttachment(
 
     const sanitizedFilename = validationResult.sanitizedFilename || filename || 'attachment';
 
-    // 4. Upload to GCS (xyne-spaces-chat-documents/attachments/ASKAI/)
-    const gcsResult = await askaiGcsService.uploadFile(buffer, {
+    // 4. Upload to storage (attachments/ASKAI/)
+    const gcsResult = await askaiStorageService.uploadFile(buffer, {
       filename: sanitizedFilename,
       contentType: mime_type,
       metadata: {
@@ -106,13 +105,13 @@ export async function uploadXyneAIAttachment(
     // 5. Generate attachment ID and metadata
     const metadata: XyneAIAttachmentMetadata = {
       attachment_id: uuidv4(),
-      url: gcsResult.gcsPath,
+      url: gcsResult.path,
       mime_type,
       file_name: sanitizedFilename,
       size: gcsResult.size,
     };
 
-    logger.info(`[XyneAI] [${sessionId}] Successfully uploaded attachment to GCS: ${gcsResult.gcsPath}`);
+    logger.info(`[XyneAI] [${sessionId}] Successfully uploaded attachment to GCS: ${gcsResult.path}`);
 
     // 6. Cache attachment in Redis for fast retrieval (non-blocking)
     try {

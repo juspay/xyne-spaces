@@ -69,6 +69,7 @@ export const isNativeCallSupported = (): boolean => {
 
 const nativeInboundMessageTypeValues = {
   GOOGLE_SIGN_IN_RESULT: 'GOOGLE_SIGN_IN_RESULT',
+  MICROSOFT_SIGN_IN_RESULT: 'MICROSOFT_SIGN_IN_RESULT',
   NATIVE_READY: 'NATIVE_READY',
   NATIVE_SIGN_OUT: 'NATIVE_SIGN_OUT',
   NATIVE_PUSH_TOKEN: 'NATIVE_PUSH_TOKEN',
@@ -108,6 +109,7 @@ const nativeOutboundMessageTypeValues = {
   WEB_APP_READY: 'WEB_APP_READY',
   WEB_ROUTE_READY: 'WEB_ROUTE_READY',
   REQUEST_GOOGLE_SIGN_IN: 'REQUEST_GOOGLE_SIGN_IN',
+  REQUEST_MICROSOFT_SIGN_IN: 'REQUEST_MICROSOFT_SIGN_IN',
   WEB_SIGN_OUT: 'WEB_SIGN_OUT',
   AUTH_STATE_SYNC: 'AUTH_STATE_SYNC',
   REQUEST_MEDIA_PERMISSIONS: 'REQUEST_MEDIA_PERMISSIONS',
@@ -177,6 +179,16 @@ export interface NativeGoogleSignInResultPayload {
   sessionId?: string | null;
   userId?: string;
   hasRefreshToken?: boolean;
+  error?: string;
+  errorMessage?: string;
+}
+
+export interface NativeMicrosoftSignInResultPayload {
+  success: boolean;
+  sessionId?: string | null;
+  userId?: string;
+  email?: string;
+  name?: string;
   error?: string;
   errorMessage?: string;
 }
@@ -270,6 +282,7 @@ export interface GetClientSessionIdPayload {
 
 type ReactNativeInboundPayloadMap = {
   GOOGLE_SIGN_IN_RESULT: NativeGoogleSignInResultPayload;
+  MICROSOFT_SIGN_IN_RESULT: NativeMicrosoftSignInResultPayload;
   NATIVE_READY: NativeReadyPayload;
   NATIVE_SIGN_OUT: NativeSignOutPayload;
   NATIVE_PUSH_TOKEN: NativePushTokenPayload;
@@ -313,6 +326,9 @@ type ReactNativeOutboundPayloadMap = {
     path: string;
   };
   REQUEST_GOOGLE_SIGN_IN: {
+    reason?: string;
+  };
+  REQUEST_MICROSOFT_SIGN_IN: {
     reason?: string;
   };
   WEB_SIGN_OUT: {
@@ -508,6 +524,12 @@ class ReactNativeBridge {
     payload?: ReactNativeOutboundPayloadMap[typeof NativeOutboundMessageType.REQUEST_GOOGLE_SIGN_IN],
   ): boolean {
     return this.send(NativeOutboundMessageType.REQUEST_GOOGLE_SIGN_IN, payload);
+  }
+
+  requestMicrosoftSignIn(
+    payload?: ReactNativeOutboundPayloadMap[typeof NativeOutboundMessageType.REQUEST_MICROSOFT_SIGN_IN],
+  ): boolean {
+    return this.send(NativeOutboundMessageType.REQUEST_MICROSOFT_SIGN_IN, payload);
   }
 
   syncAuthState(

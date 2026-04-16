@@ -415,6 +415,20 @@ export const authMachine = createMachine(
       },
       initiateMicrosoftSignIn: () => {
         try {
+          if (reactNativeBridge.isAvailable()) {
+            reactNativeBridge.initialize();
+            const dispatched = reactNativeBridge.requestMicrosoftSignIn({
+              reason: 'User requested sign-in inside React Native host',
+            });
+            if (dispatched) {
+              return;
+            }
+          }
+        } catch {
+          // Fall through to web OAuth flow if native bridge interaction fails
+        }
+
+        try {
           const isElectron = typeof window.electronAPI?.openExternal === 'function';
           const loginUrl = isElectron
             ? `${API_BASE_URL}/v2/auth/microsoft/login?platform=electron`

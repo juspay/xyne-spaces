@@ -1,4 +1,4 @@
-import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { type NormalizedContext, transformXyneCli, transformWorkflow } from './transformers';
 
@@ -31,7 +31,7 @@ class SessionHistoryService {
     const transform = BUCKET_TRANSFORMERS[bucketName];
     if (!transform) throw new Error(`[SessionHistory] Unknown bucket: "${bucketName}"`);
 
-    const buffer = await GCSServiceFactory.getService(bucketName).getFileBuffer(filePath);
+    const buffer = await getStorageService(bucketName).getFileBuffer(filePath);
     return transform(JSON.parse(buffer.toString('utf-8')));
   }
 }

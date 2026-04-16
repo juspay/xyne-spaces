@@ -58,9 +58,19 @@ class Config:
     debug_audio_storage: bool
     debug_audio_storage_path: str
     
+    # Storage Provider ('gcs' or 's3')
+    storage_provider: str
+
     # GCS Configuration
     gcs_project_id: Optional[str]
     gcs_bucket_name: Optional[str]
+
+    # S3 Configuration
+    s3_bucket_name: Optional[str]
+    s3_region: str
+    s3_access_key_id: Optional[str]
+    s3_secret_access_key: Optional[str]
+    s3_endpoint: Optional[str]
     
     # Backend API Configuration
     backend_url: str
@@ -145,9 +155,19 @@ class Config:
             debug_audio_storage=os.getenv("DEBUG_AUDIO_STORAGE", "false").lower() == "true",
             debug_audio_storage_path=os.getenv("DEBUG_AUDIO_STORAGE_PATH", "/tmp/xyne-audio-debug"),
             
+            # Storage provider
+            storage_provider=os.getenv("STORAGE_PROVIDER", "gcs").lower(),
+            
             # GCS
             gcs_project_id=os.getenv("GCS_PROJECT_ID"),
             gcs_bucket_name=os.getenv("TRANSCRIPTION_BUCKET_NAME") or os.getenv("GCS_BUCKET_NAME"),
+
+            # S3
+            s3_bucket_name=os.getenv("S3_BUCKET_NAME") or os.getenv("TRANSCRIPTION_BUCKET_NAME"),
+            s3_region=os.getenv("AWS_REGION", "ap-south-1"),
+            s3_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            s3_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+            s3_endpoint=os.getenv("S3_ENDPOINT"),
             
             # Backend API
             backend_url=os.getenv("BACKEND_URL", "http://localhost:3001"),

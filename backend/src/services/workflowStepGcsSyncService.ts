@@ -1,4 +1,4 @@
-import GCSServiceFactory from './gcsServiceFactory';
+import { getStorageService } from './storage';
 import { redisService } from './redisService';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { logger } from '@/utils/logger';
@@ -20,7 +20,7 @@ export interface WorkflowStepData {
 }
 
 export class WorkflowStepGcsSyncService {
-  private gcsService = GCSServiceFactory.getService(config.gcs.workflowStepsBucketName);
+  private storageService = getStorageService(config.gcs.workflowStepsBucketName);
 
   /**
    * Sync all workflow steps from Redis to GCS.
@@ -101,7 +101,7 @@ export class WorkflowStepGcsSyncService {
       metadata.stepName = stepName;
     }
 
-    await this.gcsService.uploadFileV2(buffer, {
+    await this.storageService.uploadFileV2(buffer, {
       path: gcsPath,
       contentType: 'application/json',
       metadata

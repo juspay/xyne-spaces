@@ -1,5 +1,5 @@
 import { config } from '@/config/env';
-import { gcsService } from '@/services/gcsService';
+import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 
 const JIRA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
@@ -287,7 +287,7 @@ export class JiraMigrationClient {
     );
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    const uploaded = await gcsService.uploadFile(buffer, {
+    const uploaded = await getStorageService().uploadFile(buffer, {
       filename: attachment.filename,
       contentType: attachment.mimeType || response.headers.get('content-type') || 'application/octet-stream',
       metadata: {
@@ -300,7 +300,7 @@ export class JiraMigrationClient {
     });
 
     return {
-      gcsPath: uploaded.gcsPath,
+      gcsPath: uploaded.path,
       size: uploaded.size,
       filename: uploaded.filename,
       mimeType: attachment.mimeType || response.headers.get('content-type') || 'application/octet-stream',

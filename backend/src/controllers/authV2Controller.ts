@@ -6,6 +6,7 @@ import { UserSessionService } from '../services/userSessionService';
 import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
+import { MicrosoftAuthController } from './microsoftAuthController';
 import '../types/express';
 import { config } from '@/config/env';
 
@@ -13,6 +14,7 @@ export class AuthV2Controller {
   private googleClient: OAuth2Client;
   private userService: UserService;
   private userSessionService: UserSessionService;
+  private microsoftAuthController: MicrosoftAuthController;
 
   constructor() {
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -27,7 +29,38 @@ export class AuthV2Controller {
     this.googleClient = new OAuth2Client(clientId, clientSecret);
     this.userService = new UserService();
     this.userSessionService = new UserSessionService();
+    this.microsoftAuthController = new MicrosoftAuthController();
   }
+
+  /**
+   * Unified Electron code-exchange dispatcher.
+   *
+   * Peeks at the OAuth state (without consuming it) to determine which
+   * provider issued it, then delegates to the provider-specific handler.
+   * This lets the Electron app use a single deep link
+   * (xyne-spaces://auth/callback) and a single POST endpoint for both
+   * Google and Microsoft logins.
+   */
+  dispatchElectronExchange = async (req: Request, res: Response): Promise<void> => {
+    const requestId = `ELECTRON_EXCHANGE_DISPATCH_${Date.now()}`;
+    const state = typeof req.body?.state === 'string' ? req.body.state.trim() : '';
+
+    if (state) {
+      try {
+        const stateData = await oauthStateServiceV2.validateState(state, false);
+        if (stateData?.provider === 'microsoft') {
+          return this.microsoftAuthController.exchangeElectron(req, res);
+        }
+      } catch (error) {
+        logger.warn(
+          `[${requestId}] Failed to peek OAuth state for provider dispatch; falling back to Google handler`,
+          error,
+        );
+      }
+    }
+
+    return this.exchangeElectronCode(req, res);
+  };
 
   private getFrontendUrl(req: Request | null = null): string {
     logger.info(`[X-Original-Host]: value: ${req?.headers['x-original-host']}`);

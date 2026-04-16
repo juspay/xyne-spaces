@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { UserManagementService } from '../services/userManagementService';
-import { gcsService } from '../services/gcsService';
+import { getStorageService } from '../services/storage';
 import { AccessType } from '@prisma/client';
 import { logger } from '../utils/logger';
 
+const storageService = getStorageService();
 const userManagementService = UserManagementService.getInstance();
 
 export class UserManagementController {
@@ -908,13 +909,13 @@ export class UserManagementController {
       }
 
       const gcsPath = user.picture;
-      const fileExists = await gcsService.fileExists(gcsPath);
+      const fileExists = await storageService.fileExists(gcsPath);
       if (!fileExists) {
         res.status(404).json({ error: 'Profile picture file not found' });
         return;
       }
 
-      const metadata = await gcsService.getFileMetadata(gcsPath);
+      const metadata = await storageService.getFileMetadata(gcsPath);
       const contentType = metadata.contentType || 'image/png';
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
@@ -923,7 +924,7 @@ export class UserManagementController {
       // Cache for 1 year - safe because picture path includes timestamp and changes on each upload
       res.setHeader('Cache-Control', 'public, max-age=31536000');
 
-      const stream = await gcsService.createReadStream(gcsPath);
+      const stream = await storageService.createReadStream(gcsPath);
       stream.pipe(res);
 
       stream.on('error', (error: Error) => {

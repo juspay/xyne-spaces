@@ -16,7 +16,7 @@ import { extractWorkspace } from '../workflows/framework/agent-executor';
 import { calculateDiffStats } from '@/utils/diffUtils';
 import { redisService } from '@/services/redisService';
 import { buildWorkflowStepKey, WORKFLOW_KEYS_SET } from '@/workflows/utils/workflowStepKeys';
-import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { getStorageService, type StorageService } from '@/services/storage';
 import { v4 as uuidv4 } from 'uuid';
 import { safeSerialize } from '../workflows/storage/serialization';
 import { STEP_TYPES } from '../workflows/storage/step-types';
@@ -64,11 +64,11 @@ export class WorkflowController {
         );
 
         if (attachments.length > 0 && attachments[0].url?.startsWith('gs://')) {
-          const gcsService = GCSServiceFactory.getService(config.gcs.workflowStepsBucketName);
+          const storageService = getStorageService(config.gcs.workflowStepsBucketName);
           const gcsPath = attachments[0].url.replace('gs://', '').split('/').slice(1).join('/');
 
           try {
-            const fileBuffer = await gcsService.getFileBuffer(gcsPath);
+            const fileBuffer = await storageService.getFileBuffer(gcsPath);
             if (fileBuffer) {
               const parsedContent = JSON.parse(fileBuffer.toString());
               parentSteps = Array.isArray(parsedContent) ? parsedContent : [parsedContent];
@@ -1614,15 +1614,15 @@ export class WorkflowController {
       }
 
       const vrBucketName = config.gcs.workflowVRBucketName;
-      const gcsService = GCSServiceFactory.getService(vrBucketName);
+      const storageService = getStorageService(vrBucketName);
 
       // List artifacts from GCS
       const screenshotsPrefix = `workflow-artifacts/${executionId}/screenshots/`;
       const reportsPrefix = `workflow-artifacts/${executionId}/reports/`;
 
       const [screenshots, reports] = await Promise.all([
-        this.listGCSArtifacts(gcsService, screenshotsPrefix, 'screenshot'),
-        this.listGCSArtifacts(gcsService, reportsPrefix, 'report'),
+        this.listStorageArtifacts(storageService, screenshotsPrefix, 'screenshot'),
+        this.listStorageArtifacts(storageService, reportsPrefix, 'report'),
       ]);
 
       // Parse test summary from cucumber report if available
@@ -1631,7 +1631,7 @@ export class WorkflowController {
       if (cucumberReport) {
         try {
           logger.info(`[TEST-ARTIFACTS] Found cucumber report at: ${cucumberReport.gcsPath}`);
-          const buffer = await gcsService.getFileBuffer(cucumberReport.gcsPath);
+          const buffer = await storageService.getFileBuffer(cucumberReport.gcsPath);
           const report = JSON.parse(buffer.toString());
           // Cucumber report is an array of features
           let total = 0, passed = 0, failed = 0, skipped = 0;
@@ -1670,14 +1670,14 @@ export class WorkflowController {
   /**
    * Helper: List artifacts from GCS with given prefix
    */
-  private async listGCSArtifacts(
-    gcsService: ReturnType<typeof GCSServiceFactory.getService>,
+  private async listStorageArtifacts(
+    storageService: StorageService,
     prefix: string,
     type: 'screenshot' | 'report' | 'log'
   ): Promise<Array<{ name: string; gcsPath: string; type: string; contentType?: string }>> {
     try {
       logger.info(`[LIST-GCS-ARTIFACTS] Listing files with prefix: ${prefix}`);
-      const files = await gcsService.listFiles(prefix);
+      const files = await storageService.listFiles(prefix);
       logger.info(`[LIST-GCS-ARTIFACTS] Found ${files.length} files with prefix: ${prefix}`);
 
       return files.map(file => ({
@@ -1712,11 +1712,11 @@ export class WorkflowController {
       }
 
       const vrBucketName = config.gcs.workflowVRBucketName;
-      const gcsService = GCSServiceFactory.getService(vrBucketName);
+      const storageService = getStorageService(vrBucketName);
 
       logger.info(`[ARTIFACT-IMAGE] Fetching image from GCS: bucket=${vrBucketName}, path=${gcsPath}`);
 
-      const buffer = await gcsService.getFileBuffer(gcsPath);
+      const buffer = await storageService.getFileBuffer(gcsPath);
 
       logger.info(`[ARTIFACT-IMAGE] Successfully fetched image: ${gcsPath}, size=${buffer.length} bytes`);
 
@@ -1763,11 +1763,11 @@ export class WorkflowController {
       }
 
       const vrBucketName = config.gcs.workflowVRBucketName;
-      const gcsService = GCSServiceFactory.getService(vrBucketName);
+      const storageService = getStorageService(vrBucketName);
 
       logger.info(`[ARTIFACT-DOWNLOAD] Fetching artifact from GCS: bucket=${vrBucketName}, path=${gcsPath}`);
 
-      const buffer = await gcsService.getFileBuffer(gcsPath);
+      const buffer = await storageService.getFileBuffer(gcsPath);
 
       logger.info(`[ARTIFACT-DOWNLOAD] Successfully fetched artifact: ${gcsPath}, size=${buffer.length} bytes`);
 
@@ -1816,11 +1816,11 @@ export class WorkflowController {
       }
 
       const vrBucketName = config.gcs.workflowVRBucketName;
-      const gcsService = GCSServiceFactory.getService(vrBucketName);
+      const storageService = getStorageService(vrBucketName);
 
       logger.info(`[ARTIFACT-VIEW] Fetching artifact from GCS: bucket=${vrBucketName}, path=${gcsPath}`);
 
-      const buffer = await gcsService.getFileBuffer(gcsPath);
+      const buffer = await storageService.getFileBuffer(gcsPath);
 
       logger.info(`[ARTIFACT-VIEW] Successfully fetched artifact: ${gcsPath}, size=${buffer.length} bytes`);
 

@@ -4,7 +4,7 @@ import {logger} from '@/utils/logger';
 import { getExecutionState } from './workflowExecutionStateUtils';
 import { redisService } from '@/services/redisService';
 import { buildWorkflowStepKey } from '@/workflows/utils/workflowStepKeys';
-import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 
 const prisma = DatabaseClient.getInstance();
@@ -1280,10 +1280,10 @@ export class WorkflowRepository {
       // Fallback to GCS if URL is available
       else if (attachment.url && attachment.url.startsWith('gs://')) {
         logger.info(`[WORKFLOW-REPO] Redis empty, fetching agent steps from GCS for ${redisKey}`);
-        const gcsService = GCSServiceFactory.getService(config.gcs.workflowStepsBucketName);
+        const storageService = getStorageService(config.gcs.workflowStepsBucketName);
         // Extract the file path from gs:// URL
         const gcsPath = attachment.url.replace('gs://', '').split('/').slice(1).join('/');
-        const fileBuffer = await gcsService.getFileBuffer(gcsPath);
+        const fileBuffer = await storageService.getFileBuffer(gcsPath);
 
         if (fileBuffer) {
           const parsedContent = JSON.parse(fileBuffer.toString());
