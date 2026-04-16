@@ -12,6 +12,13 @@ import {
   isPreviewableDocument,
 } from '../services/documentThumbnailService';
 import type { UploadedFile } from '../components/ui/files/Files.types';
+import { logger, Event } from '../utils/logger';
+
+/** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
+const getFileExtension = (name: string): string => {
+  const dotIndex = name.lastIndexOf('.');
+  return dotIndex > 0 ? name.slice(dotIndex).toLowerCase() : '';
+};
 
 // Format: Record<attachmentId, File> - local cache of File objects for newly uploaded files
 const filesMapRef: Record<string, File> = {};
@@ -128,6 +135,12 @@ export function useDraftAttachments() {
             thumbnailBlob = thumbnailResult.blob;
           } catch (error) {
             console.warn('Failed to generate thumbnail for video:', file.name, error);
+            logger.warn(Event.ATTACHMENT_THUMBNAIL_FAILED, {
+              fileType: file.type,
+              extension: getFileExtension(file.name),
+              category: 'video',
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
         }
         // Generate thumbnail for previewable document files (PDF, DOCX, XLSX, CSV)
@@ -137,6 +150,12 @@ export function useDraftAttachments() {
             if (blob) thumbnailBlob = blob;
           } catch (error) {
             console.warn('Failed to generate thumbnail for document:', file.name, error);
+            logger.warn(Event.ATTACHMENT_THUMBNAIL_FAILED, {
+              fileType: file.type,
+              extension: getFileExtension(file.name),
+              category: 'document',
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
         }
         // Get dimensions for image files
@@ -149,6 +168,12 @@ export function useDraftAttachments() {
             }
           } catch (error) {
             console.warn('Failed to get image dimensions:', file.name, error);
+            logger.warn(Event.ATTACHMENT_THUMBNAIL_FAILED, {
+              fileType: file.type,
+              extension: getFileExtension(file.name),
+              category: 'image_dimensions',
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
         }
 
@@ -213,6 +238,19 @@ export function useDraftAttachments() {
 
       // Upload all files to API in a single batch request
       try {
+        const uploadStartTime = Date.now();
+        const totalSizeBytes = filesArray.reduce((sum, f) => sum + f.size, 0);
+
+        logger.info(Event.ATTACHMENT_UPLOAD_STARTED, {
+          fileCount: filesArray.length,
+          totalSizeBytes,
+          extensions: filesArray.map(f => getFileExtension(f.name)),
+          fileTypes: filesArray.map(f => f.type || 'unknown'),
+          channelId,
+          conversationId,
+          draftMessageId,
+        });
+
         const formData = new FormData();
 
         // Add all files
@@ -253,6 +291,13 @@ export function useDraftAttachments() {
 
         await apiInstance.post('/drafts/attachments/upload', formData);
 
+        logger.info(Event.ATTACHMENT_UPLOAD_SUCCESS, {
+          fileCount: filesArray.length,
+          latency: Date.now() - uploadStartTime,
+          channelId,
+          draftMessageId,
+        });
+
         // Return results in same order as input
         return processedFiles.map(({ attachmentId, file }) => ({
           attachmentId: attachmentId,
@@ -260,6 +305,13 @@ export function useDraftAttachments() {
         }));
       } catch (error) {
         console.error('Failed to upload files:', error);
+        logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
+          fileCount: filesArray.length,
+          error: error instanceof Error ? error.message : String(error),
+          channelId,
+          conversationId,
+          draftMessageId,
+        });
         removeDroppedFiles(attachmentIds);
         throw error;
       }

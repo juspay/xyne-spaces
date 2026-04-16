@@ -53,6 +53,7 @@ import {
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useChannel } from '../../../hooks/useChannels';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { logger, Event } from '../../../utils/logger';
 import { useShortcutById } from '../../../shortcuts';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
 import { useUser } from '../../../hooks/useUsers';
@@ -347,6 +348,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       await result.server;
       // Invalidate summary cache when message is deleted
       onMessageChange(message['conversationId'], channelId);
+      logger.info(Event.MESSAGE_DELETED, {
+        messageId: message.messageId,
+        channelId,
+        conversationId: message['conversationId'],
+      });
       mixpanelService.track(EVENTS.INITIATE_ACTION, {
         type: EVENT_PROPERTIES.ACTION_TYPES.DELETE_MESSAGE,
       });
@@ -355,7 +361,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         duration: 3000,
       });
       setShowDeleteConfirm(false);
-    } catch {
+    } catch (error) {
+      logger.error(Event.MESSAGE_DELETE_FAILED, {
+        messageId: message.messageId,
+        channelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       toast.error('Delete failed', {
         description: 'Could not delete the message',
         duration: 3000,

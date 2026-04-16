@@ -38,6 +38,7 @@ import { Combobox } from '../../ui/Combobox/Combobox';
 import { DropdownListItemType } from '../../ui/Combobox/Combobox.types';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { VisibleChannel } from '../../../machines/stateMachine';
+import { logger, Event } from '../../../utils/logger';
 
 /**
  * ForwardMessageForm component allows users to forward a message to channels or users.
@@ -99,6 +100,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           );
 
           // Show success message
+          logger.info(Event.MESSAGE_FORWARDED, {
+            originalMessageId: message.messageId,
+            targetType: 'channel',
+            targetChannelId: firstTarget.id,
+          });
           toast.success('Message forwarded', {
             description: `Message sent to #${firstTarget.name}`,
             duration: 3000,
@@ -114,6 +120,12 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           void navigate(`/chat/dir/${firstTarget.id}`);
         } catch (error) {
           console.error('Failed to forward message via mutator:', error);
+          logger.error(Event.MESSAGE_FORWARD_FAILED, {
+            originalMessageId: message.messageId,
+            targetType: 'channel',
+            targetChannelId: firstTarget.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
           toast.error('Failed to forward message', {
             description: `Please try again.`,
             duration: 3000,
@@ -140,6 +152,11 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
         // Show success message
         const targetNames = selectedTargets.map((t: ForwardTarget) => t.name).join(', ');
+        logger.info(Event.MESSAGE_FORWARDED, {
+          originalMessageId: message.messageId,
+          targetType: 'users',
+          targetCount: userIds.length,
+        });
         toast.success('Message forwarded', {
           description: `Message sent to ${targetNames}`,
           duration: 3000,
@@ -155,6 +172,12 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         void navigate(`/chat/dir/${response.id}`);
       } catch (error) {
         console.error('Failed to create DM with forwarded message:', error);
+        logger.error(Event.MESSAGE_FORWARD_FAILED, {
+          originalMessageId: message.messageId,
+          targetType: 'users',
+          targetCount: userIds.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
         toast.error('Failed to forward message', {
           description: 'Could not create direct message. Please try again.',
           duration: 3000,
