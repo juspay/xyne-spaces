@@ -56,6 +56,7 @@ export interface CreateCallWithParticipantsInput {
   recurringSeriesId?: string;
   startsAt: Date;
   endsAt: Date;
+  targetUserIds?: string[];
 }
 
 export class CallRepository {
@@ -254,9 +255,9 @@ export class CallRepository {
     params: CreateCallWithParticipantsInput,
     tx: Prisma.TransactionClient,
   ): Promise<{ callId: string; participantUserIds: string[] }> {
-    const channelParticipants = await repositories.channelParticipants.getChannelParticipants(
-      params.channelId,
-    );
+    const participantUserIds = params.targetUserIds?.length
+      ? params.targetUserIds
+      : (await repositories.channelParticipants.getChannelParticipants(params.channelId)).map(p => p.userId);
 
     await tx.call.create({
       data: {
@@ -282,24 +283,37 @@ export class CallRepository {
     });
 
     await tx.callParticipant.createMany({
-      data: channelParticipants.map((p) => ({
+      data: participantUserIds.map((userId) => ({
         id: uuidv4(),
         callId: params.callId,
-        userId: p.userId,
+        userId,
         invitedBy: params.createdByUserId,
         invitedAt: new Date(),
         response: InvitationResponse.INVITED,
-        meetingStatus: p.userId === params.createdByUserId ? MeetingStatus.ACCEPTED : MeetingStatus.PENDING,
-        respondedAt: p.userId === params.createdByUserId ? new Date() : null,
+        meetingStatus: userId === params.createdByUserId ? MeetingStatus.ACCEPTED : MeetingStatus.PENDING,
+        respondedAt: userId === params.createdByUserId ? new Date() : null,
         joinedAt: null,
         leftAt: null,
       })),
     });
 
-    return {
-      callId: params.callId,
-      participantUserIds: channelParticipants.map((p) => p.userId),
-    };
+    return { callId: params.callId, participantUserIds };
+  }
+
+  /**
+   * Find participant userIds from the most recently created call in a recurring series.
+   * Used to carry over the explicit participant list when creating new instances.
+   */
+  async findLatestSeriesParticipantUserIds(
+    seriesId: string,
+    tx: Prisma.TransactionClient,
+  ): Promise<string[] | undefined> {
+    const sibling = await tx.call.findFirst({
+      where: { recurringSeriesId: seriesId },
+      select: { participants: { select: { userId: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return sibling?.participants.map(p => p.userId);
   }
 
   /**

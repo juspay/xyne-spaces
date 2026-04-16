@@ -10,13 +10,14 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { cn } from '../../../utils/classNames';
 import Dialog from '../../ui/Dialog';
+import type { DropdownListItemType } from '../../ui/Combobox/Combobox.types';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { ChevronDown, ChevronUp, Hash, Lock, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Hash, Info, Lock, X } from 'lucide-react';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TimePicker } from '../../ui/TimePicker/TimePicker';
 import { RadioGroup, Radio } from '../../ui/RadioGroup/RadioGroup';
@@ -28,6 +29,7 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { toast } from 'sonner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
+import { Tooltip } from '../../ui/Tooltip/Tooltip';
 
 /** Shape of a scheduled call passed in for pre-filling in edit mode. */
 export interface EditCallData {
@@ -154,6 +156,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   // For recurring calls in edit mode — checkbox to edit the whole series
   const [editEntireSeries, setEditEntireSeries] = useState(false);
 
+  // Post call updates feature
+  const [postCallUpdates, setPostCallUpdates] = useState(false);
+  const [updateChannelId, setUpdateChannelId] = useState<string | null>(null);
+  const [channelSearchQuery, setChannelSearchQuery] = useState('');
+  const [channelPickerOpen, setChannelPickerOpen] = useState(false);
+
   // Fetch recurring call series data via Zero — only when the modal is open and
   // in edit mode for a recurring call, so the query doesn't run when the popup is closed.
   // Always fetch (not just when editEntireSeries) so the dropdown shows correct values.
@@ -188,6 +196,39 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     return allVisibleChannels.filter(channel => channel.scopeType === ChannelScopeType.DEFAULT);
   }, [allVisibleChannels]);
 
+  // Combobox items for the "post call updates" channel picker — filtered by search query
+  const channelComboboxItems = useMemo((): DropdownListItemType[] => {
+    const q = channelSearchQuery.toLowerCase();
+    return channels
+      .filter(c => c.name.toLowerCase().includes(q))
+      .map(c => ({
+        value: c.id,
+        label: c.name,
+        leftSlot:
+          c.visibility === ChannelVisibility.PRIVATE ? (
+            <Lock className='size-3.5 text-gray-600' strokeWidth={2.3} />
+          ) : (
+            <Hash className='size-3.5 text-gray-600' strokeWidth={2.3} />
+          ),
+      }));
+  }, [channels, channelSearchQuery]);
+
+  const selectedChannelItem = useMemo((): DropdownListItemType | null => {
+    if (!updateChannelId) return null;
+    const channel = channels.find(c => c.id === updateChannelId);
+    if (!channel) return null;
+    return {
+      value: channel.id,
+      label: channel.name,
+      leftSlot:
+        channel.visibility === ChannelVisibility.PRIVATE ? (
+          <Lock className='size-3.5 text-gray-600' strokeWidth={2.3} />
+        ) : (
+          <Hash className='size-3.5 text-gray-600' strokeWidth={2.3} />
+        ),
+    };
+  }, [updateChannelId, channels]);
+
   const defaultStart = getDefaultScheduledStartTime();
 
   const {
@@ -217,6 +258,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   const startsAt = watch('startsAt');
   const endsAt = watch('endsAt');
   const participants = watch('participants');
+
+  // Show "Post call updates" checkbox only when:
+  //   - at least one participant is added
+  //   - no channel is selected in the participants field (channel already serves as the target)
+  const hasParticipantChannel = participants.some(v => v.startsWith('channel:'));
+  const showPostCallUpdates = participants.length > 0 && !hasParticipantChannel;
 
   // Search query state (not in form)
   const [searchQuery, setSearchQuery] = React.useState('');
@@ -395,6 +442,16 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     // Don't reset series end state here - keep the original series settings
     // so the dropdown label shows the correct recurrence pattern
   }, [editEntireSeries]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset post-call-updates state when the checkbox becomes hidden
+  // (user removes all participants, or adds a channel to participants)
+  useEffect(() => {
+    if (!showPostCallUpdates && postCallUpdates) {
+      setPostCallUpdates(false);
+      setUpdateChannelId(null);
+      setChannelSearchQuery('');
+    }
+  }, [showPostCallUpdates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Legacy: keep default title in sync on first load (create mode)
   useEffect(() => {
@@ -803,6 +860,15 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         return;
       }
 
+      // Validate post call updates requires channel selection
+      if (postCallUpdates && !updateChannelId) {
+        toast.error('Select a channel', {
+          description: 'Please select a channel to post call updates.',
+          duration: 3000,
+        });
+        return;
+      }
+
       const userIds: string[] = [];
       let channelId: string | undefined;
       data.participants.forEach(value => {
@@ -867,8 +933,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         }
         const recurringRequest: Parameters<typeof callService.createRecurringSeries>[0] = {
           title: data.title,
-          ...(channelId !== undefined && { channelId }),
-          ...(userIds.length > 0 && { targetUserIds: userIds }),
+          ...(postCallUpdates && updateChannelId
+            ? { channelId: updateChannelId, ...(userIds.length > 0 && { targetUserIds: userIds }) }
+            : {
+                ...(channelId !== undefined && { channelId }),
+                ...(userIds.length > 0 && { targetUserIds: userIds }),
+              }),
           timezone,
           recurrenceRule: buildRrule(),
           startTime: recurringStartTime,
@@ -895,8 +965,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           startsAt: data.startsAt.getTime(),
           endsAt: data.endsAt.getTime(),
         };
-        if (channelId) requestData.channelId = channelId;
-        if (userIds.length > 0) requestData.targetUserIds = userIds;
+        if (postCallUpdates && updateChannelId) {
+          requestData.channelId = updateChannelId;
+          if (userIds.length > 0) requestData.targetUserIds = userIds;
+        } else {
+          if (channelId) requestData.channelId = channelId;
+          if (userIds.length > 0) requestData.targetUserIds = userIds;
+        }
         await callService.scheduleCall(requestData);
         toast.success('Call Scheduled', {
           description: 'Call scheduled successfully',
@@ -936,6 +1011,10 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     setOccurrenceCount(13);
     setShowCustomPanel(false);
     setEditEntireSeries(false);
+    setPostCallUpdates(false);
+    setUpdateChannelId(null);
+    setChannelSearchQuery('');
+    setChannelPickerOpen(false);
     onClose();
   }, [reset, onClose, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -943,7 +1022,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     <Dialog
       open={isOpen}
       onOpenChange={open => !open && handleClose()}
-      className={cn('max-w-[584px] rounded-xl overflow-hidden', 'top-1/3 !-translate-y-1/3')}
+      className={cn('max-w-[584px] rounded-xl', 'top-1/3 !-translate-y-1/3')}
     >
       <form className='flex flex-col w-full' onSubmit={e => void handleSubmit(onSubmit)(e)}>
         {/* Header */}
@@ -1690,6 +1769,91 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
             )}
           </div>
 
+          {/* Post call updates to channel — only when participants are added and no channel is selected */}
+          {showPostCallUpdates && (
+            <div className='flex items-center gap-3'>
+              <div className='flex items-center gap-1.5'>
+                <Checkbox
+                  checked={postCallUpdates}
+                  onChange={checked => {
+                    setPostCallUpdates(checked);
+                    if (!checked) {
+                      setUpdateChannelId(null);
+                      setChannelSearchQuery('');
+                    }
+                  }}
+                  label='Post call updates to channel'
+                />
+                <Tooltip
+                  content='Only selected participants will receive call notifications, and the summaries will be posted to the chosen channel.'
+                  side='top'
+                  sideOffset={6}
+                  className='max-w-60'
+                >
+                  <button
+                    type='button'
+                    className='text-muted-foreground hover:text-foreground transition-colors'
+                  >
+                    <Info className='size-3.5' strokeWidth={2} />
+                  </button>
+                </Tooltip>
+              </div>
+              {postCallUpdates && (
+                <div className='min-w-48 flex-1 relative'>
+                  <div
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg border h-8 px-3',
+                      !updateChannelId ? 'border-red-500' : 'border-input',
+                    )}
+                  >
+                    {updateChannelId && !channelPickerOpen && selectedChannelItem?.leftSlot}
+                    <input
+                      value={
+                        channelPickerOpen ? channelSearchQuery : (selectedChannelItem?.label ?? '')
+                      }
+                      onChange={e => setChannelSearchQuery(e.target.value)}
+                      onFocus={() => {
+                        setChannelSearchQuery('');
+                        setChannelPickerOpen(true);
+                      }}
+                      onBlur={() => setChannelPickerOpen(false)}
+                      placeholder='Select channel'
+                      data-track-category='calls'
+                      data-track-name='channel-picker-search'
+                      className='flex-1 min-w-0 text-sm bg-transparent outline-none placeholder:text-muted-foreground'
+                    />
+                  </div>
+                  {channelPickerOpen && (
+                    <div className='absolute top-full mt-1 left-0 right-0 z-50 bg-popover border border-border rounded-md shadow-lg max-h-48 overflow-y-auto py-1'>
+                      {channelComboboxItems.length === 0 ? (
+                        <p className='text-sm text-muted-foreground px-3 py-2'>No channels found</p>
+                      ) : (
+                        channelComboboxItems.map(item => (
+                          <button
+                            key={item.value}
+                            type='button'
+                            onMouseDown={e => {
+                              e.preventDefault(); // prevent input blur before selection
+                              setUpdateChannelId(item.value);
+                              setChannelSearchQuery('');
+                              setChannelPickerOpen(false);
+                            }}
+                            data-track-category='calls'
+                            data-track-name='select-post-call-channel'
+                            className='w-full flex items-center gap-2 mx-1 px-2 py-1.5 text-sm cursor-pointer hover:bg-accent rounded-md'
+                          >
+                            {item.leftSlot}
+                            {item.label}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Edit entire series checkbox — only for recurring calls in edit mode */}
           {isEditMode && initialCall?.recurringSeriesId && (
             <Checkbox
@@ -1719,7 +1883,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 !title.trim() ||
                 !!errors.startsAt ||
                 !!errors.endsAt ||
-                (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0)
+                (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) ||
+                (postCallUpdates && !updateChannelId)
               }
               className='rounded-lg text-[13px] px-4 h-9 bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
             >

@@ -64,9 +64,11 @@ export class ScheduleCallController {
         endsOn,
       } = RecurringScheduleCallSchema.parse(req.body);
 
-      // Resolve or create channel
+      // update-channel mode: channelId is the broadcast channel, targetUserIds are the actual participants
+      const isUpdateChannelMode = !!(channelId && targetUserIds?.length);
+
       let finalChannelId = channelId;
-      if (!channelId && targetUserIds && targetUserIds.length > 0) {
+      if (!channelId && targetUserIds?.length) {
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
           targetUserIds,
@@ -74,6 +76,11 @@ export class ScheduleCallController {
           title,
         );
       }
+
+      // Always include the organizer in the participant list
+      const finalTargetUserIds = isUpdateChannelMode
+        ? [...new Set([userId, ...targetUserIds!])]
+        : undefined;
 
       const seriesId = uuidv4();
       const dbClient = DatabaseClient.getInstance();
@@ -124,6 +131,7 @@ export class ScheduleCallController {
           fromDate,
           finalToDate,
           tx,
+          finalTargetUserIds,
         );
       });
 
@@ -155,9 +163,11 @@ export class ScheduleCallController {
       // Validate request body with Zod
       const { title, startsAt, endsAt, channelId, targetUserIds } = ScheduleCallSchema.parse(req.body);
 
+      // update-channel mode: channelId is the broadcast channel, targetUserIds are the actual participants
+      const isUpdateChannelMode = !!(channelId && targetUserIds?.length);
+
       let finalChannelId = channelId;
-      // If no channelId but targetUserIds is provided, find or create DM channel
-      if (!channelId && targetUserIds && targetUserIds.length > 0) {
+      if (!channelId && targetUserIds?.length) {
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
           targetUserIds,
@@ -165,6 +175,11 @@ export class ScheduleCallController {
           title
         );
       }
+
+      // Always include the organizer in the participant list
+      const finalTargetUserIds = isUpdateChannelMode
+        ? [...new Set([userId, ...targetUserIds!])]
+        : undefined;
 
       // Generate IDs
       const callId = uuidv4();
@@ -188,6 +203,7 @@ export class ScheduleCallController {
         isRecurring: false,
         startsAt: new Date(startsAt),
         endsAt: new Date(endsAt),
+        ...(finalTargetUserIds && { targetUserIds: finalTargetUserIds }),
       }, tx));
 
       // Send immediate notifications + create activities for all participants (excluding organizer)
@@ -339,11 +355,13 @@ export class ScheduleCallController {
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
 
+      // Fetch participants once for both rescheduling and update notifications
+      const allParticipants = await repositories.calls.findParticipants(call.id);
+      const participantIds = allParticipants.map((p) => p.userId);
+
       // Reschedule Bull jobs if time changed
       if (startsAt !== undefined) {
         try {
-          const allParticipants = await repositories.calls.findParticipants(call.id);
-          const participantIds = allParticipants.map((p) => p.userId);
           await scheduledCallNotificationService.rescheduleCallReminder(
             call.id,
             externalId,
@@ -370,8 +388,6 @@ export class ScheduleCallController {
 
       // Notify participants of the update
       try {
-        const allParticipants = await repositories.calls.findParticipants(call.id);
-        const participantIds = allParticipants.map((p) => p.userId);
         await scheduledCallNotificationService.sendCallUpdatedNotifications({
           callId: call.id,
           callExternalId: externalId,

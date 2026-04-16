@@ -61,6 +61,7 @@ class RecurringCallService {
     notifyParticipants: boolean,
     tx: Prisma.TransactionClient,
     scheduleJobs = true,
+    targetUserIds?: string[],
   ): Promise<string> {
     const callId = uuidv4();
     const externalId = uuidv4();
@@ -80,6 +81,7 @@ class RecurringCallService {
       recurringSeriesId: recurringSeries.id,
       startsAt,
       endsAt,
+      targetUserIds,
     }, tx);
 
     // Send immediate CALL_SCHEDULED notifications + activities for the first instance only
@@ -163,7 +165,10 @@ class RecurringCallService {
     }
 
     const endsAt = addHHMMDuration(nextOccurrence, recurringSeries.startTime, recurringSeries.endTime);
-    return this.createInstance(recurringSeries, nextOccurrence, endsAt, notifyParticipants, tx);
+
+    const carryoverUserIds = await repositories.calls.findLatestSeriesParticipantUserIds(seriesId, tx);
+
+    return this.createInstance(recurringSeries, nextOccurrence, endsAt, notifyParticipants, tx, true, carryoverUserIds);
   }
 
   /**
@@ -214,6 +219,7 @@ class RecurringCallService {
     fromDate: Date,
     toDate: Date,
     tx: Prisma.TransactionClient,
+    targetUserIds?: string[],
   ): Promise<string[]> {
     const occurrences = this.getOccurrencesInRange(series, fromDate, toDate);
     const callIds: string[] = [];
@@ -231,7 +237,7 @@ class RecurringCallService {
         // Only schedule Bull jobs for the FIRST instance (i === 0)
         // Subsequent instances will have their jobs created when the previous instance ends
         const scheduleJobs = i === 0;
-        const callId = await this.createInstance(series, startsAt, endsAt, isFirstUpcoming, tx, scheduleJobs);
+        const callId = await this.createInstance(series, startsAt, endsAt, isFirstUpcoming, tx, scheduleJobs, targetUserIds);
         callIds.push(callId);
       } catch (err) {
         logger.error(`Failed to create instance for ${startsAt.toISOString()} in series ${series.id}:`, err);
@@ -295,6 +301,10 @@ class RecurringCallService {
       let lastDate = lastScheduledInstance?.startsAt ?? new Date();
       let createdCount = 0;
 
+      // Copy participants from an existing sibling instance so update-channel-mode series
+      // preserve the explicit participant list rather than re-resolving channel members.
+      const carryoverUserIds = await repositories.calls.findLatestSeriesParticipantUserIds(seriesId, tx);
+
       while (createdCount < neededCount) {
         const nextOccurrence = this.getNextOccurrence(series, lastDate);
         if (!nextOccurrence) break; // No more occurrences in the series
@@ -311,7 +321,7 @@ class RecurringCallService {
         if (!existing) {
           const endsAt = addHHMMDuration(nextOccurrence, series.startTime, series.endTime);
           // Don't schedule jobs during replenishment - jobs are created on instance end
-          await this.createInstance(series, nextOccurrence, endsAt, false, tx, false);
+          await this.createInstance(series, nextOccurrence, endsAt, false, tx, false, carryoverUserIds);
           createdCount++;
         }
 
