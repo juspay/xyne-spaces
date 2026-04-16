@@ -12,6 +12,8 @@ import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 
+import { resolveChannelId } from '../utils/channelUtils';
+
 const prismaClient = DatabaseClient.getInstance();
 
 const CreateTicketBodySchema = z.object({
@@ -19,25 +21,30 @@ const CreateTicketBodySchema = z.object({
   description: z.string().min(1, 'Description is required').trim(),
   projectId: z.string().min(1, 'Project ID is required').trim(),
   boardId: z.string().min(1, 'Board ID is required').trim(),
-  channelId: z.string().min(1, 'Channel ID is required').trim(),
+  channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
   text: z.string().trim().optional(),
   priority: z.nativeEnum(TicketPriority).optional(),
   assignedToEmail: z.string().email('Invalid email format').trim().optional(),
   assignedUserGroupAlias: z.string().trim().optional(),
   userId: z.string().min(1, 'User ID is required').trim(),
-});
+}).refine(
+  data => !!data.channelId || !!data.channelName,
+  { message: 'Either channelId or channelName is required', path: ['channelId'] }
+);
 
 const UpdateTicketBodySchema = z.object({
   ticketId: z.string().min(1, 'Ticket ID is required').trim(),
   userId: z.string().min(1, 'User ID is required').trim(),
   channelId: z.string().trim().optional(),
+  channelName: z.string().trim().optional(),
   conversationId: z.string().trim().optional(),
   assigneeId: z.string().trim().optional(),
   stage: z.string().trim().optional(),
   groupId: z.string().trim().optional(),
 }).refine(
-  data => !!data.channelId || !!data.conversationId,
-  { message: 'Either channelId or conversationId is required', path: ['channelId'] }
+  data => !!data.channelId || !!data.channelName || !!data.conversationId,
+  { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
 ).refine(
   data => !!data.assigneeId || !!data.stage || !!data.groupId,
   { message: 'At least one of assigneeId, stage, or groupId is required', path: ['assigneeId'] }
@@ -83,6 +90,7 @@ export class TicketController {
         projectId,
         boardId,
         channelId,
+        channelName,
         priority,
         assignedToEmail,
         assignedUserGroupAlias,
@@ -106,10 +114,13 @@ export class TicketController {
         return;
       }
 
-      const channel = await repositories.channels.findById(channelId);
+      // Resolve channelId from channelName if not provided
+      const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
+
+      const channel = await repositories.channels.findById(resolvedChannelId);
       if (!channel) {
         res.status(404).json({
-          error: `Channel with ID ${channelId} not found`,
+          error: `Channel with ID ${resolvedChannelId} not found`,
           code: 'CHANNEL_NOT_FOUND',
         });
         return;
@@ -178,7 +189,7 @@ export class TicketController {
         description,
         projectId,
         boardId,
-        channelId,
+        channelId: resolvedChannelId,
         userId,
         priority,
         assignedTo: resolvedAssignedTo,

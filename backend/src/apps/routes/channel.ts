@@ -32,4 +32,6 @@ router.post('/openDm', async (req: Request, res: Response) => {
 
 router.post('/info', validateChannelAccessForPost, channelController.getChannelByName);
 
+router.get('/list', channelController.listChannels);
+
 export default router;

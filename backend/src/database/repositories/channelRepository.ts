@@ -152,6 +152,21 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
   }
 
+  async findManyPaginated(options: {
+    where?: Record<string, unknown>;
+    limit: number;
+    cursor?: string;
+  }): Promise<Channel[]> {
+    const { where = {}, limit, cursor } = options;
+
+    return await this.db.channel.findMany({
+      where,
+      take: limit,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async update(id: string, data: UpdateChannelInput): Promise<Channel> {
     if (data.name) {
       // Skip 255 char validation for DM and GROUP_DM channels

@@ -2,23 +2,36 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 
 /**
- * Resolve channelId from conversationId if channelId is not provided
+ * Resolve channelId from channelName or conversationId if channelId is not provided
  * 
  * @param channelId - Channel ID (optional)
  * @param conversationId - Conversation ID (optional)
+ * @param channelName - Channel name (optional)
  * @returns Resolved channel ID
- * @throws Error if neither channelId nor conversationId is provided, or if conversation is not found
+ * @throws Error if no identifier is provided, or if the resource is not found
  */
 export async function resolveChannelId(
   channelId: string | undefined,
-  conversationId: string | undefined
+  conversationId: string | undefined,
+  channelName?: string | undefined
 ): Promise<string> {
   if (channelId) {
     return channelId;
   }
 
+  if (channelName) {
+    logger.info(`[CHANNEL-UTILS] Resolving channelId from channelName: ${channelName}`);
+    const channel = await repositories.channels.findByName(channelName);
+    if (!channel) {
+      logger.warn(`[CHANNEL-UTILS] Channel not found by name: ${channelName}`);
+      throw new Error('Channel not found');
+    }
+    logger.info(`[CHANNEL-UTILS] Resolved channelId: ${channel.id} from channelName: ${channelName}`);
+    return channel.id;
+  }
+
   if (!conversationId) {
-    throw new Error('Either channelId or conversationId is required');
+    throw new Error('Either channelId, channelName, or conversationId is required');
   }
 
   logger.info(`[CHANNEL-UTILS] Resolving channelId from conversationId: ${conversationId}`);
