@@ -112,6 +112,22 @@ export const Event = {
   THREAD_CONTEXT_SUBMITTED: 'thread_context_submitted',
   KANBAN_ENTITY_LOADED: 'kanban_entity_loaded',
   CONVERSATION_PREFERCH_ERROR: 'conversation_prefetch_error',
+  ATTACHMENT_FILES_SELECTED: 'attachment_files_selected',
+  ATTACHMENT_VALIDATION_FAILED: 'attachment_validation_failed',
+  ATTACHMENT_LIMIT_REACHED: 'attachment_limit_reached',
+  ATTACHMENT_PASTE_DETECTED: 'attachment_paste_detected',
+  ATTACHMENT_LARGE_TEXT_CONVERTED: 'attachment_large_text_converted',
+  ATTACHMENT_THUMBNAIL_FAILED: 'attachment_thumbnail_failed',
+  ATTACHMENT_UPLOAD_STARTED: 'attachment_upload_started',
+  ATTACHMENT_UPLOAD_SUCCESS: 'attachment_upload_success',
+  ATTACHMENT_UPLOAD_FAILED: 'attachment_upload_failed',
+  DRAFT_ATTACHMENTS_LOAD_FAILED: 'draft_attachments_load_failed',
+  MESSAGE_SENT: 'message_sent',
+  MESSAGE_SEND_FAILED: 'message_send_failed',
+  MESSAGE_DELETED: 'message_deleted',
+  MESSAGE_DELETE_FAILED: 'message_delete_failed',
+  MESSAGE_FORWARDED: 'message_forwarded',
+  MESSAGE_FORWARD_FAILED: 'message_forward_failed',
 } as const;
 
 export type EventType = (typeof Event)[keyof typeof Event];

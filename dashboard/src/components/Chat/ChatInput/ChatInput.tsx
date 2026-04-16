@@ -48,6 +48,7 @@ import { createTicket, CreateTicketRequest } from '../../../services/ticketServi
 import { useUser } from '../../../hooks/useUsers';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { isStatusExpired } from '../../../utils/statusUtils';
+import { logger, Event } from '../../../utils/logger';
 
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
@@ -379,6 +380,12 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             onMessageChange(conversationId, channelId);
           }
           onEditComplete?.();
+          logger.info(Event.MESSAGE_SENT, {
+            channelId,
+            conversationId,
+            isEdit: true,
+            messageLength: processedHtml.length,
+          });
           mixpanelService.track(EVENTS.INITIATE_ACTION, {
             type: EVENT_PROPERTIES.ACTION_TYPES.EDIT,
           });
@@ -398,6 +405,15 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
               }),
             );
 
+            logger.info(Event.MESSAGE_SENT, {
+              channelId,
+              conversationId,
+              isReply: true,
+              hasAttachments: hasFiles,
+              attachmentCount: hasFiles ? files.length : 0,
+              messageLength: processedHtml.length,
+            });
+
             mixpanelService.track(EVENTS.INITIATE_ACTION, {
               type: EVENT_PROPERTIES.ACTION_TYPES.THREAD_REPLY,
               scopeType,
@@ -410,6 +426,13 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             const errorMessage = error instanceof Error ? error.message : 'Please try again.';
             toast.error('Failed to send message', {
               description: errorMessage,
+            });
+
+            logger.error(Event.MESSAGE_SEND_FAILED, {
+              channelId,
+              conversationId,
+              isReply: true,
+              error: errorMessage,
             });
 
             // Track message send failure with categorized error reason
@@ -437,6 +460,14 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
               }),
             );
 
+            logger.info(Event.MESSAGE_SENT, {
+              channelId,
+              isNewConversation: true,
+              hasAttachments: hasFiles,
+              attachmentCount: hasFiles ? files.length : 0,
+              messageLength: processedHtml.length,
+            });
+
             mixpanelService.track(EVENTS.INITIATE_ACTION, {
               type: EVENT_PROPERTIES.ACTION_TYPES.DIRECT_MESSAGE,
               scopeType,
@@ -450,6 +481,12 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
 
             toast.error('Failed to send message', {
               description: errorMessage,
+            });
+
+            logger.error(Event.MESSAGE_SEND_FAILED, {
+              channelId,
+              isNewConversation: true,
+              error: errorMessage,
             });
 
             // Track message send failure with categorized error reason

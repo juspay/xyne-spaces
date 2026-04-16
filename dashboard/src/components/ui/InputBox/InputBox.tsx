@@ -66,6 +66,13 @@ import type { Canvas } from '../../Canvas';
 import { CanvasVisibility } from '@xyne/shared';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { v4 as uuidv4 } from 'uuid';
+import { logger, Event } from '../../../utils/logger';
+
+/** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
+const getFileExtension = (name: string): string => {
+  const dotIndex = name.lastIndexOf('.');
+  return dotIndex > 0 ? name.slice(dotIndex).toLowerCase() : '';
+};
 
 const lowlight = createLowlight(common);
 
@@ -181,6 +188,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           setAttachmentsMap(map);
         } catch (error) {
           console.error('Failed to load attachments:', error);
+          logger.error(Event.DRAFT_ATTACHMENTS_LOAD_FAILED, {
+            error: error instanceof Error ? error.message : String(error),
+            channelId,
+            conversationId,
+          });
         }
       };
 
@@ -246,6 +258,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           await providerAddDroppedFiles(files, channelId, conversationId);
         } catch (error) {
           console.error('Failed to upload file:', error);
+          logger.error(Event.ATTACHMENT_UPLOAD_FAILED, {
+            error: error instanceof Error ? error.message : String(error),
+            channelId,
+            conversationId,
+          });
           toast.error('Failed to upload file', {
             description: error instanceof Error ? error.message : 'Unknown error',
           });
@@ -261,6 +278,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         const availableSlots = maxFiles - allAttachments.length;
 
         if (availableSlots <= 0) {
+          logger.warn(Event.ATTACHMENT_LIMIT_REACHED, {
+            maxFiles,
+            currentCount: allAttachments.length,
+            attemptedCount: filesArray.length,
+          });
           toast.error('Cannot add more files', {
             description: `Maximum ${maxFiles} files allowed`,
           });
@@ -295,6 +317,26 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
         // Add valid files with upload logic
         await addDraftAttachments(validFiles);
+
+        // Log file selection with metadata
+        if (filesArray.length > 0) {
+          logger.info(Event.ATTACHMENT_FILES_SELECTED, {
+            fileCount: filesArray.length,
+            validCount: validFiles.length,
+            rejectedCount: rejectedFiles.length,
+            extensions: filesArray.map(f => getFileExtension(f.name)),
+            fileTypes: filesArray.map(f => f.type || 'unknown'),
+            totalSizeBytes: filesArray.reduce((sum, f) => sum + f.size, 0),
+          });
+        }
+
+        // Log each rejected file
+        rejectedFiles.forEach(({ name, reason }) => {
+          logger.warn(Event.ATTACHMENT_VALIDATION_FAILED, {
+            extension: getFileExtension(name),
+            reason,
+          });
+        });
 
         // Show error for rejected files
         if (rejectedFiles.length > 0) {
@@ -554,6 +596,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
           if (files.length > 0) {
+            logger.info(Event.ATTACHMENT_PASTE_DETECTED, {
+              fileCount: files.length,
+              fileTypes: Array.from(files).map(f => f.type || 'unknown'),
+              extensions: Array.from(files).map(f => getFileExtension(f.name)),
+            });
             void addFilesWithLimit(files);
           }
 
@@ -679,6 +726,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
 
             const file = new File([blobContent], fileName, { type: fileType });
+            logger.info(Event.ATTACHMENT_LARGE_TEXT_CONVERTED, {
+              charCount: pastedText.length,
+              convertedExtension: getFileExtension(fileName),
+            });
             void addDraftAttachments([file]);
             editor?.commands.setContent('');
             setContent('');
@@ -810,7 +861,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         // Open canvas editor in new tab for editing
         const canvasUrl = `/chat/canvas/${newCanvasId}`;
         window.open(canvasUrl, '_blank');
-      } catch {
+      } catch (error) {
+        logger.error(Event.CANVAS_CREATE_FAILED, {
+          canvasId: newCanvasId,
+          channelId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         toast.error('Failed to create canvas', {
           description: 'Please try again.',
         });
