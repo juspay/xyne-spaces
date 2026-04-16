@@ -382,14 +382,17 @@ export const MessageItem = React.memo(
       void navigate(`/chat/canvas/${canvasViewAccessId}`);
     };
 
-    // Display streaming content directly without character reveal slicing
-    const displayContent = useMemo(
-      () =>
+    // Display streaming content directly without character reveal slicing.
+    // Append a trailing newline during streaming so remark-breaks flushes the
+    // current incomplete line and markdown constructs (headings, lists, code
+    // blocks) render correctly before the closing token arrives.
+    const displayContent = useMemo(() => {
+      const raw =
         message.type === 'bot' && message.isStreaming && message.streamingContent
           ? message.streamingContent
-          : message.content || message.streamingContent || '',
-      [message.type, message.isStreaming, message.streamingContent, message.content],
-    );
+          : message.content || message.streamingContent || '';
+      return message.isStreaming ? raw + '\n' : raw;
+    }, [message.type, message.isStreaming, message.streamingContent, message.content]);
 
     const parsedContent = message.parsedContent;
     const hasKeypoints = parsedContent && parsedContent.keypoints.length > 0;
@@ -779,14 +782,26 @@ const MessageContent = ({
 
       {/* Genius: Summary text */}
       {(!message.agentType || message.agentType === 'genius') && displayContent && (
-        <div className="text-sm font-['Inter'] leading-6 font-normal">
+        <div className="bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal">
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
               ...markdownComponents,
               p: ({ children }) => {
                 const processed = processNodeForUserTags(children, message.userTags);
-                return <span>{processed}</span>;
+                return <p className='mb-2 last:mb-0'>{processed}</p>;
+              },
+              li: ({ children, ...props }) => {
+                const processed = processNodeForUserTags(children, message.userTags);
+                return <li {...props}>{processed}</li>;
+              },
+              td: ({ children, ...props }) => {
+                const processed = processNodeForUserTags(children, message.userTags);
+                return <td {...props}>{processed}</td>;
+              },
+              th: ({ children, ...props }) => {
+                const processed = processNodeForUserTags(children, message.userTags);
+                return <th {...props}>{processed}</th>;
               },
               a: ({ href, children, ...props }) => {
                 // Check if URL is external
@@ -971,19 +986,39 @@ const SummarizerContent = ({
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
 
+  // Same trailing-newline fix as displayContent: flush the current incomplete
+  // line so remark-breaks renders line breaks / code blocks correctly mid-stream.
+  const summaryContent = message.summarizerOutput?.summary
+    ? message.isStreaming
+      ? message.summarizerOutput.summary + '\n'
+      : message.summarizerOutput.summary
+    : '';
+
   return (
     <>
       {/* Summary */}
-      {message.summarizerOutput?.summary && (
+      {summaryContent && (
         <div className='relative'>
-          <div className="text-sm font-['Inter'] leading-6 font-normal">
+          <div className="bot-markdown-content xyne-ai-markdown text-sm font-['Inter'] leading-6 font-normal">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkBreaks]}
               components={{
                 ...markdownComponents,
                 p: ({ children }) => {
                   const processed = processNodeForUserTags(children, message.userTags);
-                  return <span>{processed}</span>;
+                  return <p className='mb-2 last:mb-0'>{processed}</p>;
+                },
+                li: ({ children, ...props }) => {
+                  const processed = processNodeForUserTags(children, message.userTags);
+                  return <li {...props}>{processed}</li>;
+                },
+                td: ({ children, ...props }) => {
+                  const processed = processNodeForUserTags(children, message.userTags);
+                  return <td {...props}>{processed}</td>;
+                },
+                th: ({ children, ...props }) => {
+                  const processed = processNodeForUserTags(children, message.userTags);
+                  return <th {...props}>{processed}</th>;
                 },
                 a: ({ href, children, ...props }) => {
                   // Check if URL is external
@@ -1033,7 +1068,7 @@ const SummarizerContent = ({
                 },
               }}
             >
-              {message.summarizerOutput.summary}
+              {summaryContent}
             </ReactMarkdown>
           </div>
           {message.isStreaming && <span className='animate-pulse ml-1'>▋</span>}

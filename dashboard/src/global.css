@@ -1592,6 +1592,29 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   font-size: 14px !important;
 }
 
+/* ── XyneAI sidebar overrides — black text, blue links ── */
+.xyne-ai-markdown *:not(a):not(.mention-text):not(.mention-text *) {
+  color: hsl(var(--foreground)) !important;
+}
+
+/* Override bot-markdown-content grey text when inside xyne-ai-markdown */
+.bot-markdown-content.xyne-ai-markdown p,
+.bot-markdown-content.xyne-ai-markdown ol,
+.bot-markdown-content.xyne-ai-markdown ol li,
+.bot-markdown-content.xyne-ai-markdown ul,
+.bot-markdown-content.xyne-ai-markdown ul li {
+  color: hsl(var(--foreground)) !important;
+}
+
+.xyne-ai-markdown a {
+  color: var(--link-color) !important;
+  text-decoration: underline !important;
+}
+
+.xyne-ai-markdown a:hover {
+  color: var(--link-hover-color) !important;
+}
+
 .bot-markdown-content table {
   width: 100%;
   border-collapse: collapse;
