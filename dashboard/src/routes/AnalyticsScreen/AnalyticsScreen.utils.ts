@@ -202,14 +202,14 @@ export const processCurrentActiveUsersData = (
     const status = item.userStatus || 'Unknown';
     chartData[status] = {
       primary: {
-        label: status,
+        label: `Currently ${status.toLowerCase()} users`,
         val: item.userCount || 0,
       },
     };
   });
 
   return {
-    chartData: [{ name: 'Currently Online Users', data: chartData }],
+    chartData: [{ name: '', data: chartData }],
     hasError: false,
     errorMessage: '',
   };
