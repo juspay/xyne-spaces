@@ -85,6 +85,20 @@ const getHostnameSafely = (url: string): string | null => {
 };
 
 /**
+ * Detect if URL is a Bitbucket link (Bitbucket Server).
+ * Bitbucket links should never show OG images to avoid login page screenshots.
+ */
+const isBitbucketUrl = (url: string): boolean => {
+  try {
+    const urlObj = new URL(url);
+    // Check if hostname contains 'bitbucket' (handles bitbucket.juspay.net, bitbucket.org, etc.)
+    return urlObj.hostname.toLowerCase().includes('bitbucket');
+  } catch {
+    return false;
+  }
+};
+
+/**
  * LinkPreview Component
  *
  * Displays a clean preview card for URLs with:
@@ -150,20 +164,20 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
 
   return (
     <div
-      className='link-preview relative flex flex-col gap-1 w-full max-w-[460px] rounded-2xl border border-border overflow-hidden bg-card py-2 pr-8 pl-3'
+      className='link-preview relative flex flex-col gap-0.5 w-full max-w-[380px] rounded-lg border border-border overflow-hidden bg-card py-1.5 pr-6 pl-2'
       aria-label={`Link preview: ${displayTitle}`}
     >
       {onClose && (
         <button
           type='button'
-          className='link-preview__close-button absolute top-2 right-2 z-10 p-1 rounded-full bg-muted hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
+          className='link-preview__close-button absolute top-1 right-1 z-10 p-0.5 rounded-full bg-muted hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
           onClick={handleClose}
           aria-label='Close link preview'
           data-track-category='MESSAGE'
           data-track-name='CLOSE_LINK_PREVIEW'
           data-track-metadata={JSON.stringify({ url })}
         >
-          <X size={14} className='text-muted-foreground' />
+          <X size={12} className='text-muted-foreground' />
         </button>
       )}
 
@@ -172,9 +186,9 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
         href={url}
         target='_blank'
         rel='noopener noreferrer'
-        className='flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground hover:underline min-w-0 w-fit'
+        className='flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline min-w-0 w-fit'
       >
-        <span className='flex-shrink-0 w-5 h-5 rounded overflow-hidden flex items-center justify-center'>
+        <span className='flex-shrink-0 w-3.5 h-3.5 rounded overflow-hidden flex items-center justify-center'>
           {faviconUrl ? (
             <img
               src={faviconUrl}
@@ -189,7 +203,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
             />
           ) : null}
           <ExternalLink
-            size={14}
+            size={10}
             className='text-muted-foreground'
             style={{ display: faviconUrl ? 'none' : 'block' }}
           />
@@ -216,7 +230,8 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
       )}
 
       {/* Line 4: OG image if present */}
-      {image && !imageError && (
+      {/* Skip images for Bitbucket URLs to avoid showing login page screenshots */}
+      {image && !imageError && !isBitbucketUrl(url) && (
         // Fixed 2:1 aspect ratio (OG image standard is 1200×630 ≈ 2:1).
         // Skeleton and image share the same box — no layout shift or flicker.
         <div className='relative w-full mt-1 rounded-xl overflow-hidden aspect-[2/1]'>

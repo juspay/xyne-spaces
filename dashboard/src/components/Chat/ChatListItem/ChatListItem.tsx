@@ -55,11 +55,11 @@ const ChatListItemComponent = ({
       </div>
     );
   }
-
   // Now we know it's a conversation - get initial message from denormalized data
   const initialMsg = conversation
     ? getInitialMessageFromConversation(conversation, user?.id)
     : null;
+
   // Attach attachments and nudgeCounts from the conversation's denormalized relations
   const convAny = conversation as {
     initialMessageAttachments?: readonly { id: string }[];
