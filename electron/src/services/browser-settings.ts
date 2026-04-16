@@ -1,12 +1,10 @@
 import Store from 'electron-store';
 
 export interface BrowserSettings {
-  javascript: boolean;
   popups: boolean;
 }
 
 const defaultSettings: BrowserSettings = {
-  javascript: true,
   popups: true,
 };
 
