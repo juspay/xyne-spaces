@@ -189,15 +189,17 @@ export const updateTicketThreadFields = async (conversationId: string): Promise<
   if (messages.length === 0) {
     // All messages deleted - clear thread fields
     await vespaClient.crudService.update(
-      ticket.id,
-      {
-        docType: VespaDocType.TICKET,
+      [{
         docId: ticket.id,
-        threadMentions: [],
-        threadSenders: [],
-        initialMessage: '',
-        initialMessageSender: ''
-      },
+        fields: {
+          docType: VespaDocType.TICKET,
+          docId: ticket.id,
+          threadMentions: [],
+          threadSenders: [],
+          initialMessage: '',
+          initialMessageSender: ''
+        },
+      }],
       ticketSchema
     );
     return;
@@ -217,15 +219,17 @@ export const updateTicketThreadFields = async (conversationId: string): Promise<
 
   // Update ticket in Vespa
   await vespaClient.crudService.update(
-    ticket.id,
-    {
-      docType: VespaDocType.TICKET,
+    [{
       docId: ticket.id,
-      threadMentions,
-      threadSenders,
-      initialMessage,
-      initialMessageSender: initialSender?.name || ''
-    },
+      fields: {
+        docType: VespaDocType.TICKET,
+        docId: ticket.id,
+        threadMentions,
+        threadSenders,
+        initialMessage,
+        initialMessageSender: initialSender?.name || ''
+      },
+    }],
     ticketSchema
   );
 };
@@ -319,19 +323,20 @@ export const updateChannelNameInPreviousMessages = async (
 
         if (messages.length === 0) break;
 
-        await Promise.all(
-          messages.map((message) =>
-            vespaClient.crudService.update(
-              message.messageId,
-              {
-                docType: VespaDocType.MESSAGE,
-                docId: message.messageId,
-                messageChannelName: channelName || '',
-              },
-              messageSchema,
-            )
-          )
-        );
+        const updates = messages.map((message) => ({
+          docId: message.messageId,
+          fields: {
+            docType: VespaDocType.MESSAGE,
+            docId: message.messageId,
+            messageChannelName: channelName || '',
+          },
+        }));
+
+        const results = await vespaClient.crudService.update(updates, messageSchema);
+        const failed = results.filter(r => !r.success);
+        if (failed.length > 0) {
+          logger.error(`[CHANNEL NAME UPDATE] ${failed.length}/${results.length} updates failed for channelId: ${id}`);
+        }
 
         lastMessageId = messages[messages.length - 1].messageId;
       }
@@ -349,22 +354,24 @@ export const mapAndUpdatePreviousMessagesMentions = async (
   const { messages, threadMentions, threadSenders } = await getThreadInfo(conversationId);
 
   const filteredMessages = messages.filter(m => m.messageId !== messageId);
-  logger.info(`[MESSAGE THREAD MENTIONS UPDATE] Updating messages for conversationId: ${conversationId}`);
+  logger.info(`[MESSAGE THREAD MENTIONS UPDATE] Updating ${filteredMessages.length} messages for conversationId: ${conversationId}`);
 
-  await Promise.all(
-    filteredMessages.map(message =>
-      vespaClient.crudService.update(
-        message.messageId,
-        {
-          docType: VespaDocType.MESSAGE,
-          docId: message.messageId,
-          threadMentions,
-          threadSenders,
-        },
-        messageSchema,
-      )
-    )
-  );
+  const updates = filteredMessages.map(message => ({
+    docId: message.messageId,
+    fields: {
+      docType: VespaDocType.MESSAGE,
+      docId: message.messageId,
+      threadMentions,
+      threadSenders,
+    },
+  }));
+
+  const results = await vespaClient.crudService.update(updates, messageSchema);
+  const failed = results.filter(r => !r.success);
+  if (failed.length > 0) {
+    logger.error(`[MESSAGE THREAD MENTIONS UPDATE] ${failed.length}/${results.length} updates failed for conversationId: ${conversationId}`);
+  }
+
   return { threadMentions, threadSenders };
 };
 

@@ -231,7 +231,10 @@ export class VespaWorker {
 		data: InsertDocument,
 	): Promise<void> {
 		logger.info(`[Vespa-Worker]: queue ${schema} insert ${schema}/${data.docId}`);
-		await vespaClient.crudService.insert(data, schema);
+		const [result] = await vespaClient.crudService.insert([data], schema);
+		if (!result.success) {
+			throw new Error(`Failed to insert ${data.docId}: ${result.error}`);
+		}
 	}
 
 	private async handleUpdate(
@@ -240,7 +243,10 @@ export class VespaWorker {
 		data: Partial<InsertDocument>,
 	): Promise<void> {
 		logger.info(`[Vespa-Worker]: queue ${schema} update ${schema}/${docId}`);
-		await vespaClient.crudService.update(docId, data, schema);
+		const [result] = await vespaClient.crudService.update([{ docId, fields: data }], schema);
+		if (!result.success) {
+			throw new Error(`Failed to update ${docId}: ${result.error}`);
+		}
 	}
 
 	private async handleDelete(schema: VespaSchema, docId: string): Promise<void> {
@@ -293,6 +299,7 @@ export class VespaWorker {
 		if (this.queue) {
 			await this.queue.close();
 		}
+		await vespaClient.crudService.close();
 		logger.info('[VESPA_WORKER] ✓ VespaWorker shut down');
 	}
 }

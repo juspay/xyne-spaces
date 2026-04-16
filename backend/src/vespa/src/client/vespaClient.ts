@@ -1,4 +1,6 @@
 import { type ILogger } from '@xyne/vespa-ts';
+import { Agent } from 'undici';
+import pLimit from 'p-limit';
 import { consoleLogger, getErrorMessage } from '../utils';
 import { cleanDocumentFields } from '../../../utils/vespaTextValidation';
 import type { InsertDocument, VespaSchema } from '../types';
@@ -10,12 +12,21 @@ type VespaConfigValues = {
   userId?: string;
 };
 
+export interface BatchResult {
+  docId: string;
+  success: boolean;
+  error?: string;
+}
+
 class VespaClient {
   private maxRetries: number;
   private retryDelay: number;
   private feedEndpoint: string;
   private queryEndpoint: string;
   private logger: ILogger;
+  private feedDispatcher: Agent;
+  private queryDispatcher: Agent;
+  private concurrencyLimit: ReturnType<typeof pLimit>;
 
   constructor(
     logger?: ILogger,
@@ -25,6 +36,8 @@ class VespaClient {
       vespaBaseHost?: string;
       feedEndpoint?: string;
       queryEndpoint?: string;
+      maxConnections?: number;
+      maxConcurrentRequests?: number;
     },
   ) {
     this.logger = logger || consoleLogger;
@@ -35,6 +48,20 @@ class VespaClient {
 
     this.feedEndpoint = config?.feedEndpoint || `http://${baseHost}:8080`;
     this.queryEndpoint = config?.queryEndpoint || `http://${baseHost}:8081`;
+
+    const maxConnections = config?.maxConnections || 16;
+    const agentOptions = {
+      keepAliveTimeout: 30_000,
+      keepAliveMaxTimeout: 60_000,
+      pipelining: 1,
+      connections: maxConnections,
+    };
+    this.feedDispatcher = new Agent(agentOptions);
+    this.queryDispatcher = new Agent(agentOptions);
+
+    this.concurrencyLimit = pLimit(config?.maxConcurrentRequests || 10);
+
+    this.logger.info(`[VESPA CLIENT] Initialized - feedEndpoint: ${this.feedEndpoint}, queryEndpoint: ${this.queryEndpoint}, maxConnections: ${maxConnections}, maxConcurrentRequests: ${config?.maxConcurrentRequests || 10}`);
   }
 
   private async delay(ms: number): Promise<void> {
@@ -47,8 +74,11 @@ class VespaClient {
     retryCount = 0,
   ): Promise<Response> {
     const nonRetryableStatusCodes = [404];
+    const dispatcher = url.startsWith(this.queryEndpoint)
+      ? this.queryDispatcher
+      : this.feedDispatcher;
     try {
-      const response = await fetch(url, options);
+      const response = await fetch(url, { ...options, dispatcher } as any);
       if (!response.ok) {
         // Don't need to retry for non-retryable status codes
         if (nonRetryableStatusCodes.includes(response.status)) {
@@ -249,6 +279,69 @@ class VespaClient {
     }
   }
 
+  async feedBatch(
+    documents: InsertDocument[],
+    options: VespaConfigValues,
+  ): Promise<BatchResult[]> {
+    this.logger.info(`[BATCH FEED] Starting batch insert of ${documents.length} documents with concurrency limit`);
+    const startTime = Date.now();
+
+    const results = await Promise.allSettled(
+      documents.map((doc) =>
+        this.concurrencyLimit(() => this.insert(doc, options)),
+      ),
+    );
+
+    const duration = Date.now() - startTime;
+    const successCount = results.filter(r => r.status === 'fulfilled').length;
+    this.logger.info(`[BATCH FEED] Completed ${successCount}/${documents.length} documents in ${duration}ms`);
+
+    return results.map((result, index) => {
+      const docId = documents[index].docId;
+      if (result.status === 'fulfilled') {
+        return { docId, success: true };
+      }
+      this.logger.error(`Batch feed failed for ${docId}: ${result.reason}`);
+      return { docId, success: false, error: getErrorMessage(result.reason) };
+    });
+  }
+
+  async updateBatch(
+    updates: { docId: string; fields: Record<string, any> }[],
+    options: VespaConfigValues,
+  ): Promise<BatchResult[]> {
+    this.logger.info(`[BATCH UPDATE] Starting batch update of ${updates.length} documents with concurrency limit`);
+    const startTime = Date.now();
+
+    const results = await Promise.allSettled(
+      updates.map((update) =>
+        this.concurrencyLimit(() =>
+          this.updateDocument(update.fields, { ...options, docId: update.docId }),
+        ),
+      ),
+    );
+
+    const duration = Date.now() - startTime;
+    const successCount = results.filter(r => r.status === 'fulfilled').length;
+    this.logger.info(`[BATCH UPDATE] Completed ${successCount}/${updates.length} documents in ${duration}ms`);
+
+    return results.map((result, index) => {
+      const docId = updates[index].docId;
+      if (result.status === 'fulfilled') {
+        return { docId, success: true };
+      }
+      this.logger.error(`Batch update failed for ${docId}: ${result.reason}`);
+      return { docId, success: false, error: getErrorMessage(result.reason) };
+    });
+  }
+
+  async close(): Promise<void> {
+    await Promise.all([
+      this.feedDispatcher.close(),
+      this.queryDispatcher.close(),
+    ]);
+    this.logger.info('VespaClient connections closed');
+  }
 }
 
 export default VespaClient;

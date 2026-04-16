@@ -381,7 +381,7 @@ export class PersonalizationSyncWorker {
         };
 
         // Cast to any since personalization fields may not be in base type yet
-        await vespaService.crudService.update(userId, updateFields as any, userSchema);
+        await vespaService.crudService.update([{ docId: userId, fields: updateFields as any }], userSchema);
     }
 
     /**
