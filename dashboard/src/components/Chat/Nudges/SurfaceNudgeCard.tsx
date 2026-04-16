@@ -320,20 +320,20 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
   return (
     <div
       className={cn(
-        'w-full max-w-[520px] rounded-xl border border-gray-200 bg-white p-3',
+        'w-full max-w-[520px] rounded-xl border border-border bg-card p-3',
         'text-[13px]',
       )}
     >
       {/* Header row */}
       {isCreateTicket ? (
         <div className='flex items-center gap-0.5'>
-          <span className='text-xs font-[450] text-[#788187]'>
+          <span className='text-xs font-[450] text-muted-foreground'>
             {getNudgeKindLabel(nudge.nudgeKind)}
           </span>
           {createTicketCount > 0 && (
             <>
-              <ChevronRight className='h-[13px] w-[13px] text-[#788187]' strokeWidth={1.8} />
-              <div className='flex items-center gap-1 text-[#788187]'>
+              <ChevronRight className='h-[13px] w-[13px] text-muted-foreground' strokeWidth={1.8} />
+              <div className='flex items-center gap-1 text-muted-foreground'>
                 <SubTicketCountIcon className='h-3.5 w-3.5' />
                 <span className='text-xs font-[450]'>{createTicketCount}</span>
               </div>
@@ -342,14 +342,14 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
         </div>
       ) : (
         <div className='flex items-center'>
-          <span className='text-xs font-[450] text-gray-500'>
+          <span className='text-xs font-[450] text-muted-foreground'>
             {getNudgeKindLabel(nudge.nudgeKind)}
           </span>
         </div>
       )}
 
       {/* Title */}
-      <div className='mt-2 text-sm font-medium leading-[18px] text-gray-900 line-clamp-2'>
+      <div className='mt-2 text-sm font-medium leading-[18px] text-foreground line-clamp-2'>
         {nudge.title}
       </div>
 
@@ -357,9 +357,9 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
       {isCreateTicket && (
         <div className='mt-3 flex items-center justify-between gap-3'>
           <div className='flex min-w-0 items-center gap-2'>
-            <span className='inline-flex h-6 items-center gap-[6px] rounded-[6px] border border-[#f2f2f3] bg-[#fafafa] px-2 py-1'>
+            <span className='inline-flex h-6 items-center gap-[6px] rounded-[6px] border border-border bg-muted px-2 py-1'>
               <span className='inline-flex items-center'>{getPriorityIcon(initialPriority)}</span>
-              <span className='text-[13px] font-medium capitalize leading-[22px] text-[#505b62]'>
+              <span className='text-[13px] font-medium capitalize leading-[22px] text-muted-foreground'>
                 {priorityLabel}
               </span>
             </span>
@@ -371,7 +371,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               variant='outline'
               disabled={isActing}
               onClick={handleReview}
-              className='h-8 rounded-[8px] border-[#e4e6e7] px-[10px] text-sm text-[#787878] hover:bg-gray-50'
+              className='h-8 rounded-[8px] border-border px-[10px] text-sm text-muted-foreground hover:bg-muted/50'
             >
               <Eye className='h-4 w-4' />
               Review
@@ -391,7 +391,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               variant='outline'
               disabled={isActing}
               onClick={handleOpenRelatedTicket}
-              className='h-8 rounded-lg border-gray-300 px-3 text-sm text-gray-900'
+              className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
             >
               Open ticket
             </Button>
@@ -408,7 +408,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               variant='outline'
               disabled={isActing}
               onClick={handleOpenRelatedMessage}
-              className='h-8 rounded-lg border-gray-300 px-3 text-sm text-gray-900'
+              className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
             >
               View message
             </Button>
@@ -429,7 +429,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
             variant='ghost'
             disabled={isActing}
             onClick={handleDismiss}
-            className='text-gray-500'
+            className='text-muted-foreground'
           >
             Dismiss
           </Button>
@@ -438,8 +438,10 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
 
       {/* Evidence quote */}
       {evidenceText && (
-        <div className='mt-3 rounded-tr-lg rounded-br-lg border-l-2 border-gray-400 bg-gray-50 px-2 py-1.5'>
-          <p className='text-sm italic text-gray-500 line-clamp-3'>&ldquo;{evidenceText}&rdquo;</p>
+        <div className='mt-3 rounded-tr-lg rounded-br-lg border-l-2 border-border bg-muted/50 px-2 py-1.5'>
+          <p className='text-sm italic text-muted-foreground line-clamp-3'>
+            &ldquo;{evidenceText}&rdquo;
+          </p>
         </div>
       )}
 

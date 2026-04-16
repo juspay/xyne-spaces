@@ -447,7 +447,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                   {showEditAction && onDeleteMessage && (
                     <DropdownMenuItem
                       onClick={onDeleteMessage}
-                      className='text-red-600 focus:text-red-600'
+                      className='text-destructive focus:text-destructive'
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
                       data-track-name='DELETE_MESSAGE'
                       data-track-metadata={JSON.stringify({ messageId })}

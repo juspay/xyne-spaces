@@ -1415,7 +1415,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           {subTickets.length > 0 && (
             <div className='mt-2 rounded-md border border-border bg-muted p-3'>
               <div className='mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground'>
-                <SubTicketCountIcon className='shrink-0 text-black' />
+                <SubTicketCountIcon className='shrink-0 text-foreground' />
                 <span>{subTickets.length} Sub-tickets</span>
               </div>
               <div className='space-y-2'>

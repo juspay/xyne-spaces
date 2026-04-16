@@ -102,7 +102,7 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
       <div className='flex justify-between items-center gap-2 min-w-0'>
         <div className='flex items-center gap-2 min-w-0 flex-1'>
           {workflowNumber !== undefined && (
-            <span className='inline-flex items-center justify-center flex-shrink-0 min-w-[28px] h-6 px-2 bg-blue-100 text-blue-700 text-xs font-bold rounded-full border border-blue-200'>
+            <span className='inline-flex items-center justify-center flex-shrink-0 min-w-[28px] h-6 px-2 bg-muted text-primary text-xs font-bold rounded-full border border-border'>
               #{workflowNumber}
             </span>
           )}
@@ -121,7 +121,7 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
               data-track-name='COPY_WORKFLOW_NAME'
               data-track-metadata={JSON.stringify({ workflowName, ticketId })}
             >
-              <Copy size={12} color='#788187' />
+              <Copy size={12} className='text-muted-foreground' />
             </button>
           )}
         </div>
@@ -159,7 +159,7 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
                 : `/tickets/${ticketId}/workflow${workflowNumberParam}`;
               void navigate(workflowUrl);
             }}
-            color='#788187'
+            className='text-muted-foreground'
             size={14}
             data-track-category='WORKFLOW_BUBBLE'
             data-track-name='OPEN_WORKFLOW_DETAILS'
@@ -168,15 +168,16 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
         </div>
       </div>
       <div className='flex flex-wrap items-center gap-2'>
-        <span className='text-[#788187] font-medium text-[13px]'>
+        <span className='text-muted-foreground font-medium text-[13px]'>
           {getExecutionTimeDisplay(displayMetadataForTime, new Date(createdAt))}
         </span>
         <span
           className={cn(
             'text-xs font-medium px-2 py-0.5 rounded-full',
-            displayStatus === 'SUCCESS' && 'bg-green-100 text-green-700',
-            displayStatus === 'FAILURE' && 'bg-red-100 text-red-700',
-            displayStatus === 'PENDING' && 'bg-gray-100 text-gray-600',
+            displayStatus === 'SUCCESS' &&
+              'bg-stage-completed border border-stage-completed-border text-status-success',
+            displayStatus === 'FAILURE' && 'bg-destructive/10 text-destructive',
+            displayStatus === 'PENDING' && 'bg-muted text-muted-foreground',
           )}
         >
           {displayStatus}
@@ -201,8 +202,7 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
               </span>
               <Copy
                 size={12}
-                color='#6B7280'
-                className='cursor-pointer'
+                className='cursor-pointer text-muted-foreground'
                 onClick={() => {
                   if (metadata.gitInfo?.branch) {
                     void navigator.clipboard.writeText(metadata.gitInfo.branch);
@@ -247,13 +247,13 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
                     )}
                   >
                     {step.status === 'FAILED' ? (
-                      <X size={14} className='text-red-600 flex-shrink-0' />
+                      <X size={14} className='text-destructive flex-shrink-0' />
                     ) : step.status === 'COMPLETED' ? (
-                      <CircleCheck size={14} className='text-green-600 flex-shrink-0' />
+                      <CircleCheck size={14} className='text-status-success flex-shrink-0' />
                     ) : (
-                      <span className='text-gray-700 flex-shrink-0' />
+                      <span className='text-foreground flex-shrink-0' />
                     )}
-                    <span className='text-sm font-medium text-gray-700'>
+                    <span className='text-sm font-medium text-foreground'>
                       {formatStepName(step.stepName)}
                       {step.status === 'FAILED' && ' Failed'}
                       {step.status === 'COMPLETED' && ' Completed'}
@@ -276,11 +276,11 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
                     )}
                   >
                     {step.status === 'FAILED' ? (
-                      <X size={14} className='text-red-600 flex-shrink-0' />
+                      <X size={14} className='text-destructive flex-shrink-0' />
                     ) : (
-                      <span className='text-gray-700 flex-shrink-0' />
+                      <span className='text-foreground flex-shrink-0' />
                     )}
-                    <span className='text-sm font-medium text-gray-700'>
+                    <span className='text-sm font-medium text-foreground'>
                       {formatStepName(step.stepName)}{' '}
                       {step.status === 'FAILED'
                         ? 'Failed'
@@ -296,7 +296,7 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
 
           {!showAllSteps && hasMoreSteps && (
             <button
-              className='text-xs font-semibold cursor-pointer text-gray-600 hover:text-gray-900 underline py-1'
+              className='text-xs font-semibold cursor-pointer text-muted-foreground hover:text-foreground underline py-1'
               onClick={() => setShowAllSteps(true)}
               data-track-category='WORKFLOW_BUBBLE'
               data-track-name='READ_MORE_STEPS'
@@ -306,7 +306,7 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
           )}
           {showAllSteps && (
             <button
-              className='text-xs font-semibold cursor-pointer text-gray-600 hover:text-gray-900 underline py-1'
+              className='text-xs font-semibold cursor-pointer text-muted-foreground hover:text-foreground underline py-1'
               onClick={() => setShowAllSteps(false)}
               data-track-category='WORKFLOW_BUBBLE'
               data-track-name='VIEW_LESS_STEPS'
@@ -317,11 +317,9 @@ export const WorkflowBubble: React.FC<WorkflowBubbleProps> = ({
         </div>
       )}
       {metadata?.createdBy && (
-        <div className='flex items-center gap-2 text-xs text-gray-500 border-t border-gray-100 pt-2 mt-1'>
+        <div className='flex items-center gap-2 text-xs text-muted-foreground border-t border-border pt-2 mt-1'>
           <span className='font-medium'>Ran by:</span>
-          <span className='bg-gray-100 px-2 py-0.5 rounded text-gray-700'>
-            {metadata.createdBy}
-          </span>
+          <span className='bg-muted px-2 py-0.5 rounded text-foreground'>{metadata.createdBy}</span>
         </div>
       )}
     </div>

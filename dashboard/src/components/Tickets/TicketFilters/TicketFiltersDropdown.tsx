@@ -915,18 +915,18 @@ export const TicketFiltersDropdown = ({
             <Popover.Trigger asChild>
               <Button
                 variant='outline'
-                className='bg-[#FAFAFA] border border-[#E8E8E8] rounded-[10px] h-8'
+                className='bg-background border border-border rounded-[10px] h-8'
                 data-track-category='Tickets'
                 data-track-name='OpenSaveViewPopover'
               >
-                <span className='text-[#202020]'>Save view</span>
+                <span className='text-foreground'>Save view</span>
               </Button>
             </Popover.Trigger>
             <Popover.Content
               side='bottom'
               align='end'
               sideOffset={6}
-              className='z-[60] w-72 bg-white border border-gray-200 rounded-xl shadow-lg p-4 flex flex-col gap-4'
+              className='z-[60] w-72 bg-popover border border-border rounded-xl shadow-lg p-4 flex flex-col gap-4'
             >
               <input
                 type='text'
@@ -938,7 +938,7 @@ export const TicketFiltersDropdown = ({
                 onKeyDown={e => {
                   if (e.key === 'Enter' && viewName.trim()) handleSaveView();
                 }}
-                className='w-full text-sm border-0 border-b border-gray-200 focus:outline-none focus:border-gray-400 pb-1 placeholder-gray-400'
+                className='w-full text-sm border-0 border-b border-border focus:outline-none focus:border-border pb-1 placeholder-muted-foreground'
               />
               <div className='flex items-center justify-between'>
                 <Switch
@@ -952,7 +952,7 @@ export const TicketFiltersDropdown = ({
                     data-track-category='saved-views'
                     data-track-name='cancel-save-view'
                     onClick={() => setShowSavePopover(false)}
-                    className='text-sm font-medium text-[#202020] px-2 h-8'
+                    className='text-sm font-medium text-foreground px-2 h-8'
                   >
                     Cancel
                   </button>

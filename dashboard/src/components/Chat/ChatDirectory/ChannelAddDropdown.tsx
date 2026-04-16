@@ -20,7 +20,7 @@ const ChannelAddDropdown = ({
       <DropdownMenu.Trigger asChild>
         <button
           type='button'
-          className='text-[#464C53] hover:text-[#1D1E1F] p-1 rounded transition-colors'
+          className='text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground p-1 rounded transition-colors'
         >
           <Plus className='w-4 h-4' />
         </button>

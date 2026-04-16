@@ -63,7 +63,7 @@ export function MobileCallHeader({
   }, [participants]);
 
   return (
-    <div className='md:hidden fixed top-0 left-0 right-0 z-[60] bg-background border-b shadow-sm'>
+    <div className='md:hidden fixed top-0 left-0 right-0 z-[60] bg-background border-b border-border shadow-sm'>
       <div className='flex items-center justify-between px-3 py-2.5'>
         {/* Left: Mic Toggle */}
         <Button
@@ -75,7 +75,7 @@ export function MobileCallHeader({
           size='icon'
           className={cn(
             'flex-shrink-0 hover:bg-muted rounded-full',
-            isMicEnabled ? 'bg-muted' : 'bg-border hover:bg-muted-foreground/50',
+            isMicEnabled ? 'bg-muted' : 'bg-destructive/10 hover:bg-destructive/20',
           )}
           title={isMicEnabled ? 'Mute' : 'Unmute'}
           data-track-category='CALLS'
@@ -85,7 +85,7 @@ export function MobileCallHeader({
           {isMicEnabled ? (
             <Mic size={18} className='text-foreground' />
           ) : (
-            <MicOff size={18} className='text-red-600' />
+            <MicOff size={18} className='text-destructive' />
           )}
         </Button>
 
@@ -111,7 +111,7 @@ export function MobileCallHeader({
           }}
           variant='destructive'
           size='icon'
-          className='flex-shrink-0 bg-red-600 hover:bg-red-700 rounded-full'
+          className='flex-shrink-0 rounded-full'
           title='End call'
           data-track-category='CALLS'
           data-track-name='Mobile_End_Call'

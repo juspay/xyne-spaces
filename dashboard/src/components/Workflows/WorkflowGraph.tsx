@@ -352,14 +352,20 @@ const EnhancedWorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
       const idx = group.findIndex(e => e.id === edge.id);
       const total = group.length;
 
-      let color = '#e5e7eb';
+      // Use CSS variables for theme-aware default colors
+      let color = 'hsl(var(--muted-foreground) / 0.3)';
       let width = 2;
       let type = 'straight';
       const animated = false;
 
       if (total > 1) {
-        const palette = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
-        color = palette[idx % palette.length] || '#6b7280';
+        const palette = [
+          'var(--status-scheduled)',
+          'var(--status-success)',
+          'var(--status-pending)',
+          'var(--status-failure)',
+        ];
+        color = palette[idx % palette.length] || 'var(--status-new)';
         width = 1.5;
         type = 'smoothstep';
       }

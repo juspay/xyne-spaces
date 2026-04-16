@@ -81,9 +81,9 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
         data-track-name='TOGGLE_SUBSCRIPTION_ICON'
       >
         {isSubscribed ? (
-          <Bell className='w-4 h-4 fill-blue-600 stroke-blue-600' />
+          <Bell className='w-4 h-4 fill-sidebar-badge-accent stroke-sidebar-badge-accent' />
         ) : (
-          <BellOff className='w-4 h-4 stroke-current' />
+          <BellOff className='w-4 h-4 text-muted-foreground' />
         )}
       </button>
     );
@@ -99,12 +99,8 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
         data-track-category='CONVERSATION_SUBSCRIPTION'
         data-track-name='TOGGLE_SUBSCRIPTION_DROPDOWN'
       >
-        <span className='w-4 h-4 mr-2 flex items-center justify-center'>
-          {isSubscribed ? (
-            <Bell className='w-4 h-4 fill-blue-600 stroke-blue-600' />
-          ) : (
-            <BellOff className='w-4 h-4 stroke-current' />
-          )}
+        <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
+          {isSubscribed ? <BellOff className='w-4 h-4' /> : <Bell className='w-4 h-4' />}
         </span>
         {isSubscribed ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}
       </button>
@@ -127,7 +123,7 @@ export const ConversationSubscription: React.FC<ConversationSubscriptionProps> =
         </>
       ) : (
         <>
-          <Bell size={16} className='text-blue-600' />
+          <Bell size={16} className='text-sidebar-badge-accent' />
           <span className='text-sm text-muted-foreground'>Subscribe to notifications</span>
         </>
       )}

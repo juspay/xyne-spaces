@@ -1,7 +1,7 @@
 import React from 'react';
 
 export const TicketStatusIcon: React.FC<{ color?: string; size?: number }> = ({
-  color = '#2B7FFF',
+  color = 'var(--status-scheduled)',
   size,
 }) => (
   <svg

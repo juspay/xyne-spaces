@@ -84,14 +84,14 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
 
         return (
           <div key={merchant.id} className='mb-4 ml-4'>
-            <div className='text-xs font-medium text-blue-600 mb-1 flex items-center gap-1'>
+            <div className='text-xs font-medium text-action-primary mb-1 flex items-center gap-1'>
               {merchant.name}
             </div>
 
             {/* Already-sent items for this merchant */}
             {merchantSent.map(item => (
               <div key={item.itemId} className='flex items-start gap-2 py-1.5 opacity-50'>
-                <span className='mt-[5px] text-xs text-green-600'>✓</span>
+                <span className='mt-[5px] text-xs text-status-success'>✓</span>
                 <span className='text-sm text-muted-foreground line-through flex-1'>
                   {item.content}
                 </span>
@@ -135,7 +135,7 @@ export const PulseTickets: React.FC<PulseTicketsProps> = ({
         <div className='pt-1 ml-4'>
           <button
             onClick={startCreation}
-            className='text-sm font-medium text-blue-600 hover:underline bg-transparent border-none p-0 cursor-pointer'
+            className='text-sm font-medium text-action-primary hover:underline bg-transparent border-none p-0 cursor-pointer'
           >
             Create Actionable ({selectedIds.length})
           </button>

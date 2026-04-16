@@ -82,7 +82,7 @@ export const renderPreviewFieldValue = (field: PreviewField): ReactNode => {
         </>
       );
     default:
-      return <span className='text-[14px] text-[#505b62]'>Sample value</span>;
+      return <span className='text-[14px] text-muted-foreground'>Sample value</span>;
   }
 };
 

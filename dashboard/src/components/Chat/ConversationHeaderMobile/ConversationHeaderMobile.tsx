@@ -31,6 +31,7 @@ import { VisibleChannel } from '../../../machines/stateMachine';
 import { useUser } from '../../../hooks/useUsers';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { isStatusExpired } from '../../../utils/statusUtils';
+import { XyneAIStar } from '../../icons/xyne-ai';
 
 interface ConversationHeaderMobileProps {
   channelId: string;
@@ -95,6 +96,9 @@ const ConversationHeaderMobile = ({
       borderRadius: 16,
     },
   };
+  const isStarred = channelUserStatus?.isStarred ?? false;
+  const floatingButtonClass =
+    'border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent';
   return (
     <div className='relative w-full p-2 bg-transparent z-10'>
       <div className='absolute top-0 left-0 right-0 z-0 h-16 bg-gradient-to-b from-background to-transparent touch-none' />
@@ -103,11 +107,10 @@ const ConversationHeaderMobile = ({
           onClick={() => {
             void navigate(baseRoute);
           }}
-          className='flex items-center justify-center  rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
+          className={cn('flex items-center justify-center rounded-full', floatingButtonClass)}
           style={{
             width: ROOT_SIZE,
             height: ROOT_SIZE,
-            // background: 'linear-gradient(135deg, #FFFFFF 0%, #FFFFFF 100%)',
           }}
           data-track-category='CHANNELS_MOBILE_VIEW'
           data-track-name='Back_To_Directory_Mobile'
@@ -136,7 +139,7 @@ const ConversationHeaderMobile = ({
           initial='default'
           animate={isExpanded ? 'expanded' : 'default'}
           onClick={() => setIsExpanded(true)}
-          className={`absolute text-left z-50 overflow-clip border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]`}
+          className='absolute z-50 overflow-clip border border-border bg-background text-left text-foreground shadow-sm'
           transition={{ type: 'spring', bounce: 0.1, duration: 0.4 }}
           data-track-category='CHANNELS_MOBILE_VIEW'
           data-track-name='EXPAND_HEADER_MOBILE'
@@ -183,9 +186,7 @@ const ConversationHeaderMobile = ({
                 onClick={handleStarToggle}
                 className={cn(
                   'w-full border flex items-center justify-center gap-2 rounded-lg py-1.5 px-2 h-[34px] transition-all duration-100',
-                  channelUserStatus?.isStarred
-                    ? 'bg-[#FBEFD9] border-[#FBEFD9]'
-                    : 'bg-background border-border',
+                  isStarred ? 'bg-muted border-border' : 'bg-background border-border',
                 )}
                 data-track-category='CHANNELS_MOBILE_VIEW'
                 data-track-name='TOGGLE_STAR_MOBILE'
@@ -195,12 +196,14 @@ const ConversationHeaderMobile = ({
                 })}
               >
                 <Star
-                  className='size-4'
-                  fill={(channelUserStatus?.isStarred ?? false) ? '#FACC14' : 'none'}
-                  stroke={(channelUserStatus?.isStarred ?? false) ? '#FACC14' : '#3B4145'}
+                  className={cn(
+                    'size-4',
+                    isStarred ? 'text-status-pending' : 'text-muted-foreground',
+                  )}
+                  fill={isStarred ? 'currentColor' : 'none'}
                 />
                 <span className='text-sm font-medium text-foreground'>
-                  {(channelUserStatus?.isStarred ?? false) ? 'Unstar' : 'Star'}
+                  {isStarred ? 'Unstar' : 'Star'}
                 </span>
               </button>
               <button
@@ -219,11 +222,10 @@ const ConversationHeaderMobile = ({
               {channelTabs?.map((tab: ConversationTabListType) => (
                 <button
                   key={tab.label}
-                  className='w-full text-left px-2 h-10 flex items-center justify-start gap-2 rounded-md transition-all duration-100'
-                  style={{
-                    backgroundColor:
-                      activeTab === tab.label.toLowerCase() ? '#F2F2F3' : 'transparent',
-                  }}
+                  className={cn(
+                    'w-full text-left px-2 h-10 flex items-center justify-start gap-2 rounded-md transition-all duration-100',
+                    activeTab === tab.label.toLowerCase() && 'bg-muted',
+                  )}
                   onClick={() => setActiveTab(tab.label.toLowerCase())}
                   data-track-category='CHANNELS_MOBILE_VIEW'
                   data-track-name='SELECT_HEADER_TAB_MOBILE'
@@ -294,7 +296,7 @@ const ConversationHeaderMobile = ({
               })}
               callDisplayName={displayName}
               isMember={!!channelUserStatus}
-              className='rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
+              className={cn('rounded-full', floatingButtonClass)}
               disabled={channel.isArchived}
             />
           </div>
@@ -304,69 +306,15 @@ const ConversationHeaderMobile = ({
             xyneAIActor.send({ type: 'OPEN', channelId: channel.id });
           }}
           style={{ width: ROOT_SIZE, height: ROOT_SIZE }}
-          className='absolute right-0 top-0 rounded-full flex items-center justify-center border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
+          className={cn(
+            'absolute right-0 top-0 flex items-center justify-center rounded-full',
+            floatingButtonClass,
+          )}
           data-track-category='CHANNELS_MOBILE_VIEW'
           data-track-name='OPEN_XYNE_AI_MOBILE'
           data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
-          <svg
-            xmlns='http://www.w3.org/2000/svg'
-            width='17'
-            height='17'
-            viewBox='0 0 17 17'
-            fill='none'
-          >
-            <g filter='url(#filter0_ii_2440_92537)'>
-              <path
-                d='M7.57441 15.8759C7.57287 13.1907 7.18228 11.5734 6.26007 10.5931C5.34838 9.62413 3.73528 9.09014 0.756805 9.09014C0.33862 9.09014 0.000354246 8.75144 0 8.33333C0 7.91493 0.338401 7.57441 0.756805 7.57441C3.73531 7.57441 5.34839 7.04044 6.26007 6.0714C7.18206 5.09108 7.57292 3.47374 7.57441 0.788603C7.57441 0.778162 7.57441 0.767274 7.57441 0.756805C7.57465 0.33857 7.9151 0 8.33333 0C8.75127 0.000354114 9.0899 0.338789 9.09014 0.756805C9.09014 0.767828 9.09014 0.779725 9.09014 0.790723C9.0918 3.47445 9.48295 5.09125 10.4045 6.0714C11.3161 7.04035 12.9298 7.57431 15.9077 7.57441C16.3261 7.57441 16.6667 7.91493 16.6667 8.33333C16.6663 8.75144 16.3259 9.09014 15.9077 9.09014C12.9298 9.09023 11.3161 9.6242 10.4045 10.5931C9.48252 11.5734 9.09167 13.191 9.09014 15.8759C9.09013 15.8865 9.09013 15.8993 9.09014 15.9099C9.08943 16.3275 8.75097 16.6663 8.33333 16.6667C7.91539 16.6667 7.57512 16.3277 7.57441 15.9099C7.57441 15.8993 7.57441 15.8865 7.57441 15.8759Z'
-                fill='white'
-              />
-              <path
-                d='M7.57441 15.8759C7.57287 13.1907 7.18228 11.5734 6.26007 10.5931C5.34838 9.62413 3.73528 9.09014 0.756805 9.09014C0.33862 9.09014 0.000354246 8.75144 0 8.33333C0 7.91493 0.338401 7.57441 0.756805 7.57441C3.73531 7.57441 5.34839 7.04044 6.26007 6.0714C7.18206 5.09108 7.57292 3.47374 7.57441 0.788603C7.57441 0.778162 7.57441 0.767274 7.57441 0.756805C7.57465 0.33857 7.9151 0 8.33333 0C8.75127 0.000354114 9.0899 0.338789 9.09014 0.756805C9.09014 0.767828 9.09014 0.779725 9.09014 0.790723C9.0918 3.47445 9.48295 5.09125 10.4045 6.0714C11.3161 7.04035 12.9298 7.57431 15.9077 7.57441C16.3261 7.57441 16.6667 7.91493 16.6667 8.33333C16.6663 8.75144 16.3259 9.09014 15.9077 9.09014C12.9298 9.09023 11.3161 9.6242 10.4045 10.5931C9.48252 11.5734 9.09167 13.191 9.09014 15.8759C9.09013 15.8865 9.09013 15.8993 9.09014 15.9099C9.08943 16.3275 8.75097 16.6663 8.33333 16.6667C7.91539 16.6667 7.57512 16.3277 7.57441 15.9099C7.57441 15.8993 7.57441 15.8865 7.57441 15.8759Z'
-                fill='#FF4E4F'
-              />
-            </g>
-            <defs>
-              <filter
-                id='filter0_ii_2440_92537'
-                x='0'
-                y='0'
-                width='16.666'
-                height='17.4396'
-                filterUnits='userSpaceOnUse'
-                colorInterpolationFilters='sRGB'
-              >
-                <feFlood floodOpacity='0' result='BackgroundImageFix' />
-                <feBlend mode='normal' in='SourceGraphic' in2='BackgroundImageFix' result='shape' />
-                <feColorMatrix
-                  in='SourceAlpha'
-                  type='matrix'
-                  values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0'
-                  result='hardAlpha'
-                />
-                <feOffset dy='0.386471' />
-                <feGaussianBlur stdDeviation='0.378362' />
-                <feComposite in2='hardAlpha' operator='arithmetic' k2='-1' k3='1' />
-                <feColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0' />
-                <feBlend mode='normal' in2='shape' result='effect1_innerShadow_2440_92537' />
-                <feColorMatrix
-                  in='SourceAlpha'
-                  type='matrix'
-                  values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0'
-                  result='hardAlpha'
-                />
-                <feOffset dy='0.772943' />
-                <feGaussianBlur stdDeviation='1.26121' />
-                <feComposite in2='hardAlpha' operator='arithmetic' k2='-1' k3='1' />
-                <feColorMatrix type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.5 0' />
-                <feBlend
-                  mode='normal'
-                  in2='effect1_innerShadow_2440_92537'
-                  result='effect2_innerShadow_2440_92537'
-                />
-              </filter>
-            </defs>
-          </svg>
+          <XyneAIStar size={17} />
         </button>
       </div>
       <Drawer

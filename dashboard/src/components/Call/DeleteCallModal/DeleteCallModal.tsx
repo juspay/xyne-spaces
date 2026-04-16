@@ -36,8 +36,8 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
         {/* ── Header row ── */}
         <div className='flex items-center justify-between px-5 py-3'>
           <div className='flex items-center gap-1.5'>
-            <div className='w-7 h-7 rounded-full bg-red-100 flex items-center justify-center shrink-0'>
-              <Trash2 className='size-4 text-red-500' />
+            <div className='w-7 h-7 rounded-full bg-destructive/10 flex items-center justify-center shrink-0'>
+              <Trash2 className='size-4 text-destructive' />
             </div>
             <h2 className='text-[15px] font-semibold text-foreground'>Delete Call?</h2>
           </div>
@@ -45,13 +45,13 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
             onClick={onClose}
             data-track-category='calls'
             data-track-name='close-delete-modal'
-            className='w-7 h-7 rounded-lg border border-primary/10 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:border-primary/10 hover:bg-primary/10 transition-colors'
+            className='w-7 h-7 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
           >
             <X className='size-3.5 text-primary' />
           </button>
         </div>
 
-        <div className='h-px bg-primary/10' />
+        <div className='h-px bg-border' />
 
         {/* ── Body ── */}
         <div className='px-5 pt-6 pb-5 flex flex-col gap-4'>
@@ -84,7 +84,7 @@ export const DeleteCallModal: React.FC<DeleteCallModalProps> = ({
               Cancel
             </Button>
             <Button
-              className='h-9 rounded-[8px] px-5 py-2.5 gap-2 bg-[#ED5B61] hover:bg-[#d94f55] text-white border-0'
+              className='h-9 rounded-[8px] px-5 py-2.5 gap-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground border-0'
               onClick={handleConfirm}
             >
               Delete

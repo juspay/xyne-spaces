@@ -130,36 +130,20 @@ const CalendarMonthView = ({
                             >
                               <PopoverPrimitive.Trigger asChild>
                                 <button
-                                  className='relative flex items-center gap-1 text-left w-full px-1 py-0.5 rounded transition-colors cursor-pointer focus:outline-none'
-                                  style={{
-                                    backgroundColor: isEnded
-                                      ? meetingStatus === MeetingStatus.ACCEPTED
-                                        ? '#0077FF1A'
-                                        : 'transparent'
-                                      : meetingStatus === MeetingStatus.ACCEPTED
-                                        ? '#0077FF1A'
-                                        : 'transparent',
-                                  }}
+                                  className={cn(
+                                    'relative flex items-center gap-1 text-left w-full px-1 py-0.5 rounded transition-colors cursor-pointer focus:outline-none',
+                                    meetingStatus === MeetingStatus.ACCEPTED && 'bg-primary/10',
+                                  )}
                                 >
                                   {isMaybe && !isEnded && (
                                     <div className='pointer-events-none absolute inset-0 overflow-hidden'>
-                                      <div
-                                        className='absolute inset-0'
-                                        style={{
-                                          backgroundImage:
-                                            'repeating-linear-gradient(-18deg, rgba(9, 46, 88, 0.55) 0 1px, transparent 1px 4px)',
-                                        }}
-                                      />
+                                      <div className='absolute inset-0 call-stripe-pattern' />
                                     </div>
                                   )}
-                                  <div
-                                    className='w-0.5 h-3.5 rounded-full shrink-0'
-                                    style={{ backgroundColor: '#0077FF' }}
-                                  />
+                                  <div className='w-0.5 h-3.5 rounded-full shrink-0 bg-primary' />
                                   <span
-                                    className='truncate flex-1 min-w-0 leading-tight'
+                                    className='truncate flex-1 min-w-0 leading-tight text-foreground'
                                     style={{
-                                      color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
                                       fontSize: '12px',
                                       lineHeight: '18px',
                                       fontWeight: 500,
@@ -170,9 +154,8 @@ const CalendarMonthView = ({
                                   </span>
                                   {call.startsAt && (
                                     <span
-                                      className='shrink-0 tabular-nums ml-1'
+                                      className='shrink-0 tabular-nums ml-1 text-muted-foreground'
                                       style={{
-                                        color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
                                         fontSize: '10px',
                                         lineHeight: '14px',
                                         opacity: 0.7,
@@ -232,10 +215,7 @@ const CalendarMonthView = ({
                             }}
                           >
                             <PopoverPrimitive.Trigger asChild>
-                              <button
-                                className='text-[11px] font-medium px-1 cursor-pointer hover:underline text-left focus:outline-none'
-                                style={{ color: '#6276BE' }}
-                              >
+                              <button className='text-[11px] font-medium px-1 cursor-pointer hover:underline text-left focus:outline-none text-action-primary'>
                                 +{overflow} more
                               </button>
                             </PopoverPrimitive.Trigger>
@@ -292,26 +272,13 @@ const CalendarMonthView = ({
                                           <button className='relative flex items-center gap-2 w-full px-4 py-2 hover:bg-muted/50 transition-colors text-left focus:outline-none'>
                                             {isMaybe && call.status !== CallStatus.ENDED && (
                                               <div className='pointer-events-none absolute inset-0 overflow-hidden'>
-                                                <div
-                                                  className='absolute inset-0'
-                                                  style={{
-                                                    backgroundImage:
-                                                      'repeating-linear-gradient(-18deg, rgba(9, 46, 88, 0.55) 0 1px, transparent 1px 4px)',
-                                                  }}
-                                                />
+                                                <div className='absolute inset-0 call-stripe-pattern' />
                                               </div>
                                             )}
-                                            <div
-                                              className='w-0.5 h-4 rounded-full shrink-0'
-                                              style={{ backgroundColor: '#0077FF' }}
-                                            />
+                                            <div className='w-0.5 h-4 rounded-full shrink-0 bg-primary' />
                                             <span
-                                              className='flex-1 min-w-0 truncate text-sm font-medium'
+                                              className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'
                                               style={{
-                                                color:
-                                                  call.status === CallStatus.ENDED
-                                                    ? 'hsl(var(--foreground))'
-                                                    : '#092E58',
                                                 textDecorationLine: isDeclined
                                                   ? 'line-through'
                                                   : 'none',
@@ -388,9 +355,10 @@ const CalendarMonthView = ({
                         <span
                           className={cn(
                             'text-xs w-6 h-6 flex items-center justify-center font-medium',
-                            isToday ? 'text-white' : 'text-muted-foreground',
+                            isToday
+                              ? 'bg-action-primary text-action-primary-foreground rounded'
+                              : 'text-muted-foreground',
                           )}
-                          style={isToday ? { backgroundColor: '#6276BE', borderRadius: '4px' } : {}}
                         >
                           {day.getDate()}
                         </span>

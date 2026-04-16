@@ -345,7 +345,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           },
           code: {
             HTMLAttributes: {
-              class: 'bg-blue-50 rounded px-1 py-0.5 text-blue-800 font-mono text-[0.85em]',
+              class: 'bg-muted rounded px-1 py-0.5 text-foreground font-mono text-[0.85em]',
             },
           },
           blockquote: {
@@ -1231,7 +1231,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       <div
                         className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
                           hasSendableContent || sendMode === 'ticket'
-                            ? 'bg-primary text-white hover:bg-primary/90'
+                            ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                             : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                         }`}
                       >
@@ -1340,7 +1340,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           disabled={disabled || isSending || !hasSendableContent}
                           className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
                             hasSendableContent && !disabled
-                              ? 'bg-primary text-white hover:bg-primary/90'
+                              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}
                           aria-label='Send message'

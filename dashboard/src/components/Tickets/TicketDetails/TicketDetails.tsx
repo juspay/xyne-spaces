@@ -240,7 +240,7 @@ const ReleaseNotesButton: React.FC<ReleaseNotesButtonProps> = ({
         onClick: handleViewClick,
         trackName: 'ViewReleaseNotes',
         testId: 'view-release-notes-button',
-        iconClass: 'bg-green-100 text-green-700',
+        iconClass: 'bg-muted text-muted-foreground',
         label: 'View Release Notes',
         description: 'Open the generated release notes canvas',
         disabled: false,
@@ -249,7 +249,7 @@ const ReleaseNotesButton: React.FC<ReleaseNotesButtonProps> = ({
         onClick: handleGenerateClick,
         trackName: 'GenerateReleaseNotes',
         testId: 'generate-release-notes-button',
-        iconClass: 'bg-purple-100 text-purple-700',
+        iconClass: 'bg-muted text-muted-foreground',
         label: isGenerating ? 'Generating...' : 'Generate Release Notes',
         description: 'Create release-notes for this release',
         disabled: isGenerating,
@@ -263,7 +263,7 @@ const ReleaseNotesButton: React.FC<ReleaseNotesButtonProps> = ({
       data-track-category='Tickets'
       data-track-name={config.trackName}
       data-testid={config.testId}
-      className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 shadow-sm hover:shadow-md hover:border-gray-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed'
+      className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-card text-foreground shadow-sm hover:shadow-md hover:border-border transition-all disabled:opacity-50 disabled:cursor-not-allowed'
     >
       <span className='inline-flex items-center gap-3'>
         <span
@@ -272,12 +272,12 @@ const ReleaseNotesButton: React.FC<ReleaseNotesButtonProps> = ({
           <FileText size={18} />
         </span>
         <span className='flex flex-col text-left'>
-          <span className='text-sm font-semibold text-gray-900'>{config.label}</span>
-          <span className='text-xs text-gray-600'>{config.description}</span>
+          <span className='text-sm font-semibold text-foreground'>{config.label}</span>
+          <span className='text-xs text-muted-foreground'>{config.description}</span>
         </span>
       </span>
       <ArrowRight
-        className={`h-4 w-4 text-gray-500 transition-transform group-hover:translate-x-0.5 ${isGenerating ? 'animate-pulse' : ''}`}
+        className={`h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 ${isGenerating ? 'animate-pulse' : ''}`}
       />
     </button>
   );
@@ -1524,7 +1524,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           {allowEdit && (
             <button
               type='button'
-              className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted hover:text-red-500 opacity-0 group-hover:opacity-100'
+              className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100'
               onClick={() => handleRemoveReference(reference.id)}
               aria-label='Remove reference'
               data-track-category='Tickets'
@@ -1549,7 +1549,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               data-track-category='Tickets'
               data-track-name='BackFromExpandedView'
             >
-              <ChevronLeft size={18} color='#222530' />
+              <ChevronLeft size={18} className='text-foreground' />
             </button>
             <span className='text-[14px] font-medium text-foreground px-2 py-0.5'>
               {ticket.xyneId}
@@ -1569,7 +1569,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 data-track-category='Tickets'
                 data-track-name='NavigateToPreviousTicket'
               >
-                <ChevronUp size={18} color='#222530' />
+                <ChevronUp size={18} className='text-foreground' />
               </button>
               <button
                 onClick={onNavigateNext}
@@ -1583,7 +1583,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 data-track-category='Tickets'
                 data-track-name='NavigateToNextTicket'
               >
-                <ChevronDown size={18} color='#222530' />
+                <ChevronDown size={18} className='text-foreground' />
               </button>
               <div className='flex items-center gap-x-1/2 text-[14px] text-foreground font-medium'>
                 <span>{(navigation?.currentIndex ?? 0) + 1}</span>
@@ -1670,10 +1670,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         <ApprovalNudgeBanner ticketId={ticket.id} className='mb-4' />
 
         {ticket?.isArchived && (
-          <div className='mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center gap-3'>
-            <Archive className='w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0' />
+          <div className='mb-4 p-3 bg-muted border border-border rounded-lg flex items-center gap-3'>
+            <Archive className='w-5 h-5 text-muted-foreground shrink-0' />
             <div className='flex-1'>
-              <p className='text-sm font-medium text-amber-800 dark:text-amber-200'>
+              <p className='text-sm font-medium text-foreground'>
                 This ticket is archived and is Read-only
               </p>
             </div>
@@ -2047,7 +2047,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           onChange={e => setTagSearchQuery(e.target.value)}
                           onKeyDown={handleTagKeyDown}
                           placeholder='Search or create tag...'
-                          className='w-full px-2.5 py-1.5 text-sm border border-input rounded outline-none focus:border-blue-500'
+                          className='w-full px-2.5 py-1.5 text-sm border border-input rounded outline-none focus:border-border'
                           data-track-category='Tickets'
                           data-track-name='SearchTags'
                         />
@@ -2063,8 +2063,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             data-track-name='CreateTag'
                             data-track-metadata={JSON.stringify({ tagName: tagSearchQuery.trim() })}
                           >
-                            <Plus size={14} className='text-blue-600' />
-                            <span className='text-blue-600 font-medium'>
+                            <Plus size={14} className='text-foreground' />
+                            <span className='text-foreground font-medium'>
                               Create &quot;{tagSearchQuery.trim()}&quot;
                             </span>
                           </button>
@@ -2243,7 +2243,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           setEditingETA(false);
                         }
                       }}
-                      className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
+                      className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-border'
                       data-track-category='Tickets'
                       data-track-name='StageETAInput'
                       data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -2284,7 +2284,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         new Date(ticket.eta) < new Date() &&
                         ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                         ticket.statusV2 !== TicketStatusV2.CANCELLED
-                          ? 'text-red-500'
+                          ? 'text-destructive'
                           : 'text-muted-foreground'
                       }
                     />
@@ -2293,7 +2293,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       new Date(ticket.eta) < new Date() &&
                       ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                       ticket.statusV2 !== TicketStatusV2.CANCELLED && (
-                        <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
+                        <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-destructive/10 text-destructive rounded'>
                           Overdue
                         </span>
                       )}
@@ -2329,7 +2329,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                             setEditingStageETA(false);
                           }
                         }}
-                        className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-blue-500'
+                        className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-border'
                         data-track-category='Tickets'
                         data-track-name='StageETAInput'
                         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -2370,7 +2370,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                           new Date(currentStageEntry.stageEta) < new Date() &&
                           ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                           ticket.statusV2 !== TicketStatusV2.CANCELLED
-                            ? 'text-red-500'
+                            ? 'text-destructive'
                             : 'text-muted-foreground'
                         }
                       />
@@ -2383,7 +2383,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         new Date(currentStageEntry.stageEta) < new Date() &&
                         ticket.statusV2 !== TicketStatusV2.COMPLETED &&
                         ticket.statusV2 !== TicketStatusV2.CANCELLED && (
-                          <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 rounded'>
+                          <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-destructive/10 text-destructive rounded'>
                             Stage Overdue
                           </span>
                         )}
@@ -2550,7 +2550,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                       existingRequest: item.request!,
                                     })
                                   }
-                                  className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                  className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='ContinueDraftStageForm'
                                   data-track-metadata={JSON.stringify({
@@ -2577,7 +2577,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Request submitted for approval');
                                   }}
-                                  className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                  className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='SubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
@@ -2604,7 +2604,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                           hasApprovers: true,
                                         })
                                       }
-                                      className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
+                                      className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
                                       aria-label='View form'
                                       data-track-category='Tickets'
                                       data-track-name='ViewStageForm'
@@ -2665,7 +2665,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                       existingRequest: item.request!,
                                     })
                                   }
-                                  className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
+                                  className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
                                   aria-label='View form'
                                   data-track-category='Tickets'
                                   data-track-name='ViewApprovedStageForm'
@@ -2741,7 +2741,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                       existingRequest: item.request!,
                                     })
                                   }
-                                  className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                  className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='ResubmitStageForm'
                                   data-track-metadata={JSON.stringify({
@@ -2768,7 +2768,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                     );
                                     toast.success('Stage change request resubmitted for approval');
                                   }}
-                                  className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                                  className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                   data-track-category='Tickets'
                                   data-track-name='ResubmitStageRequest'
                                   data-track-metadata={JSON.stringify({ stageId: item.stageId })}
@@ -2797,7 +2797,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   existingRequest: item.request!,
                                 })
                               }
-                              className='text-muted-foreground hover:text-blue-600 transition-colors border border-input rounded-md p-1.5'
+                              className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
                               aria-label='View form'
                               data-track-category='Tickets'
                               data-track-name='ViewStageFormNoApprovers'
@@ -3065,7 +3065,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                 setMappedTicketId(parentTicket.id);
                               }
                             }}
-                            className='text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap'
+                            className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                             data-track-category='Tickets'
                             data-track-name='ViewParentTicket'
                             data-track-metadata={JSON.stringify({
@@ -3122,7 +3122,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   noBorder
                 />
               </div>
-              {referenceError && <p className='text-xs text-red-600'>{referenceError}</p>}
+              {referenceError && <p className='text-xs text-destructive'>{referenceError}</p>}
             </div>
           </div>
         </div>
@@ -3254,7 +3254,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     setShowBackwardConfirmDialog(false);
                   }
                 }}
-                className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
+                className='bg-sidebar-badge-accent text-sidebar-badge-accent-foreground hover:opacity-90'
                 data-track-category='Tickets'
                 data-track-name='ConfirmBackwardStageChange'
                 data-track-metadata={JSON.stringify({ stageName: backwardStageChange?.stageName })}
@@ -3275,8 +3275,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         >
           <div className='p-6'>
             <div className='flex items-center gap-3 mb-4'>
-              <div className='p-2 rounded-full bg-red-100'>
-                <AlertCircle className='w-6 h-6 text-red-600' />
+              <div className='p-2 rounded-full bg-destructive/10'>
+                <AlertCircle className='w-6 h-6 text-destructive' />
               </div>
               <h3 className='text-lg font-semibold'>This action is irreversible</h3>
             </div>
@@ -3291,7 +3291,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               </Button>
               <Button
                 onClick={handleArchiveTicket}
-                className='bg-red-600 text-white hover:bg-red-700'
+                className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
               >
                 Archive Ticket
               </Button>
@@ -3319,7 +3319,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               </Button>
               <Button
                 onClick={confirmBoardChange}
-                className='bg-sidebar-badge-accent text-white hover:bg-blue-700'
+                className='bg-sidebar-badge-accent text-sidebar-badge-accent-foreground hover:opacity-90'
               >
                 Confirm
               </Button>

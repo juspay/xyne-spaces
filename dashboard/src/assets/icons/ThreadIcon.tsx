@@ -4,7 +4,7 @@ interface ThreadIconProps {
   color?: string;
 }
 
-export const ThreadIcon: React.FC<ThreadIconProps> = ({ color = '#181B1D' }) => (
+export const ThreadIcon: React.FC<ThreadIconProps> = ({ color = 'currentColor' }) => (
   <svg width='16' height='16' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'>
     <path
       d='M2 10.668L4.66667 13.3346L7.33333 10.668'

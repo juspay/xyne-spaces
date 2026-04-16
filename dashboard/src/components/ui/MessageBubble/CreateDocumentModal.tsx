@@ -92,7 +92,7 @@ export const CreateDocumentModal: React.FC<CreateDocumentModalProps> = ({
               <div className='flex justify-between text-xs text-muted-foreground'>
                 <span>
                   {customPrompt.length > 4500 && customPrompt.length <= MAX_PROMPT_LENGTH && (
-                    <span className='text-orange-500'>Approaching limit</span>
+                    <span className='text-status-pending'>Approaching limit</span>
                   )}
                 </span>
                 <span className={isCustomPromptTooLong ? 'text-destructive' : ''}>

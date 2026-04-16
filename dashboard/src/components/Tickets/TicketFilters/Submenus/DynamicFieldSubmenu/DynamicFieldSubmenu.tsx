@@ -124,7 +124,7 @@ export const DynamicFieldSubmenu = ({
                     onClick={() => handleToggle(option)}
                     className={`
                       w-full flex items-center justify-between px-3 py-2 rounded-md transition-all
-                      ${isSelected ? 'bg-accent text-black' : 'hover:bg-muted text-foreground'}
+                      ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
                     `}
                     data-track-category='Tickets'
                     data-track-name='ToggleDynamicFieldFilter'
@@ -318,7 +318,7 @@ export const DynamicFieldSubmenu = ({
             onClick={() => handleBooleanToggle('true')}
             className={`
               w-full flex items-center justify-between px-3 py-2 rounded-md transition-all border
-              ${isTrueSelected ? 'bg-accent text-black border-input' : 'hover:bg-muted text-foreground border-border'}
+              ${isTrueSelected ? 'bg-accent text-accent-foreground border-input' : 'hover:bg-muted text-foreground border-border'}
             `}
             data-track-category='Tickets'
             data-track-name='FilterBooleanTrue'
@@ -331,7 +331,7 @@ export const DynamicFieldSubmenu = ({
             onClick={() => handleBooleanToggle('false')}
             className={`
               w-full flex items-center justify-between px-3 py-2 rounded-md transition-all border
-              ${isFalseSelected ? 'bg-accent text-black border-input' : 'hover:bg-muted text-foreground border-border'}
+              ${isFalseSelected ? 'bg-accent text-accent-foreground border-input' : 'hover:bg-muted text-foreground border-border'}
             `}
             data-track-category='Tickets'
             data-track-name='FilterBooleanFalse'

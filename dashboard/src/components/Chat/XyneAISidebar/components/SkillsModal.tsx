@@ -1,7 +1,7 @@
 import { ReactElement, useState, useEffect } from 'react';
 import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
-import { Edit2, Trash2, Plus, Eye } from 'lucide-react';
+import { Edit2, Trash2, Plus, Eye, X } from 'lucide-react';
 
 interface Skill {
   name: string;
@@ -132,7 +132,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
   if (!isOpen) return null;
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50'>
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
       <div className='bg-popover rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col'>
         {/* Header */}
         <div className='flex items-center justify-between p-6 border-b border-border'>
@@ -144,7 +144,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
             data-track-category='XYNE_AI'
             data-track-name='CloseSkillsModal'
           >
-            <img src='/svgs/icons/close.svg' alt='Close' width='16' height='16' />
+            <X size={16} className='text-current' />
           </button>
         </div>
 
@@ -174,7 +174,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
                 />
                 <div className='flex justify-end mt-1'>
                   <span
-                    className={`text-xs ${name.length >= MAX_NAME_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                    className={`text-xs ${name.length >= MAX_NAME_LENGTH ? 'text-destructive' : 'text-muted-foreground'}`}
                   >
                     {name.length}/{MAX_NAME_LENGTH}
                   </span>
@@ -202,7 +202,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
                 />
                 <div className='flex justify-end mt-1'>
                   <span
-                    className={`text-xs ${description.length >= MAX_DESCRIPTION_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                    className={`text-xs ${description.length >= MAX_DESCRIPTION_LENGTH ? 'text-destructive' : 'text-muted-foreground'}`}
                   >
                     {description.length}/{MAX_DESCRIPTION_LENGTH}
                   </span>
@@ -230,7 +230,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
                 />
                 <div className='flex justify-end mt-1'>
                   <span
-                    className={`text-xs ${instructions.length >= MAX_INSTRUCTIONS_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                    className={`text-xs ${instructions.length >= MAX_INSTRUCTIONS_LENGTH ? 'text-destructive' : 'text-muted-foreground'}`}
                   >
                     {instructions.length}/{MAX_INSTRUCTIONS_LENGTH}
                   </span>
@@ -244,7 +244,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
               <div className='flex justify-end'>
                 <button
                   onClick={() => handleAddNew()}
-                  className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors'
+                  className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors'
                   disabled={isLoading}
                   data-track-category='XYNE_AI'
                   data-track-name='AddNewSkill'
@@ -273,13 +273,13 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
                         <span
-                          className={`w-2 h-2 rounded-full flex-shrink-0 ${skill.enabled ? 'bg-green-500' : 'bg-gray-300'}`}
+                          className={`w-2 h-2 rounded-full flex-shrink-0 ${skill.enabled ? 'bg-status-success' : 'bg-muted-foreground/30'}`}
                         />
                         <span className='text-sm font-medium text-foreground truncate'>
                           {skill.name}
                         </span>
                         {skill.isSystem && (
-                          <span className='flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded'>
+                          <span className='flex-shrink-0 px-1.5 py-0.5 text-xs font-medium bg-muted text-primary rounded'>
                             System
                           </span>
                         )}
@@ -294,8 +294,8 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
                             }}
                             className={`px-2 py-1 text-xs rounded-md transition-colors ${
                               skill.enabled
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-gray-100 text-gray-600'
+                                ? 'bg-status-success/10 text-status-success'
+                                : 'bg-muted text-muted-foreground'
                             }`}
                             title={skill.enabled ? 'Disable' : 'Enable'}
                             data-track-category='XYNE_AI'
@@ -316,7 +316,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
                             onClick={() => {
                               void handleDelete(skill.name);
                             }}
-                            className='p-1.5 rounded-md hover:bg-red-100 text-muted-foreground hover:text-red-600 transition-colors'
+                            className='p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors'
                             title='Delete'
                             data-track-category='XYNE_AI'
                             data-track-name='DeleteSkill'
@@ -350,7 +350,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
               <div className='flex gap-2'>
                 <button
                   onClick={() => void handleSave()}
-                  className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                   disabled={isSaving || !name.trim()}
                   data-track-category='XYNE_AI'
                   data-track-name='SaveSkill'
@@ -365,7 +365,7 @@ export const SkillsModal = ({ isOpen, onClose }: SkillsModalProps): ReactElement
               <div /> {/* Spacer */}
               <button
                 onClick={onClose}
-                className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors'
+                className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors'
                 data-track-category='XYNE_AI'
                 data-track-name='CloseSettingsModal'
               >

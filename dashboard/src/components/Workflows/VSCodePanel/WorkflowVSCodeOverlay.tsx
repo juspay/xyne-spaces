@@ -45,7 +45,7 @@ export const WorkflowVSCodeOverlay: React.FC = () => {
           height: rect.height,
           zIndex: 50, // Ensure it sits on top of the placeholder
           display: 'block',
-          backgroundColor: '#1e1e1e', // Match theme to avoid flashes
+          backgroundColor: 'transparent',
         });
       });
     };
@@ -70,8 +70,8 @@ export const WorkflowVSCodeOverlay: React.FC = () => {
     <div style={style}>
       <iframe
         src={activeConfig.url}
-        className='w-full h-full border-0 bg-[#1e1e1e]'
-        title='VS Code Editor'
+        className='w-full h-full border-0 bg-background'
+        title='VS Code: Editor'
         allow='clipboard-read; clipboard-write'
       />
     </div>

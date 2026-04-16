@@ -122,7 +122,7 @@ export function CallMessageOverlay({
           <div className='flex-shrink-0'>
             <button
               onClick={handleJoinClick}
-              className='bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm font-medium transition-colors'
+              className='bg-status-success hover:opacity-90 text-background px-3 py-1 rounded-md text-sm font-medium transition-colors'
               data-testid={userIsActiveInCall ? 'switch-call-button' : 'join-button'}
               data-track-category='CALLS'
               data-track-name={

@@ -492,11 +492,10 @@ const CallHistoryScreen = (): ReactElement => {
               <DropdownMenuTrigger asChild>
                 <Button
                   data-testid='new-call-button'
-                  className='duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8 hover:opacity-90'
-                  style={{ backgroundColor: '#6276BE' }}
+                  className='!bg-action-primary !text-action-primary-foreground duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8 hover:opacity-90'
                 >
-                  <span className='text-white text-sm leading-5 font-semibold'>New Call</span>
-                  <ChevronDown className='size-4 text-white' strokeWidth={2.3} />
+                  <span className='text-sm leading-5 font-semibold'>New Call</span>
+                  <ChevronDown className='size-4' strokeWidth={2.3} />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align='end' sideOffset={8} className='rounded-xl'>
@@ -750,7 +749,7 @@ const CallHistoryScreen = (): ReactElement => {
                             variant='secondary'
                             size='sm'
                             onClick={() => setShowAllUpcoming(!showAllUpcoming)}
-                            className='font-mono text-[#3B4145] text-sm leading-5 font-medium capitalize rounded-xl h-7'
+                            className='font-mono text-sm leading-5 font-medium capitalize rounded-xl h-7'
                           >
                             {showAllUpcoming ? 'less' : 'more'}
                           </Button>

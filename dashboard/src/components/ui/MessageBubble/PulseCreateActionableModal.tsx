@@ -211,7 +211,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
                   <div className='flex items-center'>
                     <span>{localMerchant.name}</span>
                     {localMerchant.orgId !== merchant?.orgId && (
-                      <span className='ml-2 text-[10px] text-blue-600 font-medium px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900 rounded-full'>
+                      <span className='ml-2 text-[10px] text-action-primary font-medium px-1.5 py-0.5 bg-accent rounded-full'>
                         Changed
                       </span>
                     )}
@@ -268,7 +268,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
                               onClick={() => handleSelectOrg(org)}
                               className={`w-full text-left px-3 py-2 text-xs transition-colors border-none cursor-pointer ${
                                 isCurrentOrg
-                                  ? 'bg-blue-50 text-blue-700 font-medium dark:bg-blue-950 dark:text-blue-300'
+                                  ? 'bg-accent text-action-primary font-medium'
                                   : 'bg-transparent text-foreground hover:bg-accent'
                               }`}
                             >
@@ -298,7 +298,7 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
               htmlFor='pulse-title'
               className='text-xs font-medium text-muted-foreground uppercase tracking-wide'
             >
-              Title <span className='text-red-500'>*</span>
+              Title <span className='text-destructive'>*</span>
             </label>
             <input
               id='pulse-title'
@@ -356,11 +356,11 @@ export const PulseCreateActionableModal: React.FC<PulseCreateActionableModalProp
             <button
               type='submit'
               disabled={submitting || !title.trim()}
-              className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5'
+              className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:opacity-90 rounded-lg transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5'
             >
               {submitting ? (
                 <>
-                  <span className='w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block' />
+                  <span className='w-3.5 h-3.5 border-2 border-action-primary-foreground border-t-transparent rounded-full animate-spin inline-block' />
                   Sending…
                 </>
               ) : (

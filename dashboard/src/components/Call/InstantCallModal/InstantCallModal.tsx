@@ -55,7 +55,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               userId={user.id}
               size={'sm'}
               showActiveStatus={false}
-              className='rounded-md size-[18px] flex items-center justify-center bg-white'
+              className='rounded-md size-[18px] flex items-center justify-center bg-background'
             />
           ),
           children: (
@@ -64,16 +64,16 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 userId={user.id}
                 size={'sm'}
                 showActiveStatus={false}
-                className='rounded-md size-[18px] flex items-center justify-center bg-white'
+                className='rounded-md size-[18px] flex items-center justify-center bg-background'
               />
               <div className='flex-1 w-full flex items-center gap-1.5'>
                 <span className='text-sm'>{user.name.split(' ')[0]}</span>
                 {user.status === UserStatus.ACTIVE ? (
                   <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
                 ) : (
-                  <span className='w-[5px] h-[5px] border border-gray-500 rounded-full'></span>
+                  <span className='w-[5px] h-[5px] border border-border rounded-full'></span>
                 )}
-                <span className='text-sm text-gray-500'>{user.name}</span>
+                <span className='text-sm text-muted-foreground'>{user.name}</span>
               </div>
             </div>
           ),
@@ -86,9 +86,9 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       value: `channel:${channel.id}`,
       icon:
         channel.visibility === ChannelVisibility.PRIVATE ? (
-          <Lock className='size-3.5 text-gray-600 mx-0.5' strokeWidth={2.3} />
+          <Lock className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />
         ) : (
-          <Hash className='size-3.5 text-gray-600 mx-0.5' strokeWidth={2.3} />
+          <Hash className='size-3.5 text-muted-foreground mx-0.5' strokeWidth={2.3} />
         ),
       type: 'channel' as const,
     }));
@@ -161,7 +161,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 type='submit'
                 onClick={handleSubmit}
                 disabled={selectedParticipants.length === 0}
-                className='rounded-lg text-[13px] text-white bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
+                className='rounded-lg text-[13px] bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
                 data-testid='instant-call-start-button'
               >
                 Start Call

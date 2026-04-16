@@ -108,9 +108,9 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
               <button
                 type='button'
                 onClick={handleOpenAll}
-                className='absolute inset-0 bg-black/60 flex items-center justify-center rounded-lg'
+                className='absolute inset-0 flex items-center justify-center rounded-lg bg-background/80 backdrop-blur-sm'
               >
-                <span className='text-white text-2xl font-semibold'>+{remainingCount}</span>
+                <span className='text-foreground text-2xl font-semibold'>+{remainingCount}</span>
               </button>
             )}
           </div>
@@ -128,21 +128,27 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
             data-prevent-drawer='true'
           />
           <Dialog.Popup
-            className='fixed inset-0 z-50 flex flex-col'
+            className='fixed inset-0 z-50 flex flex-col bg-background text-foreground'
             style={{ touchAction: 'none' }}
             data-prevent-drawer='true'
           >
             <div
-              className='flex items-center justify-between px-4 py-3 border-b'
+              className='flex items-center justify-between px-4 py-3 border-b border-border'
               onPointerDown={e => e.stopPropagation()}
               onTouchStart={e => e.stopPropagation()}
             >
-              <span className='font-medium text-sm'>{formatAttachmentSummary(attachments)}</span>
-              <button type='button' onClick={handleClose} className='p-2'>
+              <span className='font-medium text-sm text-foreground'>
+                {formatAttachmentSummary(attachments)}
+              </span>
+              <button
+                type='button'
+                onClick={handleClose}
+                className='p-2 rounded-md text-foreground transition-colors hover:bg-accent'
+              >
                 <X className='w-6 h-6' />
               </button>
             </div>
-            <div className='flex-1 overflow-y-auto divide-y'>
+            <div className='flex-1 overflow-y-auto divide-y divide-border bg-background'>
               {attachments.map(att => (
                 <div key={att.id} className='p-2'>
                   <MessageAttachment attachment={att} allAttachments={attachments} fullSize />

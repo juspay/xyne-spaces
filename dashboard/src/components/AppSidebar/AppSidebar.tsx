@@ -304,7 +304,7 @@ const AppSidebar = (): ReactElement => {
                     >
                       <Icon size={item.iconSize ?? 16} />
                       {showMissedCallBadge && (
-                        <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] bg-red-500 text-white text-[11px] font-semibold rounded-full'>
+                        <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
                           {missedCallCount > 99 ? '99+' : missedCallCount}
                         </span>
                       )}
@@ -323,7 +323,7 @@ const AppSidebar = (): ReactElement => {
             hasValidStatus ? (
               <div
                 className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90'
-                style={{ backgroundColor: 'var(--sidebar-divider, #CFD4E2)' }}
+                style={{ backgroundColor: 'var(--sidebar-divider)' }}
                 data-testid='profile-icon'
               >
                 {/* Status Emoji at Top Center */}
@@ -479,12 +479,16 @@ const MobileNavbar = ({
   const menuItems = mobileNavItems.filter(
     item => !['Home', 'DMs', 'Calls', 'Activity'].includes(item.label),
   );
+  const isMoreActive = isMenuOpen || menuItems.some(item => activeRoute === item.path);
 
   return (
     <>
       {!isKeyboardOpen && (
         <div className='fixed bottom-2 w-screen z-50 pointer-events-none px-4'>
-          <div className='pointer-events-auto mx-auto w-full flex items-center justify-center gap-6 bg-[#181B1D]/60 backdrop-blur-[10px] border-[0.5px] border-[#181B1D]/30 rounded-[102px] px-6 py-2'>
+          <div
+            className='pointer-events-auto mx-auto w-full flex items-center justify-center gap-6 rounded-[102px] border border-border px-6 py-2 shadow-lg backdrop-blur-[10px]'
+            style={{ background: 'var(--mobile-panel-bg)' }}
+          >
             {primaryItems.map(item => {
               const isActive = activeRoute === item.path;
               const Icon = item.icon;
@@ -501,16 +505,19 @@ const MobileNavbar = ({
                   className='flex flex-col gap-[3px] h-[44px] items-center justify-center p-[2px] cursor-pointer'
                 >
                   <div className='size-[24px] flex items-center justify-center relative'>
-                    <Icon size={20} className={isActive ? 'text-white' : 'text-[#c9cccf]'} />
+                    <Icon
+                      size={20}
+                      className={isActive ? 'text-foreground' : 'text-muted-foreground'}
+                    />
                     {showMissedCallBadge && (
-                      <span className='absolute -top-1 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] bg-red-500 text-white text-[11px] font-semibold rounded-full'>
+                      <span className='absolute -top-1 -right-2 flex items-center justify-center min-w-[18px] h-[18px] px-[4px] rounded-full bg-destructive text-destructive-foreground text-[11px] font-semibold'>
                         {missedCallCount > 99 ? '99+' : missedCallCount}
                       </span>
                     )}
                   </div>
                   <span
                     className={`font-medium text-[12px] leading-[1.2] text-center whitespace-nowrap font-['Geist',sans-serif] ${
-                      isActive ? 'text-white' : 'text-muted'
+                      isActive ? 'text-foreground' : 'text-muted-foreground'
                     }`}
                   >
                     {item.label}
@@ -537,16 +544,23 @@ const MobileNavbar = ({
               className='flex flex-col gap-[3px] h-[44px] items-center justify-center p-[2px] cursor-pointer relative'
             >
               <div className='size-[24px] flex items-center justify-center'>
-                <MoreHorizontal size={20} className='text-[#c9cccf]' />
+                <MoreHorizontal
+                  size={20}
+                  className={isMoreActive ? 'text-foreground' : 'text-muted-foreground'}
+                />
               </div>
-              <span className='font-medium text-[12px] leading-[1.2] text-center whitespace-nowrap font-Geist text-muted'>
+              <span
+                className={`font-medium text-[12px] leading-[1.2] text-center whitespace-nowrap font-Geist ${
+                  isMoreActive ? 'text-foreground' : 'text-muted-foreground'
+                }`}
+              >
                 More
               </span>
 
               {isMenuOpen && (
                 <div
                   ref={menuRef}
-                  className='absolute bottom-14 left-1/2 -translate-x-1/2 bg-[#181B1D]/60 backdrop-blur-[10px] border-[0.5px] border-[#181B1D]/30 rounded-xl py-2 min-w-[160px] shadow-2xl z-50'
+                  className='absolute bottom-14 left-1/2 z-50 min-w-[160px] -translate-x-1/2 rounded-xl border border-border bg-popover/95 py-2 text-popover-foreground shadow-2xl backdrop-blur-[10px]'
                 >
                   {menuItems.map(item => {
                     const Icon = item.icon;
@@ -558,8 +572,8 @@ const MobileNavbar = ({
                       return (
                         <div
                           key={item.path}
-                          className={`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[#2a2d30] transition-colors ${
-                            isActive ? 'bg-[#2a2d30]' : ''
+                          className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${
+                            isActive ? 'bg-accent' : 'hover:bg-accent'
                           }`}
                           onClick={e => {
                             e.preventDefault();
@@ -585,9 +599,14 @@ const MobileNavbar = ({
                             label: item.label,
                           })}
                         >
-                          <Icon size={20} className={isActive ? 'text-white' : 'text-[#9ca3af]'} />
+                          <Icon
+                            size={20}
+                            className={isActive ? 'text-foreground' : 'text-muted-foreground'}
+                          />
                           <span
-                            className={`text-[14px] font-medium ${isActive ? 'text-white' : 'text-[#d1d5db]'}`}
+                            className={`text-[14px] font-medium ${
+                              isActive ? 'text-foreground' : 'text-muted-foreground'
+                            }`}
                           >
                             {item.label}
                           </span>
@@ -601,8 +620,8 @@ const MobileNavbar = ({
                       <Link
                         to={item.path}
                         key={item.path}
-                        className={`flex items-center gap-3 px-4 py-3 hover:bg-[#2a2d30] transition-colors ${
-                          isActive ? 'bg-[#2a2d30]' : ''
+                        className={`flex items-center gap-3 px-4 py-3 transition-colors ${
+                          isActive ? 'bg-accent' : 'hover:bg-accent'
                         }`}
                         onClick={() => {
                           setIsMenuOpen(false);
@@ -613,15 +632,20 @@ const MobileNavbar = ({
                         data-track-metadata={JSON.stringify({ path: item.path, label: item.label })}
                       >
                         <div className='relative'>
-                          <Icon size={20} className={isActive ? 'text-white' : 'text-[#9ca3af]'} />
+                          <Icon
+                            size={20}
+                            className={isActive ? 'text-foreground' : 'text-muted-foreground'}
+                          />
                           {showRecapBadge && (
-                            <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[14px] h-[14px] px-[3px] bg-blue-500 text-white text-[9px] font-semibold rounded-full'>
+                            <span className='absolute -top-1 -right-1 flex items-center justify-center min-w-[14px] h-[14px] px-[3px] rounded-full bg-sidebar-badge-accent text-sidebar-badge-accent-foreground text-[9px] font-semibold'>
                               {recapUnreadCount > 9 ? '9+' : recapUnreadCount}
                             </span>
                           )}
                         </div>
                         <span
-                          className={`text-[14px] font-medium ${isActive ? 'text-white' : 'text-[#d1d5db]'}`}
+                          className={`text-[14px] font-medium ${
+                            isActive ? 'text-foreground' : 'text-muted-foreground'
+                          }`}
                         >
                           {item.label}
                         </span>

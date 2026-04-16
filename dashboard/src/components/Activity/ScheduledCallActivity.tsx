@@ -20,11 +20,11 @@ export const ScheduledCallActivity = ({
   const targetPath = '/calls';
 
   const description = isReminder ? (
-    <span className='text-gray-500 text-sm'>reminded you about a scheduled call in</span>
+    <span className='text-muted-foreground text-sm'>reminded you about a scheduled call in</span>
   ) : isUpdated ? (
-    <span className='text-gray-500 text-sm'>updated a scheduled call in</span>
+    <span className='text-muted-foreground text-sm'>updated a scheduled call in</span>
   ) : (
-    <span className='text-gray-500 text-sm'>scheduled a call in</span>
+    <span className='text-muted-foreground text-sm'>scheduled a call in</span>
   );
 
   const Icon = isReminder ? Bell : CalendarClock;
@@ -37,14 +37,14 @@ export const ScheduledCallActivity = ({
       actorName={actor.name}
       channelId={activity.channelId ?? undefined}
       badgeIcon={<Icon className={`w-4 h-4 ${iconColor}`} />}
-      badgeColorClass='bg-[#FAFAFA]'
+      badgeColorClass='bg-muted'
       description={description}
       targetPath={targetPath}
       isExpanded={isExpanded}
       actorAction={activity.actorAction}
       className='flex items-start'
     >
-      <div className='text-[#181B1D] text-sm line-clamp-1 truncate whitespace-normal break-all'>
+      <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
         {isReminder
           ? 'Your call is starting in 10 min'
           : isUpdated

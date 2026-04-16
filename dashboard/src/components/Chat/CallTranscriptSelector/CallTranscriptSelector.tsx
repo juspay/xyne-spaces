@@ -116,8 +116,8 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
     const isMissedCall = isCallEnded && !isOutgoingCall && !hasCurrentUserJoined;
     const isActive = call.endedAt === null;
 
-    if (isActive) return <Phone size={16} className='text-green-600' />;
-    if (isMissedCall) return <PhoneMissed size={16} className='text-red-500' />;
+    if (isActive) return <Phone size={16} className='text-status-success' />;
+    if (isMissedCall) return <PhoneMissed size={16} className='text-destructive' />;
     if (isOutgoingCall) return <PhoneOutgoing size={16} className='text-muted-foreground' />;
     return <PhoneIncoming size={16} className='text-muted-foreground' />;
   };
@@ -169,7 +169,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
                         <div className='flex items-center gap-2 mb-0.5'>
                           {getCallIcon(call)}
                           <span
-                            className={`font-semibold block truncate flex-1 text-sm ${isActive ? 'text-blue-600' : 'text-foreground'}`}
+                            className={`font-semibold block truncate flex-1 text-sm ${isActive ? 'text-primary' : 'text-foreground'}`}
                           >
                             {title}
                           </span>
@@ -274,7 +274,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
                     AI Summary
                   </h5>
                   <div
-                    className='bg-gradient-to-br from-muted to-blue-50/30 p-6 rounded-2xl border border-border/60 prose prose-sm max-w-none'
+                    className='bg-muted p-6 rounded-2xl border border-border/60 prose prose-sm max-w-none'
                     dangerouslySetInnerHTML={{
                       __html: DOMPurify.sanitize(selectedCall.aiSummary, {
                         ALLOWED_TAGS: ['div', 'h3', 'h4', 'p', 'ul', 'li', 'span', 'section'],

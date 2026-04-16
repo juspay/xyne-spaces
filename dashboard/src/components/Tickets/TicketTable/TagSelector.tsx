@@ -112,7 +112,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
               role='listitem'
               className='flex items-center justify-between w-max gap-1.5 px-2 py-1 rounded-md text-sm font-medium border bg-card text-muted-foreground border-border'
             >
-              <span className='size-2 rounded-full bg-[#C27AFF]' />
+              <span className='size-2 rounded-full bg-xyne-purple-400' />
               {tag}
               <button
                 type='button'
@@ -174,7 +174,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
                     data-track-metadata={JSON.stringify({ tag, selected: !selected })}
                   >
                     <div className='flex items-center gap-2'>
-                      <span className='w-2 h-2 rounded-full bg-[#C27AFF]' />
+                      <span className='w-2 h-2 rounded-full bg-xyne-purple-400' />
                       {tag}
                     </div>
                     {selected && <Check className='size-4 text-blue-600' />}

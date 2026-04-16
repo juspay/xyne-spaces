@@ -242,18 +242,18 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
         data-nudge-button={messageId}
         onClick={handleToggleExpand}
         className={cn(
-          'inline-flex items-center gap-1 rounded-[8px] border border-[#e4e6e7] bg-[#f2f2f3]',
+          'inline-flex items-center gap-1 rounded-[8px] border border-border bg-card',
           'px-[6px] py-[3px]',
-          'transition-colors hover:bg-[#ededee]',
+          'transition-colors hover:bg-muted',
         )}
         data-track-category='NUDGES'
         data-track-name={expanded ? 'CollapseNudgeList' : 'ExpandNudgeList'}
       >
         <XyneAIStar size={14} />
-        <span className='text-sm tracking-[-0.1px] text-[#646464]'>{suggestionLabel}</span>
+        <span className='text-sm tracking-[-0.1px] text-muted-foreground'>{suggestionLabel}</span>
         <ChevronDown
           className={cn(
-            'h-3.5 w-3.5 text-[#646464] transition-transform duration-200',
+            'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
             expanded && 'rotate-180',
           )}
         />
@@ -262,13 +262,13 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
       {/* Expanded content */}
       {expanded && isLoading && (
         <div className='mt-2 flex items-center justify-center py-4'>
-          <Loader2 className='h-4 w-4 animate-spin text-[#9aa0a5]' />
+          <Loader2 className='h-4 w-4 animate-spin text-muted-foreground' />
         </div>
       )}
 
       {expanded && !isLoading && nudges.length === 0 && hasFetched && (
         <div className='mt-2 flex items-center justify-center py-3'>
-          <span className='text-xs text-[#9aa0a5]'>No suggestions</span>
+          <span className='text-xs text-muted-foreground'>No suggestions</span>
         </div>
       )}
 
@@ -296,8 +296,8 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
                   'flex items-center justify-center rounded-[6px] border border-border bg-card p-1',
                   'transition-colors',
                   activeIndex === 0
-                    ? 'cursor-not-allowed text-[#d5d7d9]'
-                    : 'text-[#9aa0a5] hover:bg-accent',
+                    ? 'cursor-not-allowed text-muted-foreground/50'
+                    : 'text-muted-foreground hover:bg-accent',
                 )}
                 data-track-category='NUDGES'
                 data-track-name='PreviousNudge'
@@ -305,7 +305,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
                 <ChevronLeft className='h-3.5 w-3.5' />
               </button>
 
-              <p className='text-[12px] font-medium tracking-[0.36px] text-[#838383]'>
+              <p className='text-[12px] font-medium tracking-[0.36px] text-muted-foreground'>
                 {activeIndex + 1}
               </p>
 
@@ -317,8 +317,8 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
                   'flex items-center justify-center rounded-[6px] border border-border bg-card p-1',
                   'transition-colors',
                   activeIndex === nudges.length - 1
-                    ? 'cursor-not-allowed text-[#d5d7d9]'
-                    : 'text-[#9aa0a5] hover:bg-accent',
+                    ? 'cursor-not-allowed text-muted-foreground/50'
+                    : 'text-muted-foreground hover:bg-accent',
                 )}
                 data-track-category='NUDGES'
                 data-track-name='NextNudge'

@@ -66,7 +66,7 @@ export const AppActions: React.FC<AppActionsProps> = ({
             key={action.actionId}
             onClick={() => void handleClick(action)}
             disabled={isLoading || loadingAction !== null}
-            className='inline-flex items-center rounded-md px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
+            className='inline-flex items-center rounded-md px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
             style={{ backgroundColor: action.color }}
           >
             {isLoading ? 'Processing...' : action.label}

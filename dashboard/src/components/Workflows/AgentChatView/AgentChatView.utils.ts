@@ -79,8 +79,8 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
   if (lower === 'user_message' || lower === 'user_input' || lower === 'user') {
     return {
       name: 'User',
-      avatarBg: 'bg-slate-800 border-2 border-slate-700',
-      avatarText: 'text-slate-100',
+      avatarBg: 'bg-secondary border-2 border-border',
+      avatarText: 'text-secondary-foreground',
       initials: 'US',
       labelColor: 'text-foreground',
       bubbleBg: 'bg-muted/50 border border-border/50',
@@ -91,11 +91,11 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
   if (lower.includes('review') || lower.includes('audit')) {
     return {
       name: 'Reviewer',
-      avatarBg: 'bg-white border-2 border-amber-300',
-      avatarText: 'text-amber-500',
+      avatarBg: 'bg-background border-2 border-status-pending',
+      avatarText: 'text-status-pending',
       initials: 'RV',
-      labelColor: 'text-gray-700',
-      bubbleBg: 'bg-gray-50/80',
+      labelColor: 'text-foreground',
+      bubbleBg: 'bg-muted/50 border border-border/50',
       icon: 'twitch',
     };
   }
@@ -103,11 +103,11 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
   if (lower.includes('plan') || lower.includes('requirement') || lower.includes('analy')) {
     return {
       name: 'Planner',
-      avatarBg: 'bg-white border-2 border-violet-300',
-      avatarText: 'text-violet-500',
+      avatarBg: 'bg-background border-2 border-status-paused',
+      avatarText: 'text-status-paused',
       initials: 'PL',
-      labelColor: 'text-gray-700',
-      bubbleBg: 'bg-gray-50/80',
+      labelColor: 'text-foreground',
+      bubbleBg: 'bg-muted/50 border border-border/50',
       icon: 'ghost',
     };
   }
@@ -115,11 +115,11 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
   if (lower.includes('build') || lower.includes('compile')) {
     return {
       name: 'Builder',
-      avatarBg: 'bg-white border-2 border-indigo-300',
-      avatarText: 'text-indigo-500',
+      avatarBg: 'bg-background border-2 border-action-primary',
+      avatarText: 'text-action-primary',
       initials: 'BD',
-      labelColor: 'text-gray-700',
-      bubbleBg: 'bg-gray-50/80',
+      labelColor: 'text-foreground',
+      bubbleBg: 'bg-muted/50 border border-border/50',
       icon: 'user-round-cog',
     };
   }
@@ -133,11 +133,11 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
   ) {
     return {
       name: 'Implementer',
-      avatarBg: 'bg-white border-2 border-sky-300',
-      avatarText: 'text-sky-500',
+      avatarBg: 'bg-background border-2 border-action-primary',
+      avatarText: 'text-action-primary',
       initials: 'IM',
-      labelColor: 'text-gray-700',
-      bubbleBg: 'bg-gray-50/80',
+      labelColor: 'text-foreground',
+      bubbleBg: 'bg-muted/50 border border-border/50',
       icon: 'laugh',
     };
   }
@@ -150,11 +150,11 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
   ) {
     return {
       name: 'Validator',
-      avatarBg: 'bg-white border-2 border-emerald-300',
-      avatarText: 'text-emerald-500',
+      avatarBg: 'bg-background border-2 border-status-success',
+      avatarText: 'text-status-success',
       initials: 'VA',
-      labelColor: 'text-gray-700',
-      bubbleBg: 'bg-gray-50/80',
+      labelColor: 'text-foreground',
+      bubbleBg: 'bg-muted/50 border border-border/50',
       icon: 'skull',
     };
   }
@@ -167,11 +167,11 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
   ) {
     return {
       name: 'Git Agent',
-      avatarBg: 'bg-white border-2 border-orange-300',
-      avatarText: 'text-orange-500',
+      avatarBg: 'bg-background border-2 border-status-pending',
+      avatarText: 'text-status-pending',
       initials: 'GT',
-      labelColor: 'text-gray-700',
-      bubbleBg: 'bg-gray-50/80',
+      labelColor: 'text-foreground',
+      bubbleBg: 'bg-muted/50 border border-border/50',
       icon: 'git',
     };
   }
@@ -184,22 +184,22 @@ export const getAgentInfo = (stepName: string): AgentInfo => {
   ) {
     return {
       name: 'RCA Agent',
-      avatarBg: 'bg-white border-2 border-rose-300',
-      avatarText: 'text-rose-500',
+      avatarBg: 'bg-background border-2 border-status-failure',
+      avatarText: 'text-status-failure',
       initials: 'RC',
-      labelColor: 'text-gray-700',
-      bubbleBg: 'bg-gray-50/80',
+      labelColor: 'text-foreground',
+      bubbleBg: 'bg-muted/50 border border-border/50',
       icon: 'bug',
     };
   }
 
   return {
     name: 'Agent',
-    avatarBg: 'bg-white border-2 border-slate-300',
-    avatarText: 'text-slate-500',
+    avatarBg: 'bg-background border-2 border-border',
+    avatarText: 'text-muted-foreground',
     initials: 'AG',
-    labelColor: 'text-gray-700',
-    bubbleBg: 'bg-gray-50/80',
+    labelColor: 'text-foreground',
+    bubbleBg: 'bg-muted/50 border border-border/50',
     icon: 'bot',
   };
 };

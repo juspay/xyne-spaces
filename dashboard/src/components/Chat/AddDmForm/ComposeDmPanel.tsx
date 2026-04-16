@@ -286,7 +286,7 @@ export const ComposeDmPanel: React.FC = () => {
                 <div className='flex justify-between items-center gap-2 w-full'>
                   <span className='py-1'>{getConversationTitle()}</span>
                   {!isMobile && selectedUsers.length > 9 && (
-                    <div className=' px-3 py-0.5 flex items-center gap-1.5 w-fix bg-red-50 border border-red-100 rounded-lg text-red-600'>
+                    <div className='px-3 py-0.5 flex items-center gap-1.5 w-fix bg-muted border border-border rounded-lg text-destructive'>
                       <CircleAlert className='size-3' strokeWidth={2.6} />
                       <span className='text-[10px]'>
                         Maximum 9 recipients allowed. Create a channel to add more.
@@ -321,12 +321,12 @@ export const ComposeDmPanel: React.FC = () => {
               />
               {/* Validation errors */}
               {hasAttemptedSubmit && selectedUsers.length === 0 && (
-                <div className='text-sm text-red-600'>
+                <div className='text-sm text-destructive'>
                   Please select at least one person to message
                 </div>
               )}
               {isMobile && selectedUsers.length > 9 && (
-                <div className=' px-4 py-1.5 flex items-center gap-1.5 w-full bg-red-50 border border-red-100 rounded-lg text-red-600'>
+                <div className='px-4 py-1.5 flex items-center gap-1.5 w-full bg-muted border border-border rounded-lg text-destructive'>
                   <CircleAlert className='size-3' strokeWidth={2.6} />
                   <span className='text-[10px]'>
                     Maximum 9 recipients allowed. Create a channel to add more.
@@ -387,12 +387,12 @@ export const ComposeDmPanel: React.FC = () => {
                     }}
                     className={cn(
                       field.state.meta.errors.length > 0 &&
-                        'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
+                        'border-destructive aria-invalid:ring-destructive/20 aria-invalid:border-destructive',
                     )}
                   />
                   <div className='flex items-center justify-between'>
                     {field.state.meta.errors.length > 0 && field.state.meta.errors[0] && (
-                      <p className='text-xs text-red-600 text-nowrap'>
+                      <p className='text-xs text-destructive text-nowrap'>
                         {field.state.meta.errors[0]}
                       </p>
                     )}

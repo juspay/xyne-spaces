@@ -39,31 +39,31 @@ const getStageStatusIcon = (status: JenkinsStage['status']): React.ReactNode => 
 const getStageStatusClass = (status: JenkinsStage['status']): string => {
   switch (status) {
     case 'SUCCESS':
-      return 'bg-emerald-50 border-emerald-200 text-emerald-700';
+      return 'bg-stage-completed border-stage-completed-border text-status-success';
     case 'FAILED':
-      return 'bg-red-50 border-red-200 text-red-700';
+      return 'bg-stage-cancelled border-stage-cancelled-border text-status-failure';
     case 'IN_PROGRESS':
-      return 'bg-blue-50 border-blue-200 text-blue-700';
+      return 'bg-muted border-border text-status-scheduled';
     case 'ABORTED':
       return 'bg-muted border-border text-muted-foreground';
     case 'PAUSED_PENDING_INPUT':
-      return 'bg-amber-50 border-amber-200 text-amber-700';
+      return 'bg-muted border-border text-status-pending';
     default:
       return 'bg-muted border-border text-muted-foreground';
   }
 };
 
 const getBuildStatusClass = (result: string | null, building: boolean): string => {
-  if (building) return 'bg-blue-50 border-blue-200 text-blue-700';
+  if (building) return 'bg-muted border-border text-status-scheduled';
   switch (result) {
     case 'SUCCESS':
-      return 'bg-emerald-50 border-emerald-200 text-emerald-700';
+      return 'bg-stage-completed border-stage-completed-border text-status-success';
     case 'FAILURE':
-      return 'bg-red-50 border-red-200 text-red-700';
+      return 'bg-stage-cancelled border-stage-cancelled-border text-status-failure';
     case 'ABORTED':
       return 'bg-muted border-border text-muted-foreground';
     case 'UNSTABLE':
-      return 'bg-amber-50 border-amber-200 text-amber-700';
+      return 'bg-muted border-border text-status-pending';
     default:
       return 'bg-muted border-border text-muted-foreground';
   }

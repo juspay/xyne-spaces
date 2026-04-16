@@ -4,10 +4,10 @@ import { TicketPriority, TicketStatusV2, Ticket } from '@xyne/shared';
 export const getPriorityIcon = (priority: TicketPriority): React.ReactNode => {
   if (priority === TicketPriority.CRITICAL) {
     return (
-      <svg width='15' height='14' viewBox='0 0 15 14' fill='none'>
+      <svg width='15' height='14' viewBox='0 0 15 14' fill='none' className='stroke-xyne-red-500'>
         <path
           d='M7.5 7.41673V4.75006M7.5 9.66673V9.66748M6.57337 0.939152C7.16595 0.686949 7.83405 0.686949 8.42662 0.939152C10.1942 1.69145 14.3697 8.36453 14.2474 10.1481C14.1994 10.8472 13.8529 11.4908 13.2982 11.9114C11.823 13.0295 3.17698 13.0295 1.70185 11.9114C1.14705 11.4908 0.800603 10.8472 0.752633 10.1481C0.630263 8.36453 4.80575 1.69145 6.57337 0.939152Z'
-          stroke='#E7000B'
+          stroke='currentColor'
           strokeWidth='1.5'
           strokeLinecap='round'
           strokeLinejoin='round'
@@ -18,26 +18,26 @@ export const getPriorityIcon = (priority: TicketPriority): React.ReactNode => {
 
   const barHeights = [6, 10, 14];
 
-  const priorityConfig: Record<TicketPriority, { activeBars: number; color: string }> = {
+  const priorityConfig: Record<TicketPriority, { activeBars: number; colorClass: string }> = {
     [TicketPriority.LOW]: {
       activeBars: 1,
-      color: '#10B981',
+      colorClass: 'fill-xyne-green-400',
     },
     [TicketPriority.MEDIUM]: {
       activeBars: 2,
-      color: '#F59E0B',
+      colorClass: 'fill-xyne-yellow-400',
     },
     [TicketPriority.HIGH]: {
       activeBars: 3,
-      color: '#F97316',
+      colorClass: 'fill-xyne-orange-400',
     },
     [TicketPriority.CRITICAL]: {
       activeBars: 0,
-      color: '#EF4444',
+      colorClass: 'fill-xyne-red-400',
     },
   };
 
-  const { activeBars, color } = priorityConfig[priority] ?? priorityConfig[TicketPriority.LOW];
+  const { activeBars, colorClass } = priorityConfig[priority] ?? priorityConfig[TicketPriority.LOW];
 
   return (
     <svg width='18' height='16' viewBox='0 0 18 16' fill='none'>
@@ -52,7 +52,7 @@ export const getPriorityIcon = (priority: TicketPriority): React.ReactNode => {
             width='3'
             height={height}
             rx='1.5'
-            fill={color}
+            className={colorClass}
             opacity={isActive ? 1 : 0.25}
           />
         );

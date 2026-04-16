@@ -56,6 +56,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
   isMember,
 }) => {
   const { isMobile } = usePlatform();
+  const usesCustomTriggerStyle = Boolean(className?.trim());
 
   const { hasActiveCallInChannel, isUserInCurrentChannelCall, isInCall } = useCallActions({
     channelId,
@@ -119,18 +120,28 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
     <button
       disabled={disabled}
       className={cn(
-        'h-full transition-colors rounded-lg w-8.5 !p-2 bg-sidebar-badge-accent',
+        'h-full transition-colors rounded-lg w-8.5 !p-2',
+        usesCustomTriggerStyle && 'w-full',
+        !usesCustomTriggerStyle && 'bg-sidebar-badge-accent',
         'flex items-center justify-center gap-2',
         disabled ? 'opacity-50 cursor-not-allowed' : '',
         className,
       )}
     >
-      <Headphones className={cn('h-4 w-4', isMobile ? 'text-black !w-6' : 'text-white')} />
+      <Headphones
+        className={cn(
+          'h-4 w-4',
+          isMobile && '!w-6',
+          !usesCustomTriggerStyle && (isMobile ? 'text-foreground' : 'text-background'),
+        )}
+      />
       {!isMobile && hasActiveCalls && (
         <Badge className='bg-background text-sidebar-badge-accent'>{validActiveCalls.length}</Badge>
       )}
       {!isMobile && <div className='h-4 w-px bg-muted-foreground/50' />}
-      {!isMobile && <ChevronDown className='w-4 h-4 text-white' />}
+      {!isMobile && (
+        <ChevronDown className={cn('w-4 h-4', !usesCustomTriggerStyle && 'text-background')} />
+      )}
     </button>
   );
 
@@ -144,6 +155,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
         channelName={channelName}
         participantCount={participantCount}
         isMember={isMember}
+        {...(className ? { className } : {})}
         {...(callDisplayName && { callDisplayName })}
       />
     );
@@ -205,9 +217,9 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
             data-track-metadata={JSON.stringify({ channelId, targetUserIds })}
           >
             <div className='rounded-md bg-border p-2'>
-              <Headphones className='w-5 h-5 text-black' />
+              <Headphones className='w-5 h-5 text-foreground' />
             </div>
-            <span className='text-sm font-semibold text-black'>Start call now</span>
+            <span className='text-sm font-semibold text-foreground'>Start call now</span>
           </button>
         </div>
       )}

@@ -229,14 +229,14 @@ export function CallControls({
   };
 
   const getAiButtonColorClass = () => {
-    if (hasPendingRequestFromOther) return 'bg-gray-600 cursor-not-allowed opacity-60';
+    if (hasPendingRequestFromOther) return 'bg-muted text-foreground cursor-not-allowed opacity-60';
     if (isController || (isAIAssistantEnabled && !isControlledByOther)) {
-      return 'bg-purple-600 hover:bg-purple-700 shadow-purple-500/50';
+      return 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/50';
     }
     if (isControlledByOther) {
-      return 'bg-yellow-600 hover:bg-yellow-700 shadow-yellow-500/50';
+      return 'bg-yellow-600 hover:bg-yellow-700 text-white shadow-yellow-500/50';
     }
-    return 'bg-gray-700 hover:bg-gray-600';
+    return 'bg-muted hover:bg-muted/80 text-foreground';
   };
 
   const handleAiButtonClick = () => {
@@ -253,7 +253,7 @@ export function CallControls({
       <div ref={controlsRef} className={`flex items-center justify-center ${gapClass} flex-wrap`}>
         {/* Microphone Toggle with Device Selector */}
         <div className='relative' ref={micMenuRef}>
-          <div className='flex items-center gap-0.5 bg-gray-700/80 rounded-full'>
+          <div className='flex items-center gap-0.5 bg-muted/80 rounded-full'>
             <button
               onClick={onToggleMic}
               className={cn(
@@ -262,7 +262,7 @@ export function CallControls({
                 isPushToTalkActive
                   ? 'bg-green-500 hover:bg-green-600 text-white shadow-green-500/50 ring-4 ring-green-500/30'
                   : isMicEnabled
-                    ? 'bg-gray-700 hover:bg-gray-600 text-white'
+                    ? 'bg-muted hover:bg-muted/80 text-foreground'
                     : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
@@ -297,7 +297,7 @@ export function CallControls({
             {viewMode === 'full' && (
               <button
                 onClick={() => setShowMicMenu(!showMicMenu)}
-                className='text-white flex-shrink-0 p-1.5 sm:p-2 transition-transform'
+                className='text-foreground flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select audio devices'
                 data-track-category='Calls'
                 data-track-name='Toggle_Mic_Menu'
@@ -317,7 +317,7 @@ export function CallControls({
           {showMicMenu && (
             <div
               className={cn(
-                'bg-gray-800 shadow-xl border border-gray-700',
+                'bg-popover shadow-xl border border-border',
                 isMobile
                   ? 'absolute bottom-full mb-2 -left-2 min-w-[280px] py-2 rounded-xl'
                   : 'absolute bottom-full mb-2 left-0 rounded-full',
@@ -333,7 +333,7 @@ export function CallControls({
                   icon={Mic}
                   label='Microphone'
                 />
-                {isMobile && <div className='w-full bg-gray-600 h-px' />}
+                {isMobile && <div className='w-full bg-border h-px' />}
                 <DeviceSelector
                   devices={speakerDevices}
                   currentDeviceId={activeSpeakerId}
@@ -350,14 +350,14 @@ export function CallControls({
 
         {/* Camera Toggle with Device Selector */}
         <div className='relative' ref={cameraMenuRef}>
-          <div className='flex items-center gap-0.5 bg-gray-700/80 rounded-full'>
+          <div className='flex items-center gap-0.5 bg-muted/80 rounded-full'>
             <button
               onClick={onToggleCamera}
               className={cn(
                 'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
                 !hasCustomSizing && 'p-2.5 sm:p-4',
                 isCameraEnabled
-                  ? 'bg-gray-700 hover:bg-gray-600 text-white'
+                  ? 'bg-muted hover:bg-muted/80 text-foreground'
                   : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
@@ -392,7 +392,7 @@ export function CallControls({
                 onClick={() => {
                   setShowCameraMenu(!showCameraMenu);
                 }}
-                className='text-white flex-shrink-0 p-1.5 sm:p-2 transition-transform'
+                className='text-foreground flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select camera'
                 data-track-category='Calls'
                 data-track-name='Toggle_Camera_Menu'
@@ -412,7 +412,7 @@ export function CallControls({
           {showCameraMenu && (
             <div
               className={cn(
-                'bg-gray-800 shadow-xl border border-gray-700',
+                'bg-popover shadow-xl border border-border',
                 isMobile
                   ? 'absolute bottom-full mb-2 -left-20 min-w-[280px] py-2 rounded-xl'
                   : 'absolute bottom-full mb-2 left-0 rounded-full',
@@ -440,7 +440,7 @@ export function CallControls({
             buttonClasses,
             isScreenSharing
               ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/50'
-              : 'bg-gray-700 hover:bg-gray-600 text-white',
+              : 'bg-muted hover:bg-muted/80 text-foreground',
           )}
           data-track-event='BUTTON_CLICK'
           data-track-category='CALLS'
@@ -474,7 +474,7 @@ export function CallControls({
               buttonClasses,
               isDrawingEnabled
                 ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/50'
-                : 'bg-gray-700 hover:bg-gray-600 text-white',
+                : 'bg-muted hover:bg-muted/80 text-foreground',
             )}
             style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
             title={isDrawingEnabled ? 'Stop annotating' : 'Annotate screen share'}
@@ -492,14 +492,14 @@ export function CallControls({
           </button>
         )}
 
-        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-gray-700/50 mx-0.5'></div>}
+        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-border/50 mx-0.5'></div>}
         <button
           onClick={onToggleParticipantsSidebar}
           className={cn(
             buttonClasses,
             isParticipantsSidebarOpen
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
-              : 'bg-gray-700 hover:bg-gray-600 text-white',
+              : 'bg-muted hover:bg-muted/80 text-foreground',
           )}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Participants'
@@ -520,7 +520,7 @@ export function CallControls({
         {/* Share Link Button */}
         <button
           onClick={handleShareLink}
-          className={cn(buttonClasses, 'relative bg-gray-700 hover:bg-gray-600 text-white')}
+          className={cn(buttonClasses, 'relative bg-muted hover:bg-muted/80 text-foreground')}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Share call link'
           data-track-category='CALLS'
@@ -540,7 +540,7 @@ export function CallControls({
           )}
         </button>
 
-        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-gray-700/50 mx-0.5'></div>}
+        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-border/50 mx-0.5'></div>}
 
         {/* Reactions Button */}
         {onSendReaction && (
@@ -551,7 +551,7 @@ export function CallControls({
                 buttonClasses,
                 showReactionPicker
                   ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
-                  : 'bg-gray-700 hover:bg-gray-600 text-white',
+                  : 'bg-muted hover:bg-muted/80 text-foreground',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               title='Send a reaction'
@@ -567,7 +567,7 @@ export function CallControls({
             </button>
 
             {showReactionPicker && (
-              <div className='absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-gray-800 border border-gray-700 rounded-2xl shadow-2xl p-2 flex gap-1'>
+              <div className='absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-popover border border-border rounded-2xl shadow-2xl p-2 flex gap-1'>
                 {REACTION_EMOJIS.map(emoji => (
                   <button
                     key={emoji}
@@ -575,7 +575,7 @@ export function CallControls({
                       onSendReaction(emoji);
                       setShowReactionPicker(false);
                     }}
-                    className='text-2xl p-2 rounded-xl hover:bg-gray-700 transition-colors duration-150 hover:scale-125 transform'
+                    className='text-2xl p-2 rounded-xl hover:bg-muted transition-colors duration-150 hover:scale-125 transform'
                     title={emoji}
                     data-track-category='CALLS'
                     data-track-name='SEND_REACTION'
@@ -594,8 +594,10 @@ export function CallControls({
           onClick={onToggleChat}
           className={cn(
             buttonClasses,
-            'text-white relative',
-            isChatOpen ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600',
+            'relative',
+            isChatOpen
+              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+              : 'bg-muted hover:bg-muted/80 text-foreground',
           )}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           data-track-category='CALLS'
@@ -616,7 +618,7 @@ export function CallControls({
           <button
             onClick={handleAiButtonClick}
             disabled={isAiButtonDisabled}
-            className={cn(buttonClasses, 'text-white relative', getAiButtonColorClass())}
+            className={cn(buttonClasses, 'relative', getAiButtonColorClass())}
             style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
             title={getAiButtonTitle()}
             data-track-category='CALLS'
@@ -633,17 +635,17 @@ export function CallControls({
               }
             />
             {isControlledByOther && !hasPendingRequestFromOther && (
-              <span className='absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-gray-800'></span>
+              <span className='absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-background'></span>
             )}
           </button>
         </div>
 
-        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-gray-700/50 mx-0.5'></div>}
+        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-border/50 mx-0.5'></div>}
 
         {/* Minimize/Maximize Button */}
         <button
           onClick={onToggleView}
-          className={cn(buttonClasses, 'bg-gray-700 hover:bg-gray-600 text-white')}
+          className={cn(buttonClasses, 'bg-muted hover:bg-muted/80 text-foreground')}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title={viewMode === 'mini' ? 'Expand view' : 'Minimize view'}
           data-track-category='CALLS'

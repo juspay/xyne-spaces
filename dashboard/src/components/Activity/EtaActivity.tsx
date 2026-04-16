@@ -32,7 +32,7 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
 
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm text-[#181B1D] font-medium'>
+      <div className='text-sm text-foreground font-medium'>
         {isWarning
           ? `Ticket ${ticketXyneId} is due today. Please ensure it's completed or updated.`
           : isStageBreach
@@ -40,7 +40,7 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
             : `Ticket ${ticketXyneId} is overdue. Please update the ticket's status or ETA.`}
       </div>
       {isBreach && (
-        <div className='text-xs text-[#505B62]'>
+        <div className='text-xs text-muted-foreground'>
           Action required: Ticket #{ticketXyneId} missed its deadline ({formattedDueDate}).
         </div>
       )}
@@ -59,16 +59,16 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
         />
       }
       badgeColorClass={isWarning ? 'bg-yellow-100' : isStageBreach ? 'bg-orange-100' : 'bg-red-100'}
-      description={<span className='text-[#505B62] text-sm'>ticket in</span>}
+      description={<span className='text-muted-foreground text-sm'>ticket in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
     >
       {isExpanded ? (
         expandedContent
       ) : (
-        <span className='text-sm text-[#181B1D]'>
+        <span className='text-sm text-foreground'>
           <span className='font-semibold'>{ticketXyneId}</span>
-          <span className='text-[#505B62]'>
+          <span className='text-muted-foreground'>
             {isWarning
               ? ' is due today'
               : isStageBreach

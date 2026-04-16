@@ -15,23 +15,23 @@ import { FormFieldType, type FormFields } from '@xyne/shared';
  */
 export const getStageColor = (stageName: string): string => {
   const colorMap: Record<string, string> = {};
-  colorMap['backlog'] = '#9CA3AF';
-  colorMap['todo'] = '#3B82F6';
-  colorMap['in_progress'] = '#F59E0B';
-  colorMap['review'] = '#8B5CF6';
-  colorMap['done'] = '#10B981';
-  colorMap['planning'] = '#9CA3AF';
-  colorMap['development'] = '#F59E0B';
-  colorMap['testing'] = '#8B5CF6';
-  colorMap['completed'] = '#10B981';
-  colorMap['reported'] = '#EF4444';
-  colorMap['investigating'] = '#F59E0B';
-  colorMap['fixing'] = '#3B82F6';
-  colorMap['resolved'] = '#10B981';
-  colorMap['proposed'] = '#9CA3AF';
-  colorMap['approved'] = '#3B82F6';
-  colorMap['implemented'] = '#10B981';
-  return colorMap[stageName.toLowerCase()] || '#6B7280';
+  colorMap['backlog'] = 'var(--status-new)';
+  colorMap['todo'] = 'var(--status-scheduled)';
+  colorMap['in_progress'] = 'var(--status-pending)';
+  colorMap['review'] = 'var(--status-paused)';
+  colorMap['done'] = 'var(--status-success)';
+  colorMap['planning'] = 'var(--status-new)';
+  colorMap['development'] = 'var(--status-pending)';
+  colorMap['testing'] = 'var(--status-paused)';
+  colorMap['completed'] = 'var(--status-success)';
+  colorMap['reported'] = 'var(--status-failure)';
+  colorMap['investigating'] = 'var(--status-pending)';
+  colorMap['fixing'] = 'var(--status-scheduled)';
+  colorMap['resolved'] = 'var(--status-success)';
+  colorMap['proposed'] = 'var(--status-new)';
+  colorMap['approved'] = 'var(--status-scheduled)';
+  colorMap['implemented'] = 'var(--status-success)';
+  return colorMap[stageName.toLowerCase()] || 'var(--status-new)';
 };
 
 /**
@@ -39,13 +39,13 @@ export const getStageColor = (stageName: string): string => {
  */
 export const getStatusColor = (status: string): string => {
   const colorMap: Record<string, string> = {
-    TODO: '#3B82F6',
-    STARTED: '#F59E0B',
-    PAUSED: '#8B5CF6',
-    COMPLETED: '#22C55E',
-    CANCELLED: '#DC2626',
+    TODO: 'var(--status-scheduled)',
+    STARTED: 'var(--status-pending)',
+    PAUSED: 'var(--status-paused)',
+    COMPLETED: 'var(--status-success)',
+    CANCELLED: 'var(--status-failure)',
   };
-  return colorMap[status] || '#6B7280';
+  return colorMap[status] || 'var(--status-new)';
 };
 
 /**

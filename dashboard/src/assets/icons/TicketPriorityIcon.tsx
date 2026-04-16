@@ -1,7 +1,7 @@
 import React from 'react';
 
 export const TicketPriorityIcon: React.FC<{ color?: string; size?: number }> = ({
-  color = '#646464',
+  color = 'hsl(var(--muted-foreground))',
   size,
 }) => (
   <svg

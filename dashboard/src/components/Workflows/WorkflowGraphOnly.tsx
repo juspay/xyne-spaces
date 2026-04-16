@@ -239,10 +239,20 @@ const GraphInner: React.FC<InnerProps> = ({
     return edges.map(edge => {
       const g = groups.get(`${edge.source}->${edge.target}`) || [];
       const idx = g.findIndex(e => e.id === edge.id);
+      // Use CSS variables for theme-aware colors
       const [color, width, type] =
         g.length > 1
-          ? [['#3b82f6', '#10b981', '#f59e0b', '#ef4444'][idx % 4] || '#6b7280', 1.5, 'smoothstep']
-          : ['#e5e7eb', 2, 'straight'];
+          ? [
+              [
+                'var(--status-scheduled)',
+                'var(--status-success)',
+                'var(--status-pending)',
+                'var(--status-failure)',
+              ][idx % 4] || 'var(--status-new)',
+              1.5,
+              'smoothstep',
+            ]
+          : ['hsl(var(--muted-foreground) / 0.3)', 2, 'straight'];
       return {
         ...edge,
         animated: false,
@@ -415,7 +425,7 @@ export const WorkflowGraphOnly: React.FC<WorkflowGraphOnlyProps> = ({
   if (isLoading)
     return (
       <div className='h-full flex items-center justify-center bg-background'>
-        <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500' />
+        <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-action-primary' />
       </div>
     );
   if (error)
@@ -425,7 +435,7 @@ export const WorkflowGraphOnly: React.FC<WorkflowGraphOnlyProps> = ({
         {onRefresh && (
           <button
             onClick={onRefresh}
-            className='ml-2 px-2 py-1 bg-blue-500 text-white rounded text-xs'
+            className='ml-2 px-2 py-1 bg-action-primary text-action-primary-foreground rounded text-xs hover:opacity-90 transition-opacity'
             data-track-category='Workflows'
             data-track-name='RetryLoadGraph'
           >

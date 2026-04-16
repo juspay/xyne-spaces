@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 
 const FilesIcon = ({
-  color = '#788187',
+  color = 'hsl(var(--muted-foreground))',
   size = 12,
 }: {
   color?: string;

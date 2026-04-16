@@ -156,12 +156,12 @@ function renderCallItem({
 
   // Get icon color
   const iconColorClass = isScheduled
-    ? 'text-blue-600 dark:text-blue-500'
+    ? 'text-status-scheduled'
     : call.status === CallStatus.ACTIVE
-      ? 'text-green-600 dark:text-green-500'
+      ? 'text-status-success'
       : isMissedCall
-        ? 'text-red-500 dark:text-red-400'
-        : 'text-muted-foreground dark:text-muted-foreground';
+        ? 'text-status-failure'
+        : 'text-muted-foreground';
 
   // Get status text and color
   const statusText = isScheduled
@@ -174,18 +174,18 @@ function renderCallItem({
       );
 
   const statusColorClass = isScheduled
-    ? 'text-blue-600 dark:text-blue-500 font-medium'
+    ? 'text-status-scheduled font-medium'
     : call.status === CallStatus.ACTIVE
-      ? 'text-green-600 dark:text-green-500 font-medium'
+      ? 'text-status-success font-medium'
       : isMissedCall || didNotAnswer
-        ? 'text-red-600 dark:text-red-400'
-        : 'text-muted-foreground dark:text-muted-foreground';
+        ? 'text-status-failure'
+        : 'text-muted-foreground';
 
   return (
     <div
       role='button'
       tabIndex={0}
-      className='px-6 py-3 hover:bg-muted dark:hover:bg-[#2A2A2A] transition-colors cursor-pointer group'
+      className='px-6 py-3 hover:bg-muted transition-colors cursor-pointer group'
       onClick={onCallClick}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -206,10 +206,10 @@ function renderCallItem({
 
           {/* Name and Details */}
           <div className='flex-1 min-w-0'>
-            <h3 className='text-sm font-medium text-[#384049] dark:text-[#F1F3F4] break-words'>
+            <h3 className='text-sm font-medium text-foreground break-words'>
               {call.title ? (
                 // If title exists, show title
-                <span className='text-[#384049] dark:text-[#F1F3F4] font-medium'>{call.title}</span>
+                <span className='text-foreground font-medium'>{call.title}</span>
               ) : isChannelCall ? (
                 // If channel call, show channel name
                 <span className='flex items-center gap-1 visual-regression-hide'>
@@ -221,7 +221,7 @@ function renderCallItem({
                 <>
                   {primaryUser?.name || 'Unknown'}
                   {allUsers.length > 1 && (
-                    <span className='text-[#384049] dark:text-[#F1F3F4] font-medium'>
+                    <span className='text-foreground font-medium'>
                       {', '}
                       {allUsers
                         .slice(1, 2)
@@ -239,7 +239,7 @@ function renderCallItem({
             </h3>
             <div className='flex items-center gap-2 mt-0.5 flex-wrap visual-regression-hide'>
               <span
-                className={`text-xs ${isMissedCall ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground dark:text-muted-foreground'}`}
+                className={`text-xs ${isMissedCall ? 'text-status-failure' : 'text-muted-foreground'}`}
               >
                 {isScheduled && call.startsAt
                   ? formatRelativeTimestamp(call.startsAt)
@@ -303,8 +303,8 @@ function renderCallItem({
               }}
               className={`p-2 rounded-full ${
                 isUserChannelMember
-                  ? 'hover:bg-border dark:hover:bg-gray-700 text-muted-foreground hover:text-muted-foreground dark:text-muted-foreground dark:hover:text-muted cursor-pointer'
-                  : 'text-muted dark:text-muted-foreground cursor-not-allowed'
+                  ? 'hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer transition-colors'
+                  : 'text-muted-foreground/50 cursor-not-allowed'
               }`}
             >
               <Captions size={16} />
@@ -337,8 +337,8 @@ function renderCallItem({
               }}
               className={`p-2 rounded-full ${
                 hasTranscript
-                  ? 'hover:bg-border dark:hover:bg-gray-700 text-muted-foreground hover:text-muted-foreground dark:text-muted-foreground dark:hover:text-muted cursor-pointer'
-                  : 'text-muted dark:text-muted-foreground cursor-not-allowed'
+                  ? 'hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer transition-colors'
+                  : 'text-muted-foreground/50 cursor-not-allowed'
               }`}
             >
               <Download size={16} />

@@ -334,25 +334,25 @@ const getMessageBubbleClassName = (
       !isPrivateSystemNotice &&
       !isShowInChannel &&
       'bg-muted/50',
-    isActiveCall && 'bg-green-50 active-call-highlight rounded-md',
+    isActiveCall && 'bg-stage-completed active-call-highlight rounded-md',
     isShowInChannel &&
       variant !== 'pinned' && [
-        'bg-green-50 rounded-sm',
-        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-green-400',
+        'bg-stage-completed rounded-sm',
+        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-status-success',
       ],
     isPinned &&
       variant !== 'pinned' &&
       !isShowInChannel &&
       (context === 'channel' || (context === 'thread' && isFirstInThread)) && [
-        'bg-yellow-50 rounded-sm',
-        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-yellow-400',
+        'bg-stage-todo rounded-sm',
+        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-status-pending',
       ],
     isBookmarked &&
       variant !== 'pinned' &&
       !isPinned &&
       !isShowInChannel && [
-        'bg-blue-50 rounded-sm',
-        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-blue-400',
+        'bg-accent rounded-sm',
+        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-action-primary',
       ],
     variant === 'pinned' && 'bg-background border border-border shadow-sm rounded-xl',
     isHighlighted && 'highlight-message',
@@ -419,7 +419,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return null;
   }, [isForwardedMessage, message.content]);
   const systemMessageStyles: React.CSSProperties = {
-    color: '#868D95',
+    color: 'hsl(var(--muted-foreground))',
   };
   const isWorkflowMessage =
     (isSystemMessage && metadata?.workflowId && metadata?.ticketId && !metadata?.messageSubtype) ||
@@ -539,13 +539,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       {isPinned &&
         variant !== 'pinned' &&
         (context === 'channel' || (context === 'thread' && isFirstInThread)) && (
-          <div className='flex items-center gap-1 text-xs text-amber-600 font-medium mb-1 ml-12'>
+          <div className='flex items-center gap-1 text-xs text-status-pending font-medium mb-1 ml-12'>
             <PinnedIcon className='w-4 h-4' />
             <span>Pinned</span>
           </div>
         )}
       {isBookmarked && variant !== 'pinned' && (
-        <div className='flex items-center gap-1 text-[11px] text-blue-600 font-normal mb-1 ml-12'>
+        <div className='flex items-center gap-1 text-[11px] text-action-primary font-normal mb-1 ml-12'>
           <Bookmark className='w-3 h-3 fill-current' />
           <span>Reminder Set</span>
         </div>
@@ -554,7 +554,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
       {isPrivateSystemNotice && (
         <MessageHeader
-          svgBgColor='#F3F4F6'
+          svgBgColor='hsl(var(--muted))'
           icon='visibility'
           text='Only Visible to you'
           backgroundColor='bg-muted'
@@ -596,9 +596,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               />
             ) : showAvatar && isCallMessage && !isForwardedMessage ? (
               <div
-                className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-green-100' : 'bg-muted'}`}
+                className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : 'bg-muted'}`}
               >
-                <HuddleIcon color={isActiveCall ? '#15803d' : '#4b5563'} />
+                <HuddleIcon
+                  color={isActiveCall ? 'var(--status-success)' : 'hsl(var(--muted-foreground))'}
+                />
               </div>
             ) : showAvatar && isXyneBot ? (
               <div className='flex items-center justify-center'>
@@ -931,7 +933,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div className='flex items-center gap-2 mb-1'>
                       {forwardedMessageData.originalSenderName === 'Xyne Call' ? (
                         <div className='w-5 h-5 rounded-md flex items-center justify-center bg-muted'>
-                          <HuddleIcon color='#4b5563' size={14} />
+                          <HuddleIcon color='hsl(var(--muted-foreground))' size={14} />
                         </div>
                       ) : (
                         forwardedMessageData.originalSenderId && (
@@ -1268,7 +1270,7 @@ export const ReactionView = ({
                 type='button'
                 className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
                   reaction.userHasReacted
-                    ? 'bg-blue-100 border border-blue-400 hover:bg-blue-200'
+                    ? 'bg-accent border border-action-primary hover:bg-accent/80'
                     : 'bg-muted hover:bg-accent'
                 }`}
                 onClick={e => {

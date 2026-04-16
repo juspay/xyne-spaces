@@ -6,15 +6,15 @@ import type { DisplayEntityType } from '../../../types/search';
 const entityIcon = (type: DisplayEntityType): React.ReactElement => {
   switch (type) {
     case 'channel':
-      return <Hash size={12} className='flex-shrink-0 text-gray-500' />;
+      return <Hash size={12} className='flex-shrink-0 text-muted-foreground' />;
     case 'conversation':
-      return <MessageSquare size={12} className='flex-shrink-0 text-gray-500' />;
+      return <MessageSquare size={12} className='flex-shrink-0 text-muted-foreground' />;
     case 'ticket':
-      return <Ticket size={12} className='flex-shrink-0 text-gray-500' />;
+      return <Ticket size={12} className='flex-shrink-0 text-muted-foreground' />;
     case 'attachment':
-      return <Paperclip size={12} className='flex-shrink-0 text-gray-500' />;
+      return <Paperclip size={12} className='flex-shrink-0 text-muted-foreground' />;
     case 'user':
-      return <User size={12} className='flex-shrink-0 text-gray-500' />;
+      return <User size={12} className='flex-shrink-0 text-muted-foreground' />;
   }
 };
 
@@ -25,12 +25,12 @@ const ContextItemRow = ({
   item: ContextItem;
   onRemove: (id: string) => void;
 }): React.ReactElement => (
-  <div className='flex items-center gap-1.5 px-3 py-1.5 group hover:bg-gray-50 rounded-sm'>
+  <div className='flex items-center gap-1.5 px-3 py-1.5 group hover:bg-accent rounded-sm'>
     {entityIcon(item.type)}
-    <span className='flex-1 min-w-0 text-xs text-gray-700 truncate'>{item.title}</span>
+    <span className='flex-1 min-w-0 text-xs text-foreground truncate'>{item.title}</span>
     <button
       onClick={() => onRemove(item.id)}
-      className='flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-gray-600 rounded'
+      className='flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground rounded'
       aria-label={`Remove ${item.title}`}
       data-track-category='THREAD_CONTEXT'
       data-track-name='REMOVE_CONTEXT_ITEM'
@@ -51,19 +51,19 @@ const ThreadContextPanel = ({
   };
 
   return (
-    <div className='flex flex-col h-full border-l border-gray-200 w-56 flex-shrink-0 bg-white'>
+    <div className='flex flex-col h-full border-l border-border w-56 flex-shrink-0 bg-background'>
       {/* Header */}
-      <div className='flex items-center justify-between px-3 py-2 border-b border-gray-100'>
+      <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
         <div className='flex items-center gap-1.5'>
           <Check size={13} className='text-primary' />
-          <span className='text-xs font-semibold text-gray-700'>
+          <span className='text-xs font-semibold text-foreground'>
             Context{items.length > 0 ? ` (${items.length})` : ''}
           </span>
         </div>
         {items.length > 0 && (
           <button
             onClick={handleClearAll}
-            className='text-[10px] text-gray-400 hover:text-gray-600 transition-colors'
+            className='text-[10px] text-muted-foreground hover:text-foreground transition-colors'
             data-track-category='THREAD_CONTEXT'
             data-track-name='CLEAR_ALL_CONTEXT_ITEMS'
             data-track-metdata={JSON.stringify({ itemCount: items.length })}
@@ -76,7 +76,7 @@ const ThreadContextPanel = ({
       {/* Item list */}
       <div className='flex-1 overflow-y-auto py-1'>
         {items.length === 0 ? (
-          <p className='px-3 py-4 text-xs text-gray-400 text-center leading-relaxed'>
+          <p className='px-3 py-4 text-xs text-muted-foreground text-center leading-relaxed'>
             Search and click items to add them as context
           </p>
         ) : (
@@ -85,7 +85,7 @@ const ThreadContextPanel = ({
       </div>
 
       {/* Footer */}
-      <div className='px-3 pb-3 pt-2 border-t border-gray-100'>
+      <div className='px-3 pb-3 pt-2 border-t border-border'>
         <Button
           variant='default'
           size='sm'

@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 
 const HomeIcon = ({
-  color = '#3A3C3F',
+  color = 'currentColor',
   size = 17,
 }: {
   color?: string;

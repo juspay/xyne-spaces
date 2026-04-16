@@ -119,7 +119,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   return (
     <>
       {isPinned && (context === 'channel' || (context === 'thread' && isFirstInThread)) && (
-        <div className='flex items-center gap-1 text-xs text-amber-600 font-medium mb-1 justify-end pr-2'>
+        <div className='flex items-center gap-1 text-xs text-status-pending font-medium mb-1 justify-end pr-2'>
           <PinnedIcon className='w-4 h-4' />
           <span>Pinned</span>
         </div>
@@ -161,7 +161,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
         data-component='MobileMessageMyBubble'
         className={cn(
           'group flex gap-2 relative px-3 py-0.5 justify-end items-end',
-          isHighlighted && 'bg-blue-50/30',
+          isHighlighted && 'highlight-message',
         )}
       >
         {/* ================== CONTENT ================== */}

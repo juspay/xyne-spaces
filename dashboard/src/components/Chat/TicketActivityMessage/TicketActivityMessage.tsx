@@ -28,7 +28,7 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ me
       case 'ETA':
         return <Calendar />;
       case 'IS_ARCHIVED':
-        return <Archive size={16} className='text-amber-600' />;
+        return <Archive size={16} className='text-status-pending' />;
       default:
         return <SmallUserAvatar userId={message.senderId} />;
     }

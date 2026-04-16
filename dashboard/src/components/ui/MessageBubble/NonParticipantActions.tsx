@@ -189,7 +189,7 @@ export const NonParticipantActions: React.FC<NonParticipantActionsProps> = ({
         </div>
       )}
 
-      {error && <span className='text-xs text-red-600 mt-2 block'>{error}</span>}
+      {error && <span className='text-xs text-destructive mt-2 block'>{error}</span>}
     </div>
   );
 };

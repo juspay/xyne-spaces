@@ -95,7 +95,7 @@ const ProjectSidebar = ({
       {/* Header */}
       <div className='sticky top-0 z-50 bg-background border-b border-border'>
         <div className='px-4 py-3 flex items-center justify-between'>
-          <h2 className='text-black font-inter text-base font-semibold leading-normal'>
+          <h2 className='text-foreground font-inter text-base font-semibold leading-normal'>
             Projects Board
           </h2>
           {onClose && (

@@ -32,7 +32,7 @@ export const ZeroConnectionFailureModal = ({
       role='presentation'
     >
       <div
-        className='bg-white rounded-lg shadow-2xl p-8 max-w-md w-full mx-4 relative'
+        className='bg-card rounded-lg shadow-2xl p-8 max-w-md w-full mx-4 relative'
         role='dialog'
         aria-labelledby='modal-title'
         aria-describedby='modal-description'
@@ -41,7 +41,7 @@ export const ZeroConnectionFailureModal = ({
         {onClose && (
           <button
             onClick={onClose}
-            className='absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors'
+            className='absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors'
             aria-label='Close modal'
             data-track-category='ZERO_CONNECTION'
             data-track-name='CLOSE_CONNECTION_FAILURE_MODAL'
@@ -70,12 +70,12 @@ export const ZeroConnectionFailureModal = ({
         </div>
 
         {/* Title */}
-        <h2 id='modal-title' className='text-xl font-semibold text-gray-900 text-center mb-2'>
+        <h2 id='modal-title' className='text-xl font-semibold text-foreground text-center mb-2'>
           Connection Lost
         </h2>
 
         {/* Description */}
-        <p id='modal-description' className='text-gray-600 text-center mb-6'>
+        <p id='modal-description' className='text-muted-foreground text-center mb-6'>
           {isElectron
             ? 'The connection to the server has been lost. Click below to reload the app.'
             : 'The connection to the server has been lost. Click below to refresh.'}

@@ -1,7 +1,7 @@
 import { ReactElement, useState, useEffect } from 'react';
 import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
-import { Edit2, Trash2, Plus, Eye } from 'lucide-react';
+import { Edit2, Trash2, Plus, Eye, X } from 'lucide-react';
 
 interface Skill {
   name: string;
@@ -243,7 +243,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
   const isSaving = isSavingInstruction || isSavingSkill;
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50'>
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
       <div className='bg-popover rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col'>
         {/* Header with Tabs */}
         <div className='flex items-center justify-between p-6 border-b border-border'>
@@ -292,7 +292,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
             data-track-category='XYNE_AI'
             data-track-name='CloseSettingsModal'
           >
-            <img src='/svgs/icons/close.svg' alt='Close' width='16' height='16' />
+            <X size={16} className='text-current' />
           </button>
         </div>
 
@@ -303,8 +303,8 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
             <div className='space-y-4'>
               {/* Length Warning */}
               {showLengthWarning && (
-                <div className='p-3 bg-amber-50 border border-amber-200 rounded-lg'>
-                  <p className='text-sm text-amber-800'>
+                <div className='p-3 bg-muted border border-border rounded-lg'>
+                  <p className='text-sm text-status-pending'>
                     <span className='font-semibold'>Warning:</span> Your custom instructions exceed
                     the {MAX_CUSTOM_INSTRUCTION_LENGTH} character limit. Please edit your content to
                     fit within the limit before saving.
@@ -330,14 +330,14 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                       ? 'Loading...'
                       : 'Additional behavior, style, and tone preferences'
                   }
-                  className='w-full h-48 px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent resize-none text-sm'
+                  className='w-full h-48 bg-background px-3 py-2 border border-border rounded-lg resize-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted disabled:text-muted-foreground'
                   disabled={isSavingInstruction || isLoadingInstruction}
                   data-track-category='XYNE_AI'
                   data-track-name='EditCustomInstructions'
                 />
                 <div className='flex justify-end mt-1'>
                   <span
-                    className={`text-xs ${instruction.length >= MAX_CUSTOM_INSTRUCTION_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                    className={`text-xs ${instruction.length >= MAX_CUSTOM_INSTRUCTION_LENGTH ? 'text-destructive' : 'text-muted-foreground'}`}
                   >
                     {instruction.length}/{MAX_CUSTOM_INSTRUCTION_LENGTH}
                   </span>
@@ -419,9 +419,9 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   value={skillName}
                   onChange={e => handleNameChange(e.target.value.slice(0, MAX_NAME_LENGTH))}
                   placeholder='Enter skill name'
-                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 text-sm disabled:bg-muted disabled:text-muted-foreground ${
+                  className={`w-full bg-background px-3 py-2 border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 disabled:bg-muted disabled:text-muted-foreground ${
                     nameError
-                      ? 'border-red-500 focus:ring-red-500'
+                      ? 'border-destructive focus:ring-destructive/20'
                       : 'border-border focus:ring-ring'
                   }`}
                   disabled={isSavingSkill || !!editingSkillName}
@@ -429,7 +429,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   data-track-category='XYNE_AI'
                   data-track-name='EditSkillName'
                 />
-                {nameError && <p className='text-xs text-red-500 mt-1'>{nameError}</p>}
+                {nameError && <p className='text-xs text-destructive mt-1'>{nameError}</p>}
                 {editingSkillName && !nameError && (
                   <p className='text-xs text-muted-foreground mt-1'>
                     Skill name cannot be changed after creation
@@ -437,7 +437,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                 )}
                 <div className='flex justify-end mt-1'>
                   <span
-                    className={`text-xs ${skillName.length >= MAX_NAME_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                    className={`text-xs ${skillName.length >= MAX_NAME_LENGTH ? 'text-destructive' : 'text-muted-foreground'}`}
                   >
                     {skillName.length}/{MAX_NAME_LENGTH}
                   </span>
@@ -460,14 +460,14 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   }
                   placeholder='Brief description of what this skill does'
                   rows={3}
-                  className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-none text-sm'
+                  className='w-full bg-background px-3 py-2 border border-border rounded-lg resize-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:text-muted-foreground'
                   disabled={isSavingSkill}
                   data-track-category='XYNE_AI'
                   data-track-name='EditSkillDescription'
                 />
                 <div className='flex justify-end mt-1'>
                   <span
-                    className={`text-xs ${skillDescription.length >= MAX_DESCRIPTION_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                    className={`text-xs ${skillDescription.length >= MAX_DESCRIPTION_LENGTH ? 'text-destructive' : 'text-muted-foreground'}`}
                   >
                     {skillDescription.length}/{MAX_DESCRIPTION_LENGTH}
                   </span>
@@ -490,14 +490,14 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   }
                   placeholder='Detailed instructions for how the AI should behave when using this skill'
                   rows={6}
-                  className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring resize-none text-sm'
+                  className='w-full bg-background px-3 py-2 border border-border rounded-lg resize-none text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:text-muted-foreground'
                   disabled={isSavingSkill}
                   data-track-category='XYNE_AI'
                   data-track-name='EditSkillInstructions'
                 />
                 <div className='flex justify-end mt-1'>
                   <span
-                    className={`text-xs ${skillInstructions.length >= MAX_INSTRUCTIONS_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                    className={`text-xs ${skillInstructions.length >= MAX_INSTRUCTIONS_LENGTH ? 'text-destructive' : 'text-muted-foreground'}`}
                   >
                     {skillInstructions.length}/{MAX_INSTRUCTIONS_LENGTH}
                   </span>
@@ -511,7 +511,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
               <div className='flex justify-end'>
                 <button
                   onClick={() => handleAddNewSkill()}
-                  className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors'
+                  className='flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors'
                   disabled={isLoadingSkills}
                   data-track-category='XYNE_AI'
                   data-track-name='AddNewSkill'
@@ -538,7 +538,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
                         <span
-                          className={`w-2 h-2 rounded-full flex-shrink-0 ${skill.enabled ? 'bg-green-500' : 'bg-gray-300'}`}
+                          className={`w-2 h-2 rounded-full flex-shrink-0 ${skill.enabled ? 'bg-status-success' : 'bg-muted-foreground/30'}`}
                         />
                         <span className='text-sm font-medium text-foreground truncate'>
                           {skill.name}
@@ -573,7 +573,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                               data-track-category='XYNE_AI'
                               data-track-name='ToggleSkillCheckbox'
                             />
-                            <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                            <div className="w-9 h-5 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-background after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-background after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-action-primary"></div>
                             <span className='ml-2 text-xs text-muted-foreground'>
                               {skill.enabled ? 'On' : 'Off'}
                             </span>
@@ -591,7 +591,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                             onClick={() => {
                               void handleDeleteSkill(skill.name);
                             }}
-                            className='p-1.5 rounded-md hover:bg-red-100 text-muted-foreground hover:text-red-600 transition-colors'
+                            className='p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors'
                             title='Delete'
                             data-track-category='XYNE_AI'
                             data-track-name='DeleteSkill'
@@ -615,7 +615,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
             <>
               <button
                 onClick={() => void handleClearInstruction()}
-                className='px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors'
+                className='px-4 py-2 text-sm font-medium text-destructive hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors'
                 disabled={isSavingInstruction || isLoadingInstruction || !instruction}
                 data-track-category='XYNE_AI'
                 data-track-name='ClearCustomInstructions'
@@ -634,7 +634,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                 </button>
                 <button
                   onClick={() => void handleSaveInstruction()}
-                  className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                   disabled={
                     isSavingInstruction ||
                     isLoadingInstruction ||
@@ -653,7 +653,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
               <div />
               <button
                 onClick={() => setPreviewingSkill(null)}
-                className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors'
+                className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors'
                 data-track-category='XYNE_AI'
                 data-track-name='CloseSystemSkillPreview'
               >
@@ -674,7 +674,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
               </button>
               <button
                 onClick={() => void handleSaveSkill()}
-                className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 disabled={isSavingSkill || !skillName.trim() || !!nameError}
                 data-track-category='XYNE_AI'
                 data-track-name={editingSkillName ? 'UpdateSkill' : 'CreateSkill'}
@@ -688,7 +688,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
               <div /> {/* Spacer */}
               <button
                 onClick={onClose}
-                className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors'
+                className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors'
                 data-track-category='XYNE_AI'
                 data-track-name='CloseSettingsModal'
               >

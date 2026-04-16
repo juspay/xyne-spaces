@@ -508,9 +508,9 @@ const VSCodeWorkspaceScreen: React.FC = () => {
   if (!isCodeServerAvailable) {
     if (!codeServerStatus) {
       return (
-        <div className='h-full flex flex-col items-center justify-center bg-[#1e1e1e] rounded-lg'>
-          <Loader2 className='w-12 h-12 animate-spin text-blue-500 mb-4' />
-          <h3 className='text-base font-semibold text-gray-200 mb-1.5'>Initializing VS Code</h3>
+        <div className='h-full flex flex-col items-center justify-center bg-background rounded-lg'>
+          <Loader2 className='w-12 h-12 animate-spin text-primary mb-4' />
+          <h3 className='text-base font-semibold text-foreground mb-1.5'>Initializing VS Code:</h3>
           <p className='text-sm text-muted-foreground'>Please wait...</p>
         </div>
       );
@@ -519,7 +519,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
     if (codeServerStatus.isDownloading) {
       return (
         <div className='h-full flex flex-col items-center justify-center bg-muted rounded-lg'>
-          <Loader2 className='w-12 h-12 animate-spin text-blue-500 mb-4' />
+          <Loader2 className='w-12 h-12 animate-spin text-action-primary mb-4' />
           <h3 className='text-base font-semibold text-foreground mb-1.5'>
             Downloading VS Code Server
           </h3>
@@ -531,7 +531,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
     if (codeServerStatus.error || !codeServerStatus.binaryInstalled) {
       return (
         <div className='h-full flex flex-col items-center justify-center bg-muted rounded-lg'>
-          <AlertCircle className='w-12 h-12 text-red-400 mb-4' />
+          <AlertCircle className='w-12 h-12 text-destructive mb-4' />
           <h3 className='text-base font-semibold text-foreground mb-1.5'>VS Code Server Error</h3>
           <p className='text-sm text-muted-foreground max-w-md text-center mb-4'>
             {codeServerStatus.error || 'Code server binary not installed'}
@@ -542,7 +542,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
 
     return (
       <div className='h-full flex flex-col items-center justify-center bg-muted rounded-lg'>
-        <Loader2 className='w-12 h-12 animate-spin text-blue-500 mb-4' />
+        <Loader2 className='w-12 h-12 animate-spin text-action-primary mb-4' />
         <h3 className='text-base font-semibold text-foreground mb-1.5'>Starting VS Code Server</h3>
         <p className='text-sm text-muted-foreground'>Please wait...</p>
       </div>
@@ -553,7 +553,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
   if (isLoading) {
     return (
       <div className='h-full flex flex-col items-center justify-center bg-background rounded-lg'>
-        <Loader2 className='w-8 h-8 animate-spin text-blue-500 mb-4' />
+        <Loader2 className='w-8 h-8 animate-spin text-action-primary mb-4' />
         <p className='text-muted-foreground'>Setting up VS Code...</p>
       </div>
     );
@@ -563,7 +563,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
   if (error) {
     return (
       <div className='h-full flex flex-col items-center justify-center bg-background rounded-lg'>
-        <AlertCircle className='w-12 h-12 text-red-400 mb-4' />
+        <AlertCircle className='w-12 h-12 text-destructive mb-4' />
         <h3 className='text-base font-semibold text-foreground mb-2'>Failed to Load</h3>
         <p className='text-sm text-muted-foreground max-w-md text-center mb-4'>{error}</p>
         <button
@@ -573,7 +573,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
             setIsLoading(true);
             void setupWorkspace();
           }}
-          className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors'
+          className='flex items-center gap-2 px-4 py-2 bg-action-primary text-action-primary-foreground rounded-lg hover:opacity-90 transition-opacity'
           data-track-category='VSCodeWorkspace'
           data-track-name='RetrySetup'
         >
@@ -590,11 +590,11 @@ const VSCodeWorkspaceScreen: React.FC = () => {
   return (
     <div
       ref={panelRef}
-      className='h-full flex flex-col bg-[#1e1e1e] rounded-lg overflow-hidden shadow-lg'
+      className='h-full flex flex-col bg-background rounded-lg overflow-hidden shadow-lg'
     >
       {/* Header */}
       <div
-        className='flex items-center justify-between px-3 pt-[8px] pb-[2px] bg-[#252526] border-b border-gray-700/50'
+        className='flex items-center justify-between px-3 pt-[8px] pb-[2px] bg-card border-b border-border'
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
         onDoubleClick={() => {
           if (typeof window.electronAPI?.toggleCompactMode === 'function') {
@@ -633,7 +633,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
                     ${
                       activeTabId === tab.id
                         ? 'bg-blue-500/15 text-blue-300 ring-1 ring-blue-500/25'
-                        : 'bg-gray-800/50 text-muted-foreground hover:bg-blue-500/10 hover:text-blue-300'
+                        : 'bg-card text-muted-foreground hover:bg-blue-500/10 hover:text-blue-300'
                     }
                   `}
                 >
@@ -641,7 +641,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
                   <span className='font-medium'>{tab.title}</span>
                   {tab.type !== 'main' && (
                     <X
-                      className='w-3 h-3 rounded-full opacity-0 group-hover:opacity-100 hover:bg-gray-600/50 transition-all'
+                      className='w-3 h-3 rounded-full opacity-0 group-hover:opacity-100 hover:bg-muted transition-all'
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         closeTab(tab.id);
@@ -663,7 +663,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
         >
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-              <button className='flex items-center gap-2 px-3 py-1.5 mb-1 text-xs font-semibold text-muted bg-gray-800/60 hover:bg-gray-700/80 rounded-lg transition-all border border-gray-700/50 shadow-sm'>
+              <button className='flex items-center gap-2 px-3 py-1.5 mb-1 text-xs font-semibold text-muted-foreground bg-card hover:bg-muted rounded-lg transition-all border border-border shadow-sm'>
                 <Folder className='w-3.5 h-3.5 text-blue-400' />
                 <span className='hidden sm:inline'>Projects</span>
                 <ChevronDown className='w-3 h-3 text-muted-foreground' />
@@ -672,7 +672,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
 
             <DropdownMenu.Portal container={panelRef.current}>
               <DropdownMenu.Content
-                className='min-w-[200px] bg-[#252526] border border-gray-700/50 rounded-lg p-1.5 shadow-2xl z-[100] animate-in fade-in zoom-in-95 duration-100'
+                className='min-w-[200px] bg-popover border border-border rounded-lg p-1.5 shadow-2xl z-[100] animate-in fade-in zoom-in-95 duration-100'
                 sideOffset={5}
               >
                 {/* Add Project Action */}
@@ -686,7 +686,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
                   <span>Add Project</span>
                 </DropdownMenu.Item>
 
-                <div className='h-px bg-gray-700/50 my-1.5 mx-1' />
+                <div className='h-px bg-border my-1.5 mx-1' />
 
                 {/* Open Projects */}
                 <div className='px-2.5 py-1 text-[10px] font-bold text-muted-foreground uppercase tracking-wider'>
@@ -704,7 +704,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
                         ${
                           activeTabId === tab.id
                             ? 'bg-blue-500/15 text-blue-300 font-medium'
-                            : 'text-muted-foreground hover:bg-gray-700/50 hover:text-gray-200'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                         }
                       `}
                     >
@@ -730,13 +730,13 @@ const VSCodeWorkspaceScreen: React.FC = () => {
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
 
-          <div className='w-px h-4 bg-gray-700/50 mx-1 mb-1' />
+          <div className='w-px h-4 bg-border mx-1 mb-1' />
 
           <button
             onClick={handleRefresh}
             data-track-category='VSCodeWorkspace'
             data-track-name='Refresh'
-            className='p-1.5 mb-1 text-muted-foreground hover:text-white hover:bg-background/5 rounded-lg transition-all'
+            className='p-1.5 mb-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-all'
             title='Refresh'
           >
             <RefreshCw className='w-3.5 h-3.5' />
@@ -744,7 +744,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
 
           <button
             onClick={handleFullscreenToggle}
-            className='p-1.5 mb-1 text-muted-foreground hover:text-white hover:bg-background/5 rounded-lg transition-all'
+            className='p-1.5 mb-1 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-all'
             title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
             data-track-category='VSCode'
             data-track-name='ToggleFullscreen'
@@ -763,7 +763,7 @@ const VSCodeWorkspaceScreen: React.FC = () => {
       <div className='flex-1 flex overflow-hidden relative'>
         {/* Only show thread panel on the left as before */}
         {isThreadOpen && activeTab && activeTab.type !== 'workspace' && (
-          <div className='w-[500px] flex-shrink-0 border-r border-gray-700/50 overflow-hidden flex flex-col bg-background'>
+          <div className='w-[500px] flex-shrink-0 border-r border-border overflow-hidden flex flex-col bg-background'>
             <TabContent
               key={activeTab.id}
               tab={activeTab}
@@ -785,15 +785,15 @@ const VSCodeWorkspaceScreen: React.FC = () => {
               allow='clipboard-read; clipboard-write'
             />
           ) : (
-            <div className='absolute inset-0 flex flex-col items-center justify-center bg-[#1e1e1e]'>
-              <Code2 className='w-12 h-12 text-blue-400 mb-4' />
-              <h3 className='text-base font-semibold text-gray-200 mb-1.5'>No Workspace Open</h3>
+            <div className='absolute inset-0 flex flex-col items-center justify-center bg-background'>
+              <Code2 className='w-12 h-12 text-primary mb-4' />
+              <h3 className='text-base font-semibold text-foreground mb-1.5'>No Workspace Open</h3>
               <p className='text-sm text-muted-foreground max-w-xs text-center leading-relaxed mb-4'>
                 Open a folder to start working in VS Code.
               </p>
               <button
                 onClick={() => void handleOpenFolder()}
-                className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 transition-colors'
+                className='flex items-center gap-2 px-4 py-2 bg-action-primary text-action-primary-foreground text-sm rounded-lg hover:opacity-90 transition-opacity'
                 data-track-category='VSCodeWorkspace'
                 data-track-name='OpenFolder'
               >
@@ -824,8 +824,8 @@ const TabContent: React.FC<{
 
   if (!conversationId || !channelId) {
     return (
-      <div className='h-full flex flex-col items-center justify-center bg-[#1e1e1e]'>
-        <Loader2 className='w-6 h-6 animate-spin text-blue-500 mb-2' />
+      <div className='h-full flex flex-col items-center justify-center bg-background'>
+        <Loader2 className='w-6 h-6 animate-spin text-primary mb-2' />
         <p className='text-sm text-muted-foreground'>Loading thread...</p>
       </div>
     );

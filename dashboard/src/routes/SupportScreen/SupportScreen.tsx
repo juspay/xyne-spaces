@@ -475,8 +475,8 @@ const SupportScreen = (): ReactElement => {
                     className={cn(
                       'p-1.5 rounded transition-colors',
                       isSettingsOpen
-                        ? 'bg-gray-100 text-gray-900'
-                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                     )}
                     title='Inbox settings'
                     data-track-category='Support'
@@ -498,12 +498,12 @@ const SupportScreen = (): ReactElement => {
                 </div>
               </div>
               {isSettingsOpen && (
-                <div className='absolute inset-0 z-10 bg-white flex flex-col overflow-y-auto'>
-                  <div className='flex-shrink-0 h-14 px-4 border-b border-gray-200 flex items-center justify-between'>
-                    <span className='text-sm font-semibold text-gray-800'>Inbox Settings</span>
+                <div className='absolute inset-0 z-10 bg-background flex flex-col overflow-y-auto'>
+                  <div className='flex-shrink-0 h-14 px-4 border-b border-border flex items-center justify-between'>
+                    <span className='text-sm font-semibold text-foreground'>Inbox Settings</span>
                     <button
                       onClick={() => void navigate(-1)}
-                      className='p-1.5 rounded hover:bg-gray-100 text-gray-500 transition-colors'
+                      className='p-1.5 rounded hover:bg-accent text-muted-foreground transition-colors'
                       data-track-category='inbox-settings'
                       data-track-name='close-inbox-settings'
                     >
@@ -1983,10 +1983,10 @@ const EmailComposer = ({
 
         {selectedSignatureId && (
           <div className='px-4 pb-3'>
-            <div className='border-t border-gray-200 pt-2'>
-              <p className='text-xs text-gray-400 mb-1'>--</p>
+            <div className='border-t border-border pt-2'>
+              <p className='text-xs text-muted-foreground mb-1'>--</p>
               <div
-                className='text-sm text-gray-600 prose prose-sm max-w-none'
+                className='text-sm text-muted-foreground prose prose-sm max-w-none'
                 dangerouslySetInnerHTML={{
                   __html: signatures?.find(s => s.id === selectedSignatureId)?.content ?? '',
                 }}
@@ -2031,7 +2031,7 @@ const EmailComposer = ({
                 <DropdownMenuTrigger asChild>
                   <button
                     type='button'
-                    className='flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors'
+                    className='flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors'
                     title={
                       selectedSignatureId
                         ? (signatures.find(s => s.id === selectedSignatureId)?.name ?? 'Signature')
@@ -2046,7 +2046,7 @@ const EmailComposer = ({
                 <DropdownMenuContent align='start' side='top'>
                   <DropdownMenuItem
                     onClick={() => void composerNavigate('/support?openSettings=signatures')}
-                    className='text-xs text-gray-500'
+                    className='text-xs text-muted-foreground'
                   >
                     Manage signatures
                   </DropdownMenuItem>
@@ -2081,7 +2081,7 @@ const EmailComposer = ({
             )}
           </div>
           <button
-            className='size-8 flex items-center justify-center rounded-full bg-gray-400 text-white hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+            className='size-8 flex items-center justify-center rounded-full bg-muted-foreground text-background hover:bg-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
             onClick={() => void handleSendEmail()}
             disabled={!emailContent.trim() || !conversationId || isSending || toEmails.length === 0}
             aria-label='Send email'

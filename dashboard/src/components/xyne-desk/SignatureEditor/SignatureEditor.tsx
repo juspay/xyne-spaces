@@ -63,20 +63,20 @@ export const SignatureEditor = (): ReactElement => {
             }}
             title={signatureEnabled ? 'Disable auto-append' : 'Enable auto-append'}
             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-              signatureEnabled ? 'bg-[#6276be]' : 'bg-gray-200'
+              signatureEnabled ? 'bg-[#6276be]' : 'bg-secondary'
             }`}
             data-track-category='email-signature'
             data-track-name='toggle-signature-enabled'
           >
             <span
-              className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+              className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform duration-200 ${
                 signatureEnabled ? 'translate-x-4' : 'translate-x-0'
               }`}
             />
           </button>
           <div>
-            <p className='text-sm font-medium text-gray-800'>Email Signatures</p>
-            <p className='text-xs text-gray-500 mt-0.5'>
+            <p className='text-sm font-medium text-foreground'>Email Signatures</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
               Appended to every email reply you send from Xyne Desk.
             </p>
           </div>
@@ -94,7 +94,7 @@ export const SignatureEditor = (): ReactElement => {
       </div>
 
       {!signatures || signatures.length === 0 ? (
-        <div className='text-sm text-gray-400 py-6 text-center border border-dashed border-gray-200 rounded-xl'>
+        <div className='text-sm text-muted-foreground py-6 text-center border border-dashed border-border rounded-xl'>
           No signatures yet. Click <strong>+ Add signature</strong> to create one.
         </div>
       ) : (
@@ -104,19 +104,19 @@ export const SignatureEditor = (): ReactElement => {
           {signatures.map(sig => (
             <div
               key={sig.id}
-              className={`flex items-center justify-between px-4 py-3 border rounded-xl bg-white transition-colors duration-300 ${
-                signatureEnabled ? 'border-gray-200' : 'border-gray-100'
+              className={`flex items-center justify-between px-4 py-3 border rounded-xl bg-card transition-colors duration-300 ${
+                signatureEnabled ? 'border-border' : 'border-border/50'
               }`}
             >
               <div className='flex items-center gap-2'>
                 <span
-                  className={`text-sm font-medium transition-colors duration-300 ${signatureEnabled ? 'text-gray-800' : 'text-gray-400'}`}
+                  className={`text-sm font-medium transition-colors duration-300 ${signatureEnabled ? 'text-foreground' : 'text-muted-foreground'}`}
                 >
                   {sig.name}
                 </span>
                 {sig.isDefault && (
                   <span
-                    className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors duration-300 ${signatureEnabled ? 'bg-[#eef0fb] text-[#6276be]' : 'bg-gray-100 text-gray-400'}`}
+                    className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors duration-300 ${signatureEnabled ? 'bg-[#eef0fb] text-[#6276be]' : 'bg-muted text-muted-foreground'}`}
                   >
                     Default
                   </span>
@@ -127,7 +127,7 @@ export const SignatureEditor = (): ReactElement => {
                   type='button'
                   title='Edit'
                   onClick={() => setModal({ open: true, editing: sig })}
-                  className='p-1.5 text-gray-400 hover:text-gray-700 rounded-md hover:bg-gray-100 transition-colors'
+                  className='p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent transition-colors'
                   data-track-category='email-signature'
                   data-track-name='edit-signature'
                 >
@@ -137,7 +137,7 @@ export const SignatureEditor = (): ReactElement => {
                   type='button'
                   title='Delete'
                   onClick={() => zero.mutate(mutators.emailSignature.delete({ id: sig.id }))}
-                  className='p-1.5 text-gray-400 hover:text-red-500 rounded-md hover:bg-gray-100 transition-colors'
+                  className='p-1.5 text-muted-foreground hover:text-red-500 rounded-md hover:bg-accent transition-colors'
                   data-track-category='email-signature'
                   data-track-name='delete-signature'
                 >

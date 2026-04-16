@@ -307,7 +307,7 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
                           strokeWidth='2'
                           strokeLinecap='round'
                           strokeLinejoin='round'
-                          className='flex-shrink-0 text-blue-600'
+                          className='flex-shrink-0 text-action-primary'
                         >
                           <polyline points='20 6 9 17 4 12'></polyline>
                         </svg>

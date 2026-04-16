@@ -294,13 +294,13 @@ export const BookmarkItem = ({
       {/* Snooze Badge - shown in bottom right if snoozed and not overdue */}
       {snoozeUntil && new Date(snoozeUntil).getTime() > Date.now() && !isHovered && (
         <div className='absolute bottom-2 right-2 z-10'>
-          <span className='text-xs font-medium text-blue-600'>{formatDueIn(snoozeUntil)}</span>
+          <span className='text-xs font-medium text-primary'>{formatDueIn(snoozeUntil)}</span>
         </div>
       )}
 
       {/* Action Toolbar - shown on hover, hidden on mobile */}
       {!isMobile && isHovered && (
-        <div className='absolute bottom-2 right-2 z-10 flex items-center gap-1 bg-card border border-border rounded-md shadow-[0px_0px_8px_0px_rgba(5,5,6,0.04)] p-1'>
+        <div className='absolute bottom-2 right-2 z-10 flex items-center gap-1 bg-card border border-border rounded-md shadow-sm p-1'>
           <Tooltip content='Mark as done'>
             <button
               onClick={handleRemoveBookmark}
@@ -311,7 +311,7 @@ export const BookmarkItem = ({
               data-track-name='Mark_Bookmark_Done'
               data-track-metadata={JSON.stringify({ entityId })}
             >
-              <Check size={16} className='text-[#788187]' strokeWidth={1.33} />
+              <Check size={16} className='text-muted-foreground' strokeWidth={1.33} />
             </button>
           </Tooltip>
           <div className='relative'>
@@ -324,7 +324,7 @@ export const BookmarkItem = ({
                 data-track-name='Open_Snooze_Menu'
                 data-track-metadata={JSON.stringify({ entityId })}
               >
-                <Clock size={16} className='text-[#788187]' strokeWidth={1.33} />
+                <Clock size={16} className='text-muted-foreground' strokeWidth={1.33} />
               </button>
             </Tooltip>
 
@@ -332,7 +332,7 @@ export const BookmarkItem = ({
             {showSnoozeDropdown && (
               <div
                 ref={dropdownRef}
-                className='absolute top-full right-0 mt-1 bg-popover border border-border rounded-md shadow-[0px_1px_8px_0px_rgba(0,0,0,0.15)] py-1 min-w-[200px] z-20'
+                className='absolute top-full right-0 mt-1 bg-popover border border-border rounded-md shadow-md py-1 min-w-[200px] z-20'
                 role='menu'
                 tabIndex={-1}
                 onKeyDown={(e): void => {
@@ -421,8 +421,8 @@ export const BookmarkItem = ({
             <span
               className={`truncate font-inter ${
                 String(channel?.scopeType) === 'DM' || String(channel?.scopeType) === 'GROUP_DM'
-                  ? 'text-[13px] font-medium text-[#3B4145] leading-[100%]'
-                  : 'text-sm text-[#1D1C1D]'
+                  ? 'text-[13px] font-medium text-foreground leading-[100%]'
+                  : 'text-sm text-foreground'
               }`}
             >
               {String(channel?.scopeType) === 'DM' || String(channel?.scopeType) === 'GROUP_DM'
@@ -430,7 +430,7 @@ export const BookmarkItem = ({
                 : `#${channel?.name || 'Unknown Channel'}`}
             </span>
             <span
-              className='text-[11px] font-normal text-[#788187] leading-[100%] flex-shrink-0 ml-auto'
+              className='text-[11px] font-normal text-muted-foreground leading-[100%] flex-shrink-0 ml-auto'
               style={{ fontFamily: 'Geist Mono' }}
             >
               {formatDateWithTime(message.createdAt)}
@@ -457,7 +457,7 @@ export const BookmarkItem = ({
               {/* User name and message */}
               <div className='flex-1 min-w-0'>
                 {/* User name */}
-                <div className='text-[13.5px] font-semibold text-[#181B1D] leading-[100%] truncate mb-1 font-inter'>
+                <div className='text-[13.5px] font-semibold text-foreground leading-[100%] truncate mb-1 font-inter'>
                   {sender?.name || 'Unknown User'}
                 </div>
 

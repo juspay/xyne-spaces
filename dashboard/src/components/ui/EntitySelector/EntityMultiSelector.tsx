@@ -219,7 +219,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                                 </div>
                               )}
                             </div>
-                            {isSelected && <Check className='w-4 h-4 text-blue-600' />}
+                            {isSelected && <Check className='w-4 h-4 text-action-primary' />}
                           </button>
                         </li>
                       );

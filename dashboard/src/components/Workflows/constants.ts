@@ -153,14 +153,21 @@ export const LOADING_CONFIG = {
 
 /**
  * Edge styling configuration for workflow graph
+ * Uses CSS variable for default color that responds to theme
  */
 export const EDGE_STYLING = {
-  DEFAULT_COLOR: '#e5e7eb',
+  DEFAULT_COLOR: 'var(--status-new)', // Theme-aware fallback
   DEFAULT_WIDTH: 2,
   MULTI_EDGE_WIDTH: 1.5,
   ARROW_SIZE: 14,
   STROKE_WIDTH: 1.5,
-  PALETTE: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'],
+  // Palette colors use CSS variables for theme-aware theming
+  PALETTE: [
+    'var(--status-scheduled)',
+    'var(--status-success)',
+    'var(--status-pending)',
+    'var(--status-failure)',
+  ],
 } as const;
 
 /**

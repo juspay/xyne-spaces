@@ -104,7 +104,7 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
       a: ({ href, children }) => (
         <a
           href={href}
-          className='text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline'
+          className='text-action-primary dark:text-action-primary hover:text-action-primary/80 dark:hover:text-action-primary/80 underline'
           target='_blank'
           rel='noopener noreferrer'
         >

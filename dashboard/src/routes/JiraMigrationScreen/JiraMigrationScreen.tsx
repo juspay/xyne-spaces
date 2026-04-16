@@ -597,7 +597,7 @@ const JiraMigrationScreen = (): ReactElement => {
             <div className='p-5'>
               <div className='grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr,0.9fr]'>
                 <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-                  <div className='rounded-2xl border border-border/70 bg-white/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
                     <label
                       htmlFor='jira-project-key'
                       className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -624,7 +624,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     </p>
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-white/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
                     <label
                       htmlFor='jira-target-project'
                       className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -657,7 +657,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-white/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
                     <label
                       htmlFor='jira-target-board'
                       className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -688,7 +688,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-white/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
                     <label
                       htmlFor='jira-target-channel'
                       className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -1008,37 +1008,37 @@ const JiraMigrationScreen = (): ReactElement => {
                     </div>
 
                     <div className='mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6'>
-                      <div className='rounded-lg bg-white/70 p-3'>
+                      <div className='rounded-lg bg-card/70 p-3'>
                         <p className='text-[11px] text-muted-foreground'>Status</p>
                         <p className='mt-1 text-lg font-semibold text-foreground capitalize'>
                           {migrationProgress.status}
                         </p>
                       </div>
-                      <div className='rounded-lg bg-white/70 p-3'>
+                      <div className='rounded-lg bg-card/70 p-3'>
                         <p className='text-[11px] text-muted-foreground'>Processed Issues</p>
                         <p className='mt-1 text-lg font-semibold text-foreground'>
                           {migrationProgress.processedIssues}
                         </p>
                       </div>
-                      <div className='rounded-lg bg-white/70 p-3'>
+                      <div className='rounded-lg bg-card/70 p-3'>
                         <p className='text-[11px] text-muted-foreground'>Imported Tickets</p>
                         <p className='mt-1 text-lg font-semibold text-foreground'>
                           {migrationProgress.importedTickets}
                         </p>
                       </div>
-                      <div className='rounded-lg bg-white/70 p-3'>
+                      <div className='rounded-lg bg-card/70 p-3'>
                         <p className='text-[11px] text-muted-foreground'>Imported Comments</p>
                         <p className='mt-1 text-lg font-semibold text-foreground'>
                           {migrationProgress.importedComments}
                         </p>
                       </div>
-                      <div className='rounded-lg bg-white/70 p-3'>
+                      <div className='rounded-lg bg-card/70 p-3'>
                         <p className='text-[11px] text-muted-foreground'>Imported Attachments</p>
                         <p className='mt-1 text-lg font-semibold text-foreground'>
                           {migrationProgress.importedAttachments}
                         </p>
                       </div>
-                      <div className='rounded-lg bg-white/70 p-3'>
+                      <div className='rounded-lg bg-card/70 p-3'>
                         <p className='text-[11px] text-muted-foreground'>Current Step</p>
                         <p className='mt-1 text-lg font-semibold text-foreground'>
                           {migrationProgress.currentStep || 'Waiting'}
@@ -1046,7 +1046,7 @@ const JiraMigrationScreen = (): ReactElement => {
                       </div>
                     </div>
 
-                    <div className='mt-4 rounded-lg border border-emerald-200 bg-white/70 p-3'>
+                    <div className='mt-4 rounded-lg border border-emerald-200 bg-card/70 p-3'>
                       <p className='text-xs text-muted-foreground'>Current Issue</p>
                       <p className='mt-1 text-sm font-medium text-foreground'>
                         {migrationProgress.currentIssueKey ||
@@ -1160,7 +1160,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     {result.unresolvedUsers.map((user, index) => (
                       <div
                         key={`${user.accountId || user.displayName || 'unknown'}-${index}`}
-                        className='rounded-md border border-rose-200 bg-white/70 p-3'
+                        className='rounded-md border border-rose-200 bg-card/70 p-3'
                       >
                         <p className='text-xs font-medium text-rose-900'>
                           {user.displayName || 'Unknown Jira user'}
@@ -1221,7 +1221,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     {paginatedIssueResults.map(issue => (
                       <div
                         key={issue.issueKey}
-                        className='rounded-md border border-border bg-white/70 p-3'
+                        className='rounded-md border border-border bg-card/70 p-3'
                       >
                         <div className='flex items-start justify-between gap-3'>
                           <div>

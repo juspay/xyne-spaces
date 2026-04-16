@@ -433,7 +433,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         userId={u.id}
         size={'sm'}
         showActiveStatus={false}
-        className='rounded-md size-[18px] flex items-center justify-center bg-white'
+        className='rounded-md size-[18px] flex items-center justify-center bg-background'
       />
     ),
     children: (
@@ -442,7 +442,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           userId={u.id}
           size={'sm'}
           showActiveStatus={false}
-          className='rounded-md size-[18px] flex items-center justify-center bg-white'
+          className='rounded-md size-[18px] flex items-center justify-center bg-background'
         />
         <div className='flex-1 w-full flex items-center gap-1.5'>
           <span className='text-sm'>{getUserDisplayName(u).split(' ')[0]}</span>
@@ -1721,7 +1721,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 !!errors.endsAt ||
                 (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0)
               }
-              className='rounded-lg text-[13px] px-4 h-9 text-white bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
+              className='rounded-lg text-[13px] px-4 h-9 bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
             >
               {isSubmitting
                 ? isEditMode

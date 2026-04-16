@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 
 const BookIcon = ({
-  color = '#363A3F',
+  color = 'currentColor',
   size = 20,
 }: {
   color?: string;

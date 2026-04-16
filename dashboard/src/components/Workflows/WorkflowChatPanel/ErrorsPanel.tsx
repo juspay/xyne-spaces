@@ -10,8 +10,8 @@ interface ErrorsPanelProps {
 export const ErrorsPanel: React.FC<ErrorsPanelProps> = ({ errorSteps, onClose }) => {
   return (
     <div className='flex flex-col h-full bg-background'>
-      <div className='flex items-center justify-between px-4 py-3 border-b border-border bg-red-50/30'>
-        <h3 className='font-medium text-red-700 flex items-center gap-2'>
+      <div className='flex items-center justify-between px-4 py-3 border-b border-border bg-red-500/10'>
+        <h3 className='font-medium text-red-600 dark:text-red-400 flex items-center gap-2'>
           <AlertTriangle size={16} className='text-red-500' strokeWidth={2.5} />
           Errors ({errorSteps.length})
         </h3>
@@ -31,12 +31,12 @@ export const ErrorsPanel: React.FC<ErrorsPanelProps> = ({ errorSteps, onClose })
           errorSteps.map((err, idx) => (
             <div
               key={`${err.step.id}-${idx}`}
-              className='p-3.5 bg-background rounded-xl border border-red-100/60 shadow-[0_2px_8px_rgba(239,68,68,0.08)] hover:border-red-200 transition-colors group'
+              className='p-3.5 bg-background rounded-xl border border-red-200/60 dark:border-red-900/40 shadow-sm hover:border-red-300/80 dark:hover:border-red-800/60 transition-colors group'
             >
-              <div className='text-sm font-bold text-red-800 mb-1.5 capitalize truncate group-hover:text-red-900'>
+              <div className='text-sm font-bold text-red-700 dark:text-red-400 mb-1.5 capitalize truncate group-hover:text-red-800 dark:group-hover:text-red-300'>
                 {err.step.stepName?.replace(/_/g, ' ') || 'Step'}
               </div>
-              <div className='text-[13px] text-red-600 break-words leading-relaxed whitespace-pre-wrap'>
+              <div className='text-[13px] text-red-600 dark:text-red-400/80 break-words leading-relaxed whitespace-pre-wrap'>
                 {err.message}
               </div>
             </div>

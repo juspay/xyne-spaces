@@ -153,33 +153,33 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
   const isConfirmDisabled = isPast || (inline && !value);
 
   const panel = (
-    <div className='bg-white rounded-xl overflow-hidden flex flex-col md:flex-row'>
+    <div className='bg-card rounded-xl overflow-hidden flex flex-col md:flex-row'>
       {/* CALENDAR PANEL */}
-      <div className='w-[280px] border-r border-gray-100 flex flex-col bg-white'>
-        <div className='px-3 py-3 flex items-center justify-between border-b border-gray-50 bg-gray-50/20'>
+      <div className='w-[280px] border-r border-border flex flex-col bg-card'>
+        <div className='px-3 py-3 flex items-center justify-between border-b border-border bg-muted/10'>
           <div className='flex gap-0.5'>
             <button
               onClick={() =>
                 setViewDate(new Date(viewDate.setFullYear(viewDate.getFullYear() - 1)))
               }
-              className='p-1 hover:bg-gray-200 rounded text-gray-400'
+              className='p-1 hover:bg-secondary rounded text-muted-foreground'
             >
               <ChevronsLeft className='w-4 h-4' />
             </button>
             <button
               onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() - 1)))}
-              className='p-1 hover:bg-gray-200 rounded text-gray-600'
+              className='p-1 hover:bg-secondary rounded text-muted-foreground'
             >
               <ChevronLeft className='w-4 h-4' />
             </button>
           </div>
-          <span className='text-sm font-bold text-gray-800'>
+          <span className='text-sm font-bold text-foreground'>
             {viewDate.toLocaleString('default', { month: 'short', year: 'numeric' })}
           </span>
           <div className='flex gap-0.5'>
             <button
               onClick={() => setViewDate(new Date(viewDate.setMonth(viewDate.getMonth() + 1)))}
-              className='p-1 hover:bg-gray-200 rounded text-gray-600'
+              className='p-1 hover:bg-secondary rounded text-muted-foreground'
             >
               <ChevronRight className='w-4 h-4' />
             </button>
@@ -187,7 +187,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
               onClick={() =>
                 setViewDate(new Date(viewDate.setFullYear(viewDate.getFullYear() + 1)))
               }
-              className='p-1 hover:bg-gray-200 rounded text-gray-400'
+              className='p-1 hover:bg-secondary rounded text-muted-foreground'
             >
               <ChevronsRight className='w-4 h-4' />
             </button>
@@ -197,7 +197,10 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
         <div className='p-3'>
           <div className='grid grid-cols-7 gap-1 mb-2'>
             {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
-              <div key={d} className='text-[10px] font-bold text-gray-400 text-center uppercase'>
+              <div
+                key={d}
+                className='text-[10px] font-bold text-muted-foreground text-center uppercase'
+              >
                 {d}
               </div>
             ))}
@@ -212,8 +215,8 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
       </div>
 
       {/* TIME PANEL */}
-      <div className='w-[180px] p-4 bg-gray-50/30 flex flex-col'>
-        <div className='flex items-center gap-2 mb-6 text-[10px] font-bold text-gray-400 uppercase tracking-widest'>
+      <div className='w-[180px] p-4 bg-muted/20 flex flex-col'>
+        <div className='flex items-center gap-2 mb-6 text-[10px] font-bold text-muted-foreground uppercase tracking-widest'>
           <Clock className='w-3.5 h-3.5' />
           Time
         </div>
@@ -223,7 +226,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
             <div className='relative'>
               <label
                 htmlFor='time-hours'
-                className='text-[9px] font-bold text-gray-400 uppercase mb-1.5 block'
+                className='text-[9px] font-bold text-muted-foreground uppercase mb-1.5 block'
               >
                 Hrs
               </label>
@@ -246,7 +249,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
                 }}
                 className={cn(
                   'w-full border rounded-md py-2 text-center text-sm font-medium focus:ring-1 focus:ring-black outline-none transition-colors',
-                  isPast ? 'border-red-300 bg-red-50 text-red-900' : 'border-gray-200 bg-white',
+                  isPast ? 'border-red-300 bg-red-50 text-red-900' : 'border-border bg-background',
                 )}
                 maxLength={2}
               />
@@ -254,7 +257,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
             <div>
               <label
                 htmlFor='time-minutes'
-                className='text-[9px] font-bold text-gray-400 uppercase mb-1.5 block'
+                className='text-[9px] font-bold text-muted-foreground uppercase mb-1.5 block'
               >
                 Min
               </label>
@@ -271,7 +274,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
                 }}
                 className={cn(
                   'w-full border rounded-md py-2 text-center text-sm font-medium focus:ring-1 focus:ring-black outline-none transition-colors',
-                  isPast ? 'border-red-300 bg-red-50 text-red-900' : 'border-gray-200 bg-white',
+                  isPast ? 'border-red-300 bg-red-50 text-red-900' : 'border-border bg-background',
                 )}
                 maxLength={2}
               />
@@ -282,13 +285,13 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
             type='single'
             value={period}
             onValueChange={val => val && handleTimePartChange('p', val)}
-            className='flex border border-gray-200 rounded-lg overflow-hidden bg-white'
+            className='flex border border-border rounded-lg overflow-hidden bg-background'
           >
             {['AM', 'PM'].map(p => (
               <ToggleGroup.Item
                 key={p}
                 value={p}
-                className='flex-1 py-2 text-[11px] font-bold data-[state=on]:bg-gray-900 data-[state=on]:text-white'
+                className='flex-1 py-2 text-[11px] font-bold data-[state=on]:bg-foreground data-[state=on]:text-background'
               >
                 {p}
               </ToggleGroup.Item>
@@ -302,8 +305,8 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
           className={cn(
             'mt-6 w-full py-2.5 text-xs font-bold rounded-lg transition-all',
             isConfirmDisabled
-              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              : 'bg-gray-900 text-white hover:bg-black active:scale-95',
+              ? 'bg-muted text-muted-foreground cursor-not-allowed'
+              : 'bg-foreground text-background hover:bg-foreground/90 active:scale-95',
           )}
         >
           Confirm
@@ -322,11 +325,15 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
         <button
           className={cn(
             'flex items-center gap-2 w-full px-3 py-2 text-sm border rounded-[8px] transition-colors text-left focus:outline-none',
-            isPast ? 'border-red-200 bg-red-50' : 'border-[#E4E6E7] bg-white hover:bg-gray-50',
+            isPast ? 'border-red-200 bg-red-50' : 'border-border bg-background hover:bg-accent',
           )}
         >
-          <CalendarIcon className={cn('w-4 h-4', isPast ? 'text-red-500' : 'text-gray-500')} />
-          <span className={cn('flex-1', !value && 'text-gray-400', isPast && 'text-red-700')}>
+          <CalendarIcon
+            className={cn('w-4 h-4', isPast ? 'text-red-500' : 'text-muted-foreground')}
+          />
+          <span
+            className={cn('flex-1', !value && 'text-muted-foreground', isPast && 'text-red-700')}
+          >
             {value && !isNaN(value.getTime())
               ? value.toLocaleString([], {
                   month: 'short',
@@ -343,7 +350,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({
 
       <Popover.Portal>
         <Popover.Content
-          className='z-50 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden flex flex-col md:flex-row animate-in fade-in zoom-in-95 duration-150'
+          className='z-50 bg-card rounded-xl shadow-2xl border border-border overflow-hidden flex flex-col md:flex-row animate-in fade-in zoom-in-95 duration-150'
           align='start'
           sideOffset={8}
         >
@@ -382,7 +389,9 @@ const MonthView: React.FC<{
         disabled={isBeforeToday}
         className={cn(
           'aspect-square text-[12px] rounded-lg transition-all flex items-center justify-center',
-          isSelected ? 'bg-gray-900 text-white font-bold' : 'hover:bg-gray-100 text-gray-600',
+          isSelected
+            ? 'bg-foreground text-background font-bold'
+            : 'hover:bg-accent text-muted-foreground',
           isBeforeToday && 'opacity-25 cursor-not-allowed hover:bg-transparent',
         )}
       >

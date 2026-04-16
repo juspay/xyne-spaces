@@ -25,11 +25,11 @@ export const WorkflowQuestionActivity = ({
 
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm text-[#181B1D] font-medium'>
+      <div className='text-sm text-foreground font-medium'>
         A workflow needs your input to continue.
       </div>
       {ticketTitle && (
-        <div className='text-xs text-[#505B62] break-words whitespace-normal'>
+        <div className='text-xs text-muted-foreground break-words whitespace-normal'>
           Ticket: {ticketXyneId ? `${ticketXyneId} — ` : ''}
           {ticketTitle}
         </div>
@@ -38,9 +38,9 @@ export const WorkflowQuestionActivity = ({
   );
 
   const condensedContent = (
-    <span className='text-sm text-[#181B1D]'>
+    <span className='text-sm text-foreground'>
       <span className='font-semibold'>Workflow</span>
-      <span className='text-[#505B62]'> needs your input</span>
+      <span className='text-muted-foreground'> needs your input</span>
     </span>
   );
 
@@ -52,7 +52,7 @@ export const WorkflowQuestionActivity = ({
       channelId={undefined}
       badgeIcon={<HelpCircle className='w-4 h-4 text-amber-600' />}
       badgeColorClass='bg-amber-100'
-      description={<span className='text-[#505B62] text-sm'>workflow needs input</span>}
+      description={<span className='text-muted-foreground text-sm'>workflow needs input</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
       actorAction={activity.actorAction}

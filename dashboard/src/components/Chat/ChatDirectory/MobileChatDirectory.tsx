@@ -116,6 +116,9 @@ const MobileChatDirectory = ({
     createDmMutation.mutate(dmRequest);
   };
 
+  const sectionHeadingClass =
+    'font-medium text-[14px] text-muted-foreground leading-[1.2] tracking-[-0.14px] text-left truncate block';
+
   return (
     <div
       className='h-full w-full px-2 flex flex-col bg-sidebar'
@@ -124,7 +127,10 @@ const MobileChatDirectory = ({
       }}
     >
       {/* Mobile Header - Matches Figma Design */}
-      <div className='-mx-2 px-4 pt-2 pb-4 bg-[#E9ECF5D9] rounded-b-[24px] border-b border-[#181B1D] border-opacity-[0.07]'>
+      <div
+        className='-mx-2 px-4 pt-2 pb-4 rounded-b-[24px] border-b border-border'
+        style={{ background: 'var(--mobile-panel-bg)' }}
+      >
         {/* Top Row: Logo + Name Badge | Avatar */}
         <div className='flex items-center justify-between mb-4'>
           <div className='flex items-center gap-1'>
@@ -135,7 +141,7 @@ const MobileChatDirectory = ({
         {/* Search Bar */}
         <button
           onClick={() => setIsCommandMenuOpen(true)}
-          className='w-full flex items-center gap-3 px-4 py-3 bg-background/70 rounded-full text-left border border-[#181B1D] border-opacity-[0.06]'
+          className='w-full flex items-center gap-3 px-4 py-3 bg-background rounded-full text-left border border-border'
           data-track-category='MOBILE_CHAT_DIRECTORY'
           data-track-name='OPEN_SEARCH_MOBILE'
         >
@@ -160,9 +166,7 @@ const MobileChatDirectory = ({
               <Accordion.Trigger asChild>
                 <div className='group flex items-center justify-between w-full py-[8px]'>
                   <button className='flex items-center'>
-                    <span className='font-medium text-[14px] text-[#a0a7ab] leading-[1.2] tracking-[-0.14px] text-left truncate block'>
-                      Starred
-                    </span>
+                    <span className={sectionHeadingClass}>Starred</span>
                     <span className='size-[20px] flex items-center justify-center shrink-0'>
                       <ChevronRight
                         strokeWidth={2.33}
@@ -189,9 +193,7 @@ const MobileChatDirectory = ({
             <Accordion.Trigger asChild>
               <div className='group flex items-center justify-between w-full py-[8px]'>
                 <button className='flex items-center'>
-                  <span className='font-medium text-[14px] text-[#a0a7ab] leading-[1.2] tracking-[-0.14px] text-left truncate block'>
-                    Channels
-                  </span>
+                  <span className={sectionHeadingClass}>Channels</span>
                   <span className='size-[20px] flex items-center justify-center shrink-0'>
                     <ChevronRight
                       strokeWidth={2.33}
@@ -201,7 +203,7 @@ const MobileChatDirectory = ({
                 </button>
                 <Tooltip content='Add channel' side='top' sideOffset={0} delayDuration={500}>
                   <button
-                    className='text-[#a0a7ab] hover:text-[#181B1D] transition-colors'
+                    className='text-muted-foreground hover:text-foreground transition-colors'
                     onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -231,9 +233,7 @@ const MobileChatDirectory = ({
             <Accordion.Trigger asChild>
               <div className='group flex items-center justify-between w-full py-[8px]'>
                 <button className='flex items-center'>
-                  <span className='font-medium text-[14px] text-[#a0a7ab] leading-[1.2] tracking-[-0.14px] text-left truncate block'>
-                    Direct Messages
-                  </span>
+                  <span className={sectionHeadingClass}>Direct Messages</span>
                   <span className='size-[20px] flex items-center justify-center shrink-0'>
                     <ChevronRight
                       strokeWidth={2.33}
@@ -243,7 +243,7 @@ const MobileChatDirectory = ({
                 </button>
                 <Tooltip content='Add direct message' side='top' sideOffset={0} delayDuration={500}>
                   <button
-                    className='text-[#a0a7ab] hover:text-[#181B1D] transition-colors'
+                    className='text-muted-foreground hover:text-foreground transition-colors'
                     onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                       e.preventDefault();
                       e.stopPropagation();

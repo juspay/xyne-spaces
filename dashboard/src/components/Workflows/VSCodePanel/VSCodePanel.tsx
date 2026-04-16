@@ -234,7 +234,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
     if (codeServerStatus.isDownloading) {
       return (
         <div className={`h-full flex flex-col items-center justify-center bg-muted ${className}`}>
-          <Loader2 className='w-12 h-12 animate-spin text-blue-500 mb-4' />
+          <Loader2 className='w-12 h-12 animate-spin text-action-primary mb-4' />
           <h3 className='text-base font-semibold text-foreground mb-1.5'>
             Downloading VS Code Server
           </h3>
@@ -259,7 +259,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
                 onClick={(): void => {
                   void handleDownload();
                 }}
-                className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors'
+                className='flex items-center gap-2 px-4 py-2 bg-action-primary text-action-primary-foreground rounded-lg hover:opacity-90 transition-opacity'
                 data-track-category='Workflows'
                 data-track-name='DownloadCodeServer'
                 data-track-metadata={JSON.stringify({ executionId })}
@@ -282,7 +282,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
               href='https://github.com/coder/code-server/releases'
               target='_blank'
               rel='noopener noreferrer'
-              className='text-sm text-blue-600 hover:underline'
+              className='text-sm text-action-primary hover:underline'
             >
               Or install code-server manually
             </a>
@@ -307,7 +307,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
               onClick={(): void => {
                 void handleDownload();
               }}
-              className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors'
+              className='flex items-center gap-2 px-4 py-2 bg-action-primary text-action-primary-foreground rounded-lg hover:opacity-90 transition-opacity'
               data-track-category='Workflows'
               data-track-name='DownloadCodeServer'
               data-track-metadata={JSON.stringify({ executionId })}
@@ -318,7 +318,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
               href='https://github.com/coder/code-server/releases'
               target='_blank'
               rel='noopener noreferrer'
-              className='text-sm text-blue-600 hover:underline'
+              className='text-sm text-action-primary hover:underline'
             >
               Or install code-server system-wide
             </a>
@@ -329,7 +329,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
 
     return (
       <div className={`h-full flex flex-col items-center justify-center bg-muted ${className}`}>
-        <Loader2 className='w-12 h-12 animate-spin text-blue-500 mb-4' />
+        <Loader2 className='w-12 h-12 animate-spin text-action-primary mb-4' />
         <h3 className='text-base font-semibold text-foreground mb-1.5'>Starting VS Code Server</h3>
         <p className='text-sm text-muted-foreground max-w-xs text-center leading-relaxed mb-4'>
           Please wait while the server starts...
@@ -338,7 +338,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
           onClick={(): void => {
             void handleStart();
           }}
-          className='text-sm text-blue-600 hover:underline'
+          className='text-sm text-action-primary hover:underline'
           data-track-category='Workflows'
           data-track-name='StartCodeServer'
           data-track-metadata={JSON.stringify({ executionId })}
@@ -390,7 +390,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
       <div
         className={`h-full flex flex-col items-center justify-center bg-background ${className}`}
       >
-        <Loader2 className='w-8 h-8 animate-spin text-blue-500 mb-4' />
+        <Loader2 className='w-8 h-8 animate-spin text-action-primary mb-4' />
         <p className='text-muted-foreground'>Cloning repository...</p>
         <p className='text-sm text-muted-foreground mt-1'>Branch: {gitInfo.branch}</p>
       </div>
@@ -403,7 +403,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
       <div
         className={`h-full flex flex-col items-center justify-center bg-background ${className}`}
       >
-        <Loader2 className='w-8 h-8 animate-spin text-blue-500 mb-4' />
+        <Loader2 className='w-8 h-8 animate-spin text-action-primary mb-4' />
         <p className='text-muted-foreground'>Pulling latest changes...</p>
       </div>
     );
@@ -420,7 +420,7 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
         <p className='text-sm text-muted-foreground max-w-md text-center mb-4'>{cloneError}</p>
         <button
           onClick={handleRetry}
-          className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors'
+          className='flex items-center gap-2 px-4 py-2 bg-action-primary text-action-primary-foreground rounded-lg hover:opacity-90 transition-opacity'
           data-track-category='Workflows'
           data-track-name='RetryVSCodeClone'
           data-track-metadata={JSON.stringify({ executionId })}
@@ -445,10 +445,10 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
     return (
       <div
         data-vscode-panel='true'
-        className={`${isEnlarged ? 'absolute inset-0 rounded-lg shadow-xl z-50' : 'relative w-full h-full'} flex flex-col bg-[#1e1e1e] ${className}`}
+        className={`${isEnlarged ? 'absolute inset-0 rounded-lg shadow-xl z-50' : 'relative w-full h-full'} flex flex-col bg-background ${className}`}
       >
         {/* Header with branch info */}
-        <div className='flex items-center justify-between px-4 py-2 border-b border-gray-800 bg-[#252526]'>
+        <div className='flex items-center justify-between px-4 py-2 border-b border-border bg-card'>
           <div className='flex items-center gap-2'>
             <GitBranch size={16} className='text-muted-foreground' />
             <span className='text-sm font-medium text-muted'>{gitInfo.branch}</span>
@@ -503,15 +503,15 @@ export const VSCodePanel: React.FC<VSCodePanelProps> = ({
         )}
 
         {/* VSCode Container (Portal Target) */}
-        <div className='flex-1 relative bg-[#1e1e1e]'>
-          <div ref={containerRef} className='absolute inset-0 w-full h-full bg-[#1e1e1e]' />
+        <div className='flex-1 relative bg-background'>
+          <div ref={containerRef} className='absolute inset-0 w-full h-full bg-background' />
         </div>
       </div>
     );
   }
 
   // Loading state while setting up
-  return <div className={`h-full bg-[#1e1e1e] ${className}`} />;
+  return <div className={`h-full bg-background ${className}`} />;
 };
 
 export default VSCodePanel;

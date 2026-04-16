@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 
 const ChatHistory = ({
-  color = '#181B1D',
+  color = 'currentColor',
   size = 16,
 }: {
   color?: string;

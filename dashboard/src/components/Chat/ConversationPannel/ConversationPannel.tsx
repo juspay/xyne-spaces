@@ -130,7 +130,7 @@ const ExpandedTicketView = ({
           onNavigateNext={handleNavigateNext}
         />
       </Panel>
-      <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+      <PanelResizeHandle className='w-1 hover:bg-accent active:bg-muted transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
         <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
       </PanelResizeHandle>
       <Panel minSize={40}>

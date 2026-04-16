@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { X } from 'lucide-react';
 
 interface XyneAIOnboardingHeaderProps {
   onClose: () => void;
@@ -17,7 +18,7 @@ export const XyneAIOnboardingHeader = ({ onClose }: XyneAIOnboardingHeaderProps)
         data-track-category='AIOnboarding'
         data-track-name='SkipOnboarding'
       >
-        <img src='/svgs/icons/close.svg' alt='Close' width='16' height='16' />
+        <X size={16} className='text-current' />
       </button>
     </div>
   );

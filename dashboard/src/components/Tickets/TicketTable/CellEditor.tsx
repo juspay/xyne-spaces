@@ -149,7 +149,7 @@ export const DueDateCellEditor = ({ value, onValueChange }: DueDateCellEditorPro
   const yesterday = new Date(new Date().setDate(new Date().getDate() - 1));
 
   return (
-    <div className='h-full px-2 flex items-center bg-white border border-blue-500'>
+    <div className='h-full px-2 flex items-center bg-background border border-blue-500'>
       <DatePicker
         minDate={yesterday}
         selectedDate={date}

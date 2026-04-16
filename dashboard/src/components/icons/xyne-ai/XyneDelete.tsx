@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 
 const XyneDelete = ({
-  color = '#FF4F4F',
+  color = 'currentColor',
   size = 20,
 }: {
   color?: string;

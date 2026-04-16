@@ -103,7 +103,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
             data-track-name='Close_Participants_Tray'
             data-track-metadata={JSON.stringify({ canvasId })}
           >
-            <X className='h-4 w-4' />
+            <X className='h-4 w-4 text-foreground' />
             <span className='sr-only'>Close</span>
           </button>
         </div>

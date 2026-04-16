@@ -36,7 +36,7 @@ const PreviewCloseButton: React.FC<{ onClose?: () => void }> = ({ onClose }) => 
   return (
     <button
       type='button'
-      className='rounded-full p-0.5 opacity-0 transition-opacity hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus-visible:opacity-100 group-hover:opacity-100'
+      className='rounded-full p-0.5 opacity-0 transition-opacity hover:bg-secondary focus:outline-none focus-visible:opacity-100 group-hover:opacity-100'
       onClick={e => {
         e.stopPropagation();
         onClose();
@@ -45,7 +45,7 @@ const PreviewCloseButton: React.FC<{ onClose?: () => void }> = ({ onClose }) => 
       data-track-category='MESSAGE'
       data-track-name='CLOSE_INTERNAL_LINK_PREVIEW'
     >
-      <X size={12} className='text-gray-500 dark:text-gray-400' />
+      <X size={12} className='text-muted-foreground' />
     </button>
   );
 };
@@ -84,10 +84,8 @@ const AttachmentHeader: React.FC<{
 }> = ({ senderId, senderName, formattedTime, onClose }) => (
   <div className='mb-1.5 flex items-center gap-2'>
     {senderId && <Avatar userId={senderId} size='sm' showActiveStatus={false} />}
-    <span className='truncate text-[13px] font-semibold text-gray-900 dark:text-gray-100'>
-      {senderName}
-    </span>
-    <span className='text-xs text-gray-400 dark:text-gray-500'>{formattedTime}</span>
+    <span className='truncate text-[13px] font-semibold text-foreground'>{senderName}</span>
+    <span className='text-xs text-muted-foreground'>{formattedTime}</span>
     {onClose && (
       <div className='ml-auto'>
         <PreviewCloseButton onClose={onClose} />
@@ -100,7 +98,7 @@ const MetadataFooter: React.FC<{
   channelName: string;
   isDM: boolean;
 }> = ({ channelName, isDM }) => (
-  <div className='mt-2 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400'>
+  <div className='mt-2 flex items-center gap-1.5 text-xs text-muted-foreground'>
     {isDM ? (
       <Lock size={11} className='flex-shrink-0' />
     ) : (
@@ -128,7 +126,7 @@ const NestedLinkCard: React.FC<{
   }
 
   return (
-    <div className='mt-1.5 overflow-hidden rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-750'>
+    <div className='mt-1.5 overflow-hidden rounded-lg border border-border bg-muted/50'>
       <div className='flex flex-col gap-1 p-2.5'>
         {(nestedFavicon || nestedSiteName) && (
           <div className='flex items-center gap-1.5'>
@@ -144,9 +142,7 @@ const NestedLinkCard: React.FC<{
               />
             )}
             {nestedSiteName && (
-              <span className='truncate text-[11px] text-gray-500 dark:text-gray-400'>
-                {nestedSiteName}
-              </span>
+              <span className='truncate text-[11px] text-muted-foreground'>{nestedSiteName}</span>
             )}
           </div>
         )}
@@ -155,23 +151,19 @@ const NestedLinkCard: React.FC<{
             href={nestedUrl}
             target='_blank'
             rel='noopener noreferrer'
-            className='block truncate text-xs font-medium text-blue-600 hover:underline dark:text-blue-400'
+            className='block truncate text-xs font-medium text-primary hover:underline'
           >
             {nestedTitle}
           </a>
         )}
         {nestedDescription && (
-          <p className='line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400'>
-            {nestedDescription}
-          </p>
+          <p className='line-clamp-2 text-[11px] text-muted-foreground'>{nestedDescription}</p>
         )}
       </div>
 
       {previewImage && !imageError && (
-        <div className='relative aspect-[2/1] w-full overflow-hidden border-t border-gray-200 dark:border-gray-600'>
-          {!imageLoaded && (
-            <div className='absolute inset-0 animate-pulse bg-gray-200 dark:bg-gray-700' />
-          )}
+        <div className='relative aspect-[2/1] w-full overflow-hidden border-t border-border'>
+          {!imageLoaded && <div className='absolute inset-0 animate-pulse bg-muted' />}
           <img
             src={previewImage}
             alt={nestedTitle ?? ''}
@@ -279,9 +271,7 @@ const TextPreview: React.FC<{
       </div>
 
       {isDeleted ? (
-        <p className='mb-1 text-[13px] italic text-gray-400 dark:text-gray-500'>
-          This message was deleted.
-        </p>
+        <p className='mb-1 text-[13px] italic text-muted-foreground'>This message was deleted.</p>
       ) : (
         <div className='mb-1 line-clamp-3 whitespace-pre-wrap break-words text-[13px] text-muted-foreground'>
           {inlinePreviewText}

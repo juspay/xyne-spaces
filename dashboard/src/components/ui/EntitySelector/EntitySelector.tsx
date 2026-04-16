@@ -391,7 +391,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
 
                       {/* Check mark if selected */}
                       <Check
-                        className={`w-4 h-4 text-blue-600 flex-shrink-0 
+                        className={`w-4 h-4 text-action-primary flex-shrink-0 
                         ${selectedValue === option.value ? 'opacity-100' : 'opacity-0'}`}
                       />
                     </button>

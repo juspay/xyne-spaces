@@ -100,7 +100,7 @@ export const SearchSummaryModal = ({
     <div className='absolute inset-0 z-20 flex items-start justify-center p-3'>
       {/* Blurry backdrop */}
       <div
-        className='absolute inset-0 bg-black/20 backdrop-blur-[2px]'
+        className='absolute inset-0 bg-background/80 backdrop-blur-[2px]'
         onClick={onClose}
         onKeyDown={(e): void => {
           if (e.key === 'Escape' || e.key === 'Enter') onClose();
@@ -193,7 +193,7 @@ export const SearchSummaryModal = ({
                   <ul className='space-y-2'>
                     {displayKeypoints.map((point, index) => (
                       <li key={index} className='flex items-start gap-3 text-muted-foreground'>
-                        <span className='text-purple-500 mt-1 shrink-0'>•</span>
+                        <span className='text-primary mt-1 shrink-0'>•</span>
                         <span
                           dangerouslySetInnerHTML={{
                             __html: point.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'),

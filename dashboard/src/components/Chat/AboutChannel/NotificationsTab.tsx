@@ -128,28 +128,28 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
 
   if (!isParticipant) {
     return (
-      <div className='p-4 text-sm text-[#505B62]'>
+      <div className='p-4 text-sm text-muted-foreground'>
         Join this channel to manage notification settings.
       </div>
     );
   }
 
   return (
-    <div className='flex flex-col h-[392px] bg-[#FAFAFA]'>
+    <div className='flex flex-col h-[392px] bg-muted'>
       <div className='p-4 overflow-y-auto'>
         {/* Notification Preferences Section */}
-        <div className='bg-white p-[12px] rounded-[12px] border border-[#F2F2F3]'>
+        <div className='bg-card p-[12px] rounded-[12px] border border-border'>
           {/* Device Toggles */}
           <div className='space-y-3'>
-            <p className='text-md font-medium text-[#181B1D]'>Device Notifications</p>
+            <p className='text-md font-medium text-foreground'>Device Notifications</p>
 
             {/* Desktop Toggle */}
             <div className='flex items-center justify-between'>
               <div className='flex items-center gap-2'>
-                <Monitor className='w-4 h-4 text-[#788187]' />
+                <Monitor className='w-4 h-4 text-muted-foreground' />
                 <label
                   htmlFor='desktop-notifications-toggle'
-                  className='text-xs font-medium text-gray-700 cursor-pointer select-none'
+                  className='text-xs font-medium text-foreground cursor-pointer select-none'
                 >
                   Desktop
                 </label>
@@ -162,14 +162,14 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 data-track-name='toggle_desktop_notifications'
                 className={cn(
                   'relative inline-flex h-5 w-9 items-center rounded-full',
-                  'bg-gray-200 transition-colors duration-200',
+                  'bg-muted transition-colors duration-200',
                   'data-[state=checked]:bg-sidebar-badge-accent',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                 )}
               >
                 <Switch.Thumb
                   className={cn(
-                    'block h-4 w-4 rounded-full bg-white shadow-sm',
+                    'block h-4 w-4 rounded-full bg-background shadow-sm',
                     'transition-transform duration-200',
                     'translate-x-0.5 data-[state=checked]:translate-x-4',
                   )}
@@ -187,10 +187,10 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                       onClick={() => handleDesktopLevelChange(level.value)}
                       data-track-category='notifications'
                       data-track-name={`set_notification_level_${level.value.toLowerCase()}`}
-                      className={`px-3 py-2 text-xs rounded-[8px] transition-colors border hover:bg-gray-100 ${
+                      className={`px-3 py-2 text-xs rounded-[8px] transition-colors border hover:bg-accent ${
                         desktopNotificationLevel === level.value
-                          ? 'bg-[#E4E6E7] text-[#181B1D] border-[#E4E6E7]'
-                          : 'bg-white text-[#181B1D] border-[#E4E6E7]'
+                          ? 'bg-muted text-foreground border-border'
+                          : 'bg-background text-foreground border-border'
                       }`}
                     >
                       {level.label}
@@ -203,10 +203,10 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
             {/* Mobile Toggle */}
             <div className='flex items-center justify-between'>
               <div className='flex items-center gap-2'>
-                <Smartphone className='w-4 h-4 text-[#788187]' />
+                <Smartphone className='w-4 h-4 text-muted-foreground' />
                 <label
                   htmlFor='mobile-notifications-toggle'
-                  className='text-xs font-medium text-gray-700 cursor-pointer select-none'
+                  className='text-xs font-medium text-foreground cursor-pointer select-none'
                 >
                   Mobile
                 </label>
@@ -219,14 +219,14 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                 data-track-name='toggle_mobile_notifications'
                 className={cn(
                   'relative inline-flex h-5 w-9 items-center rounded-full',
-                  'bg-gray-200 transition-colors duration-200',
+                  'bg-muted transition-colors duration-200',
                   'data-[state=checked]:bg-sidebar-badge-accent',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                 )}
               >
                 <Switch.Thumb
                   className={cn(
-                    'block h-4 w-4 rounded-full bg-white shadow-sm',
+                    'block h-4 w-4 rounded-full bg-background shadow-sm',
                     'transition-transform duration-200',
                     'translate-x-0.5 data-[state=checked]:translate-x-4',
                   )}
@@ -244,10 +244,10 @@ const NotificationsTab = ({ channel, isParticipant }: NotificationsTabProps): Re
                       onClick={() => handleMobileLevelChange(level.value)}
                       data-track-category='notifications'
                       data-track-name={`set_mobile_notification_level_${level.value.toLowerCase()}`}
-                      className={`px-3 py-2 text-xs rounded-[8px] transition-colors border hover:bg-gray-100 ${
+                      className={`px-3 py-2 text-xs rounded-[8px] transition-colors border hover:bg-accent ${
                         mobileNotificationLevel === level.value
-                          ? 'bg-[#E4E6E7] text-[#181B1D] border-[#E4E6E7]'
-                          : 'bg-white text-[#181B1D] border-[#E4E6E7]'
+                          ? 'bg-muted text-foreground border-border'
+                          : 'bg-background text-foreground border-border'
                       }`}
                     >
                       {level.label}

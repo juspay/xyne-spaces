@@ -72,7 +72,7 @@ export const AboutChannel: React.FC<AboutChannelProps> = ({ channel }) => {
             data-track-metadata={JSON.stringify({ channelId: channel.id })}
           >
             {copiedChannelId ? (
-              <Check className='w-3 h-3 text-green-500' />
+              <Check className='w-3 h-3 text-status-success' />
             ) : (
               <Copy className='w-3 h-3' />
             )}

@@ -107,7 +107,7 @@ export default function RecordingDetailScreen(): ReactElement {
     return (
       <div className='flex items-center justify-center h-full'>
         <div className='flex flex-col items-center gap-3'>
-          <Loader2 className='w-8 h-8 animate-spin text-blue-500' />
+          <Loader2 className='w-8 h-8 animate-spin text-action-primary' />
           <p className='text-sm text-muted-foreground'>Loading recording...</p>
         </div>
       </div>
@@ -118,14 +118,12 @@ export default function RecordingDetailScreen(): ReactElement {
     return (
       <div className='flex items-center justify-center h-full'>
         <div className='flex flex-col items-center gap-3 max-w-md text-center'>
-          <AlertCircle className='w-12 h-12 text-red-500' />
-          <h3 className='text-lg font-semibold text-foreground dark:text-gray-100'>Error</h3>
-          <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
-            {error || 'Recording not found'}
-          </p>
+          <AlertCircle className='w-12 h-12 text-destructive' />
+          <h3 className='text-lg font-semibold text-foreground'>Error</h3>
+          <p className='text-sm text-muted-foreground'>{error || 'Recording not found'}</p>
           <button
             onClick={() => void navigate('/recordings')}
-            className='mt-4 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors'
+            className='mt-4 px-4 py-2 bg-action-primary text-action-primary-foreground rounded-md hover:opacity-90 transition-opacity'
             data-track-category='RecordingDetail'
             data-track-name='back_to_recordings_error'
           >
@@ -137,13 +135,13 @@ export default function RecordingDetailScreen(): ReactElement {
   }
 
   return (
-    <div className='h-full overflow-auto bg-muted dark:bg-gray-900'>
+    <div className='h-full overflow-auto bg-muted'>
       <div className='max-w-4xl mx-auto p-6'>
         {/* Header */}
         <div className='mb-6'>
           <button
             onClick={() => void navigate('/recordings')}
-            className='flex items-center gap-2 text-sm text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-gray-100 mb-4'
+            className='flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-4'
             data-track-category='RecordingDetail'
             data-track-name='back_to_recordings'
           >
@@ -159,7 +157,7 @@ export default function RecordingDetailScreen(): ReactElement {
                   type='text'
                   value={editedTitle}
                   onChange={e => setEditedTitle(e.target.value)}
-                  className='flex-1 px-3 py-2 text-2xl font-bold bg-background dark:bg-gray-800 border border-input dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
+                  className='flex-1 px-3 py-2 text-2xl font-bold bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring'
                   // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus
                   data-track-category='RecordingDetail'
@@ -167,7 +165,7 @@ export default function RecordingDetailScreen(): ReactElement {
                 />
                 <button
                   onClick={() => void handleSaveTitle()}
-                  className='p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-md'
+                  className='p-2 text-status-success hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
                   data-track-name='save_title'
                 >
@@ -178,7 +176,7 @@ export default function RecordingDetailScreen(): ReactElement {
                     setEditedTitle(recording.title);
                     setIsEditingTitle(false);
                   }}
-                  className='p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md'
+                  className='p-2 text-destructive hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
                   data-track-name='cancel_edit_title'
                 >
@@ -187,12 +185,10 @@ export default function RecordingDetailScreen(): ReactElement {
               </div>
             ) : (
               <>
-                <h1 className='flex-1 text-2xl font-bold text-foreground dark:text-gray-100'>
-                  {recording.title}
-                </h1>
+                <h1 className='flex-1 text-2xl font-bold text-foreground'>{recording.title}</h1>
                 <button
                   onClick={() => setIsEditingTitle(true)}
-                  className='p-2 text-muted-foreground dark:text-muted-foreground hover:bg-muted dark:hover:bg-gray-800 rounded-md'
+                  className='p-2 text-muted-foreground hover:bg-muted rounded-md'
                   data-track-category='RecordingDetail'
                   data-track-name='edit_title'
                 >
@@ -203,7 +199,7 @@ export default function RecordingDetailScreen(): ReactElement {
           </div>
 
           {/* Metadata */}
-          <div className='flex items-center gap-4 text-sm text-muted-foreground dark:text-muted-foreground'>
+          <div className='flex items-center gap-4 text-sm text-muted-foreground'>
             <div className='flex items-center gap-1'>
               <Clock className='w-4 h-4' />
               <span>{formatDistanceToNow(new Date(recording.startedAt), { addSuffix: true })}</span>
@@ -222,7 +218,7 @@ export default function RecordingDetailScreen(): ReactElement {
                 onClick={() =>
                   void navigate(`/chat/dir/${recording.channelId}/${recording.conversationId}`)
                 }
-                className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md transition-colors'
+                className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-action-primary hover:bg-muted rounded-md transition-colors'
                 data-track-category='RecordingDetail'
                 data-track-name='view_thread'
               >
@@ -239,7 +235,7 @@ export default function RecordingDetailScreen(): ReactElement {
                 setIsShareOpen(true);
               }}
               disabled={!recording?.messageId}
-              className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-gray-100 hover:bg-muted dark:hover:bg-gray-800 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
               data-track-category='RecordingDetail'
               data-track-name='share_recording'
             >
@@ -248,7 +244,7 @@ export default function RecordingDetailScreen(): ReactElement {
             </button>
             <button
               onClick={() => setIsDeleteOpen(true)}
-              className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors'
+              className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-destructive hover:bg-muted rounded-md transition-colors'
               data-track-category='RecordingDetail'
               data-track-name='delete_recording'
             >
@@ -260,29 +256,23 @@ export default function RecordingDetailScreen(): ReactElement {
 
         {/* Transcript */}
         {recording.hasTranscript && recording.transcript && (
-          <div className='mb-6 bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 p-6'>
+          <div className='mb-6 bg-background rounded-lg border border-border p-6'>
             <div className='flex items-center gap-2 mb-4'>
-              <FileText className='w-5 h-5 text-blue-600 dark:text-blue-400' />
-              <h2 className='text-lg font-semibold text-foreground dark:text-gray-100'>
-                Transcript
-              </h2>
+              <FileText className='w-5 h-5 text-action-primary' />
+              <h2 className='text-lg font-semibold text-foreground'>Transcript</h2>
             </div>
-            <div className='prose dark:prose-invert max-w-none'>
-              <p className='whitespace-pre-wrap text-foreground dark:text-muted'>
-                {recording.transcript}
-              </p>
+            <div className='prose max-w-none'>
+              <p className='whitespace-pre-wrap text-foreground'>{recording.transcript}</p>
             </div>
           </div>
         )}
 
         {/* AI Summary */}
         {recording.hasSummary && recording.aiSummary && (
-          <div className='mb-6 bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 p-6'>
+          <div className='mb-6 bg-background rounded-lg border border-border p-6'>
             <div className='flex items-center gap-2 mb-4'>
               <div className='w-5 h-5 bg-gradient-to-br from-purple-500 to-pink-500 rounded' />
-              <h2 className='text-lg font-semibold text-foreground dark:text-gray-100'>
-                AI Summary
-              </h2>
+              <h2 className='text-lg font-semibold text-foreground'>AI Summary</h2>
             </div>
             <div className='bot-markdown-content-call-summary' style={{ marginLeft: '10px' }}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{recording.aiSummary}</ReactMarkdown>
@@ -292,10 +282,8 @@ export default function RecordingDetailScreen(): ReactElement {
 
         {/* No content message */}
         {!recording.hasTranscript && !recording.hasSummary && (
-          <div className='bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 p-12 text-center'>
-            <p className='text-muted-foreground dark:text-muted-foreground'>
-              Transcript and summary are being processed...
-            </p>
+          <div className='bg-background rounded-lg border border-border p-12 text-center'>
+            <p className='text-muted-foreground'>Transcript and summary are being processed...</p>
           </div>
         )}
       </div>
@@ -318,10 +306,8 @@ export default function RecordingDetailScreen(): ReactElement {
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteOpen} onOpenChange={open => !open && setIsDeleteOpen(false)}>
         <div className='p-6 max-w-sm'>
-          <h3 className='text-lg font-semibold text-foreground dark:text-gray-100 mb-2'>
-            Delete Recording
-          </h3>
-          <p className='text-sm text-muted-foreground dark:text-muted-foreground mb-6'>
+          <h3 className='text-lg font-semibold text-foreground mb-2'>Delete Recording</h3>
+          <p className='text-sm text-muted-foreground mb-6'>
             Are you sure you want to delete &quot;{recording?.title}&quot;? This action cannot be
             undone.
           </p>
@@ -329,7 +315,7 @@ export default function RecordingDetailScreen(): ReactElement {
             <button
               onClick={() => setIsDeleteOpen(false)}
               disabled={isDeleting}
-              className='px-4 py-2 text-sm font-medium text-foreground dark:text-muted hover:bg-muted dark:hover:bg-gray-800 rounded-md transition-colors disabled:opacity-50'
+              className='px-4 py-2 text-sm font-medium text-foreground hover:bg-muted rounded-md transition-colors disabled:opacity-50'
               data-track-category='RecordingDetail'
               data-track-name='cancel_delete_recording'
             >
@@ -338,7 +324,7 @@ export default function RecordingDetailScreen(): ReactElement {
             <button
               onClick={() => void handleDelete()}
               disabled={isDeleting}
-              className='px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors disabled:opacity-50 flex items-center gap-2'
+              className='px-4 py-2 text-sm font-medium text-destructive-foreground bg-destructive hover:opacity-90 rounded-md transition-opacity disabled:opacity-50 flex items-center gap-2'
               data-track-category='RecordingDetail'
               data-track-name='confirm_delete_recording'
             >

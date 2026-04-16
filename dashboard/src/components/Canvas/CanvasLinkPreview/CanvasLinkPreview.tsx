@@ -22,7 +22,7 @@ export const CanvasLinkPreview: React.FC<CanvasLinkPreviewProps> = ({ canvas, on
 
   return (
     <div
-      className='flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg shadow-sm w-fit max-w-md'
+      className='flex items-center gap-3 p-3 bg-card border border-border rounded-lg shadow-sm w-fit max-w-md'
       data-testid='canvas-link-preview'
     >
       {/* Canvas Icon */}
@@ -32,7 +32,7 @@ export const CanvasLinkPreview: React.FC<CanvasLinkPreviewProps> = ({ canvas, on
 
       {/* Canvas Info */}
       <div className='flex-1 min-w-0'>
-        <p className='font-medium text-gray-900 truncate' title={canvas.title}>
+        <p className='font-medium text-foreground truncate' title={canvas.title}>
           {canvas.title || 'Untitled Canvas'}
         </p>
         <p className='text-sm text-blue-600'>{canEdit ? 'Can edit' : 'Can view'}</p>
@@ -41,7 +41,7 @@ export const CanvasLinkPreview: React.FC<CanvasLinkPreviewProps> = ({ canvas, on
       {/* Remove Button */}
       <button
         onClick={onRemove}
-        className='flex-shrink-0 p-1 text-gray-400 hover:text-gray-600 transition-colors rounded hover:bg-gray-100'
+        className='flex-shrink-0 p-1 text-muted-foreground hover:text-foreground transition-colors rounded hover:bg-accent'
         aria-label='Remove canvas attachment'
         data-testid='canvas-link-preview-remove'
         data-track-category='CANVAS'

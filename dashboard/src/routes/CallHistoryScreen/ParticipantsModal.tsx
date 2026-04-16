@@ -32,28 +32,23 @@ function CallParticipantsContent({
 
   return (
     <div className='p-6'>
-      <h2 className='text-xl font-semibold text-[#384049] dark:text-[#F1F3F4] mb-6'>
-        Call Participants
-      </h2>
+      <h2 className='text-xl font-semibold text-foreground mb-6'>Call Participants</h2>
 
       <div className='space-y-3 max-h-[500px] overflow-y-auto'>
         {allParticipants.map(participant => (
           <div
             key={participant.userId}
-            className='flex items-center gap-3 p-2 rounded-lg hover:bg-muted dark:hover:bg-[#2A2A2A] transition-colors'
+            className='flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors'
           >
             <Avatar userId={participant.userId ?? null} size='md' />
             <div className='flex-1 min-w-0'>
-              <h4 className='text-sm font-medium text-[#384049] dark:text-[#F1F3F4] truncate'>
+              <h4 className='text-sm font-medium text-foreground truncate'>
                 {usersById.get(participant.userId)?.name ?? 'Unknown User'}
                 {participant.userId === currentUserId && (
-                  <span className='text-muted-foreground dark:text-muted-foreground font-normal'>
-                    {' '}
-                    (you)
-                  </span>
+                  <span className='text-muted-foreground font-normal'> (you)</span>
                 )}
               </h4>
-              <p className='text-xs text-muted-foreground dark:text-muted-foreground truncate'>
+              <p className='text-xs text-muted-foreground truncate'>
                 {usersById.get(participant.userId)?.email ?? ''}
               </p>
             </div>

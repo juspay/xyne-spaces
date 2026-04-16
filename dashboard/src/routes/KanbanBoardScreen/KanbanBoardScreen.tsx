@@ -1573,7 +1573,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   className='z-50 w-[300px] bg-background border border-border rounded-lg shadow-xl animate-in fade-in zoom-in-95'
                 >
                   <div className='mb-1 border-b flex items-center justify-between px-4 py-3'>
-                    <span className='text-sm font-bold tracking-wide'>Customise view</span>
+                    <span className='text-sm font-bold tracking-wide text-foreground'>
+                      Customise view
+                    </span>
                     <button
                       onClick={() => setIsCustomizeOpen(false)}
                       className='cursor-pointer hover:bg-muted rounded p-1 transition-colors'
@@ -1586,8 +1588,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
                   {/* Saved Views section */}
                   {savedViewsBoardId && savedConfigs && savedConfigs.length > 0 && (
-                    <div className='border-b border-gray-100 px-4 pt-4 pb-3'>
-                      <p className='text-sm font-medium text-[#7C8698] mb-1'>Views</p>
+                    <div className='border-b border-border px-4 pt-4 pb-3'>
+                      <p className='text-sm font-medium text-muted-foreground mb-1'>Views</p>
                       <div className='py-2 flex flex-wrap gap-2 max-h-[180px] overflow-y-auto'>
                         {savedConfigs.map(config => {
                           const isOwn = config.userId === user?.id;
@@ -1638,17 +1640,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                 setIsCustomizeOpen(false);
                               }}
                             >
-                              <span className='text-sm font-medium truncate max-w-[160px] text-[#7C8698]'>
+                              <span className='text-sm font-medium truncate max-w-[160px] text-muted-foreground'>
                                 {config.name}
                               </span>
                               {isPrivate && (
-                                <span className='text-xs text-[#7C8698] font-normal'>Private</span>
+                                <span className='text-xs text-muted-foreground font-normal'>
+                                  Private
+                                </span>
                               )}
                               {isOwn && (
                                 <button
                                   data-track-category='saved-views'
                                   data-track-name='delete-saved-view'
-                                  className='hidden group-hover:flex items-center justify-center absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gray-200 hover:bg-red-100 transition-colors'
+                                  className='hidden group-hover:flex items-center justify-center absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-secondary hover:bg-red-100 transition-colors'
                                   title='Delete view'
                                   onClick={e => {
                                     e.stopPropagation();
@@ -1659,7 +1663,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                                     });
                                   }}
                                 >
-                                  <X className='w-2.5 h-2.5 text-gray-500 hover:text-red-500' />
+                                  <X className='w-2.5 h-2.5 text-muted-foreground hover:text-red-500' />
                                 </button>
                               )}
                             </button>
@@ -1763,7 +1767,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                 >
                   {/* Matching Header Style */}
                   <div className='mb-1 border-b flex items-center justify-between px-4 py-3'>
-                    <span className='text-sm font-bold tracking-wide'>Group by</span>
+                    <span className='text-sm font-bold tracking-wide text-foreground'>
+                      Group by
+                    </span>
                     {groupBy !== 'none' && (
                       <DropdownMenu.Item
                         className='outline-none'
@@ -1786,7 +1792,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       className='relative flex items-center gap-2 justify-between py-3 px-4 text-sm rounded-xl text-foreground cursor-pointer outline-none select-none
       transition-colors
       data-[highlighted]:bg-muted data-[highlighted]:text-foreground
-      data-[state=checked]:bg-accent data-[state=checked]:text-black data-[state=checked]:font-semibold'
+      data-[state=checked]:bg-accent data-[state=checked]:text-foreground data-[state=checked]:font-semibold'
                       checked={
                         typeof value === 'string'
                           ? groupBy === value
@@ -1819,8 +1825,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           const activeView = savedConfigs.find(c => c.id === selectedViewId);
           if (!activeView) return null;
           return (
-            <div className='flex items-center px-4 py-2 bg-white border-b border-gray-100 flex-shrink-0'>
-              <div className='flex items-center gap-2 px-3 py-1.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-700'>
+            <div className='flex items-center px-4 py-2 bg-background border-b border-border flex-shrink-0'>
+              <div className='flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border bg-background text-sm text-foreground'>
                 <span className='font-medium'>{activeView.name}</span>
                 <button
                   data-track-category='saved-views'
@@ -1835,7 +1841,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                     setFilters({ ...(filters.boards ? { boards: filters.boards } : {}) });
                     setGroupBy('none');
                   }}
-                  className='flex items-center justify-center hover:text-gray-900 transition-colors'
+                  className='flex items-center justify-center hover:text-foreground transition-colors'
                   title='Dismiss view'
                 >
                   <X className='w-3.5 h-3.5' />
@@ -2148,7 +2154,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           title='Delete Saved View'
         >
           <div className='p-6'>
-            <p className='text-sm text-gray-600 mb-6'>
+            <p className='text-sm text-muted-foreground mb-6'>
               {deleteViewConfirm.isPublic
                 ? `"${deleteViewConfirm.name}" is a public view visible to all members. Deleting it will remove it for everyone. Are you sure you want to delete it?`
                 : `Are you sure you want to delete the saved view "${deleteViewConfirm.name}"? This action cannot be undone.`}

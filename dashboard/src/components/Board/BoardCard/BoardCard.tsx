@@ -37,10 +37,10 @@ export const BoardCard = ({ board, onEdit, onDelete }: BoardCardProps): ReactEle
   return (
     <div className='bg-background rounded-lg shadow-sm border border-border p-6 hover:shadow-md transition-shadow'>
       <div className='mb-4'>
-        <h3 className='text-lg font-semibold text-gray-900 mb-2'>{board.name}</h3>
-        <p className='text-sm text-gray-500'>Project ID: {board.projectId}</p>
+        <h3 className='text-lg font-semibold text-foreground mb-2'>{board.name}</h3>
+        <p className='text-sm text-muted-foreground'>Project ID: {board.projectId}</p>
         {board.description && (
-          <p className='text-sm text-gray-600 mt-2 line-clamp-2'>{board.description}</p>
+          <p className='text-sm text-muted-foreground mt-2 line-clamp-2'>{board.description}</p>
         )}
       </div>
 

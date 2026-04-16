@@ -118,33 +118,31 @@ export const ActivityConfigDialog = ({
 
           {/* Current Alias Display (if exists) */}
           {hasExistingAlias && currentAliasName && currentAliasCategory && (
-            <div className='bg-blue-50 rounded-md p-3 space-y-2'>
+            <div className='bg-muted rounded-md p-3 space-y-2 border border-border'>
               <div className='flex items-center gap-2'>
-                <Pencil className='w-3.5 h-3.5 text-blue-600' />
-                <span className='text-xs text-blue-600 uppercase font-medium'>Current Alias</span>
+                <Pencil className='w-3.5 h-3.5 text-primary' />
+                <span className='text-xs text-primary uppercase font-medium'>Current Alias</span>
               </div>
-              <div className='text-sm font-medium text-blue-900'>{currentAliasName}</div>
+              <div className='text-sm font-medium text-foreground'>{currentAliasName}</div>
               <div className='pt-1'>
-                <span className='text-xs text-blue-600 uppercase font-medium'>
-                  Current Category
-                </span>
-                <div className='text-sm font-medium text-blue-900'>{currentAliasCategory}</div>
+                <span className='text-xs text-primary uppercase font-medium'>Current Category</span>
+                <div className='text-sm font-medium text-foreground'>{currentAliasCategory}</div>
               </div>
             </div>
           )}
 
           {/* Blacklist Toggle */}
-          <div className='flex items-center gap-3 p-3 bg-red-50 rounded-md'>
+          <div className='flex items-center gap-3 p-3 bg-destructive/10 rounded-md'>
             <input
               type='checkbox'
               id='blacklist'
               checked={isBlacklisted}
               onChange={e => handleBlacklistChange(e.target.checked)}
-              className='w-4 h-4 text-red-600 border-border rounded focus:ring-red-500'
+              className='w-4 h-4 text-destructive border-border rounded focus:ring-destructive/20'
             />
-            <label htmlFor='blacklist' className='flex-1 text-sm text-red-700 cursor-pointer'>
+            <label htmlFor='blacklist' className='flex-1 text-sm text-destructive cursor-pointer'>
               Blacklist this activity
-              <span className='block text-xs text-red-500 mt-0.5'>
+              <span className='block text-xs text-destructive mt-0.5'>
                 This activity will be hidden from the activity list
               </span>
             </label>
@@ -153,7 +151,7 @@ export const ActivityConfigDialog = ({
           {/* New Name Input */}
           {!isBlacklisted && (
             <>
-              <div className='bg-blue-50/50 rounded-lg p-4 space-y-4 border border-blue-100'>
+              <div className='bg-muted rounded-lg p-4 space-y-4 border border-border'>
                 <div>
                   <label
                     htmlFor='newName'
@@ -191,9 +189,9 @@ export const ActivityConfigDialog = ({
 
               {/* Warning if updating existing alias */}
               {hasExistingAlias && (
-                <div className='flex items-start gap-2 p-3 bg-yellow-50 rounded-md'>
-                  <AlertTriangle className='w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0' />
-                  <div className='text-sm text-yellow-700'>
+                <div className='flex items-start gap-2 p-3 bg-muted rounded-md border border-border'>
+                  <AlertTriangle className='w-4 h-4 text-status-pending mt-0.5 flex-shrink-0' />
+                  <div className='text-sm text-status-pending'>
                     This will overwrite the existing alias. The new name will be shown for all
                     users.
                   </div>
@@ -203,7 +201,9 @@ export const ActivityConfigDialog = ({
           )}
 
           {/* Error message */}
-          {error && <div className='text-sm text-red-600 bg-red-50 p-2 rounded'>{error}</div>}
+          {error && (
+            <div className='text-sm text-destructive bg-destructive/10 p-2 rounded'>{error}</div>
+          )}
         </div>
 
         {/* Footer */}
@@ -217,7 +217,7 @@ export const ActivityConfigDialog = ({
           </button>
           <button
             onClick={handleSave}
-            className='px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors'
+            className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary rounded-md hover:bg-action-primary/90 transition-colors'
             type='button'
           >
             {hasExistingAlias ? 'Update' : 'Save'}

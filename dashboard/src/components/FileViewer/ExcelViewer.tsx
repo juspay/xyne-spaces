@@ -228,7 +228,7 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
     return (
       <div className='pt-[65px] p-4 flex items-center justify-center h-full min-h-[200px]'>
         <div className='text-center'>
-          <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3'></div>
+          <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-action-primary mx-auto mb-3'></div>
           <p className='text-muted-foreground dark:text-muted text-sm'>Loading Excel file...</p>
         </div>
       </div>
@@ -258,7 +258,9 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source }) => {
             key={sheet.name}
             onClick={() => onSheetChange(idx)}
             className={`${isMobile ? 'px-2 py-1 text-xs' : 'px-3 py-1 text-sm'} border rounded whitespace-nowrap flex-shrink-0 ${
-              idx === activeSheet ? 'bg-blue-500 text-white' : 'bg-background text-foreground '
+              idx === activeSheet
+                ? 'bg-action-primary text-action-primary-foreground'
+                : 'bg-background text-foreground '
             }`}
             data-track-category='FileViewer'
             data-track-name='SWITCH_SHEET'

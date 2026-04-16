@@ -341,7 +341,7 @@ export const ContextPickerPanel = ({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className='h-[420px] flex flex-col overflow-hidden rounded-2xl bg-white border border-gray-200 shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000]'>
+    <div className='h-[420px] flex flex-col overflow-hidden rounded-2xl bg-popover border border-border shadow-xl'>
       {/* Search + tabs + results */}
       <div className='flex-1 min-h-0 overflow-hidden'>
         <GlobalCommandMenu
@@ -359,8 +359,8 @@ export const ContextPickerPanel = ({
       </div>
 
       {/* Confirm footer */}
-      <div className='flex-shrink-0 border-t border-gray-200 px-4 py-2 flex items-center justify-between bg-[#FAFAFA] rounded-b-2xl'>
-        <span className='text-xs text-gray-500'>
+      <div className='flex-shrink-0 border-t border-border px-4 py-2 flex items-center justify-between bg-muted/50 rounded-b-2xl'>
+        <span className='text-xs text-muted-foreground'>
           {totalSelected > 0
             ? `${totalSelected} item${totalSelected === 1 ? '' : 's'} selected`
             : 'Select items to add to context'}
@@ -368,7 +368,7 @@ export const ContextPickerPanel = ({
         <div className='flex items-center gap-2'>
           <button
             onClick={onClose}
-            className='px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors'
+            className='px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent rounded-lg transition-colors'
             data-track-category='XyneAI'
             data-track-name='CONTEXT_PICKER_CANCEL'
           >
@@ -377,7 +377,7 @@ export const ContextPickerPanel = ({
           <button
             onClick={handleConfirm}
             disabled={totalSelected === 0}
-            className='px-3 py-1.5 text-xs font-medium bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+            className='px-3 py-1.5 text-xs font-medium bg-action-primary text-action-primary-foreground rounded-lg hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
             data-track-category='XyneAI'
             data-track-name='CONTEXT_PICKER_CONFIRM'
             data-track-metadata={JSON.stringify({ itemCount: totalSelected })}

@@ -29,7 +29,7 @@ export const CodeGenerationLoader = ({
 
   if (isFailed) {
     return (
-      <div className='flex items-center justify-center min-h-screen bg-white'>
+      <div className='flex items-center justify-center min-h-screen bg-background'>
         <div className='text-center'>
           <div className='w-8 h-8 mx-auto mb-3 rounded-full bg-red-50 flex items-center justify-center'>
             <div className='w-1.5 h-1.5 rounded-full bg-red-400' />
@@ -42,11 +42,11 @@ export const CodeGenerationLoader = ({
   }
 
   return (
-    <div className='flex items-center justify-center min-h-screen bg-white'>
+    <div className='flex items-center justify-center min-h-screen bg-background'>
       <div className='text-center'>
         <motion.p
           key={statusIdx}
-          className='text-gray-800 text-xs mb-4 font-medium tracking-wide'
+          className='text-foreground text-xs mb-4 font-medium tracking-wide'
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
@@ -62,7 +62,7 @@ export const CodeGenerationLoader = ({
                 {widths.map((w, j) => (
                   <motion.div
                     key={j}
-                    className='h-1 rounded-full bg-gray-300'
+                    className='h-1 rounded-full bg-border'
                     style={{ width: w }}
                     animate={{ opacity: [0.4, 1, 0.4] }}
                     transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.1 + j * 0.15 }}

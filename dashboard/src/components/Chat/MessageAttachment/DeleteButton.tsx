@@ -18,9 +18,8 @@ interface DeleteButtonProps {
 }
 
 const VARIANT_STYLES: Record<DeleteButtonVariant, string> = {
-  default:
-    'flex-shrink-0 text-muted-foreground dark:text-muted-foreground hover:text-red-600 text-red-500',
-  overlay: 'hover:bg-background/20 text-white hover:text-red-400',
+  default: 'flex-shrink-0 text-muted-foreground hover:text-destructive',
+  overlay: 'hover:bg-muted text-background hover:text-destructive',
 } as const;
 
 const ICON_SIZES: Record<DeleteButtonVariant, number> = {
@@ -73,7 +72,7 @@ export const DeleteButton = memo<DeleteButtonProps>(
           onClick={handleDelete}
           disabled={isDeleting}
           className={cn(
-            'p-2 rounded-md transition-colors duration-200 disabled:opacity-50 flex items-center gap-2',
+            'p-2 rounded-md text-foreground transition-colors duration-200 disabled:opacity-50 flex items-center gap-2',
             VARIANT_STYLES[variant],
           )}
           title={buttonLabel}
@@ -84,9 +83,13 @@ export const DeleteButton = memo<DeleteButtonProps>(
           data-track-metadata={JSON.stringify({ fileName })}
         >
           {isDeleting ? (
-            <Loader2 size={ICON_SIZES[variant]} className='animate-spin' aria-hidden='true' />
+            <Loader2
+              size={ICON_SIZES[variant]}
+              className='animate-spin text-foreground'
+              aria-hidden='true'
+            />
           ) : (
-            <Trash2 size={ICON_SIZES[variant]} aria-hidden='true' />
+            <Trash2 size={ICON_SIZES[variant]} className='text-destructive' aria-hidden='true' />
           )}
           {showLabel && (
             <span className={cn('ml-2 text-sm', className)}>
@@ -104,10 +107,8 @@ export const DeleteButton = memo<DeleteButtonProps>(
           <div className='p-6'>
             <div className='flex items-start justify-between mb-4'>
               <div className='flex-1'>
-                <h2 className='text-lg font-semibold text-foreground dark:text-gray-100'>
-                  Delete Attachment
-                </h2>
-                <p className='text-sm text-muted-foreground dark:text-muted-foreground mt-1'>
+                <h2 className='text-lg font-semibold text-foreground'>Delete Attachment</h2>
+                <p className='text-sm text-muted-foreground mt-1'>
                   Are you sure you want to delete this attachment?
                 </p>
               </div>
@@ -124,16 +125,12 @@ export const DeleteButton = memo<DeleteButtonProps>(
               </Button>
             </div>
 
-            <div className='border-t border-border dark:border-gray-700 mb-4' />
+            <div className='border-t border-border mb-4' />
 
             <div className='space-y-3 mb-6'>
-              <p className='text-sm text-muted-foreground dark:text-muted-foreground'>
-                This action cannot be undone.
-              </p>
-              <div className='bg-muted dark:bg-gray-900 rounded-md p-3 border border-border dark:border-gray-700'>
-                <p className='text-sm font-medium text-foreground dark:text-gray-100 truncate'>
-                  {fileName}
-                </p>
+              <p className='text-sm text-muted-foreground'>This action cannot be undone.</p>
+              <div className='bg-muted rounded-md p-3 border border-border'>
+                <p className='text-sm font-medium text-foreground truncate'>{fileName}</p>
               </div>
             </div>
 

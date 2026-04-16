@@ -33,14 +33,14 @@ export const CanvasMentionActivity = ({
       actorId={sender?.id ?? actorId}
       actorName={sender?.name ?? 'Someone'}
       channelId={activity.channelId ?? undefined}
-      badgeIcon={<AtSign className='w-4 h-4 text-blue-500' />}
-      badgeColorClass='bg-[#FAFAFA]'
+      badgeIcon={<AtSign className='w-4 h-4 text-primary' />}
+      badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>mentioned you in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
       className='flex items-start'
     >
-      <div className='text-[#3B4145] text-sm'>
+      <div className='text-muted-foreground text-sm'>
         {isExpanded
           ? `Canvas: ${canvas.title ?? 'Untitled'}`
           : `View canvas: ${canvas.title ?? 'Untitled'}`}

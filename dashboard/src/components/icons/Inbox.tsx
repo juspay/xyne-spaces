@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 
 const Inbox = ({
-  color = '#363A3F',
+  color = 'currentColor',
   size = 20,
 }: {
   color?: string;

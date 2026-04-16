@@ -8,7 +8,7 @@ interface InProgressIconProps {
 
 const InProgressIcon: React.FC<InProgressIconProps> = ({
   size = 16,
-  color = '#4C84F2',
+  color = 'var(--status-scheduled)',
   className,
 }) => (
   <svg

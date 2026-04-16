@@ -127,7 +127,7 @@ const ChannelCommandItem = ({
       key={channel.id}
       value={`channel-${channel.id}-${displayName}`}
       onSelect={() => onSelect(displayName)}
-      className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'aria-selected:bg-gray-100'}`}
+      className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'aria-selected:bg-muted'}`}
       style={{ WebkitTapHighlightColor: 'transparent' }}
     >
       <div className='flex items-center justify-center h-4 w-5 flex-shrink-0'>
@@ -1135,7 +1135,7 @@ const ChannelCommandMenu = ({
             <div key={groupKey} className='mb-4'>
               <Command.Group
                 heading={`${getGroupLabel(groupKey)} (${displayCount})`}
-                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
               >
                 {items.map((result, index) => (
                   <SearchResultItem
@@ -1155,7 +1155,7 @@ const ChannelCommandMenu = ({
       {paginationState[activeTab].hasMore && (
         <div ref={loadMoreRef} className='py-4 flex justify-center'>
           {isLoadingMore && (
-            <div className='flex items-center gap-2 text-xs text-gray-500'>
+            <div className='flex items-center gap-2 text-xs text-muted-foreground'>
               <Loader2 className='h-4 w-4 animate-spin' />
               <span>Loading more results...</span>
             </div>
@@ -1205,7 +1205,7 @@ const ChannelCommandMenu = ({
             <div key={type} className='mb-4'>
               <Command.Group
                 heading={`${getGroupLabel(type)} (${displayCount})`}
-                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
               >
                 {displayItems.map((result, index) => (
                   <SearchResultItem
@@ -1219,7 +1219,7 @@ const ChannelCommandMenu = ({
                 {isUserType && hasMore && (
                   <button
                     onClick={() => toggleCategoryExpansion(type)}
-                    className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                    className={`w-full px-2 py-1.5 mt-1 text-xs text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                     style={{
                       WebkitTapHighlightColor: 'transparent',
                       userSelect: 'none',
@@ -1243,7 +1243,7 @@ const ChannelCommandMenu = ({
       {paginationState[activeTab].hasMore && (
         <div ref={loadMoreRef} className='py-4 flex justify-center'>
           {isLoadingMore && (
-            <div className='flex items-center gap-2 text-xs text-gray-500'>
+            <div className='flex items-center gap-2 text-xs text-muted-foreground'>
               <Loader2 className='h-4 w-4 animate-spin' />
               <span>Loading more results...</span>
             </div>
@@ -1273,7 +1273,7 @@ const ChannelCommandMenu = ({
               return (
                 <Command.Group
                   heading={getCategoryLabel(category)}
-                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                 >
                   {displayItems.map(({ channel }, index) => {
                     const unreadCount = unreadCounts[channel.id] ?? 0;
@@ -1294,7 +1294,7 @@ const ChannelCommandMenu = ({
                   {hasMore && (
                     <button
                       onClick={() => toggleCategoryExpansion(category)}
-                      className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                      className={`w-full px-2 py-1.5 mt-1 text-xs text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                       data-track-category='CHANNEL_SEARCH'
                       data-track-name='TOGGLE_CHANNEL_CATEGORY_EXPANSION'
                       data-track-metadata={JSON.stringify({
@@ -1346,7 +1346,7 @@ const ChannelCommandMenu = ({
               return (
                 <Command.Group
                   heading={`${getGroupLabel('user')} (${displayCount})`}
-                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                 >
                   {displayItems.map((item, index) => (
                     <SearchResultItem
@@ -1359,7 +1359,7 @@ const ChannelCommandMenu = ({
                   {hasMore && (
                     <button
                       onClick={() => toggleCategoryExpansion('user')}
-                      className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                      className={`w-full px-2 py-1.5 mt-1 text-xs text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                       style={{
                         WebkitTapHighlightColor: 'transparent',
                         userSelect: 'none',
@@ -1393,7 +1393,7 @@ const ChannelCommandMenu = ({
             <div className='mb-4'>
               <Command.Group
                 heading={getCategoryLabel(ChannelCategory.GROUP_DMS)}
-                className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
               >
                 {groupDMs.map(({ channel }, index) => {
                   const unreadCount = unreadCounts[channel.id] ?? 0;
@@ -1432,7 +1432,7 @@ const ChannelCommandMenu = ({
               return (
                 <Command.Group
                   heading={getCategoryLabel(category)}
-                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                 >
                   {displayItems.map(({ channel }, index) => {
                     const unreadCount = unreadCounts[channel.id] ?? 0;
@@ -1495,7 +1495,7 @@ const ChannelCommandMenu = ({
                 <div key={category} className='mb-4'>
                   <Command.Group
                     heading={getCategoryLabel(typedCategory)}
-                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                   >
                     {displayItems.map(({ channel }, index) => {
                       const unreadCount = unreadCounts[channel.id] ?? 0;
@@ -1516,7 +1516,7 @@ const ChannelCommandMenu = ({
                     {shouldLimit && hasMore && (
                       <button
                         onClick={() => toggleCategoryExpansion(category)}
-                        className={`w-full px-2 py-1.5 mt-1 text-xs text-gray-600 rounded-sm text-left transition-colors ${!isMobile && 'hover:text-gray-900 hover:bg-gray-50'}`}
+                        className={`w-full px-2 py-1.5 mt-1 text-xs text-muted-foreground rounded-sm text-left transition-colors ${!isMobile && 'hover:text-foreground hover:bg-accent'}`}
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           userSelect: 'none',
@@ -1693,9 +1693,9 @@ const ChannelCommandMenu = ({
       {/* Search Input with Bot Selection */}
       <div className='flex items-center border-b border-border'>
         {selectedBot && (
-          <div className='flex items-center gap-2 pl-4 pr-2 py-2 bg-blue-50 border-r border-border'>
-            <Bot size={14} className='text-blue-600' />
-            <span className='text-sm font-medium text-blue-700'>{selectedBot.name}</span>
+          <div className='flex items-center gap-2 pl-4 pr-2 py-2 bg-primary/10 border-r border-border'>
+            <Bot size={14} className='text-primary' />
+            <span className='text-sm font-medium text-primary'>{selectedBot.name}</span>
           </div>
         )}
         <div className='relative flex-1 flex items-center gap-2 px-4 py-[10px]'>
@@ -1786,7 +1786,7 @@ const ChannelCommandMenu = ({
             backendResults.some(r => r.type === 'conversation') && (
               <button
                 onClick={handleSummarize}
-                className='p-1.5 rounded-md text-purple-600 hover:text-purple-700 hover:bg-purple-50 transition-colors flex-shrink-0 hidden sm:flex items-center justify-center'
+                className='p-1.5 rounded-md text-primary hover:text-primary hover:bg-primary/10 transition-colors flex-shrink-0 hidden sm:flex items-center justify-center'
                 aria-label='Summarize search results'
                 title='Summarize search results'
                 data-track-category='CHANNEL_SEARCH'
@@ -1875,8 +1875,8 @@ const ChannelCommandMenu = ({
                         className={cn(
                           'flex items-center justify-center gap-1.5 px-2 text-[13px] py-[2px] max-h-6 whitespace-nowrap transition-colors cursor-pointer rounded-[10px] border',
                           activeTab === tab.id
-                            ? 'border-[#6276BE] text-[#FFF] bg-[#6276BE]'
-                            : 'border-[#E4E6E7] text-[#000] hover:text-gray-900',
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border text-foreground hover:text-foreground',
                           isMobile && 'text-[14px] w-fit h-[37px] px-3',
                         )}
                         data-track-category='CHANNEL_SEARCH'
@@ -1896,7 +1896,7 @@ const ChannelCommandMenu = ({
           {/* Results */}
           <Command.List
             className={cn(
-              'flex-1 overflow-y-auto md:max-h-[550px] p-2 ml-2',
+              'flex-1 overflow-y-auto md:max-h-[550px] p-2',
               suppressHover && '[&_[cmdk-item]]:pointer-events-none',
             )}
             ref={el => {
@@ -1909,13 +1909,13 @@ const ChannelCommandMenu = ({
             {selectedBot ? (
               <div className='p-4'>
                 {/* Bot description */}
-                <p className='text-xs text-gray-500 mb-4'>{selectedBot.description}</p>
+                <p className='text-xs text-muted-foreground mb-4'>{selectedBot.description}</p>
 
                 {/* Bot response area */}
                 {(botChatState.status === 'success' || botChatState.status === 'loading') && (
-                  <div className='bg-gray-50 rounded-lg p-3 mb-4 border border-gray-200'>
+                  <div className='bg-muted/50 rounded-lg p-3 mb-4 border border-border'>
                     <div className='flex items-start gap-2'>
-                      <Bot size={16} className='text-blue-600 mt-0.5 flex-shrink-0' />
+                      <Bot size={16} className='text-primary mt-0.5 flex-shrink-0' />
                       <div className='flex-1 min-w-0'>
                         {botChatState.status === 'success' && botChatState.response && (
                           <p className='text-sm whitespace-pre-wrap break-words'>
@@ -1932,16 +1932,14 @@ const ChannelCommandMenu = ({
                               {botChatState.toolOutputs.map(toolOutput => (
                                 <div key={toolOutput.id} className='w-full overflow-hidden'>
                                   {toolOutput.description && (
-                                    <div className='text-sm text-gray-600 mb-2'>
+                                    <div className='text-sm text-muted-foreground mb-2'>
                                       {toolOutput.description}
                                     </div>
                                   )}
                                   <ToolOutputRenderer
                                     toolOutput={toolOutput}
                                     className={
-                                      toolOutput.singleStat
-                                        ? ''
-                                        : 'border border-gray-200 rounded-lg'
+                                      toolOutput.singleStat ? '' : 'border border-border rounded-lg'
                                     }
                                   />
                                 </div>
@@ -1955,7 +1953,7 @@ const ChannelCommandMenu = ({
 
                 {/* Error message */}
                 {botChatState.status === 'error' && (
-                  <div className='bg-red-50 text-red-600 rounded-lg p-3 mb-4 text-sm'>
+                  <div className='bg-destructive/10 text-destructive rounded-lg p-3 mb-4 text-sm'>
                     {botChatState.message}
                   </div>
                 )}
@@ -1964,7 +1962,7 @@ const ChannelCommandMenu = ({
                 {botChatState.status === 'success' && (
                   <button
                     onClick={() => void handleContinueInDM()}
-                    className='flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline'
+                    className='flex items-center gap-2 text-sm text-primary hover:text-primary hover:underline'
                     data-track-category='CHANNEL_SEARCH'
                     data-track-name='CONTINUE_BOT_IN_DM'
                     data-track-metadata={JSON.stringify({ botId: selectedBot?.id })}
@@ -1976,7 +1974,7 @@ const ChannelCommandMenu = ({
 
                 {/* Hint when no query entered yet */}
                 {botChatState.status === 'idle' && !search.trim() && (
-                  <p className='text-sm text-gray-400 text-center py-4'>
+                  <p className='text-sm text-muted-foreground text-center py-4'>
                     Type your question and press Enter
                   </p>
                 )}
@@ -1986,22 +1984,24 @@ const ChannelCommandMenu = ({
               <>
                 <Command.Group
                   heading='Bots'
-                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                  className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                 >
                   {filteredBots.map(bot => (
                     <Command.Item
                       key={bot.id}
                       value={`@${bot.name}`}
                       onSelect={() => handleBotSelect(bot)}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-sm cursor-pointer ${!isMobile && 'aria-selected:bg-gray-100'}`}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-sm cursor-pointer ${!isMobile && 'aria-selected:bg-muted'}`}
                       style={{ WebkitTapHighlightColor: 'transparent' }}
                     >
-                      <div className='flex items-center justify-center h-8 w-8 rounded-full bg-blue-100 flex-shrink-0'>
-                        <Bot size={16} className='text-blue-600' />
+                      <div className='flex items-center justify-center h-8 w-8 rounded-full bg-primary/10 flex-shrink-0'>
+                        <Bot size={16} className='text-primary' />
                       </div>
                       <div className='flex-1 min-w-0'>
-                        <span className='text-sm font-medium text-gray-800 block'>{bot.name}</span>
-                        <span className='text-xs text-gray-500 truncate block'>
+                        <span className='text-sm font-medium text-foreground block'>
+                          {bot.name}
+                        </span>
+                        <span className='text-xs text-muted-foreground truncate block'>
                           {bot.description}
                         </span>
                       </div>
@@ -2009,7 +2009,7 @@ const ChannelCommandMenu = ({
                   ))}
                 </Command.Group>
                 {filteredBots.length === 0 && (
-                  <Command.Empty className='py-6 text-center text-sm text-gray-500'>
+                  <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
                     No bots found.
                   </Command.Empty>
                 )}
@@ -2023,7 +2023,7 @@ const ChannelCommandMenu = ({
                     {mentionSearchType === MentionType.USER && availableUsers.length > 0 && (
                       <Command.Group
                         heading='Users'
-                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                       >
                         {availableUsers.map((user, index) => (
                           <Command.Item
@@ -2043,17 +2043,17 @@ const ChannelCommandMenu = ({
                               }
                             }}
                             className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                              index === selectedMentionIndex ? 'bg-gray-100' : ''
-                            } ${!isMobile && 'active:bg-gray-200 active:scale-[0.98]'}`}
+                              index === selectedMentionIndex ? 'bg-muted' : ''
+                            } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
                             <Avatar userId={user.id} size='sm' />
                             <div className='flex-1 min-w-0'>
-                              <div className='font-semibold text-xs text-gray-800 truncate'>
+                              <div className='font-semibold text-xs text-foreground truncate'>
                                 {getUserDisplayName(user)}
                               </div>
                               {user.email && (
-                                <div className='text-[11px] text-gray-500 truncate'>
+                                <div className='text-[11px] text-muted-foreground truncate'>
                                   {user.email}
                                 </div>
                               )}
@@ -2065,7 +2065,7 @@ const ChannelCommandMenu = ({
                     {mentionSearchType === MentionType.CHANNEL && availableChannels.length > 0 && (
                       <Command.Group
                         heading='Channels'
-                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                       >
                         {availableChannels.map(({ channel, displayName }, index) => {
                           return (
@@ -2085,15 +2085,15 @@ const ChannelCommandMenu = ({
                                 }
                               }}
                               className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                                index === selectedMentionIndex ? 'bg-gray-100' : ''
-                              } ${!isMobile && 'active:bg-gray-200 active:scale-[0.98]'}`}
+                                index === selectedMentionIndex ? 'bg-muted' : ''
+                              } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
-                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-gray-600'>
+                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
                                 {getChannelIcon(channel)}
                               </div>
                               <div className='flex-1 min-w-0'>
-                                <div className='font-semibold text-xs text-gray-800 truncate'>
+                                <div className='font-semibold text-xs text-foreground truncate'>
                                   {displayName}
                                 </div>
                               </div>
@@ -2105,14 +2105,14 @@ const ChannelCommandMenu = ({
                     {mentionSearchType === MentionType.USER &&
                       availableUsers.length === 0 &&
                       mentionSearchQuery && (
-                        <Command.Empty className='py-6 text-center text-xs text-gray-500'>
+                        <Command.Empty className='py-6 text-center text-xs text-muted-foreground'>
                           No users found for &quot;{mentionSearchQuery}&quot;
                         </Command.Empty>
                       )}
                     {mentionSearchType === MentionType.CHANNEL &&
                       availableChannels.length === 0 &&
                       mentionSearchQuery && (
-                        <Command.Empty className='py-6 text-center text-xs text-gray-500'>
+                        <Command.Empty className='py-6 text-center text-xs text-muted-foreground'>
                           No channels found for &quot;{mentionSearchQuery}&quot;
                         </Command.Empty>
                       )}
@@ -2129,7 +2129,7 @@ const ChannelCommandMenu = ({
                       {!searchText.trim() && loadRecents(activeTab).length > 0 && (
                         <Command.Group
                           heading='Recent'
-                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-[#788187] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                         >
                           {loadRecents(activeTab).map(item => {
                             const isChannelTab = activeTab === TabType.CHANNELS;
@@ -2170,14 +2170,20 @@ const ChannelCommandMenu = ({
                                     } as DisplaySearchResult,
                                   });
                                 }}
-                                className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'hover:bg-gray-100 aria-selected:bg-gray-100'}`}
+                                className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'hover:bg-muted aria-selected:bg-muted'}`}
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                               >
                                 {isChannelTab &&
                                   (item.isPrivate ? (
-                                    <Lock size={14} className='text-gray-500 flex-shrink-0' />
+                                    <Lock
+                                      size={14}
+                                      className='text-muted-foreground flex-shrink-0'
+                                    />
                                   ) : (
-                                    <Hash size={14} className='text-gray-500 flex-shrink-0' />
+                                    <Hash
+                                      size={14}
+                                      className='text-muted-foreground flex-shrink-0'
+                                    />
                                   ))}
                                 <span className='flex-1 min-w-0 text-left text-xs font-medium text-foreground truncate'>
                                   {item.title}
@@ -2196,7 +2202,7 @@ const ChannelCommandMenu = ({
                   )}
 
                 {showEmptyState && !mentionSearchType && (
-                  <Command.Empty className='py-6 text-center text-xs text-gray-500'>
+                  <Command.Empty className='py-6 text-center text-xs text-muted-foreground'>
                     No results found for &quot;{search}&quot;
                   </Command.Empty>
                 )}
@@ -2206,6 +2212,8 @@ const ChannelCommandMenu = ({
                     when Vespa fails. The backend-results section below is the part
                     that gracefully degrades to empty when there's an error. The
                     error notice itself is rendered after the local results below. */}
+                {error && <div className='p-3 text-xs text-destructive'>{error}</div>}
+
                 {!showEmptyState && !mentionSearchType && (
                   <>
                     {/* When searching, ordered results: Starred, Users, Group DMs, Channels, Messages, Tickets */}
@@ -2259,7 +2267,7 @@ const ChannelCommandMenu = ({
 
           {/* Footer */}
           {!inline && !isMobile && (
-            <div className='px-4 py-2 border-t border-gray-200 text-xs text-gray-500 flex items-center justify-end shrink-0 bg-[#FAFAFA] rounded-b-2xl'>
+            <div className='px-4 py-2 border-t border-border text-xs text-muted-foreground flex items-center justify-end shrink-0 bg-muted/50 rounded-b-2xl'>
               {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
             <label htmlFor='vespa-toggle' className='text-xs text-muted-foreground cursor-pointer'>
@@ -2278,7 +2286,7 @@ const ChannelCommandMenu = ({
               <div className='flex items-center gap-6'>
                 <span className='flex gap-[10px] items-center'>
                   <span>Open</span>
-                  <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
+                  <span className='p-1 bg-background rounded-md border border-border'>
                     <CornerDownLeft size={10} />
                   </span>
                 </span>
@@ -2286,10 +2294,10 @@ const ChannelCommandMenu = ({
                 <span className='flex gap-[10px] items-center'>
                   <span>Navigate </span>
                   <span className='flex gap-1'>
-                    <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
+                    <span className='p-1 bg-background rounded-md border border-border'>
                       <MoveUp size={12} />
                     </span>
-                    <span className='p-1 bg-white rounded-md border border-[#E4E6E7]'>
+                    <span className='p-1 bg-background rounded-md border border-border'>
                       <MoveDown size={12} />
                     </span>
                   </span>
@@ -2344,7 +2352,7 @@ const ChannelCommandMenu = ({
       <Command
         ref={commandRef}
         shouldFilter={false}
-        className='w-full h-full flex flex-col bg-white'
+        className='w-full h-full flex flex-col bg-background'
         onMouseMove={() => {
           if (suppressHover) {
             commandRef.current
@@ -2382,7 +2390,7 @@ const ChannelCommandMenu = ({
         'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
         isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
         contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
-        'md:w-full md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-gray-200 z-50',
+        'md:w-full md:h-auto bg-background md:rounded-2xl shadow-lg border border-border z-50',
       )}
       onKeyDownCapture={handleCommandKeyDown}
     >

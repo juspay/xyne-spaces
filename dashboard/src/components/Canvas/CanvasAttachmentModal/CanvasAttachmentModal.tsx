@@ -92,13 +92,13 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
       />
 
       {/* Modal */}
-      <div className='relative z-10 w-full max-w-2xl max-h-[80vh] bg-white rounded-lg shadow-lg flex flex-col m-4'>
+      <div className='relative z-10 w-full max-w-2xl max-h-[80vh] bg-card rounded-lg shadow-lg flex flex-col m-4'>
         {/* Header */}
-        <div className='flex items-center justify-between px-6 py-4 border-b border-gray-200'>
-          <h2 className='text-lg font-semibold text-gray-900'>Attach a canvas</h2>
+        <div className='flex items-center justify-between px-6 py-4 border-b border-border'>
+          <h2 className='text-lg font-semibold text-foreground'>Attach a canvas</h2>
           <button
             onClick={handleClose}
-            className='text-gray-400 hover:text-gray-600 transition-colors'
+            className='text-muted-foreground hover:text-foreground transition-colors'
             aria-label='Close'
             data-testid='canvas-attachment-close'
             data-track-category='CANVAS'
@@ -137,7 +137,7 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className='flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg'>
+        <div className='flex items-center justify-between px-6 py-4 border-t border-border bg-muted/50 rounded-b-lg'>
           <Button
             variant='outline'
             onClick={handleCreateNew}

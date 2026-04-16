@@ -285,10 +285,10 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
                   data-track-name='OPEN_ADD_PEOPLE_MODAL'
                   data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                 >
-                  <div className='w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center'>
-                    <UserPlus className='w-5 h-5 text-white' />
+                  <div className='w-10 h-10 bg-action-primary rounded-lg flex items-center justify-center'>
+                    <UserPlus className='w-5 h-5 text-action-primary-foreground' />
                   </div>
-                  <span className='text-blue-600 font-medium group-hover:text-blue-700'>
+                  <span className='text-primary font-medium group-hover:text-primary/80'>
                     Add people
                   </span>
                 </button>
@@ -325,7 +325,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
                       userId: participant.userId,
                     })}
                   >
-                    <Trash2 size={20} className='text-red-500' />
+                    <Trash2 size={20} className='text-destructive' />
                   </button>
                 )}
               </div>

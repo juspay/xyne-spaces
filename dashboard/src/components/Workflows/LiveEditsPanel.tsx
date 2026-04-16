@@ -91,12 +91,12 @@ const LiveEditsPanel: React.FC<LiveEditsPanelProps> = ({ combinedStepsData }) =>
     }
 
     return (
-      <div className='h-full flex items-center justify-center bg-gray-50'>
+      <div className='h-full flex items-center justify-center bg-muted/50'>
         <div className='text-center px-6'>
-          <div className='w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4'>
-            <FileX2 className='w-7 h-7 text-gray-400' />
+          <div className='w-14 h-14 rounded-full bg-muted flex items-center justify-center mx-auto mb-4'>
+            <FileX2 className='w-7 h-7 text-muted-foreground' />
           </div>
-          <p className='text-gray-700 font-medium text-sm'>It seems there are no edits!</p>
+          <p className='text-foreground font-medium text-sm'>It seems there are no edits!</p>
         </div>
       </div>
     );
