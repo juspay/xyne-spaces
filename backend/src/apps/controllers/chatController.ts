@@ -30,18 +30,20 @@ const ChatActionBodySchema = z.object({
 
 const PostMessageBodySchema = ChatActionBodySchema.extend({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
   conversationId: z.string().trim().optional(),
 }).refine(
   data => !!data.text || !!data.markdownText,
   { message: 'Either text or markdownText is required', path: ['text'] }
 ).refine(
-  data => !!data.channelId || !!data.conversationId,
-  { message: 'Either channelId or conversationId is required', path: ['channelId'] }
+  data => !!data.channelId || !!data.channelName || !!data.conversationId,
+  { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
 );
 
 const UpdateMessageBodySchema = ChatActionBodySchema.extend({
   messageId: z.string().min(1, 'Message ID is required').trim(),
   channelId: z.string().optional(),
+  channelName: z.string().trim().optional(),
 }).refine(
   data => !!data.text || !!data.markdownText,
   { message: 'Either text or markdownText is required', path: ['text'] }
@@ -49,16 +51,18 @@ const UpdateMessageBodySchema = ChatActionBodySchema.extend({
 
 const ChannelHistoryQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
   conversationId: z.string().min(1, 'Conversation ID is required').trim().optional(),
   limit: z.string().optional().transform(val => val ? parseInt(val, 10) : 1000),
   cursor: z.string().optional(),
 }).refine(
-  data => !!data.channelId || !!data.conversationId,
-  { message: 'Either channelId or conversationId is required', path: ['channelId'] }
+  data => !!data.channelId || !!data.channelName || !!data.conversationId,
+  { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
 );
 
 const ConversationRepliesQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
   conversationId: z.string().min(1, 'Conversation ID is required').trim(),
   limit: z.string().optional().transform(val => val ? parseInt(val, 10) : 1000),
   cursor: z.string().optional(),
@@ -137,6 +141,7 @@ export class ChatController {
 
       const {
         channelId,
+        channelName,
         text,
         markdownText,
         conversationId,
@@ -147,8 +152,8 @@ export class ChatController {
         contentFormat,
       } = bodyResult.data;
 
-      // Resolve channelId from conversationId if not provided
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+      // Resolve channelId from channelName or conversationId if not provided
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
 
       let content: string;
       if (markdownText) {
@@ -273,10 +278,10 @@ export class ChatController {
         return;
       }
 
-      const { channelId, conversationId, limit, cursor } = queryResult.data;
+      const { channelId, channelName, conversationId, limit, cursor } = queryResult.data;
 
-      // Resolve channelId from conversationId if not provided
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+      // Resolve channelId from channelName or conversationId if not provided
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
 
       const response = await getChannelHistory(resolvedChannelId, limit, cursor);
 
@@ -322,10 +327,10 @@ export class ChatController {
         return;
       }
 
-      const { channelId, conversationId, limit, cursor } = queryResult.data;
+      const { channelId, channelName, conversationId, limit, cursor } = queryResult.data;
 
-      // Resolve channelId from conversationId if not provided
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+      // Resolve channelId from channelName or conversationId if not provided
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
 
       const response = await getConversationReplies(resolvedChannelId, conversationId, limit, cursor);
 

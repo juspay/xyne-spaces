@@ -222,6 +222,24 @@ export interface ChannelsResponse {
 }
 
 /**
+ * Channel list item - represents a channel in the list API
+ */
+export interface ChannelListItem {
+    id: string;
+    name: string;
+    description?: string;
+    scopeType: string;
+    projectId: string;
+    createdBy: string;
+    createdAt: Date;
+}
+
+/**
+ * Response type for channel list API endpoint
+ */
+export interface ChannelListResponse extends PaginatedResponse<ChannelListItem> {}
+
+/**
  * Request type for conversation replies API endpoint
  */
 export interface ConversationRepliesRequest extends PaginationRequest {

@@ -5,11 +5,12 @@ import { logger } from "@/utils/logger";
 
 const ChannelValidationSchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
   conversationId: z.string().min(1, 'Conversation ID is required').trim().optional(),
   userId: z.string().min(1, 'User ID is required').trim(),
 }).refine(
-  data => !!data.channelId || !!data.conversationId,
-  { message: 'Either channelId or conversationId is required', path: ['channelId'] }
+  data => !!data.channelId || !!data.channelName || !!data.conversationId,
+  { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
 );
 
 /**
@@ -27,13 +28,25 @@ function sendError(res: Response, status: number, error: string, message: string
  */
 async function resolveAndValidateChannel(
   channelId: string | undefined,
+  channelName: string | undefined,
   conversationId: string | undefined,
   userId: string,
   res: Response
 ): Promise<string | null> {
   let resolvedChannelId = channelId;
 
-  // Resolve channelId from conversationId if not provided
+  // Resolve channelId from channelName if not provided
+  if (!resolvedChannelId && channelName) {
+    const channel = await repositories.channels.findByName(channelName);
+    if (!channel) {
+      logger.warn(`[CHANNEL-VALIDATION] Channel with name "${channelName}" not found`);
+      sendError(res, 404, 'Not Found', 'Channel not found');
+      return null;
+    }
+    resolvedChannelId = channel.id;
+  }
+
+  // Resolve channelId from conversationId if still not provided
   if (!resolvedChannelId && conversationId) {
     const conversation = await repositories.conversations.findById(conversationId);
     if (!conversation) {
@@ -84,11 +97,13 @@ export async function validateChannelAccessForGet(
 ): Promise<void> {
   try {
     const channelId = req.query.channelId as string | undefined;
+    const channelName = req.query.channelName as string | undefined;
     const conversationId = req.query.conversationId as string | undefined;
     const userId = req.body.userId;
 
     const validationResult = ChannelValidationSchema.safeParse({
       channelId,
+      channelName,
       conversationId,
       userId,
     });
@@ -101,6 +116,7 @@ export async function validateChannelAccessForGet(
     const validated = validationResult.data;
     const resolvedChannelId = await resolveAndValidateChannel(
       validated.channelId,
+      validated.channelName,
       validated.conversationId,
       validated.userId,
       res
@@ -128,11 +144,13 @@ export async function validateChannelAccessForPost(
 ): Promise<void> {
   try {
     const channelId = req.body.channelId;
+    const channelName = req.body.channelName;
     const conversationId = req.body.conversationId;
     const userId = req.body.userId;
 
     const validationResult = ChannelValidationSchema.safeParse({
       channelId,
+      channelName,
       conversationId,
       userId,
     });
@@ -145,6 +163,7 @@ export async function validateChannelAccessForPost(
     const validated = validationResult.data;
     const resolvedChannelId = await resolveAndValidateChannel(
       validated.channelId,
+      validated.channelName,
       validated.conversationId,
       validated.userId,
       res

@@ -6,14 +6,15 @@ import { resolveChannelId } from '../utils/channelUtils';
 
 const UploadFilesBodySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
+  channelName: z.string().min(1, 'Channel name is required').trim().optional(),
   text: z.string().trim().optional(),
   markdownText: z.string().optional(),
   metadata: z.string().optional(), // JSON-encoded string
   conversationId: z.string().trim().optional(),
   userId: z.string().min(1, 'User ID is required').trim(),
 }).refine(
-  data => !!data.channelId || !!data.conversationId,
-  { message: 'Either channelId or conversationId is required', path: ['channelId'] }
+  data => !!data.channelId || !!data.channelName || !!data.conversationId,
+  { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
 );
 
 export class FilesController {
@@ -35,10 +36,10 @@ export class FilesController {
         return;
       }
 
-      const { channelId, text, markdownText, metadata, conversationId, userId } = bodyResult.data;
+      const { channelId, channelName, text, markdownText, metadata, conversationId, userId } = bodyResult.data;
 
-      // Resolve channelId from conversationId if not provided
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+      // Resolve channelId from channelName or conversationId if not provided
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
 
       // Extract files from multer
       // uploadMultiple uses fields() so files are in object format
