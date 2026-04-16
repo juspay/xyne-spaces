@@ -28,7 +28,7 @@ import { clearAuthTokens } from '../services/clients/apiClient';
 import { logger, Event as LoggerEvent } from '../utils/logger';
 import { useZeroConnectionLogger } from '../services/zeroConnectionLogger';
 import { useCachedQuery } from '../hooks/useCachedQuery';
-import { useCallStatusSync } from '../hooks/useCallStatusSync';
+import { CallStatusSyncProvider } from '../hooks/useCallStatusSync';
 import { authRefreshDuration, authRefreshTotal, safeRecordMetric } from '../services/otel';
 import { Channel } from '@xyne/shared/index';
 import { SharedAuthProvider } from '@xyne/shared/hooks';
@@ -105,7 +105,6 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   logger.setZeroClientGroupId(zero.clientGroupID);
 
   useZeroConnectionLogger(state);
-  useCallStatusSync();
 
   // Connection failure modal state — in-memory only
   const [showModal, setShowModal] = useState(false);
@@ -495,6 +494,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   if (areAllQueriesCompleted) {
     return (
       <SharedAuthProvider value={context}>
+        <CallStatusSyncProvider />
         {showModal && <ZeroConnectionFailureModal onClose={() => setShowModal(false)} />}
         {children}
       </SharedAuthProvider>
