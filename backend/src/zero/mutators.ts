@@ -7350,7 +7350,38 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // 3. Create or update all attachments
           for (const attachment of attachments) {
-            const { attachmentId, originalFilename, mimetype, size, width, height } = attachment;
+            const { attachmentId, mimetype, size, width, height } = attachment;
+            const rawName = attachment.originalFilename || 'unnamed_file';
+            const lastDotIdx = rawName.lastIndexOf('.');
+
+            let ext = '';
+            let nameWithoutExt = rawName;
+
+            if (lastDotIdx === 0) {
+              ext = rawName;
+              nameWithoutExt = '';
+            } else if (lastDotIdx > 0) {
+              ext = rawName.substring(lastDotIdx);
+              nameWithoutExt = rawName.substring(0, lastDotIdx);
+            }
+
+            const maxBaseLength = Math.max(1, 255 - ext.length);
+
+            let sanitizedBase = nameWithoutExt
+              .replace(/[^a-zA-Z0-9 ._-]/g, '_')
+              .replace(/\.\./g, '_')
+              .replace(/^\.+/, '')
+              .replace(/[\s.]+$/, '')
+              .replace(/_+/g, '_')
+              .replace(/^_|_$/g, '')
+              .substring(0, maxBaseLength)
+              .trim();
+
+            if (!sanitizedBase) {
+              sanitizedBase = `file_${Date.now()}`;
+            }
+
+            const originalFilename = sanitizedBase + ext;
 
             const existingAttachment = await tx.run(
               zql.message_attachments.where('id', attachmentId).one(),

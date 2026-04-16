@@ -223,13 +223,37 @@ export class FileValidationService {
    * Sanitize filename to remove unsafe characters
    */
   private sanitizeFilename(filename: string): string {
-    // Remove path traversal attempts and unsafe characters
-    return filename
-      .replace(/[/\\:*?"<>|]/g, '_') // Replace filesystem unsafe chars
-      .replace(/\.\./g, '_') // Replace path traversal attempts
-      .replace(/^\.+/, '') // Remove leading dots
-      .substring(0, 255) // Limit filename length
+    const rawName = filename || 'unnamed_file';
+    const lastDotIdx = rawName.lastIndexOf('.');
+
+    let ext = '';
+    let nameWithoutExt = rawName;
+
+    if (lastDotIdx === 0) {
+      ext = rawName;
+      nameWithoutExt = '';
+    } else if (lastDotIdx > 0) {
+      ext = rawName.substring(lastDotIdx);
+      nameWithoutExt = rawName.substring(0, lastDotIdx);
+    }
+
+    const maxBaseLength = Math.max(1, 255 - ext.length);
+
+    let sanitizedBase = nameWithoutExt
+      .replace(/[^a-zA-Z0-9 ._-]/g, '_')
+      .replace(/\.\./g, '_')
+      .replace(/^\.+/, '')
+      .replace(/[\s.]+$/, '')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '')
+      .substring(0, maxBaseLength)
       .trim();
+
+    if (!sanitizedBase) {
+      sanitizedBase = `file_${Date.now()}`;
+    }
+
+    return sanitizedBase + ext;
   }
 
   /**
