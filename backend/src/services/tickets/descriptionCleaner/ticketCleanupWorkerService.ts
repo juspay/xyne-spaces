@@ -205,8 +205,7 @@ class TicketCleanupWorkerService {
   ): Promise<void> {
     try {
       await vespaClient.crudService.update(
-        ticketId,
-        { description_clean: descriptionClean },
+        [{ docId: ticketId, fields: { description_clean: descriptionClean } }],
         ticketSchema,
       );
     } catch (error) {

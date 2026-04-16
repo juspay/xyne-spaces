@@ -199,8 +199,7 @@ export async function runTicketDescriptionCleanOnCompletion(
 
   try {
     await vespaClient.crudService.update(
-      ctx.docId,
-      { description_clean: descriptionClean },
+      [{ docId: ctx.docId, fields: { description_clean: descriptionClean } }],
       ticketSchema,
     );
 

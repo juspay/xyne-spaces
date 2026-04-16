@@ -1,6 +1,7 @@
 import { type ILogger, type VespaConfig, type VespaDependencies } from '@xyne/vespa-ts';
 import type vespaClient from '../client';
 import type { InsertDocument, VespaSchema } from '../types';
+import type { BatchResult } from '../client/vespaClient';
 import type VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import { ErrorPerformingSearch } from '../error';
@@ -15,46 +16,34 @@ export class CRUDService {
     this.vespa = vespaClient;
   }
 
-  insert = async (document: InsertDocument, schema: VespaSchema) => {
+  insert = async (documents: InsertDocument[], schema: VespaSchema): Promise<BatchResult[]> => {
     try {
-      return this.vespa
-        .insert(document, {
-          namespace: this.config.namespace,
-          cluster: this.config.cluster,
-          schema,
-        })
-        .catch((error) => {
-          throw new ErrorPerformingSearch({
-            cause: error as Error,
-            sources: schema,
-          });
-        });
+      return this.vespa.feedBatch(documents, {
+        namespace: this.config.namespace,
+        cluster: this.config.cluster,
+        schema,
+      });
     } catch (error) {
       this.logger.error(
-        `Error inserting document to schema "${schema}": ${getErrorMessage(error)}`,
+        `Error inserting documents to schema "${schema}": ${getErrorMessage(error)}`,
       );
       throw error;
     }
   };
 
-  update = async (docId: string, document: Partial<InsertDocument>, schema: VespaSchema) => {
+  update = async (
+    updates: { docId: string; fields: Record<string, any> }[],
+    schema: VespaSchema,
+  ): Promise<BatchResult[]> => {
     try {
-      return this.vespa
-        .updateDocument(document, {
-          namespace: this.config.namespace,
-          cluster: this.config.cluster,
-          schema,
-          docId: docId
-        })
-        .catch((error) => {
-          throw new ErrorPerformingSearch({
-            cause: error as Error,
-            sources: schema,
-          });
-        });
+      return this.vespa.updateBatch(updates, {
+        namespace: this.config.namespace,
+        cluster: this.config.cluster,
+        schema,
+      });
     } catch (error) {
       this.logger.error(
-        `Error inserting document to schema "${schema}": ${getErrorMessage(error)}`,
+        `Error updating documents in schema "${schema}": ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -104,5 +93,9 @@ export class CRUDService {
       );
       throw error;
     }
+  };
+
+  close = async () => {
+    await this.vespa.close();
   };
 }
