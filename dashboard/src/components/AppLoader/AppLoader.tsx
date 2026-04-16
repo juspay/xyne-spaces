@@ -2,15 +2,20 @@ import { ReactElement } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLoadingAnimationLog } from '../../hooks/useLoadingAnimationLog';
 import { Event } from '../../utils/logger';
+import { detectReactNativeWebView } from '../../utils/reactNativeBridge';
 
 const AppLoader = (): ReactElement => {
+  const isNativeWebView = detectReactNativeWebView();
+
   useLoadingAnimationLog({
     event: Event.APP_LOADER_HIDDEN,
     source: 'AppLoader',
     message: 'App loader animation hidden',
   });
 
-  return (
+  return isNativeWebView ? (
+    <></>
+  ) : (
     <AnimatePresence>
       <motion.div
         key='app-loader'
