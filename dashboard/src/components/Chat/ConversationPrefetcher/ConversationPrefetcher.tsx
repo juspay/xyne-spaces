@@ -5,7 +5,7 @@ import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { stateMachineActor, Conversation } from '../../../machines/stateMachine';
 import { queryCacheActor } from '../../../machines/queryCacheMachine';
-import { useAllVisibleChannels } from '../../../hooks/useChannels';
+import { useAllVisibleChannels, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { Event, logger } from '../../../utils/logger';
 
 const PAGE_SIZE = 50;
@@ -56,6 +56,7 @@ const ConversationPrefetcher = (): null => {
   );
 
   const allChannels = useAllVisibleChannels();
+  const userChannelStatus = useGetChannelUserStatus(currentChannelId || '');
 
   // Track prefetch state
   const stateRef = useRef<PrefetchState>({
@@ -86,6 +87,7 @@ const ConversationPrefetcher = (): null => {
             start: { createdAt: anchor },
             direction: 'forward',
             limit: PAGE_SIZE,
+            isMember: !!userChannelStatus,
           }),
         ).complete;
 
@@ -96,6 +98,7 @@ const ConversationPrefetcher = (): null => {
             start: { createdAt: anchor },
             direction: 'backward',
             limit: PAGE_SIZE,
+            isMember: !!userChannelStatus,
           }),
         ).complete;
 

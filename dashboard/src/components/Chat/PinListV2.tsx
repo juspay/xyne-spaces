@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { ConversationTabContext } from './ConversationTabContext';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useGetChannelUserStatus } from '@xyne/shared/hooks';
 
 interface PinListProps {
   channelId: string;
@@ -15,7 +16,10 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
   const { baseRoute } = useRouteContext();
   const { setActiveTab } = useContext(ConversationTabContext);
 
-  const [pinned] = useCachedQuery(queries.getPinnedMessegesV2({ channelId: channelId }));
+  const userChannelStatus = useGetChannelUserStatus(channelId);
+  const [pinned] = useCachedQuery(
+    queries.getPinnedMessegesV2({ channelId: channelId, isMember: !!userChannelStatus }),
+  );
 
   if (pinned.length === 0) {
     return (

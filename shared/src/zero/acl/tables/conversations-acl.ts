@@ -24,9 +24,21 @@ export class ConversationsACL extends BaseQueryACL<'conversations'> {
       );
     }
 
-    // Fallback: only show conversations from public channels
+    if (args?.isMember === false && channelId) {
+      return query.whereExists('channel', (ch) =>
+        ch.where("id", channelId).where('visibility', ChannelVisibility.PUBLIC),
+        {scalar: true}
+      );
+    }
+
     return query.whereExists('channel', (ch) =>
-      ch.where('visibility', ChannelVisibility.PUBLIC)
+      ch.where(({ or, cmp, exists }) =>
+        or(
+          cmp('visibility', ChannelVisibility.PUBLIC),
+          exists('participants', (p) => p.where('userId', this.ctx.userID))
+        )
+      )
     );
+    
   }
 }

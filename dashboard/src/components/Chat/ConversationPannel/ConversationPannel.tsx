@@ -162,7 +162,7 @@ const ConversationPannel = ({
   const lastViewedTimestamp = userChannelStatus?.lastViewedAt;
   const channel = useChannel(channelId || '');
   const [latestMessage, latestMessageDetails] = useCachedQuery(
-    queries.channelLatestConversation({ channelId }),
+    queries.channelLatestConversation({ channelId, isMember: !!userChannelStatus }),
   );
 
   const latestMessageRef = useRef(latestMessage);
@@ -171,14 +171,20 @@ const ConversationPannel = ({
     latestMessageRef.current = latestMessage;
   }, [latestMessage]);
 
+  const participationStatus = useGetChannelUserStatus(channelId);
   const [initialMessageById] = useCachedQuery(
-    queries.getConversationById({ conversationId: urlConversationId || '' }),
+    queries.getConversationByIdWithChannel({
+      conversationId: urlConversationId || '',
+      channelId: channelId || '',
+      isMember: !!participationStatus,
+    }),
     { enabled: !!urlConversationId },
   );
   const [initialMessageByTimestamp] = useCachedQuery(
     queries.getConversationByTimestamp({
       channelId,
       timestamp: lastViewedTimestamp || 0,
+      isMember: !!userChannelStatus,
     }),
     { enabled: !!lastViewedTimestamp && !urlConversationId },
   );

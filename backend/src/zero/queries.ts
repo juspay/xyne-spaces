@@ -29,7 +29,7 @@ export const zql = createBuilder(schema);
 export const queries = defineQueries({
   // Conversation and Message Queries
   channelConversations: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -62,7 +62,7 @@ export const queries = defineQueries({
     }
   ),
   channelConversationsV2: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -141,6 +141,27 @@ export const queries = defineQueries({
         .one();
     }
   ),
+
+
+  // If channel Id is available use this instead of getConversationById to leverage ACL optimizations for channel conversations
+  getConversationByIdWithChannel: defineQuery(
+    z.object({ conversationId: z.string(), channelId: z.string(), isMember: z.boolean() }),
+    ({ ctx, args: { conversationId } }) => {
+      return zql.conversations
+        .where('conversationId', conversationId)
+        .related('initialMessage', (im) =>
+          im.where(({ or, cmp }) =>
+            or(cmp('visibleTo', 'IS', null), cmp('visibleTo', '=', ctx.userID))
+          )
+        )
+        .related('parentMessage')
+        .related('participants')
+        .related('ticket')
+        .one();
+    },
+  ),
+
+
   conversationParticipantByConversationId: defineQuery(
     z.object({ conversationId: z.string() }),
     ({ ctx, args: { conversationId } }) => {
@@ -164,7 +185,7 @@ export const queries = defineQueries({
     }
   ),
   getConversationByTimestamp: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional(), timestamp: z.number() }),
+    z.object({ channelId: z.string(), isMember: z.boolean(), timestamp: z.number() }),
     ({ args: { channelId, timestamp } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1231,7 +1252,7 @@ export const queries = defineQueries({
   channelConversationsPaginated: defineQuery(
     z.object({
       channelId: z.string(),
-      isMember: z.boolean().optional(),
+      isMember: z.boolean(),
       limit: z.number(),
       start: z.object({ conversationId: z.string(), createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
@@ -1289,7 +1310,7 @@ export const queries = defineQueries({
   channelConversationsPaginatedV2: defineQuery(
     z.object({
       channelId: z.string(),
-      isMember: z.boolean().optional(),
+      isMember: z.boolean(),
       limit: z.number(),
       start: z.object({ createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
@@ -1333,7 +1354,7 @@ export const queries = defineQueries({
   channelConversationsPaginatedV3: defineQuery(
     z.object({
       channelId: z.string(),
-      isMember: z.boolean().optional(),
+      isMember: z.boolean(),
       limit: z.number(),
       start: z.object({ createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
@@ -1365,7 +1386,7 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversations: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional(), limit: z.number() }),
+    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1397,7 +1418,7 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV2: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional(), limit: z.number() }),
+    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1426,7 +1447,7 @@ export const queries = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV3: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional(), limit: z.number() }),
+    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number() }),
     ({ ctx, args: { channelId, limit } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1445,7 +1466,7 @@ export const queries = defineQueries({
   ),
 
   channelLatestConversation: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
     ({ args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1505,7 +1526,7 @@ export const queries = defineQueries({
   ),
 
   getPinnedMesseges: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1529,7 +1550,7 @@ export const queries = defineQueries({
     }
   ),
   getPinnedMessegesV2: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
+    z.object({ channelId: z.string(), isMember: z.boolean() }),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)
@@ -1552,7 +1573,7 @@ export const queries = defineQueries({
   ),
 
   channelLatestMessage: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean().optional() }),
+    z.object({ channelId: z.string(), isMember: z.boolean()}),
     ({ ctx, args: { channelId } }) => {
       return zql.conversations
         .where('channelId', channelId)

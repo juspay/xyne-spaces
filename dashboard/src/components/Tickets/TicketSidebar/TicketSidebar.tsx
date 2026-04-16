@@ -24,7 +24,7 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { TicketActivity } from '../TicketActivity';
-import { useChannelsByProjectId } from '../../../hooks/useChannels';
+import { useChannelsByProjectId, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { mutators } from '../../../zero/mutators';
@@ -326,9 +326,12 @@ export const TicketSidebar: React.FC<TicketSidebarProps> = ({
     { enabled: !!ticket?.conversationId },
   );
 
+  const participationStatus = useGetChannelUserStatus(actualChannelId || '');
   const [conversation] = useCachedQuery(
-    queries.getConversationById({
+    queries.getConversationByIdWithChannel({
       conversationId: ticket?.conversationId || '',
+      channelId: actualChannelId || '',
+      isMember: !!participationStatus,
     }),
     { enabled: !!ticket?.conversationId },
   );

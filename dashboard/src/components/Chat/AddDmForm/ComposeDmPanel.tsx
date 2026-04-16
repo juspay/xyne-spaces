@@ -25,7 +25,11 @@ import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import ChatListV2 from '../ChatList/ChatListV2';
 import { useExistingDmChannel } from './useExistingDmChannel';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
-import { useChannelSearch, useAllVisibleChannels } from '../../../hooks/useChannels';
+import {
+  useChannelSearch,
+  useAllVisibleChannels,
+  useGetChannelUserStatus,
+} from '../../../hooks/useChannels';
 
 export interface CreateDmFormData {
   participants: User[];
@@ -134,8 +138,12 @@ export const ComposeDmPanel: React.FC = () => {
 
   const existingDmChannel = useExistingDmChannel(selectedUsers);
 
+  const channelParticipation = useGetChannelUserStatus(existingDmChannel?.id || '');
   const [latestMessage] = useCachedQuery(
-    queries.channelLatestConversation({ channelId: existingDmChannel?.id ?? '' }),
+    queries.channelLatestConversation({
+      channelId: existingDmChannel?.id ?? '',
+      isMember: !!channelParticipation,
+    }),
     { enabled: !!existingDmChannel },
   );
 

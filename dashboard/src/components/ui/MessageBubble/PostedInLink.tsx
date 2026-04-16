@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { Hash, Lock, MessageSquare, CornerUpRight } from 'lucide-react';
-import { useChannel } from '../../../hooks/useChannels';
+import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { queries } from '../../../zero/queries';
 import { Tooltip } from '../Tooltip';
 import { useQuery } from '../../../hooks/useQuery';
@@ -27,10 +27,15 @@ export const PostedInLink: React.FC<PostedInLinkProps> = ({
 }) => {
   const navigate = useNavigate();
   const channel = useChannel(originalChannelId);
+  const participationStatus = useGetChannelUserStatus(originalChannelId);
 
   // Get the original conversation to check if the message is a thread reply
   const [originalConversation] = useQuery(
-    queries.getConversationById({ conversationId: originalConversationId }),
+    queries.getConversationByIdWithChannel({
+      conversationId: originalConversationId,
+      channelId: originalChannelId,
+      isMember: !!participationStatus,
+    }),
   );
 
   // Determine if the original message is a thread reply (not the initial message)
