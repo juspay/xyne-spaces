@@ -12,6 +12,8 @@ import { config } from '../../../config/env.js';
 import { z } from 'zod';
 import { loadWorkflowConfig, INTEGRITY_GIT_CONFIG } from './config.js';
 import { config as agentConfig } from '../../config.js';
+import { executeWithRetry, formatRetryErrors } from './retry-utils.js';
+import { RetryMetadata, formatRetryMetadata } from './retry-tracking.js';
 
 // Import user prompts (system prompts come from agent configs)
 import {
@@ -25,7 +27,7 @@ import type {
   SessionData,
   IntegrityDebugWorkflowOutput,
 } from './types.js';
-import { formatGatewayIssueReport } from './utils.js';
+import { formatGatewayIssueReport, mapRepositoryName, getRepositoryBaseBranch } from './utils.js';
 import {
   getMockStep1RepositoryIdentification,
   getMockStep2AmountFormat,
@@ -47,6 +49,7 @@ export enum IntegrityDebugWorkflowSteps {
   ANALYZE_CODE = 'analyze_code',
   DECIDE_ACTION = 'decide_action',
   CREATE_FIX_PR = 'create_fix_pr',
+  SUMMARIZE_PR = 'summarize_pr',
   GENERATE_GATEWAY_ISSUE_REPORT = 'generate_gateway_issue_report',
   SAVE_ERROR_DETAILS = 'save_error_details',
 }
@@ -54,6 +57,7 @@ export enum IntegrityDebugWorkflowSteps {
 // ============================================================================
 // Utility Functions
 // ============================================================================
+
 
 /**
  * Map repository name to UUID for research agent
@@ -100,7 +104,7 @@ function formatGitDiff(gitDiff?: GitDiffFile[]): string {
 const identifyRepository = async (
   ticketId: string,
   gateway: string
-): Promise<string> => {
+): Promise<{ repository: string; researchAgentSessionId: string }> => {
   logger.info(`[${ticketId}] STEP 1: Identifying repository for gateway: ${gateway}`);
   logger.info(`${ticketId}_identify_repository_1_input`, { gateway });
 
@@ -113,36 +117,69 @@ const identifyRepository = async (
       mock: true,
       repository: mockResult.repository,
     });
-    return mockResult.repository;
+    return { repository: mockResult.repository, researchAgentSessionId: 'mock-session-id' };
   }
 
   try {
     const workflowConfig = loadWorkflowConfig();
-    
-    // Create research agent session with product ID to search across all repos in product
-    const sessionId = await researchAgentService.createSession(
-      process.env.RESEARCH_AGENT_PRODUCT_ID || null, // productId - search within product
-      null, // repositoryId - no specific repo, search all repos in product
-      undefined
-    );
 
-    logger.info(`[${ticketId}] Created research agent session: ${sessionId}`);
-
-    // Build repository identification prompt (Step 1)
+    // Build repository identification prompt (Step 1) - done outside retry for debug logging
     const repoIdentificationPrompt = buildStep1RepositoryIdentificationPrompt(gateway);
 
-    // Stream query to research agent
-    // System prompt comes from agent config: integrity-step1-repository-identifier
-    const response = await researchAgentService.streamQuery(
-      sessionId,
-      repoIdentificationPrompt,
-      {
-        systemPrompt: agentConfig[workflowConfig.agents.step1].systemPrompt,
-        maxTurns: 999,  // No limit - let it run until complete
-      }
+    // Track retry metadata for observability
+    let currentRetryMetadata: RetryMetadata | undefined;
+
+    // Execute with retry logic
+    const retryResult = await executeWithRetry(
+      `${ticketId} - Repository Identification`,
+      async () => {
+        // Create research agent session with product ID to search across all repos in product
+        const sessionId = await researchAgentService.createSession(
+          process.env.RESEARCH_AGENT_PRODUCT_ID || null, // productId - search within product
+          null, // repositoryId - no specific repo, search all repos in product
+          undefined
+        );
+
+        logger.info(`[${ticketId}] ✅ Research Agent Session Created: ${sessionId}`);
+
+        // Stream query to research agent
+        // System prompt comes from agent config: integrity-step1-repository-identifier
+        const response = await researchAgentService.streamQuery(
+          sessionId,
+          repoIdentificationPrompt,
+          {
+            systemPrompt: agentConfig[workflowConfig.agents.step1].systemPrompt,
+            maxTurns: 999,  // No limit - let it run until complete
+          }
+        );
+
+        return { sessionId, response };
+      },
+      workflowConfig.retry.enabled ? {
+        maxRetries: workflowConfig.retry.maxRetries,
+        retryDelayMs: workflowConfig.retry.retryDelayMs,
+        exponentialBackoff: workflowConfig.retry.exponentialBackoff,
+        onRetryUpdate: async (metadata) => {
+          currentRetryMetadata = metadata;
+          logger.info(`[${ticketId}] Retry metadata updated:`, {
+            attempt: metadata.totalAttempts,
+            status: metadata.finalStatus,
+          });
+        },
+      } : { maxRetries: 0 }
     );
 
+    if (!retryResult.success || !retryResult.result) {
+      throw new Error(formatRetryErrors('Repository Identification', retryResult));
+    }
+
+    const { sessionId, response } = retryResult.result;
     logger.info(`[${ticketId}] STEP 1: Repository identification completed`);
+
+    // Log retry summary if retries occurred
+    if (currentRetryMetadata && currentRetryMetadata.totalAttempts > 1) {
+      logger.info(`[${ticketId}] Repository Identification Retry Summary:\n${formatRetryMetadata(currentRetryMetadata)}`);
+    }
 
     // Write debug files only in development/test mode
     if (config.use_mock_analysis || process.env.NODE_ENV !== 'production') {
@@ -180,9 +217,11 @@ const identifyRepository = async (
     logger.info(`[${ticketId}] STEP 1: Identified repository: ${identificationResult.repository}`);
     logger.info(`${ticketId}_identify_repository_1_output`, {
       repository: identificationResult.repository,
+      researchAgentSessionId: sessionId,
+      retryMetadata: currentRetryMetadata,
     });
 
-    return identificationResult.repository;
+    return { repository: identificationResult.repository, researchAgentSessionId: sessionId };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 1: Error identifying repository:`, error);
@@ -203,7 +242,7 @@ const discoverAmountFormat = async (
   collectedLogs: any
 ): Promise<any> => {
   logger.info(`[${ticketId}] STEP 4: Analyzing amount logic for ${gateway} gateway`);
-  logger.info(`${ticketId}_discover_amount_format_4_input`, { gateway, repository: identifiedRepository, logsCollected: Object.keys(collectedLogs).length });
+  logger.info(`${ticketId}_discover_amount_format_4_input`, { gateway, repository: identifiedRepository, logsCollected: collectedLogs ? Object.keys(collectedLogs).length : 0 });
 
   // Check if we should use mock data
   if (config.use_mock_analysis) {
@@ -225,30 +264,48 @@ const discoverAmountFormat = async (
       throw new Error(`Unknown repository: ${identifiedRepository}. Please add repository ID to .env.local`);
     }
 
-    const sessionId = await researchAgentService.createSession(
-      null,
-      repositoryId,
-      undefined
-    );
-
-    logger.info(`[${ticketId}] Created research agent session: ${sessionId}`);
-
     // Build prompt with collected logs data
     const logsJson = JSON.stringify(collectedLogs, null, 2);
     const amountFormatPrompt = buildStep2AmountFormatPrompt(gateway, logsJson);
     const workflowConfig = loadWorkflowConfig();
 
-    // Stream query to research agent
-    // System prompt comes from agent config: integrity-step2-amount-format-analyzer
-    const response = await researchAgentService.streamQuery(
-      sessionId,
-      amountFormatPrompt,
-      {
-        systemPrompt: agentConfig[workflowConfig.agents.step2].systemPrompt,
-        maxTurns: 999,  // No limit - let it run until complete
-      }
+    // Execute with retry logic
+    const retryResult = await executeWithRetry(
+      `${ticketId} - Amount Format Analysis`,
+      async () => {
+        const sessionId = await researchAgentService.createSession(
+          null,
+          repositoryId,
+          undefined
+        );
+
+        logger.info(`[${ticketId}] ✅ Research Agent Session Created: ${sessionId}`);
+
+        // Stream query to research agent
+        // System prompt comes from agent config: integrity-step2-amount-format-analyzer
+        const response = await researchAgentService.streamQuery(
+          sessionId,
+          amountFormatPrompt,
+          {
+            systemPrompt: agentConfig[workflowConfig.agents.step2].systemPrompt,
+            maxTurns: 999,  // No limit - let it run until complete
+          }
+        );
+
+        return { sessionId, response };
+      },
+      workflowConfig.retry.enabled ? {
+        maxRetries: workflowConfig.retry.maxRetries,
+        retryDelayMs: workflowConfig.retry.retryDelayMs,
+        exponentialBackoff: workflowConfig.retry.exponentialBackoff,
+      } : { maxRetries: 0 }
     );
 
+    if (!retryResult.success || !retryResult.result) {
+      throw new Error(formatRetryErrors('Amount Format Analysis', retryResult));
+    }
+
+    const { sessionId, response } = retryResult.result;
     logger.info(`[${ticketId}] STEP 4: Amount logic analysis completed`);
 
     // Write debug files only in development/test mode
@@ -283,9 +340,11 @@ const discoverAmountFormat = async (
     }
 
     logger.info(`[${ticketId}] STEP 4: Amount logic: ${amountFormatResult.amount_format}, calculated: ${amountFormatResult.calculated_amount}`);
-    logger.info(`${ticketId}_discover_amount_format_4_output`, amountFormatResult);
 
-    return amountFormatResult;
+    const resultWithSessionId = { ...amountFormatResult, researchAgentSessionId: sessionId };
+    logger.info(`${ticketId}_discover_amount_format_4_output`, resultWithSessionId);
+
+    return resultWithSessionId;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 4: Error analyzing amount logic:`, error);
@@ -311,7 +370,7 @@ const discoverLogRequirements = async (
   logger.info(`${ticketId}_discover_log_requirements_2_input`, {
     gateway,
     orderIds,
-    orderCount: orderIds.length,
+    orderCount: orderIds?.length || 0,
     merchantId,
     flow,
     repository: identifiedRepository,
@@ -339,31 +398,48 @@ const discoverLogRequirements = async (
 
     logger.info(`[${ticketId}] Mapped repository ${identifiedRepository} to ID ${repositoryId}`);
 
-    // Create research agent session for the identified repository
-    const sessionId = await researchAgentService.createSession(
-      null, // productId - don't pass when repository_id is specified
-      repositoryId, // repositoryId - search in identified repo
-      undefined
-    );
-
-    logger.info(`[${ticketId}] Created research agent session: ${sessionId}`);
-
     // Build log requirements discovery prompt (Step 2)
     const logRequirementsPrompt = buildStep3LogRequirementsPrompt(gateway, orderIds, merchantId, flow);
-
     const workflowConfig = loadWorkflowConfig();
-    
-    // Stream query to research agent (use more turns for comprehensive code search)
-    // System prompt comes from agent config: integrity-step3-log-requirements-analyzer
-    const response = await researchAgentService.streamQuery(
-      sessionId,
-      logRequirementsPrompt,
-      {
-        systemPrompt: agentConfig[workflowConfig.agents.step3].systemPrompt,
-        maxTurns: 999,  // No limit - let it run until complete
-      }
+
+    // Execute with retry logic
+    const retryResult = await executeWithRetry(
+      `${ticketId} - Log Requirements Discovery`,
+      async () => {
+        // Create research agent session for the identified repository
+        const sessionId = await researchAgentService.createSession(
+          null, // productId - don't pass when repository_id is specified
+          repositoryId, // repositoryId - search in identified repo
+          undefined
+        );
+
+        logger.info(`[${ticketId}] ✅ Research Agent Session Created: ${sessionId}`);
+
+        // Stream query to research agent (use more turns for comprehensive code search)
+        // System prompt comes from agent config: integrity-step3-log-requirements-analyzer
+        const response = await researchAgentService.streamQuery(
+          sessionId,
+          logRequirementsPrompt,
+          {
+            systemPrompt: agentConfig[workflowConfig.agents.step3].systemPrompt,
+            maxTurns: 999,  // No limit - let it run until complete
+          }
+        );
+
+        return { sessionId, response };
+      },
+      workflowConfig.retry.enabled ? {
+        maxRetries: workflowConfig.retry.maxRetries,
+        retryDelayMs: workflowConfig.retry.retryDelayMs,
+        exponentialBackoff: workflowConfig.retry.exponentialBackoff,
+      } : { maxRetries: 0 }
     );
 
+    if (!retryResult.success || !retryResult.result) {
+      throw new Error(formatRetryErrors('Log Requirements Discovery', retryResult));
+    }
+
+    const { sessionId, response } = retryResult.result;
     logger.info(`[${ticketId}] STEP 2: Log requirements discovery completed`);
 
     // Write debug files only in development/test mode
@@ -421,9 +497,11 @@ const discoverLogRequirements = async (
       locationsFound: requirementsResult.integrity_locations_found?.length || 0,
       fieldCategoriesRequired: Object.keys(requirementsResult.required_fields || {}).length,
     });
-    logger.info(`${ticketId}_discover_log_requirements_2_output`, requirementsResult);
 
-    return requirementsResult;
+    const resultWithSessionId = { ...requirementsResult, researchAgentSessionId: sessionId };
+    logger.info(`${ticketId}_discover_log_requirements_2_output`, resultWithSessionId);
+
+    return resultWithSessionId;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 2: Error discovering log requirements:`, error);
@@ -449,7 +527,7 @@ const fetchLogs = async (
   logger.info(`${ticketId}_fetch_logs_3_input`, {
     gateway,
     orderIds,
-    orderCount: orderIds.length,
+    orderCount: orderIds?.length || 0,
     merchantId,
     flow,
     requiredFieldCategories: Object.keys(logRequirements.required_fields || {}).length,
@@ -468,16 +546,6 @@ const fetchLogs = async (
   }
 
   try {
-    // Create research agent session for log collection
-    const sessionId = await researchAgentService.createSession(
-      process.env.RESEARCH_AGENT_PRODUCT_ID || null, // productId - for log access
-      null, // repositoryId - logs are not in a specific repository
-      undefined
-    );
-
-    logger.info(`[${ticketId}] Created research agent session: ${sessionId}`);
-
-    // Build log collection prompt (Step 3)
     // Handle both field names: required_fields or required_fields_for_dry_run
     let requiredFields = logRequirements.required_fields || logRequirements.required_fields_for_dry_run;
 
@@ -504,6 +572,7 @@ const fetchLogs = async (
       logger.info(`[${ticketId}] Flattened nested required_fields structure`);
     }
 
+    // Build log collection prompt (Step 3)
     const logCollectionPrompt = buildStep4LogCollectionPrompt(
       gateway,
       orderIds,
@@ -514,17 +583,44 @@ const fetchLogs = async (
 
     const workflowConfig = loadWorkflowConfig();
 
-    // Stream query to research agent
-    // System prompt comes from agent config: integrity-step4-log-collector
-    const response = await researchAgentService.streamQuery(
-      sessionId,
-      logCollectionPrompt,
-      {
-        systemPrompt: agentConfig[workflowConfig.agents.step4].systemPrompt,
-        maxTurns: 999,  // No limit - let it run until complete
-      }
+    // Execute with retry logic
+    const retryResult = await executeWithRetry(
+      `${ticketId} - Log Collection`,
+      async () => {
+        // Create research agent session for log collection
+        const sessionId = await researchAgentService.createSession(
+          process.env.RESEARCH_AGENT_PRODUCT_ID || null, // productId - for log access
+          null, // repositoryId - logs are not in a specific repository
+          undefined
+        );
+
+        logger.info(`[${ticketId}] ✅ Research Agent Session Created: ${sessionId}`);
+
+        // Stream query to research agent
+        // System prompt comes from agent config: integrity-step4-log-collector
+        const response = await researchAgentService.streamQuery(
+          sessionId,
+          logCollectionPrompt,
+          {
+            systemPrompt: agentConfig[workflowConfig.agents.step4].systemPrompt,
+            maxTurns: 999,  // No limit - let it run until complete
+          }
+        );
+
+        return { sessionId, response };
+      },
+      workflowConfig.retry.enabled ? {
+        maxRetries: workflowConfig.retry.maxRetries,
+        retryDelayMs: workflowConfig.retry.retryDelayMs,
+        exponentialBackoff: workflowConfig.retry.exponentialBackoff,
+      } : { maxRetries: 0 }
     );
 
+    if (!retryResult.success || !retryResult.result) {
+      throw new Error(formatRetryErrors('Log Collection', retryResult));
+    }
+
+    const { sessionId, response } = retryResult.result;
     logger.info(`[${ticketId}] STEP 3: Log collection completed`);
 
     // Write debug files only in development/test mode
@@ -561,11 +657,14 @@ const fetchLogs = async (
     }
 
     logger.info(`[${ticketId}] STEP 3: Logs collected successfully`);
+
+    const logsWithSessionId = { ...collectedLogs, researchAgentSessionId: sessionId };
     logger.info(`${ticketId}_fetch_logs_3_output`, {
       fieldsCollected: Object.keys(collectedLogs).length,
+      researchAgentSessionId: sessionId,
     });
 
-    return collectedLogs;
+    return logsWithSessionId;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 3: Error fetching logs:`, error);
@@ -592,12 +691,12 @@ const analyzeCode = async (
   logger.info(`${ticketId}_analyze_code_5_input`, {
     gateway,
     orderIds,
-    orderCount: orderIds.length,
+    orderCount: orderIds?.length || 0,
     merchantId,
     repository: identifiedRepository,
-    logsCollected: Object.keys(collectedLogs).length,
-    amountFormat: amountFormat.amount_format,
-    multiplier: amountFormat.multiplier,
+    logsCollected: collectedLogs ? Object.keys(collectedLogs).length : 0,
+    amountFormat: amountFormat?.amount_format || 'unknown',
+    multiplier: amountFormat?.multiplier || 0,
   });
 
   // Check if we should use mock data
@@ -623,15 +722,6 @@ const analyzeCode = async (
 
     logger.info(`[${ticketId}] Mapped repository ${identifiedRepository} to ID ${repositoryId}`);
 
-    // Create research agent session for the identified repository
-    const sessionId = await researchAgentService.createSession(
-      null, // productId - don't pass when repository_id is specified
-      repositoryId, // repositoryId - search only in identified repo
-      undefined
-    );
-
-    logger.info(`[${ticketId}] Created research agent session: ${sessionId}`);
-
     // Build code analysis prompt with collected logs and amount format (Step 5)
     const logsJson = JSON.stringify(collectedLogs, null, 2);
     const codeAnalysisPrompt = buildStep5CodeAnalysisPrompt(gateway, orderIds, merchantId, logsJson, amountFormat);
@@ -639,15 +729,43 @@ const analyzeCode = async (
     // Stream query to research agent
     // System prompt comes from agent config: integrity-step5-code-analyzer
     const workflowConfig = loadWorkflowConfig();
-    const response = await researchAgentService.streamQuery(
-      sessionId,
-      codeAnalysisPrompt,
-      {
-        systemPrompt: agentConfig[workflowConfig.agents.step5].systemPrompt,
-        maxTurns: 999,  // No limit - let it run until complete
-      }
+
+    // Execute with retry logic
+    const retryResult = await executeWithRetry(
+      `${ticketId} - Code Analysis`,
+      async () => {
+        // Create research agent session for the identified repository
+        const sessionId = await researchAgentService.createSession(
+          null, // productId - don't pass when repository_id is specified
+          repositoryId, // repositoryId - search only in identified repo
+          undefined
+        );
+
+        logger.info(`[${ticketId}] ✅ Research Agent Session Created: ${sessionId}`);
+
+        const response = await researchAgentService.streamQuery(
+          sessionId,
+          codeAnalysisPrompt,
+          {
+            systemPrompt: agentConfig[workflowConfig.agents.step5].systemPrompt,
+            maxTurns: 999,  // No limit - let it run until complete
+          }
+        );
+
+        return { sessionId, response };
+      },
+      workflowConfig.retry.enabled ? {
+        maxRetries: workflowConfig.retry.maxRetries,
+        retryDelayMs: workflowConfig.retry.retryDelayMs,
+        exponentialBackoff: workflowConfig.retry.exponentialBackoff,
+      } : { maxRetries: 0 }
     );
 
+    if (!retryResult.success || !retryResult.result) {
+      throw new Error(formatRetryErrors('Code Analysis', retryResult));
+    }
+
+    const { sessionId, response } = retryResult.result;
     logger.info(`[${ticketId}] STEP 5: Code analysis completed`);
 
     // Write debug files only in development/test mode
@@ -690,9 +808,9 @@ const analyzeCode = async (
       issueType: analysisResult.issue_type,
       integrityLocationsAnalyzed: analysisResult.integrity_locations_analysis?.length || 0,
     });
-    logger.info(`${ticketId}_analyze_code_5_output`, analysisResult);
+    logger.info(`${ticketId}_analyze_code_5_output`, { ...analysisResult, researchAgentSessionId: sessionId });
 
-    return analysisResult;
+    return { ...analysisResult, researchAgentSessionId: sessionId };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${ticketId}] STEP 5: Error analyzing code:`, error);
@@ -716,13 +834,66 @@ const decideAction = async (
     responsibleParty: analysisResult.responsible_party,
   });
 
-  if (analysisResult.is_our_issue && analysisResult.responsible_party === 'our_code') {
+  // Default to create_pr unless explicitly a gateway issue
+  if (analysisResult.is_our_issue === false) {
+    logger.info(`[${ticketId}] Action: Escalate to gateway (not our issue)`);
+    return 'escalate_to_gateway';
+  } else {
+    // Default: create PR (when is_our_issue is true or undefined)
     logger.info(`[${ticketId}] Action: Create PR to fix our code`);
     return 'create_pr';
-  } else {
-    logger.info(`[${ticketId}] Action: Escalate to gateway`);
-    return 'escalate_to_gateway';
   }
+};
+
+/**
+ * Create PR summary for display in workflow steps
+ */
+const createPRSummary = async (
+  prLink: string | undefined,
+  commitHash: string | undefined,
+  analysisResult: any,
+  gateway: string
+): Promise<{
+  prLink: string;
+  commitHash: string;
+  filesChanged: number;
+  summary: string;
+  issueType: string;
+  gateway: string;
+  repository: string;
+}> => {
+  const filesChanged = analysisResult.affected_files?.length || 0;
+
+  let summary = `## PR Created for ${gateway} Integrity Fix\n\n`;
+  summary += `**Issue Type**: ${analysisResult.issue_type}\n`;
+  summary += `**Repository**: ${analysisResult.repository}\n`;
+  summary += `**Files Changed**: ${filesChanged}\n\n`;
+
+  if (analysisResult.analysis_summary) {
+    summary += `**Issue Summary**:\n${analysisResult.analysis_summary}\n\n`;
+  }
+
+  if (prLink) {
+    summary += `**PR Link**: ${prLink}\n\n`;
+  }
+
+  if (commitHash && commitHash !== 'No commit created') {
+    summary += `**Commit**: ${commitHash}\n\n`;
+  }
+
+  if (analysisResult.suggested_fix?.description) {
+    summary += `**Fix Description**:\n${analysisResult.suggested_fix.description}\n\n`;
+  }
+
+  return {
+    prLink: prLink || 'N/A',
+    commitHash: commitHash || 'N/A',
+    filesChanged,
+    summary,
+    issueType: analysisResult.issue_type,
+    gateway,
+    repository: analysisResult.repository,
+  };
 };
 
 /**
@@ -731,34 +902,50 @@ const decideAction = async (
 const prepareFixPRParams = async (
   ticketId: string,
   analysisResult: any,
-  gateway: string
+  gateway: string,
+  identifiedRepository: string
 ): Promise<{
   initialMessage: string;
   repoUrl: string;
   fixBranchName: string;
   skipBranchCheckout: boolean;
-  localRepoPath: string;
+  localRepoPath?: string;
+  repository: 'api-gateway' | 'api-txns';
 }> => {
   const workflowConfig = loadWorkflowConfig();
 
   logger.info(`[${ticketId}] Creating fix PR`);
+
+  // Use repository from analysis result, fallback to identified repository or default
+  const rawRepository = analysisResult.repository || identifiedRepository || 'api-gateway';
+
+  // Normalize repository name (e.g., "euler-api-gateway" -> "api-gateway")
+  const repository = mapRepositoryName(rawRepository);
+
+  if (!analysisResult.repository) {
+    logger.warn(`[${ticketId}] Repository not in analysis result, using fallback: ${repository}`);
+  }
+
   logger.info(`${ticketId}_create_fix_pr_6_input`, {
-    repository: analysisResult.repository,
-    affectedFilesCount: analysisResult.affected_files.length,
+    rawRepository,
+    repository,
+    affectedFilesCount: analysisResult.affected_files?.length || 0,
     mockMode: config.use_mock_analysis,
   });
 
-  if (!analysisResult.repository) {
-    throw new Error('Repository not identified in code analysis');
-  }
-
   // Determine repository path based on configuration
-  const localRepoPath = workflowConfig.localRepoPath?.[analysisResult.repository as 'api-txns' | 'api-gateway'];
-  if (!localRepoPath) {
-    throw new Error(`Local repository path not configured for ${analysisResult.repository}. Please set API_TXNS_REPO_PATH or API_GATEWAY_REPO_PATH in .env.local`);
+  // Only required in mock mode (for direct local repo access)
+  const localRepoPath = workflowConfig.localRepoPath?.[repository];
+
+  // In mock mode, local repo path is required
+  if (config.use_mock_analysis && !localRepoPath) {
+    logger.error(`[${ticketId}] Mock mode requires local repository path for ${repository}`);
+    throw new Error(`Local repository path not configured for ${repository}. Please set API_TXNS_REPO_PATH or API_GATEWAY_REPO_PATH in .env.local`);
   }
 
-  logger.info(`[${ticketId}] Using local repository at: ${localRepoPath}`);
+  if (localRepoPath) {
+    logger.info(`[${ticketId}] Using local repository at: ${localRepoPath}`);
+  }
   logger.info(`[${ticketId}] Mock mode: ${config.use_mock_analysis}`);
 
   // Build initial user message for agentic checkpoint
@@ -766,21 +953,28 @@ const prepareFixPRParams = async (
 
   // Add repo context
   if (config.use_mock_analysis) {
-    initialMessage += `**IMPORTANT**: You are working with a local repository at ${localRepoPath}.\n\n`;
+    initialMessage += `**IMPORTANT**: You are working with a local repository at ${localRepoPath!}.\n\n`;
   } else {
-    initialMessage += `**Repository**: ${analysisResult.repository}\n\n`;
+    initialMessage += `**Repository**: ${repository}\n\n`;
   }
 
   initialMessage += `## Analysis Summary\n${analysisResult.analysis_summary}\n\n`;
-  initialMessage += `## Files to Fix:\n`;
-  for (const file of analysisResult.affected_files) {
-    initialMessage += `- ${file.file_path} (${file.function_name}, lines ${file.line_numbers})\n`;
-    initialMessage += `  Issue: ${file.issue_description}\n`;
+
+  if (analysisResult.affected_files && analysisResult.affected_files.length > 0) {
+    initialMessage += `## Files to Fix:\n`;
+    for (const file of analysisResult.affected_files) {
+      initialMessage += `- ${file.file_path || file} (${file.function_name || ''}, lines ${file.line_numbers || file.line || ''})\n`;
+      initialMessage += `  Issue: ${file.issue_description || file.issue || ''}\n`;
+    }
   }
-  initialMessage += `\n## Suggested Fix:\n${analysisResult.suggested_fix.description}\n\n`;
-  initialMessage += `## Code Changes:\n`;
-  for (const change of analysisResult.suggested_fix.code_changes) {
-    initialMessage += `- ${change.file}: ${change.change_description}\n`;
+
+  initialMessage += `\n## Suggested Fix:\n${analysisResult.suggested_fix?.description || 'See analysis summary'}\n\n`;
+
+  if (analysisResult.suggested_fix?.code_changes && analysisResult.suggested_fix.code_changes.length > 0) {
+    initialMessage += `## Code Changes:\n`;
+    for (const change of analysisResult.suggested_fix.code_changes) {
+      initialMessage += `- ${change.file}: ${change.change_description || change.description || ''}\n`;
+    }
   }
   initialMessage += `\n## Instructions:\n`;
   initialMessage += `1. Read the affected files to understand the current implementation\n`;
@@ -803,10 +997,10 @@ const prepareFixPRParams = async (
   // In production mode: clone from remote and create PR
   const useLocalRepoDirectly = config.use_mock_analysis;
   const repoUrl = useLocalRepoDirectly
-    ? localRepoPath  // Direct path - no cloning (mock mode only)
-    : (analysisResult.repository === 'api-txns'
-      ? 'https://bitbucket.example.com/scm/be/euler-api-txns.git'
-      : 'https://bitbucket.example.com/scm/be/euler-api-gateway.git');
+    ? localRepoPath!  // Direct path - no cloning (mock mode only) - guaranteed non-null by earlier check
+    : (repository === 'api-txns'
+      ? 'ssh://git@github.com/example-org/euler-api-txns.git'
+      : 'ssh://git@github.com/example-org/euler-api-gateway.git');
 
   // Skip branch operations when working directly in local repo (mock mode)
   const skipBranchCheckout = useLocalRepoDirectly;
@@ -824,6 +1018,7 @@ const prepareFixPRParams = async (
     fixBranchName,
     skipBranchCheckout,
     localRepoPath,
+    repository,
   };
 };
 
@@ -881,9 +1076,21 @@ const IntegrityDebugInputSchema = z.object({
 
 /**
  * Context mapper to convert payload to workflow context
+ * Made idempotent - can be safely called multiple times (creation + execution)
  */
 const contextMapper = (payload: any): IntegrityDebugContext => {
-  // Create a single session with all order IDs
+  // If payload already has sessions (already transformed), return as-is
+  // This happens when runner calls contextMapper on already-transformed context from DB
+  if (payload.sessions && Array.isArray(payload.sessions) && payload.sessions.length > 0) {
+    return {
+      ticketId: payload.ticketId,
+      csvData: payload.csvData || '',
+      sessions: payload.sessions,
+      orderIds: payload.orderIds || [],
+    };
+  }
+
+  // Otherwise, transform raw input into context
   const sessions: SessionData[] = [{
     orderId: payload.orderIds?.[0] || 'unknown', // First order ID for compatibility
     merchantId: payload.merchantId || 'unknown',
@@ -909,35 +1116,53 @@ async function execute(
   const context = engine.getContext();
   const ticketId = context.ticketId;
 
-  // Track errors from each step
-  const stepErrors: Array<{step: string, stepName: string, error: string}> = [];
+  // Track errors from each step with comprehensive details
+  const stepErrors: Array<{
+    step: string;
+    stepName: string;
+    error: string;
+    errorStack?: string;
+    fallbackUsed?: any;
+    timestamp?: string;
+  }> = [];
 
   try {
     // Extract session context from first session
-    const firstSession = context.sessions[0];
+    const firstSession = context.sessions?.[0];
     if (!firstSession) {
-      throw new Error('No sessions found in context');
+      logger.warn(`[${ticketId}] No sessions found in context, using defaults`);
     }
-  const gateway = firstSession.gateway;
-  const merchantId = firstSession.merchantId;
-  const flow = firstSession.flow;
+  const gateway = firstSession?.gateway || 'unknown';
+  const merchantId = firstSession?.merchantId || 'unknown';
+  const flow = firstSession?.flow || 'WEBHOOK';
 
   // Use orderIds from context (new format) or fall back to sessions (old CSV format)
-  const orderIds = context.orderIds || context.sessions.map(s => s.orderId);
+  const orderIds = context.orderIds || context.sessions?.map(s => s.orderId) || [];
 
   // STEP 1: Identify repository (continue with fallback on error)
   let identifiedRepository = 'api-gateway'; // Default fallback
   try {
-    identifiedRepository = await engine.createCheckpoint(
+    const repoResult = await engine.createCheckpoint(
       IntegrityDebugWorkflowSteps.IDENTIFY_REPOSITORY,
       identifyRepository,
       ticketId,
       gateway
     );
+    // Normalize repository name (e.g., "euler-api-gateway" -> "api-gateway")
+    identifiedRepository = mapRepositoryName(repoResult.repository);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
     logger.error(`[${ticketId}] STEP 1 Failed: ${errorMsg} - continuing with fallback: ${identifiedRepository}`);
-    stepErrors.push({ step: 'identify_repository', stepName: 'Repository Identification', error: errorMsg });
+
+    stepErrors.push({
+      step: 'identify_repository',
+      stepName: 'Repository Identification',
+      error: errorMsg,
+      errorStack: errorStack?.substring(0, 500),
+      fallbackUsed: identifiedRepository,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // STEP 2: Discover log requirements (continue with fallback on error)
@@ -955,8 +1180,16 @@ async function execute(
     );
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
     logger.error(`[${ticketId}] STEP 2 Failed: ${errorMsg} - continuing with empty log requirements`);
-    stepErrors.push({ step: 'discover_log_requirements', stepName: 'Log Requirements Discovery', error: errorMsg });
+    stepErrors.push({
+      step: 'discover_log_requirements',
+      stepName: 'Log Requirements Discovery',
+      error: errorMsg,
+      errorStack: errorStack?.substring(0, 500),
+      fallbackUsed: logRequirements,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // STEP 3: Fetch logs based on requirements (continue with fallback on error)
@@ -974,8 +1207,16 @@ async function execute(
     );
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
     logger.error(`[${ticketId}] STEP 3 Failed: ${errorMsg} - continuing with empty logs`);
-    stepErrors.push({ step: 'fetch_logs', stepName: 'Log Collection', error: errorMsg });
+    stepErrors.push({
+      step: 'fetch_logs',
+      stepName: 'Log Collection',
+      error: errorMsg,
+      errorStack: errorStack?.substring(0, 500),
+      fallbackUsed: collectedLogs,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // STEP 4: Analyze amount logic using Money framework with collected logs (continue with fallback on error)
@@ -991,8 +1232,16 @@ async function execute(
     );
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
     logger.error(`[${ticketId}] STEP 4 Failed: ${errorMsg} - continuing with unknown amount format`);
-    stepErrors.push({ step: 'discover_amount_format', stepName: 'Amount Format Analysis', error: errorMsg });
+    stepErrors.push({
+      step: 'discover_amount_format',
+      stepName: 'Amount Format Analysis',
+      error: errorMsg,
+      errorStack: errorStack?.substring(0, 500),
+      fallbackUsed: amountFormat,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // STEP 5: Comprehensive code analysis (with amount format context) (continue with fallback on error)
@@ -1017,8 +1266,16 @@ async function execute(
     );
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
     logger.error(`[${ticketId}] STEP 5 Failed: ${errorMsg} - continuing with incomplete analysis`);
-    stepErrors.push({ step: 'analyze_code', stepName: 'Code Analysis', error: errorMsg });
+    stepErrors.push({
+      step: 'analyze_code',
+      stepName: 'Code Analysis',
+      error: errorMsg,
+      errorStack: errorStack?.substring(0, 500),
+      fallbackUsed: analysisResult,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // Step 6: Decide action
@@ -1035,8 +1292,8 @@ async function execute(
   let gatewayIssueReport: string | undefined;
 
   if (action === 'create_pr') {
-    // Step 5: Prepare fix PR parameters
-    const fixPRParams = await prepareFixPRParams(ticketId, analysisResult, gateway);
+    // Step 6: Prepare fix PR parameters
+    const fixPRParams = await prepareFixPRParams(ticketId, analysisResult, gateway, identifiedRepository);
     const workflowConfig = loadWorkflowConfig();
 
     // Create fix PR using agentic checkpoint (in main execute function for AST graph generation)
@@ -1047,8 +1304,9 @@ async function execute(
         repoInfo: {
           repoUrl: fixPRParams.repoUrl,
           repoBranch: fixPRParams.skipBranchCheckout ? undefined : fixPRParams.fixBranchName,
-          baseBranch: fixPRParams.skipBranchCheckout ? undefined : INTEGRITY_GIT_CONFIG.analysisBaseBranch,
+          baseBranch: fixPRParams.skipBranchCheckout ? undefined : getRepositoryBaseBranch(fixPRParams.repository),
           earlyPRCreation: !config.use_mock_analysis,  // Always create PR in production mode
+          getCommitMessage: (raw_commit_message: string) => `EUL-0000 ${raw_commit_message}`,
         },
         conversationContext: {
           initialUserMessage: fixPRParams.initialMessage,
@@ -1073,7 +1331,7 @@ async function execute(
     }
 
     // Apply changes to local repository if configured (for non-mock mode)
-    if (!config.use_mock_analysis && workflowConfig.applyChangesToLocalRepo && agenticResult.gitInfo?.workingDirectory) {
+    if (!config.use_mock_analysis && workflowConfig.applyChangesToLocalRepo && fixPRParams.localRepoPath && agenticResult.gitInfo?.workingDirectory) {
       logger.info(`[${ticketId}] Applying changes to local repository: ${fixPRParams.localRepoPath}`);
       try {
         const { execSync } = await import('child_process');
@@ -1082,7 +1340,8 @@ async function execute(
         const workspaceDir = agenticResult.gitInfo.workingDirectory;
 
         // Create the same branch in local repo
-        execSync(`cd "${fixPRParams.localRepoPath}" && git checkout -b ${fixPRParams.fixBranchName} ${INTEGRITY_GIT_CONFIG.analysisBaseBranch} 2>/dev/null || git checkout ${fixPRParams.fixBranchName}`, { encoding: 'utf-8' });
+        const baseBranch = getRepositoryBaseBranch(fixPRParams.repository);
+        execSync(`cd "${fixPRParams.localRepoPath}" && git checkout -b ${fixPRParams.fixBranchName} ${baseBranch} 2>/dev/null || git checkout ${fixPRParams.fixBranchName}`, { encoding: 'utf-8' });
 
         // Get the patch from workspace
         const patch = execSync(`cd "${workspaceDir}" && git format-patch -1 ${commitHash} --stdout`, { encoding: 'utf-8' });
@@ -1091,7 +1350,7 @@ async function execute(
         execSync(`cd "${fixPRParams.localRepoPath}" && git am --3way`, { input: patch, encoding: 'utf-8' });
 
         logger.info(`[${ticketId}] ✅ Successfully applied changes to ${fixPRParams.localRepoPath} on branch ${fixPRParams.fixBranchName}`);
-        logger.info(`[${ticketId}] To view changes: cd ${fixPRParams.localRepoPath} && git diff ${INTEGRITY_GIT_CONFIG.analysisBaseBranch}..${fixPRParams.fixBranchName}`);
+        logger.info(`[${ticketId}] To view changes: cd ${fixPRParams.localRepoPath} && git diff ${baseBranch}..${fixPRParams.fixBranchName}`);
       } catch (error) {
         logger.error(`[${ticketId}] ❌ Failed to apply changes to local repo:`, error);
         logger.info(`[${ticketId}] You can manually apply the git diff shown above`);
@@ -1109,11 +1368,25 @@ async function execute(
     // Set final PR link
     prLink = config.use_mock_analysis
       ? `MOCK MODE: Changes applied to ${fixPRParams.localRepoPath}. Run: cd ${fixPRParams.localRepoPath} && git diff`
-      : prLinkFromAgent || (workflowConfig.applyChangesToLocalRepo
+      : prLinkFromAgent || (workflowConfig.applyChangesToLocalRepo && fixPRParams.localRepoPath
         ? `Changes applied to ${fixPRParams.localRepoPath} on branch ${fixPRParams.fixBranchName}`
         : `Local changes committed (commit: ${commitHash})`);
-  } else {
-    // Step 6: Generate gateway issue report
+
+    // Step 7: Create PR Summary for display
+    const prSummary = await engine.createCheckpoint(
+      IntegrityDebugWorkflowSteps.SUMMARIZE_PR,
+      createPRSummary,
+      prLink,
+      commitHash,
+      analysisResult,
+      gateway
+    );
+
+    logger.info(`${ticketId}_summarize_pr_7_output`, prSummary);
+  }
+
+  // Generate gateway issue report if it's a gateway issue OR if there's escalation details
+  if (action === 'escalate_to_gateway' || analysisResult.gateway_escalation_details) {
     gatewayIssueReport = await engine.createCheckpoint(
       IntegrityDebugWorkflowSteps.GENERATE_GATEWAY_ISSUE_REPORT,
       generateGatewayIssueReport,
@@ -1121,12 +1394,17 @@ async function execute(
       analysisResult,
       collectedLogs
     );
+
+    logger.info(`${ticketId}_generate_gateway_report_output`, {
+      hasReport: !!gatewayIssueReport,
+      reportLength: gatewayIssueReport?.length || 0,
+    });
   }
 
   const workflowOutput: IntegrityDebugWorkflowOutput = {
-    sessionsAnalyzed: orderIds.length,
+    sessionsAnalyzed: orderIds?.length || 0,
     issueType: action === 'create_pr' ? ('our_issue' as const) : ('gateway_issue' as const),
-    repository: analysisResult.repository || undefined,
+    repository: analysisResult?.repository || undefined,
     prLink,
     gitDiff,
     commitHash,
@@ -1135,9 +1413,9 @@ async function execute(
     analysisDetails: analysisResult,
     // New fields from 4-step workflow
     logRequirements,
-    integrityLocationsAnalyzed: analysisResult.integrity_locations_analysis?.length || 0,
+    integrityLocationsAnalyzed: analysisResult?.integrity_locations_analysis?.length || 0,
     // Include step errors if any steps failed
-    stepErrors: stepErrors.length > 0 ? stepErrors : undefined,
+    stepErrors: stepErrors?.length > 0 ? stepErrors : undefined,
   };
 
   return workflowOutput;
@@ -1182,19 +1460,22 @@ async function execute(
       errorStack: errorStack?.substring(0, 500), // Limit stack trace length
     });
 
-    // Save error details to a checkpoint so it's available in the API response
+    // Save error details to a checkpoint so it's available in the API response and visible in steps
     const errorDetails = {
-      sessionsAnalyzed: 0,
-      issueType: 'our_issue' as const,
-      logsAggregated: {},
-      analysisDetails: {},
-      error: {
-        message: errorMessage,
-        step: failedStep,
-        stepName: failedStepName,
-        details: errorStack?.substring(0, 1000),
-        timestamp: new Date().toISOString(),
-      },
+      failureReason: `Workflow failed at: ${failedStepName}`,
+      errorMessage: errorMessage,
+      failedStep: failedStep,
+      failedStepName: failedStepName,
+      errorDetails: errorStack?.substring(0, 1000),
+      timestamp: new Date().toISOString(),
+      howToDebug: `Check the logs for step "${failedStepName}" (${failedStep}) to see the full error details.`,
+      // Also include partial workflow output for context
+      partialResults: {
+        sessionsAnalyzed: 0,
+        issueType: 'our_issue' as const,
+        logsAggregated: {},
+        analysisDetails: {},
+      }
     };
 
     try {
@@ -1202,6 +1483,8 @@ async function execute(
         IntegrityDebugWorkflowSteps.SAVE_ERROR_DETAILS,
         async () => errorDetails
       );
+
+      logger.info(`[${ticketId}] Error details saved to step: ${IntegrityDebugWorkflowSteps.SAVE_ERROR_DETAILS}`);
     } catch (e) {
       logger.warn(`[${ticketId}] Failed to save error details to checkpoint:`, e);
     }

@@ -104,19 +104,44 @@ export function getRepositoryUrl(repository: 'api-gateway' | 'api-txns'): string
 }
 
 /**
+ * Get the base branch for a repository
+ * @param repository - Repository name
+ * @returns Base branch name (master for api-gateway, main for api-txns, defaults to master)
+ */
+export function getRepositoryBaseBranch(repository: 'api-gateway' | 'api-txns'): string {
+  const branchMap: Record<string, string> = {
+    'api-gateway': 'master',
+    'api-txns': 'main',
+  };
+
+  return branchMap[repository] || 'master';
+}
+
+/**
  * Format gateway issue report for escalation
  * @param analysisDetails - Code analysis result
  * @param logsJson - Aggregated logs in JSON format
  * @returns Formatted report string
  */
 export function formatGatewayIssueReport(analysisDetails: any, logsJson: string): string {
-  const { analysis_summary, gateway_escalation_details, detailed_findings } = analysisDetails;
+  const { analysis_summary, gateway_escalation_details, detailed_findings } = analysisDetails || {};
 
   let report = `# Gateway Issue Report - Integrity Check Failure\n\n`;
-  report += `## Summary\n${analysis_summary}\n\n`;
-  report += `## Issue Details\n${gateway_escalation_details}\n\n`;
 
-  if (detailed_findings.log_discrepancies && detailed_findings.log_discrepancies.length > 0) {
+  // Summary section
+  if (analysis_summary) {
+    report += `## Summary\n${analysis_summary}\n\n`;
+  }
+
+  // Issue details section
+  if (gateway_escalation_details) {
+    report += `## Issue Details\n${gateway_escalation_details}\n\n`;
+  } else {
+    report += `## Issue Details\nNo specific gateway escalation details provided.\n\n`;
+  }
+
+  // Log discrepancies section (optional)
+  if (detailed_findings?.log_discrepancies && detailed_findings.log_discrepancies.length > 0) {
     report += `## Log Discrepancies\n`;
     for (const discrepancy of detailed_findings.log_discrepancies) {
       report += `- **Session**: ${discrepancy.session}\n`;
@@ -127,7 +152,10 @@ export function formatGatewayIssueReport(analysisDetails: any, logsJson: string)
     }
   }
 
-  report += `## Raw Log Data\n\`\`\`json\n${logsJson}\n\`\`\`\n`;
+  // Raw logs section
+  if (logsJson && logsJson !== '{}') {
+    report += `## Raw Log Data\n\`\`\`json\n${logsJson}\n\`\`\`\n`;
+  }
 
   return report;
 }

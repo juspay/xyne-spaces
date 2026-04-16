@@ -16,6 +16,14 @@ export interface IntegrityDebugWorkflowConfig {
   // Local mode - apply changes directly to local repo (for testing)
   applyChangesToLocalRepo: boolean;  // If true, copy changes from /tmp to local repo
 
+  // Retry configuration
+  retry: {
+    enabled: boolean;
+    maxRetries: number;
+    retryDelayMs: number;
+    exponentialBackoff: boolean;
+  };
+
   // Prompts configuration
   prompts: {
     // Constraint for which files can be modified
@@ -70,6 +78,14 @@ export function loadWorkflowConfig(): IntegrityDebugWorkflowConfig {
     localRepoPath: process.env.LOCAL_REPO_PATHS ? JSON.parse(process.env.LOCAL_REPO_PATHS) : {
       'api-txns': process.env.API_TXNS_REPO_PATH,
       'api-gateway': process.env.API_GATEWAY_REPO_PATH,
+    },
+
+    // Retry configuration - defaults to 5 retries with exponential backoff
+    retry: {
+      enabled: process.env.INTEGRITY_RETRY_ENABLED !== 'false', // Enabled by default
+      maxRetries: parseInt(process.env.INTEGRITY_MAX_RETRIES || '5', 10),
+      retryDelayMs: parseInt(process.env.INTEGRITY_RETRY_DELAY_MS || '2000', 10),
+      exponentialBackoff: process.env.INTEGRITY_EXPONENTIAL_BACKOFF !== 'false', // Enabled by default
     },
 
     prompts: {

@@ -34,17 +34,29 @@ Analyze the Money framework to determine the amount logic and calculate what amo
 - gateway_response.amount: Amount returned by gateway
 - outgoing_gateway_request.amount: Amount we sent to gateway
 
-**CRITICAL - Amount Calculation Logic:**
+**CRITICAL - Amount Storage & Conversion:**
 
-Even though the DB has different amount fields (txnAmount, surchargeAmount, taxAmount), the actual amount used for integrity verification is CALCULATED using Money framework logic.
+**How amounts are stored in DB:**
+- **ALL amounts in DB are ALWAYS stored in MAJOR denomination** (e.g., ₹399 stored as 399, NOT 39900)
+- DB fields: txnAmount, surchargeAmount, taxAmount, offerDeductionAmount - all in major denomination
+- This is consistent across all gateways and currencies
+
+**Money Framework Conversion:**
+- Money framework ONLY converts these DB amounts according to gateway requirements
+- Conversion is based on:
+  1. **Gateway's expected format** (smallest vs major denomination)
+  2. **Currency** (e.g., INR uses paise/rupee, USD uses cents/dollar)
+- The framework does NOT change which DB field to use, only how to convert it
+
+**Where to find Money Framework configuration:**
+- **For api-gateway**: Check euler-db repository > money_framework_instance > look for ${gateway}
+- **For api-txns**: Money framework config is present in the txns repository itself > check gateway-specific instance
+- This tells you: multiplier, denomination format, currency handling
 
 **Steps:**
 
-1. **Find Money framework files** for ${gateway}:
-   - Search for Money/${gateway}/ directory
-   - Look for amount conversion functions
-   - Check surcharge/tax handling logic
-   - Identify if it uses base_amount or total_amount
+1. **Find Money framework configuration** for ${gateway}:
+   - Check the code to see which gateway use what conversion
 
 2. **Determine the amount format**:
    - Compare the amounts in logs (DB vs gateway response)
@@ -52,31 +64,33 @@ Even though the DB has different amount fields (txnAmount, surchargeAmount, taxA
    - If gateway returns 399 for ₹399 → higher_denomination (multiplier=1, rupees)
 
 3. **Calculate the expected amount using Money framework logic**:
-   
-   **For base_amount:**
-   - Use ONLY txnAmount (exclude surcharge and tax)
-   - Apply offer deduction if present
-   - Formula: base_amount = txnAmount - offer_deduction
-   - Then convert to denomination: base_amount * multiplier
-   
-   **For total_amount:**
-   - Include txnAmount + surchargeAmount + taxAmount
-   - Apply offer deduction
-   - Formula: total_amount = (txnAmount + surchargeAmount + taxAmount) - offer_deduction
-   - Then convert to denomination: total_amount * multiplier
+
+   **Remember**: All DB amounts are in MAJOR denomination. Money framework converts them.
+
+   **For amount:**
+   - Check the instance and functions in money framework on how its calculated, substitute the value in function to get the amount, it can be base amount or effective amount (check that in money framework instance of gateway)
 
 4. **Return the calculated amount**:
-   - This calculated amount is what should be compared with gateway response
-   - Even if DB has txnAmount=399, the actual amount for verification might be different based on Money framework logic
-   - Provide clear formula showing how the amount is calculated
+   - This calculated amount (after Money framework conversion) is what should be compared with gateway response
+   - DB stores in major denomination (e.g., 399 for ₹399)
+   - Gateway expects amount per Money framework config (e.g., 39900 for paise if smallest_denomination)
+   - The verification MUST use the converted amount, not the DB value directly
+   - Provide clear formula showing: DB value (major) → Money framework conversion → Expected amount
 
 **Example:**
-- DB: txnAmount=399, surchargeAmount=10, taxAmount=5
-- Gateway uses: base_amount in smallest_denomination
-- Calculation: 399 * 100 = 39900 (surcharge and tax excluded)
-- This 39900 is what should be compared with gateway response, NOT the DB txnAmount directly
+- **DB (always major denomination)**: txnAmount=399, surchargeAmount=10, taxAmount=5 (stored as ₹399, ₹10, ₹5)
+- **Money framework for this gateway**: base_amount in smallest_denomination, multiplier=100 (paise)
+- **Calculation**:
+  1. Use base_amount or total amount from money framework instance: 399
+  2. Convert to smallest denomination: 399 * 100 = 39900 paise
+- **Result**: 39900 is what should be compared with gateway response
+- **NOT**: Don't use DB txnAmount (399) directly for comparison
 
-**IMPORTANT:** The calculated amount is what matters for integrity verification, not the raw DB values. Provide the complete calculation formula.
+**IMPORTANT:**
+- DB stores in major denomination (399 = ₹399)
+- Money framework converts to gateway's expected format (39900 = 39900 paise)
+- Always calculate using Money framework logic, not raw DB values
+- Provide the complete calculation formula showing the conversion
 
 Return JSON with:
 - Amount format (smallest/higher denomination)
@@ -225,12 +239,26 @@ ${webhookSyncInstruction}
 7. Include gateway response logs (what gateway returned)
 8. For WEBHOOK flow: Check for and include sync logs if mandatory sync exists
 
+**CRITICAL - Handling Encrypted Gateway Logs:**
+Some gateways encrypt their request/response payloads. **ONLY** if you encounter encrypted data:
+- Check if the gateway response/request contains fields like "ENCRYPTED_PAYLOAD", "encrypted", "payload" with encrypted values
+- **If and only if encrypted**, then look for logs tagged with **DECRYPTED_RESPONSE** or **DECRYPTED_REQUEST**
+- These logs contain the decrypted version of the gateway payload
+- Search for log entries with these keywords in the same session
+- Example log patterns to search:
+  - "DECRYPTED_RESPONSE" - Decrypted gateway response after webhook/sync
+  - "DECRYPTED_REQUEST" - Decrypted outgoing request to gateway
+  - Check logs immediately after encrypted payload logs (same session_id/timestamp)
+- **Use the decrypted data for integrity verification, NOT the encrypted payload**
+- **If logs are NOT encrypted** (you can see plain JSON data), use them directly - no need to search for DECRYPTED logs
+
 **IMPORTANT:**
 - Just collect the data for orders that have logs, do not analyze
 - ONLY include order IDs where logs were found
 - If no logs are found for any order, return empty array: []
 - Do an exhaustive search - check all log sources
 - For WEBHOOK flow with mandatory sync: include both webhook and sync logs from the SAME session_id
+- **If logs are encrypted, use DECRYPTED_RESPONSE/DECRYPTED_REQUEST logs instead**
 
 Return structured JSON with the collected data: an array of log objects for orders where logs were found.`;
 }
@@ -277,18 +305,30 @@ Gateway: ${gateway}
 Order IDs requested: ${orderIds.join(', ')} (${orderIds.length} total)
 Order IDs with logs found: ${logsCount}
 ${amountFormatInfo}
+
+**NOTE - Gateway Logs:**
+The collected logs contain either plain JSON or decrypted gateway payloads.
+If the gateway uses encryption, the logs will already contain decrypted data (from DECRYPTED_RESPONSE/DECRYPTED_REQUEST logs).
+Use the provided log data for analysis - it's ready to use.
+
 **Analysis Task:**
 
 **STEP 0: Check if integrity verification is applicable**
 FIRST, before analyzing any verification failures, check if integrity should even be performed:
 
-**0a. Check transaction status:**
-- Look at transaction status in logs (txn_detail.status, gateway_response.status)
-- If transaction status is FAILED/REJECTED/DECLINED/ERROR → Set can_perform_integrity=false, cannot_perform_reason="transaction_failed"
-- Integrity checks should only run for successful transactions
-- If found → Provide code changes to return CANNOT_PERFORM_INTEGRITY for failed transactions
-- Suggest specific condition to add (e.g., "if txn_status is not SUCCESS, return CANNOT_PERFORM_INTEGRITY")
-- Make it clear: failed transactions should NOT be marked as integrity_failed
+**0a. Check Payment Gateway (PG) response status (NOT txnStatus):**
+- **CRITICAL**: Look at the actual PG response status in gateway_response, NOT the transaction's final status (txn_detail.status)
+- **Why**: In webhook/async flows, txnStatus can be SUCCESS even if PG initially returned failure (webhook updates it later)
+- **For WEBHOOK flow**: Check the webhook payload status from PG (gateway_response.status, gateway_response.txn_status, etc.)
+- **For SYNC flow**: Check the sync response status from PG
+- If PG response status is FAILED/REJECTED/DECLINED/ERROR (Check pg specific mapping in code for failure) → then skip integrity
+- **Integrity check should be skipped when PG itself returns failure** - there's nothing to verify
+- If found → Provide code changes to skip the integrity check ONLY when PG response indicates failure
+- **IMPORTANT**: All other flows should continue normally - txn status mapping, response handling, etc.
+- The code should ONLY skip the integrity verification step, everything else remains unchanged
+- Suggest specific condition to add (e.g., "if gateway_response.status is FAILED/REJECTED/DECLINED, skip integrity check and continue with normal flow")
+- **DO NOT check txnStatus** - only check the actual PG response status
+- Make it clear: PG failures should NOT be marked as integrity_failed, just skip integrity verification
 
 **0b. Check for mandatory sync decode/timeout errors:**
 - If the flow involves mandatory sync after webhook, check sync logs for decode errors or timeout errors
@@ -324,10 +364,11 @@ Compare what we sent vs what gateway returned FOR THE SPECIFIC FIELD THAT FAILED
   - Example: We sent 39900, gateway returned 39800 → PG issue
   - Set is_our_issue=false
 - **If they MATCH**: Gateway correctly echoed back what we sent → Our verification logic is wrong → Fix our code
-  - Example: We sent 39900, gateway returned 39900, but our integrity check compares against 399 → Our bug
+  - Example: We sent 39900, gateway returned 39900, but our integrity check compares against DB value 399 → Our bug
   - Set is_our_issue=true
-  - Root cause: We're not using same amount logic in verification as we used in initiation
-  - Fix: Update verification to use correct Money framework logic, multiplier, base vs total amount
+  - Root cause: We're not using same Money framework conversion in verification as we used in initiation
+  - **Remember**: DB stores amounts in MAJOR denomination (399 = ₹399), but verification must use Money framework converted amount (39900 = paise)
+  - Fix: Update verification to apply correct Money framework conversion (multiplier, base vs total amount)
 
 **For OTHER field failures (currency, txnId, hash):**
 - Compare outgoing_request vs gateway_response for that specific field
@@ -353,10 +394,14 @@ Use the calculated amount from Step 2 (Amount Format Discovery):
 - Calculation formula: ${amountFormat?.calculation_breakdown?.formula || 'unknown'}
 
 For amount dry-run analysis:
-- Use the calculated amount for comparison, NOT the raw DB txnAmount
-- Check if our code applies the same Money framework logic
+- **CRITICAL**: DB stores amounts in MAJOR denomination (e.g., 399 for ₹399)
+- Use the Money framework CONVERTED amount for comparison, NOT the raw DB txnAmount
+- Example: DB has 399, but verification should use 39900 (after Money framework conversion with multiplier=100)
+- Check if our code applies the same Money framework logic in both:
+  1. Initiation (when sending to gateway)
+  2. Verification (when checking integrity)
 - Verify if our code uses base_amount or total_amount correctly
-- Check if the denomination conversion (multiplier) is applied correctly
+- Check if the denomination conversion (multiplier) is applied correctly in verification code
 
 **ONLY IF currency verification failed** (check Step 1):
 - Compare currency in outgoing request vs gateway response
@@ -390,13 +435,16 @@ Trace the exact code path for these transactions, focusing on the field that act
 **STEP 6: Identify the fix specific to the scenario**
 
 **If can_perform_integrity=false:**
-- If reason is "transaction_failed":
-  - **Provide code changes** to return CANNOT_PERFORM_INTEGRITY in Gateway/{GatewayName}/ files
-  - Suggest checking transaction status before integrity verification
-  - Example: "if txn_status != SUCCESS, return CANNOT_PERFORM_INTEGRITY" or "if gateway_status is FAILED/REJECTED, return CANNOT_PERFORM_INTEGRITY"
+- If reason is "pg_failure":
+  - **Provide code changes** to skip integrity check in Gateway/{GatewayName}/ files when PG response indicates failure
+  - **CRITICAL**: Check PG response status, NOT txnStatus (txnStatus can be SUCCESS even if PG initially failed)
+  - Suggest checking PG response status before integrity verification
+  - Example: "if gateway_response.status is FAILED/REJECTED/DECLINED, skip integrity check" or "if webhook_payload.status is FAILED, skip integrity check"
+  - **IMPORTANT**: Only skip the integrity verification step - all other processing (txn status mapping, response handling, etc.) should continue normally as it currently does
+  - **DO NOT use txn_status** - only check the actual PG response status fields
   - Specify exact function and file where this check should be added
   - Provide the condition logic to implement
-  - **CRITICAL**: Use CANNOT_PERFORM_INTEGRITY status, not integrity_failed
+  - The code should skip integrity verification but proceed with normal flow otherwise
 
 - If reason is "decode_error" or "timeout_error":
   - **Provide code changes** to return CANNOT_PERFORM_INTEGRITY when sync fails
@@ -407,7 +455,7 @@ Trace the exact code path for these transactions, focusing on the field that act
   - Provide the condition logic to implement
   - **CRITICAL**: Use CANNOT_PERFORM_INTEGRITY status, not integrity_failed
 
-- Provide clear explanation of why integrity cannot be performed and how code should return CANNOT_PERFORM_INTEGRITY
+- Provide clear explanation of why integrity cannot be performed and how code should handle it (skip for PG failures, CANNOT_PERFORM_INTEGRITY for decode/timeout)
 
 **If can_perform_integrity=true (actual integrity bug):**
 After dry-run, determine:
@@ -426,7 +474,8 @@ Analyze patterns across failed orders to identify common root cause.
 - If it's a signature issue, don't suggest amount fixes
 - Match your fix to the actual failure reason
 - If logs were found for only some orders, focus analysis on those orders
-- For transaction failures: **provide code changes** to return CANNOT_PERFORM_INTEGRITY (not integrity_failed) for failed transactions
+- For PG failures: **provide code changes** to skip the integrity check ONLY (not integrity_failed) when PG response indicates failure (check gateway_response.status, NOT txnStatus). All other flows (txn status mapping, response handling) should continue normally.
 - For decode/timeout errors: **provide code changes** to return CANNOT_PERFORM_INTEGRITY (not integrity_failed) for sync failures
-- **CRITICAL**: Both scenarios should use CANNOT_PERFORM_INTEGRITY status in the code fix`;
+- **CRITICAL**: PG failures should skip integrity verification only (normal flows continue), decode/timeout should return CANNOT_PERFORM_INTEGRITY
+- **CRITICAL**: Never check txnStatus to determine if integrity should run - always check the actual PG response status`;
 }
