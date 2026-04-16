@@ -386,6 +386,12 @@ function GroupMentionRenderer({
 }): JSX.Element {
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId: string }>();
+  const [userMemberships] = useCachedQuery(queries.getUserGroupMappingsByUserId());
+
+  const isCurrentUserInGroup = useMemo(
+    () => userMemberships?.some(m => m.userGroupId === groupId) ?? false,
+    [userMemberships, groupId],
+  );
 
   const handleClick = (): void => {
     if (channelId) {
@@ -401,7 +407,11 @@ function GroupMentionRenderer({
         data-group-id={groupId}
         data-group-name={groupName}
         data-group-alias={alias}
-        className='mention-text cursor-pointer'
+        className={
+          isCurrentUserInGroup
+            ? 'mention-text cursor-pointer !bg-[var(--mention-current-user-bg)] !text-[color:var(--mention-color)]'
+            : 'mention-text cursor-pointer'
+        }
         onClick={handleClick}
         role='button'
         tabIndex={0}
