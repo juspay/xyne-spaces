@@ -207,6 +207,7 @@ export const getChannelConversationsQueryHash = (context: { userID: string }): s
         limit: 1,
         start: null,
         direction: 'forward' as const,
+        isMember: false,
       },
       ctx: context,
     });

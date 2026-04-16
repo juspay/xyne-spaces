@@ -165,8 +165,13 @@ const ConversationPanelV2 = ({
   const ticketId = searchParams.get('ticketId');
   const conversationId = searchParams.get('conversationId');
 
+  const participationStatus = useGetChannelUserStatus(channelId);
   const [initialMessageById] = useCachedQuery(
-    queries.getConversationById({ conversationId: urlConversationId || '' }),
+    queries.getConversationByIdWithChannel({
+      conversationId: urlConversationId || '',
+      channelId: channelId || '',
+      isMember: !!participationStatus,
+    }),
     { enabled: !!urlConversationId && !urlCreatedAtMatch },
   );
 

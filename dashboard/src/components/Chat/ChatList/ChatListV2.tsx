@@ -14,7 +14,7 @@ import LoadingAnimation from '../Loader/Loader';
 import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
 import { ArrowDown } from 'lucide-react';
-import { useGetChannelConversations } from '../../../hooks/useChannels';
+import { useGetChannelConversations, useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { useEditContext } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
@@ -59,12 +59,14 @@ const ChatListV2: React.FC<ChatListProps> = ({
   const virtuosoRef = useRef<GroupedVirtuosoHandle>(null);
   const { user } = useAuth();
   const { editingMessageId, requestEdit } = useEditContext();
+  const particpantionStatus = useGetChannelUserStatus(channelId);
   const [oldConversations, oldConversationsDetails] = useQuery(
     queries.channelConversationsPaginatedV3({
       channelId,
       limit: PAGE_SIZE,
       start: oldestConversation ? { createdAt: oldestConversation.createdAt } : null,
       direction: 'forward', // (get NEWER messages)
+      isMember: !!particpantionStatus,
     }),
   );
 
@@ -88,6 +90,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
       limit: PAGE_SIZE,
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
       direction: 'forward',
+      isMember: !!particpantionStatus,
     }),
   );
   const [newConversations, newConversationsDetails] = useQuery(
@@ -96,6 +99,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
       limit: 0,
       start: newestConversation ? { createdAt: newestConversation.createdAt } : null,
       direction: 'backward',
+      isMember: !!particpantionStatus,
     }),
   );
 

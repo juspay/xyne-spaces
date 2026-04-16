@@ -151,9 +151,12 @@ export const ThreadMessages = ({
     ? (selectedTabParam as TabType)
     : 'thread';
 
+  const participationStatus = useGetChannelUserStatus(derivedChannelId);
   const [conversation] = useCachedQuery(
-    queries.getConversationById({
+    queries.getConversationByIdWithChannel({
       conversationId: derivedConversationId || ' ',
+      channelId: derivedChannelId || ' ',
+      isMember: !!participationStatus,
     }),
     {
       enabled: !!derivedConversationId && !!derivedChannelId,
