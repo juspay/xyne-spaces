@@ -15,6 +15,14 @@ const CALL_STATUS_CONTENT = 'In a call';
  * When a user enters a call and has no active status, sets "In a call" status.
  * When the call ends, clears it only if we were the ones who set it and it's still present.
  */
+/**
+ * Renders nothing — just runs useCallStatusSync inside the SharedAuthProvider tree.
+ */
+export const CallStatusSyncProvider = (): null => {
+  useCallStatusSync();
+  return null;
+};
+
 export const useCallStatusSync = (): void => {
   const zero = useZero();
   const currentUser = useSelf();
