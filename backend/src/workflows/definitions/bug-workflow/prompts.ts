@@ -350,3 +350,4 @@ Your task is to now create a detailed summary of the conversation so far, paying
     1. **The summary should be comprehensive and detailed, capturing all relevant technical aspects and conversation flow to ensure seamless continuation of the work. It should be structured in a way that allows easy reference to specific points discussed, with an emphasis on clarity and completeness.**
     2. **The summary should be text-only and should not be wrapped in any tool call.**
 `;
+

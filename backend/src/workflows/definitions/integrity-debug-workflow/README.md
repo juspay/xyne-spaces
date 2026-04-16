@@ -75,6 +75,8 @@ npm run dev
 
 ## Configuration
 
+### Workflow Configuration
+
 All configuration is in `config.ts`:
 
 ```typescript
@@ -91,6 +93,41 @@ All configuration is in `config.ts`:
 ```
 
 Git settings are hardcoded in `INTEGRITY_GIT_CONFIG`.
+
+### Retry Configuration
+
+The workflow includes automatic retry logic for all research agent steps. Add these to `.env.local`:
+
+```bash
+# Retry Configuration (all enabled by default)
+INTEGRITY_RETRY_ENABLED=true                    # Enable/disable retries (default: true)
+INTEGRITY_MAX_RETRIES=5                         # Maximum number of retries (default: 5)
+INTEGRITY_RETRY_DELAY_MS=2000                   # Initial retry delay in ms (default: 2000)
+INTEGRITY_EXPONENTIAL_BACKOFF=true              # Use exponential backoff (default: true)
+```
+
+**Retry Behavior:**
+- Exponential backoff: 2s → 4s → 8s → 16s → 32s
+- All 5 steps retry independently
+- Retry metadata tracked in workflow step outputs
+- Graceful fallbacks if all retries fail
+
+**Environment-Specific Settings:**
+
+```bash
+# Production (robust retry)
+INTEGRITY_MAX_RETRIES=5
+INTEGRITY_RETRY_DELAY_MS=2000
+INTEGRITY_EXPONENTIAL_BACKOFF=true
+
+# Development (faster iteration)
+INTEGRITY_MAX_RETRIES=2
+INTEGRITY_RETRY_DELAY_MS=1000
+INTEGRITY_EXPONENTIAL_BACKOFF=false
+
+# Debugging (no retries)
+INTEGRITY_RETRY_ENABLED=false
+```
 
 ## Output
 
@@ -175,6 +212,23 @@ Mock responses are in `mockResearchAgent-v2.ts`. When `USE_MOCK_ANALYSIS=true`:
 - Faster execution for testing
 - No external dependencies
 
+## Recent Improvements
+
+### Repository-Specific Branches
+- api-gateway uses `master` branch
+- api-txns uses `main` branch
+- Auto-detects correct base branch per repository
+
+### Commit Requirements
+- Automatically adds `EUL-0000` prefix for Bitbucket compliance
+- Meets Jira ticket requirements for git push
+
+### PG Failure Handling
+- Checks actual PG response status (not txnStatus)
+- Skips integrity check only when PG itself fails
+- All other flows (txn status mapping, webhooks) continue normally
+- Returns `CANNOT_PERFORM_INTEGRITY` only for decode/timeout errors
+
 ## Notes
 
 - **Repository IDs** are hardcoded in `getRepositoryId()` function
@@ -182,15 +236,59 @@ Mock responses are in `mockResearchAgent-v2.ts`. When `USE_MOCK_ANALYSIS=true`:
 - **System prompts** come from database (defined in agent configs)
 - **User prompts** are built dynamically based on workflow context
 - **Debug files** are only written in development/test mode (not production)
+- **Retry tracking** stores attempt metadata in step outputs
+
+## Retry Tracking & Observability
+
+Retry attempts are tracked and stored in workflow step outputs for debugging:
+
+```json
+{
+  "repository": "api-gateway",
+  "retryMetadata": {
+    "totalAttempts": 2,
+    "maxRetries": 5,
+    "finalStatus": "success",
+    "attempts": [
+      {
+        "attemptNumber": 1,
+        "status": "failed",
+        "error": "Connection timeout",
+        "durationMs": 2340
+      },
+      {
+        "attemptNumber": 2,
+        "status": "success",
+        "durationMs": 850
+      }
+    ]
+  }
+}
+```
+
+**Access retry data:**
+- API: `GET /api/workflows/executions/:id/steps`
+- Logs: Search for "RETRY", "FAILED", or "Retry Summary"
+- Step outputs: Includes full retry metadata
+
+**Console logs example:**
+```
+[TICKET-123 - Repository Identification] 🔄 Attempt 1/6
+[TICKET-123 - Repository Identification] ❌ Attempt 1/6 FAILED: Connection timeout
+[TICKET-123 - Repository Identification] ⏳ Waiting 2000ms before retry...
+[TICKET-123 - Repository Identification] 🔄 Attempt 2/6 (RETRY)
+[TICKET-123 - Repository Identification] ✅ SUCCEEDED on retry attempt 2 after 1 failures
+```
 
 ## Failure Handling
 
 The workflow handles special cases:
 
-- **Decode/Timeout Errors** - Marks as `CANNOT_PERFORM_INTEGRITY` (not failure)
-- **Transaction Failures** - Marks as `CANNOT_PERFORM_INTEGRITY` (not failure)
+- **Decode/Timeout Errors** - Returns `CANNOT_PERFORM_INTEGRITY` (not failure)
+- **PG Response Failures** - Skips integrity check when PG response indicates failure (normal txn status mapping continues)
 - **Gateway Issues** - Escalates to gateway team instead of creating PR
 - **Missing Logs** - Reports clearly which orders have no logs
+- **Retry Exhaustion** - Falls back to sensible defaults and continues workflow
 
 ## Troubleshooting
 
