@@ -6,15 +6,14 @@
  * Used when building conversation history for follow-up queries
  */
 
-import { GCSService } from './gcsService.js';
+import { getStorageService } from './storage/index.js';
 import { redisService } from './redisService.js';
 import { logger } from '../utils/logger.js';
-import { config } from '../config/env.js';
 import type { AttachmentMetadata } from '../agents/xyne-ai/storage/types.js';
 import type { AttachmentData } from '../agents/xyne-ai/types.js';
 
-// Create GCS service instance for Xyne AI attachments (uses main chat documents bucket)
-const askaiGcsService = new GCSService(config.gcs.bucketName);
+// Create storage service instance for Xyne AI attachments
+const askaiStorageService = getStorageService();
 
 // Redis cache configuration
 const REDIS_CACHE_PREFIX = 'xyne-ai:askai-attachment:';
@@ -54,7 +53,7 @@ async function fetchAttachmentFromGCS(
     }
 
     // 2. Cache miss or Redis error - fetch from GCS
-    const buffer = await askaiGcsService.getFileBuffer(metadata.url);
+    const buffer = await askaiStorageService.getFileBuffer(metadata.url);
     const base64 = buffer.toString('base64');
 
     // 3. Cache for future requests (fire-and-forget)

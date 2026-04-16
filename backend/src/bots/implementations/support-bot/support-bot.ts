@@ -12,8 +12,7 @@ import { superpositionClient } from '@/services/superpositionClient'
 import { UserGroupRepository, UserRepository } from '@/database/repositories'
 import * as yaml from 'js-yaml'
 import jwt from "jsonwebtoken";
-import { gcsService } from '@/services/gcsService'
-import { FileMetadata } from '@google-cloud/storage'
+import { getStorageService, type FileMetadata } from '@/services/storage'
 
 const CAC_KEYS = {
   support_group_name: 'support_group_name',
@@ -216,7 +215,7 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
       if (params.gcsPaths && params.gcsPaths.length > 0 && !params.isEscalation) {
         // Fetch metadata for all files concurrently
         const metadataPromises = params.gcsPaths.map(gcsPath => 
-          gcsService.getFileMetadata(gcsPath)
+          getStorageService().getFileMetadata(gcsPath)
         )
         const metadataResults: FileMetadata[] = await Promise.all(metadataPromises)
 

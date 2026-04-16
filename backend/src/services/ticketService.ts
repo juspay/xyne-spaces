@@ -3,7 +3,7 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { ImageAttachment } from '@/workflows/types/workflow-enums';
 import { ActivitySource } from '@/types/ticket';
 import { DatabaseClient } from '@/database/client';
-import { gcsService } from '@/services/gcsService';
+import { getStorageService } from '@/services/storage';
 import { logger } from '@/utils/logger';
 import { PRStatusEvent } from '@prisma/client';
 
@@ -149,7 +149,7 @@ export class TicketService {
         .filter(a => a.mimetype.startsWith('image/'))
         .map(async (attachment, index): Promise<ImageAttachment | null> => {
           try {
-            const buffer = await gcsService.getFileBuffer(attachment.url);
+            const buffer = await getStorageService().getFileBuffer(attachment.url);
             const rawFileName = attachment.url.split('/').pop() || `image-${index}`;
             const fileName = sanitizeFilename(rawFileName);
             return {

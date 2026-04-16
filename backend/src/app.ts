@@ -114,6 +114,7 @@ import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { initializeXyneAI } from '@/agents/xyne-ai';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
+import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
@@ -495,6 +496,9 @@ export class App {
     // Initialize Redis connection
     logger.info('Initializing Redis connection...');
     await redisService.connect();
+
+    // Ensure storage bucket exists (required for fake-gcs-server in dev)
+    await initStorage();
 
     // Initialize and start metrics sync queue (Bull-based scheduling)
     logger.info('Initializing metrics sync queue...');

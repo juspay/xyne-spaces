@@ -1,4 +1,4 @@
-import { gcsService } from './gcsService';
+import { storageService } from './storage/index';
 import { fileValidationService } from './fileValidationService';
 import { logger } from '../utils/logger';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
@@ -283,8 +283,8 @@ export class ExternalAttachmentService {
         logger.warn(`File validation warnings for ${fileName}:`, validationResult.warnings);
       }
 
-      // Upload to GCS
-      const gcsResult = await gcsService.uploadFile(buffer, {
+      // Upload to storage
+      const gcsResult = await storageService.uploadFile(buffer, {
         filename: validationResult.sanitizedFilename || uniqueFileName,
         contentType: finalMimeType,
         metadata: {
@@ -303,10 +303,10 @@ export class ExternalAttachmentService {
         fileName: gcsResult.filename,
         fileSize: gcsResult.size,
         mimeType: finalMimeType,
-        fileUrl: gcsResult.gcsPath,
+        fileUrl: gcsResult.path,
         metadata: {
           externalUrl: fileUrl,
-          gcsPath: gcsResult.gcsPath,
+          gcsPath: gcsResult.path,
           downloadedAt: new Date().toISOString()
         }
       };

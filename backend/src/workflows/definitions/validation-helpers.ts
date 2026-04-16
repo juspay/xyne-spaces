@@ -1,7 +1,7 @@
 import { hasUncommittedChanges, commitAllChanges, pushCommits, CommandExecutor } from '@framework';
 import { logger } from '@/utils/logger';
 import { GitInfo } from '../workflow-types';
-import { GCSService } from '@/services/gcsService';
+import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -719,12 +719,12 @@ export async function uploadScreenshotsToGCS(
   gcsPrefix: string,
   executionId: string
 ): Promise<number> {
-  const gcsService = new GCSService(VR_BUCKET_NAME);
+  const storageService = getStorageService(VR_BUCKET_NAME);
 
   // Ensure bucket exists before uploading (important for fake-gcs-server)
   try {
     logger.info(`[VR] Ensuring bucket exists: ${VR_BUCKET_NAME}`);
-    await gcsService.ensureBucketExists();
+    await storageService.ensureBucketExists();
   } catch (error) {
     logger.error(`[VR] Failed to ensure bucket exists: ${VR_BUCKET_NAME}`, error);
     throw new Error(`Failed to ensure GCS bucket exists: ${error}`);
@@ -743,7 +743,7 @@ export async function uploadScreenshotsToGCS(
     const buffer = readFileSync(filePath);
     const gcsPath = `${gcsPrefix}${file}`;
 
-    await gcsService.uploadFileV2(buffer, {
+    await storageService.uploadFileV2(buffer, {
       path: gcsPath,
       contentType: 'image/png',
       metadata: { executionId, sourceFile: file },
@@ -763,12 +763,12 @@ export async function uploadTestReportsToGCS(
   reportDir: string,
   executionId: string
 ): Promise<number> {
-  const gcsService = new GCSService(VR_BUCKET_NAME);
+  const storageService = getStorageService(VR_BUCKET_NAME);
 
   // Ensure bucket exists before uploading
   try {
     logger.info(`[VR] Ensuring bucket exists for reports: ${VR_BUCKET_NAME}`);
-    await gcsService.ensureBucketExists();
+    await storageService.ensureBucketExists();
   } catch (error) {
     logger.error(`[VR] Failed to ensure bucket exists: ${VR_BUCKET_NAME}`, error);
     throw new Error(`Failed to ensure GCS bucket exists: ${error}`);
@@ -816,7 +816,7 @@ export async function uploadTestReportsToGCS(
     else if (file.endsWith('.html')) contentType = 'text/html';
     else if (file.endsWith('.log')) contentType = 'text/plain';
 
-    await gcsService.uploadFileV2(buffer, {
+    await storageService.uploadFileV2(buffer, {
       path: gcsPath,
       contentType,
       metadata: { executionId, sourceFile: file, reportTimestamp: reportDirs[0] },

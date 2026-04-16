@@ -1814,15 +1814,15 @@ export class DBWorkflowStorage implements WorkflowStorage {
   ): Promise<Array<{ stepName: string; data: string; createdAt: Date }>> {
     try {
       // Import GCS service factory and config
-      const GCSServiceFactory = (await import('@/services/gcsServiceFactory')).default;
+      const { getStorageService } = await import('@/services/storage');
       const { config } = await import('@/config/env');
-      const gcsService = GCSServiceFactory.getService(config.gcs.workflowStepsBucketName);
+      const storageService = getStorageService(config.gcs.workflowStepsBucketName);
 
       // Try per-step file only: workflows/{executionId}/{checkpointId}.json
       const gcsPath = `workflows/${workflowExecutionId}/${checkpointId}.json`;
       let fileContent: Buffer | null = null;
       try {
-        fileContent = await gcsService.getFileBuffer(gcsPath);
+        fileContent = await storageService.getFileBuffer(gcsPath);
         if (!fileContent) {
           logger.warn(`[DB-STORAGE] No per-step GCS file found at ${gcsPath} for ${workflowExecutionId}:${checkpointId}`);
           return [];
@@ -1877,14 +1877,14 @@ export class DBWorkflowStorage implements WorkflowStorage {
       const stepData: WorkflowStepData[] = [];
 
       // Fetch from GCS using the attachment URL
-      const GCSServiceFactory = (await import('@/services/gcsServiceFactory')).default;
-      const gcsService = GCSServiceFactory.getService(config.gcs.workflowStepsBucketName);
+      const { getStorageService } = await import('@/services/storage');
+      const storageService = getStorageService(config.gcs.workflowStepsBucketName);
 
       for (const attachment of attachments) {
         if (attachment.url && attachment.url.startsWith('gs://')) {
           try {
             const gcsPath = attachment.url.replace('gs://', '').split('/').slice(1).join('/');
-            const fileBuffer = await gcsService.getFileBuffer(gcsPath);
+            const fileBuffer = await storageService.getFileBuffer(gcsPath);
 
             if (fileBuffer) {
               const parsedContent = JSON.parse(fileBuffer.toString());

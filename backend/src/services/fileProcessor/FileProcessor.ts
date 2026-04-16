@@ -1,4 +1,4 @@
-import { GCSService } from "@/services/gcsService"
+import { getStorageService } from "@/services/storage"
 import { logger } from "@/utils/logger"
 import type { ProcessingResult, StrategyConfig } from "./types"
 import { BaseStrategy } from "./strategies/BaseStrategy"
@@ -86,8 +86,8 @@ export class FileProcessor {
         vespaDocId: string,
         config?: StrategyConfig
     ): Promise<ProcessingResult> {
-        const gcsService = GCSService.getInstance()
-        const buffer = await gcsService.getFileBuffer(gcsPath)
+        const storage = getStorageService()
+        const buffer = await storage.getFileBuffer(gcsPath)
 
         const strategy = FileProcessor.detectStrategy(gcsPath, config)
         const processor = new FileProcessor(strategy)

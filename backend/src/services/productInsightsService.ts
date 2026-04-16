@@ -1,5 +1,7 @@
-import { gcsService } from './gcsService';
+import { getStorageService } from './storage';
 import { logger } from '../utils/logger';
+
+const storageService = getStorageService();
 
 export interface UploadJsonOptions {
   cacheControl?: string;
@@ -23,13 +25,13 @@ export class ProductInsightsService {
       logger.info(`Fetching insights from GCS: ${filePath}`);
 
       // Check if file exists
-      const exists = await gcsService.fileExists(filePath);
+      const exists = await storageService.fileExists(filePath);
       if (!exists) {
         throw new Error(`Insights file not found: ${filePath}`);
       }
 
       // Fetch file content as buffer
-      const buffer = await gcsService.getFileBuffer(filePath);
+      const buffer = await storageService.getFileBuffer(filePath);
       
       // Parse JSON
       const insights = JSON.parse(buffer.toString('utf-8'));
@@ -44,7 +46,7 @@ export class ProductInsightsService {
   }
 
   async readJsonFromPath<T = unknown>(path: string): Promise<T> {
-    const buffer = await gcsService.getFileBuffer(path);
+    const buffer = await storageService.getFileBuffer(path);
     return JSON.parse(buffer.toString('utf-8')) as T;
   }
 
@@ -53,23 +55,15 @@ export class ProductInsightsService {
     payload: unknown,
     options: UploadJsonOptions = {},
   ): Promise<void> {
-    const cacheControl = options.cacheControl ?? 'no-cache';
     const buffer = Buffer.from(JSON.stringify(payload, null, 2), 'utf-8');
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bucket = (gcsService as any)['bucket'];
-    if (!bucket) {
-      throw new Error('GCS bucket not initialized');
-    }
-
-    const file = bucket.file(path);
-    await file.save(buffer, {
+    await storageService.uploadFileV2(buffer, {
+      path,
       contentType: 'application/json',
-      metadata: { cacheControl },
-      resumable: false,
+      cacheControl: options.cacheControl ?? 'no-cache',
     });
 
-    logger.info(`[ProductInsightsService] Uploaded JSON to GCS: ${path}`);
+    logger.info(`[ProductInsightsService] Uploaded JSON to storage: ${path}`);
   }
 }
 

@@ -14,10 +14,12 @@ import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '../../../../utils/logger.js';
 import type { XyneAIAgentContext } from '../types.js';
 import { getDescription } from '../helpers.js';
-import { gcsService } from '../../../../services/gcsService.js';
+import { getStorageService } from '../../../../services/storage/index.js';
 import { MessageAttachmentRepository } from '../../../../database/repositories/messageAttachmentRepository.js';
 import { config } from '../../../../config/env.js';
 import { PPTX_DESIGNER_SYSTEM_PROMPT } from './prompt.js';
+
+const storageService = getStorageService();
 
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
 
@@ -379,7 +381,7 @@ export function createCreatePptTool(): Tool<
         const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
         const filename = `${safeTitle}.pptx`;
 
-        const gcsResult = await gcsService.uploadFile(buffer, {
+        const gcsResult = await storageService.uploadFile(buffer, {
           filename,
           contentType: pptxMimeType,
           metadata: { title, source: 'xyne-ai-create-ppt' },
@@ -394,7 +396,7 @@ export function createCreatePptTool(): Tool<
           originalFilename: filename,
           size: gcsResult.size,
           mimetype: pptxMimeType,
-          url: gcsResult.gcsPath,
+          url: gcsResult.path,
           uploadedByUserId: context.userId,
           createdBy: context.userId,
           storageProvider: config.fileStorage.provider,
@@ -403,13 +405,13 @@ export function createCreatePptTool(): Tool<
         });
 
         logger.info(
-          `[Tool] [${context.sessionId}] create_ppt: uploaded ${gcsResult.gcsPath} (${(buffer.length / 1024).toFixed(0)}KB), attachmentId=${attachment.id}`
+          `[Tool] [${context.sessionId}] create_ppt: uploaded ${gcsResult.path} (${(buffer.length / 1024).toFixed(0)}KB), attachmentId=${attachment.id}`
         );
 
         // ── Step 6: Return download URL ─────────────────────────────────────
         const isLocalDev = (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') && config.gcs.fakeGcsHost;
         const downloadUrl = isLocalDev
-          ? `http://${config.gcs.fakeGcsHost}/download/storage/v1/b/${config.gcs.bucketName}/o/${encodeURIComponent(gcsResult.gcsPath)}?alt=media`
+          ? `http://${config.gcs.fakeGcsHost}/download/storage/v1/b/${config.gcs.bucketName}/o/${encodeURIComponent(gcsResult.path)}?alt=media`
           : `/api/attachments/${attachment.id}/download`;
 
         return downloadUrl;

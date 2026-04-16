@@ -15,7 +15,7 @@ import { RCAWithRelations, ReleaseRepository } from '@/database/repositories/rel
 import { fileSchema } from '@xyne/vespa-ts';
 import { config } from '@/config/env';
 import { TextStrategy } from '../strategies/TextStrategy';
-import { GCSService } from '@/services/gcsService';
+import { getStorageService } from '@/services/storage';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 
 type ChannelsSchema = Schema['tables']['channels'];
@@ -706,8 +706,8 @@ export const mapTranscript = async (args: InsertValue<TranscriptsSchema>): Promi
       }
 
       // Use transcript bucket for fetching
-      const gcsService = new GCSService(config.gcs.transcriptionBucketName);
-      const buffer = await gcsService.getFileBuffer(gcsPath);
+      const storageService = getStorageService(config.gcs.transcriptionBucketName);
+      const buffer = await storageService.getFileBuffer(gcsPath);
       fileSize = buffer.length;
 
       const textStrategy = new TextStrategy();
@@ -883,8 +883,8 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Prom
         }
       }
 
-      const gcsService = GCSService.getInstance();
-      const buffer = await gcsService.getFileBuffer(gcsPath);
+      const storageService = getStorageService();
+      const buffer = await storageService.getFileBuffer(gcsPath);
       fileSize = buffer.length;
 
       // Use FileProcessor to detect strategy from mime type and parse

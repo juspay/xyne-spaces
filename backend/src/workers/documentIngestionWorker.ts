@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { documentIngestQueue, type DocumentIngestJobData } from '@/queues/documentIngestQueue';
 import { documentAnalysisService } from '@/services/documentAnalysisService';
 import { vespaKnowledgeIngestionService, type ReplaceSessionDoc } from '@/services/vespaKnowledgeIngestionService';
-import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 
 class DocumentIngestionWorker {
@@ -47,8 +47,8 @@ class DocumentIngestionWorker {
     const [, bucketName, filePath] = match;
 
     // 2. Download file from GCS
-    const gcsService = GCSServiceFactory.getService(bucketName || config.gcs.docsBucketName);
-    const buffer = await gcsService.getFileBuffer(filePath);
+    const storage = getStorageService(bucketName || config.gcs.docsBucketName);
+    const buffer = await storage.getFileBuffer(filePath);
     const content = buffer.toString('utf-8');
 
     logger.info(`[DOC-INGEST-WORKER] Downloaded file=${originalFilename} size=${buffer.length} bytes`);

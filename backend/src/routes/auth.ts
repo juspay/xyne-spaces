@@ -10,7 +10,7 @@ router.get('/login', authV2Controller.initiateLogin);
 
 router.get('/exchange', authV2Controller.handleCallback);
 
-router.post('/exchange-electron', authV2Controller.exchangeElectronCode);
+router.post('/exchange-electron', authV2Controller.dispatchElectronExchange);
 
 router.get('/refresh-session', authV2Controller.refreshSession);
 

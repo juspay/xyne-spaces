@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
-import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import {  SessionRecordingProcessStatus  } from '@prisma/client';
@@ -31,7 +31,7 @@ interface SessionRecording {
 }
 
 class SessionRecordingSyncService {
-  private gcsService = GCSServiceFactory.getService(config.gcs.sessionRecordingBucketName);
+  private storageService = getStorageService(config.gcs.sessionRecordingBucketName);
 
   /**
    * Sync all session recordings from Redis to GCS.
@@ -205,7 +205,7 @@ class SessionRecordingSyncService {
    */
   private async readExistingRecording(gcsPath: string): Promise<SessionRecording | null> {
     try {
-      const buffer = await this.gcsService.getFileBuffer(gcsPath);
+      const buffer = await this.storageService.getFileBuffer(gcsPath);
       
       if (!buffer) {
         return null;
@@ -267,7 +267,7 @@ class SessionRecordingSyncService {
   private async uploadToGcs(gcsPath: string, recording: SessionRecording): Promise<void> {
     const buffer = Buffer.from(JSON.stringify(recording, null, 2));
 
-    await this.gcsService.uploadFileV2(buffer, {
+    await this.storageService.uploadFileV2(buffer, {
       path: gcsPath,
       contentType: 'application/json',
     });

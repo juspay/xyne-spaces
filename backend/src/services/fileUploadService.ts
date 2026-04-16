@@ -1,4 +1,4 @@
-import { gcsService } from './gcsService.js';
+import { storageService } from './storage/index.js';
 import { fileValidationService } from './fileValidationService.js';
 import { logger } from '../utils/logger';
 
@@ -65,7 +65,7 @@ export async function uploadFiles(
       }
 
       // Upload to GCS
-      const gcsResult = await gcsService.uploadFile(file.buffer, {
+      const gcsResult = await storageService.uploadFile(file.buffer, {
         filename: validationResult.sanitizedFilename || file.originalname,
         contentType: file.mimetype,
         metadata: {
@@ -101,23 +101,23 @@ export async function uploadFiles(
               logger.info(`Using frontend-generated thumbnail (index ${metadata.thumbnailIndex}) for video: ${file.originalname}`);
 
               // Generate thumbnail filename: strip original extension and append _thumb.jpg
-              const thumbnailFilename = gcsResult.gcsPath.replace(/\.[^/.]+$/, '') + '_thumb.jpg';
+              const thumbnailFilename = gcsResult.path.replace(/\.[^/.]+$/, '') + '_thumb.jpg';
 
               // Upload frontend-generated thumbnail to GCS
-              const thumbnailGcsResult = await gcsService.uploadFile(frontendThumbnail.buffer, {
+              const thumbnailGcsResult = await storageService.uploadFile(frontendThumbnail.buffer, {
                 filename: thumbnailFilename,
                 contentType: 'image/jpeg',
                 metadata: {
                   originalName: file.originalname,
                   uploadedAt: new Date().toISOString(),
                   isThumbnail: 'true',
-                  originalFile: gcsResult.gcsPath,
+                  originalFile: gcsResult.path,
                 },
                 scopeType: 'CONVERSATION',
                 scopeId: 'temp', // Will be updated by caller
               });
 
-              thumbnailUrl = thumbnailGcsResult.gcsPath;
+              thumbnailUrl = thumbnailGcsResult.path;
               logger.info(`Frontend thumbnail uploaded successfully: ${thumbnailUrl}`);
             } catch (error) {
               logger.error(`Failed to upload frontend thumbnail for ${file.originalname}:`, error);
@@ -143,14 +143,14 @@ export async function uploadFiles(
         fileName: validationResult.sanitizedFilename || file.originalname,
         fileSize: gcsResult.size,
         mimeType: file.mimetype,
-        fileUrl: gcsResult.gcsPath,
+        fileUrl: gcsResult.path,
         thumbnailUrl,
         width,
         height,
         metadata: {
           uploadedAt: new Date().toISOString(),
           originalSize: file.size,
-          gcsPath: gcsResult.gcsPath,
+          gcsPath: gcsResult.path,
           sanitized: validationResult.sanitizedFilename !== file.originalname,
           validationWarnings: validationResult.warnings,
           ...(thumbnailUrl && { thumbnailGenerated: true }),

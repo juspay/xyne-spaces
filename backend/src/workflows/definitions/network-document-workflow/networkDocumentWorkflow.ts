@@ -17,7 +17,7 @@ import { WorkflowType } from '../../types/workflow-enums';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { z } from 'zod';
-import { GCSService } from '@/services/gcsService';
+import { getStorageService } from '@/services/storage';
 import { ticketAssignmentService } from '@/services/ticketAssignmentService';
 import { TicketController } from '@/controllers/ticketController';
 import { conversationService } from '@/services/conversationService';
@@ -154,8 +154,8 @@ async function fetchFileFromGcs(
     throw new Error('Missing gcsPath or gcsBucket in context metadata');
   }
 
-  const gcsService = new GCSService(gcsBucket);
-  const buffer = await gcsService.getFileBuffer(gcsPath);
+  const storageService = getStorageService(gcsBucket);
+  const buffer = await storageService.getFileBuffer(gcsPath);
 
   logger.info(`[NETWORK_DOC] Fetched file from GCS: ${gcsPath} (${buffer.length} bytes, in memory)`);
 

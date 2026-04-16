@@ -1,6 +1,6 @@
 import { repositories } from '../database/repositories/index';
 import { aclService } from './aclService';
-import { gcsService } from './gcsService';
+import { getStorageService } from './storage';
 import { AccessType, PrismaClient } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
@@ -710,7 +710,7 @@ export class UserManagementService {
       const filePath = `profile-pictures/${userId}/${timestamp}-${uuid}-${filename}`;
 
       // Upload to GCS
-      const gcsResult = await gcsService.uploadFile(file.buffer, {
+      const uploadResult = await getStorageService().uploadFile(file.buffer, {
         filename: filePath,
         contentType: file.mimetype,
         metadata: {
@@ -720,17 +720,17 @@ export class UserManagementService {
         },
       });
 
-      // Store only the GCS path in database (not full URL)
+      // Store only the storage path in database (not full URL)
       // Profile picture is served via streaming endpoint like custom emojis
       await this.prisma.user.update({
         where: { id: userId },
-        data: { picture: gcsResult.gcsPath },
+        data: { picture: uploadResult.path },
       });
 
       logger.info(`Profile picture uploaded for user ${userId}`, {
-        filePath: gcsResult.gcsPath,
+        filePath: uploadResult.path,
       });
-      return gcsResult.gcsPath;
+      return uploadResult.path;
     } catch (error) {
       logger.error(`Error uploading profile picture for user ${userId}:`, error);
       throw error;

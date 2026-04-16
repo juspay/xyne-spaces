@@ -5,7 +5,8 @@ import {
 } from '../database/repositories/messageAttachmentRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
-import { gcsService, GCSService } from '../services/gcsService';
+import { storageService, getStorageService } from '../services/storage/index';
+import { normalizeStoragePath } from '../services/storage/pathUtils';
 import { logger } from '../utils/logger';
 import { AttachmentEntityType } from '@prisma/client';
 import { uploadFiles } from '../services/fileUploadService';
@@ -86,26 +87,21 @@ export class AttachmentController {
         return;
       }
 
-      let serviceToUse = gcsService; // Default GCS service (singleton with default bucket xyne-spaces-chat-documents)
-      let gcsPath = attachment.url;
-
-      const meta = attachment.metadata as { type?: string }; 
-      
-      if (meta?.type === 'transcript') {
-        if (gcsPath.startsWith('gs://')) {
-          const match = gcsPath.match(/^gs:\/\/([^\/]+)\/(.+)$/);
-          if (match) {
-            const [, bucketName, filePath] = match;
-            serviceToUse = new GCSService(bucketName); 
-            gcsPath = filePath; 
-          }
-        }
+      const filePath = normalizeStoragePath(attachment.url);
+      if (!filePath) {
+        res.status(404).json({ error: 'Attachment not yet uploaded' });
+        return;
       }
 
-      logger.info(`Streaming attachment ${attachmentId} from GCS path: ${gcsPath}`);
+      // Transcripts live in a separate bucket
+      const meta = attachment.metadata as { type?: string };
+      const service = meta?.type === 'transcript'
+        ? getStorageService(config.gcs.transcriptionBucketName)
+        : storageService;
 
-      // Use the dynamic service instance (either default or custom)
-      const buffer = await serviceToUse.getFileBuffer(gcsPath);
+      logger.info(`Streaming attachment ${attachmentId} from path: ${filePath}`);
+
+      const buffer = await service.getFileBuffer(filePath);
 
       // Set response headers
       res.setHeader('Content-Type', attachment.mimetype);
@@ -115,13 +111,13 @@ export class AttachmentController {
       const encodedFilename = encodeURIComponent(attachment.originalFilename);
       res.setHeader('Content-Disposition', `inline; filename="${encodedFilename}"`);
 
-      // Disable caching for transcripts (they can be updated), cache other files
       if (meta?.type === 'transcript') {
+        // Transcripts can be updated (e.g., after translation) — don't cache
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');
       } else {
-        res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
+        res.setHeader('Cache-Control', 'private, max-age=3600');
       }
 
       // Stream the file
@@ -150,7 +146,7 @@ export class AttachmentController {
       logger.info(`Streaming file from GCS path: ${gcsPath}`);
 
       // Check if file exists in GCS
-      const fileExists = await gcsService.fileExists(gcsPath);
+      const fileExists = await storageService.fileExists(gcsPath);
       if (!fileExists) {
         logger.error(`File not found in GCS: ${gcsPath}`);
         res.status(404).json({ error: 'File not found in storage' });
@@ -158,7 +154,7 @@ export class AttachmentController {
       }
 
       // Get file metadata to determine content type and size
-      const metadata = await gcsService.getFileMetadata(gcsPath);
+      const metadata = await storageService.getFileMetadata(gcsPath);
       const contentType = metadata.contentType || 'application/octet-stream';
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
@@ -172,7 +168,7 @@ export class AttachmentController {
       res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
 
       // Stream the file directly from GCS
-      const stream = await gcsService.createReadStream(gcsPath);
+      const stream = await storageService.createReadStream(gcsPath);
       stream.pipe(res);
 
       stream.on('error', (error) => {
@@ -209,30 +205,26 @@ export class AttachmentController {
         return;
       }
 
-      const thumbnailGcsPath = attachment.thumbnailUrl;
+      const thumbnailPath = normalizeStoragePath(attachment.thumbnailUrl);
 
-      logger.info(`Streaming thumbnail ${attachmentId} from GCS path: ${thumbnailGcsPath}`);
+      logger.info(`Streaming thumbnail ${attachmentId} from path: ${thumbnailPath}`);
 
-      // Check if thumbnail file exists in GCS
-      const fileExists = await gcsService.fileExists(thumbnailGcsPath);
+      const fileExists = await storageService.fileExists(thumbnailPath);
       if (!fileExists) {
-        logger.error(`Thumbnail file not found in GCS: ${thumbnailGcsPath}`);
+        logger.error(`Thumbnail file not found: ${thumbnailPath}`);
         res.status(404).json({ error: 'Thumbnail file not found in storage' });
         return;
       }
 
-      // Get file metadata to determine size for Content-Length header
-      const metadata = await gcsService.getFileMetadata(thumbnailGcsPath);
+      const metadata = await storageService.getFileMetadata(thumbnailPath);
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
-      // Set response headers
       res.setHeader('Content-Type', 'image/jpeg');
       res.setHeader('Content-Length', fileSize);
       res.setHeader('Content-Disposition', `inline; filename="thumbnail.jpg"`);
-      res.setHeader('Cache-Control', 'private, max-age=3600'); // Cache for 1 hour
+      res.setHeader('Cache-Control', 'private, max-age=3600');
 
-      // Stream the thumbnail directly from GCS
-      const stream = await gcsService.createReadStream(thumbnailGcsPath);
+      const stream = await storageService.createReadStream(thumbnailPath);
       stream.pipe(res);
 
       stream.on('error', (error) => {
@@ -290,7 +282,7 @@ export class AttachmentController {
 
         if (!isParticipant) {
           logger.warn(`Unauthorized access attempt: User ${userId} tried to stream attachment ${attachmentId} from channel ${conversation.channelId}`);
-          res.status(403).json({ 
+          res.status(403).json({
             error: 'Forbidden',
             message: 'You do not have permission to access this attachment'
           });
@@ -299,7 +291,7 @@ export class AttachmentController {
       } else {
         if (attachment.createdBy !== userId) {
           logger.warn(`Unauthorized access attempt: User ${userId} tried to stream draft attachment ${attachmentId} created by ${attachment.createdBy}`);
-          res.status(403).json({ 
+          res.status(403).json({
             error: 'Forbidden',
             message: 'You do not have permission to access this attachment'
           });
@@ -307,18 +299,20 @@ export class AttachmentController {
         }
       }
 
-      const gcsPath = attachment.url;
+      const filePath = normalizeStoragePath(attachment.url);
+      if (!filePath) {
+        res.status(404).json({ error: 'Attachment not yet uploaded' });
+        return;
+      }
 
-      // Check if file exists in GCS
-      const fileExists = await gcsService.fileExists(gcsPath);
+      const fileExists = await storageService.fileExists(filePath);
       if (!fileExists) {
-        logger.error(`File not found in GCS: ${gcsPath}`);
+        logger.error(`File not found in storage: ${filePath}`);
         res.status(404).json({ error: 'File not found in storage' });
         return;
       }
 
-      // Get file metadata to determine size
-      const metadata = await gcsService.getFileMetadata(gcsPath);
+      const metadata = await storageService.getFileMetadata(filePath);
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
       // Parse Range header (e.g., "bytes=0-1023")
@@ -326,14 +320,14 @@ export class AttachmentController {
 
       if (!range) {
         // No range requested - send entire file
-        logger.info(`Streaming entire file: ${gcsPath}`);
+        logger.info(`Streaming entire file: ${filePath}`);
 
         res.setHeader('Content-Type', attachment.mimetype);
         res.setHeader('Content-Length', fileSize);
         res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Cache-Control', 'private, max-age=3600');
 
-        const stream = await gcsService.createReadStream(gcsPath);
+        const stream = await storageService.createReadStream(filePath);
         stream.pipe(res);
 
         stream.on('error', (error) => {
@@ -373,7 +367,7 @@ export class AttachmentController {
 
       const chunkSize = end - start + 1;
 
-      logger.info(`Streaming range for ${gcsPath}: bytes ${start}-${end}/${fileSize}`);
+      logger.info(`Streaming range for ${filePath}: bytes ${start}-${end}/${fileSize}`);
 
       // Set headers for partial content
       res.status(206); // Partial Content
@@ -383,8 +377,7 @@ export class AttachmentController {
       res.setHeader('Accept-Ranges', 'bytes');
       res.setHeader('Cache-Control', 'private, max-age=3600');
 
-      // Stream the requested range from GCS
-      const stream = await gcsService.createReadStream(gcsPath, { start, end });
+      const stream = await storageService.createReadStream(filePath, { start, end });
       stream.pipe(res);
 
       stream.on('error', (error) => {

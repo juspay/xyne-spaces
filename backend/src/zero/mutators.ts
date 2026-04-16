@@ -57,7 +57,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
 import { extractAllMentions } from '@/utils/mentionParser';
-import { gcsService } from '@/services/gcsService';
+import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
 import { sendAddAndRemoveParticipantsSystemMessage, sendCallSystemMessage, updateCallSystemMessageOnEnd } from '@/zero/utils/systemMessagesUtils';
 import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/channelParticipantUtils';
@@ -65,6 +65,7 @@ import { convert } from 'html-to-text';
 import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { nudgeRegistry } from '@/nudges/registry';
 import { initializeRotationForGroup } from '@/utils/rotationEngine';
 import { livekitService } from '@/services/liveKitService';
@@ -79,6 +80,8 @@ import {
 } from '@/bots/unified/index.js';
 import { z } from 'zod';
 import { zql } from './queries';
+
+const storageService = getStorageService();
 
 export type AuthData = {
   sub: string;
@@ -2111,7 +2114,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                         thumbnailUrl: attInfo.thumbnailUrl,
                         uploadedByUserId: authData.sub,
                         createdBy: authData.sub,
-                        storageProvider: (attInfo as any).storageProvider || 's3',
+                        storageProvider: (attInfo as any).storageProvider || config.fileStorage.provider,
                         conversationId: conversationId,
                         metadata: attInfo.metadata as any,
                         createdAt: now,
@@ -3253,11 +3256,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 attachments.map(async (attachment) => {
                   try {
                     if (attachment.url) {
-                      await gcsService.deleteFile(attachment.url);
+                      await storageService.deleteFile(attachment.url);
 
                       // Also delete thumbnail if it exists
                       if (attachment.thumbnailUrl) {
-                        await gcsService.deleteFile(attachment.thumbnailUrl);
+                        await storageService.deleteFile(attachment.thumbnailUrl);
                       }
                     }
                   } catch (error) {
@@ -3291,9 +3294,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             asyncTasks.push(async () => {
               try {
                 if (attachment.url) {
-                  await gcsService.deleteFile(attachment.url);
+                  await storageService.deleteFile(attachment.url);
                   if (attachment.thumbnailUrl) {
-                    await gcsService.deleteFile(attachment.thumbnailUrl);
+                    await storageService.deleteFile(attachment.thumbnailUrl);
                   }
                 }
               } catch (error) {
@@ -3367,11 +3370,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             // Delete attachment file from gcs
             try {
               if (attachment.url) {
-                await gcsService.deleteFile(attachment.url);
+                await storageService.deleteFile(attachment.url);
 
                 // Also delete thumbnail if it exists
                 if (attachment.thumbnailUrl) {
-                  await gcsService.deleteFile(attachment.thumbnailUrl);
+                  await storageService.deleteFile(attachment.thumbnailUrl);
                 }
               }
             } catch (error) {

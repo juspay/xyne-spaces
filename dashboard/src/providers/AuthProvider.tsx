@@ -4,6 +4,7 @@ import { authActor, type User } from '../machines/authMachine';
 import {
   NativeInboundMessageType,
   type NativeGoogleSignInResultPayload,
+  type NativeMicrosoftSignInResultPayload,
   type NativePushTokenPayload,
   reactNativeBridge,
 } from '../utils/reactNativeBridge';
@@ -86,7 +87,9 @@ const hydrateNativeSession = async (sessionId: string | null | undefined): Promi
   return fetchUserFromSession();
 };
 
-const handleNativeSignInResult = (payload: NativeGoogleSignInResultPayload | undefined): void => {
+const handleNativeSignInResult = (
+  payload: NativeGoogleSignInResultPayload | NativeMicrosoftSignInResultPayload | undefined,
+): void => {
   if (!payload) {
     authActor.send({
       type: 'AUTH_ERROR',
@@ -266,6 +269,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       },
     );
 
+    const unsubscribeMicrosoftSignInResult = reactNativeBridge.on(
+      NativeInboundMessageType.MICROSOFT_SIGN_IN_RESULT,
+      message => {
+        handleNativeSignInResult(message.payload);
+      },
+    );
+
     const unsubscribeNativeSignOut = reactNativeBridge.on(
       NativeInboundMessageType.NATIVE_SIGN_OUT,
       message => {
@@ -284,6 +294,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return (): void => {
       unsubscribeNativeReady();
       unsubscribeSignInResult();
+      unsubscribeMicrosoftSignInResult();
       unsubscribeNativeSignOut();
       unsubscribeNativePushToken();
       reactNativeBridge.dispose();

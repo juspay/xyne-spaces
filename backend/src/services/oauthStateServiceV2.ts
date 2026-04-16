@@ -1,9 +1,12 @@
 import crypto from 'crypto';
 import { logger } from '../utils/logger';
 
+export type OAuthProvider = 'google' | 'microsoft';
+
 interface OAuthState {
   state: string;
   platform: 'web' | 'electron' | 'mobile';
+  provider?: OAuthProvider;
   codeChallenge?: string;
   createdAt: number;
   redirectTo?: string;
@@ -19,6 +22,7 @@ class OAuthStateService {
     platform: 'web' | 'electron' | 'mobile',
     codeChallenge?: string,
     redirectTo?: string,
+    provider: OAuthProvider = 'google',
   ): Promise<string> {
     const { redisService } = await import('./redisService');
     const client = redisService.getClient();
@@ -28,6 +32,7 @@ class OAuthStateService {
     const stateData: OAuthState = {
       state,
       platform,
+      provider,
       codeChallenge,
       createdAt: Date.now(),
       ...(redirectTo !== undefined ? { redirectTo } : {}),

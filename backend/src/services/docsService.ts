@@ -1,7 +1,6 @@
 // XYNE-1287: Quarto docs are now stored as Canvas records with docType='Quarto'
 // Docs are scoped by channelId instead of projectId
 
-import { Bucket } from '@google-cloud/storage';
 import { config } from '@/config/env.js';
 import { logger } from '@/utils/logger.js';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -12,7 +11,7 @@ import { MessageRepository } from '@/database/repositories/messageRepository.js'
 import { MessageType, CanvasVisibility, DocType } from '@prisma/client';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { v4 as uuidv4 } from 'uuid';
-import { GCSService } from './gcsService.js';
+import { getStorageService, type StorageService } from './storage';
 import { DatabaseClient } from '@/database/client.js';
 
 
@@ -64,12 +63,10 @@ export interface QuartoDocInfo {
 
 // XYNE-1287
 export class DocsService {
-    private bucket: Bucket;
-    private gcsService: GCSService;
+    private storageService: StorageService;
 
     constructor() {
-        this.gcsService = new GCSService(config.gcs.docsBucketName);
-        this.bucket = this.gcsService['bucket'];
+        this.storageService = getStorageService(config.gcs.docsBucketName);
     }
 
     /**
@@ -365,12 +362,7 @@ export class DocsService {
 
             // Store the zip file directly - frontend will unzip
             const zipFilePath = `${gcsPath}/bundle.zip`;
-            const zipFile = this.bucket.file(zipFilePath);
-            await zipFile.save(zipBuffer, {
-                metadata: {
-                    contentType: 'application/zip',
-                },
-            });
+            await this.storageService.uploadFileV2(zipBuffer, { path: zipFilePath, contentType: 'application/zip' });
             logger.info(`[DocsService] Stored zip bundle at ${zipFilePath}`);
 
             await this.storeDocsMetadata(gcsPath, entryFile, userRepo, channelId || null, quartoDocumentType);
@@ -485,12 +477,7 @@ export class DocsService {
             publishedAt: new Date().toISOString(),
         };
         const metadataPath = `${docsPath}/_docs_metadata.json`;
-        const file = this.bucket.file(metadataPath);
-        await file.save(JSON.stringify(metadata), {
-            metadata: {
-                contentType: 'application/json',
-            },
-        });
+        await this.storageService.uploadFileV2(Buffer.from(JSON.stringify(metadata)), { path: metadataPath, contentType: 'application/json' });
         logger.debug(`[DocsService] Stored metadata at ${metadataPath}`);
     }
 
@@ -500,14 +487,13 @@ export class DocsService {
     async getDocsMetadata(docsPath: string): Promise<{ entryFile: string } | null> {
         try {
             const metadataPath = `${docsPath}/_docs_metadata.json`;
-            const file = this.bucket.file(metadataPath);
-            const [exists] = await file.exists();
+            const exists = await this.storageService.fileExists(metadataPath);
 
             if (!exists) {
                 return null;
             }
 
-            const [buffer] = await file.download();
+            const buffer = await this.storageService.getFileBuffer(metadataPath);
             return JSON.parse(buffer.toString()) as { entryFile: string };
         } catch (error) {
             logger.warn(`[DocsService] Could not read metadata: ${error}`);
@@ -614,16 +600,15 @@ export class DocsService {
      */
     async getFile(filePath: string): Promise<{ buffer: Buffer; contentType: string } | null> {
         try {
-            const file = this.bucket.file(filePath);
-            const [exists] = await file.exists();
+            const exists = await this.storageService.fileExists(filePath);
 
             if (!exists) {
                 return null;
             }
 
-            const [buffer] = await file.download();
-            const [metadata] = await file.getMetadata();
-            const contentType = (metadata.contentType as string) || 'application/octet-stream';
+            const buffer = await this.storageService.getFileBuffer(filePath);
+            const metadata = await this.storageService.getFileMetadata(filePath);
+            const contentType = metadata.contentType || 'application/octet-stream';
 
             return { buffer, contentType };
         } catch (error) {
@@ -638,17 +623,16 @@ export class DocsService {
             const docsPath = `quarto/${safeUserRepo}`;
             const zipFilePath = `${docsPath}/bundle.zip`;
 
-            logger.info(`[DocsService] getDocsZip called with userRepo: ${userRepo}, safeUserRepo: ${safeUserRepo}, zipFilePath: ${zipFilePath}, bucket: ${this.bucket.name}`);
+            logger.info(`[DocsService] getDocsZip called with userRepo: ${userRepo}, safeUserRepo: ${safeUserRepo}, zipFilePath: ${zipFilePath}, bucket: ${config.gcs.docsBucketName}`);
 
-            const file = this.bucket.file(zipFilePath);
-            const [exists] = await file.exists();
+            const exists = await this.storageService.fileExists(zipFilePath);
 
             if (!exists) {
-                logger.warn(`[DocsService] Zip bundle not found at ${zipFilePath} in bucket ${this.bucket.name}`);
+                logger.warn(`[DocsService] Zip bundle not found at ${zipFilePath} in bucket ${config.gcs.docsBucketName}`);
                 return null;
             }
 
-            const [buffer] = await file.download();
+            const buffer = await this.storageService.getFileBuffer(zipFilePath);
 
             // Get metadata to find entry file
             const metadata = await this.getDocsMetadata(docsPath);

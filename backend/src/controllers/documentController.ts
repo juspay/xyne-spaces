@@ -8,7 +8,7 @@ import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { vespaKnowledgeIngestionService } from '@/services/vespaKnowledgeIngestionService';
 import { searchMemory, deleteMemory } from '@/services/memoryService';
 import { MemoryScope } from '@/vespa/src/types';
-import GCSServiceFactory from '@/services/gcsServiceFactory';
+import { getStorageService } from '@/services/storage';
 
 const ALLOWED_EXTENSIONS = new Set(['.txt', '.md']);
 const ALLOWED_MIME_TYPES = new Set(['text/plain', 'text/markdown', 'text/x-markdown']);
@@ -74,7 +74,7 @@ export class DocumentController {
         return;
       }
 
-      const gcsService = GCSServiceFactory.getService(config.gcs.docsBucketName);
+      const storageService = getStorageService(config.gcs.docsBucketName);
       const results: Array<{ filename: string; sessionId: string; status: string }> = [];
 
       for (const file of accepted) {
@@ -84,7 +84,7 @@ export class DocumentController {
         const repoUrl = (req.body as Record<string, string>).repoUrl ?? '';
 
         // Upload to GCS
-        await gcsService.uploadFileV2(file.buffer, {
+        await storageService.uploadFileV2(file.buffer, {
           path: gcsPath,
           contentType: 'text/plain',
           metadata: {

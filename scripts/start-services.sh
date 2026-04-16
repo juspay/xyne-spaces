@@ -93,7 +93,7 @@ fi
 
 # Start infrastructure services
 echo -e "${BLUE}🚢 Starting infrastructure services...${NC}"
-$COMPOSE_CMD -f docker-compose.dev.yml up -d postgres redis livekit fake-gcs ysweet transcription-agent victoriametrics grafana otel-collector superposition
+$COMPOSE_CMD -f docker-compose.dev.yml up -d postgres redis livekit fake-gcs minio ysweet transcription-agent victoriametrics grafana otel-collector superposition
 
 # Wait for PostgreSQL
 echo -e "${BLUE}⏳ Waiting for PostgreSQL...${NC}"
@@ -132,6 +132,20 @@ for i in {1..30}; do
     fi
     if [ $i -eq 30 ]; then
         echo -e "${YELLOW}⚠️  fake-gcs-server failed to start (optional service)${NC}"
+        break
+    fi
+    sleep 1
+done
+
+# Wait for MinIO
+echo -e "${BLUE}⏳ Waiting for MinIO...${NC}"
+for i in {1..30}; do
+    if curl -s http://localhost:9000/minio/health/live > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ MinIO is ready${NC}"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo -e "${YELLOW}⚠️  MinIO failed to start (optional service)${NC}"
         break
     fi
     sleep 1
@@ -293,6 +307,7 @@ echo -e "  🎥 LiveKit:            ${GREEN}http://localhost:7880${NC}"
 echo -e "  📝 Y-Sweet:            ${GREEN}http://localhost:8080${NC}"
 echo -e "  ⚡ Zero Server:        ${GREEN}http://localhost:4848${NC}"
 echo -e "  📦 fake-gcs:           ${GREEN}http://localhost:4443${NC}"
+echo -e "  🪣  MinIO (S3):         ${GREEN}http://localhost:9000${NC} (console: ${GREEN}http://localhost:9001${NC})"
 echo -e "  📊 Grafana:            ${GREEN}http://localhost:3333${NC}"
 echo -e "  📈 VM:                 ${GREEN}http://localhost:8428${NC}"
 echo -e "  🔭 OTEL:               ${GREEN}http://localhost:4318${NC}"
