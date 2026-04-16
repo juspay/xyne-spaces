@@ -208,7 +208,7 @@ export function ParticipantsSidebar({
             className={`p-1.5 rounded-md transition-colors disabled:cursor-not-allowed ${
               !isMicrophoneEnabled
                 ? 'text-red-500 bg-red-50'
-                : 'hover:bg-gray-200 text-muted-foreground hover:text-foreground'
+                : 'hover:bg-secondary text-muted-foreground hover:text-foreground'
             }`}
             data-track-category='CALLS'
             data-track-name='MUTE_PARTICIPANT'
@@ -276,7 +276,7 @@ export function ParticipantsSidebar({
               <button
                 onClick={() => void handleMuteAll()}
                 disabled={isMuting}
-                className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white hover:bg-gray-100 text-black border border-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card hover:bg-accent text-foreground border border-border transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
                 title='Mute all participants'
                 data-testid='mute-all-button'
                 data-track-category='CALLS'
@@ -289,7 +289,7 @@ export function ParticipantsSidebar({
             )}
             <button
               onClick={() => setShowInviteModal(true)}
-              className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background hover:bg-muted text-black border border-input transition-colors'
+              className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background hover:bg-muted text-foreground border border-input transition-colors'
               title='Add People'
               data-testid='add-people-button'
               data-track-category='CALLS'

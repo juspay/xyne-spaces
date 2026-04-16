@@ -1,13 +1,15 @@
 /**
  * Gets the color for a ticket status
+ * Using CSS custom properties for theme-aware colors
  */
 export function getTicketStatusColor(status: string): string {
-  const colors: Record<string, string> = {
-    TODO: '#9CA3AF',
-    STARTED: '#3B82F6',
-    PAUSED: '#F59E0B',
-    CANCELLED: '#EF4444',
-    COMPLETED: '#10B981',
+  // Map statuses to semantic CSS variables for proper dark mode support
+  const statusToCssVar: Record<string, string> = {
+    TODO: 'var(--status-new)',
+    STARTED: 'var(--status-scheduled)',
+    PAUSED: 'var(--status-paused)',
+    CANCELLED: 'var(--status-failure)',
+    COMPLETED: 'var(--status-success)',
   };
-  return colors[status] || '#9CA3AF';
+  return statusToCssVar[status] || 'var(--status-new)';
 }

@@ -122,7 +122,7 @@ const OnboardingScreen: React.FC = () => {
     switch (step.key) {
       case 'welcome':
         return (
-          <div className='w-full h-screen relative bg-[#faf9f7] overflow-hidden flex items-center justify-center p-4 animate-in fade-in duration-500'>
+          <div className='w-full h-screen relative bg-background overflow-hidden flex items-center justify-center p-4 animate-in fade-in duration-500'>
             <div className='absolute inset-0 opacity-20 bg-gradient-to-br from-orange-100 to-orange-200 blur-3xl animate-pulse-slow' />
             <div className='relative z-10 w-full max-w-4xl mx-auto text-center'>
               <h1 className='text-center text-foreground font-medium text-lg sm:text-xl md:text-2xl lg:text-3xl leading-relaxed'>

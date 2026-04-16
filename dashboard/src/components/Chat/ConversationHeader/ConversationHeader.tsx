@@ -204,10 +204,14 @@ const ConversationHeader = ({
           {!isCompact && (
             <Tooltip content={channelUserStatus?.isStarred ? 'Unstar' : 'Star'}>
               <Button
-                variant='ghost'
-                size='sm'
+                variant='outline'
                 onClick={handleStarToggle}
-                className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                className={cn(
+                  'flex items-center justify-between gap-2 border border-border rounded-lg !p-2 transition-all duration-100 text-primary',
+                  channelUserStatus?.isStarred
+                    ? 'bg-muted border-border'
+                    : 'bg-background border-border',
+                )}
                 data-track-category='CHANNELS'
                 data-track-name='TOGGLE_STAR_CHANNEL'
                 data-track-metadata={JSON.stringify({
@@ -216,9 +220,14 @@ const ConversationHeader = ({
                 })}
               >
                 <Star
-                  className='w-4 h-4'
-                  fill={(channelUserStatus?.isStarred ?? false) ? '#FACC14' : 'none'}
-                  stroke={(channelUserStatus?.isStarred ?? false) ? '#FACC14' : 'currentColor'}
+                  className={cn(
+                    'w-4 h-4',
+                    (channelUserStatus?.isStarred ?? false)
+                      ? 'text-status-pending'
+                      : 'text-muted-foreground',
+                  )}
+                  fill={(channelUserStatus?.isStarred ?? false) ? 'currentColor' : 'none'}
+                  stroke='currentColor'
                 />
               </Button>
             </Tooltip>
@@ -234,7 +243,7 @@ const ConversationHeader = ({
                     setInfoDefaultTab('members');
                     setIsInfoOpen(true);
                   }}
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8'
+                  className='p-2 border border-border rounded-lg h-8'
                   data-track-category='CHANNELS'
                   data-track-name='VIEW_MEMBERS'
                   data-track-metadata={JSON.stringify({ channelId })}
@@ -242,7 +251,7 @@ const ConversationHeader = ({
                   <span className='shrink-0'>
                     <Users2 className='w-4 h-4' />
                   </span>
-                  <span className='h-4 w-[1px] bg-[#E4E6E7] rounded-full'></span>
+                  <span className='h-4 w-[1px] bg-border rounded-full'></span>
                   <span className='shrink-0'>{channel.channelStats?.participantCount ?? 0}</span>
                 </Button>
               </Tooltip>
@@ -256,7 +265,7 @@ const ConversationHeader = ({
                   setInfoDefaultTab('notifications');
                   setIsInfoOpen(true);
                 }}
-                className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                className='p-2 border border-border rounded-lg h-8 w-8'
               >
                 <span className='shrink-0'>
                   <Bell className='w-4 h-4' />
@@ -279,7 +288,7 @@ const ConversationHeader = ({
                 // Trigger xstate machine to open XyneAI
                 xyneAIActor.send({ type: 'OPEN', channelId });
               }}
-              className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+              className='p-2 border border-border rounded-lg h-8 w-8'
               data-track-category='CHANNELS'
               data-track-name='OPEN_XYNE_AI'
               data-track-metadata={JSON.stringify({ channelId })}
@@ -293,7 +302,7 @@ const ConversationHeader = ({
                 variant='ghost'
                 size='sm'
                 onClick={handleOpenAllLinks}
-                className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                className='p-2 border border-border rounded-lg h-8 w-8'
               >
                 <ExternalLink className='w-4 h-4' />
               </Button>
@@ -302,7 +311,7 @@ const ConversationHeader = ({
           {isCompact && (
             <CompactActionsMenu
               items={compactMenuItems}
-              triggerClassName='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+              triggerClassName='p-2 border border-border rounded-lg h-8 w-8'
             />
           )}
           <CallTriggerModal

@@ -202,7 +202,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
         href={url}
         target='_blank'
         rel='noopener noreferrer'
-        className='text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline truncate block'
+        className='text-sm font-medium text-primary hover:underline truncate block'
         title={title}
       >
         {displayTitle}
@@ -220,9 +220,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
         // Fixed 2:1 aspect ratio (OG image standard is 1200×630 ≈ 2:1).
         // Skeleton and image share the same box — no layout shift or flicker.
         <div className='relative w-full mt-1 rounded-xl overflow-hidden aspect-[2/1]'>
-          {!imageLoaded && (
-            <div className='absolute inset-0 animate-pulse bg-gray-200 dark:bg-gray-700' />
-          )}
+          {!imageLoaded && <div className='absolute inset-0 animate-pulse bg-muted' />}
           {/* Always in DOM with eager loading — opacity hides until ready.
               display:none + loading='lazy' prevents the browser fetching the image. */}
           <img

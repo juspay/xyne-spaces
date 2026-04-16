@@ -118,7 +118,11 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
       );
     }
 
-    return isPrivate ? <ChatLock color={isActive ? '#1D1E1F' : '#464C53'} /> : <Hash size={12} />;
+    return isPrivate ? (
+      <ChatLock color={isActive ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))'} />
+    ) : (
+      <Hash size={12} />
+    );
   };
 
   const checkTruncation = (): void => {
@@ -177,7 +181,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
             isActive
               ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
               : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
-            shouldShowBold && '!font-semibold text-black',
+            shouldShowBold && '!font-semibold text-sidebar-primary-foreground',
           )}
           style={shouldShowBold ? { fontWeight: '700' } : undefined}
         >
@@ -197,7 +201,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
             )}
           </span>
           {hasActiveCall && (
-            <span className='shrink-0 rounded-full bg-[#2D881F] px-2 py-1 text-white'>
+            <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
               <Headphones size={14} />
             </span>
           )}
@@ -207,7 +211,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
             </Tooltip>
           )}
           {unreadCount > 0 && !isActive && (
-            <Badge className='font-mono h-[18px] bg-sidebar-badge-accent px-1.5'>
+            <Badge className='font-mono h-[18px] bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
               {unreadCount > 9 ? '9+' : unreadCount}
             </Badge>
           )}
@@ -244,15 +248,15 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
         to={`/chat/dir/${channel.id}`}
         className={cn(
           'text-base flex items-center gap-2 rounded-lg px-2 h-8 transition-colors ',
-          'hover:bg-[#E4E6E7] hover:text-[#181B1D]',
+          'hover:bg-muted hover:text-foreground',
 
-          isActive ? 'bg-[#E4E6E7]' : 'bg-transparent',
+          isActive ? 'bg-muted' : 'bg-transparent',
 
           unreadCount > 0
-            ? 'font-medium text-[#181B1D]'
+            ? 'font-medium text-foreground'
             : isActive
-              ? 'font-normal text-[#181B1D]'
-              : 'font-normal text-[#788187]',
+              ? 'font-normal text-foreground'
+              : 'font-normal text-muted-foreground',
         )}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
@@ -275,7 +279,7 @@ const ChannelItemV2 = ({ channel, unreadCount = 0 }: ChannelItemV2Props): ReactE
           <span ref={nameRef} className={`text-sm flex-1 truncate min-w-0 `}>
             {displayName}
           </span>
-          {hasActiveCall && <Headphones size={14} className='text-[#464C53] shrink-0' />}
+          {hasActiveCall && <Headphones size={14} className='text-muted-foreground shrink-0' />}
           {draftMessage && !isActive && (
             <Tooltip
               content={

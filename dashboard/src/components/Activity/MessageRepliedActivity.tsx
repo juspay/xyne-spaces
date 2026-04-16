@@ -28,7 +28,7 @@ export const MessageRepliedActivity = ({
       actorName={sender.name}
       channelId={message.conversation?.channelId}
       badgeIcon={<MessageCircleMore className='text-yellow-600' />}
-      badgeColorClass='bg-[#FFFCF5]'
+      badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>replied in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
@@ -36,7 +36,7 @@ export const MessageRepliedActivity = ({
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} variant='default' contentOnly={true} />
       ) : (
-        <div className='text-[#181B1D] text-sm line-clamp-1 truncate whitespace-normal break-all'>
+        <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
           <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
         </div>
       )}

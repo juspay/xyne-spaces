@@ -68,7 +68,7 @@ export const ReactionAddedActivityV2 = ({
       actorName={actorUser?.name ?? 'Someone'}
       channelId={message.conversation?.channelId}
       badgeIcon={renderEmoji(latestEmoji)}
-      badgeColorClass={actorUser?.picture ? 'bg-[#FAFAFA]' : 'bg-[#EDF3F7]'}
+      badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}

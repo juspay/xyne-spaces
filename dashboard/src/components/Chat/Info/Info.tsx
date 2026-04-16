@@ -293,7 +293,7 @@ const Info = ({
           onClick={handleStarToggle}
           className={[
             headerLinkContainerStyle,
-            channelUserStatus?.isStarred ? 'bg-[#FBEFD9] !border-[#FBEFD9]' : '',
+            channelUserStatus?.isStarred ? 'bg-muted !border-border' : '',
           ].join(' ')}
           data-track-category='CHAT_INFO'
           data-track-name='TOGGLE_STAR'
@@ -303,12 +303,12 @@ const Info = ({
           })}
         >
           {channelUserStatus?.isStarred ? (
-            <LucideStar size={16} color='#FACC14' fill='#FACC14' />
+            <LucideStar size={16} className='text-status-pending' fill='currentColor' />
           ) : (
             <LucideStar className='text-muted-foreground' size={16} />
           )}
           <div
-            className={`${channelUserStatus?.isStarred ? 'text-[#FACC14]' : 'text-muted-foreground'} text-[13px]`}
+            className={`${channelUserStatus?.isStarred ? 'text-status-pending' : 'text-muted-foreground'} text-[13px]`}
           >
             Starred
           </div>
@@ -339,14 +339,14 @@ const Info = ({
           data-track-metadata={JSON.stringify({ channelId: channel.id })}
         >
           {isUserInCurrentChannelCall ? (
-            <PhoneOff className='w-4 h-4 text-[#D14040]' />
+            <PhoneOff className='w-4 h-4 text-status-failure' />
           ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
             <HuddleIcon color='currentColor' />
           ) : (
             <HuddleIcon color='currentColor' />
           )}
           <div
-            className={`${isUserInCurrentChannelCall ? 'text-[#D14040]' : 'text-muted-foreground'} text-[13px]`}
+            className={`${isUserInCurrentChannelCall ? 'text-status-failure' : 'text-muted-foreground'} text-[13px]`}
           >
             {isUserInCurrentChannelCall ? 'Leave' : 'Call'}
           </div>
@@ -371,8 +371,8 @@ const Info = ({
             data-track-name='LEAVE_CHANNEL'
             data-track-metadata={JSON.stringify({ channelId: channel.id })}
           >
-            <LucideLogOut size={16} color='#D14040' />
-            <div className='text-[#D14040] text-[13px]'>Leave</div>
+            <LucideLogOut size={16} className='text-destructive' />
+            <div className='text-destructive text-[13px]'>Leave</div>
           </button>
         )}
       </div>
@@ -439,7 +439,10 @@ const Info = ({
           />
         </Tabs.Content>
         {!isDM && (
-          <Tabs.Content value='members' className='outline-none'>
+          <Tabs.Content
+            value='members'
+            className='outline-none h-[480px] rounded-b-lg overflow-hidden bg-muted'
+          >
             <ChannelMembers
               channel={channel}
               participants={participants}
@@ -591,7 +594,7 @@ const ParticipantListItem = ({
               sideOffset={8}
               align='end'
               {...(popoverContainer ? { container: popoverContainer } : {})}
-              className='p-1 border border-border rounded-lg shadow-[0px_8px_24px_0px_rgba(43,45,47,0.08)] overflow-hidden z-[100]'
+              className='p-1 border border-border rounded-lg shadow-lg overflow-hidden z-[100]'
             >
               <div>
                 {canManageThisUser &&
@@ -626,8 +629,8 @@ const ParticipantListItem = ({
                     data-track-name='RemoveParticipant'
                     data-track-metadata={JSON.stringify({ userId: participant.userId })}
                   >
-                    <Trash size={14} color='#D14040' />
-                    <span className='text-[14px] text-[#D14040]'>Remove</span>
+                    <Trash size={14} className='text-destructive' />
+                    <span className='text-[14px] text-destructive'>Remove</span>
                   </button>
                 )}
               </div>
@@ -839,7 +842,7 @@ const ChannelMembers = ({
   }, [accumulatedParticipants, searchQuery, searchResults, usersById]);
 
   return (
-    <div className='relative bg-background h-[328px] flex flex-col'>
+    <div className='relative bg-muted h-full flex flex-col'>
       <div className='shrink-0 z-10 p-4'>
         <div className='relative'>
           <Search className='text-muted-foreground absolute left-3 top-1/2 size-4 -translate-y-1/2 pointer-events-none' />
@@ -848,7 +851,7 @@ const ChannelMembers = ({
             placeholder='Find members'
             value={searchQuery}
             onChange={handleSearchChange}
-            className='placeholder:text-muted-foreground px-10 rounded-[8px] border border-border focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+            className='placeholder:text-muted-foreground text-foreground px-10 rounded-[8px] border border-border focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
           />
         </div>
       </div>

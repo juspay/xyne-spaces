@@ -616,7 +616,7 @@ const AnalyticsScreen = (): ReactElement => {
                         </span>
                         <span className='text-sm font-medium text-foreground'>{user.userName}</span>
                       </div>
-                      <span className='text-sm font-semibold text-blue-600'>
+                      <span className='text-sm font-semibold text-status-scheduled'>
                         {user.messageCount.toLocaleString()} messages
                       </span>
                     </div>

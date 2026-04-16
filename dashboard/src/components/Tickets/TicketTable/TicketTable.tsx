@@ -180,8 +180,8 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   }, [projectTickets]);
 
   const theme = themeQuartz.withParams({
-    headerBackgroundColor: '#FAFAFA',
-    headerTextColor: '#99A0AE',
+    headerBackgroundColor: 'hsl(var(--card))',
+    headerTextColor: 'hsl(var(--muted-foreground))',
     headerFontWeight: '600',
     fontSize: '12px',
     ...(isComfortView
@@ -191,12 +191,12 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           borderColor: 'transparent',
         }
       : {
-          columnBorder: { color: '#ECEFF3', style: 'solid' },
-          headerColumnBorder: { color: '#ECEFF3', style: 'solid' },
+          columnBorder: { color: 'hsl(var(--border))', style: 'solid' },
+          headerColumnBorder: { color: 'hsl(var(--border))', style: 'solid' },
         }),
-    rowBorder: { color: '#ECEFF3', style: 'solid' },
-    headerRowBorder: { color: '#ECEFF3', style: 'solid' },
-    selectedRowBackgroundColor: '#F2F2F3',
+    rowBorder: { color: 'hsl(var(--border))', style: 'solid' },
+    headerRowBorder: { color: 'hsl(var(--border))', style: 'solid' },
+    selectedRowBackgroundColor: 'hsl(var(--accent))',
   });
 
   const columnDefs = useMemo<ColDef<Ticket>[]>(() => {
@@ -534,7 +534,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
                   key={tag.id}
                   className='flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border bg-muted text-muted-foreground border-border'
                 >
-                  <span className='w-2 h-2 rounded-full bg-[#C27AFF]'></span>
+                  <span className='w-2 h-2 rounded-full bg-xyne-purple-400'></span>
                   {tag.name}
                 </span>
               ))}

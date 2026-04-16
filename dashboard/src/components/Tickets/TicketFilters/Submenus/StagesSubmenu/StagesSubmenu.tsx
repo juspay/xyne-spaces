@@ -87,8 +87,8 @@ export const StagesSubmenu = ({
                   onClick={() => handleStageToggle(stage.name)}
                   className={`
                     w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
-                    ${isSelected ? 'bg-accent text-black' : 'hover:bg-muted text-foreground'}
-                    focus-visible:ring-2 focus-visible:ring-[#F2F2F3]
+                    ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
+                    focus-visible:ring-2 focus-visible:ring-ring
                   `}
                   data-track-category='TICKETS'
                   data-track-name='ToggleStageFilter'
@@ -102,7 +102,7 @@ export const StagesSubmenu = ({
                   </div>
                   <span className='flex-1 text-left text-sm truncate'>{stage.name}</span>
                   {isSelected && (
-                    <Check className='w-4 h-4 text-blue-600 shrink-0' aria-hidden='true' />
+                    <Check className='w-4 h-4 text-primary shrink-0' aria-hidden='true' />
                   )}
                 </button>
               );

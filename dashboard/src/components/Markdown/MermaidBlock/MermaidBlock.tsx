@@ -91,7 +91,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
         <p className='text-sm text-red-600'>{error}</p>
         <details className='mt-2'>
           <summary className='text-xs text-red-500 cursor-pointer'>Show diagram code</summary>
-          <pre className='mt-2 text-xs text-gray-700 overflow-x-auto'>{chart}</pre>
+          <pre className='mt-2 text-xs text-foreground overflow-x-auto'>{chart}</pre>
         </details>
       </div>
     );
@@ -103,13 +103,13 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
       <div className='relative my-4'>
         {/* View Mode Toggle & Actions */}
         <div className='absolute top-2 right-2 z-10'>
-          <div className='flex items-center gap-1 bg-white/90 backdrop-blur-sm rounded-lg shadow-sm border border-gray-200 p-1'>
+          <div className='flex items-center gap-1 bg-background/90 backdrop-blur-sm rounded-lg shadow-sm border border-border p-1'>
             <button
               onClick={() => setViewMode('diagram')}
               className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
                 viewMode === 'diagram'
                   ? 'bg-blue-100 text-blue-700'
-                  : 'text-gray-600 hover:bg-gray-100'
+                  : 'text-muted-foreground hover:bg-accent'
               }`}
               title='View diagram'
               data-track-category='Mermaid'
@@ -123,7 +123,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
               className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
                 viewMode === 'code'
                   ? 'bg-blue-100 text-blue-700'
-                  : 'text-gray-600 hover:bg-gray-100'
+                  : 'text-muted-foreground hover:bg-accent'
               }`}
               title='View code'
               data-track-category='Mermaid'
@@ -137,7 +137,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
             {viewMode === 'diagram' && (
               <button
                 onClick={handleDownloadImage}
-                className='flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-gray-600 hover:bg-gray-100 transition-colors'
+                className='flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-muted-foreground hover:bg-accent transition-colors'
                 title='Download as PNG'
                 data-track-category='Mermaid'
                 data-track-name='DOWNLOAD_PNG'
@@ -150,7 +150,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
             {viewMode === 'code' && (
               <button
                 onClick={() => void handleCopyCode()}
-                className='flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-gray-600 hover:bg-gray-100 transition-colors'
+                className='flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-muted-foreground hover:bg-accent transition-colors'
                 title='Copy code'
                 data-track-category='Mermaid'
                 data-track-name='COPY_CODE'
@@ -176,7 +176,7 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
           <>
             <div
               ref={elementRef}
-              className='mermaid-diagram flex justify-center p-4 bg-white border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors'
+              className='mermaid-diagram flex justify-center p-4 bg-card border border-border rounded-lg cursor-pointer hover:bg-accent transition-colors'
               /* eslint-disable-next-line react/no-danger, @typescript-eslint/naming-convention */
               dangerouslySetInnerHTML={{ __html: svg }}
               onClick={() => setShowPreview(true)}
@@ -194,15 +194,15 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
             />
             {/* Show subtle loading indicator if re-rendering */}
             {isRendering && (
-              <div className='absolute bottom-2 left-2 flex items-center gap-1 px-2 py-1 bg-white/90 rounded shadow-sm text-xs text-gray-600'>
+              <div className='absolute bottom-2 left-2 flex items-center gap-1 px-2 py-1 bg-background/90 rounded shadow-sm text-xs text-muted-foreground'>
                 <div className='animate-spin h-3 w-3 border-2 border-blue-500 border-t-transparent rounded-full' />
                 <span>Updating...</span>
               </div>
             )}
           </>
         ) : (
-          <div className='bg-gray-50 border border-gray-200 rounded-lg p-4'>
-            <pre className='text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap break-words'>
+          <div className='bg-muted/50 border border-border rounded-lg p-4'>
+            <pre className='text-sm text-foreground overflow-x-auto whitespace-pre-wrap break-words'>
               {chart}
             </pre>
           </div>
@@ -219,12 +219,12 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
           {/* Close Button */}
           <button
             onClick={() => setShowPreview(false)}
-            className='absolute top-4 right-4 z-10 p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors'
+            className='absolute top-4 right-4 z-10 p-2 rounded-full bg-muted hover:bg-secondary transition-colors'
             aria-label='Close preview'
             data-track-category='Mermaid'
             data-track-name='CLOSE_PREVIEW'
           >
-            <X className='h-5 w-5 text-gray-600' />
+            <X className='h-5 w-5 text-muted-foreground' />
           </button>
 
           {/* Preview Content */}
@@ -244,10 +244,10 @@ const MermaidBlockComponent = ({ chart, messageId }: MermaidBlockProps): ReactEl
   // No SVG yet - show loading state if we have valid syntax, otherwise show placeholder
   if (hasValidSyntaxRef.current || isRendering) {
     return (
-      <div className='my-4 p-4 bg-gray-50 border border-gray-200 rounded-lg'>
+      <div className='my-4 p-4 bg-muted/50 border border-border rounded-lg'>
         <div className='flex items-center justify-center gap-2'>
           <div className='animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full' />
-          <p className='text-sm text-gray-600'>Rendering diagram...</p>
+          <p className='text-sm text-muted-foreground'>Rendering diagram...</p>
         </div>
       </div>
     );

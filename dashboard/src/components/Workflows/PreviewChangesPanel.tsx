@@ -120,7 +120,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
       case 'log':
         return <FileText className='w-5 h-5 text-orange-500' />;
       default:
-        return <FileText className='w-5 h-5 text-gray-500' />;
+        return <FileText className='w-5 h-5 text-muted-foreground' />;
     }
   };
 
@@ -429,7 +429,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
             <div className='flex-1 overflow-auto p-4 bg-muted'>
               <iframe
                 src={`/api/workflows/artifacts/view?path=${encodeURIComponent(viewingReport.gcsPath)}`}
-                className='w-full h-full min-h-[60vh] bg-white rounded'
+                className='w-full h-full min-h-[60vh] bg-background rounded'
                 title={viewingReport.name}
                 onError={e => {
                   console.error(

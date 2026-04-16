@@ -72,6 +72,8 @@ export const ConversationHistory = ({
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const mobileActionButtonClass =
+    'flex p-4 justify-center items-center gap-2 rounded-full border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent aspect-square';
 
   const handleClose = (): void => {
     // Send close event to xstate machine
@@ -92,7 +94,7 @@ export const ConversationHistory = ({
   };
 
   return (
-    <div className='flex-1 overflow-hidden flex flex-col bg-white h-full rounded-xl'>
+    <div className='flex-1 overflow-hidden flex flex-col bg-background h-full rounded-xl'>
       {/* Header */}
       <div className='p-4 flex items-center justify-between gap-2 self-stretch border-border flex-shrink-0'>
         {isSearchExpanded ? (
@@ -104,7 +106,7 @@ export const ConversationHistory = ({
               }}
               className={
                 isMobile
-                  ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+                  ? mobileActionButtonClass
                   : 'p-1 hover:bg-accent rounded transition-colors flex-shrink-0'
               }
               data-track-category='XyneAI'
@@ -145,7 +147,7 @@ export const ConversationHistory = ({
                 onClick={onBack}
                 className={
                   isMobile
-                    ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+                    ? mobileActionButtonClass
                     : 'p-1 hover:bg-accent rounded transition-colors'
                 }
                 data-track-category='XyneAI'
@@ -160,7 +162,7 @@ export const ConversationHistory = ({
                 onClick={() => setIsSearchExpanded(true)}
                 className={
                   isMobile
-                    ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+                    ? mobileActionButtonClass
                     : 'p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                 }
                 data-track-category='XyneAI'
@@ -374,7 +376,7 @@ const ConversationSection = ({
   <div
     className={
       isMobile
-        ? 'bg-[#F5F6F6] rounded-[12px] mx-4 my-4'
+        ? 'bg-muted rounded-[12px] mx-4 my-4'
         : title === 'Starred'
           ? 'border-b border-border'
           : ''
@@ -384,7 +386,7 @@ const ConversationSection = ({
       <summary
         className={
           isMobile
-            ? "px-4 py-3 cursor-pointer flex items-center justify-between text-sm text-[#A1A5A9] font-medium font-['Inter']"
+            ? "px-4 py-3 cursor-pointer flex items-center justify-between text-sm text-muted-foreground font-medium font-['Inter']"
             : "px-4 py-2 cursor-pointer hover:bg-accent flex items-center justify-between text-sm text-muted-foreground font-medium font-['Inter']"
         }
       >
@@ -533,10 +535,15 @@ const ConversationItem = ({
     <div
       className={
         isMobile
-          ? `relative w-full px-3 py-3 rounded-lg transition-colors flex items-center gap-3 group '
+          ? `relative w-full px-3 py-3 rounded-lg transition-colors flex items-center gap-3 group ${
+              isActive ? 'bg-background' : ''
             }`
           : `relative w-full px-4 py-3 hover:bg-accent transition-colors flex items-center gap-3 group ${
-              isActive ? (isStarred ? 'bg-blue-50' : 'bg-blue-50 border-l-2 border-blue-500') : ''
+              isActive
+                ? isStarred
+                  ? 'bg-primary/10'
+                  : 'bg-primary/10 border-l-2 border-primary'
+                : ''
             }`
       }
     >
@@ -573,7 +580,7 @@ const ConversationItem = ({
           <div
             className={
               isMobile
-                ? `text-[14px] leading-[20px] tracking-[0.14px] text-[#181B1D] font-['Inter'] truncate ${
+                ? `text-[14px] leading-[20px] tracking-[0.14px] text-foreground font-['Inter'] truncate ${
                     isActive ? 'font-semibold' : 'font-normal'
                   }`
                 : `text-sm text-foreground font-${isStarred ? 'medium' : 'normal'} font-['Inter'] truncate`
@@ -595,7 +602,7 @@ const ConversationItem = ({
           fill='none'
           className='flex-shrink-0'
         >
-          <circle cx='2' cy='2' r='2' fill='#FF4F4F' />
+          <circle cx='2' cy='2' r='2' fill='hsl(var(--destructive))' />
         </svg>
       )}
       {isMobile ? (
@@ -640,12 +647,12 @@ const ConversationItem = ({
                 onDelete();
                 setOpenDropdownId(null);
               }}
-              className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 text-red-600 touch-manipulation'
+              className='w-full px-4 py-4 text-left text-sm active:bg-accent flex items-center gap-3 text-destructive touch-manipulation'
               data-track-category='XyneAI'
               data-track-name='DELETE_CONVERSATION'
               data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
             >
-              <XyneDelete />
+              <XyneDelete color='currentColor' />
               <span>Delete</span>
             </button>
           </div>
@@ -702,12 +709,12 @@ const ConversationItem = ({
               onDelete();
               setOpenDropdownId(null);
             }}
-            className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 text-red-600'
+            className='w-full px-4 py-2 text-left text-sm hover:bg-accent flex items-center gap-2 text-destructive'
             data-track-category='XyneAI'
             data-track-name='DELETE_DESKTOP'
             data-track-metadata={JSON.stringify({ conversationId: conversation.id })}
           >
-            <XyneDelete />
+            <XyneDelete color='currentColor' />
             <span>Delete</span>
           </button>
         </Popover>

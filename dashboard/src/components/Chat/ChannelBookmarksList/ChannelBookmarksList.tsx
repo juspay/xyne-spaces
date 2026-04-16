@@ -42,7 +42,7 @@ const ChannelBookmarksList = ({ channelId }: ChannelBookmarksListProps): ReactEl
                 {/* Date Header */}
                 <div className='sticky top-0 bg-background px-4 py-2 border-b border-border z-10'>
                   <h3
-                    className='text-xs font-medium text-[#788187] leading-[100%]'
+                    className='text-xs font-medium text-muted-foreground leading-[100%]'
                     style={{ fontFamily: 'Geist Mono' }}
                   >
                     {formatDateHeader(new Date(dateKey).getTime())}

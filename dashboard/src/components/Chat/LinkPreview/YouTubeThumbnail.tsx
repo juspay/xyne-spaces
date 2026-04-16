@@ -35,7 +35,7 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
       {onClose && (
         <button
           type='button'
-          className='absolute top-0 right-0 z-10 p-1 text-muted-foreground hover:text-foreground dark:text-muted dark:hover:text-gray-100 focus:outline-none focus:ring-0'
+          className='absolute top-0 right-0 z-10 p-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-0'
           onClick={e => {
             e.stopPropagation();
             onClose();
@@ -52,7 +52,7 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
         href={YOUTUBE_HOME}
         target='_blank'
         rel='noopener noreferrer'
-        className='flex items-center gap-1.5 text-sm text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-gray-200 hover:underline w-fit'
+        className='flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline w-fit'
       >
         <SiYoutube size={18} className='flex-shrink-0 text-[#FF0000]' aria-hidden />
         <span>YouTube</span>
@@ -62,14 +62,14 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
         href={watchUrl}
         target='_blank'
         rel='noopener noreferrer'
-        className='text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline truncate block'
+        className='text-sm font-medium text-primary hover:underline truncate block'
         title={title}
       >
         {displayTitle}
       </a>
 
       {/* Thumbnail + play / external */}
-      <div className='relative w-full aspect-video rounded-2xl border border-[#D3DAE0A8] dark:border-gray-700 overflow-hidden bg-black max-h-[202px] md:max-h-[236px] lg:max-h-[270px]'>
+      <div className='relative w-full aspect-video rounded-2xl border border-border overflow-hidden bg-black max-h-[202px] md:max-h-[236px] lg:max-h-[270px]'>
         {isMobile ? (
           // Mobile: no inline play, no overlay controls. Tap thumbnail -> open YouTube.
           <a

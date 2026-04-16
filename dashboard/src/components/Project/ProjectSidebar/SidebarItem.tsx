@@ -81,7 +81,7 @@ const SidebarItem = ({
         'w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors group',
         'hover:bg-muted',
 
-        isActive ? 'bg-[#E4E6E7]' : 'bg-transparent',
+        isActive ? 'bg-sidebar-item-active' : 'bg-transparent',
       )}
       data-track-category='Projects'
       data-track-name='SelectSidebarItem'
@@ -96,7 +96,7 @@ const SidebarItem = ({
       <span
         className={cn(
           'text-[13px] flex-1 text-left truncate',
-          isActive ? 'text-[#181B1D] font-semibold' : textColor,
+          isActive ? 'text-sidebar-primary-foreground font-semibold' : textColor,
           !isActive && 'group-hover:text-foreground',
         )}
       >

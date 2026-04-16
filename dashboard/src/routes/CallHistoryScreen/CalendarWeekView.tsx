@@ -229,37 +229,25 @@ const CalendarWeekView = ({
                           <PopoverPrimitive.Trigger asChild>
                             <button
                               title={call.title ?? 'Call'}
-                              className='absolute right-1 rounded overflow-hidden text-left transition-colors border-l-[3px] cursor-pointer z-[5] focus:outline-none'
+                              className={cn(
+                                'absolute right-1 rounded overflow-hidden text-left transition-colors border-l-[3px] cursor-pointer z-[5] focus:outline-none border-l-primary',
+                                meetingStatus === MeetingStatus.ACCEPTED && 'bg-primary/10',
+                              )}
                               style={{
                                 top,
                                 height,
                                 left: `calc(0.25rem + ${leftPx}px)`,
-                                backgroundColor: isEnded
-                                  ? meetingStatus === MeetingStatus.ACCEPTED
-                                    ? '#0077FF1A'
-                                    : 'transparent'
-                                  : meetingStatus === MeetingStatus.ACCEPTED
-                                    ? '#0077FF1A'
-                                    : 'transparent',
-                                borderLeftColor: '#0077FF',
                               }}
                             >
                               {isMaybe && !isEnded && (
                                 <div className='pointer-events-none absolute inset-0 overflow-hidden'>
-                                  <div
-                                    className='absolute inset-0'
-                                    style={{
-                                      backgroundImage:
-                                        'repeating-linear-gradient(-18deg, rgba(9, 46, 88, 0.55) 0 1px, transparent 1px 4px)',
-                                    }}
-                                  />
+                                  <div className='absolute inset-0 call-stripe-pattern' />
                                 </div>
                               )}
                               <div className='px-1.5 py-1 h-full flex flex-col justify-start overflow-hidden'>
                                 <span
-                                  className='truncate'
+                                  className='truncate text-foreground'
                                   style={{
-                                    color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
                                     fontSize: '12px',
                                     lineHeight: '18px',
                                     fontWeight: 500,
@@ -270,9 +258,8 @@ const CalendarWeekView = ({
                                 </span>
                                 {height >= 40 && (
                                   <span
-                                    className='mt-0.5 whitespace-nowrap'
+                                    className='mt-0.5 whitespace-nowrap text-muted-foreground'
                                     style={{
-                                      color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
                                       fontSize: '10px',
                                       lineHeight: '14px',
                                       opacity: 0.7,

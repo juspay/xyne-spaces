@@ -38,7 +38,7 @@ const ThreadRow = memo(
       if (isDM && avatarUserId) {
         return <div className='w-2.5 h-2.5 rounded-full border-2 border-border' />;
       }
-      return isPrivate ? <ChatLock color={'#1D1E1F'} /> : <Hash size={16} />;
+      return isPrivate ? <ChatLock color='hsl(var(--foreground))' /> : <Hash size={16} />;
     };
 
     return (

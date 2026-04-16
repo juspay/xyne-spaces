@@ -86,45 +86,45 @@ export interface WorkflowHeaderProps {
 type StatusConfig = { bg: string; text: string; dot: string; label: string };
 const STATUS_MAP: Record<string, StatusConfig> = {
   running: {
-    bg: 'bg-blue-500/10 border border-blue-500/20',
-    text: 'text-blue-700 dark:text-blue-400',
-    dot: 'bg-blue-500',
+    bg: 'bg-muted border border-border',
+    text: 'text-status-scheduled',
+    dot: 'bg-status-scheduled',
     label: 'In-Progress',
   },
   inProgress: {
-    bg: 'bg-blue-500/10 border border-blue-500/20',
-    text: 'text-blue-700 dark:text-blue-400',
-    dot: 'bg-blue-500',
+    bg: 'bg-muted border border-border',
+    text: 'text-status-scheduled',
+    dot: 'bg-status-scheduled',
     label: 'In-Progress',
   },
   completed: {
-    bg: 'bg-emerald-500/10 border border-emerald-500/20',
-    text: 'text-emerald-700 dark:text-emerald-400',
-    dot: 'bg-emerald-500',
+    bg: 'bg-stage-completed border border-stage-completed-border',
+    text: 'text-status-success',
+    dot: 'bg-status-success',
     label: 'Completed',
   },
   success: {
-    bg: 'bg-emerald-500/10 border border-emerald-500/20',
-    text: 'text-emerald-700 dark:text-emerald-400',
-    dot: 'bg-emerald-500',
+    bg: 'bg-stage-completed border border-stage-completed-border',
+    text: 'text-status-success',
+    dot: 'bg-status-success',
     label: 'Completed',
   },
   failed: {
-    bg: 'bg-red-500/10 border border-red-500/20',
-    text: 'text-red-700 dark:text-red-400',
-    dot: 'bg-red-500',
+    bg: 'bg-stage-cancelled border border-stage-cancelled-border',
+    text: 'text-status-failure',
+    dot: 'bg-status-failure',
     label: 'Failed',
   },
   failure: {
-    bg: 'bg-red-500/10 border border-red-500/20',
-    text: 'text-red-700 dark:text-red-400',
-    dot: 'bg-red-500',
+    bg: 'bg-stage-cancelled border border-stage-cancelled-border',
+    text: 'text-status-failure',
+    dot: 'bg-status-failure',
     label: 'Failed',
   },
   paused: {
-    bg: 'bg-amber-500/10 border border-amber-500/20',
-    text: 'text-amber-700 dark:text-amber-400',
-    dot: 'bg-amber-500',
+    bg: 'bg-muted border border-border',
+    text: 'text-status-pending',
+    dot: 'bg-status-pending',
     label: 'Paused',
   },
 };
@@ -134,7 +134,7 @@ const getStatusConfig = (status?: string): StatusConfig => {
     STATUS_MAP[key] || {
       bg: 'bg-muted border border-border',
       text: 'text-muted-foreground',
-      dot: 'bg-gray-400',
+      dot: 'bg-muted-foreground',
       label: status || 'Unknown',
     }
   );

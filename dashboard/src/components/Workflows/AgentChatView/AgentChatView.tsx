@@ -25,6 +25,7 @@ import {
   WorkflowStep,
 } from '../../../services/Workflow/workflowGraphService.types';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useTheme } from '../../../hooks/useTheme';
 import { AgentAvatar } from './AgentAvatar';
 import { ReviewerFeedback, parseReviewerFeedback } from './ReviewerFeedback';
 import {
@@ -56,20 +57,20 @@ const StatusIcon: React.FC<{ status: string; size?: number }> = ({ status, size 
   switch (status) {
     case 'running':
       return (
-        <div className={`${containerClass} bg-blue-500/10`}>
-          <Loader2 size={size} className='text-blue-500 animate-spin' />
+        <div className={`${containerClass} bg-action-primary/10`}>
+          <Loader2 size={size} className='text-action-primary animate-spin' />
         </div>
       );
     case 'completed':
       return (
-        <div className={`${containerClass} bg-emerald-500/10`}>
-          <CheckCircle size={size} className='text-emerald-500' />
+        <div className={`${containerClass} bg-status-success/10`}>
+          <CheckCircle size={size} className='text-status-success' />
         </div>
       );
     case 'failed':
       return (
-        <div className={`${containerClass} bg-red-500/10`}>
-          <AlertCircle size={size} className='text-red-500' />
+        <div className={`${containerClass} bg-destructive/10`}>
+          <AlertCircle size={size} className='text-destructive' />
         </div>
       );
     case 'pending':
@@ -79,31 +80,35 @@ const StatusIcon: React.FC<{ status: string; size?: number }> = ({ status, size 
         </div>
       );
     default:
-      return <Circle size={size} className='text-gray-300' />;
+      return <Circle size={size} className='text-muted-foreground' />;
   }
 };
 
 const MarkdownContent: React.FC<{ content: string; small?: boolean }> = ({
   content,
   small = false,
-}) => (
-  <div
-    className={`overflow-hidden max-w-full [&_*]:max-w-full [&_pre]:overflow-x-auto [&_pre]:!bg-muted/70 [&_.wmde-markdown]:bg-transparent [&_.wmde-markdown_code]:!bg-muted/70 prose-xs ${small ? 'text-xs' : 'text-sm'} text-foreground`}
-  >
-    <MarkdownPreview
-      source={content}
-      style={{
-        backgroundColor: 'transparent',
-        color: 'inherit',
-        maxWidth: '100%',
-        fontSize: small ? '12px' : '13px',
-        lineHeight: '1.5',
-      }}
-      // eslint-disable-next-line @typescript-eslint/naming-convention
-      wrapperElement={{ 'data-color-mode': 'light' }}
-    />
-  </div>
-);
+}) => {
+  const { theme } = useTheme();
+
+  return (
+    <div
+      className={`overflow-hidden max-w-full [&_*]:max-w-full [&_pre]:overflow-x-auto [&_pre]:!bg-muted/70 [&_.wmde-markdown]:bg-transparent [&_.wmde-markdown_code]:!bg-muted/70 prose-xs ${small ? 'text-xs' : 'text-sm'} text-foreground`}
+    >
+      <MarkdownPreview
+        source={content}
+        style={{
+          backgroundColor: 'transparent',
+          color: 'inherit',
+          maxWidth: '100%',
+          fontSize: small ? '12px' : '13px',
+          lineHeight: '1.5',
+        }}
+        // eslint-disable-next-line @typescript-eslint/naming-convention
+        wrapperElement={{ 'data-color-mode': theme === 'midnight' ? 'dark' : 'light' }}
+      />
+    </div>
+  );
+};
 
 interface TruncatableMarkdownContentProps {
   content: string;
@@ -123,6 +128,7 @@ const TruncatableMarkdownContent: React.FC<TruncatableMarkdownContentProps> = ({
   onViewMore,
 }) => {
   const { isMobile } = usePlatform();
+  const { theme } = useTheme();
   const [isExpanded, setIsExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -178,13 +184,13 @@ const TruncatableMarkdownContent: React.FC<TruncatableMarkdownContentProps> = ({
             lineHeight: '1.5',
           }}
           // eslint-disable-next-line @typescript-eslint/naming-convention
-          wrapperElement={{ 'data-color-mode': 'light' }}
+          wrapperElement={{ 'data-color-mode': theme === 'midnight' ? 'dark' : 'light' }}
         />
       </div>
       {needsTruncation && (
         <button
           onClick={handleViewMore}
-          className='flex items-center gap-1 mt-2 text-[11px] font-medium text-sky-600 hover:text-sky-700 transition-colors'
+          className='flex items-center gap-1 mt-2 text-[11px] font-medium text-action-primary hover:opacity-80 transition-opacity'
           data-track-category='Workflows'
           data-track-name='ViewMoreResponse'
         >
@@ -292,7 +298,7 @@ const WorkflowRequestCard: React.FC<{
       </div>
       <div className='flex-1 min-w-0'>
         <div className='flex items-center gap-1.5 mb-1.5 flex-wrap'>
-          <span className='text-xs font-semibold text-slate-700'>{displayName}</span>
+          <span className='text-xs font-semibold text-foreground'>{displayName}</span>
           {executionMetadata && selectedExecutionId && onExecutionSelect && (
             <ExecutionAttemptDropdown
               executionMetadata={executionMetadata}
@@ -301,7 +307,7 @@ const WorkflowRequestCard: React.FC<{
             />
           )}
         </div>
-        <div className='rounded-xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 bg-slate-50 border border-slate-200/60'>
+        <div className='rounded-xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 bg-muted/50 border border-border/50'>
           <TruncatableMarkdownContent
             content={description}
             maxLinesDesktop={6}
@@ -316,11 +322,11 @@ const WorkflowRequestCard: React.FC<{
 const LoopRunningLoader: React.FC = () => (
   <div className='flex items-center gap-1.5 ml-11 py-2'>
     <div className='flex gap-0.5'>
-      <div className='w-1 h-1 rounded-full bg-slate-400 animate-[bounce_1s_infinite_0ms]' />
-      <div className='w-1 h-1 rounded-full bg-slate-300 animate-[bounce_1s_infinite_150ms]' />
-      <div className='w-1 h-1 rounded-full bg-slate-400 animate-[bounce_1s_infinite_300ms]' />
+      <div className='w-1 h-1 rounded-full bg-muted-foreground/60 animate-[bounce_1s_infinite_0ms]' />
+      <div className='w-1 h-1 rounded-full bg-muted-foreground/40 animate-[bounce_1s_infinite_150ms]' />
+      <div className='w-1 h-1 rounded-full bg-muted-foreground/60 animate-[bounce_1s_infinite_300ms]' />
     </div>
-    <span className='text-[10px] font-medium text-slate-500 uppercase tracking-wider'>
+    <span className='text-[10px] font-medium text-muted-foreground uppercase tracking-wider'>
       Cycling...
     </span>
   </div>
@@ -581,7 +587,7 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
                   Agent Chat
                 </span>
                 <div className='flex items-center gap-1.5'>
-                  <div className='w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse' />
+                  <div className='w-1.5 h-1.5 rounded-full bg-status-success animate-pulse' />
                   <span className='text-[10px] text-muted-foreground font-medium uppercase tracking-wider'>
                     Live Channel
                   </span>
@@ -648,7 +654,7 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
       <div className='flex-1 overflow-y-auto px-3 md:px-4 py-4 space-y-4 no-scrollbar pb-16'>
         {isLoading ? (
           <div className='flex flex-col items-center justify-center py-12 text-center'>
-            <Loader2 size={24} className='text-blue-500 animate-spin mb-2' />
+            <Loader2 size={24} className='text-action-primary animate-spin mb-2' />
             <p className='text-muted-foreground text-xs font-medium'>Loading attempt data...</p>
           </div>
         ) : !hideTabs && activeTab === 'diff' ? (
@@ -676,20 +682,20 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
                       <div key={`loop-${item.baseName}-${i}`} className='relative'>
                         {/* Loop Header */}
                         <div className='flex items-center gap-2 mb-3'>
-                          <div className='flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100/80 border border-slate-200/60'>
-                            <Repeat size={11} className='text-slate-500' strokeWidth={2.5} />
-                            <span className='text-[10px] font-semibold uppercase tracking-wide text-slate-600'>
+                          <div className='flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/80 border border-border/60'>
+                            <Repeat size={11} className='text-muted-foreground' strokeWidth={2.5} />
+                            <span className='text-[10px] font-semibold uppercase tracking-wide text-foreground/70'>
                               {formatStepName(item.baseName)}
                             </span>
-                            <span className='text-[9px] font-mono text-slate-400 bg-slate-200/50 px-1 rounded'>
+                            <span className='text-[9px] font-mono text-muted-foreground/70 bg-muted px-1 rounded'>
                               ×{item.messages.length}
                             </span>
                           </div>
-                          <div className='h-px flex-1 bg-gradient-to-r from-slate-200/60 via-slate-100/40 to-transparent' />
+                          <div className='h-px flex-1 bg-gradient-to-r from-border/60 via-border/40 to-transparent' />
                         </div>
 
                         {/* Vertical Timeline */}
-                        <div className='absolute left-[15px] top-12 bottom-6 w-[2px] bg-slate-200 z-0' />
+                        <div className='absolute left-[15px] top-12 bottom-6 w-[2px] bg-border z-0' />
 
                         {/* Loop Messages */}
                         <div className='space-y-3 relative z-10'>
@@ -752,7 +758,7 @@ export const AgentChatView: React.FC<AgentChatViewProps> = ({
                 {/* Auto-continuing indicator shown while resuming */}
                 {showGoToAutomaticButton && isSettingMode && (
                   <div className='flex justify-center mt-2 mb-4'>
-                    <div className='flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-600'>
+                    <div className='flex items-center gap-2 px-4 py-2 text-sm font-medium text-action-primary'>
                       <Loader2 size={16} className='animate-spin' />
                       Continuing automatically...
                     </div>
@@ -835,12 +841,12 @@ const AgentMessageBubble: React.FC<{
         <>
           <div className='flex items-end gap-2 md:gap-3 mb-0.5'>
             <div className='flex-shrink-0 w-[31px] flex justify-end h-5'>
-              <div className='w-4 h-full border-l-2 border-t-2 border-slate-300 rounded-tl-[6px]' />
+              <div className='w-4 h-full border-l-2 border-t-2 border-border rounded-tl-[6px]' />
             </div>
 
             {/* Reply content — column-aligned with the message content below */}
             <div className='flex items-center gap-1.5 flex-1 min-w-0 text-[11px] text-muted-foreground/80 pb-2 overflow-hidden'>
-              <div className='w-4 h-4 rounded-full bg-slate-600 flex items-center justify-center text-white flex-shrink-0 shadow-sm'>
+              <div className='w-4 h-4 rounded-full bg-secondary flex items-center justify-center text-secondary-foreground flex-shrink-0 shadow-sm'>
                 <User size={9} strokeWidth={2.5} />
               </div>
               <span className='font-semibold flex-shrink-0 text-foreground/60'>User</span>
@@ -849,7 +855,7 @@ const AgentMessageBubble: React.FC<{
                 {isReplyLong && (
                   <button
                     onClick={() => setIsReplyModalOpen(true)}
-                    className='text-[10px] font-bold text-sky-600 hover:text-sky-700 flex-shrink-0 transition-colors px-1.5 py-0.5 rounded hover:bg-sky-50 cursor-pointer pointer-events-auto bg-transparent border-none'
+                    className='text-[10px] font-bold text-action-primary hover:opacity-80 flex-shrink-0 transition-opacity px-1.5 py-0.5 rounded hover:bg-accent cursor-pointer pointer-events-auto bg-transparent border-none'
                     data-track-category='Workflows'
                     data-track-name='ExpandReply'
                   >
@@ -900,7 +906,7 @@ const AgentMessageBubble: React.FC<{
             )}
 
             {hasEdits && (
-              <span className='flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded'>
+              <span className='flex items-center gap-1 text-[10px] text-status-pending bg-muted px-1.5 py-0.5 rounded'>
                 <FileEdit size={9} />
                 {editSteps.length} edit{editSteps.length !== 1 ? 's' : ''}
               </span>
@@ -956,7 +962,7 @@ const AgentMessageBubble: React.FC<{
 
           {(summary || isRunning || canShowTurns) && (
             <div
-              className={`rounded-xl md:rounded-2xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 ${agentInfo.bubbleBg} transition-shadow ${isLatest && isRunning ? 'shadow-sm ring-1 ring-sky-100' : ''}`}
+              className={`rounded-xl md:rounded-2xl rounded-tl-sm px-3 md:px-4 py-2 md:py-2.5 ${agentInfo.bubbleBg} transition-shadow ${isLatest && isRunning ? 'shadow-sm ring-1 ring-ring/20' : ''}`}
             >
               {summary ? (
                 parseReviewerFeedback(summary) ? (
@@ -977,12 +983,12 @@ const AgentMessageBubble: React.FC<{
                   executionStatus === 'WAIT_FOR_EVENT' &&
                   isLatest ? (
                     <>
-                      <Clock size={14} className='text-amber-500' />
+                      <Clock size={14} className='text-status-pending' />
                       <span>Waiting for input…</span>
                     </>
                   ) : (
                     <>
-                      <Loader2 size={14} className='animate-spin text-sky-400' />
+                      <Loader2 size={14} className='animate-spin text-action-primary' />
                       <span>Running…</span>
                     </>
                   )}
@@ -992,7 +998,7 @@ const AgentMessageBubble: React.FC<{
               )}
 
               {canShowTurns && (
-                <div className='mt-3 pt-2 border-t border-black/5'>
+                <div className='mt-3 pt-2 border-t border-border/50'>
                   <button
                     onClick={() => setIsTurnsExpanded(v => !v)}
                     className={`flex items-center gap-1.5 text-[11px] font-medium transition-colors ${agentInfo.labelColor} hover:opacity-80`}

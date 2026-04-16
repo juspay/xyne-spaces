@@ -1263,15 +1263,15 @@ export const AttachmentGalleryModal: React.FC = () => {
 
   // Render thread panel content
   const renderThreadPanel = (): JSX.Element => (
-    <div className='flex flex-col h-full w-full border-l border-gray-200 bg-white z-10 min-w-0'>
+    <div className='flex flex-col h-full w-full border-l border-border bg-background z-10 min-w-0'>
       {/* Thread header with close button */}
-      <div className='flex items-center justify-between p-4 border-b border-gray-200 h-14 flex-shrink-0'>
-        <h3 className='font-semibold text-gray-900'>Thread</h3>
+      <div className='flex items-center justify-between p-4 border-b border-border h-14 flex-shrink-0'>
+        <h3 className='font-semibold text-foreground'>Thread</h3>
         <button
           onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
           data-track-category='FILE_VIEWER'
           data-track-name='CloseThreadPanel'
-          className='p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors'
+          className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
           aria-label='Close'
         >
           <X className='h-5 w-5' />
@@ -1315,7 +1315,7 @@ export const AttachmentGalleryModal: React.FC = () => {
           onMouseLeave={() => setIsHovered(false)}
           onTouchStart={e => e.stopPropagation()}
         >
-          <div className={cn('absolute inset-0', isVideo ? 'bg-black' : 'bg-white')}>
+          <div className={cn('absolute inset-0', isVideo ? 'bg-black' : 'bg-background')}>
             {showThreadPanel ? (
               // Side-by-side layout with thread panel
               <PanelGroup direction='horizontal' className='h-full w-full'>
@@ -1327,10 +1327,10 @@ export const AttachmentGalleryModal: React.FC = () => {
                       isImage
                         ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
                         : isPdf
-                          ? 'bg-white'
+                          ? 'bg-background'
                           : isVideo
                             ? 'overflow-hidden bg-black'
-                            : 'overflow-auto bg-white',
+                            : 'overflow-auto bg-background',
                     )}
                   >
                     {/* Floating top bar - no close button when thread visible */}
@@ -1349,7 +1349,7 @@ export const AttachmentGalleryModal: React.FC = () => {
 
                 {/* Resize handle */}
                 <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors cursor-col-resize flex items-center justify-center z-20'>
-                  <div className='w-[1px] h-full bg-gray-200'></div>
+                  <div className='w-[1px] h-full bg-border'></div>
                 </PanelResizeHandle>
 
                 {/* Thread panel - 30% default, min 20%, max 40%, resizable */}
@@ -1365,10 +1365,10 @@ export const AttachmentGalleryModal: React.FC = () => {
                   isImage
                     ? 'overflow-hidden before:absolute before:inset-0 before:bg-black/80 before:z-0 before:backdrop-blur-md bg-black/30'
                     : isPdf
-                      ? 'bg-white'
+                      ? 'bg-background'
                       : isVideo
                         ? 'overflow-hidden bg-black'
-                        : 'overflow-auto bg-white',
+                        : 'overflow-auto bg-background',
                 )}
               >
                 {renderFloatingTopBar(true)}

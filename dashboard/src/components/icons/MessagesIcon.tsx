@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 
 const MessagesIcon = ({
-  color = '#181B1D',
+  color = 'currentColor',
   size = 12,
 }: {
   color?: string;

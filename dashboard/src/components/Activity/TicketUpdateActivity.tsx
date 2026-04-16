@@ -130,21 +130,21 @@ export const TicketUpdateActivity = ({
   const isPRAction = activity.actorAction.startsWith('ticket_pr_');
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm text-[#181B1D] font-medium break-words whitespace-normal'>
+      <div className='text-sm text-foreground font-medium break-words whitespace-normal'>
         {' '}
         {isPRAction ? config.label.toLowerCase() : `${config.label} updated`} for ticket &ldquo;
         {ticket.title}&rdquo;
       </div>
-      <div className='text-xs text-[#505B62] break-words whitespace-normal'>
+      <div className='text-xs text-muted-foreground break-words whitespace-normal'>
         Ticket ID: <span className='font-mono'>{ticketXyneId}</span>
       </div>
     </div>
   );
 
   const condensedContent = (
-    <span className='text-sm text-[#181B1D]'>
+    <span className='text-sm text-foreground'>
       <span className='font-semibold'>{ticketXyneId}</span>
-      <span className='text-[#505B62]'>
+      <span className='text-muted-foreground'>
         {' '}
         {isPRAction ? config.label.toLowerCase() : `${config.label.toLowerCase()} updated`}
       </span>
@@ -159,7 +159,7 @@ export const TicketUpdateActivity = ({
       channelId={ticket.channelId}
       badgeIcon={config.icon}
       badgeColorClass={config.badgeColor}
-      description={<span className='text-[#505B62] text-sm'>{config.description}</span>}
+      description={<span className='text-muted-foreground text-sm'>{config.description}</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
     >

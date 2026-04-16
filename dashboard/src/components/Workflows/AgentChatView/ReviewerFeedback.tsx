@@ -262,16 +262,16 @@ function getSeverityStyle(severity: string): { icon: string; colorClass: string 
   const suggestionKeywords = ['suggestion', 'info', 'nit', 'style', 'improvement'];
 
   if (errorKeywords.some(k => s.includes(k))) {
-    return { icon: '🔴', colorClass: 'text-red-500' };
+    return { icon: '🔴', colorClass: 'text-destructive' };
   }
   if (warningKeywords.some(k => s.includes(k))) {
-    return { icon: '⚠️', colorClass: 'text-amber-500' };
+    return { icon: '⚠️', colorClass: 'text-status-pending' };
   }
   if (successKeywords.some(k => s.includes(k))) {
-    return { icon: '✅', colorClass: 'text-green-500' };
+    return { icon: '✅', colorClass: 'text-status-success' };
   }
   if (suggestionKeywords.some(k => s.includes(k))) {
-    return { icon: '💡', colorClass: 'text-blue-400' };
+    return { icon: '💡', colorClass: 'text-action-primary' };
   }
 
   return { icon: 'ℹ️', colorClass: 'text-muted-foreground' };
@@ -371,8 +371,8 @@ export const ReviewerFeedback: React.FC<ReviewerFeedbackProps> = ({
                         <span className='break-words text-foreground/90'>{issue.message}</span>
 
                         {issue.suggestion && (
-                          <div className='mt-1.5 pl-3 border-l-2 border-blue-400/50'>
-                            <span className='text-[11px] text-blue-400 font-medium'>
+                          <div className='mt-1.5 pl-3 border-l-2 border-action-primary/50'>
+                            <span className='text-[11px] text-action-primary font-medium'>
                               Suggestion:{' '}
                             </span>
                             <span className='text-[12px] text-foreground/70'>
@@ -409,7 +409,7 @@ export const ReviewerFeedback: React.FC<ReviewerFeedbackProps> = ({
       {needsTruncation && !disableTruncation && (
         <button
           onClick={handleViewMore}
-          className='flex items-center gap-1 mt-2 text-[11px] font-medium text-sky-600 hover:text-sky-700 transition-colors'
+          className='flex items-center gap-1 mt-2 text-[11px] font-medium text-action-primary hover:opacity-80 transition-opacity'
           data-track-category='Workflows'
           data-track-name='ViewMoreReviewerFeedback'
         >

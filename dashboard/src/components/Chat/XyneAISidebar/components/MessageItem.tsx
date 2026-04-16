@@ -43,7 +43,7 @@ const UserTagComponent = React.memo(({ userTag }: { userTag: UserTag }) => {
   const mentionDisplay = `${displayName}`;
 
   const className = isCurrentUser
-    ? 'mention-text !bg-[#fef3c7] !text-[#1264a3] cursor-pointer hover:underline'
+    ? 'mention-text !bg-muted !text-primary cursor-pointer hover:underline'
     : 'mention-text cursor-pointer hover:underline';
 
   console.log('[UserTagComponent] Rendering:', {
@@ -106,7 +106,7 @@ const processStringForUserTags = (
       parts.push(
         <span
           key={`${fullMatch}-${startIndex}`}
-          className='mention-text cursor-pointer hover:underline text-blue-600'
+          className='mention-text cursor-pointer hover:underline text-primary'
         >
           {username}
         </span>,
@@ -288,19 +288,19 @@ const SelectionContextPreview = ({
     <button
       type='button'
       onClick={onClick}
-      className='flex items-center gap-2 p-2 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors w-full text-left'
+      className='flex items-center gap-2 p-2 rounded-lg bg-muted border border-border hover:bg-accent transition-colors w-full text-left'
       title={`From canvas: ${selection.canvasTitle || 'Untitled'}`}
       data-track-category='XyneAI'
       data-track-name='SELECTION_CONTEXT_CLICK'
     >
-      <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-blue-100 rounded'>
-        <FileDocumentIcon color='#3B82F6' size={20} />
+      <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-background rounded'>
+        <FileDocumentIcon color='currentColor' size={20} className='text-primary' />
       </div>
       <div className='flex flex-col overflow-hidden flex-1'>
-        <span className="text-xs text-blue-600 font-['Inter'] font-medium truncate">
+        <span className="text-xs text-primary font-['Inter'] font-medium truncate">
           From canvas: {selection.canvasTitle || 'Untitled'}
         </span>
-        <span className="text-sm text-blue-700 font-['Inter'] truncate">{selection.preview}</span>
+        <span className="text-sm text-foreground font-['Inter'] truncate">{selection.preview}</span>
       </div>
     </button>
   );
@@ -613,7 +613,7 @@ export const MessageItem = React.memo(
                                   href={href}
                                   target='_blank'
                                   rel='noopener noreferrer'
-                                  className='text-blue-600 hover:text-blue-700 underline'
+                                  className='text-primary hover:text-primary/80 underline'
                                   {...props}
                                 >
                                   {children}
@@ -625,7 +625,7 @@ export const MessageItem = React.memo(
                               return (
                                 <a
                                   href={href}
-                                  className='text-blue-600 hover:text-blue-700 underline'
+                                  className='text-primary hover:text-primary/80 underline'
                                   data-track-category='xyne-ai'
                                   data-track-name='api-download'
                                   onClick={e => {
@@ -642,7 +642,7 @@ export const MessageItem = React.memo(
                             return (
                               <a
                                 href={href}
-                                className='text-blue-600 hover:text-blue-700 underline'
+                                className='text-primary hover:text-primary/80 underline'
                                 {...props}
                               >
                                 {children}
@@ -1259,11 +1259,11 @@ const ParticipantAvatar: React.FC<{ participant: Participant }> = ({ participant
       .join('') || '?';
 
   return (
-    <div className='w-6 h-6 rounded-lg overflow-hidden ring-2 ring-white flex-shrink-0 bg-gray-200 flex items-center justify-center'>
+    <div className='w-6 h-6 rounded-lg overflow-hidden ring-2 ring-background flex-shrink-0 bg-muted flex items-center justify-center'>
       {pictureUrl ? (
         <img src={pictureUrl} alt={participant.name} className='w-full h-full object-cover' />
       ) : (
-        <span className='text-xs font-medium text-gray-600'>{initials}</span>
+        <span className='text-xs font-medium text-muted-foreground'>{initials}</span>
       )}
     </div>
   );
@@ -1309,8 +1309,8 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
 
   // Dropdown content
   const dropdownContent = (
-    <div className='bg-black rounded-lg shadow-xl py-2 px-3 w-64 z-[99999]'>
-      <div className='text-sm text-white break-words'>{displayNames}</div>
+    <div className='bg-popover border border-border rounded-lg shadow-xl py-2 px-3 w-64 z-[99999]'>
+      <div className='text-sm text-foreground break-words'>{displayNames}</div>
     </div>
   );
 
@@ -1325,7 +1325,7 @@ const ParticipantsAvatars: React.FC<{ participants: Participant[] }> = ({
         ))}
         {remaining > 0 && (
           <div
-            className='w-6 h-6 rounded-lg bg-gray-100 ring-2 ring-white flex items-center justify-center text-xs font-medium text-gray-600 flex-shrink-0'
+            className='w-6 h-6 rounded-lg bg-muted ring-2 ring-background flex items-center justify-center text-xs font-medium text-muted-foreground flex-shrink-0'
             title={`${remaining} more participant${remaining > 1 ? 's' : ''}`}
           >
             +{remaining}
@@ -1411,7 +1411,7 @@ const MessageActions = ({
           </g>
           <defs>
             <clipPath id='clip0_9950_23975'>
-              <rect width='16' height='16' fill='white' />
+              <rect width='16' height='16' fill='currentColor' />
             </clipPath>
           </defs>
         </svg>
@@ -1453,7 +1453,12 @@ const MessageActions = ({
           </g>
           <defs>
             <clipPath id='clip0_9950_23979'>
-              <rect width='16' height='16' fill='white' transform='translate(16 16) rotate(-180)' />
+              <rect
+                width='16'
+                height='16'
+                fill='currentColor'
+                transform='translate(16 16) rotate(-180)'
+              />
             </clipPath>
           </defs>
         </svg>
@@ -1482,7 +1487,7 @@ const MessageActions = ({
           rel='noopener noreferrer'
           className='flex items-center gap-1 p-1.5 rounded-[11.345px] bg-gradient-to-br from-[#1E40AF] to-[#3B82F6] hover:opacity-80 transition-opacity'
         >
-          <Globe className='w-2 h-2 text-white' />
+          <Globe className='w-2 h-2 text-primary-foreground' />
         </a>
       </Tooltip>
     )}

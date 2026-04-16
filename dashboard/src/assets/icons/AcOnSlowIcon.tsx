@@ -9,7 +9,7 @@ type IconProps = {
 
 const AcOnSlow: React.FC<IconProps> = ({
   size = 14,
-  color = '#788187',
+  color = 'currentColor',
   strokeWidth = 1.2,
   className,
 }) => {

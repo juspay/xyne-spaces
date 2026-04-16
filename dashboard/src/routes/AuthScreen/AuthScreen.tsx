@@ -89,7 +89,7 @@ const AuthScreen = (): ReactElement => {
           Sign in with Google
         </>
       </button>
-      <ShineBorder shineColor={['#FF4F4F']} />
+      <ShineBorder shineColor={['hsl(var(--action-primary))']} />
     </div>
   );
 
@@ -116,10 +116,10 @@ const AuthScreen = (): ReactElement => {
                   <div className='mb-8'>
                     <img src='/svgs/xyne.svg' alt='Xyne Logo' />
                   </div>
-                  <h2 className='text-lg lg:text-xl font-medium md:font-semibold text-slate-900'>
+                  <h2 className='text-lg lg:text-xl font-medium md:font-semibold text-foreground'>
                     Log in to Xyne Spaces
                   </h2>
-                  <p className='text-xs sm:text-sm md:text-sm text-slate-600'>
+                  <p className='text-xs sm:text-sm md:text-sm text-muted-foreground'>
                     {isLoading
                       ? 'Signing you in...'
                       : 'Communicate, collaborate & 10x your daily productivity'}
@@ -130,11 +130,11 @@ const AuthScreen = (): ReactElement => {
               {/* Error Message */}
               {error && (
                 <div
-                  className='p-3 sm:p-4 bg-red-50 border border-red-200 rounded-lg max-h-24 overflow-y-auto'
+                  className='max-h-24 overflow-y-auto rounded-lg border border-destructive/20 bg-destructive/10 p-3 sm:p-4'
                   role='alert'
                   aria-live='assertive'
                 >
-                  <p className='text-sm sm:text-base text-red-600 break-words'>{error}</p>
+                  <p className='text-sm sm:text-base text-destructive break-words'>{error}</p>
                 </div>
               )}
 
@@ -147,7 +147,7 @@ const AuthScreen = (): ReactElement => {
                       <button
                         disabled={isLoading}
                         onClick={handleGoogleSignIn}
-                        className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#10131F] text-[#525866] rounded-[10px] overflow-hidden h-12'
+                        className='relative flex h-12 w-full items-center justify-center gap-4 overflow-hidden rounded-[10px] border border-border bg-card px-4 py-[9px] font-inherit text-foreground shadow-sm transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50'
                         data-track-category='Auth'
                         data-track-name='GoogleSignIn'
                       >
@@ -157,7 +157,7 @@ const AuthScreen = (): ReactElement => {
                         >
                           <GoogleLogo />
                         </span>
-                        <span className='text-sm font-semibold text-center text-white'>
+                        <span className='text-sm font-semibold text-center text-foreground'>
                           Sign in with Google
                         </span>
                       </button>
@@ -168,7 +168,7 @@ const AuthScreen = (): ReactElement => {
                       <button
                         disabled={isLoading}
                         onClick={handleMicrosoftSignIn}
-                        className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white rounded-[10px] overflow-hidden h-12'
+                        className='relative flex h-12 w-full items-center justify-center gap-4 overflow-hidden rounded-[10px] border border-border bg-secondary px-4 py-[9px] font-inherit text-secondary-foreground shadow-sm transition-colors hover:bg-secondary/80 disabled:cursor-not-allowed disabled:opacity-50'
                         data-track-category='Auth'
                         data-track-name='MicrosoftSignIn'
                       >
@@ -178,7 +178,7 @@ const AuthScreen = (): ReactElement => {
                         >
                           <MicrosoftLogo />
                         </span>
-                        <span className='text-sm font-semibold text-center text-white'>
+                        <span className='text-sm font-semibold text-center text-secondary-foreground'>
                           Sign in with Microsoft
                         </span>
                       </button>
@@ -194,16 +194,16 @@ const AuthScreen = (): ReactElement => {
                 >
                   <div className='relative' aria-hidden='true'>
                     <Loader2
-                      className='h-12 w-12 sm:h-14 sm:w-14 animate-spin text-blue-600'
+                      className='h-12 w-12 sm:h-14 sm:w-14 animate-spin text-action-primary'
                       aria-hidden='true'
                     />
-                    <div className='absolute inset-0 rounded-full bg-blue-600/20 animate-ping'></div>
+                    <div className='absolute inset-0 rounded-full bg-action-primary/20 animate-ping'></div>
                   </div>
                   <div className='text-center space-y-2'>
-                    <p className='text-lg sm:text-xl font-semibold text-slate-900'>
+                    <p className='text-lg sm:text-xl font-semibold text-foreground'>
                       Signing you in...
                     </p>
-                    <p className='text-sm sm:text-base text-slate-600'>
+                    <p className='text-sm sm:text-base text-muted-foreground'>
                       Please wait while we authenticate your account
                     </p>
                   </div>

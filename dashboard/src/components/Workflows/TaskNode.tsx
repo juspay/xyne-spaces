@@ -26,23 +26,23 @@ const TaskNode: React.FC<TaskNodeProps> = ({ id, data, type }) => {
   const STATUS_MAP: Record<string, { icon: React.ReactElement; label: string; style: string }> = {
     completed: {
       label: 'Done',
-      icon: <CheckCircle2 size={12} className='text-emerald-600' />,
-      style: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      icon: <CheckCircle2 size={12} className='text-status-success' />,
+      style: 'bg-stage-completed text-status-success border-stage-completed-border',
     },
     success: {
       label: 'Done',
-      icon: <CheckCircle2 size={12} className='text-emerald-600' />,
-      style: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      icon: <CheckCircle2 size={12} className='text-status-success' />,
+      style: 'bg-stage-completed text-status-success border-stage-completed-border',
     },
     failed: {
       label: 'Failed',
-      icon: <AlertCircle size={12} className='text-red-600' />,
-      style: 'bg-red-50 text-red-700 border-red-200',
+      icon: <AlertCircle size={12} className='text-status-failure' />,
+      style: 'bg-stage-cancelled text-status-failure border-stage-cancelled-border',
     },
     running: {
       label: 'Running',
-      icon: <Loader2 size={12} className='animate-spin text-blue-600' />,
-      style: 'bg-blue-50 text-blue-700 border-blue-200',
+      icon: <Loader2 size={12} className='animate-spin text-status-scheduled' />,
+      style: 'bg-muted text-status-scheduled border-border',
     },
     pending: {
       label: 'Pending',

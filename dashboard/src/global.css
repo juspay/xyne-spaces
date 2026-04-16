@@ -47,7 +47,7 @@
     --action-primary: #57ab02;
     --action-primary-foreground: #ffffff;
     --sidebar-divider: #e5ebf0;
-    --metrics-bar-color: #27699d;
+    --metrics-bar-color: #485056;
     --metrics-bar-divider: rgba(0, 0, 0, 0.5);
     --nav-active-icon: #27699d;
     --nav-disabled-icon: #a1bcd1;
@@ -65,6 +65,7 @@
     --mention-group-color: #3d74b6;
     --link-color: #2563eb;
     --link-hover-color: #1d4ed8;
+    --mobile-panel-bg: #ffffff;
 
     /* Stage status backgrounds - semantic for light themes */
     --stage-todo-bg: 240 5% 96%;
@@ -152,6 +153,7 @@
     --mention-group-color: #3d74b6;
     --link-color: #2563eb;
     --link-hover-color: #1d4ed8;
+    --mobile-panel-bg: #e9ecf5;
 
     /* Workflow status colors - accessible on light bg */
     --status-new: #6b7280;
@@ -171,7 +173,7 @@
     --card-foreground: 0 0% 95%;
     --popover: 0 0% 10%;
     --popover-foreground: 0 0% 95%;
-    --primary: 204 70% 55%;
+    --primary: 0 0% 100%;
     --primary-foreground: 0 0% 5%;
     --secondary: 240 4% 16%;
     --secondary-foreground: 0 0% 90%;
@@ -183,7 +185,7 @@
     --destructive-foreground: 0 0% 95%;
     --border: 240 4% 20%;
     --input: 240 4% 20%;
-    --ring: 204 70% 50%;
+    --ring: 0 0% 100%;
     --radius: 0.5rem;
     --chart-1: 12 76% 65%;
     --chart-2: 173 58% 50%;
@@ -206,24 +208,25 @@
     --action-primary: #0073bf;
     --action-primary-foreground: #ffffff;
     --sidebar-divider: #2b2d2e;
-    --metrics-bar-color: #3b82c4;
+    --metrics-bar-color: #b0b8c1;
     --metrics-bar-divider: rgba(255, 255, 255, 0.2);
-    --nav-active-icon: #60a5fa;
+    --nav-active-icon: #b0b8c1;
     --nav-disabled-icon: #4b5563;
-    --call-action-button-color: #60a5fa;
+    --call-action-button-color: #b0b8c1;
     --nav-icon-seperator: #374151;
-    --nav-search-btn-bg: #1e3a5f;
-    --nav-search-btn-text: #93c5fd;
+    --nav-search-btn-bg: rgba(255, 255, 255, 0.08);
+    --nav-search-btn-text: #b0b8c1;
     --chat-mobile-my-bubble: #1e293b;
     --mention-color: #60a5fa;
-    --mention-hover-color: #93c5fd;
-    --mention-bg: #1e3a5f;
-    --mention-current-user-bg: #78350f;
+    --mention-hover-color: #bae6fd;
+    --mention-bg: rgba(96, 165, 250, 0.25);
+    --mention-current-user-bg: rgba(245, 158, 11, 0.25);
     --mention-channel-bg: rgba(96, 165, 250, 0.1);
     --mention-channel-hover-bg: rgba(96, 165, 250, 0.15);
     --mention-group-color: #60a5fa;
     --link-color: #2563eb;
     --link-hover-color: #1d4ed8;
+    --mobile-panel-bg: #151515;
 
     /* Stage status backgrounds - semantic for dark theme */
     --stage-todo-bg: 240 4% 16%;
@@ -385,7 +388,7 @@
 
   /* Chat Input Field - Base editor styles */
   .chat-input-field {
-    @apply leading-6 text-gray-900;
+    @apply leading-6 text-foreground;
     max-width: 100%;
     overflow-wrap: break-word;
     word-break: break-word;
@@ -435,12 +438,12 @@
 
   /* Inline Code */
   .chat-input-field code:not(pre code) {
-    @apply bg-gray-100 border border-gray-200 rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-gray-700;
+    @apply bg-muted border border-border rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-muted-foreground;
   }
 
   /* Code Block Inner Code*/
   .chat-input-field pre code {
-    @apply bg-transparent border-0 p-0 text-sm leading-6 block overflow-x-auto font-mono text-slate-700;
+    @apply bg-transparent border-0 p-0 text-sm leading-6 block overflow-x-auto font-mono text-foreground;
   }
 
   /* Code Block Scrollbar */
@@ -449,15 +452,15 @@
   }
 
   .chat-input-field pre::-webkit-scrollbar-track {
-    @apply bg-slate-200 rounded;
+    @apply bg-muted rounded;
   }
 
   .chat-input-field pre::-webkit-scrollbar-thumb {
-    @apply bg-slate-400 rounded;
+    @apply bg-border rounded;
   }
 
   .chat-input-field pre::-webkit-scrollbar-thumb:hover {
-    @apply bg-slate-500;
+    @apply bg-muted-foreground;
   }
 
   /* Mention Node Wrapper */
@@ -512,15 +515,15 @@
   }
 
   .chat-input-field .ProseMirror::-webkit-scrollbar-track {
-    @apply bg-gray-100 rounded;
+    @apply bg-muted rounded;
   }
 
   .chat-input-field .ProseMirror::-webkit-scrollbar-thumb {
-    @apply bg-gray-300 rounded;
+    @apply bg-border rounded;
   }
 
   .chat-input-field .ProseMirror::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-400;
+    @apply bg-muted-foreground;
   }
 
   /* Table rendering in TipTap chat input editor.
@@ -539,7 +542,7 @@
 
   .chat-input-field .ProseMirror .tableWrapper table td,
   .chat-input-field .ProseMirror .tableWrapper table th {
-    border: 1px solid #d1d5db;
+    border: 1px solid hsl(var(--border));
     padding: 0.375rem 0.625rem;
     text-align: left;
     min-width: 50px;
@@ -547,7 +550,8 @@
   }
 
   .chat-input-field .ProseMirror .tableWrapper table th {
-    background-color: #f9fafb;
+    background-color: hsl(var(--muted));
+    color: hsl(var(--foreground));
     font-weight: 600;
   }
 
@@ -1115,7 +1119,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    =========================================================== */
 
 .jp-message-html {
-  @apply leading-6 text-gray-800;
+  @apply leading-6 text-foreground;
   max-width: 100%;
   overflow-wrap: break-all;
   word-wrap: break-word;
@@ -1142,7 +1146,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    Inline code
    ---------------------------- */
 .jp-message-html code:not(pre code) {
-  @apply bg-gray-100 border border-gray-200 rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-gray-700;
+  @apply bg-muted border border-border rounded-md px-1 py-0.5 text-[0.85em] font-mono font-medium text-muted-foreground;
 }
 
 /* ----------------------------
@@ -1150,20 +1154,20 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    ---------------------------- */
 .jp-message-html pre,
 .jp-message-html div.slack_code {
-  @apply bg-gray-50 border border-gray-200 rounded-lg p-4 whitespace-pre-wrap break-all relative mt-3 mb-3;
+  @apply bg-muted border border-border rounded-lg p-4 whitespace-pre-wrap break-all relative mt-3 mb-3;
   overflow-wrap: break-all;
   word-break: break-word;
 }
 
 .jp-message-html div.slack_code code {
-  @apply !bg-transparent !p-0 !border-0 !text-[0.875rem] !leading-6 !font-mono !text-gray-900 !block;
+  @apply !bg-transparent !p-0 !border-0 !text-[0.875rem] !leading-6 !font-mono !text-foreground !block;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: break-all;
 }
 
 .jp-message-html pre code {
-  @apply bg-transparent p-0 border-0 text-[0.875rem] leading-6 font-mono text-gray-900 block;
+  @apply bg-transparent p-0 border-0 text-[0.875rem] leading-6 font-mono text-foreground block;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: break-all;
@@ -1175,17 +1179,17 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 .jp-message-html pre::-webkit-scrollbar-track {
-  background: #f1f3f4;
+  background: hsl(var(--muted));
   border-radius: 4px;
 }
 
 .jp-message-html pre::-webkit-scrollbar-thumb {
-  background: #c1c7cd;
+  background: hsl(var(--border));
   border-radius: 4px;
 }
 
 .jp-message-html pre::-webkit-scrollbar-thumb:hover {
-  background: #9aa0a6;
+  background: hsl(var(--muted-foreground));
 }
 
 /* ----------------------------
@@ -1206,8 +1210,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 .jp-message-html blockquote {
-  @apply border-l-2 pl-2 m-0 text-gray-700 sm:border-l-4 sm:pl-4;
-  border-left-color: var(--border-color, #9ca3af);
+  @apply border-l-2 pl-2 m-0 text-muted-foreground sm:border-l-4 sm:pl-4;
+  border-left-color: hsl(var(--border));
   max-width: 100%;
   overflow-wrap: break-word;
   word-wrap: break-word;
@@ -1279,7 +1283,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    Links
    ---------------------------- */
 .jp-message-html a {
-  @apply text-blue-600 hover:text-blue-800 underline;
+  color: var(--link-color);
+  text-decoration: underline;
 }
 
 /* ----------------------------
@@ -1287,12 +1292,14 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
    (RenderMessageWithHTML adds the wrapper span)
    ---------------------------- */
 .jp-message-html .mention-text {
-  @apply text-[#1264a3] cursor-pointer hover:underline;
+  color: var(--mention-color);
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .mention-text {
-  background-color: var(--mention-bg, #e5f1fe);
-  color: var(--mention-color, #1264a3);
+  background-color: var(--mention-bg);
+  color: var(--mention-color);
   border-radius: 4px;
   padding: 2px 4px;
 }
@@ -1491,7 +1498,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 /* Markdown Call Summary - Figma style with section dividers */
 .bot-markdown-content-call-summary {
-  border-left: 2px solid #d1d5db;
+  border-left: 2px solid hsl(var(--border));
   padding-left: 16px;
   margin: 8px 0 8px -24px;
   position: relative;
@@ -1505,7 +1512,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   top: 0;
   width: 2px;
   height: 12px;
-  background: #d1d5db;
+  background: hsl(var(--border));
 }
 
 .bot-markdown-content .wmde-markdown,
@@ -1519,7 +1526,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .bot-markdown-content-call-summary h2 {
   font-size: 14px !important;
   font-weight: 500 !important;
-  color: #1d1e1f !important;
+  color: hsl(var(--foreground)) !important;
   margin: 16px 0 8px 0 !important;
   border-bottom: none !important;
   padding-bottom: 0 !important;
@@ -1535,8 +1542,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   top: 10px;
   width: 12px;
   height: 2px;
-  background: #d1d5db;
-  border-bottom: 2px solid #d1d5db;
+  background: hsl(var(--border));
+  border-bottom: 2px solid hsl(var(--border));
   border-bottom-left-radius: 6px;
 }
 
@@ -1549,7 +1556,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .bot-markdown-content-call-summary p {
   margin: 0 0 8px 0 !important;
   line-height: 1.5;
-  color: #788187 !important;
+  color: hsl(var(--muted-foreground)) !important;
   font-size: 14px !important;
   padding-left: 6px !important;
 }
@@ -1559,14 +1566,14 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   padding-left: 20px !important;
   margin: 8px 0 !important;
   list-style-type: decimal !important;
-  color: #788187 !important;
+  color: hsl(var(--muted-foreground)) !important;
   font-size: 14px !important;
 }
 
 .bot-markdown-content ol li,
 .bot-markdown-content-call-summary ol li {
   margin: 4px 0 !important;
-  color: #788187 !important;
+  color: hsl(var(--muted-foreground)) !important;
 }
 
 .bot-markdown-content ul,
@@ -1574,14 +1581,14 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   padding-left: 16px !important;
   margin: 8px 0 !important;
   list-style-type: disc !important;
-  color: #788187 !important;
+  color: hsl(var(--muted-foreground)) !important;
   font-size: 14px !important;
 }
 
 .bot-markdown-content ul li,
 .bot-markdown-content-call-summary ul li {
   margin: 4px 0 !important;
-  color: #788187 !important;
+  color: hsl(var(--muted-foreground)) !important;
   font-size: 14px !important;
 }
 
@@ -1590,7 +1597,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   border-collapse: collapse;
   margin: 8px 0;
   font-size: 13px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid hsl(var(--border));
   border-radius: 6px;
   overflow: hidden;
 }
@@ -1598,11 +1605,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 .bot-markdown-content th {
   text-align: left;
   font-weight: 600;
-  color: #1d1e1f;
+  color: hsl(var(--foreground));
   padding: 8px 12px;
-  border-bottom: 2px solid #e5e7eb;
-  border-right: 1px solid #e5e7eb;
-  background: #f9fafb;
+  border-bottom: 2px solid hsl(var(--border));
+  border-right: 1px solid hsl(var(--border));
+  background: hsl(var(--muted));
 }
 
 .bot-markdown-content th:last-child {
@@ -1611,9 +1618,9 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 .bot-markdown-content td {
   padding: 6px 12px;
-  border-bottom: 1px solid #f0f0f0;
-  border-right: 1px solid #f0f0f0;
-  color: #788187;
+  border-bottom: 1px solid hsl(var(--border));
+  border-right: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
 }
 
 .bot-markdown-content td:last-child {
@@ -1864,7 +1871,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-theme="midnight"] span.chat-input-special-mention[data-mention-type="channel"],
 [data-theme="midnight"] span.chat-input-special-mention[data-mention-type="here"] {
   color: #60a5fa !important;
-  background-color: #78350f !important;
+  background-color: #451a03 !important;
 }
 
 [data-theme="midnight"] .mention-text {
@@ -2013,6 +2020,23 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   border-right-color: #1e1e23;
 }
 
+/* --- Calendar call stripe pattern --- */
+.call-stripe-pattern {
+  background-image: repeating-linear-gradient(
+    -18deg,
+    rgba(9, 46, 88, 0.55) 0 1px,
+    transparent 1px 4px
+  );
+}
+
+[data-theme="midnight"] .call-stripe-pattern {
+  background-image: repeating-linear-gradient(
+    -18deg,
+    rgba(96, 165, 250, 0.35) 0 1px,
+    transparent 1px 4px
+  );
+}
+
 /* --- 2G: Skeleton/Animation/Highlights --- */
 [data-theme="midnight"] .skeleton-pulse,
 [data-theme="midnight"] .skeleton-pulse-delay-1,
@@ -2050,6 +2074,17 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-theme="midnight"] ::highlight(canvas-search-match-current) {
   background-color: #c2410c;
   color: white;
+}
+
+/* --- ShimmerText component dark theme fixes --- */
+.shimmer-text-gradient {
+  --base-color: #e5e5e5;
+  --base-gradient-color: #ffffff;
+}
+
+[data-theme="midnight"] .shimmer-text-gradient {
+  --base-color: #4b5563;
+  --base-gradient-color: #9ca3af;
 }
 
 /* --- Present Toolbar (blocknote-layout external component) --- */
@@ -2102,6 +2137,16 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   color: #60a5fa !important;
 }
 
+/* --- Ticket header status tab slider --- */
+[data-theme="midnight"] [data-id="ticket-header-status-tabs"] > div.absolute {
+  background-color: rgba(0, 115, 191, 0.25) !important;
+  border-color: rgba(0, 115, 191, 0.5) !important;
+}
+
+[data-theme="midnight"] [data-slot="status-tab"][class*="text-action-primary"] {
+  color: #60a5fa !important;
+}
+
 [data-theme="midnight"] #present-toolbar-dropdown button.bg-blue-50:hover {
   background-color: rgba(37, 99, 235, 0.25) !important;
 }
@@ -2138,6 +2183,78 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   box-shadow:
     0 4px 6px -1px rgba(0, 0, 0, 0.4),
     0 2px 4px -2px rgba(0, 0, 0, 0.3);
+}
+
+/* --- 2I: MarkdownPreview Dark Mode Overrides --- */
+/* Ensure MarkdownPreview content inherits theme colors in dark mode */
+[data-theme="midnight"] .wmde-markdown {
+  background-color: transparent !important;
+  color: var(--foreground) !important;
+}
+
+[data-theme="midnight"] .wmde-markdown p,
+[data-theme="midnight"] .wmde-markdown li,
+[data-theme="midnight"] .wmde-markdown td,
+[data-theme="midnight"] .wmde-markdown th {
+  color: #d1d5db !important;
+}
+
+[data-theme="midnight"] .wmde-markdown h1,
+[data-theme="midnight"] .wmde-markdown h2,
+[data-theme="midnight"] .wmde-markdown h3,
+[data-theme="midnight"] .wmde-markdown h4,
+[data-theme="midnight"] .wmde-markdown h5,
+[data-theme="midnight"] .wmde-markdown h6 {
+  color: #e5e7eb !important;
+  border-bottom-color: #374151 !important;
+}
+
+[data-theme="midnight"] .wmde-markdown a {
+  color: #60a5fa !important;
+}
+
+[data-theme="midnight"] .wmde-markdown a:hover {
+  color: #93c5fd !important;
+}
+
+[data-theme="midnight"] .wmde-markdown code {
+  background-color: #1f2937 !important;
+  color: #d1d5db !important;
+}
+
+[data-theme="midnight"] .wmde-markdown pre {
+  background-color: #111827 !important;
+}
+
+[data-theme="midnight"] .wmde-markdown pre code {
+  background-color: transparent !important;
+  color: #f3f4f6 !important;
+}
+
+[data-theme="midnight"] .wmde-markdown blockquote {
+  color: #9ca3af !important;
+  border-left-color: #4b5563 !important;
+}
+
+[data-theme="midnight"] .wmde-markdown hr {
+  background-color: #374151 !important;
+}
+
+[data-theme="midnight"] .wmde-markdown table {
+  border-color: #374151 !important;
+}
+
+[data-theme="midnight"] .wmde-markdown th,
+[data-theme="midnight"] .wmde-markdown td {
+  border-color: #374151 !important;
+}
+
+[data-theme="midnight"] .wmde-markdown th {
+  background-color: #1f2937 !important;
+}
+
+[data-theme="midnight"] .wmde-markdown tr:nth-child(2n) {
+  background-color: #1f2937 !important;
 }
 
 [data-theme="midnight"] .shadow-lg {
@@ -2250,4 +2367,169 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-theme="midnight"] .bot-markdown-content hr,
 [data-theme="midnight"] .bot-markdown-content-call-summary hr {
   border-top-color: #374151 !important;
+}
+
+/* --- 2K: AG Grid Dark Mode Fixes --- */
+[data-theme="midnight"] .ag-header {
+  background-color: #1a1a1a !important;
+}
+
+[data-theme="midnight"] .ag-header-cell {
+  background-color: #1a1a1a !important;
+  color: #9ca3af !important;
+}
+
+[data-theme="midnight"] .ag-row {
+  background-color: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+  border-color: #2a2d30 !important;
+}
+
+[data-theme="midnight"] .ag-cell {
+  background-color: transparent !important;
+  color: hsl(var(--foreground)) !important;
+  border-color: #2a2d30 !important;
+}
+
+[data-theme="midnight"] .ag-row-selected {
+  background-color: #1e3a5f !important;
+}
+
+[data-theme="midnight"] .ag-paging-panel {
+  background-color: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+[data-theme="midnight"] .ag-paging-button {
+  color: hsl(var(--foreground)) !important;
+}
+
+[data-theme="midnight"] .ag-paging-button.ag-disabled {
+  opacity: 0.4 !important;
+}
+
+/* --- 2J: Memory Page - Blend Design System Dark Mode Fixes --- */
+/* DataTable loading state - prevent bright white background.
+   The Blend Design System uses styled-components with hardcoded light-mode colors.
+   The specific class patterns are generated at build time, so we need broad selectors.
+   The audit shows div.sc-bRKDuR.fBvFqp with "Loading data..." text and luminance 1.00.
+
+   IMPORTANT: The class names are hash-based and change between builds.
+   We need to target: 1) The container, 2) Any sc-* div/span with white bg
+*/
+
+/* BROAD OVERRIDE: Any styled-component class within the dashboard
+   that has a white/light background should use the theme background */
+[data-theme="midnight"] [class*="sc-"] {
+  background-color: hsl(var(--background)) !important;
+  color: #d1d5db;
+}
+
+/* Exception: Don't override if it's already explicitly transparent or dark */
+[data-theme="midnight"] [class*="sc-"][style*="transparent"],
+[data-theme="midnight"] [class*="sc-"][style*="rgba(0, 0, 0"],
+[data-theme="midnight"] [class*="sc-"][style*="#000"] {
+  background-color: transparent !important;
+}
+
+/* Nested styled-components should be transparent to avoid stacking backgrounds */
+[data-theme="midnight"] [class*="sc-"] [class*="sc-"] {
+  background-color: transparent !important;
+}
+
+/* MultiSelect trigger buttons (Scope, Doc Type) - improve placeholder and text contrast */
+[data-theme="midnight"] [role="combobox"],
+[data-theme="midnight"] button[aria-haspopup="listbox"] {
+  color: #d1d5db !important;
+}
+
+[data-theme="midnight"] [role="combobox"] span,
+[data-theme="midnight"] button[aria-haspopup="listbox"] span {
+  color: #d1d5db !important;
+}
+
+/* MultiSelect placeholder text */
+[data-theme="midnight"] [role="combobox"] span[class*="placeholder"],
+[data-theme="midnight"] button[aria-haspopup="listbox"] span[class*="placeholder"] {
+  color: #9ca3af !important;
+}
+
+/* Blend DataTable header cells - ensure proper dark mode text color */
+[data-theme="midnight"] th,
+[data-theme="midnight"] th *,
+[data-theme="midnight"] th span {
+  color: #d1d5db !important;
+}
+
+/* Specific targeting for table header text with lower contrast */
+[data-theme="midnight"] thead th {
+  color: #d1d5db !important;
+  background-color: #1a1a1a !important;
+}
+
+/* Table header text spans (Type, User Query, Summary, etc.) */
+[data-theme="midnight"] th p,
+[data-theme="midnight"] th div,
+[data-theme="midnight"] th span {
+  color: #d1d5db !important;
+}
+
+/* Ensure high contrast for all header content */
+[data-theme="midnight"] thead * {
+  color: #d1d5db !important;
+}
+
+/* MultiSelect dropdown menu dark mode */
+[data-theme="midnight"] [role="listbox"] {
+  background-color: #1a1a1a !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="midnight"] [role="option"] {
+  color: #d1d5db !important;
+}
+
+[data-theme="midnight"] [role="option"]:hover {
+  background-color: #2a2d30 !important;
+}
+
+[data-theme="midnight"] [role="option"][aria-selected="true"] {
+  background-color: rgba(37, 99, 235, 0.2) !important;
+  color: #60a5fa !important;
+}
+
+/* Blend Design System - styled-components specific overrides */
+/* The Blend components use sc-* class patterns from styled-components */
+[data-theme="midnight"] [class^="sc-"] {
+  color: #d1d5db;
+}
+
+/* MultiSelect trigger text - higher specificity for styled-component generated classes */
+[data-theme="midnight"] div[class*="sc-"][role="combobox"] span,
+[data-theme="midnight"] button[class*="sc-"][aria-haspopup="listbox"] span {
+  color: #d1d5db !important;
+}
+
+/* DataTable header cells with styled-components classes */
+[data-theme="midnight"] th[class*="sc-"] p,
+[data-theme="midnight"] th[class*="sc-"] span,
+[data-theme="midnight"] th[class*="sc-"] div {
+  color: #d1d5db !important;
+}
+
+/* Target specific header cell text elements that have low contrast in Blend */
+[data-theme="midnight"] .sc-bVHCgj,
+[data-theme="midnight"] .sc-dhKdcB,
+[data-theme="midnight"] .sc-ggWZvA {
+  color: #d1d5db !important;
+}
+
+/* Override any !important colors in table headers for midnight theme */
+[data-theme="midnight"] thead th [class*="sc-"] {
+  color: #d1d5db !important;
+}
+
+/* Ensure MultiSelect values/placeholders have enough contrast */
+[data-theme="midnight"] div[class*="sc-"] span:first-child {
+  color: #d1d5db !important;
 }

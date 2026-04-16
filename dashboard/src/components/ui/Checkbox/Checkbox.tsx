@@ -21,7 +21,7 @@ export function Checkbox({ checked, onChange, label = 'Edit entire series' }: Ch
           relative flex items-center justify-center
           w-[18px] h-[18px] rounded-[4px] shrink-0
           border transition-all duration-150 ease-in-out
-          ${checked ? 'bg-blue-600 border-blue-600 ' : 'bg-card border-border '}
+          ${checked ? 'bg-primary border-primary ' : 'bg-card border-border '}
         `}
       >
         {/* Checkmark SVG */}
@@ -35,7 +35,7 @@ export function Checkbox({ checked, onChange, label = 'Edit entire series' }: Ch
         >
           <path
             d='M1 4L3.5 6.5L9 1'
-            stroke='white'
+            stroke='hsl(var(--primary-foreground))'
             strokeWidth='1.6'
             strokeLinecap='round'
             strokeLinejoin='round'
@@ -44,7 +44,7 @@ export function Checkbox({ checked, onChange, label = 'Edit entire series' }: Ch
       </span>
 
       {/* Label text */}
-      {label && <span className={`text-[13px] font-medium text-primary`}>{label}</span>}
+      {label && <span className='text-[13px] font-medium text-foreground'>{label}</span>}
     </label>
   );
 }

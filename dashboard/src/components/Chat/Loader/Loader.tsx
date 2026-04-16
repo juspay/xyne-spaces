@@ -36,7 +36,7 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
           style={{ width: '100%', height: '100%' }}
         />
       </div>
-      {message && <p className='mt-1 text-black text-sm'>{message}</p>}
+      {message && <p className='mt-1 text-foreground text-sm'>{message}</p>}
     </div>
   );
 };

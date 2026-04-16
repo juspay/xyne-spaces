@@ -233,7 +233,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
   const buttonClass = (active: boolean): string =>
     `p-1.5 rounded transition-all duration-200 ease-in-out ${
-      active ? 'bg-blue-100 text-primary' : 'hover:bg-accent text-muted-foreground'
+      active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
     }`;
 
   return (

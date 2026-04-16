@@ -84,7 +84,11 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
       );
     }
 
-    return isPrivate ? <ChatLock color={isActive ? '#1D1E1F' : '#464C53'} /> : <Hash size={12} />;
+    return isPrivate ? (
+      <ChatLock color={isActive ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))'} />
+    ) : (
+      <Hash size={12} />
+    );
   };
 
   const checkTruncation = (): void => {
@@ -124,14 +128,16 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
             {getIcon()}
             {/* Online status indicator for DMs - shown on the Avatar */}
             {/* {isDM && avatarUserId && (
-              <div className='absolute bottom-0 right-0 size-[6px] bg-[#00c951] border border-white rounded-full' />
+              <div className='absolute bottom-0 right-0 size-[6px] bg-status-success border border-background rounded-full' />
             )} */}
           </div>
           <span
             ref={nameRef}
             className={cn(
               'flex-1 truncate min-w-0 text-[16px] leading-[1.2] tracking-[-0.32px] flex items-center gap-1.5',
-              shouldShowBold ? 'font-semibold text-[#181B1D]' : 'font-medium text-[#788187]',
+              shouldShowBold
+                ? 'font-semibold text-foreground'
+                : 'font-medium text-muted-foreground',
             )}
           >
             <span className='truncate'>{displayName}</span>
@@ -147,7 +153,7 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
             )}
           </span>
           {hasActiveCall && (
-            <span className='shrink-0 rounded-full bg-[#2D881F] px-2 py-1 text-white'>
+            <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
               <Headphones size={14} />
             </span>
           )}

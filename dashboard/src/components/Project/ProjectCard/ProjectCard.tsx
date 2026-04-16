@@ -47,8 +47,8 @@ export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): Re
       <div className='flex items-start justify-between mb-4'>
         <div className='flex-1'>
           <div className='flex items-center gap-2 mb-2'>
-            <h3 className='text-lg font-semibold text-gray-900'>{project.name}</h3>
-            <span className='px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded'>
+            <h3 className='text-lg font-semibold text-foreground'>{project.name}</h3>
+            <span className='px-2 py-0.5 text-xs font-medium bg-primary/10 text-primary rounded'>
               {project.code}
             </span>
           </div>

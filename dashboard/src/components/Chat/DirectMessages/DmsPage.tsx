@@ -275,7 +275,10 @@ const DmsPage = (): ReactElement => {
     // Show DM list on index route
     return (
       <div className='flex flex-col h-full max-w-full bg-background text-foreground overflow-x-hidden px-2 w-screen'>
-        <div className='block sm:hidden -mx-2 px-4 pt-2 pb-4 bg-[#E9ECF5D9] rounded-b-[24px] border-b border-[#181B1D] border-opacity-[0.07]'>
+        <div
+          className='block sm:hidden -mx-2 px-4 pt-2 pb-4 rounded-b-[24px] border-b border-border'
+          style={{ background: 'var(--mobile-panel-bg)' }}
+        >
           {/* Top Row: Logo + Avatar */}
           <div className='flex items-center justify-between mb-4'>
             <div className='flex items-center gap-1'>
@@ -284,7 +287,7 @@ const DmsPage = (): ReactElement => {
             <div className='flex items-center gap-3'>
               <button
                 onClick={() => startWalkthrough(true)}
-                className='p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-black/5 transition-colors'
+                className='p-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                 aria-label='Replay Tour'
                 title='Replay Tour'
                 data-track-category='DM'
@@ -305,7 +308,7 @@ const DmsPage = (): ReactElement => {
               id='dm-search-input'
               ref={dmSearchInputRef}
               type='text'
-              className='w-full h-11 pl-12 pr-10 py-3 bg-background/70 rounded-full border border-[#181B1D] border-opacity-[0.06] text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-0'
+              className='w-full h-11 pl-12 pr-10 py-3 bg-background rounded-full border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0'
               placeholder='Search DMs (Cmd+K)'
               value={dmSearchQuery}
               onChange={e => {
@@ -372,14 +375,14 @@ const DmsPage = (): ReactElement => {
         {/* Floating Create DM Button */}
         <button
           id='dm-create-btn'
-          className='fixed bottom-[85px] right-4 z-40 flex items-center justify-center size-14 rounded-full bg-[#ff4f4f] border-[0.5px] border-[#181B1D]/30 backdrop-blur-[10px] shadow-lg'
+          className='fixed bottom-[85px] right-4 z-40 flex items-center justify-center size-14 rounded-full bg-action-primary border border-border backdrop-blur-[10px] shadow-lg'
           onClick={handleAddDirectMessage}
           aria-label='Create new message'
           data-testid='create-new-message-btn'
           data-track-category='DM'
           data-track-name='CREATE_DM'
         >
-          <PenBox className='size-5 text-white' />
+          <PenBox className='size-5 text-action-primary-foreground' />
         </button>
 
         {/* Render the Dialog and AddDmForm component */}
@@ -444,7 +447,7 @@ const DmsPage = (): ReactElement => {
                   data-track-category='DM'
                   data-track-name='CREATE_DM_DESKTOP'
                 >
-                  <PenBox className='size-5 text-blue-600' />
+                  <PenBox className='size-5 text-primary' />
                 </button>
               </div>
               <div className='relative dm-search-container'>

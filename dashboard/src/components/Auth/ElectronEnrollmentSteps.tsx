@@ -61,7 +61,7 @@ export function ElectronEnrollmentSteps({
                 <div
                   className={cn(
                     'absolute left-3.5 top-8 bottom-0 w-0.5',
-                    isCompleted ? 'bg-[#FF4F4F]' : 'border-[#FF4F4F]',
+                    isCompleted ? 'bg-action-primary' : 'bg-border',
                   )}
                   aria-hidden='true'
                 />
@@ -72,9 +72,9 @@ export function ElectronEnrollmentSteps({
                 className={cn(
                   'absolute left-0 top-0 flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold border-2 transition-colors duration-200',
                   isActive
-                    ? 'border-[#FF4F4F] bg-[#FF4F4F] text-[#fff7ed]'
+                    ? 'border-action-primary bg-action-primary text-action-primary-foreground'
                     : isCompleted
-                      ? 'border-[#FF4F4F] bg-[#FF4F4F] text-[#fff7ed]'
+                      ? 'border-action-primary bg-action-primary text-action-primary-foreground'
                       : 'border-muted-foreground/30 bg-background text-muted-foreground',
                 )}
               >
@@ -112,7 +112,7 @@ export function ElectronEnrollmentSteps({
               href='https://docs.google.com/document/d/1dad4KPVMjGWE7nC3OxhXGvrL-g7AlqUprxqKklgAZcc/edit?usp=sharing'
               target='_blank'
               rel='noopener noreferrer'
-              className='underline text-[#FF4F4F] hover:text-[#FF4F4F]/80'
+              className='underline text-primary hover:text-primary/80'
             >
               this document
             </a>{' '}
@@ -125,7 +125,7 @@ export function ElectronEnrollmentSteps({
             target='_blank'
             rel='noreferrer'
             href='https://juspay.slack.com/archives/C0A473SV8CC'
-            className='font-bold text-[#FF4F4F] hover:text-[#FF4F4F]/80 hover:underline'
+            className='font-bold text-primary hover:text-primary/80 hover:underline'
           >
             #xyne-app-issues
           </a>{' '}

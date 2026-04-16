@@ -70,7 +70,11 @@ const ChannelItem = ({
       return <Avatar userId={avatarUserId} size='sm' />;
     }
 
-    return isPrivate ? <ChatLock color={isActive ? '#1D1E1F' : '#464C53'} /> : <Hash size={12} />;
+    return isPrivate ? (
+      <ChatLock color={isActive ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))'} />
+    ) : (
+      <Hash size={12} />
+    );
   };
 
   // Truncation detection for tooltip
@@ -106,15 +110,15 @@ const ChannelItem = ({
         to={`/chat/dir/${channel.id}`}
         className={cn(
           'text-base flex items-center gap-2 rounded-lg px-2 h-8 transition-colors',
-          'hover:bg-[#E4E6E7] hover:text-[#181B1D]',
+          'hover:bg-muted hover:text-foreground',
 
-          isActive ? 'bg-[#E4E6E7]' : 'bg-transparent',
+          isActive ? 'bg-muted' : 'bg-transparent',
 
           shouldShowBold
-            ? '!font-bold text-[#181B1D]'
+            ? '!font-bold text-foreground'
             : isActive
-              ? 'font-normal text-[#181B1D]'
-              : 'font-normal text-[#788187]',
+              ? 'font-normal text-foreground'
+              : 'font-normal text-muted-foreground',
         )}
         style={shouldShowBold ? { fontWeight: '700' } : undefined}
         onMouseEnter={() => setIsHovered(true)}
@@ -134,7 +138,7 @@ const ChannelItem = ({
             {displayName}
           </span>
           {hasActiveCall && (
-            <span className='shrink-0 rounded-full bg-[#2D881F] px-2 py-1 text-white'>
+            <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
               <Headphones size={14} />
             </span>
           )}

@@ -396,7 +396,7 @@ const Settings = (): ReactElement => {
             )}
           </div>
           {isCurrentlyUnavailable && unavailableUntil && (
-            <div className='text-xs text-gray-500'>
+            <div className='text-xs text-muted-foreground'>
               Until {format(new Date(unavailableUntil), 'dd/MM/yyyy hh:mm a')}
             </div>
           )}
@@ -408,14 +408,16 @@ const Settings = (): ReactElement => {
         <div className='mt-2 space-y-1'>
           <div
             className={cn(
-              'px-2 py-1 rounded-lg border border-gray-200 bg-transparent hover:bg-gray-100 transition-colors w-full flex items-center justify-between gap-2',
+              'px-2 py-1 rounded-lg border border-border bg-transparent hover:bg-accent transition-colors w-full flex items-center justify-between gap-2',
             )}
             data-track-category='Settings'
             data-track-name='ResumeNotificationsArea'
           >
             <div className='flex items-center gap-2 min-w-0 flex-1'>
-              <BellOff className='size-4 flex-shrink-0 text-gray-600' />
-              <div className='text-sm font-medium text-gray-900 truncate'>Notifications paused</div>
+              <BellOff className='size-4 flex-shrink-0 text-muted-foreground' />
+              <div className='text-sm font-medium text-foreground truncate'>
+                Notifications paused
+              </div>
             </div>
             <Button
               variant='ghost'
@@ -426,11 +428,11 @@ const Settings = (): ReactElement => {
               data-track-category='Settings'
               data-track-name='ResumeNotifications'
             >
-              <X className='size-3 text-gray-600' />
+              <X className='size-3 text-muted-foreground' />
             </Button>
           </div>
           {notificationsPausedUntil && (
-            <div className='text-xs text-gray-500'>
+            <div className='text-xs text-muted-foreground'>
               Until {format(new Date(notificationsPausedUntil), 'dd/MM/yyyy hh:mm a')}
             </div>
           )}
@@ -440,15 +442,15 @@ const Settings = (): ReactElement => {
           <Popover
             trigger={
               <button
-                className='w-full px-2 py-1 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-200 transition-colors flex items-center justify-between gap-2'
+                className='w-full px-2 py-1 rounded-lg border border-border bg-muted/50 hover:bg-secondary transition-colors flex items-center justify-between gap-2'
                 data-track-category='Settings'
                 data-track-name='OpenPauseNotificationsMenu'
               >
-                <div className='flex items-center p-1 gap-2 text-gray-600'>
+                <div className='flex items-center p-1 gap-2 text-muted-foreground'>
                   <Bell className='size-4 flex-shrink-0' />
                   <span className='text-xs truncate'>Pause notifications for: </span>
                 </div>
-                <ChevronDown className='size-4 text-gray-400' />
+                <ChevronDown className='size-4 text-muted-foreground' />
               </button>
             }
             align='start'
@@ -470,7 +472,7 @@ const Settings = (): ReactElement => {
                       e.preventDefault();
                       handlePauseNotifications(option.minutes);
                     }}
-                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                    className='w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                     data-track-category='Settings'
                     data-track-name='PauseNotifications'
                     data-track-metadata={JSON.stringify({ duration: option.minutes })}
@@ -484,12 +486,12 @@ const Settings = (): ReactElement => {
                     e.preventDefault();
                     setShowCustomDatePicker(true);
                   }}
-                  className='w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-gray-100 transition-colors text-left'
+                  className='w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-accent transition-colors text-left'
                   data-track-category='Settings'
                   data-track-name='PauseNotificationsCustom'
                 >
                   <span>Custom</span>
-                  <Calendar className='size-4 text-gray-500' />
+                  <Calendar className='size-4 text-muted-foreground' />
                 </button>
               </div>
             ) : (

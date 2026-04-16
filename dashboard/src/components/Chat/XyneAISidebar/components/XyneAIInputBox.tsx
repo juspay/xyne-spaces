@@ -23,6 +23,7 @@ import {
   Phone,
   Mic,
   Microscope,
+  Hash,
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -48,7 +49,7 @@ import { CERTIFICATE_MIME_TYPES } from '@xyne/shared';
 
 // Hash icon component
 const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
-  <img src='/svgs/icons/hash.svg' alt='#' className={className} width={16} height={16} />
+  <Hash className={className} size={16} />
 );
 
 import type { UserActivity } from '../../../../hooks/useUserActivity';
@@ -448,7 +449,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         }).configure({
           openOnClick: false,
           HTMLAttributes: {
-            class: 'text-blue-600 hover:text-blue-700 underline cursor-text',
+            class:
+              'text-[color:var(--link-color)] hover:text-[color:var(--link-hover-color)] underline cursor-text',
             rel: 'noopener noreferrer',
           },
         }),
@@ -1110,14 +1112,14 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               className='flex items-center gap-2 overflow-x-auto flex-nowrap min-w-0 pb-2'
               style={{
                 scrollbarWidth: 'thin',
-                scrollbarColor: '#D1D5DB transparent',
+                scrollbarColor: 'hsl(var(--border)) transparent',
               }}
             >
               {/* "/" Button to open unified context modal */}
               <button
                 type='button'
                 onClick={() => onOpenContextModal?.()}
-                className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-[#E4E6E7] hover:bg-[#E8EAED] transition-all duration-200 ease-in-out flex-shrink-0`}
+                className={`flex h-7 py-1 px-2 justify-center items-center gap-2 ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0`}
                 aria-label='Add context'
                 title='Add context'
                 data-track-category='XyneAI'
@@ -1132,7 +1134,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   type='button'
                   onClick={handleResearchButtonClick}
                   disabled={isResearchLoading}
-                  className={`flex h-7 py-1 px-2 justify-center items-center ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-[#E4E6E7] hover:bg-[#E8EAED] transition-all duration-200 ease-in-out flex-shrink-0 ${isResearchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`flex h-7 py-1 px-2 justify-center items-center ${isMobile ? 'rounded-full' : 'rounded-lg'} border border-border hover:bg-muted transition-all duration-200 ease-in-out flex-shrink-0 ${isResearchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   aria-label='Select product or repository for research'
                   title='Deep Research'
                   data-track-category='XyneAI'
@@ -1145,7 +1147,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {/* Thread Context Pill */}
               {activeThreadInfo && (
                 <div
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
                 >
                   <button
                     type='button'
@@ -1177,12 +1179,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {/* Canvas Context Pill */}
               {activeCanvasInfo && (
                 <div
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
                 >
                   <button
                     type='button'
                     onClick={handleCanvasPillClick}
-                    className='flex items-center gap-1 cursor-pointer hover:bg-gray-50 transition-colors bg-transparent border-0 p-0'
+                    className='flex items-center gap-1 cursor-pointer hover:bg-accent transition-colors bg-transparent border-0 p-0'
                     aria-label={`Navigate to canvas: ${activeCanvasInfo.title || 'Untitled Canvas'}`}
                     data-track-category='XYNE_AI'
                     data-track-name='ClickCanvasContextPill'
@@ -1190,7 +1192,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       canvasId: activeCanvasInfo.viewAccessId,
                     })}
                   >
-                    <FileText className='w-3.5 h-3.5 text-gray-600' />
+                    <FileText className='w-3.5 h-3.5 text-muted-foreground' />
                     <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
                       {activeCanvasInfo.title || 'Untitled Canvas'}
                     </span>
@@ -1198,7 +1200,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <button
                     type='button'
                     onClick={handleRemoveCanvasInfo}
-                    className='hover:bg-gray-200 rounded p-0.5 transition-colors flex-shrink-0'
+                    className='hover:bg-secondary rounded p-0.5 transition-colors flex-shrink-0'
                     aria-label='Remove canvas context'
                     data-track-category='XYNE_AI'
                     data-track-name='RemoveCanvasContext'
@@ -1215,12 +1217,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {activeSelectionInfos.map((selection, index) => (
                 <div
                   key={`${selection.canvasViewAccessId}-${index}`}
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0`}
+                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border bg-muted/50 flex-shrink-0`}
                 >
                   <button
                     type='button'
                     onClick={() => handleSelectionPillClick(selection)}
-                    className='flex items-center gap-1 cursor-pointer hover:bg-blue-100 transition-colors bg-transparent border-0 p-0'
+                    className='flex items-center gap-1 cursor-pointer hover:bg-muted transition-colors bg-transparent border-0 p-0'
                     aria-label={`Navigate to canvas with selection: ${selection.preview}`}
                     data-track-category='XYNE_AI'
                     data-track-name='ClickSelectionContextPill'
@@ -1228,15 +1230,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       canvasId: selection.canvasViewAccessId,
                     })}
                   >
-                    <FileText className='w-3.5 h-3.5 text-blue-600' />
-                    <span className="text-blue-700 font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[150px] truncate">
+                    <FileText className='w-3.5 h-3.5 text-primary' />
+                    <span className="text-primary font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[150px] truncate">
                       {selection.preview}
                     </span>
                   </button>
                   <button
                     type='button'
                     onClick={() => handleRemoveSelectionInfo(index)}
-                    className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                    className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
                     aria-label='Remove selection context'
                     data-track-category='XYNE_AI'
                     data-track-name='RemoveSelectionContext'
@@ -1244,7 +1246,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       canvasId: selection.canvasViewAccessId,
                     })}
                   >
-                    <X className='w-3 h-3 text-blue-600' />
+                    <X className='w-3 h-3 text-primary' />
                   </button>
                 </div>
               ))}
@@ -1252,12 +1254,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {/* Browser Context Pill */}
               {browserContext && (
                 <div
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#667eea] bg-gradient-to-r from-[#667eea]/10 to-[#764ba2]/10 flex-shrink-0`}
+                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border bg-muted/50 flex-shrink-0`}
                 >
                   <button
                     type='button'
                     onClick={handleBrowserContextClick}
-                    className='flex items-center gap-1 cursor-pointer hover:bg-white/50 transition-colors bg-transparent border-0 p-0 rounded px-1'
+                    className='flex items-center gap-1 cursor-pointer hover:bg-muted transition-colors bg-transparent border-0 p-0 rounded px-1'
                     aria-label={`Open ${browserContext.domain}`}
                     title={`${browserContext.title}\n${browserContext.url}`}
                     data-track-category='XYNE_AI'
@@ -1267,7 +1269,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       domain: browserContext.domain,
                     })}
                   >
-                    <Globe className='w-3.5 h-3.5 text-[#667eea] flex-shrink-0' />
+                    <Globe className='w-3.5 h-3.5 text-primary flex-shrink-0' />
                     <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap max-w-[200px] truncate">
                       {browserContext.text.slice(0, 50)}
                       {browserContext.text.length > 50 ? '...' : ''} • {browserContext.domain}
@@ -1276,13 +1278,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <button
                     type='button'
                     onClick={handleRemoveBrowserContext}
-                    className='hover:bg-white/70 rounded p-0.5 transition-colors flex-shrink-0'
+                    className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
                     aria-label='Remove browser context'
                     data-track-category='XYNE_AI'
                     data-track-name='RemoveBrowserContext'
                     data-track-metadata={JSON.stringify({ url: browserContext.url })}
                   >
-                    <X className='w-3 h-3 text-[#667eea]' />
+                    <X className='w-3 h-3 text-primary' />
                   </button>
                 </div>
               )}
@@ -1291,7 +1293,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {selectedChannels.map(channel => (
                 <div
                   key={channel.id}
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
                 >
                   <div className='flex items-center gap-1'>
                     <div className='flex-shrink-0'>
@@ -1308,7 +1310,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   {/* Show X button for all channels */}
                   <button
                     onClick={() => onRemoveChannel?.(channel.id)}
-                    className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                    className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
                     aria-label={`Remove ${channel.name}`}
                     data-track-category='XyneAI'
                     data-track-name='REMOVE_CHANNEL'
@@ -1322,7 +1324,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {/* Research Context Pill */}
               {selectedResearch && (
                 <div
-                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-[#E4E6E7] flex-shrink-0`}
+                  className={`flex h-7 py-1 ${isMobile ? 'px-1' : 'px-2'} justify-center items-center ${isMobile ? 'gap-[4px]' : 'gap-2'} rounded-lg border border-border flex-shrink-0`}
                 >
                   <div className='flex items-center gap-1'>
                     <div className='flex-shrink-0'>
@@ -1352,7 +1354,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {selectedAttachments.map(attachment => (
                 <div
                   key={attachment.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-[#F2F2F3] flex-shrink-0'
+                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-muted flex-shrink-0'
                 >
                   <div className='flex items-center gap-1'>
                     <div className='flex-shrink-0'>
@@ -1364,7 +1366,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   </div>
                   <button
                     onClick={() => handleRemoveAttachment(attachment.id)}
-                    className='hover:bg-blue-200 rounded p-0.5 transition-colors flex-shrink-0'
+                    className='hover:bg-muted rounded p-0.5 transition-colors flex-shrink-0'
                     aria-label={`Remove ${attachment.name}`}
                     data-track-category='XyneAI'
                     data-track-name='REMOVE_ATTACHMENT'
@@ -1379,7 +1381,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {selectedTickets.map(ticket => (
                 <div
                   key={ticket.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'
+                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
                 >
                   <div className='flex items-center gap-1'>
                     <div className='flex-shrink-0'>
@@ -1406,7 +1408,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {selectedCanvases.map(canvas => (
                 <div
                   key={canvas.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'
+                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
                 >
                   <div className='flex items-center gap-1'>
                     <div className='flex-shrink-0'>
@@ -1433,7 +1435,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {selectedTranscripts.map(transcript => (
                 <div
                   key={transcript.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'
+                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
                 >
                   <div className='flex items-center gap-1'>
                     <div className='flex-shrink-0'>
@@ -1460,7 +1462,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               {selectedRecordings.map(recording => (
                 <div
                   key={recording.id}
-                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'
+                  className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-card flex-shrink-0'
                 >
                   <div className='flex items-center gap-1'>
                     <div className='flex-shrink-0'>
@@ -1485,7 +1487,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
               {/* Activity Pills */}
               {selectedActivities.length > 0 && (
-                <div className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-[#E4E6E7] bg-white flex-shrink-0'>
+                <div className='flex h-7 py-1 px-2 justify-center items-center gap-2 rounded-lg border border-border bg-background flex-shrink-0'>
                   <div className='flex items-center gap-1'>
                     <span className="text-foreground font-['Inter'] text-sm font-[450] whitespace-nowrap">
                       {selectedActivities.length}{' '}
@@ -1559,7 +1561,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     disabled={!webSearchAccessible}
                     className={`p-1.5 rounded-lg transition-colors ${
                       webSearchEnabled
-                        ? 'bg-[#E6F4EA] text-[#1E8E3E] hover:bg-[#D8EBE2]'
+                        ? 'bg-muted text-status-success hover:bg-accent'
                         : 'hover:bg-accent text-muted-foreground'
                     } ${!webSearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
                     aria-label={
@@ -1599,7 +1601,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     disabled={!deepResearchAccessible}
                     className={`p-1.5 rounded-lg transition-colors ${
                       deepResearchEnabled
-                        ? 'bg-[#FFF3E0] text-[#E65100] hover:bg-[#FFE0B2]'
+                        ? 'bg-muted text-status-pending hover:bg-accent'
                         : 'hover:bg-accent text-muted-foreground'
                     } ${!deepResearchAccessible ? 'opacity-50 cursor-not-allowed' : ''}`}
                     aria-label={
@@ -1625,7 +1627,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 )}
 
                 {/* Divider line */}
-                {onCreateCanvasToggle && <div className='h-4 w-px bg-gray-300' />}
+                {onCreateCanvasToggle && <div className='h-4 w-px bg-border' />}
 
                 {/* Create Canvas Toggle Button */}
                 {onCreateCanvasToggle && (
@@ -1634,8 +1636,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     onClick={onCreateCanvasToggle}
                     className={`p-1.5 rounded-lg transition-colors ${
                       createCanvasEnabled
-                        ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
-                        : 'hover:bg-gray-100 text-gray-600'
+                        ? 'bg-muted text-primary hover:bg-accent'
+                        : 'hover:bg-accent text-muted-foreground'
                     }`}
                     aria-label={createCanvasEnabled ? 'Disable create canvas' : 'Create canvas'}
                     title={createCanvasEnabled ? 'Create canvas enabled' : 'Create canvas'}
@@ -1654,9 +1656,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 disabled={!isStreaming && !inputValue.trim()}
                 className={`absolute ${isMobile ? 'bottom-[5px] mr-1 mb-1' : 'bottom-2'} right-2 p-2 rounded-full transition-colors ${
                   isStreaming
-                    ? 'bg-[#FF4F4F] text-white hover:bg-[#E64545]'
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                     : inputValue.trim()
-                      ? 'bg-[#FF4F4F] text-white hover:bg-[#E64545]'
+                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                       : 'bg-muted text-muted-foreground cursor-not-allowed'
                 }`}
                 data-track-category='XyneAI'
@@ -1728,7 +1730,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                 }}
                 onKeyDown={handleResearchSearchKeyDown}
                 placeholder={`Search ${researchTab}...`}
-                className="w-full px-3 py-2 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent font-['Inter']"
+                className="w-full bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent font-['Inter']"
                 data-track-category='XyneAI'
                 data-track-name='RESEARCH_SEARCH_INPUT'
               />

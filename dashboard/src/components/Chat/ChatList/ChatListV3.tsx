@@ -849,15 +849,15 @@ const ChatListV3: React.FC<ChatListProps> = ({
 
   if (conversations.length === 0 && isInitialLoadComplete)
     return (
-      <div className='text-center text-gray-500 flex-1 flex items-center justify-center'>
-        <p className='text-gray-500'>No conversations in this channel yet</p>
+      <div className='text-center text-muted-foreground flex-1 flex items-center justify-center'>
+        <p className='text-muted-foreground'>No conversations in this channel yet</p>
       </div>
     );
 
   if (!initialTopMostItemIndex)
     return (
       <div
-        className='absolute inset-0 flex items-center justify-center bg-white z-50'
+        className='absolute inset-0 flex items-center justify-center bg-background z-50'
         data-testid='chat-list-loading'
       >
         <LoadingAnimation
@@ -929,9 +929,9 @@ const ChatListV3: React.FC<ChatListProps> = ({
               )}
               {isNewMessageBoundary && (
                 <div className='relative py-3'>
-                  <div className='absolute left-0 right-0 top-1/2 h-px bg-red-500 z-0'></div>
+                  <div className='absolute left-0 right-0 top-1/2 h-px bg-destructive z-0'></div>
                   <div className='relative z-5 flex items-center justify-center'>
-                    <span className='text-xs text-red-500 bg-white px-2 font-medium'>
+                    <span className='text-xs text-destructive bg-background px-2 font-medium'>
                       New Messages
                     </span>
                   </div>
@@ -958,7 +958,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
           data-track-category='CHAT_LIST'
           data-track-name='CLICK_NEW_MESSAGES_PILL'
           onClick={handleNewMessagesScroll}
-          className='cursor-pointer absolute top-6 left-1/2 -translate-x-1/2 bg-blue-900 text-white px-2 py-2 rounded-full flex items-center gap-1 shadow-lg z-50'
+          className='cursor-pointer absolute top-6 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-2 py-2 rounded-full flex items-center gap-1 shadow-lg z-50'
         >
           <ArrowDown className='w-3 h-3' />
           <span className='text-xs font-medium'>
@@ -973,7 +973,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
           data-track-category='CHAT_LIST'
           data-track-name='CLICK_LATEST_MESSAGES_PILL'
           onClick={() => handleLatestMessagesScroll()}
-          className='cursor-pointer absolute bottom-6 left-1/2 -translate-x-1/2 bg-blue-900 text-white px-2 py-2 rounded-full flex items-center gap-1 shadow-lg z-50'
+          className='cursor-pointer absolute bottom-6 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-2 py-2 rounded-full flex items-center gap-1 shadow-lg z-50'
         >
           <ArrowDown className='w-3 h-3' />
           <span className='text-xs font-medium'>Latest messages</span>
@@ -984,12 +984,12 @@ const ChatListV3: React.FC<ChatListProps> = ({
       {showScrollButton && (
         <button
           onClick={scrollToBottom}
-          className='absolute bottom-6 right-6 bg-white border border-gray-300 rounded-full p-3 shadow-lg hover:shadow-xl transition-all duration-200 hover:bg-gray-50 z-50'
+          className='absolute bottom-6 right-6 bg-background border border-border rounded-full p-3 shadow-lg hover:shadow-xl transition-all duration-200 hover:bg-accent z-50'
           aria-label='Scroll to bottom'
           data-track-category='CHAT_LIST'
           data-track-name='SCROLL_TO_BOTTOM'
         >
-          <ArrowDown className='w-5 h-5 text-gray-700' />
+          <ArrowDown className='w-5 h-5 text-foreground' />
         </button>
       )}
     </div>

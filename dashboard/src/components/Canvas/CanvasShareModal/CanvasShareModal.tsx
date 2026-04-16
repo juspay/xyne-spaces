@@ -220,7 +220,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
         <div className='flex items-center justify-between py-4'>
           <div className='flex items-center gap-3'>
             <CornerDownRight size={18} className='text-muted-foreground' />
-            <span className='text-sm font-medium'>Make visible to channel</span>
+            <span className='text-sm font-medium text-foreground'>Make visible to channel</span>
           </div>
           <button
             role='switch'
@@ -251,7 +251,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
         <div className='py-4 space-y-3'>
           <div className='flex items-center gap-3'>
             <Globe size={18} className='text-muted-foreground' />
-            <span className='text-sm'>Anyone with this link can view</span>
+            <span className='text-sm text-foreground'>Anyone with this link can view</span>
           </div>
 
           {/* Shareable Link */}
@@ -261,12 +261,12 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
               type='text'
               readOnly
               value={viewLink || 'Not available'}
-              className='flex-1 text-sm bg-muted visual-regression-hide'
+              className='flex-1 text-sm bg-muted visual-regression-hide text-foreground border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent'
               disabled={!viewLink}
             />
             <button
               onClick={handleCopyLink}
-              className='px-3 py-2 text-sm text-muted-foreground hover:text-foreground font-medium border border-border rounded-md bg-background hover:bg-accent'
+              className='px-3 py-2 text-sm text-foreground font-medium border border-border rounded-md bg-background hover:bg-accent'
               data-testid='canvas-copy-link-button'
               data-track-category='CANVAS'
               data-track-name='COPY_CANVAS_LINK'

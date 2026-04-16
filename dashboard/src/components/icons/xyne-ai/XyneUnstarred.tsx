@@ -1,7 +1,7 @@
 import { ReactElement } from 'react';
 
 const XyneUnstarred = ({
-  color = '#181B1D',
+  color = 'currentColor',
   size = 20,
 }: {
   color?: string;

@@ -440,7 +440,7 @@ const ActionTray: React.FC<{
   return (
     <div className='absolute top-2 right-2 z-10 opacity-0 group-hover/attachment:opacity-100 transition-opacity duration-200'>
       {!isMobile && (
-        <div className='flex items-center justify-between bg-gray-900/80 backdrop-blur-sm rounded-lg p-1 shadow-lg'>
+        <div className='flex items-center justify-between bg-background/90 backdrop-blur-sm rounded-lg p-1 shadow-lg border border-border'>
           <DownloadButton attachmentId={attachmentId} fileName={fileName} variant='overlay' />
           {canDelete && <DeleteButton fileName={fileName} variant='overlay' onDelete={onDelete} />}
         </div>
@@ -864,7 +864,7 @@ const InlineVideoPlayer: React.FC<{
       <Menu.Trigger>
         <button
           type='button'
-          className='p-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white transition-colors opacity-0 group-hover:opacity-100'
+          className='p-1.5 rounded-md bg-background/90 backdrop-blur-sm text-foreground transition-colors opacity-0 group-hover:opacity-100 border border-border'
           title='More options'
           aria-label='More options'
         >
@@ -876,7 +876,7 @@ const InlineVideoPlayer: React.FC<{
           side='bottom'
           align='end'
           sideOffset={4}
-          className='z-50 bg-black rounded-lg shadow-lg border border-gray-700 p-1 min-w-[160px]'
+          className='z-50 bg-popover rounded-lg shadow-lg border border-border p-1 min-w-[160px]'
           onClick={e => e.stopPropagation()}
         >
           <Menu.Popup>
@@ -886,7 +886,7 @@ const InlineVideoPlayer: React.FC<{
                   attachmentId={attachmentId}
                   fileName={fileName}
                   showLabel
-                  className='text-white'
+                  className='text-foreground'
                 />
               </Menu.Item>
               {canDelete && (

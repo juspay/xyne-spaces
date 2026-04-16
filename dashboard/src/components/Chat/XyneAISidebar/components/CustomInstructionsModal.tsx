@@ -1,4 +1,5 @@
 import { ReactElement, useState, useEffect } from 'react';
+import { X } from 'lucide-react';
 import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
 
@@ -78,7 +79,7 @@ export const CustomInstructionsModal = ({
   if (!isOpen) return null;
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50'>
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
       <div className='bg-popover rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col'>
         {/* Header */}
         <div className='flex items-center justify-between p-6 border-b border-border'>
@@ -90,7 +91,7 @@ export const CustomInstructionsModal = ({
             data-track-category='XYNE_AI'
             data-track-name='CloseCustomInstructionsModal'
           >
-            <img src='/svgs/icons/close.svg' alt='Close' width='16' height='16' />
+            <X size={16} className='text-current' />
           </button>
         </div>
 
@@ -99,8 +100,8 @@ export const CustomInstructionsModal = ({
           <div className='space-y-4'>
             {/* Length Warning */}
             {showLengthWarning && (
-              <div className='p-3 bg-amber-50 border border-amber-200 rounded-lg'>
-                <p className='text-sm text-amber-800'>
+              <div className='p-3 bg-muted border border-border rounded-lg'>
+                <p className='text-sm text-status-pending'>
                   <span className='font-semibold'>Warning:</span> Your custom instructions exceed
                   the {MAX_INSTRUCTION_LENGTH} character limit. Please edit your content to fit
                   within the limit before saving.
@@ -130,7 +131,7 @@ export const CustomInstructionsModal = ({
               />
               <div className='flex justify-end mt-1'>
                 <span
-                  className={`text-xs ${instruction.length >= MAX_INSTRUCTION_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                  className={`text-xs ${instruction.length >= MAX_INSTRUCTION_LENGTH ? 'text-destructive' : 'text-muted-foreground'}`}
                 >
                   {instruction.length}/{MAX_INSTRUCTION_LENGTH}
                 </span>
@@ -143,7 +144,7 @@ export const CustomInstructionsModal = ({
         <div className='flex items-center justify-between p-6 border-t border-border'>
           <button
             onClick={() => void handleClear()}
-            className='px-4 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors'
+            className='px-4 py-2 text-sm font-medium text-destructive hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors'
             disabled={isSaving || isLoading || !instruction}
             data-track-category='XYNE_AI'
             data-track-name='ClearCustomInstructions'
@@ -162,7 +163,7 @@ export const CustomInstructionsModal = ({
             </button>
             <button
               onClick={() => void handleSave()}
-              className='px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary hover:bg-action-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
               disabled={isSaving || isLoading || instruction.trim() === originalInstruction.trim()}
               data-track-category='XYNE_AI'
               data-track-name='SaveCustomInstructions'

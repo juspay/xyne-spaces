@@ -57,12 +57,12 @@ export const AssignmentPauseActivity = ({
     >
       {isExpanded ? (
         <div className='flex flex-col gap-1 mt-2'>
-          <div className='text-sm text-[#181B1D] font-medium'>{expandedText}</div>
+          <div className='text-sm text-foreground font-medium'>{expandedText}</div>
         </div>
       ) : (
-        <span className='text-sm text-[#181B1D]'>
+        <span className='text-sm text-foreground'>
           <span className='font-semibold'>{userName}</span>
-          <span className='text-[#505B62]'>{collapsedSuffix}</span>
+          <span className='text-muted-foreground'>{collapsedSuffix}</span>
         </span>
       )}
     </ActivityItemCard>

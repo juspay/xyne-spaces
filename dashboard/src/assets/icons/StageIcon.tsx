@@ -6,7 +6,7 @@ interface StageIconProps {
 
 export const StageCircleIcon: React.FC<StageIconProps> = ({
   size = 16,
-  color = '#49A169',
+  color = 'var(--status-success)',
   className,
 }) => (
   <svg

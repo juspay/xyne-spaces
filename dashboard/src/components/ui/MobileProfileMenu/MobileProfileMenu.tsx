@@ -70,12 +70,12 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
       <Drawer.Root open={isOpen} onOpenChange={setIsOpen}>
         <Drawer.Portal>
           <Drawer.Overlay
-            className='fixed inset-0 z-50 bg-black/30'
+            className='fixed inset-0 z-50 bg-background/80 backdrop-blur-[2px]'
             onClick={() => setIsOpen(false)}
           />
           <Drawer.Content
             asChild
-            className='fixed inset-x-0 bottom-0 z-50 rounded-t-3xl bg-background max-h-[90dvh] overflow-auto'
+            className='fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-background text-foreground max-h-[90dvh] overflow-auto'
           >
             <motion.div
               animate={{

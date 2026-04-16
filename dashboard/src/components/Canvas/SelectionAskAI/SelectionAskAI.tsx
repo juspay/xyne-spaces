@@ -156,7 +156,7 @@ export const SelectionAskAI = ({
     >
       <button
         onClick={handleAskAI}
-        className='flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-200 rounded-lg shadow-lg hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700'
+        className='flex items-center gap-1.5 px-3 py-1.5 bg-card border border-border rounded-lg shadow-lg hover:bg-accent transition-colors text-sm font-medium text-foreground'
         onMouseDown={e => {
           // Prevent the button click from clearing the selection
           e.preventDefault();

@@ -18,8 +18,8 @@ interface DownloadButtonProps {
 }
 
 const VARIANT_STYLES: Record<DownloadButtonVariant, string> = {
-  default: 'text-gray-200 flex-shrink-0 disabled:cursor-not-allowed',
-  overlay: 'hover:bg-background/20 text-white',
+  default: 'text-muted-foreground flex-shrink-0 disabled:cursor-not-allowed',
+  overlay: 'hover:bg-muted text-background',
 } as const;
 
 const ICON_SIZES: Record<DownloadButtonVariant, number> = {
@@ -71,7 +71,7 @@ export const DownloadButton = memo<DownloadButtonProps>(
         type='button'
         onClick={e => void handleDownload(e)}
         disabled={isDownloading}
-        className={`p-2 rounded-md transition-colors duration-200 disabled:opacity-50 ${VARIANT_STYLES[variant]}`}
+        className={`p-2 rounded-md text-foreground transition-colors duration-200 disabled:opacity-50 ${VARIANT_STYLES[variant]}`}
         title={buttonLabel}
         aria-label={buttonLabel}
         aria-busy={isDownloading}

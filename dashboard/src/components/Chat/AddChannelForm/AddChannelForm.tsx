@@ -6,7 +6,6 @@ import { SingleSelect } from '@juspay/blend-design-system';
 import { Hash, Lock } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
-import { cn } from '../../../utils/classNames';
 import {
   channelService,
   CreateChannelFormData,
@@ -165,7 +164,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   };
 
   const renderFormComponent = (): ReactElement => (
-    <div className='space-y-6 max-w-md mx-auto bg-background'>
+    <div className='space-y-6 max-w-md mx-auto'>
       <div className='text-xl font-medium text-foreground mb-1'>
         {mode === 'promote' ? 'Promote to Channel' : 'Create a channel'}
       </div>
@@ -196,11 +195,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 value={field.state.value}
                 onChange={handleNameChange}
                 placeholder='e.g. general, development, support'
-                className={cn(
-                  'pl-8 pr-12',
-                  field.state.meta.errors.length > 0 &&
-                    'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-                )}
+                className='pl-8 pr-12'
                 aria-invalid={field.state.meta.errors.length > 0}
                 data-testid='channel-name-input'
                 data-track-category='ADD_CHANNEL_FORM'
@@ -212,7 +207,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               </div>
             </div>
             {field.state.meta.errors.length > 0 && field.state.meta.errors[0] && (
-              <p className='text-sm text-red-600'>{field.state.meta.errors[0]}</p>
+              <p className='text-sm text-destructive'>{field.state.meta.errors[0]}</p>
             )}
           </div>
         )}
@@ -238,10 +233,12 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               onSelect={selected => field.handleChange(selected)}
             />
             {field.state.meta.errors.length > 0 && (
-              <p className='text-sm text-red-500 mt-1'>{field.state.meta.errors[0] as string}</p>
+              <p className='text-sm text-destructive mt-1'>
+                {field.state.meta.errors[0] as string}
+              </p>
             )}
             {projectOptions.length === 0 && (
-              <p className='text-sm text-amber-600 mt-1'>
+              <p className='text-sm text-status-pending mt-1'>
                 No projects found. Please create a project first.
               </p>
             )}
@@ -353,7 +350,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           size='default'
           loading={loading || false}
           type='submit'
-          className='bg-blue-600 hover:bg-blue-700'
+          className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
           data-testid='create-channel-button'
           data-track-category='ADD_CHANNEL_FORM'
           data-track-name='CREATE_CHANNEL_SUBMIT'

@@ -484,8 +484,8 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     return (
       <>
         {channel?.isArchived ? (
-          <div className='px-4 py-3 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-200 dark:border-amber-800'>
-            <p className='text-sm text-amber-700 dark:text-amber-300 text-center'>
+          <div className='px-4 py-3 bg-muted border-t border-border'>
+            <p className='text-sm text-status-pending text-center'>
               {conversationId
                 ? 'You are viewing a thread from an archived channel'
                 : `You are viewing #${channel.name}, an archived channel`}

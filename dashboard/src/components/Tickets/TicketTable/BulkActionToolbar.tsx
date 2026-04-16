@@ -53,12 +53,12 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
   return (
     <div
       className='
-    bg-[#181B1D]
+    bg-card
     p-2 sm:p-3
     flex flex-col sm:flex-row sm:items-center w-full md:max-w-[760px] gap-2 sm:gap-4
     absolute bottom-20 left-1/2 -translate-x-1/2
     right-2 sm:right-auto
-    rounded-2xl shadow-2xl border border-white/10
+    rounded-2xl shadow-2xl border border-border
     z-50
     max-w-[calc(100vw-1rem)]
   '
@@ -68,14 +68,14 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
         <div className='flex items-center gap-2 pb-2 sm:pb-0 sm:pr-4 flex-1 sm:flex-none min-w-0'>
           <button
             onClick={onClearSelection}
-            className='p-1 text-white hover:text-muted-foreground transition-colors flex-shrink-0'
+            className='p-1 text-foreground hover:text-muted-foreground transition-colors flex-shrink-0'
             title='Clear selection'
             data-track-category='Tickets'
             data-track-name='ClearTicketSelection'
           >
             <X className='w-4 h-4' />
           </button>
-          <span className='text-xs sm:text-sm font-semibold text-white whitespace-nowrap overflow-hidden text-ellipsis'>
+          <span className='text-xs sm:text-sm font-semibold text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
             {selectedCount} {selectedCount === 1 ? 'ticket' : 'tickets'} selected
           </span>
         </div>
@@ -93,8 +93,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             variant='inline'
             isOpen={activeMenu === 'assignee'}
             onOpenChange={open => setActiveMenu(open ? 'assignee' : null)}
-            inputClassName='!bg-transparent placeholder:text-white text-white border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
-            inputIcon={<UserIcon className='size-4' />}
+            inputClassName='!bg-transparent placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
+            inputIcon={<UserIcon className='size-4 text-foreground' />}
             showIndicator={false}
           />
 
@@ -111,8 +111,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             variant='inline'
             isOpen={activeMenu === 'status'}
             onOpenChange={open => setActiveMenu(open ? 'status' : null)}
-            inputClassName='!bg-transparent placeholder:text-white text-white border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
-            inputIcon={<CircleCheckBig className='size-4' />}
+            inputClassName='!bg-transparent placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
+            inputIcon={<CircleCheckBig className='size-4 text-foreground' />}
             showIndicator={false}
           />
 
@@ -129,8 +129,8 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
             variant='inline'
             isOpen={activeMenu === 'priority'}
             onOpenChange={open => setActiveMenu(open ? 'priority' : null)}
-            inputClassName='!bg-transparent text-white placeholder:text-white border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
-            inputIcon={<Layers className='size-4' />}
+            inputClassName='!bg-transparent text-foreground placeholder:text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
+            inputIcon={<Layers className='size-4 text-foreground' />}
             showIndicator={false}
           />
 
@@ -141,14 +141,14 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               className={cn(
                 'flex items-center gap-1 sm:gap-3 px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-colors whitespace-nowrap',
                 activeMenu === 'dueDate'
-                  ? 'bg-background/10 text-white'
-                  : 'text-muted-foreground hover:bg-background/5 hover:text-white',
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-muted-foreground hover:bg-background/5 hover:text-foreground',
               )}
               data-track-category='Tickets'
               data-track-name='ToggleDueDateMenu'
             >
-              <Calendar className='size-4 text-white flex-shrink-0' />
-              <span className='text-xs sm:text-sm font-semibold text-white'>Due Date</span>
+              <Calendar className='size-4 text-foreground flex-shrink-0' />
+              <span className='text-xs sm:text-sm font-semibold text-foreground'>Due Date</span>
             </button>
 
             {activeMenu === 'dueDate' && (
@@ -180,7 +180,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               variant='inline'
               isOpen={activeMenu === 'stage'}
               onOpenChange={open => setActiveMenu(open ? 'stage' : null)}
-              inputClassName='!bg-transparent text-white border-none placeholder:text-white hover:bg-background/5 text-xs sm:text-sm px-2'
+              inputClassName='!bg-transparent text-foreground border-none placeholder:text-foreground hover:bg-background/5 text-xs sm:text-sm px-2'
               inputIcon={<TicketStatusIcon size={14} />}
             />
           )}
@@ -192,14 +192,14 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
               className={cn(
                 'flex items-center gap-1 sm:gap-3 px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-colors whitespace-nowrap',
                 activeMenu === 'tags'
-                  ? 'bg-background/10 text-white'
-                  : 'text-muted-foreground hover:bg-background/5 hover:text-white',
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-muted-foreground hover:bg-background/5 hover:text-foreground',
               )}
               data-track-category='Tickets'
               data-track-name='ToggleTagsMenu'
             >
-              <Tag className='size-4 text-white flex-shrink-0' />
-              <span className='text-xs sm:text-sm font-semibold text-white'>Tags</span>
+              <Tag className='size-4 text-foreground flex-shrink-0' />
+              <span className='text-xs sm:text-sm font-semibold text-foreground'>Tags</span>
             </button>
 
             {activeMenu === 'tags' && (

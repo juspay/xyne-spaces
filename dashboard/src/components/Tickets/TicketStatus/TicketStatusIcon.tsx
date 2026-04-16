@@ -45,8 +45,8 @@ export const TicketStatusIcon: React.FC<TicketStatusIconProps> = ({
   };
 
   const getColor = () => {
-    if (progressPercentage === 100) return '#10B981';
-    if (progressPercentage > 0) return '#3B82F6';
+    if (progressPercentage === 100) return 'var(--status-success)';
+    if (progressPercentage > 0) return 'var(--status-scheduled)';
     return 'transparent';
   };
   const color = getColor();
@@ -104,7 +104,7 @@ export const TicketStatusWithStages: React.FC<TicketStatusWithStagesProps> = ({
     <div className={cn('flex items-center gap-1.5', className)}>
       {showLeadingDot && <div className='rounded-full h-1 w-1 bg-muted-foreground'></div>}
       <TicketStatusIcon progressPercentage={25} size={12} />
-      <span className={cn('text-xs line-clamp-1 break-all text-blue-500', labelClassName)}>
+      <span className={cn('text-xs line-clamp-1 break-all text-primary', labelClassName)}>
         {currentStageName || 'Not Started'}
       </span>
     </div>

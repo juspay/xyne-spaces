@@ -104,7 +104,7 @@ function PlaceholderPlugin({ placeholder }: { placeholder?: string }) {
 
   return (
     <div
-      className={`absolute ${isMobile ? 'left-0' : 'left-9'} top-1/2 -translate-y-1/2 text-sm text-[#C9CCCF] pointer-events-none`}
+      className={`absolute ${isMobile ? 'left-0' : 'left-9'} top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none`}
     >
       {placeholder}
     </div>
@@ -327,16 +327,16 @@ export function LexicalSearchInput({
           <RichTextPlugin
             contentEditable={
               <span className='flex items-center gap-2'>
-                {!isMobile && <Search size={16} className='ml-3 text-[#788187]' />}
+                {!isMobile && <Search size={16} className='ml-3 text-muted-foreground' />}
                 <ContentEditable
-                  className='min-h-5 py-1 text-sm focus:outline-none flex-1'
+                  className='min-h-5 py-1 text-sm text-foreground focus:outline-none flex-1'
                   spellCheck={true}
                   autoCorrect='on'
                   autoCapitalize='none'
                 />
                 {autocompleteSuffix && (
                   <span
-                    className='text-[#C9CCCF] pointer-events-none text-sm absolute top-1/2 -translate-y-1/2 whitespace-nowrap'
+                    className='text-muted-foreground pointer-events-none text-sm absolute top-1/2 -translate-y-1/2 whitespace-nowrap'
                     style={{ left: `${suffixLeft}px` }}
                   >
                     {autocompleteSuffix}

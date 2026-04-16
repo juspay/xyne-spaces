@@ -39,13 +39,13 @@ const getActivityIcon = (activity: UserActivity): ReactNode => {
   // Check for specific entity types in contextMetadata first
   if (contextMetadata) {
     if (contextMetadata['messageId'] || contextMetadata['message']) {
-      return <MessageSquare className='w-4 h-3.5 text-blue-500' />;
+      return <MessageSquare className='w-4 h-3.5 text-primary' />;
     }
     if (contextMetadata['xyneId'] || contextMetadata['ticketId']) {
-      return <Ticket className='w-4 h-3.5 text-green-500' />;
+      return <Ticket className='w-4 h-3.5 text-status-success' />;
     }
     if (contextMetadata['canvasId']) {
-      return <FileText className='w-4 h-3.5 text-purple-500' />;
+      return <FileText className='w-4 h-3.5 text-status-pending' />;
     }
   }
 
@@ -54,7 +54,7 @@ const getActivityIcon = (activity: UserActivity): ReactNode => {
     eventLower.includes('toggle') ||
     eventLower.includes('open')
   ) {
-    return <RefreshCw className='w-4 h-3.5 text-orange-500' />;
+    return <RefreshCw className='w-4 h-3.5 text-status-pending' />;
   }
 
   // Default icon
@@ -249,7 +249,7 @@ export const UserActivityItem = ({
     <div
       className={`
         w-full transition-all outline-none
-        ${isSelected ? 'bg-blue-100' : 'hover:bg-accent'}
+        ${isSelected ? 'bg-muted' : 'hover:bg-accent'}
         ${isExpanded ? 'bg-muted' : ''}
       `}
     >
@@ -305,7 +305,7 @@ export const UserActivityItem = ({
         {getRedirection(activity, navigate)}
 
         {/* Checkmark (when selected) */}
-        {isSelected && <Check className='w-4 h-4 text-blue-600 shrink-0' aria-hidden='true' />}
+        {isSelected && <Check className='w-4 h-4 text-primary shrink-0' aria-hidden='true' />}
 
         {onConfigure && canConfigure && (
           <button

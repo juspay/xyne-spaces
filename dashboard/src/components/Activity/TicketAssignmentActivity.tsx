@@ -38,7 +38,7 @@ export const TicketAssignmentActivity = ({
 
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm text-[#181B1D] font-medium break-words whitespace-normal'>
+      <div className='text-sm text-foreground font-medium break-words whitespace-normal'>
         {isRecipientAssigned ? (
           <>You have been assigned to ticket &ldquo;{ticket.title}&rdquo;</>
         ) : (
@@ -47,25 +47,25 @@ export const TicketAssignmentActivity = ({
           </>
         )}
       </div>
-      <div className='text-xs text-[#505B62] break-words whitespace-normal'>
+      <div className='text-xs text-muted-foreground break-words whitespace-normal'>
         Ticket ID: <span className='font-mono'>{ticketXyneId}</span>
       </div>
     </div>
   );
 
   const condensedContent = (
-    <span className='text-sm text-[#181B1D]'>
+    <span className='text-sm text-foreground'>
       <span className='font-semibold'>{ticketXyneId}</span>
-      <span className='text-[#505B62]'>
+      <span className='text-muted-foreground'>
         {isRecipientAssigned ? ' assigned to you' : ` assigned to ${assignedUserName}`}
       </span>
     </span>
   );
 
   const description = isRecipientAssigned ? (
-    <span className='text-[#505B62] text-sm'>assigned you to ticket in</span>
+    <span className='text-muted-foreground text-sm'>assigned you to ticket in</span>
   ) : (
-    <span className='text-[#505B62] text-sm'>changed assignee of ticket in</span>
+    <span className='text-muted-foreground text-sm'>changed assignee of ticket in</span>
   );
 
   return (

@@ -126,7 +126,7 @@ const MonthView: React.FC<{
               disabled={isDisabled}
               className={`
                 aspect-square flex items-center justify-center text-sm rounded-md transition-colors
-                ${isSelected ? 'bg-primary text-white font-semibold' : ''}
+                ${isSelected ? 'bg-primary text-primary-foreground font-semibold' : ''}
                 ${!isSelected && isToday ? 'border border-sidebar-badge-accent text-sidebar-badge-accent font-semibold' : ''}
                 ${!isSelected && !isToday && !isDisabled ? 'hover:bg-muted text-foreground' : ''}
                 ${isDisabled ? 'text-muted-foreground cursor-not-allowed' : 'cursor-pointer'}
@@ -443,7 +443,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
             </Button>
             <Button
               onClick={handleApply}
-              className='h-8 px-3 text-sm text-white font-semibold rounded-lg transition-colors'
+              className='h-8 px-3 text-sm font-semibold rounded-lg transition-colors'
               data-track-category='Tickets'
               data-track-name='ApplyDatePicker'
             >

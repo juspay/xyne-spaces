@@ -216,7 +216,7 @@ const CalendarCallPopup = ({
             onClick={() => void submitRsvp(seriesPrompt, true)}
             data-track-category='Calls'
             data-track-name='rsvp-all-calls'
-            className='text-sm px-4 py-2 rounded-lg bg-[#6276BE] text-white hover:bg-[#5566ae] transition-colors cursor-pointer disabled:opacity-50'
+            className='text-sm px-4 py-2 rounded-lg bg-action-primary text-action-primary-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50'
           >
             All Calls
           </button>
@@ -375,10 +375,9 @@ const CalendarCallPopup = ({
           : onJoinCall && (
               <Button
                 onClick={onJoinCall}
-                className='hover:opacity-90 duration-200 rounded-lg gap-1.5 px-4 py-2 h-8'
-                style={{ backgroundColor: '#6276BE' }}
+                className='!bg-action-primary !text-action-primary-foreground hover:opacity-90 duration-200 rounded-lg gap-1.5 px-4 py-2 h-8'
               >
-                <span className='text-white text-sm font-semibold'>Join Call</span>
+                <span className='text-sm font-semibold'>Join Call</span>
               </Button>
             )}
       </div>

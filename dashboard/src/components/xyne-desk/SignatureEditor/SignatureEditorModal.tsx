@@ -100,7 +100,7 @@ export const SignatureEditorModal = ({
     >
       <div className='flex flex-col gap-4 p-5'>
         <div className='flex flex-col gap-1'>
-          <label htmlFor='signature-name' className='text-xs font-medium text-gray-600'>
+          <label htmlFor='signature-name' className='text-xs font-medium text-muted-foreground'>
             Signature name
           </label>
           <input
@@ -109,13 +109,13 @@ export const SignatureEditorModal = ({
             value={name}
             onChange={e => setName(e.target.value)}
             placeholder='e.g. Work, Personal…'
-            className='border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#6276be]'
+            className='border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#6276be]'
             data-track-category='email-signature'
             data-track-name='edit-signature-name'
           />
         </div>
 
-        <div className='border border-gray-200 rounded-xl overflow-hidden'>
+        <div className='border border-border rounded-xl overflow-hidden'>
           <EditorToolbar editor={editor} showImageUpload />
           <EditorContent editor={editor} />
         </div>
@@ -144,7 +144,7 @@ export const SignatureEditorModal = ({
             <button
               type='button'
               onClick={() => onOpenChange(false)}
-              className='px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors'
+              className='px-4 py-2 text-sm font-medium text-muted-foreground bg-muted rounded-lg hover:bg-secondary transition-colors'
               data-track-category='email-signature'
               data-track-name='cancel-signature'
             >

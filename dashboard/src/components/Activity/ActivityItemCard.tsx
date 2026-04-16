@@ -78,7 +78,7 @@ export const ActivityItemCard = ({
       role='button'
       onClick={handleClick}
       className={cn(
-        'group flex w-full items-start gap-3 p-4 text-left transition-colors duration-150 h-auto rounded-none border-b border-[#F2F2F3]',
+        'group flex w-full items-start gap-3 p-4 text-left transition-colors duration-150 h-auto rounded-none border-b border-border',
         !activity.isRead ? 'bg-muted hover:bg-accent' : 'bg-card hover:bg-muted',
         className,
       )}
@@ -102,7 +102,7 @@ export const ActivityItemCard = ({
             <UserAvatar userId={actorId} size={AvatarSize.REGULAR} showActiveStatus={false} />
             <div
               className={cn(
-                'absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[#FAFAFA] border-[0.5px] p-1',
+                'absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-muted border-[0.5px] p-1',
                 badgeColorClass,
               )}
             >

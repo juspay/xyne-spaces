@@ -66,7 +66,7 @@ export const DatePill = ({ dateText }: DatePillProps): ReactElement => {
       {/* Always render the line in the DOM to maintain constant height;
           toggle visibility via opacity so Virtuoso's height tracking stays stable. */}
       <div
-        className={`absolute left-0 right-0 top-1/2 h-px bg-gray-300 -translate-y-1/2 transition-opacity duration-150 ${showLines ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute left-0 right-0 top-1/2 h-px bg-border -translate-y-1/2 transition-opacity duration-150 ${showLines ? 'opacity-100' : 'opacity-0'}`}
       />
 
       <div className='relative'>

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { Button } from '../../ui/Button';
-import { cn } from '../../../utils/classNames';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
 import Textarea from '../../ui/Textarea';
 import { User } from '@xyne/shared';
@@ -67,7 +66,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
         void form.handleSubmit();
       }}
     >
-      <div className='space-y-6  mx-auto bg-background'>
+      <div className='space-y-6  mx-auto'>
         {/* Conversation Preview */}
         <div>
           <div className='text-base font-medium text-foreground mb-1'>{getConversationTitle()}</div>
@@ -92,12 +91,12 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
             hintText='Search user by email or name'
           />
           {selectedUsers.length === 0 && (
-            <div className='text-sm text-red-600 mt-1'>
+            <div className='text-sm text-destructive mt-1'>
               Please select at least one person to message
             </div>
           )}
           {selectedUsers.length > 9 && (
-            <div className='text-sm text-red-600 mt-1'>Maximum 9 recipients allowed</div>
+            <div className='text-sm text-destructive mt-1'>Maximum 9 recipients allowed</div>
           )}
         </div>
 
@@ -123,17 +122,13 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
                 placeholder='Say something to start the conversation...'
                 rows={4}
                 data-testid='dm-message-textarea'
-                className={cn(
-                  field.state.meta.errors.length > 0 &&
-                    'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-                )}
                 aria-invalid={field.state.meta.errors.length > 0}
               />
               <div className='flex justify-end mt-1'>
                 <span className='text-sm text-muted-foreground'>{`${field.state.value.length}/1000 characters`}</span>
               </div>
               {field.state.meta.errors.length > 0 && field.state.meta.errors[0] && (
-                <p className='text-sm text-red-600'>{field.state.meta.errors[0]}</p>
+                <p className='text-sm text-destructive'>{field.state.meta.errors[0]}</p>
               )}
             </div>
           )}
@@ -141,8 +136,8 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
 
         {/* Participant Limit Notice */}
         {selectedUsers.length >= 9 && (
-          <div className='p-3 bg-yellow-50 border border-yellow-200 rounded-lg'>
-            <p className='text-sm text-yellow-700'>
+          <div className='p-3 bg-muted border border-border rounded-lg'>
+            <p className='text-sm text-status-pending'>
               Maximum of 9 people can be added to a conversation.
             </p>
           </div>
@@ -170,7 +165,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
             type='submit'
             variant='default'
             size='default'
-            className='bg-blue-600 hover:bg-blue-700'
+            className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
             loading={loading || false}
             disabled={selectedUsers.length === 0}
             data-testid='start-dm-btn'

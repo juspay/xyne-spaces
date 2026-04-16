@@ -65,7 +65,7 @@ const utcToIst = (utcString?: string): string => {
 };
 
 const SelectedBadge = (): ReactElement => (
-  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-white'>
+  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
     <Check size={10} />
   </span>
 );
@@ -186,7 +186,7 @@ const SearchResultItem = ({
                   e.stopPropagation();
                   onPreview(result);
                 }}
-                className='p-1.5 text-gray-500 hover:text-black-700 hover:bg-gray-200 rounded transition-colors'
+                className='p-1.5 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors'
                 title='Preview file'
                 data-track-category='GLOBAL_SEARCH'
                 data-track-name='PREVIEW_SEARCH_RESULT'

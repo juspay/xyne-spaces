@@ -302,12 +302,26 @@ const AttemptBranchGraph: React.FC<AttemptBranchGraphProps> = ({
 
                 return (
                   <g key={`conn-${idx}`}>
-                    <line x1={fromX} y1={y} x2={toX - 8} y2={y} stroke='#f59e0b' strokeWidth='2' />
+                    <line
+                      x1={fromX}
+                      y1={y}
+                      x2={toX - 8}
+                      y2={y}
+                      stroke='var(--status-pending)'
+                      strokeWidth='2'
+                    />
                     <polygon
                       points={`${toX - 8},${y - 4} ${toX},${y} ${toX - 8},${y + 4}`}
-                      fill='#f59e0b'
+                      fill='var(--status-pending)'
                     />
-                    <circle cx={fromX} cy={y} r='3' fill='#f59e0b' stroke='white' strokeWidth='1' />
+                    <circle
+                      cx={fromX}
+                      cy={y}
+                      r='3'
+                      fill='var(--status-pending)'
+                      stroke='var(--sidebar)'
+                      strokeWidth='1'
+                    />
                   </g>
                 );
               })}

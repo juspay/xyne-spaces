@@ -115,7 +115,7 @@ export const CanvasSearch = ({ editor, containerRef, isOpen, onClose }: CanvasSe
           onChange={e => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder='Search in canvas...'
-          className='w-full px-3 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent'
+          className='w-full px-3 py-1.5 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent'
           data-track-event='blur'
           data-track-category='CANVAS'
           data-track-name='Canvas_Search_Input'

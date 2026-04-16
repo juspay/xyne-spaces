@@ -271,7 +271,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   placeholder='https://example.com'
                   required
                   disabled={!!linkToEdit}
-                  className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:bg-muted disabled:cursor-not-allowed'
+                  className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:bg-muted disabled:cursor-not-allowed'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='EditLinkUrl'
                   data-track-metadata={JSON.stringify({
@@ -299,7 +299,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   onChange={e => setFormData({ ...formData, title: e.target.value })}
                   placeholder='Link title'
                   required
-                  className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm'
+                  className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='EditLinkTitle'
                   data-track-metadata={JSON.stringify({
@@ -322,7 +322,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
                   placeholder='Optional description'
                   rows={3}
-                  className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none'
+                  className='w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none'
                   data-track-category='CHANNEL_LINKS'
                   data-track-name='EditLinkDescription'
                   data-track-metadata={JSON.stringify({
@@ -341,9 +341,9 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                   <button
                     type='button'
                     onClick={() => setFormData({ ...formData, visibility: 'DEFAULT' })}
-                    className={`flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                    className={`flex items-center bg-background gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
                       formData.visibility === 'DEFAULT'
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        ? 'border-blue-500'
                         : 'border-border hover:border-border'
                     }`}
                     data-track-category='CHANNEL_LINKS'
@@ -353,18 +353,18 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                       visibility: 'DEFAULT',
                     })}
                   >
-                    <Globe size={16} />
+                    <Globe size={16} className='text-foreground' />
                     <div className='text-left'>
-                      <div className='text-sm font-medium'>Shared</div>
+                      <div className='text-sm font-medium text-foreground'>Shared</div>
                       <div className='text-xs text-muted-foreground'>Everyone in channel</div>
                     </div>
                   </button>
                   <button
                     type='button'
                     onClick={() => setFormData({ ...formData, visibility: 'PERSONAL' })}
-                    className={`flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                    className={`flex items-center bg-background gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
                       formData.visibility === 'PERSONAL'
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        ? 'border-blue-500'
                         : 'border-border hover:border-border'
                     }`}
                     data-track-category='CHANNEL_LINKS'
@@ -374,9 +374,9 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
                       visibility: 'PERSONAL',
                     })}
                   >
-                    <Lock size={16} />
+                    <Lock size={16} className='text-foreground' />
                     <div className='text-left'>
-                      <div className='text-sm font-medium'>Personal</div>
+                      <div className='text-sm font-medium text-foreground'>Personal</div>
                       <div className='text-xs text-muted-foreground'>Only visible to you</div>
                     </div>
                   </button>

@@ -226,7 +226,7 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
           data-track-name='OpenStepRerunDropdown'
         >
           {isLoading ? (
-            <Loader2 size={size} className='animate-spin text-blue-500' />
+            <Loader2 size={size} className='animate-spin text-action-primary' />
           ) : (
             <span className='flex items-center gap-0.5'>
               <RotateCcw size={size} />
@@ -258,7 +258,7 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
                   onChange={(e): void => setContextInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder='Type your message to Rerun from this step or just press Enter'
-                  className='w-full px-2 py-1.5 text-xs border border-border rounded-md bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-sky-500 resize-none'
+                  className='w-full px-2 py-1.5 text-xs border border-border rounded-md bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none'
                   rows={6}
                   disabled={isLoading}
                   data-track-category='Workflows'
@@ -273,7 +273,7 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
             )}
 
             {dropdownError && (
-              <div className='flex items-start gap-1.5 p-2 bg-red-500/10 border border-red-200 rounded text-xs text-red-700'>
+              <div className='flex items-start gap-1.5 p-2 bg-destructive/10 border border-destructive/20 rounded text-xs text-destructive'>
                 <AlertCircle size={12} className='flex-shrink-0 mt-0.5' />
                 <span>{dropdownError}</span>
               </div>
@@ -288,7 +288,7 @@ export const StepRerunButton: React.FC<StepRerunButtonProps> = ({
                 }
               }}
               disabled={isLoading}
-              className='w-full px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5'
+              className='w-full px-3 py-1.5 bg-action-primary hover:opacity-90 text-action-primary-foreground text-xs font-medium rounded transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5'
               data-track-category='Workflows'
               data-track-name='SubmitStepRerun'
             >

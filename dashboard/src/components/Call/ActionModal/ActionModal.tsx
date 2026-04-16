@@ -36,7 +36,7 @@ export const ActionModal: React.FC<ActionModalProps> = ({
   subtitle,
   description,
   showIcon = true,
-  iconColor = '#6276BE',
+  iconColor = 'var(--action-primary)',
   buttons,
   testId,
 }) => {
@@ -45,7 +45,7 @@ export const ActionModal: React.FC<ActionModalProps> = ({
       <div className='p-6 flex flex-col max-w-[460px]' data-testid={testId}>
         {/* Icon */}
         {showIcon && (
-          <div className='w-10 h-10 rounded-xl bg-indigo-100/60 border border-indigo-200/80 flex items-center justify-center mb-5'>
+          <div className='w-10 h-10 rounded-xl bg-muted border border-border flex items-center justify-center mb-5'>
             <div className='scale-[1.25]'>
               <HuddleIcon color={iconColor} />
             </div>

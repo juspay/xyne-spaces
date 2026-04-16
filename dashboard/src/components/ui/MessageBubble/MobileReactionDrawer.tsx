@@ -172,7 +172,7 @@ export default function MobileReactionDrawer({
     <Drawer.Root open={isOpen} onOpenChange={setIsOpen}>
       <Drawer.Portal>
         <Drawer.Overlay
-          className='fixed inset-0 z-[100] bg-black/30'
+          className='fixed inset-0 z-[100] bg-background/80 backdrop-blur-[2px]'
           onClick={() => setIsOpen(false)}
           onTouchStart={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
@@ -181,7 +181,7 @@ export default function MobileReactionDrawer({
         />
         <Drawer.Content
           asChild
-          className='fixed inset-x-0 bottom-0 z-[110] rounded-t-3xl bg-popover'
+          className='fixed inset-x-0 bottom-0 z-[110] rounded-t-3xl border-t border-border bg-popover text-foreground'
           onTouchStart={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
           onTouchEnd={e => e.stopPropagation()}
@@ -196,22 +196,22 @@ export default function MobileReactionDrawer({
             >
               <Tabs.List
                 ref={tabsListRef}
-                className='relative z-0 flex gap-1 px-1 pb-1 border-b overflow-x-auto [scrollbar-color:transparent_transparent]'
+                className='relative z-0 flex gap-1 px-1 pb-1 border-b border-border overflow-x-auto [scrollbar-color:transparent_transparent]'
               >
                 <Tabs.Tab
-                  className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-blue-500 data-[active]:text-foreground ~data-[active]:bg-accent'
+                  className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-ring data-[active]:text-foreground ~data-[active]:bg-accent'
                   value='all'
                   onClick={() => handleTabClick('all')}
                 >
                   <span>All</span>
-                  <span className='text-xs ttext-muted-foreground'>
+                  <span className='text-xs text-muted-foreground'>
                     {Object.values(reactionsData).reduce((sum, ids) => sum + ids.length, 0)}
                   </span>
                 </Tabs.Tab>
                 {groupedReactions.map(({ emojiName, count }) => (
                   <Tabs.Tab
                     key={emojiName}
-                    className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-blue-500 data-[active]:text-foreground ~data-[active]:bg-accent'
+                    className='flex py-2 items-center justify-center gap-1 border-0 px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none select-none rounded-md ~hover:text-foreground ~hover:bg-accent ~focus-visible:ring-2 ~focus-visible:ring-ring data-[active]:text-foreground ~data-[active]:bg-accent'
                     value={emojiName}
                     onClick={() => handleTabClick(emojiName)}
                   >
@@ -219,7 +219,7 @@ export default function MobileReactionDrawer({
                     <span className='text-xs text-muted-foreground'>{count}</span>
                   </Tabs.Tab>
                 ))}
-                <Tabs.Indicator className='absolute bottom-0 left-0 z-[-1] h-0.5 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] rounded-t-sm bg-blue-500 transition-all duration-200 ease-out' />
+                <Tabs.Indicator className='absolute bottom-0 left-0 z-[-1] h-0.5 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] rounded-t-sm bg-primary transition-all duration-200 ease-out' />
               </Tabs.List>
 
               {/* Single AnimatePresence wrapping all panels */}

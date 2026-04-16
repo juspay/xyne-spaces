@@ -42,7 +42,7 @@ export function EndCallModal({
         {
           label: 'End for everyone',
           onClick: onEndForAll,
-          className: 'bg-[#6276BE] hover:bg-[#5264a8] text-white',
+          className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
         },
       ]}
     />

@@ -148,7 +148,7 @@ export const DmListItem = ({
               {getPreviewText()}
             </div>
             {unreadCount > 0 ? (
-              <div className='font-["Geist_Mono"] text-[14px] font-semibold leading-[1.2] text-[#FFF] shrink-0 bg-[#6276be] flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
+              <div className='font-["Geist_Mono"] text-[14px] font-semibold leading-[1.2] text-action-primary-foreground shrink-0 bg-action-primary flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
                 {unreadCount}
               </div>
             ) : null}
@@ -222,8 +222,8 @@ export const DmListItem = ({
               {getPreviewText()}
             </p>
             {unreadCount > 0 && (
-              <div className='shrink-0 bg-[#6276be] flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
-                <span className="font-['Geist_Mono'] text-[14px] font-semibold leading-[1.2] text-[#FFF]">
+              <div className='shrink-0 bg-action-primary flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
+                <span className="font-['Geist_Mono'] text-[14px] font-semibold leading-[1.2] text-action-primary-foreground">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               </div>

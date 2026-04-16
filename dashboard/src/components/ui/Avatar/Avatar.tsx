@@ -95,36 +95,36 @@ const generateAvatarColor = (userId: string): { bg: string; text: string } => {
   if (!userId) return { bg: 'bg-muted', text: 'text-muted-foreground' };
 
   const colorPalette = [
-    { bg: 'bg-red-400', text: 'text-white' },
-    { bg: 'bg-teal-400', text: 'text-white' },
-    { bg: 'bg-sky-400', text: 'text-white' },
-    { bg: 'bg-orange-300', text: 'text-white' },
-    { bg: 'bg-green-300', text: 'text-white' },
-    { bg: 'bg-yellow-300', text: 'text-white' },
-    { bg: 'bg-purple-300', text: 'text-white' },
-    { bg: 'bg-blue-300', text: 'text-white' },
-    { bg: 'bg-amber-400', text: 'text-white' },
-    { bg: 'bg-green-500', text: 'text-white' },
-    { bg: 'bg-pink-400', text: 'text-white' },
-    { bg: 'bg-indigo-400', text: 'text-white' },
-    { bg: 'bg-emerald-500', text: 'text-white' },
-    { bg: 'bg-yellow-500', text: 'text-white' },
-    { bg: 'bg-orange-600', text: 'text-white' },
-    { bg: 'bg-blue-400', text: 'text-white' },
-    { bg: 'bg-purple-400', text: 'text-white' },
-    { bg: 'bg-rose-400', text: 'text-white' },
-    { bg: 'bg-cyan-500', text: 'text-white' },
-    { bg: 'bg-red-400', text: 'text-white' },
-    { bg: 'bg-teal-300', text: 'text-white' },
-    { bg: 'bg-pink-300', text: 'text-white' },
-    { bg: 'bg-gray-600', text: 'text-white' },
-    { bg: 'bg-green-400', text: 'text-white' },
-    { bg: 'bg-orange-400', text: 'text-white' },
-    { bg: 'bg-violet-400', text: 'text-white' },
-    { bg: 'bg-red-600', text: 'text-white' },
-    { bg: 'bg-blue-600', text: 'text-white' },
-    { bg: 'bg-emerald-600', text: 'text-white' },
-    { bg: 'bg-orange-500', text: 'text-white' },
+    { bg: 'bg-red-400', text: 'text-primary-foreground' },
+    { bg: 'bg-teal-400', text: 'text-primary-foreground' },
+    { bg: 'bg-sky-400', text: 'text-primary-foreground' },
+    { bg: 'bg-orange-300', text: 'text-primary-foreground' },
+    { bg: 'bg-green-300', text: 'text-primary-foreground' },
+    { bg: 'bg-yellow-300', text: 'text-primary-foreground' },
+    { bg: 'bg-purple-300', text: 'text-primary-foreground' },
+    { bg: 'bg-blue-300', text: 'text-primary-foreground' },
+    { bg: 'bg-amber-400', text: 'text-primary-foreground' },
+    { bg: 'bg-green-500', text: 'text-primary-foreground' },
+    { bg: 'bg-pink-400', text: 'text-primary-foreground' },
+    { bg: 'bg-indigo-400', text: 'text-primary-foreground' },
+    { bg: 'bg-emerald-500', text: 'text-primary-foreground' },
+    { bg: 'bg-yellow-500', text: 'text-primary-foreground' },
+    { bg: 'bg-orange-600', text: 'text-primary-foreground' },
+    { bg: 'bg-blue-400', text: 'text-primary-foreground' },
+    { bg: 'bg-purple-400', text: 'text-primary-foreground' },
+    { bg: 'bg-rose-400', text: 'text-primary-foreground' },
+    { bg: 'bg-cyan-500', text: 'text-primary-foreground' },
+    { bg: 'bg-red-400', text: 'text-primary-foreground' },
+    { bg: 'bg-teal-300', text: 'text-primary-foreground' },
+    { bg: 'bg-pink-300', text: 'text-primary-foreground' },
+    { bg: 'bg-muted', text: 'text-muted-foreground' },
+    { bg: 'bg-green-400', text: 'text-primary-foreground' },
+    { bg: 'bg-orange-400', text: 'text-primary-foreground' },
+    { bg: 'bg-violet-400', text: 'text-primary-foreground' },
+    { bg: 'bg-red-600', text: 'text-primary-foreground' },
+    { bg: 'bg-blue-600', text: 'text-primary-foreground' },
+    { bg: 'bg-emerald-600', text: 'text-primary-foreground' },
+    { bg: 'bg-orange-500', text: 'text-primary-foreground' },
   ];
 
   let hash = 0;
@@ -197,8 +197,8 @@ const Avatar = ({
           cx={center}
           cy={center}
           r={radius}
-          fill={isOnline ? '#22c55e' : '#9ca3af'}
-          stroke='white'
+          fill={isOnline ? 'var(--status-success)' : 'hsl(var(--muted-foreground))'}
+          stroke='hsl(var(--background))'
           strokeWidth={stroke}
         />
       </svg>

@@ -249,7 +249,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
     return (
       <div className='pt-[65px] p-4 flex items-center justify-center h-full min-h-[200px]'>
         <div className='text-center'>
-          <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3' />
+          <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-action-primary mx-auto mb-3' />
           <p className='text-muted-foreground dark:text-muted text-sm'>Loading code...</p>
         </div>
       </div>
@@ -291,9 +291,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName }) => {
             • {fileSizeMB.toFixed(2)}MB
           </span>
           {shouldVirtualize && (
-            <span className='text-xs text-blue-600 dark:text-blue-400 font-medium'>
-              Virtualized
-            </span>
+            <span className='text-xs text-action-primary font-medium'>Virtualized</span>
           )}
           {isMarkdown && (
             <button

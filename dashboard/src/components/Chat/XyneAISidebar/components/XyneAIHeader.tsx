@@ -20,6 +20,8 @@ export const XyneAIHeader = ({
   isMobile = false,
 }: XyneAIHeaderProps): ReactElement => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const mobileActionButtonClass =
+    'flex p-4 justify-center items-center gap-2 rounded-full border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent aspect-square';
 
   const handleClose = (): void => {
     // Send close event to xstate machine
@@ -34,18 +36,12 @@ export const XyneAIHeader = ({
           <div className='flex items-center gap-2'>
             <button
               onClick={onNewChat}
-              className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+              className={mobileActionButtonClass}
               title='New chat'
               data-track-category='XyneAI'
               data-track-name='NEW_CHAT'
             >
-              <img
-                src='/svgs/icons/new-chat.svg'
-                alt='New chat'
-                width='16'
-                height='16'
-                className='w-4 h-4'
-              />
+              <SquarePen size={16} className='w-4 h-4 text-current' />
             </button>
             <div className='text-muted-foreground text-base font-medium'>New chat</div>
           </div>
@@ -54,7 +50,7 @@ export const XyneAIHeader = ({
           <div className='flex items-center gap-2'>
             <button
               onClick={() => setIsSettingsModalOpen(true)}
-              className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+              className={mobileActionButtonClass}
               title='Custom instructions'
               data-track-category='XYNE_AI'
               data-track-name='OpenCustomInstructions'
@@ -63,7 +59,7 @@ export const XyneAIHeader = ({
             </button>
             <button
               onClick={onShowMemories}
-              className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+              className={mobileActionButtonClass}
               title='Memories'
               data-track-category='XyneAI'
               data-track-name='SHOW_MEMORIES_MOBILE'
@@ -72,7 +68,7 @@ export const XyneAIHeader = ({
             </button>
             <button
               onClick={onShowUserActivity}
-              className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+              className={mobileActionButtonClass}
               title='Your activity'
               data-track-category='XyneAI'
               data-track-name='SHOW_USER_ACTIVITY_MOBILE'
@@ -81,7 +77,7 @@ export const XyneAIHeader = ({
             </button>
             <button
               onClick={onShowHistory}
-              className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+              className={mobileActionButtonClass}
               title='Chat history'
               data-track-category='XyneAI'
               data-track-name='SHOW_HISTORY_MOBILE'
@@ -90,18 +86,12 @@ export const XyneAIHeader = ({
             </button>
             <button
               onClick={handleClose}
-              className='flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
+              className={mobileActionButtonClass}
               title='Close'
               data-track-category='XyneAI'
               data-track-name='CLOSE_MOBILE'
             >
-              <img
-                src='/svgs/icons/close.svg'
-                alt='Close'
-                width='16'
-                height='16'
-                className='w-4 h-4'
-              />
+              <X size={16} className='w-4 h-4 text-current' />
             </button>
           </div>
         </div>
@@ -120,17 +110,17 @@ export const XyneAIHeader = ({
           {/* New Chat Icon */}
           <button
             onClick={onNewChat}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-[#E4E6E7] flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
             title='New chat'
             data-track-category='XyneAI'
             data-track-name='NEW_CHAT_DESKTOP'
           >
-            <SquarePen size={16} />
+            <SquarePen size={16} className='text-current' />
           </button>
           {/* Chat History Icon */}
           <button
             onClick={onShowHistory}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-[#E4E6E7] flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
             title='Chat history'
             data-track-category='XyneAI'
             data-track-name='SHOW_HISTORY_DESKTOP'
@@ -140,7 +130,7 @@ export const XyneAIHeader = ({
           {/* Memories Icon */}
           <button
             onClick={onShowMemories}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
+            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             title='Memories'
             data-track-category='XyneAI'
             data-track-name='SHOW_MEMORIES_DESKTOP'
@@ -150,7 +140,7 @@ export const XyneAIHeader = ({
           {/* User Activity Icon */}
           <button
             onClick={onShowUserActivity}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-[#E4E6E7] flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
             title='Your activity'
             data-track-category='XyneAI'
             data-track-name='SHOW_USER_ACTIVITY_DESKTOP'
@@ -160,7 +150,7 @@ export const XyneAIHeader = ({
           {/* Settings Icon */}
           <button
             onClick={() => setIsSettingsModalOpen(true)}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-[#E4E6E7] flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
             title='Settings'
             data-track-category='XYNE_AI'
             data-track-name='OpenSettings'
@@ -170,11 +160,11 @@ export const XyneAIHeader = ({
           {/* Close Icon */}
           <button
             onClick={handleClose}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-[#E4E6E7] flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
             data-track-category='XyneAI'
             data-track-name='CLOSE_DESKTOP'
           >
-            <X size={16} />
+            <X size={16} className='text-current' />
           </button>
         </div>
       </div>

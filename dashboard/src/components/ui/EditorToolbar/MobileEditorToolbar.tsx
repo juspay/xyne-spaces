@@ -137,7 +137,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
 
   const buttonClass = (active: boolean): string =>
     `p-1.5 rounded transition-all duration-200 ease-in-out flex-shrink-0 ${
-      active ? 'bg-blue-100 text-blue-600' : 'hover:bg-accent text-muted-foreground'
+      active ? 'bg-muted text-primary' : 'hover:bg-accent text-muted-foreground'
     }`;
 
   return (
@@ -146,7 +146,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
       <button
         type='button'
         onClick={onClose}
-        className='p-2 rounded-full bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center justify-center flex-shrink-0 mr-1'
+        className='p-2 rounded-full bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 transition-colors flex items-center justify-center flex-shrink-0 mr-1'
         aria-label='Close formatting toolbar'
         onMouseDown={e => e.preventDefault()}
       >

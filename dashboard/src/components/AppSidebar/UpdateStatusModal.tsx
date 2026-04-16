@@ -246,7 +246,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
     <Dialog open={isOpen} onOpenChange={onClose} className='max-w-lg rounded-2xl'>
       <div className='p-6 space-y-4'>
         <div className='flex items-center justify-between'>
-          <h2 className='text-lg font-semibold' data-testid='update-status-title'>
+          <h2 className='text-lg text-foreground font-semibold' data-testid='update-status-title'>
             Set a status
           </h2>
           <Button
@@ -330,9 +330,9 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                       })}
                     >
                       <span className='text-lg'>{renderEmoji(status.emoji)}</span>
-                      <span className='text-sm text-gray-900'>{status.text}</span>
-                      <span className='text-xs text-gray-500'>-</span>
-                      <span className='text-xs text-gray-500'>
+                      <span className='text-sm text-foreground'>{status.text}</span>
+                      <span className='text-xs text-muted-foreground'>-</span>
+                      <span className='text-xs text-muted-foreground'>
                         {EXPIRY_OPTIONS.find(opt => opt.value === status.expiry)?.label ||
                           status.expiry}
                       </span>
@@ -442,7 +442,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             <div className='space-y-2'>
               <span className='text-sm font-medium text-foreground'>Remove status after</span>
               <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
-                <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500'>
+                <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring'>
                   <Select.Value />
                   <Select.Icon>
                     <ChevronDown className='size-4' />
@@ -514,8 +514,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                   void handleSave();
                 }}
                 disabled={!selectedEmoji && !statusText.trim()}
-                className='ml-auto px-6 text-white disabled:opacity-50 disabled:cursor-not-allowed'
-                style={{ backgroundColor: '#6276BE' }}
+                className='ml-auto px-6 bg-action-primary text-action-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed'
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Save_Status'
                 data-track-metadata={JSON.stringify({ statusText, expiryOption })}

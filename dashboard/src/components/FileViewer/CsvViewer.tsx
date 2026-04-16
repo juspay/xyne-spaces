@@ -148,7 +148,7 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
     return (
       <div className='pt-[65px] p-4 flex items-center justify-center h-full min-h-[200px]'>
         <div className='text-center'>
-          <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3'></div>
+          <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-action-primary mx-auto mb-3'></div>
           <p className='text-muted-foreground dark:text-muted text-sm'>Loading CSV file...</p>
         </div>
       </div>

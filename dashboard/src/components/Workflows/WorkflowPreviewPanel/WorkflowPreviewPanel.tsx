@@ -133,7 +133,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
             <div className='mt-6 flex flex-col gap-2'>
               <button
                 onClick={() => openUrl('https://www.google.com', 'Google')}
-                className='flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm font-medium'
+                className='flex items-center gap-2 px-4 py-2 bg-action-primary text-action-primary-foreground rounded-lg hover:opacity-90 transition-opacity text-sm font-medium'
                 data-track-category='Workflows'
                 data-track-name='OpenGoogleDemo'
               >
@@ -206,7 +206,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({ clas
                 </button>
                 {/* Active indicator */}
                 {activeTabId === tab.id && (
-                  <div className='absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500' />
+                  <div className='absolute bottom-0 left-0 right-0 h-0.5 bg-action-primary' />
                 )}
               </div>
             ))}

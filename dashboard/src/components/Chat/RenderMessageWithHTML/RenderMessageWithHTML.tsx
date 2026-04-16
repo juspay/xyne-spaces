@@ -163,7 +163,7 @@ const InternalXyneLink = ({
         data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
       >
         {copied ? (
-          <Check className='h-3 w-3 text-green-600' />
+          <Check className='h-3 w-3 text-status-success' />
         ) : (
           <Copy className='h-3 w-3 text-muted-foreground' />
         )}
@@ -537,7 +537,7 @@ const handleTableElement = (
       const existingClass = (restProps['className'] as string) || '';
       const tableProps = {
         ...restProps,
-        className: cn('border border-gray-300 border-collapse w-full my-2', existingClass),
+        className: cn('border border-border border-collapse w-full my-2', existingClass),
       };
       return {
         props: tableProps,
@@ -552,13 +552,13 @@ const handleTableElement = (
     },
     thead: (_el, props) => {
       const existingClass = (props['className'] as string) || '';
-      return { props: { ...props, className: cn('bg-gray-50', existingClass) } };
+      return { props: { ...props, className: cn('bg-muted/50', existingClass) } };
     },
     td: (el, props) => {
       const existingClass = (props['className'] as string) || '';
       const newProps: Record<string, unknown> = {
         ...props,
-        className: cn('border border-gray-300 px-3 py-2 text-left', existingClass),
+        className: cn('border border-border px-3 py-2 text-left', existingClass),
       };
       const colspan = el.getAttribute('colspan');
       const rowspan = el.getAttribute('rowspan');
@@ -577,7 +577,7 @@ const handleTableElement = (
       const newProps: Record<string, unknown> = {
         ...props,
         className: cn(
-          'border border-gray-300 px-3 py-2 text-left font-semibold bg-gray-50',
+          'border border-border px-3 py-2 text-left font-semibold bg-muted/50',
           existingClass,
         ),
       };
@@ -598,7 +598,7 @@ const handleTableElement = (
       return {
         props: {
           ...props,
-          className: cn('border-b border-gray-200 last:border-b-0', existingClass),
+          className: cn('border-b border-border last:border-b-0', existingClass),
         },
       };
     },
@@ -1109,7 +1109,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   }, [parsedContent, showEdited, keyPrefix]);
 
   return (
-    <div className={cn('message-html-root', isSystemMessage ? 'text-[#747474]' : '')}>
+    <div className={cn('message-html-root', isSystemMessage ? 'text-muted-foreground' : '')}>
       {contentWithEdited}
     </div>
   );

@@ -390,7 +390,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           ) : isOwnProfile ? (
             <button
               onClick={() => handleStartEdit('team')}
-              className='mt-1 text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1'
+              className='mt-1 text-sm text-action-primary hover:opacity-80 flex items-center gap-1 transition-opacity'
             >
               <span>+ Add Team Name</span>
             </button>
@@ -413,7 +413,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           {/* Custom Status - Show for everyone if set */}
           {hasStatus && !isOwnProfile && (
             <div className='mt-2'>
-              <div className='flex items-center gap-2 text-sm text-gray-700'>
+              <div className='flex items-center gap-2 text-sm text-foreground'>
                 <span className='text-base'>{renderEmoji(statusEmoji || '')}</span>
                 <span>{statusContent}</span>
               </div>
@@ -598,7 +598,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                 setEditingField('manager');
                 setSelectedManagerUsers([]);
               }}
-              className='text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1'
+              className='text-sm text-action-primary hover:opacity-80 flex items-center gap-1 transition-opacity'
             >
               <span>+ Add Manager</span>
             </button>
@@ -679,7 +679,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                 ) : isOwnProfile ? (
                   <button
                     onClick={() => handleStartEdit('displayName', userProfile?.displayName)}
-                    className='mt-1 text-sm text-blue-600 hover:text-blue-700'
+                    className='mt-1 text-sm text-action-primary hover:opacity-80 transition-opacity'
                   >
                     + Add Display Name
                   </button>
@@ -744,7 +744,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                 ) : (
                   <button
                     onClick={() => handleStartEdit('phoneNumber')}
-                    className='mt-1 text-sm text-blue-600 hover:text-blue-700'
+                    className='mt-1 text-sm text-action-primary hover:opacity-80 transition-opacity'
                   >
                     + Add Phone Number
                   </button>
@@ -841,7 +841,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                 ) : (
                   <button
                     onClick={() => handleStartEdit('dob')}
-                    className='mt-1 text-sm text-blue-600 hover:text-blue-700'
+                    className='mt-1 text-sm text-action-primary hover:opacity-80 transition-opacity'
                   >
                     + Add Birth Date
                   </button>

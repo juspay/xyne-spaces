@@ -32,7 +32,7 @@ export const ReactionAddedActivity = ({
       actorName={actorUser?.name ?? 'unknown'}
       channelId={message.conversation?.channelId}
       badgeIcon={renderEmoji(reaction.emojiName)}
-      badgeColorClass={actorUser?.picture ? 'bg-[#FAFAFA]' : 'bg-[#EDF3F7]'}
+      badgeColorClass='bg-muted'
       description={
         <>
           <span className='text-muted-foreground text-sm'>{actionText}</span>

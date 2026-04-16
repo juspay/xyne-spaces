@@ -34,7 +34,7 @@ export const DirectMessageActivity = ({
       actorName={sender.name}
       channelId={message.conversation?.channelId}
       badgeIcon={<MessageCircle className='w-4 h-4 text-emerald-500' />}
-      badgeColorClass='bg-[#FAFAFA]'
+      badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>sent you a DM in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
@@ -43,7 +43,7 @@ export const DirectMessageActivity = ({
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} variant='default' contentOnly={true} />
       ) : (
-        <div className='text-[#181B1D] text-sm line-clamp-1 truncate whitespace-normal break-all'>
+        <div className='text-foreground text-sm line-clamp-1 truncate whitespace-normal break-all'>
           <RenderMessageWithHTML message={message.content} showEdited={message.edited} />
         </div>
       )}

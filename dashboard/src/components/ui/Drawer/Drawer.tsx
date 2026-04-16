@@ -55,7 +55,7 @@ export const Drawer = ({
           className={cn(
             'fixed z-50 flex flex-col',
             'bottom-0 left-0 right-0 max-h-[96%] rounded-t-[20px] ',
-            'bg-popover',
+            'bg-background',
             'focus:outline-none',
           )}
         >

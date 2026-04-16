@@ -197,7 +197,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
     switch (category) {
       case 'image':
         if (previewError) {
-          return <ImageIcon className='h-8 w-8 text-blue-600' />;
+          return <ImageIcon className='h-8 w-8 text-action-primary' />;
         }
         return imagePreviewUrl ? (
           <img
@@ -206,7 +206,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
             className='w-full h-full object-cover'
           />
         ) : (
-          <ImageIcon className='h-8 w-8 text-blue-600' />
+          <ImageIcon className='h-8 w-8 text-action-primary' />
         );
 
       case 'video':

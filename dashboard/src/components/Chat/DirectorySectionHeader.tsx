@@ -38,7 +38,7 @@ const DirectorySectionHeader = ({
         data-track-name='Toggle_Section'
         data-track-metadata={JSON.stringify({ section: title, isExpanded })}
       >
-        <h3 className='text-[10px] font-medium text-[#788187] select-none uppercase font-mono tracking-[0.8px]'>
+        <h3 className='text-[10px] font-medium text-muted-foreground select-none uppercase font-mono tracking-[0.8px]'>
           {title}
         </h3>
         <div
@@ -53,7 +53,7 @@ const DirectorySectionHeader = ({
       ) : onAdd ? (
         <button
           onClick={onAdd}
-          className='text-[#788187] hover:text-[#1D1E1F] p-1 rounded transition-colors'
+          className='text-muted-foreground hover:text-foreground p-1 rounded transition-colors'
           data-track-category='CHAT_DIRECTORY'
           data-track-name='Add_Section'
           data-track-metadata={JSON.stringify({ section: title })}

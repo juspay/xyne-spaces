@@ -77,6 +77,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
   useShortcutById('huddle.toggle', handleButtonClick);
 
   const { isMobile } = usePlatform();
+  const usesCustomTriggerStyle = Boolean(className?.trim());
 
   // Check if user is alone in the channel
   const isAlone = participantCount === 1;
@@ -116,24 +117,37 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
             targetUserIds,
           })}
           className={cn(
-            'h-full transition-colors w-8.5 p-2',
+            'h-full w-8.5 p-2 flex items-center justify-center transition-colors',
+            usesCustomTriggerStyle && 'w-full',
             'border ',
             hasActiveCallInChannel && !isUserInCurrentChannelCall && !isMobile
-              ? '!bg-green-500 !hover:bg-green-600 !border-green-500'
+              ? 'bg-status-success text-background hover:opacity-90 border-status-success'
               : '',
             isAlone || isNotMember ? 'opacity-50 cursor-not-allowed' : '',
             isMobile
-              ? 'p-3 rounded-full border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5]'
-              : 'rounded-lg bg-background border-[#E4E6E7] hover:bg-muted text-foreground',
+              ? usesCustomTriggerStyle
+                ? 'rounded-full'
+                : 'p-3 rounded-full border-border bg-background shadow-sm hover:bg-accent'
+              : 'rounded-lg bg-background border-border hover:bg-muted',
             className,
           )}
         >
           {isUserInCurrentChannelCall ? (
-            <PhoneOff className={cn('h-4 w-4', isMobile ? 'text-black w-6' : 'text-red-500')} />
+            <PhoneOff
+              className={cn(
+                'h-4 w-4',
+                isMobile && 'w-6',
+                !usesCustomTriggerStyle && isMobile ? 'text-foreground' : 'text-destructive',
+              )}
+            />
           ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
-            <HuddleIcon color={isMobile ? 'black' : '#FFFFFF'} />
+            <HuddleIcon
+              color={
+                !usesCustomTriggerStyle && isMobile ? 'currentColor' : 'hsl(var(--background))'
+              }
+            />
           ) : (
-            <HuddleIcon size={14} color='currentColor' />
+            <HuddleIcon {...(usesCustomTriggerStyle ? { color: 'currentColor' } : {})} />
           )}
         </button>
       </Tooltip>

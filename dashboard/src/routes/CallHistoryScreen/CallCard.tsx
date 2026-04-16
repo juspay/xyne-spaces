@@ -62,7 +62,7 @@ const RepeatBadge: React.FC = () => (
     className={cn(
       'absolute top-2.5 left-2.5 z-10 flex items-center gap-1 rounded-full px-2 py-0.5',
       'text-[10px] font-semibold uppercase tracking-wide',
-      'bg-primary/10 text-primary dark:bg-primary/15',
+      'bg-primary/10 text-primary',
     )}
   >
     Repeat
@@ -167,7 +167,7 @@ export const UpcomingCallCard = ({
               {currentUserId === call.createdByUserId && (
                 <DropdownMenuItem
                   onClick={handleDelete}
-                  className='flex items-start gap-2 text-red-500 hover:text-red-500 text-sm leading-5 font-medium rounded-lg'
+                  className='flex items-start gap-2 text-destructive focus:text-destructive text-sm leading-5 font-medium rounded-lg'
                 >
                   <Trash2 className='size-4' strokeWidth={2.2} />
                   Delete Call
@@ -178,7 +178,7 @@ export const UpcomingCallCard = ({
         </div>
         {/* Headphones Icon */}
         <div className='w-10 h-10 flex flex-shrink-0 items-center justify-center rounded-[10px] border border-border relative'>
-          <HuddleIcon color='hsl(var(--muted-foreground))' size={20} />
+          <HuddleIcon size={20} />
           <span className='bg-card rounded-full w-[18px] h-[18px] flex items-center justify-center absolute bottom-0 right-0 translate-x-1/4 translate-y-1/4 border border-border'>
             <CalendarDays className='size-2.5' />
           </span>
@@ -239,8 +239,8 @@ export const UpcomingCallCard = ({
                 className={cn(
                   ' text-sm font-medium leading-5 rounded-lg h-8 w-20',
                   isCallJoinable
-                    ? 'border-green-600 text-green-600 hover:text-green-700 hover:border-green-700'
-                    : 'border-gray-400 text-gray-400 hover:text-gray-700 hover:border-gray-700',
+                    ? 'border-status-success text-status-success hover:bg-accent'
+                    : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
                   'flex md:hidden',
                 )}
               >
@@ -252,7 +252,7 @@ export const UpcomingCallCard = ({
                 <Button
                   variant='ghost'
                   size='icon'
-                  className='md:hidden h-5 w-5 p-0.5 text-gray-400 hover:text-gray-600'
+                  className='md:hidden h-5 w-5 p-0.5 text-muted-foreground hover:text-foreground'
                 >
                   <MoreVertical className='size-3.5' />
                 </Button>
@@ -271,7 +271,7 @@ export const UpcomingCallCard = ({
                 {currentUserId === call.createdByUserId && (
                   <DropdownMenuItem
                     onClick={handleDelete}
-                    className='flex items-center gap-2 text-red-600'
+                    className='flex items-center gap-2 text-destructive focus:text-destructive'
                   >
                     <Trash2 className='size-4' />
                     Delete
@@ -301,8 +301,8 @@ export const UpcomingCallCard = ({
               className={cn(
                 ' text-sm font-medium leading-5 rounded-lg h-8 w-20',
                 isCallJoinable
-                  ? 'border-green-600 text-green-600 hover:text-green-700 hover:border-green-700'
-                  : 'border-gray-400 text-gray-400 hover:text-gray-700 hover:border-gray-700',
+                  ? 'border-status-success text-status-success hover:bg-accent'
+                  : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
             >
               Join Call
@@ -367,20 +367,20 @@ export const CallCard = ({
 
   const getCallIcon = (): ReactElement => {
     if (isMissedCall) {
-      return <MoveDownLeft className='size-2.5 text-red-500' strokeWidth={2.3} />;
+      return <MoveDownLeft className='size-2.5 text-status-failure' strokeWidth={2.3} />;
     }
     if (isOutgoingCall) {
-      return <MoveUpRight className='size-2.5 text-green-600' strokeWidth={2.3} />;
+      return <MoveUpRight className='size-2.5 text-status-success' strokeWidth={2.3} />;
     }
-    return <MoveDownLeft className='size-2.5 text-green-600' strokeWidth={2.3} />;
+    return <MoveDownLeft className='size-2.5 text-status-success' strokeWidth={2.3} />;
   };
 
   // Get icon color
   const iconColorClass = isActiveState
-    ? 'text-green-600 dark:text-green-500'
+    ? 'text-status-success'
     : isMissedCall
-      ? 'text-red-500 dark:text-red-400'
-      : 'text-muted-foreground dark:text-muted-foreground';
+      ? 'text-status-failure'
+      : 'text-muted-foreground';
 
   // Get status text and color
   const statusText = getStatusText(
@@ -433,7 +433,7 @@ export const CallCard = ({
         'relative flex items-center justify-between p-4 hover:bg-card',
         !isLastItem && 'border-b border-border',
         isActiveState && 'bg-primary/10 hover:bg-primary/20',
-        hasCurrentUserJoined && 'bg-blue-50 dark:bg-blue-900/30',
+        hasCurrentUserJoined && 'bg-muted',
       )}
     >
       {isRecurringCall(call) && <RepeatBadge />}
@@ -442,9 +442,13 @@ export const CallCard = ({
         {/* Headphones Icon */}
         <div className='w-10 h-10 flex items-center justify-center rounded-[10px] border border-border relative bg-background'>
           <HuddleIcon
-            color={
-              isActiveState ? '#229C10' : isMissedCall ? '#D75850' : 'hsl(var(--muted-foreground))'
-            }
+            className={cn(
+              isActiveState
+                ? 'text-status-success'
+                : isMissedCall
+                  ? 'text-status-failure'
+                  : 'text-muted-foreground',
+            )}
             size={20}
           />
           <span className='bg-card rounded-full w-[18px] h-[18px] flex items-center justify-center absolute bottom-0 right-0 translate-x-1/4 translate-y-1/4 border border-border'>
@@ -457,9 +461,9 @@ export const CallCard = ({
               className={cn(
                 'text-foreground font-medium text-sm truncate max-w-full',
                 isActiveState
-                  ? 'text-green-600'
+                  ? 'text-status-success'
                   : isMissedCall
-                    ? 'text-red-600'
+                    ? 'text-status-failure'
                     : 'text-foreground',
               )}
             >
@@ -502,7 +506,7 @@ export const CallCard = ({
                   <AvatarStackItem
                     key={`${userId}-${index}`}
                     size={24}
-                    className='rounded-md flex items-center justify-center ring-[1px] ring-white z-10'
+                    className='rounded-md flex items-center justify-center ring-[1px] ring-background z-10'
                     data-slot='avatar-stack-item'
                     data-index={index}
                   >
@@ -557,7 +561,7 @@ export const CallCard = ({
                 data-testid='call-join-button'
                 className={cn(
                   isActiveState
-                    ? 'ring ring-green-200 border-green-600 hover:bg-card rounded-lg h-8'
+                    ? 'ring-1 ring-border border-status-success hover:bg-card rounded-lg h-8'
                     : isCallJoinable
                       ? 'border-border hover:bg-card rounded-lg h-8'
                       : 'size-7',
@@ -565,14 +569,16 @@ export const CallCard = ({
                 )}
               >
                 <HuddleIcon
-                  color={isActiveState ? '#229C10' : 'hsl(var(--muted-foreground))'}
+                  className={cn(isActiveState ? 'text-status-success' : 'text-muted-foreground')}
                   size={12}
                 />
                 {(isActiveState || isCallJoinable) && (
                   <span
                     className={cn(
                       'font-medium text-sm',
-                      isActiveState ? 'text-green-600 hover:text-green-600' : 'text-foreground',
+                      isActiveState
+                        ? 'text-status-success hover:text-status-success'
+                        : 'text-foreground',
                     )}
                   >
                     {hasCurrentUserJoined ? 'Switch' : 'Join Call'}

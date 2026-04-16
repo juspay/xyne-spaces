@@ -330,8 +330,8 @@ export const RCADetailsView = ({
             {quickFixCoes.map((coe, index) => {
               const quickFixItems = parseQuickFixItems(coe.action);
               return (
-                <div key={coe.id} className='rounded-lg border border-gray-200 p-4'>
-                  <p className='text-xs font-medium uppercase tracking-wide text-gray-500'>
+                <div key={coe.id} className='rounded-lg border border-border p-4'>
+                  <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                     Quick Fixes Done {quickFixCoes.length > 1 ? index + 1 : ''}
                   </p>
                   {quickFixItems.length > 0 ? (
@@ -339,22 +339,22 @@ export const RCADetailsView = ({
                       {quickFixItems.map((item, itemIndex) => (
                         <span
                           key={`${coe.id}-${item}-${itemIndex}`}
-                          className='inline-flex items-center rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700'
+                          className='inline-flex items-center rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground'
                         >
                           {formatRcaValue(item)}
                         </span>
                       ))}
                     </div>
                   ) : (
-                    <p className='mt-2 text-sm text-gray-600'>-</p>
+                    <p className='mt-2 text-sm text-muted-foreground'>-</p>
                   )}
                 </div>
               );
             })}
 
             {nonQuickFixCoes.map((coe, index) => (
-              <div key={coe.id} className='rounded-lg border border-gray-200 p-4'>
-                <p className='text-xs font-medium uppercase tracking-wide text-gray-500'>
+              <div key={coe.id} className='rounded-lg border border-border p-4'>
+                <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                   COE {index + 1}
                 </p>
                 <div className='mt-2 space-y-2'>

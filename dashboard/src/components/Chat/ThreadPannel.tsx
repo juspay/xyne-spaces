@@ -771,7 +771,7 @@ export const ThreadMessages = ({
                   {/* Subscription Button */}
                   {derivedConversationId && (
                     <Tooltip content='Toggle notification subscription'>
-                      <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                      <div className='p-2 border border-border rounded-lg h-8 w-8'>
                         <ConversationSubscription
                           conversationId={derivedConversationId}
                           {...(conversation && { conversation })}
@@ -793,7 +793,7 @@ export const ThreadMessages = ({
                       <span className='inline-flex cursor-pointer'>
                         <Button
                           variant='ghost'
-                          className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                          className='p-2 border border-border rounded-lg h-8 w-8'
                           size='sm'
                           onClick={handleInitiateCall}
                           disabled={hasActiveCallForConversation}
@@ -1009,7 +1009,7 @@ export const ThreadMessages = ({
 
           {derivedConversationId && (
             <Tooltip content='Toggle notification subscription'>
-              <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+              <div className='p-2 border border-border rounded-lg h-8 w-8'>
                 <ConversationSubscription
                   conversationId={derivedConversationId}
                   {...(conversation && { conversation })}
@@ -1038,7 +1038,7 @@ export const ThreadMessages = ({
           <div ref={headerActionsRef} className='flex gap-x-2 shrink-0'>
             {!isHeaderCompact && derivedConversationId && (
               <Tooltip content='Toggle notification subscription'>
-                <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                <div className='p-2 border border-border rounded-lg h-8 w-8'>
                   <ConversationSubscription
                     conversationId={derivedConversationId}
                     {...(conversation && { conversation })}
@@ -1051,7 +1051,7 @@ export const ThreadMessages = ({
             {!isHeaderCompact && !isMobile && (
               <Tooltip content='Expand View'>
                 <Button
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
                   variant='ghost'
                   size='sm'
                   onClick={openTicketDetailsExpandedView}
@@ -1066,7 +1066,7 @@ export const ThreadMessages = ({
                 <Button
                   variant='ghost'
                   size='sm'
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
                   onClick={handleAddContextClick}
                   aria-label='Add context to thread'
                   data-track-category='THREAD_PANEL'
@@ -1089,7 +1089,7 @@ export const ThreadMessages = ({
                       threadInfo,
                     });
                   }}
-                  className='flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-foreground bg-background border-[#E4E6E7]'
+                  className='flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-foreground bg-background border-[border]'
                 >
                   <XyneAIStar />
                 </Button>
@@ -1098,7 +1098,7 @@ export const ThreadMessages = ({
             {!isHeaderCompact && isElectronApp() && !isStandaloneWindow() && (
               <Tooltip content='Open in new window'>
                 <Button
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
                   variant='ghost'
                   size='sm'
                   onClick={openInNewWindow}
@@ -1111,7 +1111,7 @@ export const ThreadMessages = ({
             {!isHeaderCompact && (
               <Tooltip content='Trigger Workflow'>
                 <Button
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
                   variant='ghost'
                   size='sm'
                   onClick={() => setIsWorkflowModalOpen(true)}
@@ -1125,7 +1125,7 @@ export const ThreadMessages = ({
             {!isHeaderCompact && (
               <Tooltip content='Copy Ticket Link'>
                 <Button
-                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                  className='p-2 border border-border rounded-lg h-8 w-8'
                   variant='ghost'
                   size='sm'
                   onClick={handleCopyTicketViewLink}
@@ -1146,7 +1146,7 @@ export const ThreadMessages = ({
                 <span className='inline-flex cursor-pointer'>
                   <Button
                     variant='ghost'
-                    className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                    className='p-2 border border-border rounded-lg h-8 w-8'
                     size='sm'
                     onClick={handleInitiateCall}
                     disabled={hasActiveCallForConversation}
@@ -1171,7 +1171,7 @@ export const ThreadMessages = ({
             <Tooltip content='Close'>
               <Button
                 onClick={handleCloseTicketDetailsThread}
-                className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                className='p-2 border border-border rounded-lg h-8 w-8'
                 variant='ghost'
                 size='sm'
                 aria-label='Close Thread Panel'
@@ -1415,7 +1415,7 @@ export const ThreadMessages = ({
                       {/* Subscription Button */}
                       {derivedConversationId && (
                         <Tooltip content='Toggle notification subscription'>
-                          <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                          <div className='p-2 border border-border rounded-lg h-8 w-8'>
                             <ConversationSubscription
                               conversationId={derivedConversationId}
                               {...(conversation && { conversation })}
@@ -1431,7 +1431,7 @@ export const ThreadMessages = ({
                           <Button
                             variant='ghost'
                             size='sm'
-                            className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                            className='p-2 border border-border rounded-lg h-8 w-8'
                             onClick={handleAddContextClick}
                             aria-label='Add context to thread'
                             data-track-category='THREAD_PANEL'
@@ -1456,7 +1456,7 @@ export const ThreadMessages = ({
                                 threadInfo,
                               });
                             }}
-                            className='flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-foreground bg-background border-[#E4E6E7]'
+                            className='flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-primary bg-background border-border'
                           >
                             <XyneAIStar />
                           </Button>
@@ -1465,7 +1465,7 @@ export const ThreadMessages = ({
                       {isElectronApp() && !isStandaloneWindow() && (
                         <Tooltip content='Open in new window'>
                           <Button
-                            className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                            className='p-2 border border-border rounded-lg h-8 w-8'
                             variant='ghost'
                             size='sm'
                             onClick={openInNewWindow}
@@ -1476,6 +1476,75 @@ export const ThreadMessages = ({
                         </Tooltip>
                       )}
 
+                      {/* Initiate Call Button */}
+                      {derivedConversationId && !channel?.isArchived && (
+                        <Tooltip
+                          content={
+                            hasActiveCallForConversation ? 'Call already in progress' : 'Start call'
+                          }
+                        >
+                          <span className='inline-flex cursor-pointer'>
+                            <Button
+                              variant='ghost'
+                              className='p-2 border border-border rounded-lg h-8 w-8'
+                              size='sm'
+                              onClick={handleInitiateCall}
+                              disabled={hasActiveCallForConversation}
+                              title={
+                                hasActiveCallForConversation
+                                  ? 'Call already in progress'
+                                  : 'Start call'
+                              }
+                              data-testid='thread-initiate-call-button'
+                              data-track-category='THREAD_PANEL'
+                              data-track-name='INITIATE_CALL_FROM_THREAD'
+                              data-track-metadata={JSON.stringify({
+                                channelId: channel?.id,
+                                conversationId: derivedConversationId,
+                              })}
+                            >
+                              <Headphones size={20} />
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      )}
+
+                      {/* Create Ticket Button */}
+                      {channel?.projectId &&
+                        !hasTicketInMessages &&
+                        !channel?.isArchived &&
+                        (() => {
+                          const buttonContent = (
+                            <Button
+                              variant='ghost'
+                              className={cn(
+                                isMobile
+                                  ? 'p-2 border border-border rounded-lg h-8 w-8'
+                                  : 'px-3 py-1.5 text-foreground hover:text-foreground hover:bg-accent transition-colors duration-200 flex items-center gap-2 rounded-lg',
+                              )}
+                              size='sm'
+                              onClick={handleCreateTicket}
+                              data-testid='thread-create-ticket-button'
+                              data-track-category='THREAD_PANEL'
+                              data-track-name='CREATE_TICKET_FROM_THREAD'
+                              data-track-metadata={JSON.stringify({
+                                channelId: channel?.id,
+                                projectId: channel?.projectId,
+                              })}
+                            >
+                              <Ticket size={isMobile ? 20 : 18} />
+                              {!isMobile && (
+                                <span className='text-sm font-medium'>Create Ticket</span>
+                              )}
+                            </Button>
+                          );
+
+                          return isMobile ? (
+                            <Tooltip content='Create ticket'>{buttonContent}</Tooltip>
+                          ) : (
+                            buttonContent
+                          );
+                        })()}
                       {/* Close Button */}
                       {onClose && (
                         <Button
@@ -1500,7 +1569,7 @@ export const ThreadMessages = ({
                     <div ref={headerActionsRef} className='flex items-center gap-2 shrink-0'>
                       {!isHeaderCompact && (
                         <Tooltip content='Toggle notification subscription'>
-                          <div className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'>
+                          <div className='p-2 border border-[border] rounded-lg h-8 w-8'>
                             <ConversationSubscription
                               conversationId={derivedConversationId}
                               {...(conversation && { conversation })}
@@ -1520,7 +1589,7 @@ export const ThreadMessages = ({
                               <Button
                                 variant='ghost'
                                 size='sm'
-                                className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                                className='p-2 border border-[border] rounded-lg h-8 w-8'
                                 onClick={handleAddContextClick}
                                 aria-label='Add context to thread'
                                 data-track-category='THREAD_PANEL'
@@ -1546,7 +1615,7 @@ export const ThreadMessages = ({
                                     threadInfo,
                                   });
                                 }}
-                                className='flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-foreground bg-background border-[#E4E6E7]'
+                                className='flex items-center justify-between gap-2 border rounded-lg !p-2 transition-all duration-100 text-foreground bg-background border-[border]'
                               >
                                 <XyneAIStar />
                               </Button>
@@ -1555,7 +1624,7 @@ export const ThreadMessages = ({
                           {!isHeaderCompact && isElectronApp() && !isStandaloneWindow() && (
                             <Tooltip content='Open in new window'>
                               <Button
-                                className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                                className='p-2 border border-[border] rounded-lg h-8 w-8'
                                 variant='ghost'
                                 size='sm'
                                 onClick={openInNewWindow}
@@ -1581,7 +1650,7 @@ export const ThreadMessages = ({
                               <span className='inline-flex cursor-pointer'>
                                 <Button
                                   variant='ghost'
-                                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                                  className='p-2 border border-[border] rounded-lg h-8 w-8'
                                   size='sm'
                                   onClick={handleInitiateCall}
                                   disabled={hasActiveCallForConversation}
@@ -1613,7 +1682,7 @@ export const ThreadMessages = ({
                                 <Button
                                   variant='ghost'
                                   size='sm'
-                                  className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                                  className='p-2 border border-[border] rounded-lg h-8 w-8'
                                   onClick={handleCreateTicket}
                                   data-testid='thread-create-ticket-button'
                                   data-track-category='THREAD_PANEL'
@@ -1633,7 +1702,7 @@ export const ThreadMessages = ({
                             <Button
                               variant='ghost'
                               size='sm'
-                              className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                              className='p-2 border border-[border] rounded-lg h-8 w-8'
                               onClick={onClose}
                               aria-label='Close thread panel'
                             >
@@ -1643,7 +1712,7 @@ export const ThreadMessages = ({
                             <Button
                               variant='ghost'
                               size='sm'
-                              className='p-2 border border-[#E4E6E7] rounded-lg h-8 w-8'
+                              className='p-2 border border-[border] rounded-lg h-8 w-8'
                               onClick={handleCloseTicketDetailsThread}
                               aria-label='Close thread panel'
                               data-track-category='THREAD_PANEL'

@@ -307,7 +307,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           </div>
         )}
         {!isCompact && (
-          <div className='bg-gradient-to-b from-[#F0E7EC] to-[#D7E7FC] w-1.5 self-stretch' />
+          <div className='bg-gradient-to-b from-xyne-purple-100 to-xyne-primary-100 w-1.5 self-stretch' />
         )}
         <div
           className={cn('flex flex-col gap-2 w-full', isCompact ? 'p-0' : 'p-3 sm:p-4')}
@@ -545,7 +545,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                           {hasTags ? (
                             <>
                               <span className='inline-flex max-w-[120px] items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border bg-card text-muted-foreground border-border'>
-                                <span className='w-2 h-2 rounded-full bg-[#C27AFF] shrink-0'></span>
+                                <span className='w-2 h-2 rounded-full bg-xyne-purple-400 shrink-0'></span>
                                 <span className='truncate'>{tags[0]?.name}</span>
                               </span>
 

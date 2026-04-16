@@ -89,22 +89,22 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
       <div
         className={cn(
           'rounded-lg flex items-stretch gap-0.5 ',
-          isUserInCall ? 'text-black' : 'text-white',
+          isUserInCall ? 'text-foreground' : 'text-white',
         )}
       >
         <div
           className={cn(
-            'flex items-center gap-2 bg-green-50 rounded-lg px-2 py-1.5',
-            isUserInCall ? 'bg-green-50' : 'bg-[#2D881F]',
+            'flex items-center gap-2 bg-green-100 rounded-lg px-2 py-1.5',
+            isUserInCall ? 'bg-green-100' : 'bg-green-700',
           )}
         >
-          <Headphones className={cn('w-5 h-5', isUserInCall ? 'text-[#2D881F]' : 'text-white')} />
+          <Headphones className={cn('w-5 h-5', isUserInCall ? 'text-green-700' : 'text-white')} />
         </div>
 
         <div
           className={cn(
-            'flex items-center bg-green-50 justify-between w-full px-2 py-1.5 rounded-lg',
-            isUserInCall ? 'bg-green-50' : 'bg-[#2D881F]',
+            'flex items-center bg-green-100 justify-between w-full px-2 py-1.5 rounded-lg',
+            isUserInCall ? 'bg-green-100' : 'bg-green-700',
           )}
         >
           <div className='flex items-center gap-4'>
@@ -119,11 +119,13 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
                   <span
                     className={cn(
                       'w-1 h-1 rounded-full',
-                      isUserInCall ? 'bg-black/50' : 'bg-background/50',
+                      isUserInCall ? 'bg-foreground/50' : 'bg-background/50',
                     )}
                   />
                 )}
-                <span className={cn('text-sm', isUserInCall ? 'text-black/90' : 'text-white/90')}>
+                <span
+                  className={cn('text-sm', isUserInCall ? 'text-foreground/90' : 'text-white/90')}
+                >
                   {callDuration}
                 </span>
               </>
@@ -135,7 +137,7 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
               onClick={handleJoinCall}
               className={cn(
                 'text-sm font-medium hover:underline transition-all cursor-pointer mx-2',
-                isUserInCall ? 'text-black' : 'text-white',
+                isUserInCall ? 'text-foreground' : 'text-white',
               )}
               type='button'
               data-track-category='CALL'

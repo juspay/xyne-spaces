@@ -42,6 +42,8 @@ export const UserActivityPanel = ({
   onAddToChat,
 }: UserActivityPanelProps): ReactElement | null => {
   const { isMobile } = usePlatform();
+  const mobileActionButtonClass =
+    'flex p-4 justify-center items-center gap-2 rounded-full border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent aspect-square';
   const { activities, isLoading, hasMore, loadMore, refresh } = useUserActivity();
   const {
     aliases,
@@ -224,16 +226,14 @@ export const UserActivityPanel = ({
   const selectedCount = selectedIds.size;
 
   return (
-    <div className='flex-1 overflow-hidden flex flex-col bg-white h-full rounded-xl'>
+    <div className='flex-1 overflow-hidden flex flex-col bg-background h-full rounded-xl'>
       {/* Header */}
       <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-b border-border flex-shrink-0'>
         <div className='flex items-center gap-2'>
           <button
             onClick={handleClose}
             className={
-              isMobile
-                ? 'flex p-4 justify-center items-center gap-2 rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] aspect-square'
-                : 'p-1 hover:bg-accent rounded transition-colors'
+              isMobile ? mobileActionButtonClass : 'p-1 hover:bg-accent rounded transition-colors'
             }
           >
             <ArrowLeft
@@ -306,7 +306,7 @@ export const UserActivityPanel = ({
             {/* Load more trigger */}
             {hasMore && !isLoading && (
               <div ref={loadMoreRef} className='h-8 flex items-center justify-center'>
-                <div className='w-5 h-5 border-2 border-border border-t-blue-500 rounded-full animate-spin' />
+                <div className='w-5 h-5 border-2 border-border border-t-primary rounded-full animate-spin' />
               </div>
             )}
 
@@ -325,7 +325,7 @@ export const UserActivityPanel = ({
         <div className='p-4 border-t border-border flex-shrink-0'>
           <button
             onClick={handleAddToChat}
-            className='w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors'
+            className='w-full py-2.5 px-4 bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground text-sm font-medium rounded-lg transition-colors'
           >
             Add {selectedCount} {selectedCount === 1 ? 'activity' : 'activities'} to chat
           </button>
