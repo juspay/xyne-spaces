@@ -2472,6 +2472,38 @@ export const mutators = defineMutators({
           const { attachmentId, originalFilename, mimetype, size, width, height, duration } =
             attachment;
 
+          const rawName = originalFilename || 'unnamed_file';
+          const lastDotIdx = rawName.lastIndexOf('.');
+
+          let ext = '';
+          let nameWithoutExt = rawName;
+
+          if (lastDotIdx === 0) {
+            ext = rawName;
+            nameWithoutExt = '';
+          } else if (lastDotIdx > 0) {
+            ext = rawName.substring(lastDotIdx);
+            nameWithoutExt = rawName.substring(0, lastDotIdx);
+          }
+
+          const maxBaseLength = Math.max(1, 255 - ext.length);
+
+          let sanitizedBase = nameWithoutExt
+            .replace(/[^a-zA-Z0-9 ._-]/g, '_')
+            .replace(/\.\./g, '_')
+            .replace(/^\.+/, '')
+            .replace(/[\s.]+$/, '')
+            .replace(/_+/g, '_')
+            .replace(/^_|_$/g, '')
+            .substring(0, maxBaseLength)
+            .trim();
+
+          if (!sanitizedBase) {
+            sanitizedBase = `file_${Date.now()}`;
+          }
+
+          const sanitizedFilename = sanitizedBase + ext;
+
           const attachmentMetadata = duration ? { duration } : null;
 
           const existingAttachment = await tx.run(
@@ -2484,7 +2516,7 @@ export const mutators = defineMutators({
               entityId: finalDraftMessageId,
               entityType: AttachmentEntityType.DRAFT,
               conversationId: conversationId || null,
-              originalFilename,
+              originalFilename: sanitizedFilename,
               mimetype,
               size,
               width,
@@ -2497,7 +2529,7 @@ export const mutators = defineMutators({
               entityType: AttachmentEntityType.DRAFT,
               entityId: finalDraftMessageId,
               storageProvider: '',
-              originalFilename,
+              originalFilename: sanitizedFilename,
               mimetype,
               size,
               width,

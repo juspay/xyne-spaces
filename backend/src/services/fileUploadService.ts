@@ -139,7 +139,7 @@ export async function uploadFiles(
       const height = metadata?.height;
       
       const uploadedFile: UploadedFileResult = {
-        originalName: file.originalname,
+        originalName: validationResult.sanitizedFilename || file.originalname,
         fileName: validationResult.sanitizedFilename || file.originalname,
         fileSize: gcsResult.size,
         mimeType: file.mimetype,

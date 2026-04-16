@@ -186,6 +186,7 @@ export class DraftAttachmentController {
             update: {
               url: fileUrl,
               size: file.size,
+              originalFilename: uploadedFile.originalName,
               width: finalWidth,
               height: finalHeight,
               thumbnailUrl,
@@ -198,7 +199,7 @@ export class DraftAttachmentController {
               entityType: AttachmentEntityType.DRAFT,
               url: fileUrl,
               size: file.size,
-              originalFilename: file.originalname,
+              originalFilename: uploadedFile.originalName,
               mimetype: file.mimetype,
               uploadedByUserId: userId,
               createdBy: userId,
