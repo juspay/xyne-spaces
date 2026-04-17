@@ -21,6 +21,7 @@ import {
   type InternalXyneLinkKind,
 } from './internalLinkUtils';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover';
 import { useChannel } from '../../../hooks/useChannels';
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
@@ -70,6 +71,8 @@ const InternalXyneLink = ({
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
   const channel = useChannel(parsedLink?.channelId ?? '');
+  const { userID } = useAuthContextValues();
+  const { displayName: channelDisplayName } = useChannelDisplayName(channel ?? null, userID);
   const [ticket] = useCachedQuery(queries.ticketById({ ticketId: parsedLink?.ticketId ?? '' }), {
     enabled: !!parsedLink?.ticketId,
   });
@@ -102,7 +105,12 @@ const InternalXyneLink = ({
     });
   };
 
-  const linkLabel = getInternalLinkLabel(parsedLink, channel?.name, ticket?.xyneId, canvas?.title);
+  const linkLabel = getInternalLinkLabel(
+    parsedLink,
+    channel ? channelDisplayName : undefined,
+    ticket?.xyneId,
+    canvas?.title,
+  );
   const leadingIcon = getInternalLinkIcon(parsedLink.kind);
 
   if (!shouldReplaceWithSemanticLabel(children, resolvedHref)) {

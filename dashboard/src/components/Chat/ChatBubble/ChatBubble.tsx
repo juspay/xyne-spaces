@@ -613,6 +613,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const msgContent = message?.content as string | undefined;
   const canvasIdMatch = msgContent?.match(/\/chat\/canvas\/([a-zA-Z0-9-]+)/);
   const canvasId = canvasIdMatch ? canvasIdMatch[1] : null;
+  const shouldShowStandaloneLinkPreview =
+    variant !== 'pinned' &&
+    showLinkPreview &&
+    !!previewResult &&
+    !canvasId &&
+    !(isMobile && message.senderId === user?.id);
 
   const shouldShowSendToChannel =
     context === 'thread' &&
@@ -675,7 +681,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
     if (e?.target instanceof HTMLElement) {
       // Do not open thread when tapping interactive controls inside the bubble.
-      if (e.target.closest('a, button, input, textarea, [role="button"], [data-prevent-thread]')) {
+      const interactiveTarget = e.target.closest(
+        'a, button, input, textarea, [role="button"], [data-prevent-thread]',
+      );
+      if (interactiveTarget && interactiveTarget !== e.currentTarget) {
         return;
       }
     }
@@ -966,7 +975,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         </>
       )}
 
-      {variant !== 'pinned' && showLinkPreview && previewResult && !canvasId && (
+      {shouldShowStandaloneLinkPreview && (
         <div
           className={cn(
             'pr-3 max-w-full pl-4 ml-14 transition-colors rounded-r border-l-4 border-l-gray-300 dark:border-l-gray-600',
