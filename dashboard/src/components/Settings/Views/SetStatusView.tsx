@@ -170,12 +170,17 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
               <div className='overflow-hidden rounded-lg'>
                 <EmojiPicker
                   emojiStyle={EmojiStyle.NATIVE}
+                  style={{
+                    ['--epr-emoji-size' as string]: '22px',
+                    ['--epr-emoji-gap' as string]: '4px',
+                  }}
                   onEmojiClick={handleEmojiSelect}
                   width={320}
                   height={400}
                   theme={Theme.LIGHT}
                   lazyLoadEmojis={true}
                   searchPlaceHolder='Search emoji...'
+                  previewConfig={{ showPreview: false }}
                   customEmojis={customEmojis || []}
                 />
               </div>
@@ -451,12 +456,17 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
               <div className='overflow-hidden rounded-lg'>
                 <EmojiPicker
                   emojiStyle={EmojiStyle.NATIVE}
+                  style={{
+                    ['--epr-emoji-size' as string]: '22px',
+                    ['--epr-emoji-gap' as string]: '4px',
+                  }}
                   onEmojiClick={handleEmojiSelect}
                   width={320}
                   height={400}
                   theme={Theme.LIGHT}
                   lazyLoadEmojis={true}
                   searchPlaceHolder='Search emoji...'
+                  previewConfig={{ showPreview: false }}
                   customEmojis={customEmojis || []}
                 />
               </div>

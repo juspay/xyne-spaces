@@ -286,6 +286,10 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                     <div className='overflow-hidden rounded-lg'>
                       <EmojiPicker
                         emojiStyle={EmojiStyle.NATIVE}
+                        style={{
+                          ['--epr-emoji-size' as string]: '22px',
+                          ['--epr-emoji-gap' as string]: '4px',
+                        }}
                         onEmojiClick={handleEmojiSelect}
                         width={320}
                         height={400}
@@ -293,6 +297,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         lazyLoadEmojis={true}
                         searchPlaceHolder='Search emoji...'
                         customEmojis={customEmojis || []}
+                        previewConfig={{ showPreview: false }}
                       />
                     </div>
                   </Popover.Content>
@@ -400,6 +405,10 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                     <div className='overflow-hidden rounded-lg'>
                       <EmojiPicker
                         emojiStyle={EmojiStyle.NATIVE}
+                        style={{
+                          ['--epr-emoji-size' as string]: '22px',
+                          ['--epr-emoji-gap' as string]: '4px',
+                        }}
                         onEmojiClick={handleEmojiSelect}
                         width={320}
                         height={400}
@@ -407,6 +416,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         lazyLoadEmojis={true}
                         searchPlaceHolder='Search emoji...'
                         customEmojis={customEmojis || []}
+                        previewConfig={{ showPreview: false }}
                       />
                     </div>
                   </Popover.Content>
