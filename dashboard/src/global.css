@@ -1254,21 +1254,9 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   list-style-type: circle;
 }
 
-/* `list-style-position: inside` keeps the marker inline with the first line
-   of text, so the <ol>'s width is determined by content (not by a large
-   padding-left for multi-digit markers). That prevents the message bubble
-   from inflating on mobile when list items have big start values. The
-   `li > p` inline rule stops react-markdown's paragraph wrapper from
-   pushing content to the next line. */
 .jp-message-html ol {
-  @apply my-2;
-  padding-left: 0;
+  @apply pl-6 my-2;
   list-style-type: decimal;
-  list-style-position: inside;
-}
-
-.jp-message-html ol li > p:only-child {
-  display: inline;
 }
 
 .jp-message-html ol ol {
