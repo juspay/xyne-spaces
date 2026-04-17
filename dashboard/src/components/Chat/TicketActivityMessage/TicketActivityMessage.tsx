@@ -15,20 +15,20 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({ me
   const getIcon = (): ReactElement => {
     switch (metadata?.['activityType']) {
       case 'PRIORITY':
-        return <TicketPriorityIcon />;
+        return <TicketPriorityIcon size={12} />;
       case 'STATUS':
       case 'STAGE_NAME':
       case 'PR':
       case 'STAGE_CHANGE_REQUEST':
       case 'STAGE_CHANGE_APPROVED':
       case 'STAGE_CHANGE_REJECTED':
-        return <TicketStatusIcon />;
+        return <TicketStatusIcon size={12} />;
       case 'TAGS':
-        return <Tag />;
+        return <Tag size={12} className='text-gray-400' />;
       case 'ETA':
-        return <Calendar />;
+        return <Calendar size={12} />;
       case 'IS_ARCHIVED':
-        return <Archive size={16} className='text-status-pending' />;
+        return <Archive size={12} className='text-amber-600' />;
       default:
         return <SmallUserAvatar userId={message.senderId} />;
     }

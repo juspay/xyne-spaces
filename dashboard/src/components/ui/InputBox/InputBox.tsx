@@ -1089,11 +1089,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   ${typeof placeholder !== 'string' ? '[&_p.is-editor-empty:before]:hidden' : ''}
                 `}
               />
-              {typeof placeholder !== 'string' && (!content || (editor && editor.isEmpty)) && (
-                <div className='absolute inset-0 px-3 py-2 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto'>
-                  {placeholder}
-                </div>
-              )}
+              {typeof placeholder !== 'string' &&
+                (!content || (editor && editor.isEmpty)) &&
+                !editor?.isActive('bulletList') &&
+                !editor?.isActive('orderedList') &&
+                !editor?.isActive('blockquote') && (
+                  <div className='absolute inset-0 px-3 py-2 text-muted-foreground text-[14px] leading-6 pointer-events-none select-none flex items-center h-fit my-auto'>
+                    {placeholder}
+                  </div>
+                )}
             </div>
           )}
 
