@@ -1,4 +1,4 @@
-import { ReactElement, ReactNode } from 'react';
+import React, { ReactElement, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { Activity } from '@xyne/shared';
@@ -53,9 +53,16 @@ export const ActivityItemCard = ({
   const channel = useChannel(channelId || '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // Always mark as read on any click (including URL clicks per FR-4)
     if (!activity.isRead) {
       void zero.mutate(mutators.activities.markAsRead({ activityId: activity.id }));
+    }
+    // If the click originated from a hyperlink inside the message content,
+    // let the browser handle it and do not navigate the card
+    const target = e.target as HTMLElement;
+    if (target.closest('a')) {
+      return;
     }
     if (targetPath) {
       void navigate(targetPath);

@@ -1,4 +1,4 @@
-import { ReactElement, KeyboardEvent } from 'react';
+import { ReactElement, ReactNode, KeyboardEvent, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   type Channel,
@@ -17,6 +17,8 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { useUser } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
+import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { sanitizeHtmlString } from '../../../utils/sanitizer';
 
 interface DmListItemProps {
   channel: Channel;
@@ -24,16 +26,6 @@ interface DmListItemProps {
   isSelected?: boolean;
   latestConversation?: { initial_message_md?: string | null } | undefined;
 }
-
-// Helper: robustly strip HTML tags using DOM parser
-const stripHtml = (html: string): string => {
-  if (!html) return '';
-  if (typeof document === 'undefined') return html;
-
-  const tmp = document.createElement('DIV');
-  tmp.innerHTML = html;
-  return tmp.textContent || tmp.innerText || '';
-};
 
 export const DmListItem = ({
   channel,
@@ -56,18 +48,9 @@ export const DmListItem = ({
   const isDM = channel.scopeType === ChannelScopeType.DM;
   const targetUser = useUser(isDM && avatarUserId ? avatarUserId : '');
 
-  // 3. Format elapsed time (now, 5m, 2h, 3d, 1 month, 2 years, etc.)
-  const formatTime = (timestamp?: number): string => {
-    if (!timestamp) return '';
-    return formatElapsedTime(timestamp);
-  };
-
-  // 4. Preview Text Logic
-  const getPreviewText = (): string => {
-    if (!lastMessage) return 'No messages yet';
-
-    const isSelfDm = avatarUserId === context.userID;
-    const prefix = lastMessage.senderId === context.userID && !isSelfDm ? 'You: ' : '';
+  // Memoize HTML sanitization for message preview (Issue #1)
+  const sanitizedHtml = useMemo(() => {
+    if (!lastMessage) return '';
 
     // Handle forwarded messages - content is XML, need to parse it
     if (
@@ -78,20 +61,43 @@ export const DmListItem = ({
       const parsed = parseForwardedMessageXml(lastMessage.content);
       if (parsed) {
         const text = parsed.optionalText || parsed.content;
-        return `${prefix}${stripHtml(text || 'Forwarded a message')}`;
+        return sanitizeHtmlString(text || 'Forwarded a message');
       }
     }
 
-    let content =
+    const rawContent =
       lastMessage.content ||
       ('attachments' in lastMessage && lastMessage.attachments?.length
         ? 'Sent an attachment'
         : 'Message');
 
-    // Clean any HTML tags from the message
-    content = stripHtml(content);
+    return sanitizeHtmlString(rawContent);
+  }, [lastMessage]);
 
-    return `${prefix}${content}`;
+  // Memoize message preview with RenderMessageWithHTML component
+  const messagePreview = useMemo(() => {
+    if (!lastMessage) return 'No messages yet';
+
+    const isSelfDm = avatarUserId === context.userID;
+    const prefix = lastMessage.senderId === context.userID && !isSelfDm ? 'You: ' : '';
+
+    return (
+      <>
+        {prefix}
+        <RenderMessageWithHTML message={sanitizedHtml} breakLongLinks={false} />
+      </>
+    );
+  }, [sanitizedHtml, lastMessage, avatarUserId, context.userID]);
+
+  // 3. Format elapsed time (now, 5m, 2h, 3d, 1 month, 2 years, etc.)
+  const formatTime = (timestamp?: number): string => {
+    if (!timestamp) return '';
+    return formatElapsedTime(timestamp);
+  };
+
+  // 4. Preview Content Logic - returns memoized message preview
+  const renderMessagePreview = (): ReactNode => {
+    return messagePreview;
   };
 
   const handleClick = (): void => {
@@ -141,11 +147,44 @@ export const DmListItem = ({
           </div>
           <div className='w-full flex items-start justify-between gap-3 min-w-0'>
             <div
+              onClick={e => {
+                // Prevent DM navigation when clicking links in preview
+                if ((e.target as HTMLElement).tagName === 'A') {
+                  e.stopPropagation();
+                }
+              }}
+              onKeyDown={e => {
+                // Prevent DM navigation when activating links via keyboard
+                if (
+                  (e.key === 'Enter' || e.key === ' ') &&
+                  (e.target as HTMLElement).tagName === 'A'
+                ) {
+                  e.stopPropagation();
+                }
+              }}
+              role='presentation'
+              data-track-category='DM_LIST'
+              data-track-name='PREVIEW_LINK_CONTAINER'
               className={cn(
                 'min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-normal leading-[1.35] text-muted-foreground',
+                // Make RenderMessageWithHTML output inline and preserve link styles
+                '[&_.message-html-root]:inline',
+                '[&_.message-html-root>*]:inline',
+                '[&_.message-html-root_br]:hidden',
+                '[&_.message-html-root_a]:!text-[var(--link-color)]',
+                '[&_.message-html-root_a]:!no-underline',
+                '[&_.message-html-root_a:hover]:!underline',
+                '[&_.message-html-root_a:hover]:!text-[var(--link-hover-color)]',
+                // Hide internal link semantic labels (icons, borders, etc.) in preview
+                '[&_.message-html-root_span.group\\/internal-link]:contents',
+                '[&_.message-html-root_.group\\/internal-link_a]:!border-0',
+                '[&_.message-html-root_.group\\/internal-link_a]:!bg-transparent',
+                '[&_.message-html-root_.group\\/internal-link_a]:!p-0',
+                '[&_.message-html-root_.group\\/internal-link_a_.shrink-0]:!hidden',
+                '[&_.message-html-root_.group\\/internal-link_button]:!hidden',
               )}
             >
-              {getPreviewText()}
+              {renderMessagePreview()}
             </div>
             {unreadCount > 0 ? (
               <div className='font-["Geist_Mono"] text-[14px] font-semibold leading-[1.2] text-action-primary-foreground shrink-0 bg-action-primary flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>
@@ -214,12 +253,45 @@ export const DmListItem = ({
           {/* Bottom Row: Message and Badge */}
           <div className='flex items-start justify-between gap-[4px] w-full'>
             <p
+              onClick={e => {
+                // Prevent DM navigation when clicking links in preview
+                if ((e.target as HTMLElement).tagName === 'A') {
+                  e.stopPropagation();
+                }
+              }}
+              onKeyDown={e => {
+                // Prevent DM navigation when activating links via keyboard
+                if (
+                  (e.key === 'Enter' || e.key === ' ') &&
+                  (e.target as HTMLElement).tagName === 'A'
+                ) {
+                  e.stopPropagation();
+                }
+              }}
+              role='presentation'
+              data-track-category='DM_LIST'
+              data-track-name='PREVIEW_LINK_CONTAINER'
               className={cn(
                 "font-['Inter'] font-normal text-[14px] text-muted-foreground tracking-[-0.28px] leading-[1.35] truncate flex-1",
                 unreadCount > 0 && 'text-foreground font-medium',
+                // Make RenderMessageWithHTML output inline and preserve link styles
+                '[&_.message-html-root]:inline',
+                '[&_.message-html-root>*]:inline',
+                '[&_.message-html-root_br]:hidden',
+                '[&_.message-html-root_a]:!text-[var(--link-color)]',
+                '[&_.message-html-root_a]:!no-underline',
+                '[&_.message-html-root_a:hover]:!underline',
+                '[&_.message-html-root_a:hover]:!text-[var(--link-hover-color)]',
+                // Hide internal link semantic labels (icons, borders, etc.) in preview
+                '[&_.message-html-root_span.group\\/internal-link]:contents',
+                '[&_.message-html-root_.group\\/internal-link_a]:!border-0',
+                '[&_.message-html-root_.group\\/internal-link_a]:!bg-transparent',
+                '[&_.message-html-root_.group\\/internal-link_a]:!p-0',
+                '[&_.message-html-root_.group\\/internal-link_a_.shrink-0]:!hidden',
+                '[&_.message-html-root_.group\\/internal-link_button]:!hidden',
               )}
             >
-              {getPreviewText()}
+              {renderMessagePreview()}
             </p>
             {unreadCount > 0 && (
               <div className='shrink-0 bg-action-primary flex flex-col items-center justify-center px-[6px] py-px rounded-[999px] h-[18px] min-w-[18px]'>

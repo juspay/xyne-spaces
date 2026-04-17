@@ -48,7 +48,7 @@ interface RenderMessageWithHTMLProps {
 
 const MAX_HTML_LENGTH = 100000;
 
-const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
+const URL_REGEX = /(?:https?|ssh):\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
 
 const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
   switch (kind) {
