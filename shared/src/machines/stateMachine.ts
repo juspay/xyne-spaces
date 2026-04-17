@@ -144,6 +144,7 @@ type StateMachineEvent =
   | { type: 'MERGE_ALL_CHANNELS'; channels: Channel[]; allChannelsUpdatedAt: number }
   | { type: 'SET_USER_PERMISSIONS'; permissions: UserPermission[] }
   | { type: 'ADD_USER_CHANNEL_STATUSES'; userChannelStatuses: UserChannelStatus[] }
+  | { type: 'UPDATE_USER_CHANNEL_STATUS'; channelId: string; updates: Partial<UserChannelStatus> }
   | { type: 'SET_LAST_VISITED_CHANNEL'; channelId: string | null }
   | { type: 'SAVE_DRAFT'; lookupId: string; html: string; text: string }
   | { type: 'REMOVE_DRAFT'; lookupId: string }
@@ -284,6 +285,16 @@ export const stateMachine = setup({
       userChannelStatuses: ({ context, event }) => {
         if (event.type === 'ADD_USER_CHANNEL_STATUSES') {
           return event.userChannelStatuses;
+        }
+        return context.userChannelStatuses;
+      },
+    }),
+    updateUserChannelStatus: assign({
+      userChannelStatuses: ({ context, event }) => {
+        if (event.type === 'UPDATE_USER_CHANNEL_STATUS') {
+          return context.userChannelStatuses.map(status =>
+            status.channelId === event.channelId ? { ...status, ...event.updates } : status,
+          );
         }
         return context.userChannelStatuses;
       },
@@ -501,6 +512,9 @@ export const stateMachine = setup({
         },
         ADD_USER_CHANNEL_STATUSES: {
           actions: 'addUserChannelStatuses',
+        },
+        UPDATE_USER_CHANNEL_STATUS: {
+          actions: 'updateUserChannelStatus',
         },
         SET_LAST_VISITED_CHANNEL: {
           actions: 'setLastVisitedChannel',

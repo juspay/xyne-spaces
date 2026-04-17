@@ -8232,6 +8232,27 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
         },
       ),
+      setCustomRecapPrompt: defineMutator(
+        z.object({
+          channelId: z.string(),
+          prompt: z.string().nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, ctx, args: { channelId, prompt, timestamp: _timestamp } }) => {
+          const status = await tx.run(
+            zql.channel_user_status.where('userId', ctx.userID).where('channelId', channelId).one(),
+          );
+
+          if (!status) {
+            throw new Error('Channel user status not found for this channel');
+          }
+
+          await tx.mutate.channel_user_status.update({
+            id: status.id,
+            customRecapPrompt: prompt,
+          });
+        },
+      ),
       markSeen: defineMutator(
         z.object({
           recapDate: z.number(),

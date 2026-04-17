@@ -11,6 +11,13 @@ export interface RecapCard {
   pointCitations?: Record<string, { conversationId?: string; messageId?: string }>;
   // Source entity index per point (for citation button label, like ask AI's messageIndex)
   citationIndices?: Record<string, number>;
+  // Custom recap fields — present only when the user has a custom recap for this channel
+  hasCustomRecap?: boolean;
+  customSummary?: string[];
+  customMessageCount?: number;
+  customPointCitations?: Record<string, { conversationId?: string; messageId?: string }>;
+  customCitationIndices?: Record<string, number>;
+  customDrilldown?: { conversationId: string | null; messageId: string | null };
 }
 
 export interface RecapSubscription {

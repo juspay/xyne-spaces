@@ -3,6 +3,7 @@ import { RecapCard, RecapData } from '../components/RecapPanel/RecapPanel.types'
 import { useCachedQuery } from './useCachedQuery';
 import { queries } from '../zero/queries';
 import { useAllChannels, useUserChannelStatuses } from './useChannels';
+import { useAuth } from './useAuth';
 import { ChannelUserStatus, ChannelDailyRecap } from '@xyne/shared';
 
 // Type definitions for recap summary data structure
@@ -94,93 +95,100 @@ function isLegacyFormatSummary(
   return 'bullets' in data && Array.isArray(data.bullets);
 }
 
-// Process raw recap data into cards
+// Parse a single recap summary into display fields
+const parseSummaryData = (
+  summaryData: SummaryData,
+): {
+  summaryPoints: string[];
+  pointCitations: Record<string, { conversationId?: string; messageId?: string }>;
+  citationIndices: Record<string, number>;
+  drilldownInfo: { conversationId: string | null; messageId: string | null };
+  recapWords: number;
+} => {
+  let summaryPoints: string[] = [];
+  const pointCitations: Record<string, { conversationId?: string; messageId?: string }> = {};
+  const citationIndices: Record<string, number> = {};
+  let drilldownInfo: { conversationId: string | null; messageId: string | null } = {
+    conversationId: null,
+    messageId: null,
+  };
+  let recapWords = 0;
+
+  if (isNewFormatSummary(summaryData)) {
+    summaryPoints = summaryData.points.map(p => p.text || '');
+    recapWords = summaryPoints
+      .join(' ')
+      .split(/\s+/)
+      .filter(word => word.length > 0).length;
+    summaryData.points.forEach((p, idx: number) => {
+      const key = `${idx + 1}`;
+      const messageId = p.messageId ?? p.citations?.[0];
+      const conversationId = p.conversationId ?? p.conversationIds?.[0];
+      if (messageId || conversationId) {
+        pointCitations[key] = {
+          ...(messageId && { messageId }),
+          ...(conversationId && { conversationId }),
+        };
+      }
+      if (p.citationIndex !== undefined) {
+        citationIndices[key] = p.citationIndex;
+      }
+    });
+  } else if (isOldFormatSummary(summaryData)) {
+    summaryPoints = summaryData.response
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.match(/^\d+\./))
+      .map(line => line.replace(/^\d+\.\s*/, '').trim());
+    recapWords = summaryData.response.split(/\s+/).filter(word => word.length > 0).length;
+    const oldCitations = summaryData.citations || {};
+    const oldMessageIds = summaryData.messageIds || {};
+    summaryPoints.forEach((_p, idx) => {
+      const key = `${idx + 1}`;
+      const messageId = oldCitations[key]?.[0] ?? oldMessageIds[key];
+      if (messageId) {
+        pointCitations[key] = { messageId };
+      }
+    });
+  } else if (isLegacyFormatSummary(summaryData)) {
+    summaryPoints = summaryData.bullets || [];
+    recapWords = summaryPoints
+      .join(' ')
+      .split(/\s+/)
+      .filter(word => word.length > 0).length;
+    drilldownInfo = {
+      conversationId: null,
+      messageId: summaryData.firstMessageId || null,
+    };
+  }
+
+  return { summaryPoints, pointCitations, citationIndices, drilldownInfo, recapWords };
+};
+
+// Process raw recap data into cards, merging base and custom recaps per channel
 const processRecapCards = (
   recaps: ChannelDailyRecap[],
   channelMap: Map<string, string>,
+  currentUserId: string,
 ): { cards: RecapCard[]; totalMessages: number; totalRecapWords: number } => {
   let totalMessages = 0;
   let totalRecapWords = 0;
 
-  const cards = recaps
+  // Separate base recaps (userId IS NULL) from custom recaps (userId = currentUserId)
+  const baseRecaps = recaps.filter(r => r.userId === null || r.userId === undefined);
+  const customRecapMap = new Map<string, ChannelDailyRecap>(
+    recaps.filter(r => r.userId === currentUserId).map(r => [r.channelId, r]),
+  );
+
+  const cards = baseRecaps
     .map((recap): RecapCard | null => {
       try {
         const summaryData: SummaryData = JSON.parse(recap.summary) as SummaryData;
         totalMessages += summaryData.messageCount || 0;
 
-        let summaryPoints: string[] = [];
-        // Per-point citation data (like ask AI): point key → { conversationId, messageId }
-        const pointCitations: Record<string, { conversationId?: string; messageId?: string }> = {};
-        const citationIndices: Record<string, number> = {};
-        let drilldownInfo: { conversationId: string | null; messageId: string | null } = {
-          conversationId: null,
-          messageId: null,
-        };
-
-        if (isNewFormatSummary(summaryData)) {
-          // New format: per-point citation data embedded directly (like ask AI)
-          summaryPoints = summaryData.points.map(p => p.text || '');
-
-          const recapWords = summaryPoints
-            .join(' ')
-            .split(/\s+/)
-            .filter(word => word.length > 0).length;
-          totalRecapWords += recapWords;
-
-          summaryData.points.forEach((p, idx: number) => {
-            const key = `${idx + 1}`;
-            // New format: messageId/conversationId flat on point
-            // Legacy DB records: messageId in citations[0], conversationId in conversationIds[0]
-            const messageId = p.messageId ?? p.citations?.[0];
-            const conversationId = p.conversationId ?? p.conversationIds?.[0];
-            if (messageId || conversationId) {
-              pointCitations[key] = {
-                ...(messageId && { messageId }),
-                ...(conversationId && { conversationId }),
-              };
-            }
-            if (p.citationIndex !== undefined) {
-              citationIndices[key] = p.citationIndex;
-            }
-          });
-        } else if (isOldFormatSummary(summaryData)) {
-          // Old format: response string with separate citation/messageId maps
-          summaryPoints = summaryData.response
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => line.match(/^\d+\./))
-            .map(line => line.replace(/^\d+\.\s*/, '').trim());
-
-          const recapWords = summaryData.response
-            .split(/\s+/)
-            .filter(word => word.length > 0).length;
-          totalRecapWords += recapWords;
-
-          // Map old citation format into pointCitations
-          const oldCitations = summaryData.citations || {};
-          const oldMessageIds = summaryData.messageIds || {};
-          summaryPoints.forEach((_p, idx) => {
-            const key = `${idx + 1}`;
-            const messageId = oldCitations[key]?.[0] ?? oldMessageIds[key];
-            if (messageId) {
-              pointCitations[key] = { messageId };
-            }
-          });
-        } else if (isLegacyFormatSummary(summaryData)) {
-          // Legacy format
-          summaryPoints = summaryData.bullets || [];
-
-          const recapWords = summaryPoints
-            .join(' ')
-            .split(/\s+/)
-            .filter(word => word.length > 0).length;
-          totalRecapWords += recapWords;
-
-          drilldownInfo = {
-            conversationId: null,
-            messageId: summaryData.firstMessageId || null,
-          };
-        }
+        const { summaryPoints, pointCitations, citationIndices, drilldownInfo, recapWords } =
+          parseSummaryData(summaryData);
+        totalRecapWords += recapWords;
 
         const card: RecapCard = {
           channelId: recap.channelId,
@@ -191,6 +199,34 @@ const processRecapCards = (
           ...(Object.keys(pointCitations).length > 0 && { pointCitations }),
           ...(Object.keys(citationIndices).length > 0 && { citationIndices }),
         };
+
+        // Merge custom recap if available for this channel
+        const customRecap = customRecapMap.get(recap.channelId);
+        if (customRecap) {
+          try {
+            const customData: SummaryData = JSON.parse(customRecap.summary) as SummaryData;
+            const {
+              summaryPoints: customPoints,
+              pointCitations: customCitations,
+              citationIndices: customIndices,
+              drilldownInfo: customDrilldown,
+            } = parseSummaryData(customData);
+
+            card.hasCustomRecap = true;
+            card.customSummary = customPoints;
+            card.customMessageCount = customData.messageCount || 0;
+            card.customDrilldown = customDrilldown;
+            if (Object.keys(customCitations).length > 0) {
+              card.customPointCitations = customCitations;
+            }
+            if (Object.keys(customIndices).length > 0) {
+              card.customCitationIndices = customIndices;
+            }
+          } catch {
+            // Custom recap parse failed, just skip it
+          }
+        }
+
         return card;
       } catch {
         return null;
@@ -212,6 +248,10 @@ export const useRecapData = () => {
     () => getYesterdayIST(),
     [],
   );
+
+  // Get current user ID for custom recap separation
+  const { user: currentUser } = useAuth();
+  const currentUserId = currentUser?.id ?? '';
 
   // Use existing hook for all channel user statuses - filter client-side for recap subscriptions
   const allUserStatuses = useUserChannelStatuses();
@@ -267,8 +307,8 @@ export const useRecapData = () => {
     if (!dailyRecapsData || dailyRecapsData.length === 0) {
       return { cards: [], totalMessages: 0, totalRecapWords: 0 };
     }
-    return processRecapCards(dailyRecapsData as ChannelDailyRecap[], channelMap);
-  }, [dailyRecapsData, channelMap]);
+    return processRecapCards(dailyRecapsData as ChannelDailyRecap[], channelMap, currentUserId);
+  }, [dailyRecapsData, channelMap, currentUserId]);
 
   // Calculate time saved
   const estimatedTimeSavedMinutes = useMemo(() => {

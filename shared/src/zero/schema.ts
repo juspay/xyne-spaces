@@ -1174,6 +1174,7 @@ export const channelUserStatusTable = table('channel_user_status')
     // Recap subscription fields
     isRecapSubscribed: boolean(),
     lastSeenRecapDate: number().optional(),
+    customRecapPrompt: string().optional(), // Optional custom prompt for personalized recaps
     desktopNotificationLevel: string(),
     mobileNotificationLevel: string(),
     isDeleted: boolean(),
@@ -1847,11 +1848,13 @@ export const surfaceLinkTable = table('surface_links')
 
 export const channelDailyRecapTable = table('channel_daily_recaps')
   .columns({
+    id: string(),
     channelId: string(),
     recapDate: number(),
     summary: string(),
+    userId: string().optional(), // null for base recap, actual userId for custom recap
   })
-  .primaryKey('channelId', 'recapDate');
+  .primaryKey('id');
 
 export const appsTable = table('apps')
   .columns({
