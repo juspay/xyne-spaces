@@ -764,7 +764,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       className={`${isMobile ? 'text-[15px] leading-tight font-semibold tracking-tight' : 'text-sm font-medium'} text-foreground hover:underline p-0 h-auto min-w-0`}
                       aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
                     >
-                      {getUserDisplayName(sender)}
+                      <span className='flex items-center gap-1'>{getUserDisplayName(sender)}</span>
                     </Button>
                     <StatusIndicator
                       statusEmoji={sender?.statusEmoji}
@@ -777,14 +777,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 ) : (
                   <span className='flex items-center gap-1'>
                     <UserHoverWrapper userId={sender.id}>
-                      <Button
-                        variant='ghost'
-                        onClick={() => handleUserClick(sender.id)}
-                        className={`text-sm font-medium text-foreground hover:underline p-0 h-auto min-w-0`}
-                        aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
-                      >
-                        {getUserDisplayName(sender)}
-                      </Button>
+                      <div className='flex items-center gap-1.5'>
+                        <Button
+                          variant='ghost'
+                          onClick={() => handleUserClick(sender.id)}
+                          className={`text-sm font-medium text-foreground hover:underline p-0 h-auto min-w-0`}
+                          aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
+                        >
+                          <span className='flex items-center gap-1'>
+                            {getUserDisplayName(sender)}
+                          </span>
+                        </Button>
+                      </div>
                     </UserHoverWrapper>
                     <StatusIndicator
                       statusEmoji={sender?.statusEmoji}

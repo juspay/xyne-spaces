@@ -9,6 +9,7 @@ import { BasePopoverSelector, type BaseSelectorPluginState } from './BasePopover
 import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 import { useUser } from '../../../hooks/useUsers';
 import { isStatusExpired } from '../../../utils/statusUtils';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 
 /**
  * Sub-component to render user avatar with resolved profile picture URL.
@@ -19,12 +20,7 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
   const user = useUser(item.id);
   const hasValidStatus =
     user?.statusEmoji && (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
-  const statusText =
-    hasValidStatus && user?.statusContent
-      ? `${user.statusEmoji} ${user.statusContent}`
-      : hasValidStatus
-        ? (user?.statusEmoji ?? undefined)
-        : undefined;
+  const statusText = hasValidStatus && user?.statusContent ? user.statusContent : undefined;
 
   return (
     <>
@@ -40,10 +36,14 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
           <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
             {item.name}
           </span>
-          {statusText && (
-            <span className='text-xs text-muted-foreground truncate'>{statusText}</span>
+          {hasValidStatus && (
+            <span className='inline-flex flex-shrink-0'>{renderEmoji(user.statusEmoji || '')}</span>
           )}
-
+          {statusText && (
+            <span className='text-sm text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+              {statusText}
+            </span>
+          )}
           {item.isChannelMember === false && (
             <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
               Not in channel

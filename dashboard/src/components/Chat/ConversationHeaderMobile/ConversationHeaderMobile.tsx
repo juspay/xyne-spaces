@@ -31,6 +31,7 @@ import { VisibleChannel } from '../../../machines/stateMachine';
 import { useUser } from '../../../hooks/useUsers';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { isStatusExpired } from '../../../utils/statusUtils';
+import { StatusIndicator } from '../../ui/StatusIndicator';
 import { XyneAIStar } from '../../icons/xyne-ai';
 
 interface ConversationHeaderMobileProps {
@@ -153,20 +154,25 @@ const ConversationHeaderMobile = ({
               <p className='text-sm font-medium whitespace-nowrap overflow-hidden text-foreground'>
                 {displayName}
               </p>
-              {channel && isOneToOneDMChannel(channel.scopeType) && dmUser?.statusEmoji ? (
-                <small className='text-muted-foreground text-xs truncate max-w-[200px]'>
-                  {dmUser.statusEmoji}{' '}
-                  {(!dmUser.statusExpiryAt || !isStatusExpired(dmUser.statusExpiryAt)) &&
-                    dmUser.statusContent}
+              {channel &&
+              isOneToOneDMChannel(channel.scopeType) &&
+              dmUser?.statusEmoji &&
+              (!dmUser.statusExpiryAt || !isStatusExpired(dmUser.statusExpiryAt)) ? (
+                <small className='text-muted-foreground text-xs truncate max-w-[200px] flex items-center gap-1'>
+                  <StatusIndicator
+                    statusEmoji={dmUser.statusEmoji}
+                    statusContent={dmUser.statusContent}
+                    statusExpiryAt={dmUser.statusExpiryAt}
+                    size='sm'
+                    showOnHover={false}
+                  />
+                  {dmUser.statusContent}
                 </small>
               ) : (
                 <small className='text-muted-foreground text-xs'>
                   {channel.channelStats?.participantCount} members
                 </small>
               )}
-              <small className='text-muted-foreground text-xs'>
-                {channel.channelStats?.participantCount} members
-              </small>
             </div>
           </motion.div>
 

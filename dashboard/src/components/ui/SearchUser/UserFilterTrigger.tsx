@@ -4,6 +4,9 @@ import { CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { useUserSearch } from '../../../hooks/useUsers';
 import Avatar from '../Avatar/Avatar';
+import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
+import { isStatusExpired } from '../../../utils/statusUtils';
 import type { User } from '@xyne/shared';
 
 interface UserFilterTriggerProps {
@@ -194,7 +197,12 @@ export const UserFilterTrigger: React.FC<UserFilterTriggerProps> = ({
                     )}
                   >
                     <Avatar userId={user.id} size='sm' showActiveStatus={false} />
-                    <span className='truncate'>{user.name}</span>
+                    <span className='truncate flex items-center gap-1'>
+                      {getUserDisplayName(user)}
+                      {user.statusEmoji &&
+                        (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt)) &&
+                        renderEmoji(user.statusEmoji)}
+                    </span>
                     {isSelected && (
                       <span className='absolute right-2 flex size-3.5 items-center justify-center'>
                         <CheckIcon className='size-4 text-foreground' />

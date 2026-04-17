@@ -15,7 +15,7 @@ export interface MobileEditorProps {
   emojiSizeClass: string;
   onAttachClick: () => void;
   onSend: () => void;
-  placeholder?: string | undefined;
+  placeholder?: React.ReactNode | undefined;
   showMentions?: boolean | undefined;
   onMentionClick?: (() => void) | undefined;
   onChannelClick?: (() => void) | undefined;
@@ -137,7 +137,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
           tabIndex={0}
         >
           {isEmpty && (
-            <div className='absolute inset-0 px-3 py-3.5 text-muted-foreground text-[15px] leading-relaxed truncate pointer-events-none select-none'>
+            <div className='absolute inset-0 px-3 py-3.5 text-muted-foreground text-[15px] leading-relaxed pointer-events-none select-none'>
               {placeholder}
             </div>
           )}

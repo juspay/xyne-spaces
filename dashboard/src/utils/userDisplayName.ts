@@ -1,3 +1,5 @@
+import { isStatusExpired } from './statusUtils';
+
 /**
  * Get the display name for a user.
  * Priority: displayName > name > email
@@ -9,23 +11,33 @@ export function getUserDisplayName(
         name?: string | null;
         email?: string | null;
         displayName?: string | null;
+        presenceStatus?:
+          | {
+              statusEmoji?: string | null;
+              statusExpiryAt?: number | null;
+            }
+          | null
+          | undefined;
       }
     | undefined
     | null,
+  includeStatus: boolean = false,
 ): string {
   if (!user) {
     return 'Unknown';
   }
-  if (user.displayName) {
-    return user.displayName;
+
+  const baseName = user.displayName || user.name || user.email || 'Unknown';
+
+  if (includeStatus && user.presenceStatus) {
+    const { statusEmoji, statusExpiryAt } = user.presenceStatus;
+    const hasValidStatus = statusEmoji && (!statusExpiryAt || !isStatusExpired(statusExpiryAt));
+    if (hasValidStatus && !statusEmoji.startsWith('custom:')) {
+      return `${baseName} ${statusEmoji}`;
+    }
   }
-  if (user.name) {
-    return user.name;
-  }
-  if (user.email) {
-    return user.email;
-  }
-  return 'Unknown';
+
+  return baseName;
 }
 
 /**

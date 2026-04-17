@@ -14,6 +14,9 @@ import {
 } from '../../../utils/statusUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { useSelf } from '../../../hooks/useUsers';
+import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
+import { EmojiClickData } from 'emoji-picker-react';
 
 // Hardcoded status suggestions
 const STATUS_SUGGESTIONS = [
@@ -74,6 +77,7 @@ interface StatusEditViewProps extends StatusViewProps {
 export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) => {
   const [statusText, setStatusText] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState<string | undefined>(undefined);
+  const { data: customEmojis } = useCustomEmojis();
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [recentStatuses, setRecentStatuses] = useState<RecentStatus[]>([]);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -89,8 +93,16 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
     }
   }, []);
 
-  const handleEmojiSelect = (emojiData: { emoji: string }): void => {
-    setSelectedEmoji(emojiData.emoji);
+  const handleEmojiSelect = (emojiData: EmojiClickData): void => {
+    let emojiValue: string;
+    if (emojiData.isCustom) {
+      const emojiId = emojiData.emoji;
+      const name = emojiData.names[0] || emojiId;
+      emojiValue = `custom:${emojiId}:${name}`;
+    } else {
+      emojiValue = emojiData.emoji;
+    }
+    setSelectedEmoji(emojiValue);
     setEmojiPickerOpen(false);
   };
 
@@ -142,7 +154,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
           <Popover.Trigger asChild>
             <button className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground'>
               {selectedEmoji ? (
-                <span className='text-lg'>{selectedEmoji}</span>
+                <span className='text-lg'>{renderEmoji(selectedEmoji)}</span>
               ) : (
                 <SmilePlus className='size-4' />
               )}
@@ -164,6 +176,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
                   theme={Theme.LIGHT}
                   lazyLoadEmojis={true}
                   searchPlaceHolder='Search emoji...'
+                  customEmojis={customEmojis || []}
                 />
               </div>
             </Popover.Content>
@@ -195,7 +208,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
                 data-track-name='SelectRecentStatus'
                 data-track-metadata={JSON.stringify({ emoji: status.emoji, text: status.text })}
               >
-                <span className='text-lg'>{status.emoji}</span>
+                <span className='text-lg'>{renderEmoji(status.emoji)}</span>
                 <span className='text-sm text-foreground'>{status.text}</span>
                 <span className='text-xs text-muted-foreground'>-</span>
                 <span className='text-xs text-muted-foreground'>
@@ -228,7 +241,7 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
                 text: suggestion.text,
               })}
             >
-              <span className='text-lg'>{suggestion.emoji}</span>
+              <span className='text-lg'>{renderEmoji(suggestion.emoji)}</span>
               <span className='text-sm text-foreground'>{suggestion.text}</span>
               <span className='text-xs text-muted-foreground'>-</span>
               <span className='text-xs text-muted-foreground'>
@@ -249,6 +262,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
   const user = useSelf();
   const [statusText, setStatusText] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState<string | undefined>(undefined);
+  const { data: customEmojis } = useCustomEmojis();
   const [isEmojiAutoAssigned, setIsEmojiAutoAssigned] = useState(false);
   const [expiryOption, setExpiryOption] = useState('today');
   const [customDate, setCustomDate] = useState<Date | undefined>(new Date());
@@ -288,8 +302,16 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
     }
   }, [expiryOption, customDate]);
 
-  const handleEmojiSelect = (emojiData: { emoji: string }): void => {
-    setSelectedEmoji(emojiData.emoji);
+  const handleEmojiSelect = (emojiData: EmojiClickData): void => {
+    let emojiValue: string;
+    if (emojiData.isCustom) {
+      const emojiId = emojiData.emoji;
+      const name = emojiData.names[0] || emojiId;
+      emojiValue = `custom:${emojiId}:${name}`;
+    } else {
+      emojiValue = emojiData.emoji;
+    }
+    setSelectedEmoji(emojiValue);
     setIsEmojiAutoAssigned(false);
     setEmojiPickerOpen(false);
   };
@@ -413,7 +435,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
               data-track-name='OpenEmojiPicker'
             >
               {selectedEmoji ? (
-                <span className='text-lg'>{selectedEmoji}</span>
+                <span className='text-lg'>{renderEmoji(selectedEmoji)}</span>
               ) : (
                 <SmilePlus className='size-5' />
               )}
@@ -435,6 +457,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
                   theme={Theme.LIGHT}
                   lazyLoadEmojis={true}
                   searchPlaceHolder='Search emoji...'
+                  customEmojis={customEmojis || []}
                 />
               </div>
             </Popover.Content>

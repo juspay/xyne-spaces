@@ -45,6 +45,7 @@ import { mutators } from '../../../zero/mutators';
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { useUser } from '../../../hooks/useUsers';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { isStatusExpired } from '../../../utils/statusUtils';
@@ -294,15 +295,22 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const hasValidStatus =
       dmUser?.statusEmoji && (!dmUser.statusExpiryAt || !isStatusExpired(dmUser.statusExpiryAt));
 
-    const placeholderText =
-      placeholder ||
-      (channelName
-        ? `Message ${isTestEnv ? '' : channelName}${
-            isDM && hasValidStatus
-              ? ` ${dmUser.statusEmoji}${dmUser.statusContent ? ` ${dmUser.statusContent}` : ''}`
-              : ''
-          }`.trim()
-        : 'Type a message...');
+    const placeholderText = (
+      <span className='flex items-center gap-1.5 whitespace-nowrap overflow-hidden'>
+        <span>
+          {placeholder ||
+            (channelName ? `Message ${isTestEnv ? '' : channelName}`.trim() : 'Type a message...')}
+        </span>
+        {isDM && hasValidStatus && dmUser?.statusEmoji && (
+          <span className='inline-flex items-center gap-1 min-w-0'>
+            <span className='shrink-0'>{renderEmoji(dmUser.statusEmoji)}</span>
+            {dmUser.statusContent && (
+              <span className='truncate opacity-80'>{dmUser.statusContent}</span>
+            )}
+          </span>
+        )}
+      </span>
+    );
 
     const handleMentionSearch = useCallback(
       (query: string) => {

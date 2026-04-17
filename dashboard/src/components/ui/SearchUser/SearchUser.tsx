@@ -10,6 +10,8 @@ import { Search, X } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
 import { useUserSearch } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { renderEmoji } from '../../../utils/customEmojiUtils';
+import { isStatusExpired } from '../../../utils/statusUtils';
 
 interface SearchUserProps {
   excludeUserIds?: string[];
@@ -284,7 +286,15 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                       <Avatar userId={user.id} size='sm' showActiveStatus={false} />
                     </div>
                     <div className='flex flex-col min-w-0 flex-1'>
-                      <span className='font-medium truncate'>{getUserDisplayName(user)}</span>
+                      <div className='flex items-center gap-1.5'>
+                        <span className='font-medium truncate flex items-center gap-1'>
+                          {getUserDisplayName(user)}
+                          {user.statusEmoji &&
+                            (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt)) && (
+                              <span className='inline-flex'>{renderEmoji(user.statusEmoji)}</span>
+                            )}
+                        </span>
+                      </div>
                       <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
                     </div>
                   </li>

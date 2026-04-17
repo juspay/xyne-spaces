@@ -42,7 +42,7 @@ export interface InputBoxProps {
   onTyping?: () => void;
   typingUsers?: TypingUser[];
   showTypingIndicator?: boolean;
-  placeholder?: string;
+  placeholder?: React.ReactNode;
   value?: string | undefined;
   disabled?: boolean;
   className?: string;

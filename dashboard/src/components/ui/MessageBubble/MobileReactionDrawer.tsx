@@ -6,9 +6,11 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useUsers } from '../../../hooks/useUsers';
 import Avatar from '../Avatar/Avatar';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
+import { isStatusExpired } from '../../../utils/statusUtils';
 import { AnimatePresence, motion, Variants } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { type User } from '../../../machines/stateMachine';
 
 type ActivationDirection = 'left' | 'right' | 'none';
 
@@ -31,14 +33,14 @@ const getAnimationVariants = (direction: ActivationDirection): Variants => {
 interface GroupedReaction {
   emojiName: string;
   count: number;
-  users: Array<{ userId: string; name: string }>;
+  users: Array<{ userId: string; name: string; user?: User | undefined }>;
   orderIndex: number;
 }
 
 // Helper: Group reactions by emoji
 const groupReactionsByEmoji = (
   reactionsData: ReactionsData,
-  usersById: Map<string, { name: string }>,
+  usersById: Map<string, User>,
 ): GroupedReaction[] => {
   const emojiOrder = Object.keys(reactionsData);
   const grouped = emojiOrder.reduce(
@@ -47,10 +49,14 @@ const groupReactionsByEmoji = (
       acc[emoji] = {
         emojiName: emoji,
         count: userIds.length,
-        users: userIds.map(userId => ({
-          userId,
-          name: usersById.get(userId)?.name || 'Unknown User',
-        })),
+        users: userIds.map(userId => {
+          const user = usersById.get(userId);
+          return {
+            userId,
+            name: user ? getUserDisplayName(user) : 'Unknown User',
+            user,
+          };
+        }),
         orderIndex: index,
       };
       return acc;
@@ -80,9 +86,9 @@ export default function MobileReactionDrawer({
   const navigate = useNavigate();
   const location = useLocation();
   const usersById = useMemo(() => {
-    const map = new Map<string, { name: string }>();
+    const map = new Map<string, User>();
     for (const u of users) {
-      map.set(u.id, { name: getUserDisplayName(u) });
+      map.set(u.id, u);
     }
     return map;
   }, [users]);
@@ -273,8 +279,15 @@ export default function MobileReactionDrawer({
                               className='flex items-center gap-3 px-2 py-2'
                             >
                               <Avatar userId={user.userId} size='sm' showActiveStatus={false} />
-                              <span className='text-sm text-foreground truncate'>
+                              <span className='text-sm text-foreground truncate flex items-center gap-1'>
                                 {user.name}
+                                {user.user?.statusEmoji &&
+                                  (!user.user.statusExpiryAt ||
+                                    !isStatusExpired(user.user.statusExpiryAt)) && (
+                                    <span className='inline-flex'>
+                                      {renderEmoji(user.user.statusEmoji)}
+                                    </span>
+                                  )}
                                 {currentUser && user.userId === currentUser.id && (
                                   <span className='text-muted-foreground'>(you)</span>
                                 )}
