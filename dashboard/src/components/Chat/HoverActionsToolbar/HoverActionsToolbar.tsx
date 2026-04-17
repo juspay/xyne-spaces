@@ -155,7 +155,11 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
           className='z-50 bg-popover rounded-lg shadow-md p-0'
         >
           <EmojiPicker
-            style={{ width: '320px' }}
+            style={{
+              width: '320px',
+              ['--epr-emoji-size' as string]: '22px',
+              ['--epr-emoji-gap' as string]: '4px',
+            }}
             emojiStyle={EmojiStyle.NATIVE}
             onEmojiClick={emoji => {
               // For custom emojis, store the emojiId with a prefix
@@ -173,6 +177,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               handleEmojiOpenChange(false);
             }}
             customEmojis={customEmojis || []}
+            previewConfig={{ showPreview: false }}
           />
         </Popover>
       )}

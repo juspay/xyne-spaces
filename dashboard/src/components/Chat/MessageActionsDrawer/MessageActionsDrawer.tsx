@@ -1,7 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { Drawer } from '../../ui/Drawer/Drawer';
-import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
-import { Popover } from '../../ui/Popover';
 import {
   Trash2,
   CornerUpLeft,
@@ -16,6 +14,7 @@ import {
   Forward,
   Copy,
   Headphones,
+  ArrowLeft,
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
@@ -27,6 +26,11 @@ import { parseReactionsMd } from '@xyne/shared';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { ConversationSubscription } from '../ConversationSubscription';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
+import { AnimatePresence, motion } from 'framer-motion';
+import { useMeasure } from 'react-use';
+import AddReactionActionView from '../AddReactionActionView/AddReactionActionView';
+
+type DrawerView = 'default' | 'emoji';
 
 export interface MessageActionsDrawerProps {
   open: boolean;
@@ -88,14 +92,23 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
   const canCreateTicket = useCanCreateTicket();
-  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [view, setView] = useState<DrawerView>('default');
+  const [drawerContentRef, measurements] = useMeasure<HTMLDivElement>();
 
   const { data: customEmojis } = useCustomEmojis();
   const reactionsData = useMemo(() => parseReactionsMd(reactionsMd), [reactionsMd]);
+  const drawerHeight = measurements.height + 32;
+
+  const handleOpenChange = (isOpen: boolean): void => {
+    if (!isOpen) {
+      setView('default');
+    }
+    onOpenChange(isOpen);
+  };
 
   const handleActionClick = (action: () => void): void => {
     action();
-    onOpenChange(false); // Close drawer after action
+    handleOpenChange(false); // Close drawer after action
   };
 
   const handleEmojiSelect = (emoji: {
@@ -116,8 +129,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
       emoji: emojiName,
       hasReacted,
     });
-    setEmojiOpen(false);
-    onOpenChange(false); // Close drawer after adding reaction
+    handleOpenChange(false); // Close drawer after adding reaction
   };
 
   // Action button component for consistency
@@ -150,202 +162,213 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   return (
     <Drawer
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={handleOpenChange}
       title='Message Actions'
       description='Choose an action for this message'
     >
-      <div className='px-2 py-4 space-y-1'>
-        {/* Add Reaction - Opens emoji picker in popover */}
-        <Popover
-          trigger={
-            <button className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-foreground hover:bg-accent'>
-              <span className='flex-shrink-0 w-5 h-5 flex items-center justify-center'>
-                <SmilePlus className='w-5 h-5' />
-              </span>
-              <span className='text-sm font-medium'>Add Reaction</span>
-            </button>
-          }
-          open={emojiOpen}
-          onOpenChange={setEmojiOpen}
-          modal={true}
-          side='top'
-          align='center'
-          sideOffset={8}
-          collisionPadding={16}
-          avoidCollisions={true}
-          className='z-50 bg-popover rounded-lg shadow-md p-0'
-        >
-          <EmojiPicker
-            style={{ width: '320px' }}
-            emojiStyle={EmojiStyle.NATIVE}
-            onEmojiClick={emoji => {
-              handleEmojiSelect({
-                emoji: emoji.emoji,
-                isCustom: emoji.isCustom,
-                imageUrl: emoji.imageUrl,
-                names: emoji.names,
-              });
-            }}
-            customEmojis={customEmojis || []}
-          />
-        </Popover>
-
-        {/* Reply in Thread */}
-        {onReplyInThread && (
-          <ActionButton
-            icon={<MessageCircleMore className='w-5 h-5' />}
-            label='Reply in Thread'
-            onClick={() => handleActionClick(onReplyInThread)}
-          />
-        )}
-
-        {/* Initiate Call */}
-        {onInitiateCall && messageId === initialMessageId && !isChannelArchived && (
-          <ActionButton
-            icon={<Headphones className='w-5 h-5' />}
-            label={isCallDisabled ? 'Call already in progress' : 'Start Call'}
-            onClick={() => handleActionClick(onInitiateCall)}
-            disabled={isCallDisabled}
-          />
-        )}
-
-        {/* Send to Channel */}
-        {onSendToChannel && (
-          <ActionButton
-            icon={<CornerUpLeft className='w-5 h-5' />}
-            label='Send to Channel'
-            onClick={() => handleActionClick(onSendToChannel)}
-          />
-        )}
-
-        {/* Create Ticket */}
-        {onCreateTicket && canCreateTicket && !isChannelArchived && (
-          <ActionButton
-            icon={<Ticket className='w-5 h-5' />}
-            label='Create Ticket'
-            onClick={() => handleActionClick(onCreateTicket)}
-          />
-        )}
-
-        {/* Copy Link */}
-        {onCopyLink && (
-          <ActionButton
-            icon={<Link className='w-5 h-5' />}
-            label='Copy Link'
-            onClick={() => handleActionClick(onCopyLink)}
-          />
-        )}
-
-        {/* Copy Message */}
-        {onCopyMessage && (
-          <ActionButton
-            icon={<Copy className='w-5 h-5' />}
-            label='Copy Message'
-            onClick={() => handleActionClick(onCopyMessage)}
-          />
-        )}
-
-        {/* Forward Message */}
-        {onForwardMessage && (
-          <ActionButton
-            icon={<Forward className='w-5 h-5' />}
-            label='Forward Message'
-            onClick={() => handleActionClick(onForwardMessage)}
-          />
-        )}
-
-        {/* Pin/Unpin Message */}
-        {onPinMessage && (
-          <ActionButton
-            icon={isPinned ? <UnpinIcon className='w-5 h-5' /> : <Pin className='w-5 h-5' />}
-            label={isPinned ? 'Unpin Message' : 'Pin Message'}
-            onClick={() => handleActionClick(onPinMessage)}
-          />
-        )}
-
-        {/* Ask AI */}
-        {onAskAI && (
-          <ActionButton
-            icon={<XyneAIStar size={20} />}
-            label='Ask AI'
-            onClick={() => handleActionClick(onAskAI)}
-          />
-        )}
-
-        {/* Bookmark */}
-        {onBookmark && (
-          <ActionButton
-            icon={
-              isBookmarked ? (
-                <BookmarkMinus className='w-5 h-5' />
+      <motion.div
+        animate={{ height: drawerHeight }}
+        transition={{ duration: 0.3, ease: [0.25, 1, 0.5, 1] }}
+        className='[*:has(>*>&)]:overflow-visible'
+      >
+        <div ref={drawerContentRef} className='px-2 py-4'>
+          <AnimatePresence initial={false} mode='popLayout' custom={view}>
+            <motion.div
+              key={view}
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.27, ease: [0.26, 0.08, 0.25, 1] }}
+              className='space-y-1'
+            >
+              {view === 'emoji' ? (
+                <div className='h-[75dvh]'>
+                  <button
+                    className='ml-3 text-muted-foreground flex items-center gap-1 py-1 px-3 transition-colors active:bg-muted rounded-md'
+                    onClick={() => setView('default')}
+                    data-track-category='MESSAGE'
+                    data-track-name='BACK_TO_MESSAGE_ACTIONS'
+                  >
+                    <ArrowLeft className='size-5' />
+                    <span>Back</span>
+                  </button>
+                  <AddReactionActionView
+                    handleEmojiSelect={handleEmojiSelect}
+                    customEmojis={customEmojis}
+                  />
+                </div>
               ) : (
-                <Bookmark className='w-5 h-5' />
-              )
-            }
-            label={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
-            onClick={() => handleActionClick(onBookmark)}
-          />
-        )}
+                <>
+                  {/* Add Reaction */}
+                  <ActionButton
+                    icon={<SmilePlus className='w-5 h-5' />}
+                    label='Add Reaction'
+                    onClick={() => setView('emoji')}
+                  />
 
-        {/* Conversation Subscription */}
-        {open && onReplyInThread && conversationId && (
-          <ConversationSubscription
-            conversationId={conversationId}
-            {...(conversation && { conversation })}
-            variant='full'
-            className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-foreground hover:bg-accent'
-            menuOpen={open}
-          />
-        )}
+                  {/* Reply in Thread */}
+                  {onReplyInThread && (
+                    <ActionButton
+                      icon={<MessageCircleMore className='w-5 h-5' />}
+                      label='Reply in Thread'
+                      onClick={() => handleActionClick(onReplyInThread)}
+                    />
+                  )}
 
-        {/* Divider before edit actions */}
-        {showEditAction && (onEditMessage || onEditInCanvas || onDeleteMessage) && (
-          <div className='py-2'>
-            <div className='border-t border-border' />
-          </div>
-        )}
+                  {/* Initiate Call */}
+                  {onInitiateCall && messageId === initialMessageId && !isChannelArchived && (
+                    <ActionButton
+                      icon={<Headphones className='w-5 h-5' />}
+                      label={isCallDisabled ? 'Call already in progress' : 'Start Call'}
+                      onClick={() => handleActionClick(onInitiateCall)}
+                      disabled={isCallDisabled}
+                    />
+                  )}
 
-        {/* Mark as Unread */}
-        {onMarkAsUnread && (
-          <ActionButton
-            icon={
-              <div className='relative flex items-center justify-center w-5 h-5'>
-                <div className='w-3 h-3 rounded-full border-2 border-current' />
-              </div>
-            }
-            label='Mark as Unread'
-            onClick={() => handleActionClick(onMarkAsUnread)}
-          />
-        )}
+                  {/* Send to Channel */}
+                  {onSendToChannel && (
+                    <ActionButton
+                      icon={<CornerUpLeft className='w-5 h-5' />}
+                      label='Send to Channel'
+                      onClick={() => handleActionClick(onSendToChannel)}
+                    />
+                  )}
 
-        {/* Edit in Chat */}
-        {showEditAction && onEditMessage && !isChannelArchived && (
-          <ActionButton
-            icon={<EditMessageIcon className='w-5 h-5' />}
-            label='Edit in Chat'
-            onClick={() => handleActionClick(onEditMessage)}
-          />
-        )}
+                  {/* Create Ticket */}
+                  {onCreateTicket && canCreateTicket && !isChannelArchived && (
+                    <ActionButton
+                      icon={<Ticket className='w-5 h-5' />}
+                      label='Create Ticket'
+                      onClick={() => handleActionClick(onCreateTicket)}
+                    />
+                  )}
 
-        {/* Edit in Canvas */}
-        {showEditAction && onEditInCanvas && (
-          <ActionButton
-            icon={<FileText className='w-5 h-5' />}
-            label='Edit in Canvas'
-            onClick={() => handleActionClick(onEditInCanvas)}
-          />
-        )}
+                  {/* Copy Link */}
+                  {onCopyLink && (
+                    <ActionButton
+                      icon={<Link className='w-5 h-5' />}
+                      label='Copy Link'
+                      onClick={() => handleActionClick(onCopyLink)}
+                    />
+                  )}
 
-        {/* Delete */}
-        {showEditAction && onDeleteMessage && (
-          <ActionButton
-            icon={<Trash2 className='w-5 h-5' />}
-            label='Delete Message'
-            onClick={() => handleActionClick(onDeleteMessage)}
-            variant='destructive'
-          />
-        )}
-      </div>
+                  {/* Copy Message */}
+                  {onCopyMessage && (
+                    <ActionButton
+                      icon={<Copy className='w-5 h-5' />}
+                      label='Copy Message'
+                      onClick={() => handleActionClick(onCopyMessage)}
+                    />
+                  )}
+
+                  {/* Forward Message */}
+                  {onForwardMessage && (
+                    <ActionButton
+                      icon={<Forward className='w-5 h-5' />}
+                      label='Forward Message'
+                      onClick={() => handleActionClick(onForwardMessage)}
+                    />
+                  )}
+
+                  {/* Pin/Unpin Message */}
+                  {onPinMessage && (
+                    <ActionButton
+                      icon={
+                        isPinned ? <UnpinIcon className='w-5 h-5' /> : <Pin className='w-5 h-5' />
+                      }
+                      label={isPinned ? 'Unpin Message' : 'Pin Message'}
+                      onClick={() => handleActionClick(onPinMessage)}
+                    />
+                  )}
+
+                  {/* Ask AI */}
+                  {onAskAI && (
+                    <ActionButton
+                      icon={<XyneAIStar size={20} />}
+                      label='Ask AI'
+                      onClick={() => handleActionClick(onAskAI)}
+                    />
+                  )}
+
+                  {/* Bookmark */}
+                  {onBookmark && (
+                    <ActionButton
+                      icon={
+                        isBookmarked ? (
+                          <BookmarkMinus className='w-5 h-5' />
+                        ) : (
+                          <Bookmark className='w-5 h-5' />
+                        )
+                      }
+                      label={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
+                      onClick={() => handleActionClick(onBookmark)}
+                    />
+                  )}
+
+                  {/* Conversation Subscription */}
+                  {open && onReplyInThread && conversationId && (
+                    <ConversationSubscription
+                      conversationId={conversationId}
+                      {...(conversation && { conversation })}
+                      variant='full'
+                      className='w-full flex items-center gap-3 px-4 py-3 text-left transition-colors rounded-lg text-foreground hover:bg-accent'
+                      menuOpen={open}
+                    />
+                  )}
+
+                  {/* Divider before edit actions */}
+                  {showEditAction && (onEditMessage || onEditInCanvas || onDeleteMessage) && (
+                    <div className='py-2'>
+                      <div className='border-t border-border' />
+                    </div>
+                  )}
+
+                  {/* Mark as Unread */}
+                  {onMarkAsUnread && (
+                    <ActionButton
+                      icon={
+                        <div className='relative flex items-center justify-center w-5 h-5'>
+                          <div className='w-3 h-3 rounded-full border-2 border-current' />
+                        </div>
+                      }
+                      label='Mark as Unread'
+                      onClick={() => handleActionClick(onMarkAsUnread)}
+                    />
+                  )}
+
+                  {/* Edit in Chat */}
+                  {showEditAction && onEditMessage && !isChannelArchived && (
+                    <ActionButton
+                      icon={<EditMessageIcon className='w-5 h-5' />}
+                      label='Edit in Chat'
+                      onClick={() => handleActionClick(onEditMessage)}
+                    />
+                  )}
+
+                  {/* Edit in Canvas */}
+                  {showEditAction && onEditInCanvas && (
+                    <ActionButton
+                      icon={<FileText className='w-5 h-5' />}
+                      label='Edit in Canvas'
+                      onClick={() => handleActionClick(onEditInCanvas)}
+                    />
+                  )}
+
+                  {/* Delete */}
+                  {showEditAction && onDeleteMessage && (
+                    <ActionButton
+                      icon={<Trash2 className='w-5 h-5' />}
+                      label='Delete Message'
+                      onClick={() => handleActionClick(onDeleteMessage)}
+                      variant='destructive'
+                    />
+                  )}
+                </>
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </motion.div>
     </Drawer>
   );
 };

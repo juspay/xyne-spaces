@@ -199,11 +199,16 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
         <div className='w-[350px]'>
           <EmojiPicker
             emojiStyle={EmojiStyle.NATIVE}
+            style={{
+              ['--epr-emoji-size' as string]: '22px',
+              ['--epr-emoji-gap' as string]: '4px',
+            }}
             onEmojiClick={emojiData => {
               onEmojiSelect(emojiData);
               setEmojiOpen(false);
             }}
             customEmojis={customEmojis || []}
+            previewConfig={{ showPreview: false }}
           />
 
           {/* Add Emoji Button */}

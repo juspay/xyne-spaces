@@ -72,6 +72,7 @@ import { hasMessageContent } from '../../../utils/chatUtils';
 import { SurfaceNudgeList } from '../../Chat/Nudges/SurfaceNudgeList';
 import MobileReactionDrawer from './MobileReactionDrawer';
 import { MobileAttachmentsGrid } from './MobileAttachmentsGrid';
+import AddReactionDrawerMobile from '../../Chat/AddReactionDrawerMobile/AddReactionDrawerMobile';
 import { AttachmentRef, attachmentViewerActor } from '../../../machines/attachmentViewerMachine';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
@@ -1329,51 +1330,67 @@ export const ReactionView = ({
           );
         })}
 
-        {/* Add Reaction Button */}
-        <Popover.Root open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen} modal={true}>
-          <Popover.Trigger asChild>
-            <button
-              type='button'
-              className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
-              onClick={e => e.stopPropagation()}
-            >
-              <span className='text-sm font-medium'>+</span>
-            </button>
-          </Popover.Trigger>
-          <Popover.Portal>
-            <>
-              {emojiPickerOpen && <div className='fixed inset-0 z-40' />}
-              <Popover.Content
-                side='top'
-                align='start'
-                sideOffset={4}
-                collisionPadding={16}
-                avoidCollisions={true}
-                className='z-50 bg-background rounded-lg shadow-lg'
+        {/* Add Reaction */}
+        {isMobile ? (
+          <AddReactionDrawerMobile
+            messageId={messageId}
+            user={user}
+            reactionsMd={reactionsMd}
+            toggleReaction={toggleReaction}
+            customEmojis={customEmojis}
+          />
+        ) : (
+          <Popover.Root open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen} modal={true}>
+            <Popover.Trigger asChild>
+              <button
+                type='button'
+                className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
+                onClick={e => e.stopPropagation()}
               >
-                <EmojiPicker
-                  emojiStyle={EmojiStyle.NATIVE}
-                  onEmojiClick={emoji => {
-                    // For custom emojis, store the emojiId with a prefix
-                    const emojiName = emoji.isCustom
-                      ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
-                      : emoji.emoji;
-                    // Check if the user has already reacted with this emoji
-                    const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
+                <span className='text-sm font-medium'>+</span>
+              </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+              <>
+                {emojiPickerOpen && <div className='fixed inset-0 z-40' />}
+                <Popover.Content
+                  side='top'
+                  align='start'
+                  sideOffset={4}
+                  collisionPadding={16}
+                  avoidCollisions={true}
+                  className='z-50 bg-background rounded-lg shadow-lg'
+                >
+                  <EmojiPicker
+                    emojiStyle={EmojiStyle.NATIVE}
+                    style={{
+                      ['--epr-emoji-size' as string]: '22px',
+                      ['--epr-emoji-gap' as string]: '4px',
+                    }}
+                    onEmojiClick={emoji => {
+                      // For custom emojis, store the emojiId with a prefix
+                      const emojiName = emoji.isCustom
+                        ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
+                        : emoji.emoji;
+                      // Check if the user has already reacted with this emoji
+                      const hasReacted =
+                        !!user && (reactionsData[emojiName] || []).includes(user.id);
 
-                    toggleReaction({
-                      messageId: messageId,
-                      emoji: emojiName,
-                      hasReacted,
-                    });
-                    setEmojiPickerOpen(false);
-                  }}
-                  customEmojis={customEmojis || []}
-                />
-              </Popover.Content>
-            </>
-          </Popover.Portal>
-        </Popover.Root>
+                      toggleReaction({
+                        messageId: messageId,
+                        emoji: emojiName,
+                        hasReacted,
+                      });
+                      setEmojiPickerOpen(false);
+                    }}
+                    customEmojis={customEmojis || []}
+                    previewConfig={{ showPreview: false }}
+                  />
+                </Popover.Content>
+              </>
+            </Popover.Portal>
+          </Popover.Root>
+        )}
       </div>
 
       {/* Mobile Reaction Drawer */}
