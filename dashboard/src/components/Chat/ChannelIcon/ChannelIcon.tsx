@@ -24,8 +24,7 @@ const ChannelIcon = ({ channel }: ChannelIconProps): React.ReactNode | null => {
   if (channel.scopeType === ChannelScopeType.DM) {
     const participantIds = getDMParticipantIdsToFetch(channel, context.userID);
     const otherUserId = participantIds.find(id => id !== context.userID);
-    if (!otherUserId) return null;
-    return <Avatar userId={otherUserId} size='sm' />;
+    return <Avatar userId={otherUserId || context.userID} size='sm' showActiveStatus={true} />;
   }
 
   return <Hash className='w-4 h-4 text-foreground' />;

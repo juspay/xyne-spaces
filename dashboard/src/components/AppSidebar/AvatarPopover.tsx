@@ -7,6 +7,7 @@ import { Button } from '../ui/Button/Button';
 import { UpdateStatusModal } from './UpdateStatusModal';
 import { useUser } from '../../hooks/useUsers';
 import { isStatusExpired, formatExpiryTime } from '../../utils/statusUtils';
+import { renderEmoji } from '../../utils/customEmojiUtils';
 
 interface AvatarPopoverProps {
   userId: string;
@@ -87,8 +88,12 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
                 data-track-metadata={JSON.stringify({ hasStatus: true, statusContent })}
               >
                 <div className='flex items-center gap-2 p-2 rounded-lg hover:bg-muted transition-colors'>
-                  <div className='text-xl mt-0.5'>
-                    {isHovered ? <Pencil className='size-5 text-muted-foreground' /> : statusEmoji}
+                  <div className='text-xl mt-0.5 flex items-center justify-center min-w-[20px]'>
+                    {isHovered ? (
+                      <Pencil className='size-5 text-muted-foreground' />
+                    ) : (
+                      renderEmoji(statusEmoji || '')
+                    )}
                   </div>
                   <div className='flex-1 min-w-0'>
                     <p className='text-sm font-medium text-foreground break-words'>

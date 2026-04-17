@@ -2,7 +2,8 @@ import { API_BASE_URL } from '../config';
 import { ReactElement } from 'react';
 
 // Helper to check if emojiName is a custom emoji
-const isCustomEmoji = (emojiName: string): boolean => {
+const isCustomEmoji = (emojiName: string | null | undefined): boolean => {
+  if (!emojiName) return false;
   return emojiName.startsWith('custom:');
 };
 
@@ -48,11 +49,35 @@ const convertCustomEmojiUrls = (htmlContent: string): string => {
 };
 
 // Helper to render emoji
-const renderEmoji = (emojiName: string): ReactElement => {
+const renderEmoji = (emojiName: string | null | undefined): ReactElement => {
+  if (!emojiName) return <span className='text-base leading-none' />;
+
   const customEmoji = parseCustomEmoji(emojiName);
-  const imageUrl = `${API_BASE_URL}/emojis/${customEmoji?.emojiId}/stream`;
   if (customEmoji) {
-    return <img src={imageUrl} alt={customEmoji.name} className='w-5 h-5 object-contain' />;
+    const imageUrl = `${API_BASE_URL}/emojis/${customEmoji.emojiId}/stream`;
+
+    return (
+      <span className='group inline-flex items-center justify-center w-5 h-5 flex-shrink-0'>
+        <img
+          src={imageUrl}
+          alt={customEmoji.name}
+          className='w-full h-full object-contain'
+          onError={e => {
+            const target = e.target as HTMLImageElement;
+            target.style.display = 'none';
+            // Show the fallback span if image fails
+            const fallback = target.nextElementSibling as HTMLSpanElement;
+            if (fallback) fallback.style.display = 'inline';
+          }}
+        />
+        <span
+          className='hidden text-[10px] text-muted-foreground font-medium'
+          style={{ display: 'none' }}
+        >
+          :{customEmoji.name}:
+        </span>
+      </span>
+    );
   }
   return <span className='text-base leading-none'>{emojiName}</span>;
 };

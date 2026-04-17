@@ -364,7 +364,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                     })}
                     data-testid='status-suggestion'
                   >
-                    <span className='text-lg'>{suggestion.emoji}</span>
+                    <span className='text-lg'>{renderEmoji(suggestion.emoji)}</span>
                     <span className='text-sm text-foreground'>{suggestion.text}</span>
                     <span className='text-xs text-muted-foreground'>-</span>
                     <span className='text-xs text-muted-foreground'>

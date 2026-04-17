@@ -53,7 +53,7 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
     <>
       <button
         type='button'
-        className='relative'
+        className='relative flex items-center gap-1.5'
         aria-label='Open user menu'
         onClick={() => {
           setView('default');
@@ -61,11 +61,11 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
         }}
       >
         {hasValidStatus && (
-          <span className='mr-1.5 text-[19px] leading-none flex items-center justify-center'>
+          <span className='text-[19px] leading-none flex items-center justify-center shrink-0'>
             {renderEmoji(user?.statusEmoji || '')}
           </span>
         )}
-        <Avatar userId={userId} size='md' />
+        <Avatar userId={userId} size='md' className='shrink-0' />
       </button>
       <Drawer.Root open={isOpen} onOpenChange={setIsOpen}>
         <Drawer.Portal>

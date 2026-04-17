@@ -221,7 +221,7 @@ const ProfileView = ({
     <div className='flex flex-col gap-4 p-6 w-full'>
       <div className='flex items-start gap-3'>
         <div className='flex-shrink-0'>
-          <Avatar userId={user?.id || ''} size='lg' showActiveStatus={false} />
+          <Avatar userId={user?.id || ''} size='lg' showActiveStatus={true} />
         </div>
         <div className='flex-1 min-w-0 space-y-1'>
           <p className='text-sm font-medium text-foreground truncate'>{user?.name || 'User'}</p>

@@ -111,10 +111,12 @@ const Info = ({
   const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: channel.projectId }));
 
   // Get target user ID for 1:1 DM calls
-  const targetUserId = useMemo(
-    () => getTargetUserIdForCall(channel?.scopeType, channel?.name, context.userID),
-    [channel?.scopeType, channel?.name, context.userID],
-  );
+  const targetUserId = useMemo(() => {
+    const id = getTargetUserIdForCall(channel?.scopeType, channel?.name, context.userID);
+    // For self-DMs (saved messages), fall back to current user
+    if (!id && isDM) return context.userID;
+    return id;
+  }, [channel?.scopeType, channel?.name, context.userID, isDM]);
 
   const targetUser = useUser(targetUserId || '');
 
