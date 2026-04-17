@@ -87,8 +87,8 @@ const SearchResultItem = ({
         >
           <Avatar userId={result.id} size='sm' />
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-xs text-foreground truncate'>{result.title}</div>
-            <div className='text-[11px] text-muted-foreground'>{result.subtitle}</div>
+            <div className='font-semibold text-sm text-foreground truncate'>{result.title}</div>
+            <div className='text-xs text-muted-foreground'>{result.subtitle}</div>
           </div>
           {isSelected && <SelectedBadge />}
         </Command.Item>
@@ -110,22 +110,20 @@ const SearchResultItem = ({
           <div className='flex items-center gap-1.5'>
             {result.avatar ? <UserAvatar userId={result.avatar} /> : getResultIcon(result)}
             <div className='flex-1 min-w-0'>
-              <div className='flex items-center gap-1.5 text-xs'>
+              <div className='flex items-center gap-1.5 text-sm'>
                 <span className='font-semibold text-foreground truncate'>
                   {result.searchContext?.senderName}
                 </span>
-                <span className='text-[10px] text-muted-foreground'>{preposition}</span>
-                <span className='text-[10px] font-medium text-foreground truncate'>
-                  {result.title}
-                </span>
-                <span className='text-[10px] text-muted-foreground'>
+                <span className='text-xs text-muted-foreground'>{preposition}</span>
+                <span className='text-xs font-medium text-foreground truncate'>{result.title}</span>
+                <span className='text-xs text-muted-foreground'>
                   {utcToIst(result.metadata.timestamp)}
                 </span>
               </div>
             </div>
             {isSelected && <SelectedBadge />}
           </div>
-          <div className='pl-6 text-xs text-foreground'>
+          <div className='pl-6 text-sm text-foreground'>
             <SearchSnippetRenderer message={result.context || ''} wordLimit={40} />
           </div>
         </Command.Item>
@@ -143,11 +141,11 @@ const SearchResultItem = ({
           <div className='flex items-center gap-2'>
             {getResultIcon(result)}
             <div className='flex-1 min-w-0'>
-              <div className='font-semibold text-xs text-foreground truncate'>
+              <div className='font-semibold text-sm text-foreground truncate'>
                 <RenderMessageWithHTML message={result.title} />
               </div>
               {result.subtitle && (
-                <div className='text-[11px] text-muted-foreground line-clamp-2'>
+                <div className='text-xs text-muted-foreground line-clamp-2'>
                   <RenderMessageWithHTML message={result.subtitle} />
                 </div>
               )}
@@ -167,11 +165,11 @@ const SearchResultItem = ({
         >
           {getResultIcon(result)}
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-xs text-foreground truncate'>
+            <div className='font-semibold text-sm text-foreground truncate'>
               {' '}
               <RenderMessageWithHTML message={result.title} />
             </div>
-            <div className='text-[11px] text-muted-foreground'>
+            <div className='text-xs text-muted-foreground'>
               {' '}
               <RenderMessageWithHTML message={result.subtitle} />
             </div>
@@ -211,8 +209,8 @@ const SearchResultItem = ({
         >
           {getResultIcon(result)}
           <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-xs text-foreground truncate'>{result.title}</div>
-            <div className='text-[11px] text-muted-foreground'>{result.subtitle}</div>
+            <div className='font-semibold text-sm text-foreground truncate'>{result.title}</div>
+            <div className='text-xs text-muted-foreground'>{result.subtitle}</div>
           </div>
           {isSelected && <SelectedBadge />}
         </Command.Item>
