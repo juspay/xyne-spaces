@@ -730,9 +730,17 @@ export class XyneAIController {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('Content-Encoding', 'none');
-    
+
     if (res.socket) res.socket.setNoDelay(true);
     res.flushHeaders();
+
+    // Send a ping every 20s to prevent idle connection timeouts
+    const pingInterval = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'ping' })}\n\n`);
+        if (typeof (res as any).flush === 'function') (res as any).flush();
+      }
+    }, 20_000);
 
     // Create callback for real-time tool events (e.g., Genius streaming)
     const onStreamEvent = (event: Record<string, unknown>): void => {
@@ -742,10 +750,14 @@ export class XyneAIController {
 
     const streamGenerator = xyneAIStream({ ...request, onStreamEvent });
 
-    for await (const chunk of streamGenerator) {
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-      if (typeof (res as any).flush === 'function') (res as any).flush();
-      if (chunk.type === 'complete' || chunk.type === 'error') break;
+    try {
+      for await (const chunk of streamGenerator) {
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        if (typeof (res as any).flush === 'function') (res as any).flush();
+        if (chunk.type === 'complete' || chunk.type === 'error') break;
+      }
+    } finally {
+      clearInterval(pingInterval);
     }
 
     res.write(`data: ${JSON.stringify({ type: 'end' })}\n\n`);
