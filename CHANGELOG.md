@@ -1,3 +1,10 @@
+## [1.117.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.117.0...v1.117.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* remove delete cookie on app-quit ([cff5f6a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cff5f6af0562c98744b61a7771c80ded34df6caa)), closes [#5046](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5046)
+
 ## [1.117.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.116.0...v1.117.0) (2026-04-17)
 
 
