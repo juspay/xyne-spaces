@@ -517,56 +517,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   /**
    * Extract metadata from Bitbucket API response based on URL type.
    */
-  private extractBitbucketMetadata(
-    parsedUrl: ReturnType<typeof this.parseBitbucketUrl>,
-    apiData: any,
-    url: string,
-  ): ExternalLinkMetadata {
-    if (!parsedUrl) {
-      return {
-        url,
-        title: 'Bitbucket',
-        description: '',
-        siteName: 'Bitbucket',
-        favicon: 'https://bitbucket.example.com/favicon.ico',
-      };
-    }
-
-    switch (parsedUrl.type) {
-      case 'pr':
-        return {
-          url,
-          title: apiData.title || `Pull Request #${parsedUrl.prNumber}`,
-          description: apiData.description || `${parsedUrl.project}/${parsedUrl.repo}`,
-          siteName: 'Bitbucket',
-          favicon: `https://${parsedUrl.hostname}/favicon.ico`,
-        };
-      
-      case 'commit':
-        return {
-          url,
-          title: `Commit ${parsedUrl.commitHash?.slice(0, 7)}`,
-          description: apiData.message || `${parsedUrl.project}/${parsedUrl.repo}`,
-          siteName: 'Bitbucket',
-          favicon: `https://${parsedUrl.hostname}/favicon.ico`,
-        };
-      
-      case 'repo':
-        return {
-          url,
-          title: apiData.name || parsedUrl.repo || 'Repository',
-          description: apiData.description || `Project: ${parsedUrl.project}`,
-          siteName: 'Bitbucket',
-          favicon: `https://${parsedUrl.hostname}/favicon.ico`,
-        };
-      
-      default:
-        return this.createUrlDerivedBitbucketMetadata(parsedUrl, url);
-    }
-  }
-
   /**
-   * Create URL-derived Bitbucket metadata fallback for all link types.
+   * Create URL-derived Bitbucket metadata for all link types.
    */
   private createUrlDerivedBitbucketMetadata(
     parsedUrl: ReturnType<typeof this.parseBitbucketUrl>,
@@ -631,11 +583,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   }
 
   /**
-   * Resolve Bitbucket link preview with API-first, URL-derived fallback strategy.
+   * Resolve Bitbucket link preview using URL-derived metadata.
    * Supports all Bitbucket link types: PRs, commits, files, repos, branches, and generic links.
-   * 1. Try authenticated Bitbucket API call for rich preview (title, description, etc.)
-   * 2. If API fails, extract context from URL for basic preview
-   * 3. Returns true if preview was written, false otherwise
+   * Extracts context from URL structure to generate preview (title, description, etc.)
+   * Returns true if preview was written, false otherwise.
    */
   private async resolveBitbucketLinkPreview(
     messageId: string,
@@ -652,76 +603,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       repo: parsedUrl.repo,
     });
 
-    let metadata: ExternalLinkMetadata;
-
-    // Try API-first approach for supported types if credentials are configured
-    if (config.bitbucket.apiToken || config.bitbucket.password) {
-      try {
-        const baseUrl = config.bitbucket.baseUrl || 'https://bitbucket.example.com/rest/api/latest';
-        let apiUrl: string | null = null;
-        
-        // Determine API endpoint based on URL type
-        switch (parsedUrl.type) {
-          case 'pr':
-            if (parsedUrl.project && parsedUrl.repo && parsedUrl.prNumber !== undefined) {
-              apiUrl = `${baseUrl}/projects/${parsedUrl.project}/repos/${parsedUrl.repo}/pull-requests/${parsedUrl.prNumber}`;
-            }
-            break;
-          
-          case 'commit':
-            if (parsedUrl.project && parsedUrl.repo && parsedUrl.commitHash) {
-              apiUrl = `${baseUrl}/projects/${parsedUrl.project}/repos/${parsedUrl.repo}/commits/${parsedUrl.commitHash}`;
-            }
-            break;
-          
-          case 'repo':
-            if (parsedUrl.project && parsedUrl.repo) {
-              apiUrl = `${baseUrl}/projects/${parsedUrl.project}/repos/${parsedUrl.repo}`;
-            }
-            break;
-          
-          // file, branch, generic → skip API, use URL-derived fallback
-          default:
-            apiUrl = null;
-        }
-        
-        if (apiUrl) {
-          const authHeader = config.bitbucket.apiToken
-            ? `Bearer ${config.bitbucket.apiToken}`
-            : config.bitbucket.apiUsername && config.bitbucket.password
-              ? `Basic ${Buffer.from(`${config.bitbucket.apiUsername}:${config.bitbucket.password}`).toString('base64')}`
-              : '';
-
-          const response = await fetch(apiUrl, {
-            headers: {
-              'Authorization': authHeader,
-              'Accept': 'application/json',
-            },
-          });
-
-          if (response.ok) {
-            const apiData = await response.json();
-            metadata = this.extractBitbucketMetadata(parsedUrl, apiData, url);
-            logger.info('[MessagesSideEffect] Fetched Bitbucket metadata from API:', metadata);
-          } else {
-            throw new Error(`Bitbucket API returned ${response.status}`);
-          }
-        } else {
-          // No API endpoint for this type, use URL-derived
-          metadata = this.createUrlDerivedBitbucketMetadata(parsedUrl, url);
-          logger.info('[MessagesSideEffect] Using URL-derived preview (no API for this type)');
-        }
-      } catch (error) {
-        logger.warn('[MessagesSideEffect] Bitbucket API call failed, using URL-derived fallback:', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        metadata = this.createUrlDerivedBitbucketMetadata(parsedUrl, url);
-      }
-    } else {
-      // No credentials configured, use URL-derived preview
-      logger.info('[MessagesSideEffect] No Bitbucket credentials configured, using URL-derived preview');
-      metadata = this.createUrlDerivedBitbucketMetadata(parsedUrl, url);
-    }
+    // Generate URL-derived metadata
+    const metadata = this.createUrlDerivedBitbucketMetadata(parsedUrl, url);
 
     // Write preview to database
     const md = serializeLinkPreviewMd(metadata);
