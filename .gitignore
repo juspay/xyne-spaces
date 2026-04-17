@@ -207,3 +207,4 @@ lotus/ios/lotus.xcodeproj/project.xcworkspace/
 
 # Agents
 .sisyphus/
+.airborne
