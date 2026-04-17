@@ -1,0 +1,59 @@
+%% Lotus Call Flow — Files & Responsibilities
+
+flowchart TB
+    subgraph Files["Lotus Files"]
+        CH["[channelId].tsx<br/><b>Start Huddle Button</b><br/>Triggers call start"]
+        
+        NC["native-call.tsx<br/><b>Active Call Screen</b><br/>LiveKit video/audio UI"]
+        
+        PP["PushNotificationPayload.ts<br/><b>Parse Push</b><br/>Extract callId, token"]
+        
+        CL["CallLaunchHandler.ts<br/><b>Killed State</b><br/>Cache intent, auto-navigate"]
+        
+        CK["CallKitService.ts<br/><b>Incoming UI</b><br/>Show accept/decline buttons"]
+        
+        CR["CallRuntimeNativeService.ts<br/><b>Room Manager</b><br/>Connect/disconnect LiveKit"]
+        
+        CS["CallService.ts<br/><b>HTTP Client</b><br/>POST /initiate, /join, /decline"]
+    end
+
+    subgraph Plugins["Custom Plugins used for Calls"]
+        direction TB
+        PN["withNativeIncomingCallAndroid.cjs<br/><b>FCM Handler</b>"]
+        PV["withVoipPushIOS.cjs<br/><b>VoIP Push</b><br/>PKPushRegistry + CallKeep setup"]
+        CM["withCallKeepAndroidManifest.cjs<br/><b>CallKeep Manifest</b><br/>Permissions & services"]
+        CC["withCallKeepAndroidCompat.cjs<br/><b>CallKeep Patch</b><br/>PhoneAccount fixes"]
+        LS["withLiveKitAndroidSetup.cjs<br/><b>LiveKit Setup</b><br/>MainApplication init"]
+        SS["withScreenShareAndroid.cjs<br/><b>Screen Share</b><br/>MediaProjection service"]
+        DL["withDeepLinks.cjs<br/><b>Deep Links</b><br/>lotus://call/{id} routing"]
+    end
+
+    subgraph Actions["Accept / Decline Flow"]
+        A1["ACCEPT:<br/>1. CK.onAnswer callback<br/>2. router.push('/native-call')<br/>3. CR.room.connect(token)<br/>4. Join call"]
+        
+        A2["DECLINE:<br/>1. CK.onEndCall callback<br/>2. CS.POST /decline<br/>3. Stay on current screen"]
+        
+        A3["KILLED STATE:<br/>1. Push wakes app<br/>2. CL caches intent<br/>3. User taps Accept<br/>4. CL reads cache<br/>5. Auto-navigate to call"]
+    end
+
+    CH -->|"router.push"| NC
+    PP -->|"call data"| CK
+    CK -->|"accept"| A1
+    CK -->|"decline"| A2
+    CL -->|"killed flow"| A3
+    CS -->|"API calls"| B[Backend]
+    CR -->|"LiveKit"| L[LiveKit]
+    PN -.->|"notifies"| PP
+    PV -.->|"notifies"| CK
+    LS -.->|"initializes"| CR
+
+    style CH fill:#a5d8ff
+    style NC fill:#a5d8ff
+    style CK fill:#ffec99
+    style CL fill:#ffec99
+    style PP fill:#d0bfff
+    style CR fill:#b2f2bb
+    style CS fill:#b2f2bb
+    style Plugins fill:#ffe0b2
+    style PN fill:#ffccbc
+    style PV fill:#c5cae9
