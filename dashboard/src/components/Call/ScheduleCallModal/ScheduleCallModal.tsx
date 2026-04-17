@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useEffect, useState } from 'react';
+import React, { useMemo, useCallback, useEffect, useState, useRef } from 'react';
 import { RRule } from 'rrule';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
@@ -161,6 +161,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   const [updateChannelId, setUpdateChannelId] = useState<string | null>(null);
   const [channelSearchQuery, setChannelSearchQuery] = useState('');
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
+  const channelInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch recurring call series data via Zero — only when the modal is open and
   // in edit mode for a recurring call, so the query doesn't run when the popup is closed.
@@ -1808,6 +1809,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                   >
                     {updateChannelId && !channelPickerOpen && selectedChannelItem?.leftSlot}
                     <input
+                      ref={channelInputRef}
                       value={
                         channelPickerOpen ? channelSearchQuery : (selectedChannelItem?.label ?? '')
                       }
@@ -1822,6 +1824,21 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                       data-track-name='channel-picker-search'
                       className='flex-1 min-w-0 text-sm bg-transparent outline-none placeholder:text-muted-foreground'
                     />
+                    {updateChannelId && (
+                      <button
+                        type='button'
+                        onMouseDown={e => {
+                          e.preventDefault();
+                          setUpdateChannelId(null);
+                          setChannelSearchQuery('');
+                          setChannelPickerOpen(true);
+                          channelInputRef.current?.focus();
+                        }}
+                        className='text-muted-foreground hover:text-foreground transition-colors flex-shrink-0'
+                      >
+                        <X className='size-3.5' />
+                      </button>
+                    )}
                   </div>
                   {channelPickerOpen && (
                     <div className='absolute top-full mt-1 left-0 right-0 z-50 bg-popover border border-border rounded-md shadow-lg max-h-48 overflow-y-auto py-1'>

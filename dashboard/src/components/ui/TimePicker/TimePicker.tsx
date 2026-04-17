@@ -47,8 +47,8 @@ export const TimePicker: React.FC<TimePickerProps> = ({
   const [open, setOpen] = useState(false);
 
   const handleHourChange = (newHour: string) => {
-    if (newHour === '') {
-      setHour('');
+    if (newHour === '' || newHour === '0') {
+      setHour(newHour);
       return;
     }
     // validate hour input from 1-12
@@ -139,6 +139,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                 id='timepicker-hour'
                 value={hour}
                 onChange={e => handleHourChange(e.target.value)}
+                onFocus={e => e.target.select()}
                 type='text'
                 inputMode='numeric'
                 pattern='[0-9]*'
@@ -159,6 +160,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                 id='timepicker-minute'
                 value={minute}
                 onChange={e => handleMinuteChange(e.target.value)}
+                onFocus={e => e.target.select()}
                 type='text'
                 inputMode='numeric'
                 pattern='[0-9]*'
