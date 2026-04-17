@@ -93,14 +93,6 @@ app.on('before-quit', async () => {
   // Log app quit event
   Logger.info(ElectronEvent.APP_QUIT, {}, 'App');
 
-  // Clear all cookies before quitting
-  try {
-    await clearAllCookies();
-    Logger.info(ElectronEvent.COOKIES_CLEARED, {}, 'App');
-  } catch (error) {
-    Logger.logError(ElectronEvent.COOKIES_CLEAR_FAILED, error, {}, 'App');
-  }
-
   // Stop version checker
   stopVersionChecker();
 
