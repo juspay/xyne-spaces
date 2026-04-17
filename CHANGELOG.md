@@ -1,3 +1,32 @@
+## [1.117.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.116.0...v1.117.0) (2026-04-17)
+
+
+### Features
+
+* add generic storage interface for s3 and gcs and support microsoft login from devices ([1fb56c9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1fb56c9518743ab438ca5f562db0f97b2ff75277)), closes [#5056](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5056)
+* Added batching capability for vespa calls, connection pooling & backpressure ([5b036e4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5b036e458feebf4e1caf4286193eb80a276e5479)), closes [#5119](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5119)
+* adding-logs-in-messaging-and-attachments ([09ab2fe](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/09ab2fe6d04d3f55791a6c12b497a6053abbcc42)), closes [#5110](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5110)
+* enable OTEL metrics for zero-cache and remove redundant backend scrape target ([77b7791](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/77b7791268933b33c61779b8428aa067ad042889)), closes [#5123](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5123)
+* Send call summary to a channel ([b2fdb2e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b2fdb2e9eacf7f1e05dc9f05ea2ac29c5c7d00ca)), closes [#5043](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5043)
+* Show user status ([4acb55c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4acb55c1c0da7817fad3a42ee02d419c9d63c829)), closes [#4957](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4957)
+
+
+### Bug Fixes
+
+* add og image handling for real-time link unfurling in chat list ([b586153](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b586153cda1e19955fa8bb3862b17ce490ea2de7)), closes [#5041](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5041)
+* copy width/height when forwarding messages with image attachments ([dd4c408](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dd4c4081e83364bca474eeb1b49ca6c86cad42b6)), closes [#5082](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5082)
+* date range analytics. ([5c298b9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5c298b94f75ad06039e03e4acdf50480b4f3a31a)), closes [#5111](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5111)
+* electron JS fix and new tab shortcut fix ([bee9211](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bee921133fcbc179b48626324cb98ab236ec052d))
+* fixes bullet ol list num overflowing ([369a5d9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/369a5d99a2a417bc4422c3151485c63010c11875))
+* Integrity workflow ([e9bbdd4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e9bbdd462f20199efaa06ef8f866aeb6f382f475)), closes [#4951](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4951)
+* lotus shared imports ([4a85062](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4a850623b95d35dca7f7ee26fdf4eaea0d78b457)), closes [#5129](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5129)
+* message send bug fix ([4a446d6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4a446d660d704565f890e6d5aa1bfea008733454)), closes [#5016](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5016)
+* prevent mid-word line breaks in channel messages ([0c48ce6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0c48ce6510abf6f6c23c521fe7144f27054b42b0)), closes [#5007](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5007)
+* Remove create ticket option from thread input drop-up ([41cc553](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/41cc55394eac96ed4ce46c5298c4d952181f39f1)), closes [#5075](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5075)
+* resolve Bitbucket PR link previews with URL-derived fallback instead of login page ([91ad2ba](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/91ad2bad578ea1bfd0b14cc9134d510782f056db))
+* sanitize filenames with special characters during upload ([8ef57ed](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8ef57edcbada9da4dce4b4abcce6037420477533)), closes [#5081](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5081)
+* Xyne Apps New Channel Routes ([bc8bd92](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bc8bd921f6a6d487850c996e2c527274b48131c0)), closes [#5130](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5130)
+
 ## [1.116.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.115.2...v1.116.0) (2026-04-16)
 
 
