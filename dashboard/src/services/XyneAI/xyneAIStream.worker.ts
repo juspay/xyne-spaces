@@ -172,6 +172,9 @@ async function executeStream(
 
             const data = parsed as Record<string, unknown>;
 
+            // Ignore heartbeat pings sent to keep the connection alive
+            if (data['type'] === 'ping') continue;
+
             // Send chunk to main thread
             const message: WorkerStreamChunkMessage = {
               type: 'STREAM_CHUNK',
