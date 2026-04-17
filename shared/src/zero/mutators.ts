@@ -3110,37 +3110,7 @@ export const mutators = defineMutators({
         tx,
         args: { userGroupId, name, alias, description, userResponsibilityUpdates, timestamp },
       }) => {
-        // Get all user groups to check for duplicates in a single query
-        const allUserGroups = await tx.run(zql.user_groups);
-
-        // Find the current user group
-        const userGroup = allUserGroups.find(ug => ug.id === userGroupId);
-        if (!userGroup) {
-          throw new Error('User group not found');
-        }
-
-        // Check for duplicate name if name is being changed
-        if (name && name !== userGroup.name) {
-          const existingUserGroup = allUserGroups.find(ug => ug.name === name);
-          if (existingUserGroup && existingUserGroup.id !== userGroupId) {
-            throw new Error(`User group with name '${name}' already exists`);
-          }
-        }
-
-        // Check for duplicate alias if alias is being changed
-        if (alias && alias !== userGroup.alias) {
-          if (!/^[a-z0-9_-]+$/.test(alias)) {
-            throw new Error(
-              'Alias can only contain lowercase letters, numbers, hyphens, and underscores',
-            );
-          }
-          const existingUserGroup = allUserGroups.find(ug => ug.alias === alias);
-          if (existingUserGroup && existingUserGroup.id !== userGroupId) {
-            throw new Error(`User group with alias '${alias}' already exists`);
-          }
-        }
-
-        // Update user group
+        // Update user group - backend validates existence and uniqueness
         await tx.mutate.user_groups.update({
           id: userGroupId,
           ...(name !== undefined && { name }),
@@ -3187,13 +3157,6 @@ export const mutators = defineMutators({
     delete: defineMutator(
       z.object({ userGroupId: z.string() }),
       async ({ tx, args: { userGroupId } }) => {
-        // Validate user group exists
-        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
-        if (!userGroup) {
-          throw new Error('User group not found');
-        }
-
-        // Check if user group has tickets with terminal statuses (CANCELLED, COMPLETED)
         const terminalTickets = await tx.run(
           zql.tickets
             .where('userGroupId', userGroupId)
@@ -3217,7 +3180,7 @@ export const mutators = defineMutators({
           await tx.mutate.user_group_mappings.delete({ id: mapping.id });
         }
 
-        // Then, delete the user group itself
+        // Then, delete the user group itself - backend validates existence
         await tx.mutate.user_groups.delete({
           id: userGroupId,
         });
@@ -3226,14 +3189,6 @@ export const mutators = defineMutators({
     deactivate: defineMutator(
       z.object({ userGroupId: z.string(), timestamp: z.number() }),
       async ({ tx, args: { userGroupId, timestamp } }) => {
-        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
-        if (!userGroup) {
-          throw new Error('User group not found');
-        }
-        if (!userGroup.isActive) {
-          throw new Error('User group is already deactivated');
-        }
-
         await tx.mutate.user_groups.update({
           id: userGroupId,
           isActive: false,
@@ -3244,14 +3199,6 @@ export const mutators = defineMutators({
     reactivate: defineMutator(
       z.object({ userGroupId: z.string(), timestamp: z.number() }),
       async ({ tx, args: { userGroupId, timestamp } }) => {
-        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
-        if (!userGroup) {
-          throw new Error('User group not found');
-        }
-        if (userGroup.isActive) {
-          throw new Error('User group is already active');
-        }
-
         await tx.mutate.user_groups.update({
           id: userGroupId,
           isActive: true,
@@ -3267,12 +3214,6 @@ export const mutators = defineMutators({
         mappingIds: z.record(z.string(), z.string()), // Map userId -> mappingId
       }),
       async ({ tx, args: { userGroupId, userIds, timestamp, mappingIds = {} } }) => {
-        // Validate user group exists
-        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
-        if (!userGroup) {
-          throw new Error('User group not found');
-        }
-
         // Bulk check for existing mappings to avoid duplicates
         const existingMappings = await Promise.all(
           userIds.map(userId =>
@@ -3314,12 +3255,6 @@ export const mutators = defineMutators({
     removeUsers: defineMutator(
       z.object({ userGroupId: z.string(), userIds: z.array(z.string()) }),
       async ({ tx, args: { userGroupId, userIds } }) => {
-        // Validate user group exists
-        const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
-        if (!userGroup) {
-          throw new Error('User group not found');
-        }
-
         // Remove users from group
         // Find all mappings to be removed using individual queries
         const mappingsToRemove = await Promise.all(
