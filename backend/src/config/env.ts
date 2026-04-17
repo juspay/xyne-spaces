@@ -189,6 +189,7 @@ const envSchema = Joi.object({
   JIRA_EULER_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_EMAIL: Joi.string().allow('').default(''),
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
+  // Bit-Bot Integration
   ENABLE_FILE_INDEXING: Joi.boolean().default(false),
 }).unknown();
 

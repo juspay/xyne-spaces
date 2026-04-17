@@ -11,6 +11,7 @@ import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { PRStatusEvent } from '@prisma/client';
 import { xyneCommentService } from '@/services/xyneCommentService';
+import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -282,6 +283,15 @@ export class BitbucketWebhookService {
         `[Bitbucket-Webhook] ✅ Stored PR in database: ${context.prUrl} (ticketId: ${validationResult.ticketId}, isNew: ${result.isNew})`
       );
 
+      // Post or update PR check approval button if Varys bot is in channel
+      if (validationResult.ticketId) {
+        prCheckApprovalService.postOrUpdateApprovalButton({
+          ticketId: validationResult.ticketId!,
+          prId: context.prId,
+          prUrl: context.prUrl,
+        }).catch(err => logger.error('[Bitbucket-Webhook] PR check approval button error:', err));
+      }
+
       // Always use CREATED event for new PRs
       await prTicketStatusSyncService.syncTicketStatusOnPRChange({
         prId: context.prId,
@@ -355,6 +365,15 @@ export class BitbucketWebhookService {
       logger.info(
         `[Bitbucket-Webhook] ♻️  Updated PR metadata: ${context.prUrl} - Event: ${prEvent}`
       );
+    }
+
+    // Post or update PR check approval button if Varys bot is in channel
+    if (validationResult.ticketId) {
+      prCheckApprovalService.postOrUpdateApprovalButton({
+        ticketId: validationResult.ticketId!,
+        prId: context.prId,
+        prUrl: context.prUrl,
+      }).catch(err => logger.error('[Bitbucket-Webhook] PR check approval button error:', err));
     }
 
     // Sync ticket status with the appropriate event type
