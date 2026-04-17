@@ -212,6 +212,10 @@ export function CallControls({
     'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
     !hasCustomSizing && 'p-2.5 sm:p-4',
   );
+  const midnightControlClass = 'bg-gray-700 hover:bg-gray-600 text-white';
+  const midnightControlGroupClass = 'bg-gray-700 border border-gray-600';
+  const midnightPopoverClass = 'bg-gray-700 border border-gray-600 text-white';
+  const midnightSeparatorClass = 'bg-gray-600';
 
   // Calculate button gap based on iconSize
   const gapClass = iconSize < 16 ? 'gap-1' : iconSize < 20 ? 'gap-1.5' : 'gap-1 sm:gap-3';
@@ -229,14 +233,14 @@ export function CallControls({
   };
 
   const getAiButtonColorClass = () => {
-    if (hasPendingRequestFromOther) return 'bg-muted text-foreground cursor-not-allowed opacity-60';
+    if (hasPendingRequestFromOther) return `${midnightControlClass} cursor-not-allowed opacity-60`;
     if (isController || (isAIAssistantEnabled && !isControlledByOther)) {
       return 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/50';
     }
     if (isControlledByOther) {
       return 'bg-yellow-600 hover:bg-yellow-700 text-white shadow-yellow-500/50';
     }
-    return 'bg-muted hover:bg-muted/80 text-foreground';
+    return midnightControlClass;
   };
 
   const handleAiButtonClick = () => {
@@ -253,7 +257,7 @@ export function CallControls({
       <div ref={controlsRef} className={`flex items-center justify-center ${gapClass} flex-wrap`}>
         {/* Microphone Toggle with Device Selector */}
         <div className='relative' ref={micMenuRef}>
-          <div className='flex items-center gap-0.5 bg-muted/80 rounded-full'>
+          <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
             <button
               onClick={onToggleMic}
               className={cn(
@@ -262,7 +266,7 @@ export function CallControls({
                 isPushToTalkActive
                   ? 'bg-green-500 hover:bg-green-600 text-white shadow-green-500/50 ring-4 ring-green-500/30'
                   : isMicEnabled
-                    ? 'bg-muted hover:bg-muted/80 text-foreground'
+                    ? midnightControlClass
                     : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
@@ -297,7 +301,7 @@ export function CallControls({
             {viewMode === 'full' && (
               <button
                 onClick={() => setShowMicMenu(!showMicMenu)}
-                className='text-foreground flex-shrink-0 p-1.5 sm:p-2 transition-transform'
+                className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select audio devices'
                 data-track-category='Calls'
                 data-track-name='Toggle_Mic_Menu'
@@ -317,7 +321,8 @@ export function CallControls({
           {showMicMenu && (
             <div
               className={cn(
-                'bg-popover shadow-xl border border-border',
+                midnightPopoverClass,
+                'shadow-xl',
                 isMobile
                   ? 'absolute bottom-full mb-2 -left-2 min-w-[280px] py-2 rounded-xl'
                   : 'absolute bottom-full mb-2 left-0 rounded-full',
@@ -350,14 +355,14 @@ export function CallControls({
 
         {/* Camera Toggle with Device Selector */}
         <div className='relative' ref={cameraMenuRef}>
-          <div className='flex items-center gap-0.5 bg-muted/80 rounded-full'>
+          <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
             <button
               onClick={onToggleCamera}
               className={cn(
                 'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
                 !hasCustomSizing && 'p-2.5 sm:p-4',
                 isCameraEnabled
-                  ? 'bg-muted hover:bg-muted/80 text-foreground'
+                  ? midnightControlClass
                   : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
@@ -392,7 +397,7 @@ export function CallControls({
                 onClick={() => {
                   setShowCameraMenu(!showCameraMenu);
                 }}
-                className='text-foreground flex-shrink-0 p-1.5 sm:p-2 transition-transform'
+                className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
                 title='Select camera'
                 data-track-category='Calls'
                 data-track-name='Toggle_Camera_Menu'
@@ -412,7 +417,8 @@ export function CallControls({
           {showCameraMenu && (
             <div
               className={cn(
-                'bg-popover shadow-xl border border-border',
+                midnightPopoverClass,
+                'shadow-xl',
                 isMobile
                   ? 'absolute bottom-full mb-2 -left-20 min-w-[280px] py-2 rounded-xl'
                   : 'absolute bottom-full mb-2 left-0 rounded-full',
@@ -440,7 +446,7 @@ export function CallControls({
             buttonClasses,
             isScreenSharing
               ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/50'
-              : 'bg-muted hover:bg-muted/80 text-foreground',
+              : midnightControlClass,
           )}
           data-track-event='BUTTON_CLICK'
           data-track-category='CALLS'
@@ -474,7 +480,7 @@ export function CallControls({
               buttonClasses,
               isDrawingEnabled
                 ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/50'
-                : 'bg-muted hover:bg-muted/80 text-foreground',
+                : midnightControlClass,
             )}
             style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
             title={isDrawingEnabled ? 'Stop annotating' : 'Annotate screen share'}
@@ -492,14 +498,16 @@ export function CallControls({
           </button>
         )}
 
-        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-border/50 mx-0.5'></div>}
+        {iconSize >= 16 && (
+          <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
+        )}
         <button
           onClick={onToggleParticipantsSidebar}
           className={cn(
             buttonClasses,
             isParticipantsSidebarOpen
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
-              : 'bg-muted hover:bg-muted/80 text-foreground',
+              : midnightControlClass,
           )}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Participants'
@@ -520,7 +528,7 @@ export function CallControls({
         {/* Share Link Button */}
         <button
           onClick={handleShareLink}
-          className={cn(buttonClasses, 'relative bg-muted hover:bg-muted/80 text-foreground')}
+          className={cn(buttonClasses, 'relative', midnightControlClass)}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title='Share call link'
           data-track-category='CALLS'
@@ -540,7 +548,9 @@ export function CallControls({
           )}
         </button>
 
-        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-border/50 mx-0.5'></div>}
+        {iconSize >= 16 && (
+          <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
+        )}
 
         {/* Reactions Button */}
         {onSendReaction && (
@@ -551,7 +561,7 @@ export function CallControls({
                 buttonClasses,
                 showReactionPicker
                   ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
-                  : 'bg-muted hover:bg-muted/80 text-foreground',
+                  : midnightControlClass,
               )}
               style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
               title='Send a reaction'
@@ -567,7 +577,12 @@ export function CallControls({
             </button>
 
             {showReactionPicker && (
-              <div className='absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-popover border border-border rounded-2xl shadow-2xl p-2 flex gap-1'>
+              <div
+                className={cn(
+                  'absolute bottom-full mb-3 left-1/2 -translate-x-1/2 rounded-2xl shadow-2xl p-2 flex gap-1',
+                  midnightPopoverClass,
+                )}
+              >
                 {REACTION_EMOJIS.map(emoji => (
                   <button
                     key={emoji}
@@ -575,7 +590,7 @@ export function CallControls({
                       onSendReaction(emoji);
                       setShowReactionPicker(false);
                     }}
-                    className='text-2xl p-2 rounded-xl hover:bg-muted transition-colors duration-150 hover:scale-125 transform'
+                    className='text-2xl p-2 rounded-xl hover:bg-[#202224] transition-colors duration-150 hover:scale-125 transform'
                     title={emoji}
                     data-track-category='CALLS'
                     data-track-name='SEND_REACTION'
@@ -595,9 +610,7 @@ export function CallControls({
           className={cn(
             buttonClasses,
             'relative',
-            isChatOpen
-              ? 'bg-blue-600 hover:bg-blue-700 text-white'
-              : 'bg-muted hover:bg-muted/80 text-foreground',
+            isChatOpen ? 'bg-blue-600 hover:bg-blue-700 text-white' : midnightControlClass,
           )}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           data-track-category='CALLS'
@@ -640,12 +653,14 @@ export function CallControls({
           </button>
         </div>
 
-        {iconSize >= 16 && <div className='hidden sm:block w-px h-8 bg-border/50 mx-0.5'></div>}
+        {iconSize >= 16 && (
+          <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
+        )}
 
         {/* Minimize/Maximize Button */}
         <button
           onClick={onToggleView}
-          className={cn(buttonClasses, 'bg-muted hover:bg-muted/80 text-foreground')}
+          className={cn(buttonClasses, midnightControlClass)}
           style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
           title={viewMode === 'mini' ? 'Expand view' : 'Minimize view'}
           data-track-category='CALLS'

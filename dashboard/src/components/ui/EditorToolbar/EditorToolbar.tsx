@@ -328,7 +328,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                   onChange={e => setLinkText(e.target.value)}
                   placeholder='Link text'
                   autoFocus // eslint-disable-line jsx-a11y/no-autofocus
-                  className='w-full px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring'
+                  className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
                 />
               </div>
 
@@ -339,7 +339,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                   onChange={e => setLinkUrl(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && applyLink()}
                   placeholder='https://example.com'
-                  className='w-full px-3 py-2 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring'
+                  className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
                 />
               </div>
 
@@ -347,7 +347,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 {isActive.link && (
                   <Button
                     onClick={removeLink}
-                    className='text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50'
+                    className='rounded px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-400/10 dark:hover:text-red-300'
                     variant='ghost'
                   >
                     Remove
@@ -357,14 +357,14 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                   <Button
                     onClick={() => setOpen(false)}
                     variant='secondary'
-                    className='px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent rounded'
+                    className='rounded px-3 py-1.5 text-xs text-foreground'
                   >
                     Cancel
                   </Button>
                   <Button
                     onClick={applyLink}
                     disabled={!linkUrl.trim()}
-                    className='px-3 py-1.5 text-xs bg-sidebar-badge-accent text-white rounded disabled:opacity-50'
+                    className='rounded bg-sidebar-badge-accent px-3 py-1.5 text-xs text-white disabled:opacity-50 disabled:text-white'
                   >
                     {hasSelection && isActive.link ? 'Update' : 'Apply'}
                   </Button>
