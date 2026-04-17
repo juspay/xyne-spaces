@@ -4057,10 +4057,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const isAssigneeChanging = params.assignedTo !== undefined && params.assignedTo !== ticket.assignedTo;
           const isUserGroupChanging = params.userGroupId !== undefined && params.userGroupId !== ticket.userGroupId;
           const isEtaChanging = params.eta !== undefined && params.eta !== ticket.eta;
-          const isStageChanging = params.stageName !== undefined && params.stageName !== ticket.stageName;
           const isBoardChanging = params.boardId !== undefined && params.boardId !== ticket.boardId;
 
-          if ((isAssigneeChanging || isUserGroupChanging || isEtaChanging || isStageChanging || isBoardChanging) && ticket.userGroupId) {
+          if ((isAssigneeChanging || isUserGroupChanging || isEtaChanging|| isBoardChanging) && ticket.userGroupId) {
             // Get board to check if transfer is restricted
             const board = await tx.run(zql.boards.where("id", ticket.boardId).one());
 
