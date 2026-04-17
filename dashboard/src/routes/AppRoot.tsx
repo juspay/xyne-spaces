@@ -632,8 +632,8 @@ export const router = createBrowserRouter([
                             element: <RecapPanel />,
                             children: [
                               {
-                                index: true,
-                                element: <ChatView />,
+                                path: ':conversationId',
+                                element: <ThreadMessages />,
                               },
                             ],
                           },

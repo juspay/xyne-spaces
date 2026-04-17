@@ -6,7 +6,6 @@ import {
   Sparkles,
   Clock,
   Hash,
-  X,
   CheckCircle,
   Mail,
   MailOpen,
@@ -62,6 +61,8 @@ const RecapPanel = (): ReactElement => {
 
   // State
   const [markedAsReadChannels, setMarkedAsReadChannels] = useState<Set<string>>(new Set());
+  // Track which cards are showing custom recap view (by channelId)
+  const [customViewChannels, setCustomViewChannels] = useState<Set<string>>(new Set());
 
   // Stable random greeting for this session
   const [greeting] = useState(() => getRandomGreeting());
@@ -148,7 +149,7 @@ const RecapPanel = (): ReactElement => {
     setIsSettingsOpen(false);
   }, [isFirstTime]);
 
-  // Handle citation click - open channel view in right panel while keeping recap visible
+  // Handle citation click - open thread view in right panel while keeping recap visible
   const handleCitationClick = (
     channelId: string,
     pointNumber: number,
@@ -162,20 +163,15 @@ const RecapPanel = (): ReactElement => {
     const messageId = pointCitation?.messageId ?? drilldown?.messageId ?? undefined;
     const conversationId = pointCitation?.conversationId ?? drilldown?.conversationId ?? undefined;
 
-    // Both mobile and desktop: open channel view with #origin to auto-scroll to the citation
-    // Mobile navigates to /chat/dir/:channelId (full screen); desktop uses split recap route
+    // Always navigate within the recap route so thread view opens inside RecapPanel context
     if (conversationId && messageId) {
       const hash = `#origin=${conversationId}&messageId=${messageId}`;
-      void navigate(
-        isMobile ? `/chat/dir/${channelId}${hash}` : `/chat/dir/recap/${channelId}${hash}`,
-      );
+      void navigate(`/chat/dir/recap/${channelId}/${conversationId}${hash}`);
     } else if (conversationId) {
       const hash = `#origin=${conversationId}`;
-      void navigate(
-        isMobile ? `/chat/dir/${channelId}${hash}` : `/chat/dir/recap/${channelId}${hash}`,
-      );
+      void navigate(`/chat/dir/recap/${channelId}/${conversationId}${hash}`);
     } else {
-      void navigate(isMobile ? `/chat/dir/${channelId}` : `/chat/dir/recap/${channelId}`);
+      void navigate(`/chat/dir/recap/${channelId}`);
     }
   };
 
@@ -237,6 +233,20 @@ const RecapPanel = (): ReactElement => {
     // Render a single recap card
     const renderCard = (card: RecapCard): ReactElement => {
       const isRead = markedAsReadChannels.has(card.channelId);
+      const isShowingCustom = card.hasCustomRecap && !customViewChannels.has(card.channelId);
+
+      // Pick which summary/citations to display based on toggle state
+      const displaySummary = isShowingCustom ? (card.customSummary ?? []) : card.summary;
+      const displayPointCitations = isShowingCustom
+        ? card.customPointCitations
+        : card.pointCitations;
+      const displayDrilldown = isShowingCustom
+        ? (card.customDrilldown ?? card.drilldown)
+        : card.drilldown;
+      const displayMessageCount = isShowingCustom
+        ? (card.customMessageCount ?? card.messageCount)
+        : card.messageCount;
+
       return (
         <div
           className={`border rounded-xl p-5 bg-card shadow-sm mb-5 transition-all duration-300 hover:shadow-md ${
@@ -245,18 +255,58 @@ const RecapPanel = (): ReactElement => {
               : 'border-l-[3px] border-l-blue-500 border-border'
           }`}
         >
-          {/* Card header: channel name */}
+          {/* Card header: channel name + recap type toggle */}
           <div className='flex items-center justify-between mb-4'>
             <div className='flex items-center gap-2 text-foreground font-semibold text-base'>
               <Hash size={16} className='text-muted-foreground' />
               <span>{card.channelName}</span>
+              {card.hasCustomRecap && (
+                <div className='flex items-center gap-0.5 ml-1 bg-muted rounded-md p-0.5'>
+                  <button
+                    onClick={() =>
+                      setCustomViewChannels(prev => {
+                        const next = new Set(prev);
+                        next.add(card.channelId);
+                        return next;
+                      })
+                    }
+                    className={`text-xs px-2 py-0.5 rounded transition-colors ${
+                      !isShowingCustom
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    data-track-category='RECAP_PANEL'
+                    data-track-name='VIEW_BASE_RECAP'
+                  >
+                    Default Recap
+                  </button>
+                  <button
+                    onClick={() =>
+                      setCustomViewChannels(prev => {
+                        const next = new Set(prev);
+                        next.delete(card.channelId);
+                        return next;
+                      })
+                    }
+                    className={`text-xs px-2 py-0.5 rounded transition-colors ${
+                      isShowingCustom
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    data-track-category='RECAP_PANEL'
+                    data-track-name='VIEW_CUSTOM_RECAP'
+                  >
+                    Custom Recap
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Summary points */}
           <div className='mb-5'>
             <ul className='space-y-2'>
-              {card.summary.map((point: string, idx: number) => (
+              {displaySummary.map((point: string, idx: number) => (
                 <li key={idx} className='flex items-start'>
                   <span
                     className={`text-foreground ${isMobile ? 'text-xs' : 'text-sm'} leading-relaxed font-normal font-['Inter'] inline`}
@@ -275,8 +325,8 @@ const RecapPanel = (): ReactElement => {
                         handleCitationClick(
                           card.channelId,
                           idx + 1,
-                          card.pointCitations,
-                          card.drilldown,
+                          displayPointCitations,
+                          displayDrilldown,
                         )
                       }
                       className="ml-1 inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-muted text-muted-foreground font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-accent transition-colors cursor-pointer align-middle"
@@ -284,7 +334,7 @@ const RecapPanel = (): ReactElement => {
                       data-track-category='RECAP_PANEL'
                       data-track-name='CLICK_CITATION'
                     >
-                      {card.citationIndices?.[`${idx + 1}`] ?? idx + 1}
+                      {idx + 1}
                     </button>
                   </span>
                 </li>
@@ -295,7 +345,7 @@ const RecapPanel = (): ReactElement => {
           {/* Card footer */}
           <div className='flex items-center justify-between pt-4 border-t border-border'>
             <span className={`text-muted-foreground ${isMobile ? 'text-xs' : 'text-sm'}`}>
-              {card.messageCount} {isMobile ? 'messages' : 'messages summarized'}
+              {displayMessageCount} {isMobile ? 'messages' : 'messages summarized'}
             </span>
             <button
               onClick={() => void handleToggleRead(card.channelId, isRead)}
@@ -451,9 +501,10 @@ const RecapPanel = (): ReactElement => {
   return (
     <>
       <div className='flex h-full bg-background'>
-        {/* Left: Recap cards (always visible) */}
+        {/* Left: Recap cards — hidden on mobile when thread is open */}
         <div
-          className={`flex flex-col ${showThreadPanel ? 'w-1/2' : 'w-full'} border-r border-border bg-background`}
+          className={`flex flex-col border-r border-border bg-background
+            ${showThreadPanel ? (isMobile ? 'hidden' : 'w-1/2') : 'w-full'}`}
         >
           {/* Header */}
           <div className='p-4 bg-background border-b border-border flex-shrink-0'>
@@ -479,20 +530,11 @@ const RecapPanel = (): ReactElement => {
           <div className='flex-1 overflow-hidden bg-muted/30'>{renderRecapCards()}</div>
         </div>
 
-        {/* Right: Channel view panel (visible when citation is clicked) */}
+        {/* Right: Thread panel — full screen on mobile, half width on desktop */}
         {showThreadPanel && (
-          <div className='w-1/2 flex flex-col h-full relative bg-background'>
-            <button
-              onClick={handleCloseThreadPanel}
-              className='absolute top-2 right-2 z-50 p-2 bg-background rounded-lg shadow-md border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
-              aria-label='Close'
-              data-track-category='RECAP_PANEL'
-              data-track-name='CLOSE_THREAD_PANEL'
-            >
-              <X size={18} />
-            </button>
+          <div className={`${isMobile ? 'w-full' : 'w-1/2'} flex flex-col h-full bg-background`}>
             <div className='flex-1 h-full overflow-hidden'>
-              <Outlet />
+              <Outlet context={{ onClose: handleCloseThreadPanel }} />
             </div>
           </div>
         )}

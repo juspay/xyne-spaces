@@ -57,6 +57,7 @@ export interface SummarizerContext {
   readonly summarizationType?: 'thread' | 'channel' | 'searchMessage' | 'recap';
   readonly searchQuery?: string; // Added for search message context
   readonly modelName?: string; // CAC-resolved model override
+  readonly customPrompt?: string; // Optional user-defined focus area appended to the base prompt
 }
 
 /**
@@ -175,12 +176,16 @@ const SUMMARIZATION_TYPE_TO_PROMPT: Record<string, string> = {
 };
 
 /**
- * Resolve the summarizer prompt from Langfuse based on summarization type
- * Langfuse internally handles fallback prompts
+ * Resolve the summarizer prompt from Langfuse based on summarization type.
+ * If a customPrompt is provided, it is appended to the base prompt to guide
+ * the AI towards the user's specific interests.
  */
-async function resolveSummarizerPrompt(summarizationType: SummarizerContext['summarizationType']): Promise<string> {
-  const promptName = summarizationType && SUMMARIZATION_TYPE_TO_PROMPT[summarizationType] 
-    ? SUMMARIZATION_TYPE_TO_PROMPT[summarizationType] 
+async function resolveSummarizerPrompt(
+  summarizationType: SummarizerContext['summarizationType'],
+  customPrompt?: string
+): Promise<string> {
+  const promptName = summarizationType && SUMMARIZATION_TYPE_TO_PROMPT[summarizationType]
+    ? SUMMARIZATION_TYPE_TO_PROMPT[summarizationType]
     : PROMPT_NAMES.FETCH_THREAD_MESSAGES;
 
   const prompt = await getPromptFromLangfuse(promptName, {
@@ -189,6 +194,10 @@ async function resolveSummarizerPrompt(summarizationType: SummarizerContext['sum
 
   if (!prompt) {
     throw new Error(`Failed to get prompt from Langfuse: ${promptName}`);
+  }
+
+  if (customPrompt && customPrompt.trim()) {
+    return `${prompt}\n\nAdditional focus area requested by the user: ${customPrompt.trim()}`;
   }
 
   return prompt;
@@ -364,7 +373,7 @@ export async function* summarizeStream(
   const { messageCount, participantCount } = calculateCounts(input.messages);
 
   // Fetch prompt from langfuse and create agent
-  const systemPrompt = await resolveSummarizerPrompt(context.summarizationType);
+  const systemPrompt = await resolveSummarizerPrompt(context.summarizationType, context.customPrompt);
   const agent = createSummarizerAgent(systemPrompt);
   const agentRegistry = createAgentRegistry(agent);
 
@@ -575,7 +584,7 @@ export async function summarizeThread(
   const { messageCount, participantCount } = calculateCounts(input.messages);
 
   // Fetch prompt from langfuse and create agent
-  const systemPrompt = await resolveSummarizerPrompt(context.summarizationType);
+  const systemPrompt = await resolveSummarizerPrompt(context.summarizationType, context.customPrompt);
   const agent = createSummarizerAgent(systemPrompt);
   const agentRegistry = createAgentRegistry(agent);
 

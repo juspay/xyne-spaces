@@ -18,6 +18,12 @@ interface RecapSummary {
     messageId?: string; // Resolved message ID for direct linking
     conversationId?: string; // Resolved conversation ID for navigation
     citationIndex?: number; // The source entity index returned by the agent (for display)
+    // Entity-specific IDs for navigation (matches summariser Citation type)
+    entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search';
+    canvasId?: string;
+    callId?: string;
+    ticketId?: string;
+    channelId?: string;
   }>;
   messageCount: number;
 }
@@ -63,6 +69,12 @@ export class RecapGenerationService {
       messageId: kp.citation.messageId || undefined,
       conversationId: kp.citation.conversationId || undefined,
       citationIndex: kp.citation.messageIndex,
+      // Include all entity-specific IDs for navigation
+      entityType: kp.citation.entityType,
+      canvasId: kp.citation.canvasId || undefined,
+      callId: kp.citation.callId || undefined,
+      ticketId: kp.citation.ticketId || undefined,
+      channelId: kp.citation.channelId || undefined,
     }));
 
     return {
@@ -287,8 +299,11 @@ export class RecapGenerationService {
       const output = await summarizeThread(input, context);
       const summary = this.convertToRecapSummary(output);
 
-      // Persist recap and broadcast to subscribers
+      // Persist base recap
       await this.persistRecap(channelId, targetDate, summary);
+
+      // Generate custom recaps for users who have a custom prompt for this channel
+      await this.generateCustomRecapsForChannel(channelId, targetDate, input);
 
       // Broadcast recap generation event to subscribed users for real-time updates
       await this.broadcastRecapGenerated(channelId, targetDate);
@@ -305,6 +320,54 @@ export class RecapGenerationService {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
       };
+    }
+  }
+
+  /**
+   * Generate custom recaps for users who have a customRecapPrompt set for this channel.
+   * Called after the base recap is generated to reuse already-fetched entities.
+   */
+  private async generateCustomRecapsForChannel(
+    channelId: string,
+    targetDate: Date,
+    input: ThreadSummaryInput
+  ): Promise<void> {
+    const customUsers = await db.channelUserStatus.findMany({
+      where: {
+        channelId,
+        isRecapSubscribed: true,
+        customRecapPrompt: { not: null },
+      },
+      select: { userId: true, customRecapPrompt: true },
+    });
+
+    if (customUsers.length === 0) return;
+
+    logger.info(
+      `Generating custom recaps for ${customUsers.length} user(s) in channel ${channelId}`
+    );
+
+    for (const { userId, customRecapPrompt } of customUsers) {
+      if (!customRecapPrompt) continue;
+      try {
+        const customContext: SummarizerContext = {
+          userId,
+          conversationId: '',
+          channelId,
+          summarizationType: 'recap',
+          customPrompt: customRecapPrompt,
+          modelName: AgentsConfig.defaults().summariserModelName,
+        };
+        const customOutput = await summarizeThread(input, customContext);
+        const customSummary = this.convertToRecapSummary(customOutput);
+        await this.persistRecap(channelId, targetDate, customSummary, userId ?? null);
+        logger.info(`Custom recap generated for user ${userId} in channel ${channelId}`);
+      } catch (error) {
+        logger.error(
+          `Failed to generate custom recap for user ${userId} in channel ${channelId}:`,
+          error
+        );
+      }
     }
   }
 
@@ -360,7 +423,8 @@ export class RecapGenerationService {
   private async persistRecap(
     channelId: string,
     recapDate: Date,
-    summary: RecapSummary
+    summary: RecapSummary,
+    userId: string | null = null
   ): Promise<void> {
     const summaryData = JSON.stringify(summary);
 
@@ -379,29 +443,32 @@ export class RecapGenerationService {
       day: '2-digit',
     });
 
-    logger.info(`Persisted recap for channel ${channelId} on ${istDisplayDate} (IST)`);
+    const recapType = userId ? `custom recap for user ${userId}` : 'base recap';
+    logger.info(`Persisted ${recapType} for channel ${channelId} on ${istDisplayDate} (IST)`);
 
-    await db.channelDailyRecap.upsert({
-      where: {
-        channelId_recapDate: {
-          channelId,
-          recapDate: normalizedDate,
-        },
-      },
-      update: {
-        summary: summaryData,
-      },
-      create: {
-        channelId,
-        recapDate: normalizedDate,
-        summary: summaryData,
-      },
+    // Find existing record and update, or create new one
+    const existing = await db.channelDailyRecap.findFirst({
+      where: { channelId, recapDate: normalizedDate, userId },
     });
-    // Update lastRecapHadMessages to true (recap generated with messages)
-    await db.channelStats.update({
-      where: { channelId },
-      data: { lastRecapHadMessages: true },
-    });
+
+    if (existing) {
+      await db.channelDailyRecap.update({
+        where: { id: existing.id },
+        data: { summary: summaryData },
+      });
+    } else {
+      await db.channelDailyRecap.create({
+        data: { channelId, recapDate: normalizedDate, summary: summaryData, userId },
+      });
+    }
+
+    // Only update lastRecapHadMessages for base recaps (not custom ones)
+    if (!userId) {
+      await db.channelStats.update({
+        where: { channelId },
+        data: { lastRecapHadMessages: true },
+      });
+    }
   }
 
   /**
@@ -470,50 +537,6 @@ export class RecapGenerationService {
       },
     });
 
-    // Fetch canvases created in this channel during the date range
-    const canvases = await db.canvas.findMany({
-      where: {
-        channelId: channelId,
-        createdAt: { gte: startOfDay, lte: endOfDay },
-      },
-      select: {
-        id: true,
-        title: true,
-        createdAt: true,
-        docType: true,
-      },
-    });
-
-    // Fetch calls in this channel during the date range
-    const calls = await db.call.findMany({
-      where: {
-        channelId: channelId,
-        createdAt: { gte: startOfDay, lte: endOfDay },
-      },
-      select: {
-        id: true,
-        title: true,
-        callType: true,
-        status: true,
-        createdAt: true,
-      },
-    });
-
-    // Fetch tickets linked to this channel during the date range
-    const tickets = await db.ticket.findMany({
-      where: {
-        channelId: channelId,
-        createdAt: { gte: startOfDay, lte: endOfDay },
-      },
-      select: {
-        id: true,
-        title: true,
-        status: true,
-        xyneId: true,
-        createdAt: true,
-      },
-    });
-
     // Collect all unique user IDs
     const allUserIds = new Set<string>(allMessages.map((m) => m.senderId));
     const users = await db.user.findMany({
@@ -534,51 +557,15 @@ export class RecapGenerationService {
       };
     });
 
-    // Add tickets as synthetic messages for summarization
-    for (const ticket of tickets) {
-      const ticketUser = userMap.get(ticket.xyneId);
-      threadMessages.push({
-        id: `ticket-${ticket.id}`,
-        content: `🎫 Ticket created: ${ticket.title}\nStatus: ${ticket.status}\nTicket ID: ${ticket.id}`,
-        authorName: ticketUser?.name || ticketUser?.email || 'System',
-        createdAt: ticket.createdAt,
-        hasAttachment: false,
-        entityType: 'ticket',
-      });
-    }
-
-    // Add canvases as synthetic messages for summarization
-    for (const canvas of canvases) {
-      threadMessages.push({
-        id: `canvas-${canvas.id}`,
-        content: `📄 Canvas created: ${canvas.title}\nType: ${canvas.docType}\nCanvas ID: ${canvas.id}`,
-        authorName: 'System',
-        createdAt: canvas.createdAt,
-        hasAttachment: false,
-        entityType: 'canvas',
-      });
-    }
-
-    // Add calls as synthetic messages for summarization
-    for (const call of calls) {
-      threadMessages.push({
-        id: `call-${call.id}`,
-        content: `🎧 Call started: ${call.title}\nType: ${call.callType}\nStatus: ${call.status}\nCall ID: ${call.id}`,
-        authorName: 'System',
-        createdAt: call.createdAt,
-        hasAttachment: false,
-        entityType: 'call',
-      });
-    }
-
-    // Sort all items chronologically (oldest first for summarizer)
+    // Sort messages chronologically (oldest first for summarizer)
     threadMessages.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
-    // Build enhanced entity mapping
+    // Build entity mapping for messages only
+    // Each message gets mapped with its conversationId for citation navigation
     const entityMapping = new Map<number, EnhancedEntityMetadata>();
     let entityIndex = 1;
 
-    // Add messages to entity mapping
+    // Process all messages
     for (const msg of threadMessages) {
       const originalMsg = allMessages.find((m) => m.messageId === msg.id);
       entityMapping.set(entityIndex++, {
@@ -590,7 +577,7 @@ export class RecapGenerationService {
       });
     }
 
-    // Add attachments to entity mapping
+    // Add attachments to entity mapping (after threadMessages)
     for (const att of attachments) {
       entityMapping.set(entityIndex++, {
         entityType: 'attachment',
@@ -600,38 +587,8 @@ export class RecapGenerationService {
       });
     }
 
-    // Add canvases to entity mapping
-    for (const canvas of canvases) {
-      entityMapping.set(entityIndex++, {
-        entityType: 'canvas',
-        entityId: canvas.id,
-        canvasId: canvas.id,
-        channelId: channelId,
-      });
-    }
-
-    // Add calls to entity mapping
-    for (const call of calls) {
-      entityMapping.set(entityIndex++, {
-        entityType: 'call',
-        entityId: call.id,
-        callId: call.id,
-        channelId: channelId,
-      });
-    }
-
-    // Add tickets to entity mapping
-    for (const ticket of tickets) {
-      entityMapping.set(entityIndex++, {
-        entityType: 'ticket',
-        entityId: ticket.id,
-        ticketId: ticket.id,
-        channelId: channelId,
-      });
-    }
-
     logger.info(
-      `[Recap] Fetched ${threadMessages.length} messages, ${attachments.length} attachments, ${canvases.length} canvases, ${calls.length} calls, ${tickets.length} tickets for channel ${channelId}`
+      `[Recap] Fetched ${threadMessages.length} messages, ${attachments.length} attachments for channel ${channelId}`
     );
 
     return {

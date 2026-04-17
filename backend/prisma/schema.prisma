@@ -1485,6 +1485,7 @@ model ChannelUserStatus {
   // Recap subscription fields
   isRecapSubscribed         Boolean     @default(false) // User opted into AI recaps for this channel
   lastSeenRecapDate         DateTime?   @db.Date // Last recap date the user has seen for this channel
+  customRecapPrompt         String?     // Optional custom prompt for personalized recaps
 
   desktopNotificationLevel  NotificationLevel     @default(ALL) // Channel notification preference (desktop)
   mobileNotificationLevel   NotificationLevel    @default(ALL) // Channel notification preference (mobile)
@@ -2906,13 +2907,16 @@ model ReleaseAttribution {
 // ============================================================================
 
 // Stores daily AI-generated summaries for each channel
+// userId = "" for base recaps, userId = actual user ID for custom recaps
 model ChannelDailyRecap {
+  id        String   @id @default(cuid())
   channelId String
   recapDate DateTime @db.Date
   summary   String // Final bullet summary text for the day
+  userId    String? // null for base recap, user ID for custom recap
 
-  @@id([channelId, recapDate])
   @@index([recapDate])
+  @@index([userId])
   @@map("channel_daily_recaps")
   @@schema("public")
 }

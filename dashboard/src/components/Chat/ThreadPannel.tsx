@@ -1,6 +1,12 @@
 import { ReactElement, useMemo, useState, useEffect, useRef } from 'react';
 import useMeasure from '../../hooks/useMeasure';
-import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import {
+  useParams,
+  useNavigate,
+  useLocation,
+  useSearchParams,
+  useOutletContext,
+} from 'react-router-dom';
 import { Button } from '../ui/Button';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
@@ -106,6 +112,9 @@ export const ThreadMessages = ({
   const { baseRoute, buildChannelRoute } = useRouteContext();
 
   const currentUser = useSelf();
+
+  const outletContext = useOutletContext<{ onClose?: () => void } | null>();
+  const resolvedOnClose = onClose ?? outletContext?.onClose;
 
   const channelId = propChannelId || paramChannelId;
   const conversationId = propConversationId || paramConversationId;
@@ -1173,7 +1182,7 @@ export const ThreadMessages = ({
             )}
             <Tooltip content='Close'>
               <Button
-                onClick={handleCloseTicketDetailsThread}
+                onClick={resolvedOnClose ?? handleCloseTicketDetailsThread}
                 className='p-2 border border-border rounded-lg h-8 w-8'
                 variant='ghost'
                 size='sm'
@@ -1241,11 +1250,11 @@ export const ThreadMessages = ({
               <div className='flex items-center justify-end gap-1'>
                 {/* Close Button */}
                 {isTicketThread &&
-                  (onClose ? (
+                  (resolvedOnClose ? (
                     <Button
                       variant='ghost'
                       size='sm'
-                      onClick={onClose}
+                      onClick={resolvedOnClose}
                       aria-label='Close thread panel'
                     >
                       <X size={20} />
@@ -1549,11 +1558,11 @@ export const ThreadMessages = ({
                           );
                         })()}
                       {/* Close Button */}
-                      {onClose && (
+                      {resolvedOnClose && (
                         <Button
                           variant='ghost'
                           size='sm'
-                          onClick={onClose}
+                          onClick={resolvedOnClose}
                           aria-label='Close thread panel'
                         >
                           <X size={20} />
@@ -1701,12 +1710,12 @@ export const ThreadMessages = ({
                             )}
 
                           {/* Close Button */}
-                          {onClose ? (
+                          {resolvedOnClose ? (
                             <Button
                               variant='ghost'
                               size='sm'
                               className='p-2 border border-[border] rounded-lg h-8 w-8'
-                              onClick={onClose}
+                              onClick={resolvedOnClose}
                               aria-label='Close thread panel'
                             >
                               <X size={20} />

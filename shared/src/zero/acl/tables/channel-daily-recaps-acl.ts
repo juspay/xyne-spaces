@@ -9,13 +9,22 @@ export class ChannelDailyRecapsACL extends BaseQueryACL<'channel_daily_recaps'> 
   }
 
   canSelect<TReturn>(query: Query<'channel_daily_recaps', Schema, TReturn>): Query<'channel_daily_recaps', Schema, TReturn> {
-    // Users can view recaps for channels that are either public or they are participants in
-    return query.whereExists('channel', (ch) =>
-      ch.where(({ or, cmp, exists }) =>
-        or(
-          cmp('visibility', '=', ChannelVisibility.PUBLIC),
-          exists('participants', (p) => p.where('userId', this.ctx.userID))
-        )
+    // Base recaps (userId IS NULL): accessible to channel participants or public channels
+    // Custom recaps (userId = userID): only accessible to the specific user who owns them
+    return query.where(({ or, cmp, and, exists }) =>
+      or(
+        and(
+          cmp('userId', 'IS', null),
+          exists('channel', (ch) =>
+            ch.where(({ or: or2, cmp: cmp2, exists: exists2 }) =>
+              or2(
+                cmp2('visibility', '=', ChannelVisibility.PUBLIC),
+                exists2('participants', (p) => p.where('userId', this.ctx.userID))
+              )
+            )
+          )
+        ),
+        cmp('userId', '=', this.ctx.userID)
       )
     );
   }
