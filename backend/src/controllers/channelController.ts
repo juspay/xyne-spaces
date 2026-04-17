@@ -940,7 +940,6 @@ export class ChannelController {
   };
 
 
-
   // GET /api/channels/search - Unified search for users and groups
   searchForMentions = async (req: Request, res: Response): Promise<void> => {
     try {
