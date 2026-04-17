@@ -1338,9 +1338,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             {field => (
               <div className='space-y-1'>
                 {isTitleGenerating ? (
-                  <TextShimmer className='leading-5 font-bold text-[20px] text-center h-8'>
-                    Adding AI generated title
-                  </TextShimmer>
+                  <div className='flex h-8 items-center'>
+                    <TextShimmer
+                      glassEffect={false}
+                      className='text-left leading-tight font-bold text-[20px]'
+                    >
+                      Adding AI generated title
+                    </TextShimmer>
+                  </div>
                 ) : (
                   <Input
                     value={field.state.value}
@@ -2123,7 +2128,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     }
                     searchPlaceholder='priority'
                     placeholder='priority'
-                    inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
+                    inputIcon={<Ellipsis className='size-3.5 text-foreground' strokeWidth={2.33} />}
                     inputClassName='rounded-md h-7 bg-muted'
                     showClearButton={true}
                     showIndicator={false}
@@ -2204,7 +2209,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     }
                     searchPlaceholder='ticket type'
                     placeholder='ticket type'
-                    inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
+                    inputIcon={<Ticket className='size-3.5 text-foreground' strokeWidth={2.33} />}
                     inputClassName='rounded-md h-7 bg-muted'
                     showClearButton={true}
                     showIndicator={false}
