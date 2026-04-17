@@ -1,3 +1,33 @@
+## [1.118.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.117.1...v1.118.0) (2026-04-17)
+
+
+### Features
+
+* (cmd + K size increase by 1 px) ([aa483a1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aa483a1b3dd446c9f4239991323e73561550b360)), closes [#5148](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5148)
+* Add profile link to user chat name ([ddf7555](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ddf7555b9f4ad87ccea15cc1fbceab25735dee3f)), closes [#5137](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5137)
+* added retry logic in native ([b68c08e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b68c08eb4b90248b7e84787ae289987519caa339)), closes [#5124](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5124)
+* bit-bot integration for pr-check for euler-repos ([b537e93](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b537e93b6fecf072557db6d170d5b110e88f80fa)), closes [#4885](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4885)
+* Custom Recap ([93e6185](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/93e61854f6c59bf15c7e360ad61ea9038dbdd908)), closes [#4749](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4749)
+* fix user groups update and menu in kanbanscreen ([a5c3cf0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a5c3cf0ca8cd9dfc4f614383aa5156e34eda4448))
+* log only initial zero query completion ([18247e3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/18247e346e48d2d272318ff54cd0bd5f628a5f57)), closes [#5163](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5163)
+* Make message URLs clickable in sidebar ([7860361](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7860361468a5392b754072547f07e59ee963152a)), closes [#5088](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5088)
+* Native call functionality for the Lotus mobile app ([e7a31d4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e7a31d44e809a16a24fb4b9301c23b188e142b36)), closes [#4629](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4629)
+* revert - add Rename option to channel Info modal" ([aaa2e32](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aaa2e3211d1936cd64b3d7d9ae0f9e01d42f845d)), closes [#5196](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5196) [#4913](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4913)
+
+
+### Bug Fixes
+
+* add darkmode fixes ([eac03fa](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/eac03fac6065546409c54083eba1f13c136260b5)), closes [#5187](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5187)
+* added a gate for the audio connection sync b/w callkit and livekit. ([6101e42](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6101e4274cd15a1f493248c6b9fdbd6a23cdd67d)), closes [#5090](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5090)
+* emoji fix ([b2184f2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b2184f249d90da794693ed7d0f2d694b9228b3ca)), closes [#4999](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4999)
+* fix input box placeholder and icon size of ticket activity messages ([ba58591](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ba585913e27761f01b5e2a29e68ed0e37c7b6039))
+* fixed one tap issue ([cff79ff](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cff79ff9c61f3417d30e353a27d4c190f7883f8f))
+* fixes bullet ol list num overflowing ([25ed3fb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/25ed3fbc6abb7da4e8fbf33263a8aaadf801557b))
+* iOS Airborne release integration redone ([7f9453b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7f9453be7922f0e0e4478b30a207008130c050d6)), closes [#5069](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5069)
+* Make selected channel editable for call summary ([8304bef](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8304bef3882e65dc26ec7928de4e156633172efa)), closes [#5168](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5168)
+* open attachment viewer when clicking anywhere on file row in files tab ([a4248a5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a4248a56e38d6f56636d7166fd0cfdb3d6820231)), closes [#5028](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5028)
+* remove satgeChanging ([0515901](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0515901243e75992f9d46ddc4847eb62fabb6a29)), closes [#5173](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5173)
+
 ## [1.117.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.117.0...v1.117.1) (2026-04-17)
 
 
