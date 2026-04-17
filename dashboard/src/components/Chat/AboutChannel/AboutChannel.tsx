@@ -1,4 +1,5 @@
 import { ReactElement, useState, useRef, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { useZero } from '../../../hooks/useZero';
 import { Channel, ChannelRole, ChannelScopeType } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
@@ -9,6 +10,8 @@ import { useUser } from '../../../hooks/useUsers';
 import { v4 as uuidv4 } from 'uuid';
 import { channelService } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useRouteContext } from '../../../hooks/useRouteContext';
 
 export interface AboutChannelProps {
   channel: Channel;
@@ -17,13 +20,18 @@ export interface AboutChannelProps {
   onClose?: () => void;
   userRole?: ChannelRole | null;
   initialEditingName?: boolean;
+  isDM?: boolean;
+  dmUserId?: string | undefined;
 }
 
 const AboutChannel = ({
   channel,
   isParticipant,
+  onClose,
   userRole,
   initialEditingName = false,
+  isDM = false,
+  dmUserId,
 }: AboutChannelProps): ReactElement => {
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [editDescription, setEditDescription] = useState(channel.description || '');
@@ -32,12 +40,32 @@ const AboutChannel = ({
   const [nameError, setNameError] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
   const zero = useZero();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { baseRoute } = useRouteContext();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const createdByUser = useUser(channel.createdBy);
+  const dmUser = useUser(dmUserId || '');
 
+  const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
   const isAdmin = userRole === ChannelRole.ADMIN;
-  const canRename = isParticipant && isAdmin && channel.scopeType === ChannelScopeType.DEFAULT;
+  const canRename = isParticipant && isAdmin && isDefaultChannel;
+
+  const profilePath = `${baseRoute}/${channel.id}/profile/${dmUserId}`;
+  const isProfileAlreadyOpen = location.pathname === profilePath;
+
+  const handleViewProfile = (): void => {
+    // flushSync ensures the dialog close state is synchronously committed to the
+    // DOM before navigation fires, preventing the flicker caused by the race
+    // between the React state update and the route change.
+    flushSync(() => {
+      onClose?.();
+    });
+    if (!isProfileAlreadyOpen) {
+      void navigate(profilePath);
+    }
+  };
 
   const handleEditDescription = (): void => {
     setIsEditingDescription(true);
@@ -192,75 +220,77 @@ const AboutChannel = ({
   return (
     <div className='flex flex-col h-[392px] bg-muted'>
       <div className='p-4 overflow-y-auto'>
-        {/* Channel Name */}
-        <div className='relative bg-card p-[12px] rounded-[12px] border border-border mb-3'>
-          <div className='flex flex-col gap-y-2'>
-            <div className='flex items-start justify-between'>
-              <p className='text-sm font-medium text-foreground'>Channel Name</p>
-            </div>
-            {isEditingName ? (
-              <div>
-                <input
-                  ref={nameInputRef}
-                  type='text'
-                  value={editName}
-                  onChange={handleNameChange}
-                  onKeyDown={handleNameKeyDown}
-                  className='w-full mt-1 p-2 text-sm border border-border rounded-[8px] focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
-                  placeholder='channel-name'
-                  maxLength={80}
-                  data-track-event='blur'
-                  data-track-category='ABOUT_CHANNEL_FORM'
-                  data-track-name='Edit_Name_Input'
-                  data-track-metadata={JSON.stringify({ channelId: channel?.id })}
-                />
-                {nameError && <p className='text-xs text-destructive mt-1'>{nameError}</p>}
-                <div className='flex gap-1 mt-2 justify-end'>
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    onClick={handleCancelNameEdit}
-                    data-track-category='ABOUT_CHANNEL_FORM'
-                    data-track-name='Cancel_Edit_Name'
-                    data-track-metadata={JSON.stringify({ channelId: channel?.id })}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    onClick={() => void handleSaveName()}
-                    disabled={!!nameError || isSavingName}
-                    data-track-category='ABOUT_CHANNEL_FORM'
-                    data-track-name='Save_Name'
-                    data-track-metadata={JSON.stringify({ channelId: channel?.id })}
-                  >
-                    {isSavingName ? 'Saving…' : 'Save'}
-                  </Button>
-                </div>
+        {/* Channel Name — only for default channels */}
+        {isDefaultChannel && (
+          <div className='relative bg-card p-[12px] rounded-[12px] border border-border mb-3'>
+            <div className='flex flex-col gap-y-2'>
+              <div className='flex items-start justify-between'>
+                <p className='text-sm font-medium text-foreground'>Channel Name</p>
               </div>
-            ) : (
-              <p className='text-sm text-muted-foreground'>#{channel.name}</p>
+              {isEditingName ? (
+                <div>
+                  <input
+                    ref={nameInputRef}
+                    type='text'
+                    value={editName}
+                    onChange={handleNameChange}
+                    onKeyDown={handleNameKeyDown}
+                    className='w-full mt-1 p-2 text-sm border border-border rounded-[8px] focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+                    placeholder='channel-name'
+                    maxLength={80}
+                    data-track-event='blur'
+                    data-track-category='ABOUT_CHANNEL_FORM'
+                    data-track-name='Edit_Name_Input'
+                    data-track-metadata={JSON.stringify({ channelId: channel?.id })}
+                  />
+                  {nameError && <p className='text-xs text-destructive mt-1'>{nameError}</p>}
+                  <div className='flex gap-1 mt-2 justify-end'>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={handleCancelNameEdit}
+                      data-track-category='ABOUT_CHANNEL_FORM'
+                      data-track-name='Cancel_Edit_Name'
+                      data-track-metadata={JSON.stringify({ channelId: channel?.id })}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => void handleSaveName()}
+                      disabled={!!nameError || isSavingName}
+                      data-track-category='ABOUT_CHANNEL_FORM'
+                      data-track-name='Save_Name'
+                      data-track-metadata={JSON.stringify({ channelId: channel?.id })}
+                    >
+                      {isSavingName ? 'Saving…' : 'Save'}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className='text-sm text-muted-foreground'>#{channel.name}</p>
+              )}
+            </div>
+
+            {canRename && !isEditingName && (
+              <Button
+                className='absolute right-0 top-0'
+                variant='ghost'
+                size='sm'
+                onClick={handleEditName}
+                data-track-category='ABOUT_CHANNEL_FORM'
+                data-track-name='Edit_Name'
+                data-track-metadata={JSON.stringify({ channelId: channel?.id })}
+              >
+                <LucideSquarePen size={12} className='text-muted-foreground' />
+              </Button>
             )}
           </div>
-
-          {canRename && !isEditingName && (
-            <Button
-              className='absolute right-0 top-0'
-              variant='ghost'
-              size='sm'
-              onClick={handleEditName}
-              data-track-category='ABOUT_CHANNEL_FORM'
-              data-track-name='Edit_Name'
-              data-track-metadata={JSON.stringify({ channelId: channel?.id })}
-            >
-              <LucideSquarePen size={12} className='text-muted-foreground' />
-            </Button>
-          )}
-        </div>
+        )}
 
         {/* Description */}
-        <div className='relative bg-card p-[12px] rounded-[12px] border border-border'>
+        <div className='relative bg-card p-[12px] rounded-[12px] border border-border mb-3'>
           <div className='flex flex-col gap-y-2'>
             <div className='flex items-start justify-between'>
               <p className='text-sm font-medium text-foreground'>Description</p>
@@ -324,6 +354,28 @@ const AboutChannel = ({
             </Button>
           )}
         </div>
+
+        {/* Email + View full profile — only for 1:1 DMs */}
+        {isDM && dmUserId && (
+          <div className='bg-card rounded-[12px] border border-border overflow-hidden'>
+            <div className='p-[12px]'>
+              <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5'>
+                Email
+              </p>
+              <p className='text-sm text-foreground'>{dmUser?.email || '—'}</p>
+            </div>
+            <button
+              onClick={handleViewProfile}
+              className='px-[12px] pb-[10px] text-xs font-sans font-semibold text-muted-foreground underline text-left hover:text-foreground transition-colors'
+              data-track-category='ABOUT_CHANNEL_FORM'
+              data-track-name='View_Full_Profile'
+              data-track-metadata={JSON.stringify({ channelId: channel?.id, userId: dmUserId })}
+            >
+              View full profile
+            </button>
+          </div>
+        )}
+
         <div className='text-[14px] text-muted-foreground py-4'>
           Created By <span className='text-primary'>{createdByUser?.name || 'Unknown'}</span> on{' '}
           <span className='visual-regression-hide'>{formatDate(channel.createdAt)}</span>

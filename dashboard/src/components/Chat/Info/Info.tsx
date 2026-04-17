@@ -438,6 +438,8 @@ const Info = ({
             isParticipant={isParticipant}
             userRole={currentUserParticipant?.role ?? null}
             {...(onClose && { onClose })}
+            isDM={isDM}
+            dmUserId={targetUserId}
           />
         </Tabs.Content>
         {!isDM && (

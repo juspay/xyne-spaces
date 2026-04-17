@@ -949,11 +949,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           />
                         )
                       )}
-                      <span className='text-xs font-medium text-foreground'>
-                        {getUserDisplayName(originalSender) ||
-                          forwardedMessageData.originalSenderName ||
-                          'Unknown User'}
-                      </span>
+                      {forwardedMessageData.originalSenderId ? (
+                        <button
+                          type='button'
+                          onClick={() => handleUserClick(forwardedMessageData.originalSenderId)}
+                          className='text-xs font-medium text-foreground hover:underline cursor-pointer bg-transparent border-0 p-0'
+                        >
+                          {getUserDisplayName(originalSender) ||
+                            forwardedMessageData.originalSenderName ||
+                            'Unknown User'}
+                        </button>
+                      ) : (
+                        <span className='text-xs font-medium text-foreground'>
+                          {forwardedMessageData.originalSenderName || 'Unknown User'}
+                        </span>
+                      )}
                       {forwardedMessageData.originalCreatedAt && (
                         <span className='text-xs text-muted-foreground visual-regression-hide'>
                           {formatRelativeTimestamp(forwardedMessageData.originalCreatedAt)}
