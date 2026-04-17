@@ -383,6 +383,9 @@ export class ChatController {
       return;
     }
 
+    // Get user ID from authenticated request
+    const userId = req.user?.id;
+
     // Acknowledge immediately so the frontend isn't blocked
     res.status(200).json({ success: true });
 
@@ -391,7 +394,7 @@ export class ChatController {
       const callbackRes = await fetch(actionableUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actionId, context, messageId, conversationId }),
+        body: JSON.stringify({ actionId, context, messageId, conversationId, userId }),
         signal: AbortSignal.timeout(30_000),
       });
       if (!callbackRes.ok) {

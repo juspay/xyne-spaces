@@ -9,6 +9,7 @@ import ticketRoutes from './ticket';
 import userRoutes from './user';
 import channelRoutes from './channel';
 import userGroupRoutes from './usergroups';
+import prCheckCallbackRouter from './prCheckCallback';
 import { authenticateApp } from '../middelware/authenticator';
 import { uploadMultiple, uploadConfig } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
@@ -46,5 +47,9 @@ router.use('/channel', authenticateApp, channelRoutes);
 
 // User Group routes
 router.use('/usergroups', authenticateApp, userGroupRoutes);
+
+// PR check callback (called by dispatchAction when user clicks "Run PR Check" button)
+// No auth needed here - dispatchAction is already authenticated and validates the request
+router.use('/pr-check', prCheckCallbackRouter);
 
 export default router;

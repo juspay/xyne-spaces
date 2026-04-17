@@ -54,6 +54,9 @@ export async function updateAppActionStatus(
   const clickedAction = appActions.find((a) => a['actionId'] === actionId);
   if (!clickedAction) return;
 
+  // Reusable actions stay active after click — don't move to actioned[]
+  if (clickedAction['reusable'] === true) return;
+
   // Move ALL actions to actioned — the clicked one is marked, others are dismissed
   const now = new Date().toISOString();
   for (const action of appActions) {
