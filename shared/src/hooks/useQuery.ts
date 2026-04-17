@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useQuery as zeroUseQuery } from '@rocicorp/zero/react';
 import type {
   DefaultSchema,
@@ -72,17 +72,22 @@ export function useQuery<
   const args = query.args;
 
   const startTime = useMemo(() => performance.now(), [queryName, JSON.stringify(args)]);
+  const hasLoggedCompleteRef = useRef(false);
+  const isEnabled = typeof options === 'boolean' ? options : options?.enabled !== false;
 
   useEffect(() => {
+    if (!isEnabled) return;
+    hasLoggedCompleteRef.current = false;
     logger.info(Event.ZERO_QUERY_CALLED, { query: queryName, args: query.args });
     metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'start' });
-  }, [queryName, JSON.stringify(args)]);
+  }, [queryName, JSON.stringify(args), isEnabled]);
 
   const result = useQueryWithFallback(query, options);
   const [data, details] = result;
 
   useEffect(() => {
-    if (details.type === 'complete') {
+    if (details.type === 'complete' && !hasLoggedCompleteRef.current) {
+      hasLoggedCompleteRef.current = true;
       const latency = performance.now() - startTime;
       metrics.recordLatency('zero.query.latency', latency, { query: queryName });
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'success' });
