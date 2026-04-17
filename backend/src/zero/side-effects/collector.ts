@@ -86,16 +86,6 @@ export async function collectSideEffectJobs(
     }
   }
 
-  // Capture previous channel state for update operations
-  if (operation === 'update' && table === 'channels') {
-    const entity = await tx.run(zql.channels.where('id', entityId).one());
-    if (entity) {
-      previousValue = {
-        name: entity.name,
-      };
-    }
-  }
-
   accumulator.push({
     entityType: table,
     entityId,

@@ -12,7 +12,6 @@ import { TicketStageEtaSideEffectHandler } from './tables/ticket-stage-eta-handl
 import { CanvasSideEffectHandler } from './tables/canvas-handler';
 import { ReactionsSideEffectHandler } from './tables/reactions-handler';
 import { TicketTagsSideEffectHandler } from './tables/ticket-tags-handler';
-import { ChannelsSideEffectHandler } from './tables/channels-handler';
 
 export class SideEffectHandlerFactory {
 
@@ -41,8 +40,6 @@ export class SideEffectHandlerFactory {
         return new CanvasSideEffectHandler(ctx);
       case 'ticket_tags':
         return new TicketTagsSideEffectHandler(ctx);
-      case 'channels':
-        return new ChannelsSideEffectHandler(ctx);
         
       default:
         return new BaseSideEffectHandler(ctx);
