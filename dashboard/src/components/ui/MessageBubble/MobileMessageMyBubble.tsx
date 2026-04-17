@@ -1,17 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { AvatarSize } from '@juspay/blend-design-system';
-import {
-  MessageType,
-  parsePreviewMd,
-  parseForwardedMessageXml,
-  isForwardedMessageXml,
-} from '@xyne/shared';
+import { MessageType, parseForwardedMessageXml, isForwardedMessageXml } from '@xyne/shared';
 import { formatTimeAmPm, formatRelativeTimestamp } from '../../../utils/dateUtils';
 import { useReactions } from '../../../hooks/useReaction';
 import { Bookmark } from 'lucide-react';
 import { BotBubble } from '../../Chat/BotBubble';
-import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
-import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
@@ -79,13 +72,11 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
 }) => {
   const { toggleReaction } = useReactions();
   const attachments = message.attachments || [];
-  const [showLinkPreview, setShowLinkPreview] = useState(true);
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
   const isBotMessage = message.msgType === MessageType.BOT;
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
-  const previewResult = parsePreviewMd(message.link_preview_md);
   const isWorkflowMessage =
     (isSystemMessage && metadata?.workflowId && metadata?.ticketId) ||
     (isBotMessage && metadata?.xyneId && metadata?.ticketId);
@@ -304,25 +295,6 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
             {!isForwardedMessage && attachments.length > 0 && (
               <div className='border-t border-border/50 w-[min(75vw,360px)]'>
                 <MobileAttachmentsGrid attachments={attachments} />
-              </div>
-            )}
-
-            {showLinkPreview && previewResult && (
-              <div className='mt-2 w-[min(75vw,360px)] self-end'>
-                {previewResult.type === 'message_preview' ? (
-                  <InternalMessagePreview
-                    metadata={{
-                      type: 'internal_message',
-                      ...previewResult.data,
-                    }}
-                    onClose={() => setShowLinkPreview(false)}
-                  />
-                ) : (
-                  <LinkPreview
-                    metadata={previewResult.data}
-                    onClose={() => setShowLinkPreview(false)}
-                  />
-                )}
               </div>
             )}
           </div>

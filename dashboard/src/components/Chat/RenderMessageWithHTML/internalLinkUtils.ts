@@ -41,12 +41,14 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
       return null;
     }
 
+    const fallbackUnknownLink: ParsedInternalXyneLink = {
+      kind: 'unknown',
+      href,
+    };
+
     const segments = url.pathname.split('/').filter(Boolean);
     if (segments[0] !== 'chat') {
-      return {
-        kind: 'unknown',
-        href,
-      };
+      return fallbackUnknownLink;
     }
 
     if (segments[1] === 'canvas' && segments[2]) {
@@ -58,17 +60,17 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     }
 
     if (segments.length < 3) {
-      return null;
+      return fallbackUnknownLink;
     }
 
     const section = segments[1];
     if (!section || !['dir', 'activity', 'dm', 'bookmarks'].includes(section)) {
-      return null;
+      return fallbackUnknownLink;
     }
 
     const channelId = segments[2];
     if (!channelId) {
-      return null;
+      return fallbackUnknownLink;
     }
 
     const hashParams = new URLSearchParams(url.hash.replace(/^#/, ''));
