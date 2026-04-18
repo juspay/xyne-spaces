@@ -1,3 +1,10 @@
+## [1.118.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.118.0...v1.118.1) (2026-04-18)
+
+
+### Bug Fixes
+
+* skip automation and enable docker push for workflows-only changes ([e44184e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e44184e9745ef4cc61c39e3a537371a0fe5b8a88)), closes [#5190](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5190)
+
 ## [1.118.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.117.1...v1.118.0) (2026-04-17)
 
 
