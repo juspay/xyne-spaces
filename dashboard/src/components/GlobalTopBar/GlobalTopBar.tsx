@@ -47,9 +47,11 @@ const NavigationAndSearch = (): ReactElement => {
       <div
         className='flex items-center gap-1'
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        onDoubleClick={e => e.stopPropagation()}
       >
         <button
           onClick={handleGoBack}
+          onDoubleClick={e => e.stopPropagation()}
           disabled={!canGoBack}
           className={`p-1 ${canGoBack ? 'cursor-pointer' : 'cursor-not-allowed'}`}
           aria-label='go-back'
@@ -66,6 +68,7 @@ const NavigationAndSearch = (): ReactElement => {
         </span>
         <button
           onClick={handleGoForward}
+          onDoubleClick={e => e.stopPropagation()}
           disabled={!canGoForward}
           className={`p-1 ${canGoForward ? 'cursor-pointer' : 'cursor-not-allowed'}`}
           aria-label='go-next'
@@ -81,6 +84,7 @@ const NavigationAndSearch = (): ReactElement => {
       <div
         className='flex items-center gap-2'
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        onDoubleClick={e => e.stopPropagation()}
       >
         <button
           onClick={handleSearchClick}
