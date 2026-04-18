@@ -1976,24 +1976,23 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
            // Copy attachments from the original message
           for (const attachment of attachmentsArray) {
             if (!attachment) continue;
-            await tx.mutate.message_attachments.insert({
-              id: uuidv4(),
-              entityId: messageId,
-              entityType: attachment.entityType,
-              originalFilename: attachment.originalFilename,
-              size: attachment.size,
-              mimetype: attachment.mimetype,
-              url: attachment.url,
-              thumbnailUrl: attachment.thumbnailUrl,
-              uploadedByUserId: authData.sub,
-              createdBy: authData.sub,
-              storageProvider: attachment.storageProvider,
-              conversationId: conversationId,
-              metadata: attachment.metadata,
-              createdAt: now,
-              width: attachment.width ?? null,
-              height: attachment.height ?? null,
-            });
+             await tx.mutate.message_attachments.insert({
+               id: uuidv4(),
+               entityId: messageId,
+               entityType: attachment.entityType,
+               originalFilename: attachment.originalFilename,
+               size: attachment.size,
+               mimetype: attachment.mimetype,
+               url: attachment.url,
+               thumbnailUrl: attachment.thumbnailUrl,
+               uploadedByUserId: authData.sub,
+               createdBy: authData.sub,
+               storageProvider: attachment.storageProvider,
+               conversationId: conversationId,
+               metadata: attachment.metadata,
+               createdAt: now,
+               isDeleted: false,
+             });
           }
 
           // --- Call Message Forwarding Specifics ---
@@ -2078,8 +2077,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                         conversationId: conversationId,
                         metadata: attInfo.metadata as any,
                         createdAt: now,
-                        width: attInfo.width ?? null,
-                        height: attInfo.height ?? null,
+                        isDeleted: false,
                      });
                    }
                 }
@@ -3279,37 +3277,31 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               throw new Error('Only sender of attachment can delete it');
             }
 
-            await tx.mutate.message_attachments.delete({ id: attachmentId });
+            // Soft-delete: mark the attachment as deleted instead of removing it
+            await tx.mutate.message_attachments.update({
+              id: attachmentId,
+              isDeleted: true,
+            });
 
-            // Check if there are any remaining attachments for this message
+            // Check if there are any remaining non-deleted attachments for this message
             const remainingAttachments = await tx.run(zql.message_attachments
-              .where('entityId', message.messageId));
+              .where('entityId', message.messageId)
+              .where('isDeleted', false));
 
-            // Only set hasAttachment to false if no attachments remain
+            // Only update hasAttachment flag if no non-deleted attachments remain
             if (remainingAttachments.length === 0) {
-              await tx.mutate.messages.update({
-                messageId: message.messageId,
-                hasAttachment: false,
-              });
-
               const plainText = convert(message.content, {
                 wordwrap: false,
                 preserveNewlines: false
               }).trim()
 
               if (plainText === '') {
-                // Delete message if content is empty and has no attachments
-                await tx.mutate.messages.delete({
-                  messageId: message.messageId,
-                })
+                // All attachments are soft-deleted and message body is empty.
+                // Keep the message so tombstones ("This file was deleted.") remain visible.
+                // Do NOT delete the message.
               }
-              else {
-                // Keep message but set hasAttachment to false
-                await tx.mutate.messages.update({
-                  messageId: message.messageId,
-                  hasAttachment: false
-                })
-              }
+              // Note: we intentionally do NOT set hasAttachment: false — the soft-deleted
+              // attachments still need to appear as tombstones in the UI.
             }
           } else {
             await tx.mutate.message_attachments.delete({ id: attachmentId });
@@ -7378,6 +7370,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 url: '', // Will be populated after upload completes
                 metadata: null,
                 conversationId: conversationId || null,
+                isDeleted: false,
               });
             }
           }

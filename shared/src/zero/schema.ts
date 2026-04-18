@@ -1254,6 +1254,7 @@ export const messageAttachmentTable = table('message_attachments')
     metadata: json().optional(),
     conversationId: string().optional(),
     thumbnailUrl: string().optional(),
+    isDeleted: boolean(),
   })
   .primaryKey('id');
 
