@@ -105,7 +105,7 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
       '.markdown',
     ],
     component: CodeViewer,
-    wrapperClass: 'h-full overflow-auto p-4',
+    wrapperClass: 'h-full w-full overflow-auto p-4',
     displayName: 'Code File',
   },
   html: {
@@ -119,7 +119,7 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
     mimeTypes: ['text/', 'application/xml'],
     extensions: ['.txt', '.log', '.xml'],
     component: TxtViewer,
-    wrapperClass: 'h-full overflow-auto p-4',
+    wrapperClass: 'h-full w-full overflow-auto p-4',
     displayName: 'Text File',
   },
   pdf: {
