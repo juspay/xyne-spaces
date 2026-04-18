@@ -18,7 +18,7 @@ import {
 
 interface TestArtifact {
   name: string;
-  gcsPath: string;
+  storagePath: string;
   type: 'screenshot' | 'report' | 'log';
   contentType?: string;
 }
@@ -176,7 +176,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
           <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
             {data.reports.map(report => (
               <div
-                key={report.gcsPath}
+                key={report.storagePath}
                 className='flex items-center justify-between p-3 border border-border rounded-lg hover:border-green-500 transition-colors bg-card group'
               >
                 <div className='flex items-center gap-3 overflow-hidden'>
@@ -203,7 +203,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
                     </button>
                   )}
                   <button
-                    onClick={() => void downloadArtifact(report.gcsPath, report.name)}
+                    onClick={() => void downloadArtifact(report.storagePath, report.name)}
                     className='p-2 hover:bg-muted rounded-md transition-colors'
                     title='Download'
                     data-track-category='workflow'
@@ -228,7 +228,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
           <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
             {data.screenshots.map(screenshot => (
               <div
-                key={screenshot.gcsPath}
+                key={screenshot.storagePath}
                 className='group relative border border-border rounded-lg overflow-hidden hover:border-blue-500 transition-colors cursor-pointer bg-card'
                 onClick={() => setSelectedImage(screenshot)}
                 onKeyDown={e => {
@@ -243,18 +243,20 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
                 data-track-name='view-screenshot'
               >
                 <div className='aspect-video bg-muted flex items-center justify-center'>
-                  {failedImages.has(screenshot.gcsPath) ? (
+                  {failedImages.has(screenshot.storagePath) ? (
                     <div className='flex flex-col items-center justify-center h-full text-muted-foreground'>
                       <ImageIcon className='w-8 h-8 mb-2' />
                       <span className='text-xs'>Failed to load</span>
                     </div>
                   ) : (
                     <img
-                      src={`/api/workflows/artifacts/image?path=${encodeURIComponent(screenshot.gcsPath)}`}
+                      src={`/api/workflows/artifacts/image?path=${encodeURIComponent(screenshot.storagePath)}`}
                       alt={screenshot.name}
                       className='w-full h-full object-cover'
                       loading='lazy'
-                      onError={() => setFailedImages(prev => new Set(prev).add(screenshot.gcsPath))}
+                      onError={() =>
+                        setFailedImages(prev => new Set(prev).add(screenshot.storagePath))
+                      }
                     />
                   )}
                 </div>
@@ -279,7 +281,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
           <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
             {data.logs.map(log => (
               <div
-                key={log.gcsPath}
+                key={log.storagePath}
                 className='flex items-center justify-between p-3 border border-border rounded-lg hover:border-orange-500 transition-colors bg-card group'
               >
                 <div className='flex items-center gap-3 overflow-hidden'>
@@ -302,7 +304,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
                     <ExternalLink className='w-4 h-4 text-muted-foreground' />
                   </button>
                   <a
-                    href={`/api/workflows/artifacts/download?path=${encodeURIComponent(log.gcsPath)}`}
+                    href={`/api/workflows/artifacts/download?path=${encodeURIComponent(log.storagePath)}`}
                     download={log.name}
                     className='p-2 hover:bg-muted rounded-md transition-colors'
                     title='Download'
@@ -348,7 +350,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
               </div>
               <div className='flex items-center gap-2'>
                 <a
-                  href={`/api/workflows/artifacts/download?path=${encodeURIComponent(selectedImage.gcsPath)}`}
+                  href={`/api/workflows/artifacts/download?path=${encodeURIComponent(selectedImage.storagePath)}`}
                   download={selectedImage.name}
                   className='p-2 hover:bg-muted rounded-lg transition-colors'
                   title='Download'
@@ -369,7 +371,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
             </div>
             <div className='flex-1 overflow-auto p-4 bg-muted'>
               <img
-                src={`/api/workflows/artifacts/image?path=${encodeURIComponent(selectedImage.gcsPath)}`}
+                src={`/api/workflows/artifacts/image?path=${encodeURIComponent(selectedImage.storagePath)}`}
                 alt={selectedImage.name}
                 className='max-w-full h-auto mx-auto'
               />
@@ -407,7 +409,7 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
               </div>
               <div className='flex items-center gap-2'>
                 <a
-                  href={`/api/workflows/artifacts/download?path=${encodeURIComponent(viewingReport.gcsPath)}`}
+                  href={`/api/workflows/artifacts/download?path=${encodeURIComponent(viewingReport.storagePath)}`}
                   download={viewingReport.name}
                   className='p-2 hover:bg-muted rounded-lg transition-colors'
                   title='Download'
@@ -428,12 +430,12 @@ const PreviewChangesPanel: React.FC<PreviewChangesPanelProps> = ({ executionId }
             </div>
             <div className='flex-1 overflow-auto p-4 bg-muted'>
               <iframe
-                src={`/api/workflows/artifacts/view?path=${encodeURIComponent(viewingReport.gcsPath)}`}
+                src={`/api/workflows/artifacts/view?path=${encodeURIComponent(viewingReport.storagePath)}`}
                 className='w-full h-full min-h-[60vh] bg-background rounded'
                 title={viewingReport.name}
                 onError={e => {
                   console.error(
-                    `[PreviewChangesPanel] Failed to load report in iframe: ${viewingReport.gcsPath}`,
+                    `[PreviewChangesPanel] Failed to load report in iframe: ${viewingReport.storagePath}`,
                     e,
                   );
                 }}

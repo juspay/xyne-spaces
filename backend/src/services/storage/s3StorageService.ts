@@ -53,7 +53,7 @@ export class S3StorageService implements StorageService {
     if (!options.contentType) throw new Error('Content type is required');
 
     const filePath = generateFilePath(options);
-    return this.putObject(buffer, filePath, options.contentType, options.metadata);
+    return this.putObject(buffer, filePath, options.contentType, options.metadata, 'public, max-age=31536000');
   }
 
   async uploadFileV2(buffer: Buffer, options: { path: string; contentType: string; cacheControl?: string; metadata?: Record<string, string> }): Promise<UploadResult> {
@@ -228,7 +228,15 @@ export class S3StorageService implements StorageService {
     }
   }
 
-  private async putObject(buffer: Buffer, filePath: string, contentType: string, metadata?: Record<string, string>, cacheControl?: string): Promise<UploadResult> {
+  public getBucketName(): string {
+    return this.bucketName;
+  }
+
+  buildStorageUri(path: string): string {
+    return `s3://${this.bucketName}/${path}`;
+  }
+
+  private async putObject(buffer: Buffer, filePath: string, contentType: string, metadata?: Record<string, string>, cacheControl: string = 'public, max-age=31536000'): Promise<UploadResult> {
     logger.info(`Uploading to S3: ${filePath}`, { contentType, size: buffer.length });
 
     // S3 metadata is sent as HTTP headers — only ASCII is allowed.
@@ -242,7 +250,7 @@ export class S3StorageService implements StorageService {
       Key: filePath,
       Body: buffer,
       ContentType: contentType,
-      CacheControl: cacheControl ?? 'public, max-age=31536000',
+      CacheControl: cacheControl,
       Metadata: safeMetadata,
     }));
 

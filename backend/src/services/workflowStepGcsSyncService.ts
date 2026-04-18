@@ -109,7 +109,7 @@ export class WorkflowStepGcsSyncService {
 
     logger.info(`[GCS-SYNC] Synced ${steps.length} steps for ${redisKey} to GCS: ${gcsPath}`);
 
-    const gcsUri = `gs://${config.gcs.workflowStepsBucketName}/${gcsPath}`;
+    const gcsUri = this.storageService.buildStorageUri(gcsPath);
 
     let sourceId = workflowExecutionId;
     if (stepName) {

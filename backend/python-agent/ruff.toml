@@ -1,0 +1,24 @@
+# Ruff linter configuration for python-agent
+target-version = "py311"
+
+[lint]
+select = [
+  "E",      # pycodestyle errors
+  "F",      # pyflakes
+  "TID",    # flake8-tidy-imports (for banned imports)
+]
+
+[lint.flake8-tidy-imports.banned-api]
+# Prevent direct GCS/S3 usage in consumer code.
+# Use the StorageBucket abstraction from infra.storage_base instead.
+"google.cloud.storage".msg = "Use StorageBucket from infra.storage_base instead of direct GCS access. Get a bucket via GCSBucketProvider/S3BucketProvider in main.py."
+"boto3".msg = "Use StorageBucket from infra.storage_base instead of direct S3/boto3 access. Get a bucket via S3BucketProvider in main.py."
+"botocore".msg = "Use StorageBucket from infra.storage_base instead of direct S3/botocore access."
+
+[lint.per-file-ignores]
+# These files ARE the storage implementations — they need direct cloud SDK access
+"infra/gcs.py" = ["TID251"]
+"infra/s3.py" = ["TID251"]
+"infra/__init__.py" = ["TID251"]
+# main.py creates the providers — needs to import them
+"main.py" = ["TID251"]

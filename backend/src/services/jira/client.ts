@@ -300,7 +300,7 @@ export class JiraMigrationClient {
     });
 
     return {
-      gcsPath: uploaded.path,
+      storagePath: uploaded.path,
       size: uploaded.size,
       filename: uploaded.filename,
       mimeType: attachment.mimeType || response.headers.get('content-type') || 'application/octet-stream',

@@ -35,6 +35,7 @@ import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-
 import {logger} from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { buildWorkflowStepKey, WORKFLOW_KEYS_SET } from '@/workflows/utils/workflowStepKeys';
+import { getStorageService } from '@/services/storage';
 import { config } from '@/config/env';
 
 const prisma = DatabaseClient.getInstance()
@@ -218,7 +219,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
       // AGENTIC STEP: Create MessageAttachment entry ONCE
       const gcsPath = `workflows/${workflowExecutionId}/${stepName}.json`;
-      const gcsUrl = `gs://${config.gcs.workflowStepsBucketName}/${gcsPath}`;
+      const gcsUrl = getStorageService(config.gcs.workflowStepsBucketName).buildStorageUri(gcsPath);
 
       // Check if MessageAttachment already exists for this step
       const existingAttachments = await this.messageAttachmentRepo.findByEntityIdAndType(

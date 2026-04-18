@@ -80,7 +80,7 @@ export class DocumentController {
       for (const file of accepted) {
         const sessionId = randomUUID();
         const gcsPath = `${MEMORY_DOCS_GCS_PREFIX}/${userId}/${sessionId}/${file.originalname}`;
-        const gcsUri = `gs://${config.gcs.docsBucketName}/${gcsPath}`;
+        const gcsUri = storageService.buildStorageUri(gcsPath);
         const repoUrl = (req.body as Record<string, string>).repoUrl ?? '';
 
         // Upload to GCS

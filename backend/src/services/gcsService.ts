@@ -53,6 +53,10 @@ export class GCSService {
     this.bucket = this.storage.bucket(this.bucketName);
   }
 
+  public getBucketName(): string {
+    return this.bucketName;
+  }
+
   public static getInstance(): GCSService {
     if (!GCSService.instance) {
       GCSService.instance = new GCSService();
