@@ -1,3 +1,10 @@
+## [1.119.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.118.1...v1.119.0) (2026-04-18)
+
+
+### Features
+
+* show tombstone card when message attachment is soft-deleted ([593ec32](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/593ec32e647a0dc0488e7a68874864455789562a)), closes [#4760](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4760)
+
 ## [1.118.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.118.0...v1.118.1) (2026-04-18)
 
 
