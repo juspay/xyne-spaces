@@ -228,7 +228,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Generic IPC send (used by standalone HTML windows like meeting-popup)
   ipcSend: (channel: string, ...args: unknown[]) => {
-    const allowed = ['meeting-popup:content-height'];
+    const allowed = ['meeting-popup:content-height', 'recording-pill:content-size', 'recording-pill:recording-stopped'];
     if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
   },
 
@@ -238,6 +238,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const listener = () => callback();
       ipcRenderer.on('meeting:start-recording', listener);
       return () => ipcRenderer.removeListener('meeting:start-recording', listener);
+    },
+    onStopRecordingFromMeeting: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('meeting:stop-recording', listener);
+      return () => ipcRenderer.removeListener('meeting:stop-recording', listener);
     },
     setEnabled: (enabled: boolean) => {
       ipcRenderer.send('meeting-detection:set-enabled', enabled);
@@ -286,6 +291,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setEnabled: (enabled: boolean) => {
       ipcRenderer.send('screen-picker:set-enabled', enabled);
     },
+  },
+
+  // Recording pill (persistent floating pill while recording is active)
+  recordingPill: {
+    onShow: (callback: (startTime: number) => void) => {
+      const listener = (_event: unknown, startTime: number) => callback(startTime);
+      ipcRenderer.on('recording-pill:show', listener);
+      return () => ipcRenderer.removeListener('recording-pill:show', listener);
+    },
+    onHide: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('recording-pill:hide', listener);
+      return () => ipcRenderer.removeListener('recording-pill:hide', listener);
+    },
+    stopRecording: () => ipcRenderer.send('recording-pill:stop-recording'),
+    cancelRecording: () => ipcRenderer.send('recording-pill:cancel-recording'),
   },
 });
 
