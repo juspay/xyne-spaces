@@ -1,13 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { Calendar, User, Code2, Tag } from 'lucide-react';
+import { Calendar, User, Tag } from 'lucide-react';
 import { BaseTicketType, isReleaseTicket, Ticket, TicketTag } from '@xyne/shared';
 import { getPriorityIcon, formatEta, isEtaUrgent, isStageEtaOverdue } from './TicketCard.utils';
 import { cn } from '../../../utils/classNames';
 import { useUser, useUsers } from '../../../hooks/useUsers';
 import { TicketStatusWithStages } from '../TicketStatus/TicketStatusIcon';
 import Tooltip from '../../ui/Tooltip';
-import { isElectronApp } from '../../../utils/electronApp';
-import { OpenIDEModal } from '../OpenIDEModal';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
@@ -67,7 +65,6 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   const zero = useZero();
   const contentRef = useRef<HTMLDivElement>(null);
   const descriptionRef = useRef<HTMLDivElement>(null);
-  const [showIDEModal, setShowIDEModal] = useState(false);
   const [isEditingTags, setIsEditingTags] = useState(false);
   // const navigate = useNavigate();
 
@@ -324,31 +321,6 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 {!isCompact && <TicketStatusWithStages currentStageName={ticket.stageName} />}
               </div>
               <div className={cn('flex items-center', isCompact ? 'gap-0' : 'gap-[15px]')}>
-                {/* IDE Button (Electron only) */}
-                {isElectronApp() && (
-                  <div
-                    className={cn('relative group/ide', isCompact ? 'hidden' : 'hidden sm:block')}
-                  >
-                    <Tooltip content='Open in VS Code'>
-                      <button
-                        type='button'
-                        onClick={e => {
-                          e.stopPropagation();
-                          setShowIDEModal(true);
-                        }}
-                        className='flex items-center p-1 hover:bg-muted rounded transition-colors'
-                        data-track-category='Tickets'
-                        data-track-name='OpenTicketInIDE'
-                        data-track-metadata={JSON.stringify({
-                          ticketId: ticket.id,
-                          xyneId: ticket.xyneId,
-                        })}
-                      >
-                        <Code2 className='w-4 h-4 text-muted-foreground hover:text-blue-600' />
-                      </button>
-                    </Tooltip>
-                  </div>
-                )}
                 {/*due date*/}
                 <div className={cn(isCompact ? 'hidden' : 'hidden md:block')}>
                   {showDueDate &&
@@ -644,15 +616,6 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           </div>
         </div>
       </div>
-
-      {/* IDE Modal */}
-      {isElectronApp() && (
-        <OpenIDEModal
-          isOpen={showIDEModal}
-          onClose={() => setShowIDEModal(false)}
-          ticket={ticket}
-        />
-      )}
     </button>
   );
 };

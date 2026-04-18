@@ -285,12 +285,12 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           <div className='flex flex-col items-center justify-center h-full text-center py-16'>
             <FileText className='w-16 h-16 text-muted-foreground mb-4' />
             <h3 className='text-lg font-medium text-foreground mb-2'>
-              {searchQuery ? 'No canvases found' : 'No canvases yet'}
+              {searchQuery ? 'No canvases found' : 'No docs yet'}
             </h3>
             <p className='text-muted-foreground text-sm'>
               {searchQuery
                 ? 'Try adjusting your search'
-                : 'Create your first canvas to get started'}
+                : 'Publish your first doc from the Xyne Code extension'}
             </p>
           </div>
         ) : (
