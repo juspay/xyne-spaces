@@ -1525,6 +1525,7 @@ export const mutators = defineMutators({
                   storageProvider: attInfo.storageProvider || 's3',
                   uploadedByUserId: ctx.userID,
                   createdBy: ctx.userID,
+                  isDeleted: false,
                 });
               }
             }
@@ -2255,7 +2256,7 @@ export const mutators = defineMutators({
   messageAttachment: {
     delete: defineMutator(
       z.object({ attachmentId: z.string() }),
-      async ({ tx, args: { attachmentId } }) => {
+      async ({ tx, ctx, args: { attachmentId } }) => {
         const attachment = await tx.run(zql.message_attachments.where('id', attachmentId).one());
 
         if (!attachment) {
@@ -2271,37 +2272,42 @@ export const mutators = defineMutators({
         }
 
         if (attachment.entityType === AttachmentEntityType.CHAT) {
-          await tx.mutate.message_attachments.delete({ id: attachment.id });
+          const message = await resolveMessage(tx, attachment.entityId);
 
+          if (!message) {
+            throw new Error("Attachment doesn't belong to a message");
+          }
+
+          if (message.senderId !== ctx.userID) {
+            throw new Error('Only sender of attachment can delete it');
+          }
+
+          // Soft-delete: mark the attachment as deleted instead of removing it
+          await tx.mutate.message_attachments.update({
+            id: attachmentId,
+            isDeleted: true,
+          });
+
+          // Check if there are any remaining non-deleted attachments for this message
           const remainingAttachments = await tx.run(
-            zql.message_attachments.where('entityId', attachment.entityId),
+            zql.message_attachments
+              .where('entityId', message.messageId)
+              .where('isDeleted', false),
           );
 
+          // Only inspect content if no non-deleted attachments remain
           if (remainingAttachments.length === 0) {
-            const message = await resolveMessage(tx, attachment.entityId);
-            if (!message) {
-              throw new Error('Message not found for the attachment');
-            }
-
             // Check if the message content is empty (including HTML-only content like <p><br></p>)
             const doc = new DOMParser().parseFromString(message.content, 'text/html');
             const plainText = doc.body.textContent?.trim();
 
             if (plainText === '') {
-              await tx.mutate.messages.delete({
-                messageId: message.messageId,
-              });
-            } else {
-              await tx.mutate.messages.update({
-                messageId: attachment.entityId,
-                hasAttachment: false,
-              });
-              await updateInitialMessageMdField(
-                tx,
-                { messageId: attachment.entityId },
-                { hasAttachment: false },
-              );
+              // All attachments are soft-deleted and message body is empty.
+              // Keep the message so tombstones ("This file was deleted.") remain visible.
+              // Do NOT delete the message.
             }
+            // Note: we intentionally do NOT set hasAttachment: false — the soft-deleted
+            // attachments still need to appear as tombstones in the UI.
           }
         } else {
           await tx.mutate.message_attachments.delete({ id: attachment.id });
@@ -2494,6 +2500,7 @@ export const mutators = defineMutators({
               url: '', // Will be populated after upload completes
               metadata: attachmentMetadata,
               conversationId: conversationId || null,
+              isDeleted: false,
             });
           }
         }

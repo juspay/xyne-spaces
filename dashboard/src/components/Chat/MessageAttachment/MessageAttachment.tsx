@@ -18,6 +18,7 @@ import {
   Maximize2,
   MoreVertical,
   Play,
+  Trash2,
   Video,
 } from 'lucide-react';
 import { Menu } from '@base-ui/react/menu';
@@ -1067,6 +1068,16 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     attachment.originalFilename,
     attachment.uploadedByUserId,
   );
+
+  // Tombstone: render a "this file was deleted" card when the attachment is soft-deleted
+  if ((attachment as { isDeleted?: boolean }).isDeleted) {
+    return (
+      <div className='flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-muted/40 text-muted-foreground text-sm italic select-none'>
+        <Trash2 className='w-4 h-4 shrink-0' />
+        <span>This file was deleted.</span>
+      </div>
+    );
+  }
 
   const isTextFile =
     attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');

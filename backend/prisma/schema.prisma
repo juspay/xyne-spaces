@@ -1690,6 +1690,7 @@ model MessageAttachment {
   metadata           Json?                 // Width/height for images, duration for videos, etc.
   conversationId     String?                // Every message belongs to a conversation (no FK constraint)
   thumbnailUrl       String?               // For images/videos
+  isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
 
   @@index([entityType])
   @@index([conversationId])

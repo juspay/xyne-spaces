@@ -126,12 +126,16 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
     return null;
   }
 
-  // Separate attachments by type
-  const videoAttachments = attachments.filter(a => a.mimetype.startsWith('video/'));
-  const imageAttachments = attachments.filter(a => a.mimetype.startsWith('image/'));
+  // Separate attachments by deleted status first
+  const activeAttachments = attachments.filter(a => !(a as { isDeleted?: boolean }).isDeleted);
+  const deletedAttachments = attachments.filter(a => (a as { isDeleted?: boolean }).isDeleted);
+
+  // Separate active attachments by type
+  const videoAttachments = activeAttachments.filter(a => a.mimetype.startsWith('video/'));
+  const imageAttachments = activeAttachments.filter(a => a.mimetype.startsWith('image/'));
 
   // Files - separate into those with thumbnails (PDFs, Office docs) and those without
-  const fileAttachments = attachments.filter(
+  const fileAttachments = activeAttachments.filter(
     a => !a.mimetype.startsWith('image/') && !a.mimetype.startsWith('video/'),
   );
 
@@ -179,41 +183,44 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
 
   return (
     <div className={className}>
-      <div className='flex items-center gap-3 text-xs font-medium'>
-        <div className='flex items-center gap-1'>
-          <span className='text-muted-foreground'>
-            {attachments.length > 1
-              ? `${attachments.length} files`
-              : attachments[0]?.originalFilename}
-          </span>
-          <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
-            {isExpanded ? (
-              <ChevronDown className='w-4 h-4 text-muted-foreground' />
-            ) : (
-              <ChevronRight className='w-4 h-4 text-muted-foreground' />
-            )}
-          </button>
-        </div>
-
-        {attachments.length > 1 && (
-          <>
-            <span className='text-muted-foreground'>|</span>
-            <button
-              type='button'
-              onClick={() => {
-                attachments.forEach(attachment => {
-                  void downloadAttachment(attachment.id, attachment.originalFilename);
-                });
-              }}
-              className='flex items-center gap-2 text-muted-foreground hover:text-foreground'
-            >
-              <span>Download all</span>
+      {/* Header row — only shown when there are active (non-deleted) attachments */}
+      {activeAttachments.length > 0 && (
+        <div className='flex items-center gap-3 text-xs font-medium'>
+          <div className='flex items-center gap-1'>
+            <span className='text-muted-foreground'>
+              {activeAttachments.length > 1
+                ? `${activeAttachments.length} files`
+                : activeAttachments[0]?.originalFilename}
+            </span>
+            <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
+              {isExpanded ? (
+                <ChevronDown className='w-4 h-4 text-muted-foreground' />
+              ) : (
+                <ChevronRight className='w-4 h-4 text-muted-foreground' />
+              )}
             </button>
-          </>
-        )}
-      </div>
+          </div>
 
-      {isExpanded && (
+          {activeAttachments.length > 1 && (
+            <>
+              <span className='text-muted-foreground'>|</span>
+              <button
+                type='button'
+                onClick={() => {
+                  activeAttachments.forEach(attachment => {
+                    void downloadAttachment(attachment.id, attachment.originalFilename);
+                  });
+                }}
+                className='flex items-center gap-2 text-muted-foreground hover:text-foreground'
+              >
+                <span>Download all</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {isExpanded && activeAttachments.length > 0 && (
         <div className='flex flex-col gap-3'>
           {/* Videos first - each in separate row */}
           {videoAttachments.map(attachment => (
@@ -297,6 +304,23 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Deleted attachment tombstones — always visible, like Slack's "This file was deleted." */}
+      {deletedAttachments.length > 0 && (
+        <div className='flex flex-col gap-2 mt-2'>
+          {deletedAttachments.map(attachment => (
+            <div
+              key={attachment.id}
+              className='flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2 w-fit'
+            >
+              <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted'>
+                <Trash2 className='h-4 w-4 text-muted-foreground' />
+              </div>
+              <span className='text-sm text-muted-foreground'>This file was deleted.</span>
+            </div>
+          ))}
         </div>
       )}
     </div>

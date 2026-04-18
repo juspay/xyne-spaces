@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { Dialog } from '@base-ui/react/dialog';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
@@ -13,6 +13,8 @@ type Attachment = QueryResultType<
 
 interface MobileAttachmentsGridProps {
   readonly attachments: readonly Attachment[];
+  conversationId?: string;
+  channelId?: string;
 }
 
 const formatAttachmentSummary = (attachments: readonly Attachment[]): string => {
@@ -21,6 +23,8 @@ const formatAttachmentSummary = (attachments: readonly Attachment[]): string => 
   let files = 0;
 
   for (const att of attachments) {
+    // Skip soft-deleted attachments from the summary count
+    if ((att as { isDeleted?: boolean }).isDeleted) continue;
     if (isImageFile(att.mimetype)) {
       photos++;
     } else if (isVideoFile(att.mimetype)) {
@@ -45,6 +49,10 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
     return null;
   }
 
+  // Separate active (non-deleted) from soft-deleted attachments
+  const activeAttachments = attachments.filter(a => !(a as { isDeleted?: boolean }).isDeleted);
+  const deletedAttachments = attachments.filter(a => (a as { isDeleted?: boolean }).isDeleted);
+
   const handleOpenAll = (): void => {
     setShowAll(true);
   };
@@ -53,111 +61,148 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
     setShowAll(false);
   };
 
-  // For single attachment
-  if (attachments.length === 1) {
-    const attachment = attachments[0]!;
-    const isMedia = isImageFile(attachment.mimetype) || isVideoFile(attachment.mimetype);
-    const isDocument = isPreviewableDocument(attachment.mimetype);
-    return (
-      <div
-        className={`w-full ${isDocument ? 'h-[220px] min-w-[75vw]' : !isMedia ? 'h-[256px] min-w-[256px] aspect-square' : ''}`}
-      >
-        <MessageAttachment attachment={attachment} allAttachments={attachments} isInGrid />
-      </div>
-    );
-  }
-
-  // For 2 attachments
-  if (attachments.length === 2) {
-    return (
-      <div className='grid grid-cols-2 row-span-2 gap-1'>
-        {attachments.map(attachment => (
-          <div key={attachment.id} className='h-full min-h-[256px]'>
-            <MessageAttachment attachment={attachment} allAttachments={attachments} isInGrid />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  // For 3 attachments
-  if (attachments.length === 3) {
-    return (
-      <div className='grid grid-cols-2 first:*:row-span-2 first:*:w-full gap-1 overflow-hidden'>
-        {attachments.map(attachment => (
-          <div key={attachment.id} className={`h-full aspect-square`}>
-            <MessageAttachment attachment={attachment} allAttachments={attachments} isInGrid />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  // For 4+ attachments: 2x2 grid with +N overlay
-  const visibleAttachments = attachments.slice(0, 4);
-  const hasMore = attachments.length > 4;
-  const remainingCount = attachments.length - 3;
-
   return (
     <>
-      <div className='grid grid-cols-2 gap-1'>
-        {visibleAttachments.map((attachment, index) => (
-          <div key={attachment.id} className='relative aspect-square'>
-            <MessageAttachment attachment={attachment} allAttachments={attachments} isInGrid />
-            {hasMore && index === 3 && (
-              <button
-                type='button'
-                onClick={handleOpenAll}
-                className='absolute inset-0 flex items-center justify-center rounded-lg bg-background/80 backdrop-blur-sm'
+      {/* Active attachments grid */}
+      {activeAttachments.length > 0 &&
+        (() => {
+          // For single attachment
+          if (activeAttachments.length === 1) {
+            const attachment = activeAttachments[0]!;
+            const isMedia = isImageFile(attachment.mimetype) || isVideoFile(attachment.mimetype);
+            const isDocument = isPreviewableDocument(attachment.mimetype);
+            return (
+              <div
+                className={`w-full ${isDocument ? 'h-[220px] min-w-[75vw]' : !isMedia ? 'h-[256px] min-w-[256px] aspect-square' : ''}`}
               >
-                <span className='text-foreground text-2xl font-semibold'>+{remainingCount}</span>
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
+                <MessageAttachment attachment={attachment} allAttachments={attachments} isInGrid />
+              </div>
+            );
+          }
 
-      {/* Vertical list modal */}
-      <Dialog.Root open={showAll} onOpenChange={handleClose}>
-        <Dialog.Portal>
-          <Dialog.Backdrop
-            className='fixed inset-0 bg-background z-50'
-            style={{ touchAction: 'none' }}
-            onPointerDown={e => e.stopPropagation()}
-            onTouchStart={e => e.stopPropagation()}
-            data-prevent-drawer='true'
-          />
-          <Dialog.Popup
-            className='fixed inset-0 z-50 flex flex-col bg-background text-foreground'
-            style={{ touchAction: 'none' }}
-            data-prevent-drawer='true'
-          >
+          // For 2 attachments
+          if (activeAttachments.length === 2) {
+            return (
+              <div className='grid grid-cols-2 row-span-2 gap-1'>
+                {activeAttachments.map(attachment => (
+                  <div key={attachment.id} className='h-full min-h-[256px]'>
+                    <MessageAttachment
+                      attachment={attachment}
+                      allAttachments={attachments}
+                      isInGrid
+                    />
+                  </div>
+                ))}
+              </div>
+            );
+          }
+
+          // For 3 attachments
+          if (activeAttachments.length === 3) {
+            return (
+              <div className='grid grid-cols-2 first:*:row-span-2 first:*:w-full gap-1 overflow-hidden'>
+                {activeAttachments.map(attachment => (
+                  <div key={attachment.id} className='h-full aspect-square'>
+                    <MessageAttachment
+                      attachment={attachment}
+                      allAttachments={attachments}
+                      isInGrid
+                    />
+                  </div>
+                ))}
+              </div>
+            );
+          }
+
+          // For 4+ attachments: 2x2 grid with +N overlay
+          const visibleAttachments = activeAttachments.slice(0, 4);
+          const hasMore = activeAttachments.length > 4;
+          const remainingCount = activeAttachments.length - 3;
+
+          return (
+            <>
+              <div className='grid grid-cols-2 gap-1'>
+                {visibleAttachments.map((attachment, index) => (
+                  <div key={attachment.id} className='relative aspect-square'>
+                    <MessageAttachment
+                      attachment={attachment}
+                      allAttachments={attachments}
+                      isInGrid
+                    />
+                    {hasMore && index === 3 && (
+                      <button
+                        type='button'
+                        onClick={handleOpenAll}
+                        className='absolute inset-0 bg-black/60 flex items-center justify-center rounded-lg'
+                      >
+                        <span className='text-white text-2xl font-semibold'>+{remainingCount}</span>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Vertical list modal */}
+              <Dialog.Root open={showAll} onOpenChange={handleClose}>
+                <Dialog.Portal>
+                  <Dialog.Backdrop
+                    className='fixed inset-0 bg-background z-50'
+                    style={{ touchAction: 'none' }}
+                    onPointerDown={e => e.stopPropagation()}
+                    onTouchStart={e => e.stopPropagation()}
+                    data-prevent-drawer='true'
+                  />
+                  <Dialog.Popup
+                    className='fixed inset-0 z-50 flex flex-col'
+                    style={{ touchAction: 'none' }}
+                    data-prevent-drawer='true'
+                  >
+                    <div
+                      className='flex items-center justify-between px-4 py-3 border-b'
+                      onPointerDown={e => e.stopPropagation()}
+                      onTouchStart={e => e.stopPropagation()}
+                    >
+                      <span className='font-medium text-sm'>
+                        {formatAttachmentSummary(attachments)}
+                      </span>
+                      <button type='button' onClick={handleClose} className='p-2'>
+                        <X className='w-6 h-6' />
+                      </button>
+                    </div>
+                    <div className='flex-1 overflow-y-auto divide-y'>
+                      {activeAttachments.map(att => (
+                        <div key={att.id} className='p-2'>
+                          <MessageAttachment
+                            attachment={att}
+                            allAttachments={attachments}
+                            fullSize
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </Dialog.Popup>
+                </Dialog.Portal>
+              </Dialog.Root>
+            </>
+          );
+        })()}
+
+      {/* Deleted attachment tombstones — always visible, like Slack's "This file was deleted." */}
+      {deletedAttachments.length > 0 && (
+        <div className='flex flex-col gap-2 mt-1'>
+          {deletedAttachments.map(attachment => (
             <div
-              className='flex items-center justify-between px-4 py-3 border-b border-border'
-              onPointerDown={e => e.stopPropagation()}
-              onTouchStart={e => e.stopPropagation()}
+              key={attachment.id}
+              className='flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2'
             >
-              <span className='font-medium text-sm text-foreground'>
-                {formatAttachmentSummary(attachments)}
-              </span>
-              <button
-                type='button'
-                onClick={handleClose}
-                className='p-2 rounded-md text-foreground transition-colors hover:bg-accent'
-              >
-                <X className='w-6 h-6' />
-              </button>
+              <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted'>
+                <Trash2 className='h-4 w-4 text-muted-foreground' />
+              </div>
+              <span className='text-sm text-muted-foreground'>This file was deleted.</span>
             </div>
-            <div className='flex-1 overflow-y-auto divide-y divide-border bg-background'>
-              {attachments.map(att => (
-                <div key={att.id} className='p-2'>
-                  <MessageAttachment attachment={att} allAttachments={attachments} fullSize />
-                </div>
-              ))}
-            </div>
-          </Dialog.Popup>
-        </Dialog.Portal>
-      </Dialog.Root>
+          ))}
+        </div>
+      )}
     </>
   );
 };
