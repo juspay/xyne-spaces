@@ -10,7 +10,7 @@ import { roomActor } from '../../machines/roomMachine';
 import { CallType } from '@xyne/shared';
 import { setupPresenceListeners, cleanupPresenceListeners } from '../../machines/stateMachine';
 import { MEETING_DETECTION_ENABLED_KEY } from '../../constants/settings';
-import { sendRecordingEvent } from '../../hooks/useRecordingStore';
+import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 
 // Function to play notification sound
 const playNotificationSound = (): void => {
@@ -364,6 +364,28 @@ export const NotificationHandler: React.FC = () => {
       sendRecordingEvent({ type: 'requestAutoStart' });
     });
   }, [isElectron]);
+
+  // Handle stop signal from the floating recording pill's Stop button
+  useEffect(() => {
+    const meetingDetector = window.electronAPI?.meetingDetector;
+    if (!isElectron || !meetingDetector) return;
+    return meetingDetector.onStopRecordingFromMeeting(() => {
+      sendRecordingEvent({ type: 'requestStop' });
+    });
+  }, [isElectron]);
+
+  // Hide the floating pill when recording transitions from active to inactive
+  // (user stopped it manually in the recordings UI, not just via the pill Stop button)
+  const recordingStatus = useRecordingStore(ctx => ctx.status);
+  const wasRecordingActiveRef = useRef(false);
+  useEffect(() => {
+    if (!isElectron) return;
+    const isActive = recordingStatus === 'recording' || recordingStatus === 'paused';
+    if (wasRecordingActiveRef.current && !isActive) {
+      window.electronAPI?.ipcSend?.('recording-pill:recording-stopped', true);
+    }
+    wasRecordingActiveRef.current = isActive;
+  }, [isElectron, recordingStatus]);
 
   const handleNotificationRef = useRef(handleNotification);
   const handleNotificationAckConfirmedRef = useRef(handleNotificationAckConfirmed);

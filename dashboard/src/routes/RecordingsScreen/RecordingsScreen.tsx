@@ -42,6 +42,7 @@ export default function RecordingsScreen(): ReactElement {
   const startTime = useRecordingStore(ctx => ctx.startTime);
   const externalId = useRecordingStore(ctx => ctx.externalId);
   const pendingAutoStart = useRecordingStore(ctx => ctx.pendingAutoStart);
+  const pendingStop = useRecordingStore(ctx => ctx.pendingStop);
 
   const isActive =
     recordingStatus === 'recording' ||
@@ -113,6 +114,14 @@ export default function RecordingsScreen(): ReactElement {
     // Show save title modal
     setShowTitleModal(true);
   };
+
+  // Stop from the floating pill — same flow as clicking Stop in the UI (shows title modal)
+  useEffect(() => {
+    if (pendingStop && (recordingStatus === 'recording' || recordingStatus === 'paused')) {
+      handleStopRecording();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStop, recordingStatus]);
 
   const handleSaveTitle = async (title: string): Promise<void> => {
     setSavingTitle(true);

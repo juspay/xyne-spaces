@@ -149,6 +149,7 @@ export interface ElectronAPI {
   ipcSend?: (channel: string, ...args: unknown[]) => void;
   meetingDetector?: {
     onStartRecordingFromMeeting: (callback: () => void) => () => void;
+    onStopRecordingFromMeeting: (callback: () => void) => () => void;
     setEnabled: (enabled: boolean) => void;
   };
   meetingPopup?: {
@@ -166,6 +167,12 @@ export interface ElectronAPI {
     select: (sourceId: string, shareAudio: boolean) => void;
     cancel: () => void;
     setEnabled: (enabled: boolean) => void;
+  };
+  recordingPill?: {
+    onShow: (callback: (startTime: number) => void) => () => void;
+    onHide: (callback: () => void) => () => void;
+    stopRecording: () => void;
+    cancelRecording: () => void;
   };
 }
 

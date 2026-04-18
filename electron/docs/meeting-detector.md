@@ -99,6 +99,20 @@ A separate `BrowserWindow` (frameless, transparent, always-on-top) slides in at 
 
 The popup auto-dismisses after **15 seconds**. When the mic turns off and stays off for **3 seconds** (debounce to handle brief mic pauses), the popup hides.
 
+### Step 4 — Recording pill (persistent floating widget)
+
+When the user clicks **Start recording** on the popup, a persistent floating pill appears after 3 seconds (once the popup's recording-started animation completes). The pill is a vertical dark widget positioned at the mid-right of the screen with:
+
+- Xyne icon
+- Pulsing red recording dot
+- Live timer (synced to actual recording start time)
+- **Stop** button (square icon) — focuses the Xyne app, navigates to `/recordings`, and shows the title modal (same flow as stopping from the in-app UI)
+- **Dismiss** button (✕ icon) — closes the pill without affecting the recording
+
+The pill uses `type: 'panel'` (macOS `NSPanel`) with `skipTransformProcessType: true` to float above full-screen apps without hiding the Dock icon or stripping window chrome. It is draggable — the user can reposition it, and the position persists across show/hide within the same app session.
+
+The pill is automatically hidden when the recording stops for any reason (user stops from the in-app UI, the pill's Stop button, etc.).
+
 ---
 
 ## Architecture
@@ -114,13 +128,18 @@ src/services/meeting-detector.ts   TypeScript — identifies meeting, fires even
          │              ▼
          │         assets/meeting-popup.html          Popup UI (standalone HTML)
          │
-         └──▶ src/ipc/handlers.ts                    Handles popup actions (start recording, dismiss)
+         ├──▶ src/services/recording-pill-window.ts  Persistent floating pill during recording
+         │              │  IPC
+         │              ▼
+         │         assets/recording-pill.html         Pill UI (standalone HTML)
+         │
+         └──▶ src/ipc/handlers.ts                    Handles popup/pill actions (start/stop recording, dismiss)
                         │  IPC
                         ▼
          dashboard/src/components/NotificationHandler/NotificationHandler.tsx
                         │
                         ▼
-         dashboard/src/routes/RecordingsScreen/RecordingsScreen.tsx  (auto-starts recording)
+         dashboard/src/routes/RecordingsScreen/RecordingsScreen.tsx  (auto-starts/stops recording)
 ```
 
 ### Key files
@@ -130,9 +149,11 @@ src/services/meeting-detector.ts   TypeScript — identifies meeting, fires even
 | `native/mic-monitor/main.c` | Native C binary — mic state + app activation events |
 | `src/services/meeting-detector.ts` | Core detection logic |
 | `src/services/meeting-popup-window.ts` | Popup window lifecycle |
+| `src/services/recording-pill-window.ts` | Recording pill window lifecycle |
 | `assets/meeting-popup.html` | Popup UI |
-| `src/ipc/handlers.ts` | IPC handlers for popup actions and toggle |
-| `src/preload.ts` | Exposes `meetingDetector` and `meetingPopup` APIs to renderer |
+| `assets/recording-pill.html` | Recording pill UI |
+| `src/ipc/handlers.ts` | IPC handlers for popup/pill actions and toggle |
+| `src/preload.ts` | Exposes `meetingDetector`, `meetingPopup`, and `recordingPill` APIs to renderer |
 | `src/app/main.ts` | Starts/stops the detector with the app |
 | `dashboard/src/hooks/useMeetingDetectionSettings.ts` | Toggle preference (localStorage) |
 | `dashboard/src/components/Settings/Settings.tsx` | Settings UI toggle |

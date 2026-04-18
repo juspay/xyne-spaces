@@ -14,6 +14,7 @@ import {
 } from '../services/media-permission';
 import { setCustomScreenPickerEnabled } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
+import { showRecordingPill, hideRecordingPill } from '../services/recording-pill-window';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
 import Sentry from '@sentry/electron/main';
@@ -376,8 +377,34 @@ export function setupIpcHandlers(): void {
       mainWindow.webContents.send('navigate-to', '/recordings');
       mainWindow.webContents.send('meeting:start-recording');
     }
-    // Delay close so the popup can show the recording-started state for 3 seconds
+    // Delay close so the popup can show the recording-started state for 3 seconds,
+    // then show the persistent recording pill
+    const recordingStartTime = Date.now();
     hideMeetingPopupAfter(3000);
+    setTimeout(() => showRecordingPill(recordingStartTime), 3000);
+  });
+
+  // Stop recording from the persistent floating pill — focus the app, navigate to
+  // /recordings, and fire requestStop so RecordingsScreen shows the title modal
+  ipcMain.on('recording-pill:stop-recording', () => {
+    const mainWindow = getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('navigate-to', '/recordings');
+      mainWindow.webContents.send('meeting:stop-recording');
+    }
+    hideRecordingPill();
+  });
+
+  // Cancel just closes the pill — recording continues unaffected
+  ipcMain.on('recording-pill:cancel-recording', () => {
+    hideRecordingPill();
+  });
+
+  // Renderer notifies main that recording stopped (e.g. user stopped manually in UI)
+  ipcMain.on('recording-pill:recording-stopped', () => {
+    hideRecordingPill();
   });
 
   // Meeting detection toggle (user preference from settings)

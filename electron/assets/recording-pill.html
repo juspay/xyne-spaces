@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Recording</title>
+  <style>
+    html { font-size: 16px; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: transparent;
+      overflow: hidden;
+      padding: 0.5rem;
+    }
+
+    /* Drag handle covers the whole pill; buttons override with no-drag */
+    .pill {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      background: #111;
+      border-radius: 1.25rem;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.4);
+      padding: 0.875rem 0.625rem;
+      opacity: 0;
+      transform: translateX(0.5rem);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      cursor: grab;
+      -webkit-app-region: drag;
+    }
+
+    .pill.visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .pill.hiding {
+      opacity: 0;
+      transform: translateX(0.5rem);
+    }
+
+    /* Xyne icon */
+    .icon {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      overflow: hidden;
+      flex-shrink: 0;
+      -webkit-app-region: no-drag;
+    }
+    .icon img { width: 100%; height: 100%; object-fit: cover; }
+
+    /* Animated recording dot */
+    .rec-dot {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: #f44;
+      flex-shrink: 0;
+      animation: pulse 1.2s ease-in-out infinite;
+      -webkit-app-region: no-drag;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* Timer */
+    .timer {
+      font-size: 0.6875rem;
+      font-weight: 600;
+      color: #fff;
+      letter-spacing: 0.02em;
+      font-variant-numeric: tabular-nums;
+      -webkit-app-region: no-drag;
+    }
+
+    /* Divider */
+    .divider {
+      width: 1.5rem;
+      height: 1px;
+      background: rgba(255,255,255,0.12);
+      -webkit-app-region: no-drag;
+    }
+
+    /* Icon buttons */
+    .btn {
+      width: 2rem;
+      height: 2rem;
+      border: none;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      -webkit-app-region: no-drag;
+      transition: background 0.15s;
+    }
+
+    /* Stop — filled square icon */
+    .btn-stop {
+      background: rgba(255,255,255,0.12);
+    }
+    .btn-stop:hover { background: rgba(255,70,70,0.8); }
+    .btn-stop svg { display: block; }
+
+    /* Cancel — ✕ icon */
+    .btn-cancel {
+      background: rgba(255,255,255,0.07);
+    }
+    .btn-cancel:hover { background: rgba(255,255,255,0.18); }
+    .btn-cancel svg { display: block; }
+  </style>
+</head>
+<body>
+  <div class="pill" id="pill">
+    <div class="icon"><img src="./images/xyne.png" alt="Xyne" /></div>
+    <div class="rec-dot"></div>
+    <div class="timer" id="timer">0:00</div>
+    <div class="divider"></div>
+
+    <!-- Stop recording (saves the recording) -->
+    <button class="btn btn-stop" id="btnStop" title="Stop recording">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="1" y="1" width="10" height="10" rx="2" fill="white"/>
+      </svg>
+    </button>
+
+    <!-- Dismiss pill (recording continues) -->
+    <button class="btn btn-cancel" id="btnCancel" title="Dismiss">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <line x1="2" y1="2" x2="10" y2="10" stroke="rgba(255,255,255,0.7)" stroke-width="1.75" stroke-linecap="round"/>
+        <line x1="10" y1="2" x2="2" y2="10" stroke="rgba(255,255,255,0.7)" stroke-width="1.75" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <script>
+    const pill = document.getElementById('pill');
+    const timerEl = document.getElementById('timer');
+    let startTime = null;
+    let timerInterval = null;
+
+    function formatTime(seconds) {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return m + ':' + String(s).padStart(2, '0');
+    }
+
+    function startTimer(recordingStartTime) {
+      startTime = recordingStartTime || Date.now();
+      // Show elapsed time immediately, then update every second
+      timerEl.textContent = formatTime(Math.floor((Date.now() - startTime) / 1000));
+      timerInterval = setInterval(() => {
+        timerEl.textContent = formatTime(Math.floor((Date.now() - startTime) / 1000));
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+      startTime = null;
+      timerEl.textContent = '0:00';
+    }
+
+    function reportSize() {
+      requestAnimationFrame(() => {
+        const rect = pill.getBoundingClientRect();
+        const w = Math.ceil(rect.width) + 16;
+        const h = Math.ceil(rect.height) + 16;
+        window.electronAPI?.ipcSend?.('recording-pill:content-size', w, h);
+      });
+    }
+
+    function show(recordingStartTime) {
+      pill.classList.remove('hiding');
+      pill.classList.add('visible');
+      startTimer(recordingStartTime);
+      reportSize();
+    }
+
+    function hide() {
+      pill.classList.add('hiding');
+      stopTimer();
+    }
+
+    document.getElementById('btnStop').addEventListener('click', () => {
+      window.electronAPI?.recordingPill?.stopRecording();
+    });
+
+    document.getElementById('btnCancel').addEventListener('click', () => {
+      window.electronAPI?.recordingPill?.cancelRecording();
+    });
+
+    if (window.electronAPI?.recordingPill) {
+      window.electronAPI.recordingPill.onShow((startTime) => show(startTime));
+      window.electronAPI.recordingPill.onHide(hide);
+    }
+  </script>
+</body>
+</html>
