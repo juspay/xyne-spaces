@@ -1735,10 +1735,6 @@ export const queries = defineQueries({
         .where('boardId', boardId);
     },
   ),
-  // Query for all repos
-  getAllRepos: defineQuery(() => {
-    return zql.repos.orderBy('name', 'asc');
-  }),
   getAllForms: defineQuery(() => {
     return zql.forms
       .related('formFields')

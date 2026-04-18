@@ -1,6 +1,6 @@
 import { ReactElement, useState, useRef, useCallback } from 'react';
 import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
-import { FileText, Plus, ArrowLeft, Loader2 } from 'lucide-react';
+import { FileText, Plus, ArrowLeft, Info, Loader2 } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { useZero } from '../../../hooks/useZero';
 import { useQuery } from '../../../hooks/useQuery';
@@ -10,9 +10,9 @@ import type { Canvas } from '../Canvas.types';
 import { DocType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { Button } from '../../ui/Button';
+import { PublishDocsModal } from '../QuartoInstructionsModal/QuartoInstructionsModal';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
-import { QuartoDocModal } from '../QuartoDocModal';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import {
   PanelGroup,
@@ -37,7 +37,7 @@ const CanvasPanel = (): ReactElement => {
   const canvasPanelRef = useRef<ImperativePanelHandle>(null);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
-  const [showQuartoModal, setShowQuartoModal] = useState(false);
+  const [showPublishModal, setShowPublishModal] = useState(false);
 
   // Fetch canvases
   const [allCanvases] = useQuery(queries.userCanvases());
@@ -67,10 +67,6 @@ const CanvasPanel = (): ReactElement => {
       setIsCreatingCanvas(false);
     }
   }, [navigate]);
-
-  const handleCreateQuartoDoc = useCallback(() => {
-    setShowQuartoModal(true);
-  }, []);
 
   const handleSelectCanvas = useCallback(
     (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => {
@@ -178,12 +174,12 @@ const CanvasPanel = (): ReactElement => {
             <Button
               variant='default'
               size='sm'
-              onClick={() => handleCreateQuartoDoc()}
+              onClick={() => setShowPublishModal(true)}
               data-track-category='CANVAS'
-              data-track-name='Create_Quarto_Doc'
+              data-track-name='Publish_Doc_Instructions'
             >
-              <Plus size={16} className='mr-1' />
-              New Doc
+              <Info size={16} className='mr-1' />
+              How to publish
             </Button>
           ) : (
             <Button
@@ -220,6 +216,7 @@ const CanvasPanel = (): ReactElement => {
           onFilterChange={setActiveFilter}
         />
       </div>
+      <PublishDocsModal isOpen={showPublishModal} onClose={() => setShowPublishModal(false)} />
     </div>
   );
 
@@ -248,12 +245,7 @@ const CanvasPanel = (): ReactElement => {
     }
 
     // Show canvas list on index route
-    return (
-      <>
-        <div className='flex flex-col h-full bg-background w-screen'>{renderLeftPanel()}</div>
-        <QuartoDocModal isOpen={showQuartoModal} onClose={() => setShowQuartoModal(false)} />
-      </>
-    );
+    return <div className='flex flex-col h-full bg-background w-screen'>{renderLeftPanel()}</div>;
   }
 
   // Desktop view - two-panel layout with resizable panels
@@ -283,7 +275,6 @@ const CanvasPanel = (): ReactElement => {
           </div>
         </Panel>
       </PanelGroup>
-      <QuartoDocModal isOpen={showQuartoModal} onClose={() => setShowQuartoModal(false)} />
     </div>
   );
 };

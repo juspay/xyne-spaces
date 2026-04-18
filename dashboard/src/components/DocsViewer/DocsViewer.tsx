@@ -1,4 +1,3 @@
-import { QuartoInstructionsModal } from '../Canvas/QuartoInstructionsModal/QuartoInstructionsModal';
 import { ReactElement, useState, useCallback, useEffect, useRef } from 'react';
 import {
   FileText,
@@ -7,7 +6,6 @@ import {
   Loader2,
   Maximize2,
   Minimize2,
-  Pencil,
   Share2,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -95,13 +93,6 @@ const DocsViewer = ({
   const [refreshKey, setRefreshKey] = useState(0);
   const [docTitle, setDocTitle] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [docRepoUrl, setDocRepoUrl] = useState<string | undefined>(repoUrl);
-  const [showInstructionsModal, setShowInstructionsModal] = useState(false);
-  const [instructionsModalData, setInstructionsModalData] = useState<{
-    repoUrl: string;
-    branchName: string;
-    repoName: string;
-  } | null>(null);
   const sessionIdRef = useRef<string>(generateSessionId());
   const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -132,35 +123,16 @@ const DocsViewer = ({
         if (response.data?.exists && response.data?.doc?.title) {
           setDocTitle(response.data.doc.title);
         }
-        // Get repo URL from doc info if not provided
-        if (response.data?.doc?.repoUrl && !docRepoUrl) {
-          setDocRepoUrl(response.data.doc.repoUrl);
-        }
       } catch {
         setDocTitle('');
       }
     };
     void fetchDocInfo();
-  }, [repoName, branchName, docRepoUrl]);
+  }, [repoName, branchName]);
 
   const toggleFullscreen = useCallback(() => {
     setIsFullscreen(prev => !prev);
   }, []);
-
-  // Handle Edit button click - open Quarto instructions modal
-  const handleEdit = useCallback(() => {
-    if (!docRepoUrl) {
-      toast.error('Repository URL not available for this document');
-      return;
-    }
-
-    setInstructionsModalData({
-      repoUrl: docRepoUrl,
-      branchName: branchName,
-      repoName,
-    });
-    setShowInstructionsModal(true);
-  }, [docRepoUrl, repoName, branchName]);
 
   const handleShare = useCallback(() => {
     const url = `${window.location.origin}/docs/${repoName}/${branchName}`;
@@ -353,21 +325,6 @@ const DocsViewer = ({
             </Button>
 
             {/* Edit button */}
-            {docRepoUrl && (
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={handleEdit}
-                className='h-8 gap-1.5 px-2'
-                title='Edit this document'
-                data-track-category='DocsViewer'
-                data-track-name='EDIT_DOCUMENT'
-                data-track-metadata={JSON.stringify({ repoName, repoUrl })}
-              >
-                <Pencil className='h-4 w-4' />
-                <span className='hidden sm:inline'>Edit</span>
-              </Button>
-            )}
             <Button
               variant='ghost'
               size='icon'
@@ -438,19 +395,6 @@ const DocsViewer = ({
             />
           )}
         </div>
-
-        {/* Instructions Modal - shown after workspace setup instead of redirecting to editor */}
-        <QuartoInstructionsModal
-          isOpen={showInstructionsModal}
-          onClose={() => {
-            setShowInstructionsModal(false);
-            setInstructionsModalData(null);
-          }}
-          repoUrl={instructionsModalData?.repoUrl || ''}
-          branchName={instructionsModalData?.branchName || 'main'}
-          repoName={instructionsModalData?.repoName || 'quarto-docs'}
-          mode='edit'
-        />
       </div>
     </>
   );
