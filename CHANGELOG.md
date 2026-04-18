@@ -1,3 +1,19 @@
+## [1.120.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.119.0...v1.120.0) (2026-04-18)
+
+
+### Features
+
+* persistent floating recording pill for meeting detection ([446a756](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/446a7562ee402647ce7a5cc86f5aa8105a03d490)), closes [#4656](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4656)
+
+
+### Bug Fixes
+
+* add w-full to code and text file viewer wrapperClass to fix squished JSON view width ([c1bd18d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c1bd18d1cc4e389fee16a8e5aa57e3567d88ebf0))
+* fix the collapse when clicking the backward and forward button in top bar ([0832ebd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0832ebd1fb31bf1022b3ef9f21868a2e04d2499b))
+* Fix thread expansion CSS breakpoint issue on side layout ([09eb6e6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/09eb6e673e8604c42df9c15afb63fbbecaa5dbb7))
+* Minor improvements for generic storage ([8c3667c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8c3667cece6acf2e904bbfbc6f377fc5d471de1c)), closes [#5199](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5199)
+* removed quartoDocModal unused code unused query ([6525b80](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6525b8025d082213b48c5127dee988769ae4f520)), closes [#5132](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5132)
+
 ## [1.119.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.118.1...v1.119.0) (2026-04-18)
 
 
