@@ -39,4 +39,5 @@ export interface StorageService {
   moveFile(sourcePath: string, destinationPath: string): Promise<void>;
   ensureBucketExists(): Promise<void>;
   checkBucketExists(): Promise<void>;
+  buildStorageUri(path: string): string;
 }

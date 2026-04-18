@@ -137,7 +137,7 @@ class SessionRecordingSyncService {
     // Upload to GCS
     await this.uploadToGcs(gcsPath, mergedRecording);
 
-    const gcsUri = `gs://${config.gcs.sessionRecordingBucketName}/${gcsPath}`;
+    const gcsUri = this.storageService.buildStorageUri(gcsPath);
 
     // Track in database for SOP/fact extraction workflow
     await this.trackSessionRecordingFile(

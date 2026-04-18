@@ -66,4 +66,8 @@ export class GCSAdapter implements StorageService {
   async checkBucketExists(): Promise<void> {
     return this.gcs.checkBucketExists();
   }
+
+  buildStorageUri(path: string): string {
+    return `gs://${this.gcs.getBucketName()}/${path}`;
+  }
 }

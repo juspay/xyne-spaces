@@ -24,6 +24,14 @@ export function generateFilePath(options: UploadOptions): string {
 }
 
 /**
+ * Strip legacy gs://bucket/ or s3://bucket/ prefix, returning just the object path.
+ */
+export function normalizeStoragePath(url: string): string {
+  const match = url.match(/^(?:gs|s3):\/\/[^/]+\/(.+)$/);
+  return match ? match[1] : url;
+}
+
+/**
  * Sanitize filename to remove unsafe characters.
  */
 export function sanitizeFilename(filename: string): string {
@@ -45,12 +53,4 @@ export function sanitizeFilename(filename: string): string {
   if (sanitized.length < 3) sanitized = 'file_' + sanitized.padEnd(3, '0');
 
   return sanitized + extension;
-}
-
-/**
- * Strip legacy gs://bucket/ or s3://bucket/ prefix, returning just the object path.
- */
-export function normalizeStoragePath(url: string): string {
-  const match = url.match(/^(?:gs|s3):\/\/[^/]+\/(.+)$/);
-  return match ? match[1] : url;
 }

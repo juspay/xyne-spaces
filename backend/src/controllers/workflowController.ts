@@ -88,7 +88,7 @@ export class WorkflowController {
       // 2. Create new Redis key and MessageAttachment for new execution
       const newRedisKey = buildWorkflowStepKey(newExecutionId, stepName);
       const newGcsPath = `workflows/${newExecutionId}/${stepName}.json`;
-      const newGcsUrl = `gs://${config.gcs.workflowStepsBucketName}/${newGcsPath}`;
+      const newGcsUrl = getStorageService(config.gcs.workflowStepsBucketName).buildStorageUri(newGcsPath);
 
       // Create MessageAttachment for new execution's step
       const { repositories } = await import('@/database/repositories');
@@ -1630,8 +1630,8 @@ export class WorkflowController {
       const cucumberReport = reports.find(r => r.name === 'cucumber-report.json');
       if (cucumberReport) {
         try {
-          logger.info(`[TEST-ARTIFACTS] Found cucumber report at: ${cucumberReport.gcsPath}`);
-          const buffer = await storageService.getFileBuffer(cucumberReport.gcsPath);
+          logger.info(`[TEST-ARTIFACTS] Found cucumber report at: ${cucumberReport.storagePath}`);
+          const buffer = await storageService.getFileBuffer(cucumberReport.storagePath);
           const report = JSON.parse(buffer.toString());
           // Cucumber report is an array of features
           let total = 0, passed = 0, failed = 0, skipped = 0;
@@ -1674,20 +1674,20 @@ export class WorkflowController {
     storageService: StorageService,
     prefix: string,
     type: 'screenshot' | 'report' | 'log'
-  ): Promise<Array<{ name: string; gcsPath: string; type: string; contentType?: string }>> {
+  ): Promise<Array<{ name: string; storagePath: string; type: string; contentType?: string }>> {
     try {
-      logger.info(`[LIST-GCS-ARTIFACTS] Listing files with prefix: ${prefix}`);
+      logger.info(`[LIST-STORAGE-ARTIFACTS] Listing files with prefix: ${prefix}`);
       const files = await storageService.listFiles(prefix);
-      logger.info(`[LIST-GCS-ARTIFACTS] Found ${files.length} files with prefix: ${prefix}`);
+      logger.info(`[LIST-STORAGE-ARTIFACTS] Found ${files.length} files with prefix: ${prefix}`);
 
       return files.map(file => ({
         name: file.name.replace(prefix, ''),
-        gcsPath: file.name,
+        storagePath: file.name,
         type,
         contentType: file.contentType,
       }));
     } catch (error) {
-      logger.error(`[LIST-GCS-ARTIFACTS] Failed to list GCS artifacts for prefix ${prefix}:`, error);
+      logger.error(`[LIST-STORAGE-ARTIFACTS] Failed to list artifacts for prefix ${prefix}:`, error);
       return [];
     }
   }

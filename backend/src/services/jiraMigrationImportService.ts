@@ -1655,11 +1655,11 @@ export class JiraMigrationImportService {
 
     const downloadCache = new Map<
       string,
-      Promise<{ gcsPath: string; size: number; filename: string; mimeType: string }>
+      Promise<{ storagePath: string; size: number; filename: string; mimeType: string }>
     >();
     const getDownloadedAttachment = (
       attachment: JiraAttachment,
-    ): Promise<{ gcsPath: string; size: number; filename: string; mimeType: string }> => {
+    ): Promise<{ storagePath: string; size: number; filename: string; mimeType: string }> => {
       const cachedDownload = downloadCache.get(attachment.id);
       if (cachedDownload) {
         return cachedDownload;
@@ -1704,7 +1704,7 @@ export class JiraMigrationImportService {
               return {
                 size: downloaded.size,
                 mimeType: downloaded.mimeType,
-                url: downloaded.gcsPath,
+                url: downloaded.storagePath,
               };
             })();
 
@@ -1865,7 +1865,7 @@ export class JiraMigrationImportService {
           originalFilename: attachment.filename,
           size: downloaded.size,
           mimetype: downloaded.mimeType,
-          url: downloaded.gcsPath,
+          url: downloaded.storagePath,
           uploadedByUserId: uploadedBy,
           createdBy: uploadedBy,
           storageProvider: config.fileStorage.provider,
