@@ -1,3 +1,10 @@
+## [1.121.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.120.0...v1.121.0) (2026-04-19)
+
+
+### Features
+
+* added polling for google and microsoft calendar data ([1debd94](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1debd94decfd0a4be23f46e7c6969a553f75c8b3)), closes [#5202](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5202)
+
 ## [1.120.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.119.0...v1.120.0) (2026-04-18)
 
 
