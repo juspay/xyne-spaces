@@ -317,7 +317,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
     roomActor.send({
       type: 'INITIATE_CALL',
-      channelId: call.channelId,
+      ...(call.channelId ? { channelId: call.channelId } : {}),
       callType: CallType.AUDIO,
       targetUserIds: participantUserIds,
       zero,

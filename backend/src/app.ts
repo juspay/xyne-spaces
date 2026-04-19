@@ -50,6 +50,7 @@ import userRoutes from '@/routes/users';
 import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
+import calendarSyncRoutes from '@/routes/calendarSync';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
@@ -106,6 +107,8 @@ import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
 import { modelSyncQueue } from '@/queues/modelSyncQueue';
 import { presenceCleanupQueue } from '@/queues/presenceCleanupQueue';
+import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
+import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { etaDeadlineQueue } from '@/queues/etaDeadlineQueue';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
@@ -322,6 +325,7 @@ export class App {
     this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
+    this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     
     // App routes
     this.app.use('/api/apps', appRoutes);
@@ -551,6 +555,13 @@ export class App {
     await modelSyncQueue.initialize();
     await modelSyncQueue.runInitialSync();
 
+    // Initialize calendar sync queues
+    logger.info('Initializing Microsoft Calendar sync queue...');
+    await microsoftCalendarSyncQueue.initialize();
+
+    logger.info('Initializing Google Calendar sync queue...');
+    await googleCalendarSyncQueue.initialize();
+
     // Initialize Superposition client early to fail fast if misconfigured
     logger.info('Initializing Superposition client...');
     try {
@@ -617,6 +628,10 @@ export class App {
 
       // Close metrics sync queue
       await metricsSyncQueue.close();
+
+      // Close calendar sync queues
+      await microsoftCalendarSyncQueue.close();
+      await googleCalendarSyncQueue.close();
 
       // Close presence cleanup queue
       await presenceCleanupQueue.close();

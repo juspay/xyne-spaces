@@ -529,7 +529,7 @@ export class AuthController {
       // Generate OAuth URL with offline access for refresh tokens
       const authUrl = this.googleClient.generateAuthUrl({
         access_type: 'offline',
-        scope: ['openid', 'email', 'profile'],
+        scope: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/calendar.readonly'],
         prompt: 'consent', // Force consent to ensure refresh token
         redirect_uri: redirectUri,
         state: `login_${Date.now()}`, // Add state for security

@@ -3499,7 +3499,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             if (!callMetadata?.conversationId) {
               const result = await sendCallSystemMessage(tx, {
                 callExternalId: call.externalId,
-                channelId: call.channelId,
+                channelId: call.channelId ?? '',
                 initiatorUserName: authData.name,
               });
 

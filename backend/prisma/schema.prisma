@@ -219,6 +219,8 @@ enum CallType {
 enum CallOrigin {
   CHANNEL
   CONVERSATION
+  GOOGLE_CALENDAR
+  MICROSOFT_CALENDAR
   @@schema("public")
 }
 
@@ -2096,7 +2098,7 @@ model Call {
   title            String?     // Meeting/call title
   createdByUserId  String      // User who initiated the call (no FK constraint)
   organizerId      String?     // Who organized the meeting
-  channelId        String      // Channel where call is happening (no FK constraint)
+  channelId        String?     // Channel where call is happening (null for GOOGLE_CALENDAR origin)
   orgName          String?     // Organization name (no FK constraint)
   description      String?     // Meeting description/agenda
   callType         CallType    @default(VIDEO)
@@ -2121,7 +2123,7 @@ model Call {
   metadata         Json?       // LiveKit room config, max participants, etc.
 
   // Relations
-  channel      Channel           @relation(fields: [channelId], references: [id])
+  channel      Channel?          @relation(fields: [channelId], references: [id])
   participants CallParticipant[]
   recurringSeries RecurringCallSeries? @relation(fields: [recurringSeriesId], references: [id])
 

@@ -8,6 +8,7 @@ import {
   Megaphone,
   Phone,
   Plus,
+  RefreshCw,
   Search,
   X,
 } from 'lucide-react';
@@ -38,8 +39,11 @@ import { useUsers } from '../../hooks/useUsers';
 import { useZero } from '../../hooks/useZero';
 import { cn } from '../../utils/classNames';
 import { mutators } from '../../zero/mutators';
+import axios from 'axios';
+import { API_BASE_URL } from '../../config';
 import { CallCard, UpcomingCallCard } from './CallCard';
-import { Call } from './callHistoryItem.utils';
+import { Call, isExternalCalendarEvent } from './callHistoryItem.utils';
+import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { ParticipantsModal } from './ParticipantsModal';
 import * as Tabs from '@radix-ui/react-tabs';
 import { getUserDisplayName } from '../../utils/userDisplayName';
@@ -79,6 +83,13 @@ const CallHistoryScreen = (): ReactElement => {
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>('month');
+  const [calendarProvider, setCalendarProvider] = useState<'GOOGLE' | 'MICROSOFT' | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<{
+    text: string;
+    ok: boolean;
+    reauth?: boolean;
+  } | null>(null);
   const [currentMonthStart, setCurrentMonthStart] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -138,6 +149,51 @@ const CallHistoryScreen = (): ReactElement => {
   const zero = useZero();
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Fetch the current user's calendar provider once on mount
+  useEffect(() => {
+    if (!user?.id) return;
+    axios
+      .get<{ success: boolean; provider: 'GOOGLE' | 'MICROSOFT' | null }>(
+        `${API_BASE_URL}/calendar/sync/provider`,
+        { withCredentials: true },
+      )
+      .then(res => {
+        if (res.data.success) setCalendarProvider(res.data.provider);
+      })
+      .catch(() => {
+        // non-critical — button just won't show
+      });
+  }, [user?.id]);
+
+  const handleCalendarSync = async () => {
+    if (!calendarProvider || isSyncing) return;
+    setIsSyncing(true);
+    setSyncMessage(null);
+    try {
+      const provider = calendarProvider === 'GOOGLE' ? 'google' : 'microsoft';
+      await axios.post(`${API_BASE_URL}/calendar/sync/${provider}`, {}, { withCredentials: true });
+      setSyncMessage({ text: 'Synced!', ok: true });
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        const data = err.response?.data as { error?: string; needsReauth?: boolean } | undefined;
+        if (data?.needsReauth) {
+          setSyncMessage({
+            text: 'Re-authorization required — please sign out and sign back in',
+            ok: false,
+            reauth: true,
+          });
+        } else {
+          setSyncMessage({ text: data?.error ?? 'Sync failed', ok: false });
+        }
+      } else {
+        setSyncMessage({ text: 'Sync failed', ok: false });
+      }
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncMessage(null), syncMessage?.reauth ? 8000 : 3000);
+    }
+  };
 
   const endedCallsCount = calls?.filter(c => c.status === CallStatus.ENDED).length ?? 0;
 
@@ -351,11 +407,14 @@ const CallHistoryScreen = (): ReactElement => {
     ? filterCallsBySearchQuery(scheduledCalls || [], searchQuery)
     : scheduledCalls;
 
-  // Show only 1 instance per recurring series
+  // Show only 1 instance per recurring series; exclude Google Calendar events from list view
   const limitedScheduledCalls = useMemo(() => {
     if (!filteredScheduledCalls) return filteredScheduledCalls;
     const seenSeries = new Set<string>();
     return filteredScheduledCalls.filter(call => {
+      if (isExternalCalendarEvent(call)) {
+        return false;
+      }
       if (call.recurringSeriesId) {
         if (seenSeries.has(call.recurringSeriesId)) {
           return false;
@@ -374,9 +433,14 @@ const CallHistoryScreen = (): ReactElement => {
     ? filterCallsBySearchQuery(calls || [], searchQuery)
     : calls;
 
-  const filteredMissedCalls = searchQuery.trim()
-    ? filterCallsBySearchQuery(missedCalls || [], searchQuery)
-    : missedCalls;
+  // Exclude Google Calendar events from All/Missed list views
+  const filteredRecentCallsNoGcal = filteredRecentCalls?.filter(
+    call => !isExternalCalendarEvent(call),
+  );
+
+  const filteredMissedCalls = (
+    searchQuery.trim() ? filterCallsBySearchQuery(missedCalls || [], searchQuery) : missedCalls
+  )?.filter(call => !isExternalCalendarEvent(call));
 
   const calendarCalls = useMemo(() => {
     const combined = [...(filteredRecentCalls || []), ...(filteredScheduledCalls || [])];
@@ -400,16 +464,16 @@ const CallHistoryScreen = (): ReactElement => {
       } else if (activeTab === 'upcoming') {
         return limitedScheduledCalls;
       }
-      return filteredRecentCalls;
+      return filteredRecentCallsNoGcal;
     }
 
     //default view without search
     if (activeTab === 'missed') {
-      return missedCalls;
+      return filteredMissedCalls;
     } else if (activeTab === 'upcoming') {
       return limitedScheduledCalls;
     }
-    return calls;
+    return filteredRecentCallsNoGcal;
   };
 
   const tabContent = getTabContent();
@@ -488,37 +552,72 @@ const CallHistoryScreen = (): ReactElement => {
           {/* Header */}
           <div className='flex items-center justify-between py-3'>
             <h1 className='text-lg font-semibold text-foreground'>Calls</h1>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  data-testid='new-call-button'
-                  className='!bg-action-primary !text-action-primary-foreground duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8 hover:opacity-90'
-                >
-                  <span className='text-sm leading-5 font-semibold'>New Call</span>
-                  <ChevronDown className='size-4' strokeWidth={2.3} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align='end' sideOffset={8} className='rounded-xl'>
-                <DropdownMenuItem
-                  data-testid='start-instant-call-option'
-                  className='flex gap-2 items-center text-sm rounded-lg'
-                  onSelect={() => {
-                    setIsInstantCallModalOpen(true);
+            <div className='flex items-center gap-2'>
+              {/* Calendar sync button — shown only for Google / Microsoft SSO users */}
+              {calendarProvider && (
+                <button
+                  onClick={() => {
+                    void handleCalendarSync();
                   }}
+                  disabled={isSyncing}
+                  data-track-category='Calls'
+                  data-track-name='calendar-sync'
+                  title={`Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 h-8 rounded-lg text-sm font-medium border transition-colors disabled:opacity-60',
+                    syncMessage?.reauth
+                      ? 'border-destructive text-destructive hover:bg-destructive/10'
+                      : 'border-border text-foreground hover:bg-muted',
+                  )}
                 >
-                  <Plus className='size-4' />
-                  Start an instant call
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  data-testid='schedule-call-option'
-                  className='flex gap-2 items-center text-sm leading-5 rounded-lg'
-                  onSelect={() => setIsScheduleModalOpen(true)}
-                >
-                  <CalendarDays className='size-4' />
-                  Schedule call for later
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  {isSyncing ? (
+                    <RefreshCw className='size-3.5 animate-spin' />
+                  ) : calendarProvider === 'GOOGLE' ? (
+                    <GoogleCalendarIcon size={14} />
+                  ) : (
+                    <MicrosoftIcon size={14} />
+                  )}
+                  <span>
+                    {syncMessage
+                      ? syncMessage.text
+                      : isSyncing
+                        ? 'Syncing…'
+                        : `Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}
+                  </span>
+                </button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    data-testid='new-call-button'
+                    className='!bg-action-primary !text-action-primary-foreground duration-300 ease-in-out rounded-lg gap-1.5 px-3 py-2 h-8 hover:opacity-90'
+                  >
+                    <span className='text-sm leading-5 font-semibold'>New Call</span>
+                    <ChevronDown className='size-4' strokeWidth={2.3} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='end' sideOffset={8} className='rounded-xl'>
+                  <DropdownMenuItem
+                    data-testid='start-instant-call-option'
+                    className='flex gap-2 items-center text-sm rounded-lg'
+                    onSelect={() => {
+                      setIsInstantCallModalOpen(true);
+                    }}
+                  >
+                    <Plus className='size-4' />
+                    Start an instant call
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    data-testid='schedule-call-option'
+                    className='flex gap-2 items-center text-sm leading-5 rounded-lg'
+                    onSelect={() => setIsScheduleModalOpen(true)}
+                  >
+                    <CalendarDays className='size-4' />
+                    Schedule call for later
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
           {/* Tabs Options */}

@@ -448,7 +448,7 @@ export class CallController {
         logger.info(`Room not found for call ${callId}, creating from call metadata`);
 
         // Fetch channel to get metadata
-        const channel = await repositories.channels.findById(call.channelId);
+        const channel = await repositories.channels.findById(call.channelId ?? '');
         if (!channel) {
           res.status(404).json({ success: false, error: 'Channel not found' });
           return;

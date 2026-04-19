@@ -47,7 +47,7 @@ export interface CreateCallWithParticipantsInput {
   externalId: string;
   title: string;
   createdByUserId: string;
-  channelId: string;
+  channelId: string; // required for CHANNEL/CONVERSATION origin
   callType: CallType;
   callOrigin: CallOrigin;
   roomLink: string;
@@ -774,7 +774,7 @@ export class CallRepository {
         await this.createConversationAndSystemMessage(tx, {
           conversationId,
           messageId,
-          channelId: call.channelId,
+          channelId: call.channelId ?? '',
           callId: call.externalId,
           initiatorName,
         });

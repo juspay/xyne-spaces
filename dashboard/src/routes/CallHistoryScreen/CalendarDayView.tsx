@@ -1,6 +1,7 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
-import { Call } from './callHistoryItem.utils';
+import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
+import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { cn } from '../../utils/classNames';
 import CalendarCallPopup from './CalendarCallPopup';
 import {
@@ -199,6 +200,16 @@ const CalendarDayView = ({
                             textDecorationLine: isDeclined ? 'line-through' : 'none',
                           }}
                         >
+                          {isGoogleCalendarCall(call) && (
+                            <span className='inline-block mr-0.5 mb-px'>
+                              <GoogleCalendarIcon size={14} />
+                            </span>
+                          )}
+                          {isMicrosoftCalendarCall(call) && (
+                            <span className='inline-block mr-0.5 mb-px'>
+                              <MicrosoftIcon size={14} />
+                            </span>
+                          )}
                           {call.title ?? 'Call'}
                         </span>
                         {height >= 40 && (

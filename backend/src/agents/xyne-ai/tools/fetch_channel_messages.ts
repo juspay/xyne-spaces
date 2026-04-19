@@ -266,7 +266,7 @@ async function fetchChannelMessagesMultiChannelImpl(
       transformCallToEntity(
         call,
         idx,
-        channelNameMap.get(call.channelId) || '',
+        channelNameMap.get(call.channelId ?? '') || '',
         userMap
       )
     );

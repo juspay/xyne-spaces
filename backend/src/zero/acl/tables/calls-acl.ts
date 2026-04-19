@@ -6,7 +6,7 @@ import { zql } from '../../queries';
 
 export class CallsACL extends BaseACL<'calls'> {
   async canInsert(args: InsertValue<TableSchema<'calls'>>, tx: Transaction<Schema>): Promise<void> {
-    const channel = await tx.run(zql.channels.where('id', args.channelId).one());
+    const channel = await tx.run(zql.channels.where('id', args.channelId ?? undefined).one());
     if (!channel) {
       throw new MutationACLError('Call insert failed: the specified channel does not exist', 'calls');
     }
@@ -16,7 +16,7 @@ export class CallsACL extends BaseACL<'calls'> {
     }
 
     const isParticipant = await tx.run(zql.channel_participants
-      .where('channelId', args.channelId)
+      .where('channelId', args.channelId ?? undefined)
       .where('userId', this.ctx.userID)
       .one());
 

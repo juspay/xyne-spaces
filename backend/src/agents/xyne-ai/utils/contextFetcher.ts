@@ -464,7 +464,7 @@ ${participantList || '  No participants'}`;
       id: callId,
       content,
       title: call.title || 'Untitled Call',
-      channelId: call.channelId,
+      channelId: call.channelId ?? undefined,
       conversationId,
       callType: call.callType,
       externalId: call.externalId,
