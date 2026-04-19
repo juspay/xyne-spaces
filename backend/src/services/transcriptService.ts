@@ -1382,7 +1382,7 @@ Output ONLY the processed transcript, nothing else.`;
         if (config.pulse.enabledChannels.length > 0) {
           try {
             // Check if this call's channel is in the Pulse allowlist (by channel ID)
-            const isPulseChannel = config.pulse.enabledChannels.includes(call.channelId);
+            const isPulseChannel = config.pulse.enabledChannels.includes(call.channelId ?? '');
 
             if (isPulseChannel) {
               logger.info(`[Pulse] Channel ${call.channelId} is in allowlist — generating Pulse data for call ${callId}`);

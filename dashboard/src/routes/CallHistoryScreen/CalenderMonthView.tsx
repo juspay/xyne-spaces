@@ -2,7 +2,8 @@ import { ReactElement, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { X } from 'lucide-react';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
-import { Call } from './callHistoryItem.utils';
+import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
+import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { cn } from '../../utils/classNames';
 import CalendarCallPopup from './CalendarCallPopup';
 import {
@@ -141,6 +142,8 @@ const CalendarMonthView = ({
                                     </div>
                                   )}
                                   <div className='w-0.5 h-3.5 rounded-full shrink-0 bg-primary' />
+                                  {isGoogleCalendarCall(call) && <GoogleCalendarIcon size={14} />}
+                                  {isMicrosoftCalendarCall(call) && <MicrosoftIcon size={14} />}
                                   <span
                                     className='truncate flex-1 min-w-0 leading-tight text-foreground'
                                     style={{

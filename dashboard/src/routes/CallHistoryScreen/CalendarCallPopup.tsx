@@ -9,10 +9,13 @@ import {
   ChevronDown,
   Users,
   Pencil,
+  ExternalLink,
+  MapPin,
 } from 'lucide-react';
 import { RRule } from 'rrule';
+import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
-import { Call } from './callHistoryItem.utils';
+import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
 import Button from '../../components/ui/Button';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { useUser } from '../../hooks/useUsers';
@@ -126,6 +129,9 @@ const CalendarCallPopup = ({
 }: CalendarCallPopupProps): React.ReactElement => {
   const isEnded = call.status === CallStatus.ENDED;
   const isRecurring = !!call.recurringSeriesId;
+  const isGoogleCalendar = isGoogleCalendarCall(call);
+  const isMicrosoftCalendar = isMicrosoftCalendarCall(call);
+  const isExternalCalendar = isGoogleCalendar || isMicrosoftCalendar;
 
   const [seriesPrompt, setSeriesPrompt] = useState<RsvpChoice | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -143,12 +149,23 @@ const CalendarCallPopup = ({
       : formatTimeAmPm(call.startsAt)
     : '';
 
-  // Access recurringSeries safely — the scheduledCalls query includes .related('recurringSeries')
-  // even though the Call type (based on userCallHistory) doesn't declare it statically.
   const callExtended = call as Call & {
     recurringSeries?: { recurrenceRule?: string };
     organizerId?: string;
     createdByUserId?: string;
+    callOrigin?: string;
+    roomLink?: string;
+    metadata?: {
+      htmlLink?: string;
+      location?: string;
+      organizer?: { email?: string; displayName?: string; self?: boolean };
+      attendees?: Array<{
+        email?: string;
+        displayName?: string;
+        responseStatus?: string;
+        self?: boolean;
+      }>;
+    };
   };
   const recurrenceRule = callExtended.recurringSeries?.recurrenceRule;
   const recurrenceLabel = isRecurring ? formatRecurrenceRule(recurrenceRule) : null;
@@ -180,6 +197,138 @@ const CalendarCallPopup = ({
       void submitRsvp(status, false);
     }
   };
+
+  // ── Google Calendar read-only view ───────────────────────────────────────
+  if (isExternalCalendar) {
+    const location = callExtended.metadata?.location;
+    const htmlLink = callExtended.metadata?.htmlLink;
+    const organizer = callExtended.metadata?.organizer;
+    const gcalAttendees = (callExtended.metadata?.attendees ?? []).filter(
+      a => !organizer || a.email !== organizer.email,
+    );
+    const roomLink = callExtended.roomLink;
+    // A Meet link exists when roomLink is set and different from the plain calendar htmlLink
+    const meetLink = roomLink && roomLink !== htmlLink ? roomLink : undefined;
+
+    return (
+      <div className='p-4'>
+        {/* Header */}
+        <div className='flex items-start justify-between gap-2 mb-2'>
+          <h3
+            className='font-medium flex-1 min-w-0 text-foreground'
+            style={{ fontSize: '16px', lineHeight: '22px' }}
+          >
+            {call.title ?? 'Event'}
+          </h3>
+          <div className='flex items-center gap-1 shrink-0'>
+            <span className='flex items-center gap-1 text-[10px] font-medium text-muted-foreground bg-muted border border-border rounded px-1.5 py-0.5'>
+              {isMicrosoftCalendar ? (
+                <>
+                  <MicrosoftIcon size={12} />
+                  <span>Microsoft Calendar</span>
+                </>
+              ) : (
+                <>
+                  <GoogleCalendarIcon size={12} />
+                  <span>Google Calendar</span>
+                </>
+              )}
+            </span>
+            <button
+              onClick={onClose}
+              data-track-category='Calls'
+              data-track-name='calendar-popup-close'
+              className='text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer'
+            >
+              <X className='size-4' />
+            </button>
+          </div>
+        </div>
+
+        {/* Date & time */}
+        {(dateLabel || timeLabel) && (
+          <p className='text-muted-foreground mb-1' style={{ fontSize: '13px' }}>
+            {dateLabel}
+            {dateLabel && timeLabel && ' • '}
+            {timeLabel}
+          </p>
+        )}
+
+        {/* Location */}
+        {location && (
+          <div className='flex items-start gap-1.5 mb-2'>
+            <MapPin className='size-3.5 text-muted-foreground shrink-0 mt-0.5' />
+            <p className='text-muted-foreground' style={{ fontSize: '13px' }}>
+              {location}
+            </p>
+          </div>
+        )}
+
+        {/* Organizer */}
+        {organizer && (
+          <div className='flex items-center gap-1.5 mt-2 mb-1'>
+            <Users className='size-3.5 text-muted-foreground shrink-0' />
+            <span className='text-[12px] text-muted-foreground truncate'>
+              {organizer.displayName ?? organizer.email ?? 'Unknown'}
+              {organizer.self && <span className='ml-1 text-[10px]'>(you)</span>}
+              <span className='ml-1 text-[10px]'>· Organizer</span>
+            </span>
+          </div>
+        )}
+
+        {/* Attendees */}
+        {gcalAttendees.length > 0 && (
+          <div className='mt-3'>
+            <div className='flex items-center gap-1.5 mb-2'>
+              <Users className='size-3.5 text-muted-foreground' />
+              <span className='text-sm font-medium text-foreground'>
+                {gcalAttendees.length} Guest{gcalAttendees.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className='flex flex-col gap-1 max-h-36 overflow-y-auto'>
+              {gcalAttendees.map((attendee, i) => (
+                <div key={i} className='flex items-center gap-2'>
+                  <span className='text-[12px] text-foreground truncate'>
+                    {attendee.displayName ?? attendee.email ?? 'Unknown'}
+                  </span>
+                  {attendee.responseStatus && attendee.responseStatus !== 'needsAction' && (
+                    <span className='text-[10px] text-muted-foreground shrink-0'>
+                      · {attendee.responseStatus}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className='mt-4 flex items-center gap-2 flex-wrap'>
+          {meetLink && (
+            <a
+              href={meetLink}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='flex items-center gap-2 text-sm font-semibold bg-action-primary text-action-primary-foreground rounded-lg px-4 py-2 hover:opacity-90 transition-opacity'
+            >
+              Join
+            </a>
+          )}
+          {htmlLink && (
+            <a
+              href={htmlLink}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='flex items-center gap-2 text-sm text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors'
+            >
+              <ExternalLink className='size-3.5 shrink-0' />
+              {isMicrosoftCalendar ? 'View in Microsoft Outlook' : 'View in Google Calendar'}
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // ── Series scope confirmation sub-view ────────────────────────────────────
   if (seriesPrompt) {
@@ -259,7 +408,7 @@ const CalendarCallPopup = ({
           {call.title ?? 'Call'}
         </h3>
         <div className='flex items-center gap-1 shrink-0 -mt-0.5'>
-          {!isEnded && currentUserId === organizerUserId && onEditClick && (
+          {!isEnded && !isExternalCalendar && currentUserId === organizerUserId && onEditClick && (
             <button
               onClick={onEditClick}
               title='Edit call'

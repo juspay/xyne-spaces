@@ -1,9 +1,27 @@
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../zero/queries';
 import { formatDuration } from '../../utils/dateUtils';
-import { CallStatus, InvitationResponse, type User } from '@xyne/shared';
+import { CallOrigin, CallStatus, InvitationResponse, type User } from '@xyne/shared';
 
 export type Call = QueryResultType<typeof queries.userCallHistory>[number];
+
+export function isGoogleCalendarCall(
+  call: { callOrigin?: string } | Record<string, unknown>,
+): boolean {
+  return (call as { callOrigin?: string }).callOrigin === CallOrigin.GOOGLE_CALENDAR;
+}
+
+export function isMicrosoftCalendarCall(
+  call: { callOrigin?: string } | Record<string, unknown>,
+): boolean {
+  return (call as { callOrigin?: string }).callOrigin === CallOrigin.MICROSOFT_CALENDAR;
+}
+
+export function isExternalCalendarEvent(
+  call: { callOrigin?: string } | Record<string, unknown>,
+): boolean {
+  return isGoogleCalendarCall(call) || isMicrosoftCalendarCall(call);
+}
 
 export interface CallStatusInfo {
   isMissedCall: boolean;

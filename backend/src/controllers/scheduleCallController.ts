@@ -394,7 +394,7 @@ export class ScheduleCallController {
           title: title ?? call.title ?? 'Scheduled Call',
           startsAt: startsAt !== undefined ? new Date(startsAt) : new Date(call.startsAt!),
           endsAt: endsAt !== undefined ? new Date(endsAt) : new Date(call.endsAt!),
-          channelId: call.channelId,
+          channelId: call.channelId ?? '',
           organizerUserId: userId,
           participantUserIds: participantIds,
         });

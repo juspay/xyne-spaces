@@ -841,7 +841,7 @@ export function transformCallToEntity(
     authorName: user?.name || user?.email || 'Unknown User',
     authorId: call.createdByUserId,
     timestamp: toIST(call.startedAt),
-    channelId: call.channelId,
+    channelId: call.channelId ?? '',
     channelName,
     conversationId: call.conversationId || undefined,
     callId: call.id,

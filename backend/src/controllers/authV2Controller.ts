@@ -151,7 +151,7 @@ export class AuthV2Controller {
 
       const authUrl = this.googleClient.generateAuthUrl({
         access_type: 'offline',
-        scope: ['openid', 'email', 'profile'],
+        scope: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/calendar.readonly'],
         prompt: 'consent',
         redirect_uri: redirectUri,
         state,

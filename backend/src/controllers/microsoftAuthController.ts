@@ -138,7 +138,7 @@ export class MicrosoftAuthController {
 
         const authorizationUri = this.oauthClient.authorizeURL({
           redirect_uri: redirectUri,
-          scope: ['openid', 'email', 'profile', 'User.Read'],
+          scope: ['openid', 'email', 'profile', 'User.Read', 'Calendars.Read', 'offline_access'],
           state,
           code_challenge: codeChallenge,
           code_challenge_method: 'S256',

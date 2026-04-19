@@ -46,7 +46,7 @@ class CallSideEffectService {
         }
 
         const channel = await db.channel.findUnique({
-            where: { id: call.channelId },
+            where: { id: call.channelId ?? undefined },
             select: { scopeType: true }
         });
 
@@ -106,7 +106,7 @@ class CallSideEffectService {
             actionSource: 'call',
             actionSourceId: call.externalId,
             callId: callId,
-            channelId: call.channelId,
+            channelId: call.channelId ?? undefined,
             isRead: false,
             createdAt: now,
             classification: ActivityClassification.FYI,
@@ -166,7 +166,7 @@ class CallSideEffectService {
             }
 
             const channel = await db.channel.findUnique({
-                where: { id: call.channelId },
+                where: { id: call.channelId ?? undefined },
                 select: { scopeType: true }
             });
 
