@@ -60,6 +60,7 @@ import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
 import { EmojiClickData } from 'emoji-picker-react';
 import { InlineEmoji } from '../EditorToolbar/InlineEmoji';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { LinkSyncPlugin } from '../TipTapExtensions/LinkSyncPlugin';
 import { CanvasAttachmentModal, CanvasLinkPreview } from '../../Canvas';
 import type { Canvas } from '../../Canvas';
 import { CanvasVisibility } from '@xyne/shared';
@@ -439,6 +440,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             rel: 'noopener noreferrer',
           },
         }),
+        LinkSyncPlugin,
         Placeholder.configure({
           placeholder: typeof placeholder === 'string' ? placeholder : '',
         }),
