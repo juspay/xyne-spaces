@@ -862,10 +862,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           void addFilesWithLimit(selectedFiles);
         }
         e.target.value = '';
-        // Focus the editor after file selection (but not on mobile to prevent keyboard popup)
-        if (!isMobile) {
-          editor?.commands.focus();
-        }
+        editor?.commands.focus();
       },
       [addFilesWithLimit, editor, isMobile, channelId, conversationId, getDroppedFilesForEntity],
     );
