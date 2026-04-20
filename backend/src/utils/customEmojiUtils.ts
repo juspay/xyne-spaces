@@ -1,10 +1,15 @@
-import { config } from '@/config/env';
 import { CustomEmojiRepository } from '@/database/repositories/customEmojiRepository';
 
 const SHORTCODE_REGEX = /:([a-zA-Z0-9_+-]{1,50}):/g;
 
+/**
+ * Build emoji img tag with relative path.
+ * Full URL is constructed at render time by the client based on current environment.
+ */
 function buildEmojiImgTag(name: string, emoji: { id: string }): string {
-  const src = `${config.backendUrl}/api/emojis/${emoji.id}/stream`;
+  // Use relative path - client constructs full URL at render time
+  // This ensures compatibility across web and desktop apps
+  const src = `/api/emojis/${emoji.id}/stream`;
   return `<img src="${src}" alt=":${name}:" title="${name}" data-emoji="true" data-emoji-id="${emoji.id}" class="inline-emoji">`;
 }
 

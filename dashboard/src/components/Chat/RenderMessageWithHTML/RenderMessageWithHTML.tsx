@@ -36,6 +36,7 @@ import { isElectronApp, isElectronStandaloneWindow } from '../../../utils/electr
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { API_BASE_URL } from '../../../config';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -913,9 +914,24 @@ const parseNode = (
     const src = el.getAttribute('src');
     const alt = el.getAttribute('alt');
     const title = el.getAttribute('title');
+    const emojiId = el.getAttribute('data-emoji-id');
 
-    if (src && isValidURL(src)) {
-      (props as { src: string; alt?: string; title?: string }).src = src;
+    // Construct emoji URL dynamically at render time
+    // Handles both new relative paths (/api/emojis/{id}/stream)
+    // and old absolute URLs by extracting emojiId
+    if (emojiId) {
+      // Always use current window origin for cross-platform compatibility
+      (props as { src: string; alt?: string; title?: string }).src =
+        `${API_BASE_URL}/emojis/${emojiId}/stream`;
+    } else if (src && isValidURL(src)) {
+      // Fallback: try to extract emojiId from old-style URL
+      const match = src.match(/\/api\/emojis\/([^/]+)\/stream/);
+      if (match && match[1]) {
+        (props as { src: string; alt?: string; title?: string }).src =
+          `${API_BASE_URL}/emojis/${match[1]}/stream`;
+      } else {
+        (props as { src: string; alt?: string; title?: string }).src = src;
+      }
     }
     if (alt) {
       (props as { src: string; alt?: string; title?: string }).alt = alt;
