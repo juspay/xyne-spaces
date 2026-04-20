@@ -1,5 +1,5 @@
-import { API_BASE_URL } from '../config';
 import { ReactElement } from 'react';
+import { API_BASE_URL } from '../config';
 
 // Helper to check if emojiName is a custom emoji
 const isCustomEmoji = (emojiName: string | null | undefined): boolean => {
@@ -29,6 +29,13 @@ const getEmojiDisplayName = (emojiName: string): string => {
   return emojiName;
 };
 
+/**
+ * Convert custom emoji blob URLs to relative API paths.
+ * This ensures emoji URLs are portable across web and desktop apps.
+ *
+ * Stores only relative path like: /api/emojis/{emojiId}/stream
+ * Full URL is constructed at render time based on current environment.
+ */
 const convertCustomEmojiUrls = (htmlContent: string): string => {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlContent, 'text/html');
@@ -37,14 +44,16 @@ const convertCustomEmojiUrls = (htmlContent: string): string => {
 
   images.forEach(img => {
     const emojiId = img.getAttribute('data-emoji-id');
-    const src = img.getAttribute('src');
 
-    if (!emojiId || !src) return;
+    if (!emojiId) return;
 
-    // Optional cleanup
+    // Convert to relative path (no hostname) - works in both web and desktop
+    // Full URL constructed at render time using window.location.origin
+    img.setAttribute('src', `/api/emojis/${emojiId}/stream`);
     img.setAttribute('data-emoji', 'true');
     img.removeAttribute('emojiid'); // cleanup accidental attr
   });
+
   return doc.body.innerHTML;
 };
 
