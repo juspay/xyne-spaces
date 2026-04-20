@@ -1,6 +1,6 @@
 import { Combobox as BaseCombobox } from '@base-ui/react/combobox';
 import { User } from '@xyne/shared';
-import { Search, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useUsersPresence } from '../../../hooks/usePresence';
@@ -149,7 +149,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
         setFocusedIndex(null);
       }
       if (e.key === 'Tab') {
-        // foucs on the InputBox
+        // focus on the InputBox
         const inputBoxWrapper = document.querySelector('[data-input-id="dm-message"]');
         if (!inputBoxWrapper) return;
 
@@ -163,10 +163,20 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
         }, 0);
       }
       if (e.key === 'Enter') {
+        // Always prevent default to avoid accidental form submission from this input.
         e.preventDefault();
+        if (!isOpen) {
+          // Dropdown is closed — move focus to the message InputBox (same as Tab)
+          const inputBoxWrapper = document.querySelector('[data-input-id="dm-message"]');
+          if (!inputBoxWrapper) return;
+          setTimeout(() => {
+            const editor = inputBoxWrapper.querySelector('.ProseMirror') as HTMLElement;
+            editor?.focus();
+          }, 0);
+        }
       }
     },
-    [searchQuery, selectedUsers, focusedIndex, handleRemove, setIsOpen],
+    [searchQuery, selectedUsers, focusedIndex, handleRemove, setIsOpen, isOpen],
   );
 
   return (
@@ -185,12 +195,9 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
         )}
       >
         <div className='flex items-start gap-0 py-1 relative w-full'>
-          <span className='sticky left-2 top-1.5'>
-            <Search className='size-4 text-muted z-20 pointer-events-none' />
-          </span>
           <div
             ref={pillsContainerRef}
-            className='flex flex-wrap items-center gap-1.5 absolute left-9 -top-0 z-10 pointer-events-none'
+            className='flex flex-wrap items-center gap-1.5 absolute left-1 -top-0 z-10 pointer-events-none'
           >
             {selectedUsers.map((user, i) => (
               <UserPill
@@ -213,7 +220,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
               'w-full text-[14px] min-w-[120px] text-foreground border-none font-normal bg-transparent relative placeholder:text-muted-foreground outline-none focus:outline-none',
             )}
             style={{
-              paddingLeft: `${pillsWidth + 24}px`,
+              paddingLeft: `${pillsWidth + 4}px`,
               paddingTop: pillsHeight > 36 ? `${pillsHeight - 30}px` : '0px',
             }}
           />

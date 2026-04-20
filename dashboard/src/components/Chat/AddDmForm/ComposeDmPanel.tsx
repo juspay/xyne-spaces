@@ -4,13 +4,14 @@ import { useMutation } from '@tanstack/react-query';
 import { User, ChannelVisibility, ChannelScopeType } from '@xyne/shared';
 import { CircleAlert } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useUserSearch, useUsers } from '../../../hooks/useUsers';
+import { useUserSearch, useUsers, useUser } from '../../../hooks/useUsers';
 import {
   EVENT_PROPERTIES,
   EVENTS,
@@ -41,13 +42,20 @@ export const ComposeDmPanel: React.FC = () => {
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isSearchUserOpen, setIsSearchUserOpen] = useState(false);
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
+  const [preselectedInitialized, setPreselectedInitialized] = useState(false);
   const searchUserRef = useRef<HTMLInputElement>(null);
   const inputBoxRef = useRef<InputBoxHandle>(null);
   const context = useAuthContextValues();
   const { user } = useAuth();
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const preselectedUserId = searchParams.get('userId');
   const zero = useZero();
+
+  // Look up the pre-selected user by ID (from the DM search sidebar)
+  const preselectedUser = useUser(preselectedUserId ?? '');
 
   // Focus search user input
   useEffect(() => {
@@ -56,6 +64,18 @@ export const ComposeDmPanel: React.FC = () => {
       setIsSearchUserOpen(true);
     }
   }, [searchUserRef]);
+
+  // Pre-populate selectedUsers with the user passed via ?userId= search param.
+  // KeyedComposeDmPanel (in AppRoot) remounts this component fresh on every sidebar
+  // selection, so a simple one-shot boolean is sufficient to avoid an infinite loop
+  // when preselectedUser loads asynchronously while still allowing the user to
+  // manually remove the pre-selected person via the X badge.
+  useEffect(() => {
+    if (preselectedInitialized) return;
+    if (!preselectedUserId || !preselectedUser) return;
+    setSelectedUsers([preselectedUser]);
+    setPreselectedInitialized(true);
+  }, [preselectedUserId, preselectedUser, preselectedInitialized]);
 
   const createDmMutation = useMutation({
     mutationFn: (data: CreateDmRequest) => channelService.createDm(data),
@@ -74,8 +94,11 @@ export const ComposeDmPanel: React.FC = () => {
       if (response.isExisting) {
         zero.mutate(mutators.channel.reopenDm({ channelId: response.id, updatedAt: Date.now() }));
       }
-      // Navigate to the DM channel
-      void navigate(`/chat/dir/${response.id}`);
+      // Navigate to the DM channel — stay inside /chat/dm if accessed from DmsPage
+      const targetPath = location.pathname.startsWith('/chat/dm')
+        ? `/chat/dm/${response.id}`
+        : `/chat/dir/${response.id}`;
+      void navigate(targetPath);
     },
   });
 
@@ -416,6 +439,21 @@ export const ComposeDmPanel: React.FC = () => {
       </form>
     </div>
   );
+};
+
+// Wrapper that forces ComposeDmPanel to fully remount each time a user is selected from
+// the DM sidebar search. DmsPage.handleUserSelect embeds a unique timestamp in
+// location.state so every click — even on the same user after removing them via X —
+// gets a fresh composePanelKey.
+export const KeyedComposeDmPanel = (): ReactElement => {
+  const [searchParams] = useSearchParams();
+  const userId = searchParams.get('userId') ?? '';
+  // location.state carries { composePanelKey: Date.now() } from DmsPage.handleUserSelect.
+  // Fall back to userId so direct navigation to ?userId=X still mounts a keyed instance.
+  const location = useLocation();
+  const composePanelKey =
+    (location.state as { composePanelKey?: number } | null)?.composePanelKey ?? userId;
+  return <ComposeDmPanel key={composePanelKey} />;
 };
 
 export default ComposeDmPanel;
