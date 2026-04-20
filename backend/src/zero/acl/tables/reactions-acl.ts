@@ -37,7 +37,7 @@ export class ReactionsACL extends BaseACL<'reactions'> {
   }
 
   async canDelete(args: DeleteID<TableSchema<'reactions'>>, tx: Transaction<Schema>): Promise<void> {
-    const reaction = await tx.run(zql.reactions.where('reactionId', args.reactionId).where('userId', this.ctx.userID).one());
+    const reaction = await tx.run(zql.reactions.where('reactionId', args.reactionId).one());
     if (!reaction) {
       throw new MutationACLError("Reaction not found", "reactions")
     }
