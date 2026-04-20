@@ -1,5 +1,6 @@
 import React, { JSX, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Download, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Download, X, ChevronLeft, ChevronRight, Copy } from 'lucide-react';
+import { useClipboard } from '../../hooks/useClipboard';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useLocation } from 'react-router-dom';
 import { detectFileType, formatFileSize } from './utils';
@@ -594,6 +595,13 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
     };
   }, [isImage, fileData]);
 
+  const { copyImage } = useClipboard();
+
+  const handleCopyImage = async (): Promise<void> => {
+    if (!fileData || !isImage) return;
+    await copyImage(fileData);
+  };
+
   // Helper function to render floating top bar with optional close button
   const renderFloatingTopBar = (includeCloseButton: boolean): JSX.Element => (
     <div
@@ -616,6 +624,17 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
           </Dialog.Description>
         </div>
         <div className='flex items-center gap-3'>
+          {isImage && (
+            <button
+              onClick={() => void handleCopyImage()}
+              className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
+              data-track-category='FileViewer'
+              data-track-name='COPY_IMAGE_FROM_MODAL'
+              title='Copy Image'
+            >
+              <Copy className='h-4 w-4' />
+            </button>
+          )}
           <button
             onClick={() => void handleDownload()}
             className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-background/10 rounded-md transition-colors'
@@ -1169,6 +1188,13 @@ export const AttachmentGalleryModal: React.FC = () => {
     );
   };
 
+  const { copyImage: copyImageGallery } = useClipboard();
+
+  const handleCopyImageGallery = async (): Promise<void> => {
+    if (!machineFileData || !isImage) return;
+    await copyImageGallery(machineFileData);
+  };
+
   // Floating top bar
   const renderFloatingTopBar = (includeCloseButton: boolean): JSX.Element => (
     <div
@@ -1189,6 +1215,17 @@ export const AttachmentGalleryModal: React.FC = () => {
           </Dialog.Description>
         </div>
         <div className='flex items-center gap-3'>
+          {isImage && (
+            <button
+              onClick={() => void handleCopyImageGallery()}
+              data-track-category='FILE_VIEWER'
+              data-track-name='CopyImageGallery'
+              title='Copy Image'
+              className='inline-flex items-center gap-2 justify-center w-9 h-9 text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 rounded-md transition-colors'
+            >
+              <Copy className='h-4 w-4' />
+            </button>
+          )}
           <button
             onClick={() => void handleDownload()}
             data-track-category='FILE_VIEWER'

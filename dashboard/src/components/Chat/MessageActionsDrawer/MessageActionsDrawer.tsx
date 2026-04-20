@@ -59,6 +59,7 @@ export interface MessageActionsDrawerProps {
   onInitiateCall?: () => void;
   isCallDisabled?: boolean;
   isChannelArchived?: boolean;
+  onCopyImage?: () => void;
 }
 
 export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
@@ -88,6 +89,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   onInitiateCall,
   isCallDisabled = false,
   isChannelArchived = false,
+  onCopyImage,
 }) => {
   const { toggleReaction } = useReactions();
   const { user } = useAuth();
@@ -258,6 +260,15 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                       icon={<Copy className='w-5 h-5' />}
                       label='Copy Message'
                       onClick={() => handleActionClick(onCopyMessage)}
+                    />
+                  )}
+
+                  {/* Copy Image */}
+                  {onCopyImage && (
+                    <ActionButton
+                      icon={<Copy className='w-5 h-5' />}
+                      label='Copy Image'
+                      onClick={() => handleActionClick(onCopyImage)}
                     />
                   )}
 

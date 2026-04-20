@@ -47,6 +47,9 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
+import { Copy } from 'lucide-react';
+import { useClipboard } from '../../../hooks/useClipboard';
+import axios from 'axios';
 import { cn } from '../../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import {
@@ -111,6 +114,7 @@ const Preview: React.FC<{
   fullSize?: boolean | undefined;
   isInMultiImageGroup?: boolean;
   onLoadingChange?: (isLoading: boolean) => void;
+  onImageBlobUrlChange?: (blobUrl: string | null) => void;
 }> = ({
   attachmentId,
   mimeType,
@@ -123,12 +127,18 @@ const Preview: React.FC<{
   isInGrid,
   fullSize,
   isInMultiImageGroup,
+  onImageBlobUrlChange,
 }) => {
   const isImage = isImageFile(mimeType);
   const isVideo = isVideoFile(mimeType);
   const isDocumentWithThumbnail = isPreviewableDocument(mimeType) && !!thumbnailUrl;
 
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+
+  // Notify parent when imageBlobUrl changes
+  useEffect(() => {
+    onImageBlobUrlChange?.(imageBlobUrl);
+  }, [imageBlobUrl, onImageBlobUrlChange]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<boolean>(false);
 
@@ -429,19 +439,47 @@ const Preview: React.FC<{
 
 /**
  * Slack-style action tray that appears on hover
- * Shows download and delete buttons in top-right corner with dark background
+ * Shows download, copy (for images), and delete buttons in top-right corner with dark background
  */
 const ActionTray: React.FC<{
   attachmentId: string;
   fileName: string;
   canDelete: boolean;
   onDelete: () => void | Promise<void>;
-}> = ({ attachmentId, fileName, canDelete, onDelete }) => {
+  imageBlobUrl?: string | null;
+}> = ({ attachmentId, fileName, canDelete, onDelete, imageBlobUrl }) => {
   const { isMobile } = usePlatform();
+  const { copyImage } = useClipboard();
+
+  const handleCopyImage = async (): Promise<void> => {
+    if (!imageBlobUrl) return;
+    try {
+      const response = await axios.get<Blob>(imageBlobUrl, { responseType: 'blob' });
+      const blob = response.data;
+      await copyImage(blob);
+    } catch {
+      toast.error('Failed to copy image');
+    }
+  };
+
   return (
     <div className='absolute top-2 right-2 z-10 opacity-0 group-hover/attachment:opacity-100 transition-opacity duration-200'>
       {!isMobile && (
         <div className='flex items-center justify-between bg-background/90 backdrop-blur-sm rounded-lg p-1 shadow-lg border border-border'>
+          {imageBlobUrl && (
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                void handleCopyImage();
+              }}
+              className='p-2 rounded-md text-foreground hover:bg-muted transition-colors'
+              title='Copy Image'
+              data-track-category='MESSAGE_ATTACHMENT'
+              data-track-name='CopyImage'
+            >
+              <Copy className='h-[18px] w-[18px]' />
+            </button>
+          )}
           <DownloadButton attachmentId={attachmentId} fileName={fileName} variant='overlay' />
           {canDelete && <DeleteButton fileName={fileName} variant='overlay' onDelete={onDelete} />}
         </div>
@@ -1069,6 +1107,9 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     attachment.uploadedByUserId,
   );
 
+  // Track image blob URL for copy functionality
+  const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+
   // Tombstone: render a "this file was deleted" card when the attachment is soft-deleted
   if ((attachment as { isDeleted?: boolean }).isDeleted) {
     return (
@@ -1237,6 +1278,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
             isInGrid={isInGrid}
             fullSize={fullSize}
             {...(isInMultiImageGroup && { isInMultiImageGroup: true })}
+            onImageBlobUrlChange={setImageBlobUrl}
           />
 
           {/* Slack-style hover action tray */}
@@ -1246,6 +1288,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
               fileName={attachment.originalFilename}
               canDelete={canDelete}
               onDelete={handleDelete}
+              imageBlobUrl={isImage ? imageBlobUrl : null}
             />
           )}
         </div>
