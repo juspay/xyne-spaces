@@ -2,7 +2,7 @@ import React, { useState, useEffect, ReactElement, useMemo } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useQuery } from '@tanstack/react-query';
-import { SingleSelect } from '@juspay/blend-design-system';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { Hash, Lock } from 'lucide-react';
 
 import { Button } from '../../ui/Button';
@@ -195,7 +195,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 value={field.state.value}
                 onChange={handleNameChange}
                 placeholder='e.g. general, development, support'
-                className='pl-8 pr-12'
+                className='pl-8 pr-12 text-foreground'
                 aria-invalid={field.state.meta.errors.length > 0}
                 data-testid='channel-name-input'
                 data-track-category='ADD_CHANNEL_FORM'
@@ -224,18 +224,32 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         }}
       >
         {field => (
-          <div>
-            <SingleSelect
-              label='Project *'
-              placeholder={projectOptions.length > 0 ? 'Select a project' : 'No projects available'}
-              items={[{ items: projectOptions }]}
-              selected={field.state.value}
-              onSelect={selected => field.handleChange(selected)}
-            />
+          <div className='space-y-1.5'>
+            <label htmlFor='project-select' className='text-sm font-medium text-foreground'>
+              Project *
+            </label>
+            <Select
+              value={field.state.value}
+              onValueChange={selected => field.handleChange(selected)}
+              disabled={projectOptions.length === 0}
+            >
+              <SelectTrigger id='project-select' className='w-full'>
+                <SelectValue
+                  placeholder={
+                    projectOptions.length > 0 ? 'Select a project' : 'No projects available'
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {projectOptions.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {field.state.meta.errors.length > 0 && (
-              <p className='text-sm text-destructive mt-1'>
-                {field.state.meta.errors[0] as string}
-              </p>
+              <p className='text-sm text-destructive'>{field.state.meta.errors[0] as string}</p>
             )}
             {projectOptions.length === 0 && (
               <p className='text-sm text-status-pending mt-1'>
@@ -256,6 +270,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <Textarea
               id='channel-description'
               value={field.state.value}
+              className='text-foreground'
               onChange={e => field.handleChange(e.target.value)}
               placeholder='What is this channel about?'
               rows={4}
@@ -315,6 +330,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <Input
               id='topic-tags'
               type='text'
+              className='text-foreground'
               value={tagString}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTagString(e.target.value)}
               onKeyDown={handleTagInputKeyDown}
