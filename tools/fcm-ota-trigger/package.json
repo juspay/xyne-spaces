@@ -1,0 +1,13 @@
+{
+  "name": "fcm-ota-trigger",
+  "license": "Apache-2.0",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "send": "node send.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  }
+}
