@@ -85,14 +85,22 @@ export const attachmentViewerMachine = createMachine(
           input: ({ context }) => ({
             attachment: context.attachments[context.currentIndex],
           }),
-          onDone: {
-            target: 'viewing',
-            actions: assign({
-              fileData: ({ event }) => event.output as File,
-              status: () => 'success',
-              error: null,
-            }),
-          },
+          onDone: [
+            {
+              // If output is null (no attachment to load), transition to waitingForData
+              // This happens when attachment is undefined - we wait for UPDATE event
+              target: 'waitingForData',
+              guard: ({ event }) => event.output === null,
+            },
+            {
+              target: 'viewing',
+              actions: assign({
+                fileData: ({ event }) => event.output as File,
+                status: () => 'success',
+                error: null,
+              }),
+            },
+          ],
           onError: {
             target: 'error',
             actions: assign({
@@ -118,6 +126,35 @@ export const attachmentViewerMachine = createMachine(
           },
           // Allow closing during loading — the invoked actor is automatically cancelled
           // by XState when transitioning away from the `opening` state.
+          CLOSE: {
+            target: 'closed',
+            actions: assign(({ context }) => ({
+              ...initialContext,
+              currentVideoTime: context.currentVideoTime,
+            })),
+          },
+        },
+      },
+      waitingForData: {
+        // Transient state when attachment data isn't available yet
+        // Waits for UPDATE event with valid attachments
+        on: {
+          UPDATE: {
+            target: 'opening',
+            actions: assign({
+              attachments: ({ event }) => event.attachments,
+              currentIndex: ({ event }) => event.startIndex ?? 0,
+              fileData: null,
+              status: () => 'loading',
+              error: null,
+              retryCount: 0,
+            }),
+          },
+          SET_VIDEO_TIME: {
+            actions: assign({
+              currentVideoTime: ({ event }) => event.time,
+            }),
+          },
           CLOSE: {
             target: 'closed',
             actions: assign(({ context }) => ({
@@ -200,8 +237,10 @@ export const attachmentViewerMachine = createMachine(
     actors: {
       loadAttachment: fromPromise<File | null, { attachment: AttachmentRef | undefined }>(
         async ({ input }) => {
+          // Return null instead of throwing - the guard in 'opening' state will handle this
+          // by transitioning to 'waitingForData' state instead of error state
           if (!input.attachment) {
-            throw new Error('No attachment to load');
+            return null;
           }
           const { attachmentId, fileName, mimeType } = input.attachment;
 
