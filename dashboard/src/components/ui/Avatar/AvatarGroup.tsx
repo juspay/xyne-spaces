@@ -9,6 +9,7 @@ interface AvatarGroupProps extends Omit<React.ComponentProps<'div'>, 'children'>
   size?: AvatarSize;
   className?: string;
   count?: number;
+  isGroupDMAvatar?: boolean;
 }
 
 /**
@@ -102,6 +103,7 @@ const AvatarGroup = ({
   size = 'md',
   className,
   count,
+  isGroupDMAvatar = false,
   ...props
 }: AvatarGroupProps): ReactElement => {
   // Filter out null/undefined userIds
@@ -118,7 +120,7 @@ const AvatarGroup = ({
     big: 80, // size-20 = 5rem = 80px
   };
 
-  const pixelSize = sizeMap[size];
+  const pixelSize = isGroupDMAvatar ? 0 : sizeMap[size];
 
   // Determine which avatars to show and if we need a count badge
   const displayCount =
@@ -127,6 +129,43 @@ const AvatarGroup = ({
   const remainingCount =
     count !== undefined && validUserIds.length > count ? validUserIds.length - count : 0;
 
+  // GroupDM mode: diagonal positioning like GroupDMAvatar
+  // Always shows first 2 users (front at top-left, back at bottom-right)
+  if (isGroupDMAvatar) {
+    const frontUserId = validUserIds[1] ?? '';
+    const backUserId = validUserIds[0] ?? '';
+
+    return (
+      <div
+        data-slot='avatar-group'
+        className={cn('relative w-10 h-10 flex-shrink-0', className)}
+        {...props}
+      >
+        {backUserId && (
+          <div className='absolute bottom-0 right-0 w-7 h-7 rounded-md ring-1 ring-background overflow-hidden z-10'>
+            <Avatar
+              userId={backUserId}
+              size='sm'
+              showActiveStatus={false}
+              className='w-full h-full rounded-none object-cover'
+            />
+          </div>
+        )}
+        {frontUserId && (
+          <div className='absolute top-0 left-0 w-7 h-7 rounded-md ring-1 ring-background overflow-hidden z-0'>
+            <Avatar
+              userId={frontUserId}
+              size='sm'
+              showActiveStatus={false}
+              className='w-full h-full rounded-none object-cover'
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Default mode: flex layout with overlapping masks
   return (
     <div data-slot='avatar-group' className={cn('flex items-center', className)} {...props}>
       {avatarsToShow.map((userId, index) => (

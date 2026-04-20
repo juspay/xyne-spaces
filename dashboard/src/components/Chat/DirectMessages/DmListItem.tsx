@@ -8,6 +8,8 @@ import {
   ChannelScopeType,
 } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
+import AvatarGroup from '../../ui/Avatar/AvatarGroup';
+import { isGroupDMChannel, parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
 
 import { cn } from '../../ui/Dialog';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -44,9 +46,16 @@ export const DmListItem = ({
 
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
 
+  // Get participant IDs for group DM avatars
+  const participantIds = parseDMParticipantIds(channel);
+  const otherParticipantIds = participantIds.filter(id => id !== context.userID);
+
   // Get user for status (only for 1-on-1 DMs)
   const isDM = channel.scopeType === ChannelScopeType.DM;
   const targetUser = useUser(isDM && avatarUserId ? avatarUserId : '');
+
+  // Get the sender of the last message
+  const lastMessageSender = useUser(lastMessage?.senderId ?? '');
 
   // Memoize HTML sanitization for message preview (Issue #1)
   const sanitizedHtml = useMemo(() => {
@@ -78,8 +87,13 @@ export const DmListItem = ({
   const messagePreview = useMemo(() => {
     if (!lastMessage) return 'No messages yet';
 
-    const isSelfDm = avatarUserId === context.userID;
-    const prefix = lastMessage.senderId === context.userID && !isSelfDm ? 'You: ' : '';
+    // Get sender's first name, fallback to "You" for current user
+    const senderFirstName =
+      lastMessage.senderId === context.userID
+        ? 'You'
+        : (lastMessageSender?.name?.split(' ')[0] ?? 'Unknown');
+
+    const prefix = `${senderFirstName}: `;
 
     return (
       <>
@@ -87,7 +101,7 @@ export const DmListItem = ({
         <RenderMessageWithHTML message={sanitizedHtml} breakLongLinks={false} />
       </>
     );
-  }, [sanitizedHtml, lastMessage, avatarUserId, context.userID]);
+  }, [sanitizedHtml, lastMessage, lastMessageSender, context.userID]);
 
   // 3. Format elapsed time (now, 5m, 2h, 3d, 1 month, 2 years, etc.)
   const formatTime = (timestamp?: number): string => {
@@ -124,7 +138,12 @@ export const DmListItem = ({
         data-track-name='OpenDMConversation'
         data-track-metadata={JSON.stringify({ channelId: channel.id, displayName })}
       >
-        <DMItemAvatar userId={avatarUserId || null} scopeType={channel.scopeType} />
+        <DMItemAvatar
+          userId={avatarUserId || null}
+          scopeType={channel.scopeType}
+          channel={channel}
+          currentUserId={context.userID}
+        />
         <div className='w-full flex-1 min-w-0 space-y-1'>
           <div className='w-full flex items-start justify-between gap-3 min-w-0'>
             <div className='flex items-center gap-1.5 min-w-0 flex-1'>
@@ -216,13 +235,17 @@ export const DmListItem = ({
         data-track-metadata={JSON.stringify({ channelId: channel.id, channelName: channel.name })}
       >
         {/* Avatar */}
-        <div className='relative shrink-0 size-[48px] rounded-[8px] overflow-visible'>
-          <Avatar
-            userId={avatarUserId}
-            size='lg'
-            className='size-full rounded-[8px]'
-            showActiveStatus={channel.scopeType === ChannelScopeType.DM}
-          />
+        <div className='relative shrink-0 size-10 rounded-[8px] overflow-visible'>
+          {isGroupDMChannel(channel.scopeType) ? (
+            <AvatarGroup userIds={otherParticipantIds} size='md' isGroupDMAvatar />
+          ) : (
+            <Avatar
+              userId={avatarUserId}
+              size='lg'
+              className='size-full rounded-[8px]'
+              showActiveStatus={channel.scopeType === ChannelScopeType.DM}
+            />
+          )}
         </div>
 
         {/* Content Container */}
@@ -310,10 +333,25 @@ export const DmListItem = ({
 const DMItemAvatar = ({
   userId,
   scopeType,
+  channel,
+  currentUserId,
 }: {
   userId: string | null;
   scopeType: ChannelScopeType;
+  channel: Channel;
+  currentUserId: string;
 }): ReactElement => {
+  // For group DMs, use the overlapping avatar style
+  if (isGroupDMChannel(scopeType)) {
+    const participantIds = parseDMParticipantIds(channel);
+    const otherParticipantIds = participantIds.filter(id => id !== currentUserId);
+    return (
+      <div className='size-[44px] rounded-md shrink-0 flex items-center justify-center overflow-visible mt-[3px]'>
+        <AvatarGroup userIds={otherParticipantIds} size='md' isGroupDMAvatar />
+      </div>
+    );
+  }
+
   return (
     <div className='size-[44px] rounded-md shrink-0 flex items-center justify-center overflow-visible mt-[3px]'>
       <Avatar userId={userId} size='lg' showActiveStatus={scopeType === ChannelScopeType.DM} />
