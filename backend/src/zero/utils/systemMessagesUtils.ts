@@ -285,6 +285,7 @@ export async function updateCallSystemMessageOnEnd(
     endedAt,
     callId,
     currentUserId,
+    isHeadlessRecording,
   }: {
     messageId: string;
     participants: Array<{ userId: string; userName: string }>;
@@ -293,6 +294,7 @@ export async function updateCallSystemMessageOnEnd(
     endedAt: number;
     callId: string;
     currentUserId: string;
+    isHeadlessRecording?: boolean;
   }
 ): Promise<void> {
   const durationMs = endedAt - startedAt;
@@ -306,6 +308,7 @@ export async function updateCallSystemMessageOnEnd(
       isCallMessage: true,
       callId,
       durationMs,
+      ...(isHeadlessRecording && { isHeadlessRecording: true }),
     },
   });
 }
@@ -323,6 +326,7 @@ export async function updateCallSystemMessageInDatabase(
     endedAt,
     callId,
     currentUserId,
+    isHeadlessRecording,
     tx,
   }: {
     messageId: string;
@@ -332,6 +336,7 @@ export async function updateCallSystemMessageInDatabase(
     endedAt: number;
     callId: string;
     currentUserId: string;
+    isHeadlessRecording?: boolean;
     tx: Prisma.TransactionClient;
   }
 ): Promise<void> {
@@ -348,6 +353,7 @@ export async function updateCallSystemMessageInDatabase(
         callId,
         operation: 'call_ended',
         durationMs,
+        ...(isHeadlessRecording && { isHeadlessRecording: true }),
       },
     },
   });
@@ -403,6 +409,7 @@ export async function updateCallSystemMessageIfNeeded(
         endedAt: endedAt.getTime(),
         callId: callId,
         currentUserId: call.createdByUserId,
+        isHeadlessRecording: messageMetadata?.isHeadlessRecording === true,
         tx,
       });
       return true;

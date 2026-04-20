@@ -12,6 +12,11 @@ router.get('/search', userManagementController.searchUsers); // Search users
 router.get('/me/dms', channelController.getUserDMs); // Get all user's DM channels
 router.post('/me/picture', uploadConfig.single('picture'), userManagementController.uploadProfilePicture); // Upload profile picture
 router.get('/:id/picture', userManagementController.streamProfilePicture); // Stream user's profile picture
+
+// Voice signature routes (for meeting/recording speaker identification)
+router.post('/me/voice-signature', uploadConfig.single('audio'), userManagementController.uploadVoiceSignature); // Upload audio → extract & store embedding
+router.delete('/me/voice-signature', userManagementController.deleteVoiceSignature);          // Remove signature
+
 router.get('/', userManagementController.getAllUsers); // Get all users (must come before /:id)
 router.get('/:id', userManagementController.getUserById); // Get user by ID
 

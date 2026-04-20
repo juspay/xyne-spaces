@@ -1039,6 +1039,7 @@ export const userProfileTable = table('user_profiles')
     manager: string().optional(), // Manager userId (optional)
     role: string().optional(), // User role (optional)
     joinedOn: number().optional(), // Date when user joined (optional for backfill) - stored as timestamp
+    hasVoiceSignature: boolean().optional(), // Zero-syncable flag derived from voiceSignature presence
     createdAt: number(),
     updatedAt: number(),
   })

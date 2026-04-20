@@ -4,6 +4,9 @@ import { getStorageService } from './storage';
 import { AccessType, PrismaClient } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
+import { config } from '@/config/env';
+import axios from 'axios';
+import FormData from 'form-data';
 import {
   User,
   UpdateUserInput,
@@ -735,6 +738,101 @@ export class UserManagementService {
       logger.error(`Error uploading profile picture for user ${userId}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Extract a speaker embedding from an audio file and store it as the user's voice signature.
+   *
+   * Flow:
+   *  1. Forward the raw audio buffer to the Python agent's /embed-voice endpoint.
+   *  2. Receive back a 256-element float32 array (the voiceprint embedding).
+   *  3. Pack the floats into a 1024-byte Buffer (IEEE-754 float32 little-endian).
+   *  4. Store those bytes in user_profiles.voiceSignature — the audio itself is never persisted.
+   *
+   * @returns ISO timestamp string of when the signature was stored
+   */
+  async uploadVoiceSignature(
+    userId: string,
+    file: Express.Multer.File,
+  ): Promise<{ hasVoiceSignature: boolean }> {
+    try {
+      // ── 1. Forward audio to Python embed service ──────────────────────────
+      const pythonAgentUrl = config.pythonAgentUrl;
+      if (!pythonAgentUrl) {
+        throw new Error('PYTHON_AGENT_URL is not configured');
+      }
+
+      const form = new FormData();
+      form.append('audio', file.buffer, {
+        filename: file.originalname,
+        contentType: file.mimetype,
+      });
+
+      const embedResponse = await axios.post<{ embedding: number[]; dim: number }>(
+        `${pythonAgentUrl}/embed-voice`,
+        form,
+        {
+          headers: form.getHeaders(),
+          timeout: 60_000, // 60s — model loading + inference can be slow on first call
+        },
+      );
+
+      const { embedding } = embedResponse.data;
+      if (!Array.isArray(embedding) || embedding.length !== 256) {
+        throw new Error(
+          `Invalid embedding from Python service: expected 256 floats, got ${embedding?.length}`,
+        );
+      }
+
+      // ── 2. Pack floats → 1024-byte Buffer (float32 LE) ───────────────────
+      const buffer = Buffer.allocUnsafe(256 * 4);
+      for (let i = 0; i < 256; i++) {
+        buffer.writeFloatLE(embedding[i]!, i * 4);
+      }
+
+      // ── 3. Upsert into user_profiles ──────────────────────────────────────
+      await this.prisma.userProfile.upsert({
+        where: { userId },
+        create: {
+          userId,
+          voiceSignature: buffer,
+          hasVoiceSignature: true,
+        },
+        update: {
+          voiceSignature: buffer,
+          hasVoiceSignature: true,
+        },
+      });
+
+      logger.info(`Voice signature stored for user ${userId} (1024 bytes)`);
+      return { hasVoiceSignature: true };
+    } catch (error) {
+      let msg = error instanceof Error ? error.message : String(error);
+      // Surface axios response body for easier debugging
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const body = error.response?.data;
+        const detail = body?.detail ? `\n${body.detail}` : '';
+        const errMsg = body?.error ?? error.code ?? error.message;
+        msg = `Python agent request failed (${status ?? error.code}): ${errMsg}${detail}`;
+      }
+      logger.error(`Error storing voice signature for user ${userId}: ${msg}`);
+      throw new Error(msg);
+    }
+  }
+
+  /**
+   * Delete voice signature for the current user.
+   */
+  async deleteVoiceSignature(userId: string): Promise<void> {
+    await this.prisma.userProfile.updateMany({
+      where: { userId },
+      data: {
+        voiceSignature: null,
+        hasVoiceSignature: false,
+      },
+    });
+    logger.info(`Voice signature deleted for user ${userId}`);
   }
 
 }

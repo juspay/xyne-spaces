@@ -1135,18 +1135,20 @@ model UserPresence {
 
 // User Profile Model
 model UserProfile {
-  id            String    @id @default(cuid())
-  userId        String    @unique // One-to-one with User
-  dob           DateTime? // Date of birth (optional)
-  phoneNumber   String?   // Phone number (optional)
-  displayName   String?   // Display name (optional) Deprecated - use displayName in User Table 
-  team          String?   // Team name/identifier (optional)
-  pronunciation String?   // Name pronunciation guide (optional)
-  manager       String?   // Manager userId (optional)
-  role          String?   // User role (optional)
-  joinedOn      DateTime? // Date when user joined (optional for backfill)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                       String    @id @default(cuid())
+  userId                   String    @unique // One-to-one with User
+  dob                      DateTime? // Date of birth (optional)
+  phoneNumber              String?   // Phone number (optional)
+  displayName              String?   // Display name (optional) Deprecated - use displayName in User Table 
+  team                     String?   // Team name/identifier (optional)
+  pronunciation            String?   // Name pronunciation guide (optional)
+  manager                  String?   // Manager userId (optional)
+  role                     String?   // User role (optional)
+  joinedOn                 DateTime? // Date when user joined (optional for backfill)
+  voiceSignature           Bytes?    // 256 × float32 = 1024 bytes — speaker embedding for meeting identification
+  hasVoiceSignature        Boolean   @default(false) // Zero-syncable flag derived from voiceSignature presence
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   @@index([userId]) // Fast lookup by user
   @@map("user_profiles")

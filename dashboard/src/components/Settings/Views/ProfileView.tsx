@@ -11,6 +11,8 @@ import {
   Bell,
   BellOff,
   Calendar,
+  Mic,
+  CheckCircle2,
 } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { useAuth } from '../../../hooks/useAuth';
@@ -29,10 +31,13 @@ import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
 import { Switch } from '../../ui/Switch';
 import { useSelf } from '../../../hooks/useUsers';
 import { mutators } from '../../../zero/mutators';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { v4 as uuidv4 } from 'uuid';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { logger } from '../../../utils/logger';
 import { toast } from 'sonner';
+import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
 import { SelectedStatusData } from './SetStatusView';
 import { formatDistanceToNow, format } from 'date-fns';
 import { useUserPresence } from '../../../hooks/usePresence';
@@ -56,6 +61,13 @@ const ProfileView = ({
   const [showCustomDatePicker, setShowCustomDatePicker] = useState(false);
   const [customDate, setCustomDate] = useState<Date | null>(null);
   const notificationDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Voice signature state
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+  const [userProfile] = useCachedQuery(queries.getUserProfile({ userId: user?.id ?? '' }), {
+    enabled: !!user?.id,
+  });
+  const hasVoiceSignature = userProfile?.hasVoiceSignature ?? false;
   const zero = useZero();
 
   // Handle click outside to close notification dropdown
@@ -558,6 +570,45 @@ const ProfileView = ({
           </div>
         )}
       </div>
+
+      <hr className='border-transparent w-full' />
+
+      {/* ── Voice Signature Section ────────────────────────────── */}
+      <div className='flex items-center justify-between'>
+        <div className='flex items-center gap-2.5'>
+          <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0'>
+            <Mic className='size-4 text-muted-foreground' />
+          </div>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Voice Signature</p>
+            <p className='text-xs text-muted-foreground'>
+              {hasVoiceSignature ? (
+                <span className='flex items-center gap-1 text-green-600 dark:text-green-400'>
+                  <CheckCircle2 className='size-3' />
+                  Signature stored
+                </span>
+              ) : (
+                'Not set'
+              )}
+            </p>
+          </div>
+        </div>
+        <button
+          type='button'
+          onClick={() => setIsVoiceModalOpen(true)}
+          className='text-xs px-3 py-1.5 rounded-md bg-muted border border-border text-foreground hover:bg-border transition-colors'
+          data-track-category='PROFILE'
+          data-track-name='OpenVoiceSignatureModal'
+        >
+          {hasVoiceSignature ? 'Update' : 'Set up'}
+        </button>
+      </div>
+
+      <VoiceSignatureModal
+        open={isVoiceModalOpen}
+        onOpenChange={setIsVoiceModalOpen}
+        hasVoiceSignature={hasVoiceSignature}
+      />
 
       <hr className='border-transparent w-full' />
 

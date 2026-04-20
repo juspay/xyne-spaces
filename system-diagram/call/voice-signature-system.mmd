@@ -1,0 +1,87 @@
+flowchart TD
+    %% ══════════════════════════════════════════════════════
+    %% 1. VOICE SIGNATURE ENROLLMENT
+    %% ══════════════════════════════════════════════════════
+    U1([User]) -->|"Upload / Record audio\nSettings → Voice Signature"| D1["Dashboard\nVoiceSignatureModal.tsx"]
+    D1 -->|"POST /api/users/me/voice-signature\nmultipart audio"| B1["TypeScript Backend\nuserManagementService.ts"]
+    B1 -->|"POST /embed-voice\nmultipart audio"| P1["Python Agent\nembed_voice_handler.py\nport 8080"]
+
+    P1 -->|"av.open → decode → resample\n→ 16kHz mono PCM"| P2["Audio Decoder\nPyAV"]
+    P2 -->|"sliding window 3s / 1s step\nper-window inference"| P3["WeSpeaker ResNet34-LM\npyannote/wespeaker-voxceleb-resnet34-LM\n256-dim float32"]
+    P3 -->|"per-window L2-norm\nmean-pool all windows\nre-normalise → unit vector"| P4["Final Embedding\n256-dim float32 = 1024 bytes"]
+    P4 -->|"embedding float[]"| B1
+
+    B1 -->|"upsert voiceSignature Bytes\nhasVoiceSignature = true"| DB1[("PostgreSQL\nuserProfile")]
+    DB1 -->|"Zero sync"| Z1["Zero Client Cache\nhasVoiceSignature: boolean"]
+    Z1 -->|"reactive UI update\nno HTTP poll needed"| D1
+
+    %% ══════════════════════════════════════════════════════
+    %% 2. CALL INITIATION
+    %% ══════════════════════════════════════════════════════
+    CI1(["User or Meeting Detector"]) -->|"POST /api/calls/initiate\ncallType: HEADLESS / AUDIO / VIDEO"| B3["callController.ts\ninitiateCall"]
+    B3 -->|"findOrCreateDMChannel\n+ Xyne Automatic bot for HEADLESS"| DB3[("PostgreSQL\nchannel")]
+    B3 -->|"createRoom with metadata:\nchannelId, callType, sttModel\ncreatedBy, conversationId"| LK1["LiveKit Room"]
+    B3 -->|"generateAccessToken"| CI1
+
+    %% ══════════════════════════════════════════════════════
+    %% 3. AGENT JOINS ROOM
+    %% ══════════════════════════════════════════════════════
+    LK1 -->|"room_created event\njob dispatched to agent worker"| AG1["Python Agent\nmain.py entrypoint"]
+    AG1 -->|"ctx.connect AUDIO_ONLY\nset name: Xyne Automatic"| LK1
+    AG1 -->|"parse room metadata\ncallType, sttModel, channelId"| AG2["Room Config"]
+
+    AG1 -->|"GET /api/transcriptionAgent/voiceprints\nx-api-key: TRANSCRIPTION_AGENT_API_KEY"| B4["transcriptionAgentController.ts\ngetVoiceprints"]
+    B4 -->|"query all userProfile\nwhere voiceSignature != null"| DB1
+    DB1 -->|"[{userId, name, voiceSignature}]"| B4
+    B4 -->|"[{userId, name, embeddingB64}]"| AG1
+
+    AG1 -->|"base64 decode each embedding\nL2-normalise → unit vectors\nstore in _voiceprints list"| AG3["RealtimeIdentifier.__init__\nrealtime_identifier.py"]
+
+    %% ══════════════════════════════════════════════════════
+    %% 4. REAL-TIME SPEAKER IDENTIFICATION
+    %% ══════════════════════════════════════════════════════
+    AG3 -->|"process_track coroutine\nlaunched per participant"| ID1["Silero VAD\nper-participant audio track\nactivation_threshold=0.5"]
+
+    ID1 -->|"END_OF_SPEECH event\nbuffered PCM frames\n≥ 1.0s speech required"| ID2["_compute_embedding\nrun_in_executor thread pool"]
+    ID2 -->|"scipy resample 48kHz → 16kHz\nnp.frombuffer → float32"| ID3["WeSpeaker ResNet34-LM\nspeaker_embedding.py\nsingleton model"]
+    ID3 -->|"256-dim unit vector"| ID4{"np.dot vs all enrolled\nvoiceprints\ncosine similarity"}
+
+    ID4 -->|"best score ≥ 0.40\nthreshold = THRESHOLD"| ID5["_identities cache\nparticipant_identity → name"]
+    ID4 -->|"best score < 0.40\nno confident match"| ID6["Unknown speaker\nno cache update"]
+
+    ID5 -->|"asyncio.Task stored\nin _pending dict"| ID7["wait_for_identification\ntimeout=2.0s\nashield protects task"]
+    ID6 --> ID7
+
+    %% ══════════════════════════════════════════════════════
+    %% 5. TRANSCRIPT GENERATION
+    %% ══════════════════════════════════════════════════════
+    ID7 -->|"on_user_turn_completed\nget_speaker → identified name\nor fall back to participant name"| TS0["MultiUserTranscriber\nmulti_user_transcriber.py"]
+
+    TS0 -->|"emit TRANSCRIPTION event\nspeaker = identified name"| TS1["TranscriptionHandler\nwrite to primary storage"]
+    TS0 -->|"emit IDENTIFIED_TRANSCRIPTION event\nreal names only"| TS2["IdentifiedStorage\nwrite to identified storage"]
+
+    TS1 -->|"buffer + flush to GCS\n{callId}.txt"| GCS[("Google Cloud Storage")]
+    TS2 -->|"buffer + flush to GCS\n{callId}_identified.txt"| GCS
+
+    AG1 -->|"POST /api/transcriptionAgent\n/:callId/transcript-ready\nx-api-key auth"| B5["transcriptService.ts\nprocessCallWithSummary"]
+    B5 -->|"fetch transcript from GCS\ngenerate AI summary via LLM"| B5
+    B5 -->|"store transcript GCS URL\naiSummary, transcript attachment"| DB4[("PostgreSQL\ncall + messageAttachment")]
+
+    DB4 -->|"Zero sync"| Z3["Zero Client Cache\nCall + Attachment"]
+    Z3 -->|"reactive update"| D3["Dashboard\nRecordingDetailScreen\nCallBubble"]
+
+    %% ── Display logic ──
+    D3 -->|"HEADLESS: show identified_transcript\nfallback to transcript"| VIEW1["Identified Transcript View"]
+    D3 -->|"AUDIO/VIDEO: hide identified_transcript\nshow plain transcript only"| VIEW2["Plain Transcript View"]
+
+    classDef node fill:#ffffff,stroke:#333,stroke-width:2px
+    classDef db fill:#fff3cd,stroke:#856404,stroke-width:2px
+    classDef service fill:#d1ecf1,stroke:#0c5460,stroke-width:2px
+    classDef agent fill:#f3e8ff,stroke:#7c3aed,stroke-width:2px
+    classDef done fill:#d4edda,stroke:#28a745,stroke-width:2px
+    classDef reject fill:#f8d7da,stroke:#dc3545,stroke-width:2px
+
+    class DB1,DB3,DB4,GCS db
+    class B1,B3,B4,B5 service
+    class AG1,AG2,AG3,ID1,ID2,ID3,ID4,ID5,TS0,TS1,TS2 agent
+    class VIEW1,VIEW2,Z1,Z3 done

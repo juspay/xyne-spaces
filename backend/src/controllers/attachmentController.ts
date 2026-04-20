@@ -95,7 +95,7 @@ export class AttachmentController {
 
       // Transcripts live in a separate bucket
       const meta = attachment.metadata as { type?: string };
-      const service = meta?.type === 'transcript'
+      const service = meta?.type === 'transcript' || meta?.type === 'identified_transcript'
         ? getStorageService(config.gcs.transcriptionBucketName)
         : storageService;
 
@@ -111,8 +111,8 @@ export class AttachmentController {
       const encodedFilename = encodeURIComponent(attachment.originalFilename);
       res.setHeader('Content-Disposition', `inline; filename="${encodedFilename}"`);
 
-      if (meta?.type === 'transcript') {
-        // Transcripts can be updated (e.g., after translation) — don't cache
+      // Disable caching for transcripts (they can be updated), cache other files
+      if (meta?.type === 'transcript' || meta?.type === 'identified_transcript') {
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Expires', '0');

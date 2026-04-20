@@ -28,5 +28,15 @@ def download_models():
         print(f"⚠ Warning: Silero VAD download failed: {e}")
         print("  Model will be downloaded at runtime")
 
+    # Download WeSpeaker speaker embedding model
+    print("Downloading WeSpeaker speaker embedding model...")
+    try:
+        from modules.speaker_embedding import get_embedding_inference
+        get_embedding_inference()
+        print("✓ WeSpeaker embedding model downloaded and cached")
+    except Exception as e:
+        print(f"⚠ Warning: WeSpeaker model download failed: {e}")
+        print("  Model will be downloaded on first enrollment request")
+
 if __name__ == "__main__":
     download_models()

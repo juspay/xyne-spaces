@@ -40,3 +40,77 @@ export const uploadProfilePicture = async (file: File): Promise<string> => {
     throw error;
   }
 };
+
+export interface VoiceSignatureStatus {
+  hasVoiceSignature: boolean;
+}
+
+/**
+ * Upload an audio recording to extract and store the user's voice signature (speaker embedding).
+ * The audio file is processed server-side; only the 1024-byte embedding is retained.
+ *
+ * @param file - Audio file (WAV, OGG, MP3, WebM). 5–30 seconds of clear speech works best.
+ * @returns ISO timestamp of when the signature was stored
+ */
+export const uploadVoiceSignature = async (
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<void> => {
+  const ALLOWED_TYPES = [
+    'audio/wav',
+    'audio/wave',
+    'audio/x-wav',
+    'audio/ogg',
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/webm',
+    'video/webm',
+    'audio/mp4',
+  ];
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    toast.error('Unsupported audio format. Please use WAV, OGG, MP3, or WebM.');
+    throw new Error('Unsupported audio format');
+  }
+
+  const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
+  if (file.size > MAX_SIZE) {
+    toast.error('Audio file too large (max 50 MB).');
+    throw new Error('File too large');
+  }
+
+  const formData = new FormData();
+  formData.append('audio', file);
+
+  try {
+    const response = await apiInstance.post<VoiceSignatureStatus>(
+      '/users/me/voice-signature',
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 90_000, // 90s — model loading can be slow on first invocation
+        onUploadProgress: event => {
+          if (onProgress && event.total) {
+            onProgress(Math.round((event.loaded * 100) / event.total));
+          }
+        },
+      },
+    );
+    void response; // Zero will sync hasVoiceSignature after backend updates
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to save voice signature';
+    toast.error(message);
+    throw error;
+  }
+};
+
+/**
+ * Delete the current user's voice signature.
+ */
+export const deleteVoiceSignature = async (): Promise<void> => {
+  try {
+    await apiInstance.delete('/users/me/voice-signature');
+  } catch (error) {
+    toast.error('Failed to remove voice signature');
+    throw error;
+  }
+};

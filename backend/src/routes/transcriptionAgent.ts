@@ -15,4 +15,7 @@ router.get('/:callId/my-tickets', transcriptionAgentController.getMyTickets);
 // Search users by name (AI assistant invite tool)
 router.get('/:callId/search-users', transcriptionAgentController.searchUsers);
 
+// Fetch all enrolled voice signatures for real-time speaker identification
+router.get('/voiceprints', transcriptionAgentController.getVoiceprints);
+
 export default router;

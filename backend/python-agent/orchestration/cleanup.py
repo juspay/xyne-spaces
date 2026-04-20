@@ -3,7 +3,7 @@ Cleanup manager - handles graceful shutdown when all participants leave
 """
 import asyncio
 import logging
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from livekit import rtc
 from transcription import TranscriptionStorage
@@ -27,6 +27,7 @@ class CleanupManager:
         webhook: WebhookNotifier,
         room: rtc.Room,
         conversation_store: Optional[ConversationStore] = None,
+        additional_storages: Optional[List[TranscriptionStorage]] = None,
     ):
         self.call_id = call_id
         self.stt_tasks = stt_tasks
@@ -34,6 +35,7 @@ class CleanupManager:
         self.webhook = webhook
         self.room = room
         self.conversation_store = conversation_store
+        self.additional_storages: List[TranscriptionStorage] = additional_storages or []
 
     async def run(self):
         """Execute full cleanup sequence with hard deadline"""
@@ -106,6 +108,13 @@ class CleanupManager:
             logger.info(f"storage_flush_completed | stage=initial")
         except Exception:
             logger.error(f"storage_flush_failed | stage=initial", exc_info=True)
+
+        for extra in self.additional_storages:
+            try:
+                await extra.flush()
+                logger.info(f"additional_storage_flush_completed | call_id={extra.call_id}")
+            except Exception:
+                logger.error(f"additional_storage_flush_failed | call_id={extra.call_id}", exc_info=True)
 
     async def _notify_backend(self):
         try:

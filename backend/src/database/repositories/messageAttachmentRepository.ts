@@ -132,6 +132,31 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findIdentifiedTranscriptByCallId(callId: string): Promise<MessageAttachment | null> {
+    return await this.db.messageAttachment.findFirst({
+      where: {
+        entityType: AttachmentEntityType.CHAT,
+        AND: [
+          {
+            metadata: {
+              path: ['type'],
+              equals: 'identified_transcript',
+            },
+          },
+          {
+            metadata: {
+              path: ['callId'],
+              equals: callId,
+            },
+          },
+        ],
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
   async createMany(attachments: CreateMessageAttachmentInput[]): Promise<void> {
     await this.db.messageAttachment.createMany({
       data: attachments

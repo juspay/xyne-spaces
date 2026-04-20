@@ -156,6 +156,8 @@ class ParticipantTranscriber(Agent):
         call_id: str = "unknown",
         ai_enabled: bool = False,
         turn_detector=None,
+        on_identified_transcription: Optional[Callable[[dict], Awaitable[None]]] = None,
+        identifier: Optional[Any] = None,
     ):
         """
         Initialize the transcriber agent.
@@ -167,6 +169,8 @@ class ParticipantTranscriber(Agent):
             call_id: Call ID for logging
             ai_enabled: Whether AI voice is enabled (affects turn detection)
             turn_detector: Pre-loaded shared turn detector model (avoids per-participant loading)
+            on_identified_transcription: Optional callback for real-name identified transcript
+            identifier: Optional RealtimeIdentifier for speaker lookup
         """
         super().__init__(
             instructions="not-needed",
@@ -177,6 +181,8 @@ class ParticipantTranscriber(Agent):
         self._on_transcription = on_transcription
         self._call_id = call_id
         self.ai_enabled = ai_enabled
+        self._on_identified_transcription = on_identified_transcription
+        self._identifier = identifier
     
     async def on_user_turn_completed(
         self, 
@@ -203,7 +209,27 @@ class ParticipantTranscriber(Agent):
             "spoken_at": time.time(),  # Built-in STT doesn't expose exact speech time
             "participant_identity": self.participant_identity,
         })
-        
+
+        # Emit identified transcription with real name if voiceprint match is available
+        if self._on_identified_transcription is not None:
+            # Wait briefly for the current turn's embedding to complete.
+            # The identifier VAD fires at roughly the same time as AgentSession VAD.
+            # Timeout is configurable via SPEAKER_ID_TIMEOUT_SECS env var (default 2s).
+            if self._identifier is not None:
+                identified_name = await self._identifier.wait_for_identification(
+                    self.participant_identity
+                )
+            else:
+                identified_name = None
+            identified_name = identified_name or "Unknown"
+            await self._on_identified_transcription({
+                "user": identified_name,
+                "text": user_transcript,
+                "timestamp": time.time(),
+                "spoken_at": time.time(),
+                "participant_identity": self.participant_identity,
+            })
+
         # Log transcription generated (Phase 2.1.16)
         logger.info(f"transcription_generated | participant_id={self.participant_identity}, text_preview={user_transcript[:50]}...")
         
@@ -246,6 +272,8 @@ class MultiUserTranscriber:
         agent_session: Optional[AgentSession] = None,
         # Call ID for logging
         call_id: str = "unknown",
+        # Real-time speaker identifier (optional, created from voiceprints in room metadata)
+        identifier: Optional[Any] = None,
     ):
         """
         Initialize the multi-user transcriber.
@@ -299,7 +327,8 @@ class MultiUserTranscriber:
         self._call_type: Optional[str] = None
         self._stt_model_override: Optional[str] = None  # User's STT model preference from UI
         self._pending_sessions: Set[str] = set()  # Participants with session creation in progress
-        
+        self._identifier: Optional[Any] = identifier  # RealtimeIdentifier for speaker ID
+
         # === Multi-core VAD optimization ===
         # Silero VAD hardcodes ONNX to intra_op_num_threads=1, inter_op_num_threads=1.
         # When multiple VADStreams share the same ONNX session, inference calls
@@ -527,6 +556,10 @@ class MultiUserTranscriber:
     async def _emit_transcription(self, data: dict):
         """Emit transcription event via EventBus."""
         await self.bus.emit("TRANSCRIPTION", data)
+
+    async def _emit_identified_transcription(self, data: dict):
+        """Emit identified transcription event via EventBus."""
+        await self.bus.emit("IDENTIFIED_TRANSCRIPTION", data)
     
     async def start(self):
         """Start room-level monitoring with track_subscribed for lazy session creation.
@@ -647,6 +680,12 @@ class MultiUserTranscriber:
             )
         else:
             self._create_participant_session(participant)
+            if self._identifier is not None:
+                task = asyncio.create_task(
+                    self._identifier.process_track(track, participant.identity)
+                )
+                self._tasks.add(task)
+                task.add_done_callback(lambda t: self._tasks.discard(t))
     
     def _on_track_unsubscribed(
         self,
@@ -673,12 +712,16 @@ class MultiUserTranscriber:
         participant_name = participant.name or participant.identity
         logger.info(f"track_unsubscribed | participant_id={participant.identity}, participant_name={participant_name}")
         self._destroy_participant_session(participant)
+        if self._identifier is not None:
+            self._identifier.cancel_participant(participant.identity)
     
     def _on_participant_disconnected(self, participant: rtc.RemoteParticipant):
         """Handle participant disconnection - final cleanup."""
         participant_name = participant.name or participant.identity
         logger.info(f"participant_disconnected | participant_id={participant.identity}, participant_name={participant_name}")
         self._destroy_participant_session(participant)
+        if self._identifier is not None:
+            self._identifier.cancel_participant(participant.identity)
     
     def _on_track_muted(self, participant, publication):
         """Handle track muted - destroy the participant's session.
@@ -746,6 +789,8 @@ class MultiUserTranscriber:
             call_id=self._call_id,
             ai_enabled=self._is_ai_enabled(),
             turn_detector=self._create_turn_detector(),
+            on_identified_transcription=self._emit_identified_transcription if self._identifier is not None else None,
+            identifier=self._identifier,
         )
         
         # Start session with participant-specific options

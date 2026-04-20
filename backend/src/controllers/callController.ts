@@ -720,6 +720,7 @@ export class CallController {
 
       // Fetch transcript content from GCS URL if available
       let transcriptContent: string | null = null;
+      let identifiedTranscriptContent: string | null = null;
 
       if (call.transcript) {
         try {
@@ -728,6 +729,13 @@ export class CallController {
         } catch (fetchError) {
           logger.warn(`Failed to fetch transcript from storage: ${fetchError}`);
         }
+      }
+
+      // Fetch real-time identified transcript (written during call by the Python agent)
+      try {
+        identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
+      } catch (fetchError) {
+        logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
       }
 
       // Determine AI summary format (markdown if starts with ## or has no HTML tags)
@@ -768,6 +776,8 @@ export class CallController {
           hasTranscript: !!transcriptContent,
           hasSummary: !!call.aiSummary,
           transcript: transcriptContent,
+          identifiedTranscript: identifiedTranscriptContent,
+          hasIdentifiedTranscript: !!identifiedTranscriptContent,
           aiSummary: call.aiSummary,
           aiSummaryFormat,
           messageId,
@@ -1741,6 +1751,7 @@ export class CallController {
       res.status(500).json({ success: false, error: 'Failed to get call participants' });
     }
   };
+
 }
 
 export const callController = new CallController();

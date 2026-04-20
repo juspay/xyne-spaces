@@ -1,6 +1,6 @@
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
-import { AttachmentEntityType, CallOrigin } from '@prisma/client';
+import { AttachmentEntityType, CallOrigin, CallType } from '@prisma/client';
 import { config } from '@/config/env';
 import { Agent, createUserMessage, createSystemMessage } from '@framework';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -13,6 +13,9 @@ import type { StorageService } from '@/services/storage';
 import { pulseService, type PulseActionItem } from '@/services/pulseService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
+import { CacConfigService } from '@/services/cacConfigService';
+
+const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
 interface TranscriptEntry {
   user: string;
@@ -401,6 +404,11 @@ export class TranscriptService {
       this.translateTranscriptAsync(callId, txtStoragePath).catch((err) => {
         logger.error(`[${callId}] background_translation_failed | error=${err}`);
       });
+
+      // 14. Attach identified transcript (real-name labelled) as a second attachment when available.
+      // Written by the Python agent's RealtimeIdentifier during the call into
+      // transcriptions/{callId}_identified.jsonl — may not exist if no voiceprints were enrolled.
+      void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId);
     } catch (error) {
       logger.error(
         `[${callId}] transcript_processing_failed | message_id=${messageId}, error=${error instanceof Error ? error.message : JSON.stringify(error)}`,
@@ -547,6 +555,107 @@ export class TranscriptService {
     return filepath;
   }
 
+  private async isSpeakerIdentificationEnabled(): Promise<boolean> {
+    const cfg = await CacConfigService.fetch(SPEAKER_IDENTIFICATION_CAC_KEY) as { enabled?: boolean } | null;
+    return cfg?.enabled === true;
+  }
+
+  /**
+   * Check if the Python agent wrote an identified transcript for this call, and if so
+   * format it and attach it as a second message attachment.
+   * Fire-and-forget — call errors are logged but do not affect the primary transcript.
+   */
+  private async attachIdentifiedTranscriptIfExists(
+    callId: string,
+    messageId: string,
+    createdByUserId: string,
+    conversationId: string,
+  ): Promise<void> {
+    try {
+      const speakerIdentificationEnabled = await this.isSpeakerIdentificationEnabled();
+      if (!speakerIdentificationEnabled) {
+        logger.info(`[${callId}] identified_transcript_skipped | reason=speaker_identification_disabled`);
+        return;
+      }
+
+      const identifiedGcsPath = `transcriptions/${callId}_identified.jsonl`;
+      const exists = await this.transcriptStorage.fileExists(identifiedGcsPath);
+      if (!exists) {
+        logger.info(`[${callId}] identified_transcript_not_found | skipping_attachment`);
+        return;
+      }
+
+      const buffer = await this.transcriptStorage.getFileBuffer(identifiedGcsPath);
+      const entries = this.parseTranscriptEntries(buffer.toString('utf-8'));
+      if (entries.length === 0) return;
+
+      const formatted = this.formatTranscript(entries, callId);
+
+      // Upload formatted identified transcript
+      const formattedPath = `attachments/${callId}_identified_formatted.txt`;
+      await this.transcriptStorage.uploadFileV2(Buffer.from(formatted, 'utf-8'), {
+        path: formattedPath,
+        contentType: 'text/plain',
+        metadata: { callId, type: 'identified_transcript' },
+      });
+      const gcsUrl = `gs://${config.gcs.transcriptionBucketName}/${formattedPath}`;
+
+      const durationSeconds = entries.length > 1
+        ? Math.round(entries[entries.length - 1].timestamp - entries[0].timestamp)
+        : 0;
+      const uniqueParticipants = Array.from(new Set(entries.map((e) => e.user))).filter(Boolean);
+
+      // Upsert: update existing identified attachment or create new one
+      const existing = await repositories.messageAttachments.findIdentifiedTranscriptByCallId(callId);
+      if (existing) {
+        await repositories.messageAttachments.update(existing.id, {
+          url: gcsUrl,
+          size: formatted.length,
+          metadata: {
+            callId,
+            type: 'identified_transcript',
+            duration: durationSeconds,
+            participantCount: uniqueParticipants.length,
+            version: ((existing.metadata as any)?.version ?? 1) + 1,
+            lastUpdatedAt: new Date().toISOString(),
+            entryCount: entries.length,
+          },
+        });
+        logger.info(`[${callId}] identified_transcript_attachment_updated | attachment_id=${existing.id}`);
+      } else {
+        const attachment = await repositories.messageAttachments.create({
+          entityId: messageId,
+          entityType: AttachmentEntityType.CHAT,
+          originalFilename: `call_identified_transcript.txt`,
+          size: formatted.length,
+          mimetype: 'text/plain',
+          url: gcsUrl,
+          uploadedByUserId: createdByUserId,
+          createdBy: createdByUserId,
+          storageProvider: 'gcs',
+          conversationId,
+          metadata: {
+            callId,
+            type: 'identified_transcript',
+            duration: durationSeconds,
+            participantCount: uniqueParticipants.length,
+            version: 1,
+            createdAt: new Date().toISOString(),
+            entryCount: entries.length,
+          },
+        });
+        logger.info(`[${callId}] identified_transcript_attachment_created | attachment_id=${attachment.id}`);
+      }
+
+      // Apply the same background translation as the plain transcript
+      this.translateIdentifiedTranscriptAsync(callId, formattedPath).catch((err) => {
+        logger.error(`[${callId}] identified_background_translation_failed | error=${err}`);
+      });
+    } catch (err) {
+      logger.error(`[${callId}] identified_transcript_attach_failed | error=${err}`);
+    }
+  }
+
   /**
    * Format timestamp (seconds from start) to MM:SS or HH:MM:SS
    */
@@ -594,6 +703,36 @@ export class TranscriptService {
       return this.formatTranscript(entries, callId);
     } catch (error) {
       logger.error(`Failed to get transcript content for ${callId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch the real-time identified transcript (written by the Python agent during the call).
+   * Reads transcriptions/{callId}_identified.jsonl from GCS and formats it.
+   * Returns null if the file does not exist (call had no enrolled speakers or feature
+   * was not yet active when the call ran).
+   */
+  async getIdentifiedTranscriptContent(callId: string): Promise<string | null> {
+    try {
+      // Try pre-formatted file first (faster, no re-parsing)
+      const formattedPath = `attachments/${callId}_identified_formatted.txt`;
+      const formattedExists = await this.transcriptStorage.fileExists(formattedPath);
+      if (formattedExists) {
+        const buf = await this.transcriptStorage.getFileBuffer(formattedPath);
+        return buf.toString('utf-8');
+      }
+
+      // Fall back to raw JSONL
+      const gcsPath = `transcriptions/${callId}_identified.jsonl`;
+      const exists = await this.transcriptStorage.fileExists(gcsPath);
+      if (!exists) return null;
+      const buffer = await this.transcriptStorage.getFileBuffer(gcsPath);
+      const entries = this.parseTranscriptEntries(buffer.toString('utf-8'));
+      if (entries.length === 0) return null;
+      return this.formatTranscript(entries, callId);
+    } catch (error) {
+      logger.error(`Failed to get identified transcript content for ${callId}:`, error);
       return null;
     }
   }
@@ -665,6 +804,31 @@ export class TranscriptService {
       logger.info(`Successfully completed background translation for call: ${callId}`);
     } catch (error) {
       logger.error(`Failed to translate transcript in background for call ${callId}:`, error);
+    }
+  }
+
+  /**
+   * Same as translateTranscriptAsync but for the identified transcript GCS file.
+   * Overwrites the identified formatted .txt with the translated version.
+   */
+  private async translateIdentifiedTranscriptAsync(callId: string, gcsPath: string): Promise<void> {
+    try {
+      logger.info(`[${callId}] identified_translation_started`);
+
+      const buffer = await this.transcriptStorage.getFileBuffer(gcsPath);
+      const rawTranscript = buffer.toString('utf-8');
+
+      const translatedTranscript = await this.postProcessTranscript(rawTranscript);
+
+      await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
+        path: gcsPath,
+        contentType: 'text/plain',
+        metadata: { callId, type: 'identified_transcript', translated: 'true' },
+      });
+
+      logger.info(`[${callId}] identified_translation_completed`);
+    } catch (error) {
+      logger.error(`[${callId}] identified_translation_failed | error=${error}`);
     }
   }
 
@@ -1277,20 +1441,43 @@ Output ONLY the processed transcript, nothing else.`;
         return;
       }
 
-      // Retrieve and format transcript for AI
-      const transcriptContent = await this.retrieveTranscript(callId);
+      // Retrieve and format transcript for AI.
+      // For HEADLESS recordings, prefer the identified transcript (real speaker names)
+      // so that summaries, titles, and ticket suggestions reflect who said what.
+      // Fall back to plain transcript if identified is not yet available.
+      const speakerIdentificationEnabled = await this.isSpeakerIdentificationEnabled();
+      const isHeadless = call.callType === CallType.HEADLESS;
+      let transcriptContent: string | null = null;
+      if (speakerIdentificationEnabled && isHeadless) {
+        transcriptContent = await this.getIdentifiedTranscriptContent(callId);
+        if (transcriptContent) {
+          logger.info(`[${callId}] using_identified_transcript_for_summary | reason=headless_call`);
+        } else {
+          logger.warn(`[${callId}] identified_transcript_unavailable | falling_back_to_plain`);
+        }
+      }
+      if (!transcriptContent) {
+        transcriptContent = await this.retrieveTranscript(callId);
+      }
       if (!transcriptContent) {
         logger.warn(`[${callId}] ai_summary_skipped | reason=no_transcript_content`);
         return;
       }
 
-      const entries = this.parseTranscriptEntries(transcriptContent);
-      if (entries.length === 0) {
-        logger.warn(`[${callId}] ai_summary_skipped | reason=no_transcript_entries`);
-        return;
+      // getIdentifiedTranscriptContent returns already-formatted text; retrieveTranscript
+      // returns raw JSONL that still needs parsing and formatting.
+      let formattedTranscript: string;
+      if (speakerIdentificationEnabled && isHeadless && transcriptContent.startsWith('[')) {
+        // Already formatted ("[MM:SS] Speaker: text" lines) — use directly
+        formattedTranscript = transcriptContent;
+      } else {
+        const entries = this.parseTranscriptEntries(transcriptContent);
+        if (entries.length === 0) {
+          logger.warn(`[${callId}] ai_summary_skipped | reason=no_transcript_entries`);
+          return;
+        }
+        formattedTranscript = this.formatTranscript(entries, callId);
       }
-
-      const formattedTranscript = this.formatTranscript(entries, callId);
 
       // For CONVERSATION origin calls, combine conversation messages with transcript for title
       let titleInput = formattedTranscript;
