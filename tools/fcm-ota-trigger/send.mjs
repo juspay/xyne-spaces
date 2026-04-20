@@ -38,7 +38,7 @@ const apns = {
   headers: {
     "apns-push-type": "background",
     "apns-priority": "5",
-    "apns-topic": "net.juspay.xynespacesnative",
+    "apns-topic": "net.juspay.xynespaces",
   },
 };
 
