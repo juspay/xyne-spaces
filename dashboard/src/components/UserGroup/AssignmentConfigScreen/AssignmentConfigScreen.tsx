@@ -63,7 +63,8 @@ export const AssignmentConfigScreen = ({
     RotationInterval.WEEKLY,
   );
   // Pending set mappings from modal (applied on main save)
-  const [pendingSetMappings, setPendingSetMappings] = useState<Map<string, number> | null>(null);
+  // Each user can be in multiple sets
+  const [pendingSetMappings, setPendingSetMappings] = useState<Map<string, number[]> | null>(null);
 
   const [userGroup] = useCachedQuery(queries.getUserGroupById({ userGroupId }));
 
@@ -110,19 +111,23 @@ export const AssignmentConfigScreen = ({
   // Effective mappings: use pending changes if available (for instant UI feedback before save)
   const effectiveUserGroupMembers = useMemo(() => {
     return (
-      userGroupMembers?.map(mapping => ({
-        ...mapping,
-        onCallSetNumber: pendingSetMappings?.get(mapping.userId) ?? mapping.onCallSetNumber ?? 1,
-      })) ?? []
+      userGroupMembers?.map(mapping => {
+        const onCallSets = mapping.onCallSetNumbers as number[] | undefined;
+        const setNumbers: number[] = onCallSets && onCallSets.length > 0 ? onCallSets : [1];
+        return {
+          ...mapping,
+          onCallSetNumbers: pendingSetMappings
+            ? (pendingSetMappings.get(mapping.userId) ?? [1])
+            : setNumbers,
+        };
+      }) ?? []
     );
   }, [userGroupMembers, pendingSetMappings]);
 
   // Get max set number for grouping (include pending changes)
   const currentMaxSet = useMemo(() => {
-    const maxSet =
-      effectiveUserGroupMembers.length > 0
-        ? Math.max(...effectiveUserGroupMembers.map(m => m.onCallSetNumber), 1)
-        : 1;
+    const allSetNumbers = effectiveUserGroupMembers.flatMap(m => m.onCallSetNumbers ?? [1]);
+    const maxSet = allSetNumbers.length > 0 ? Math.max(...allSetNumbers, 1) : 1;
     return maxSet;
   }, [effectiveUserGroupMembers]);
 
@@ -369,7 +374,7 @@ export const AssignmentConfigScreen = ({
 
     for (let setNum = 1; setNum <= currentMaxSet; setNum++) {
       const setUserIds = effectiveUserGroupMembers
-        .filter(m => m.onCallSetNumber === setNum)
+        .filter(m => m.onCallSetNumbers?.includes(setNum) ?? setNum === 1)
         .map(m => m.userId);
 
       let total = 0;
@@ -511,15 +516,17 @@ export const AssignmentConfigScreen = ({
         : undefined;
 
       // Prepare set mappings from pending changes or existing mappings
-      // Only include onCallSetNumber if rotation is enabled
+      // Only include onCallSetNumbers if rotation is enabled
       const userMappings = pendingSetMappings
-        ? Array.from(pendingSetMappings.entries()).map(([userId, onCallSetNumber]) => ({
+        ? Array.from(pendingSetMappings.entries()).map(([userId, onCallSetNumbers]) => ({
             userId,
-            onCallSetNumber: localAutoRotationEnabled ? onCallSetNumber : null,
+            onCallSetNumbers: localAutoRotationEnabled ? onCallSetNumbers : [],
           }))
         : (userGroupMembers ?? []).map(m => ({
             userId: m.userId,
-            onCallSetNumber: localAutoRotationEnabled ? (m.onCallSetNumber ?? 1) : null,
+            onCallSetNumbers: localAutoRotationEnabled
+              ? ((m.onCallSetNumbers as number[] | undefined) ?? [1])
+              : [],
           }));
 
       const stateIds = userStates.reduce(
@@ -580,7 +587,7 @@ export const AssignmentConfigScreen = ({
     }
   };
 
-  const handleSetsChange = (sets: Map<string, number>): void => {
+  const handleSetsChange = (sets: Map<string, number[]>): void => {
     setPendingSetMappings(sets);
     setHasChanges(true);
   };
@@ -596,7 +603,7 @@ export const AssignmentConfigScreen = ({
   // Group users by set number (use effective mappings for instant feedback)
   const getUsersBySet = (setNumber: number): User[] => {
     const setUserIds = effectiveUserGroupMembers
-      .filter(m => m.onCallSetNumber === setNumber)
+      .filter(m => m.onCallSetNumbers?.includes(setNumber) ?? setNumber === 1)
       .map(m => m.userId);
     return users.filter(u => setUserIds.includes(u.id));
   };
@@ -1076,7 +1083,7 @@ export const AssignmentConfigScreen = ({
           users={users}
           userGroupMembers={effectiveUserGroupMembers.map(m => ({
             userId: m.userId,
-            onCallSetNumber: m.onCallSetNumber,
+            onCallSetNumbers: m.onCallSetNumbers,
           }))}
           activeSet={activeSet}
           onClose={() => setIsRotationModalOpen(false)}

@@ -20,10 +20,11 @@ import {
 } from '../types/ticket';
 import { evaluateAssignmentRule } from '../utils/assignmentEngine';
 import { syncUserWorkload } from '../utils/workloadUtils';
-import { ticketAssignmentService } from '../services/ticketAssignmentService';
+import { ticketAssignmentService, type RoleAssignment } from '../services/ticketAssignmentService';
 import type { BoardMetadata } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '../utils/ticketMd';
-import { notificationHooks } from '@/hooks/notificationHooks';
+import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
+import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { randomUUID } from 'crypto';
@@ -868,6 +869,7 @@ export class TicketController {
       });
 
       // Full role assignment when toggle is ON (runs after ticket is committed)
+      let fraAssignedUserId: string | null = null;
       if (pendingFullRoleAssignment && userGroupId) {
         try {
           const fullRoles = await ticketAssignmentService.assignFullRolesToTicket({
@@ -877,12 +879,42 @@ export class TicketController {
             createdBy: userId,
           });
           if (fullRoles.member) {
+            const prevAssignedTo = ticket.assignedTo;
             const updatedTicket = await prisma.ticket.update({
               where: { id: ticket.id },
               data: { assignedTo: fullRoles.member },
             });
             await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
+            fraAssignedUserId = fullRoles.member;
+
+            const ticketsHandler = new TicketsSideEffectHandler({ userID: userId });
+            ticketsHandler.onUpdate({
+              entityId: ticket.id,
+              entityType: 'tickets',
+              operation: 'update',
+              args: { assignedTo: fullRoles.member },
+              previousValue: {
+                assignedTo: prevAssignedTo,
+                stageName: ticket.stageName,
+                statusV2: ticket.statusV2,
+                eta: ticket.eta ? ticket.eta.getTime() : null,
+                boardId: ticket.boardId,
+                createdBy: ticket.createdBy,
+                channelId: ticket.channelId,
+              },
+            }).catch(err => logger.error('[Ticket Creation] TicketsSideEffectHandler error:', err));
           }
+
+          const assignmentsHandler = new TicketAssignmentsSideEffectHandler({ userID: userId });
+          const fraAssignments = [fullRoles.manager, fullRoles.teamLead, fullRoles.prReviewer, fullRoles.qa].filter((a): a is RoleAssignment => Boolean(a));
+          for (const assignment of fraAssignments) {
+            assignmentsHandler.onInsert({
+              entityId: assignment.assignmentId,
+              entityType: 'ticket_assignments',
+              operation: 'insert',
+            }).catch(err => logger.error(`[Ticket Creation] TicketAssignmentsSideEffectHandler error for assignment ${assignment.assignmentId}:`, err));
+          }
+
           logger.info(`[Ticket Creation] Full role assignment complete for ticket ${ticket.id}`);
         } catch (error) {
           logger.error('[Ticket Creation] Error during full role assignment:', error);
@@ -890,23 +922,35 @@ export class TicketController {
       }
 
       // Sync workload mapping if ticket was assigned to a user
-      if (ticket.assignedTo && userGroupId) {
+      const finalAssignedUserId = fraAssignedUserId || ticket.assignedTo;
+      if (finalAssignedUserId && userGroupId) {
         try {
-          await syncUserWorkload(ticket.assignedTo, userGroupId, boardId, userId);
-          logger.info(`[Ticket Creation] Synced workload for user ${ticket.assignedTo}`);
+          await syncUserWorkload(finalAssignedUserId, userGroupId, boardId, userId);
+          logger.info(`[Ticket Creation] Synced workload for user ${finalAssignedUserId}`);
         } catch (error) {
           logger.error('[Ticket Creation] Error syncing workload:', error);
-          // Don't fail ticket creation if workload sync fails
         }
       }
 
-      // Send notification AFTER transaction (external operation)
-      if (ticket.assignedTo && ticket.assignedTo !== userId) {
-        try {
-          await notificationHooks.onTicketAssignment(ticket.id, ticket.assignedTo, userId);
-        } catch (error) {
-          logger.error('Failed to send ticket assignment notification on creation:', error);
-        }
+      // Send notification for regular auto-assignment (non-FRA)
+      // FRA notifications are handled by side-effect handlers above
+      if (!pendingFullRoleAssignment && ticket.assignedTo && ticket.assignedTo !== userId) {
+        const ticketsHandler = new TicketsSideEffectHandler({ userID: userId });
+        ticketsHandler.onUpdate({
+          entityId: ticket.id,
+          entityType: 'tickets',
+          operation: 'update',
+          args: { assignedTo: ticket.assignedTo },
+          previousValue: {
+            assignedTo: null,
+            stageName: ticket.stageName,
+            statusV2: ticket.statusV2,
+            eta: ticket.eta ? ticket.eta.getTime() : null,
+            boardId: ticket.boardId,
+            createdBy: ticket.createdBy,
+            channelId: ticket.channelId,
+          },
+        }).catch(err => logger.error('[Ticket Creation] Non-FRA TicketsSideEffectHandler error:', err));
       }
 
       ticketDuplicateService.persistDuplicateReferences({

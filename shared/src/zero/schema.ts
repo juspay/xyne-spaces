@@ -867,6 +867,7 @@ export const userGroupMappingTable = table('user_group_mappings')
     userGroupId: string(),
     responsibility: enumeration<UserResponsibility>(),
     onCallSetNumber: number().optional(),
+    onCallSetNumbers: json<number[]>(),
     createdAt: number(),
     updatedAt: number(),
   })
