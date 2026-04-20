@@ -184,10 +184,10 @@ const CallHistoryScreen = (): ReactElement => {
             reauth: true,
           });
         } else {
-          setSyncMessage({ text: data?.error ?? 'Sync failed', ok: false });
+          setSyncMessage({ text: 'Unable to sync', ok: false });
         }
       } else {
-        setSyncMessage({ text: 'Sync failed', ok: false });
+        setSyncMessage({ text: 'Unable to sync', ok: false });
       }
     } finally {
       setIsSyncing(false);
