@@ -19,7 +19,7 @@ import { Button } from '../../ui/Button';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { getTargetUserIdForCall } from './ConversationHeader.utils';
 import { useUser } from '../../../hooks/useUsers';
-import { isDMChannel, isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useNavigate } from 'react-router-dom';
@@ -54,8 +54,8 @@ const ConversationHeader = ({
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
 
-  // Get user status for DMs
-  const isDM = channel && isDMChannel(channel.scopeType);
+  // Get user status for 1-on-1 DMs only (not group DMs)
+  const isDM = channel && isOneToOneDMChannel(channel.scopeType);
   const dmUser = useUser(avatarUserId || '');
 
   const { width } = useMeasure({ observeResize: true });
