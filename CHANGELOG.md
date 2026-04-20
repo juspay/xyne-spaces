@@ -1,3 +1,37 @@
+## [1.122.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.121.1...v1.122.0) (2026-04-20)
+
+
+### Features
+
+* added filters ([931cacc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/931caccd27a270ca3898f2c6aa09221b4d4923bd)), closes [#5237](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5237)
+* airborne fcm in lotus and xyne spaces for android ([9f1acc0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9f1acc06bae4a5a865a740cbbe59b07216d24bb1)), closes [#5193](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5193)
+* display last 2 avatars for group DM messages in sidebar ([3aa1fe4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3aa1fe435a750401360c159b5901e23255a4a240)), closes [#5127](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5127)
+* Drap and Drop to reschedule calls ([384a381](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/384a381f21b9a405f9b8322e9ac5419485ee0a7c)), closes [#4945](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4945)
+* egress recordings for calls and recordings. ([d321e92](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d321e9200c359b8b05472c59fd37ceef44b669bf)), closes [#5201](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5201)
+* Enable image copy paste ([c07f33d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c07f33d8311a3c35f1c1b9a7d6d2a42759a10647)), closes [#5103](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5103)
+* filters in dasboard for scheduled messages . ([6298b3e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6298b3e248ff3e3303c7d596b422f30865cf0795)), closes [#5248](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5248)
+* fix unknown channel issue ([d39d535](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d39d535ea4d8d15328045b9767492f8829623f31))
+* native app chat date pill sticky, ui refactor ([860e384](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/860e38433a950014da23ec4b17e432c649c375f3)), closes [#5242](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5242)
+* pre-populate thread participants when opening huddle from thread ([7301ff1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7301ff15551e285b57776f1f7d2664efc61b3585)), closes [#5261](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5261)
+* speaker diarization in calls ([5f81db0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5f81db00925fbbdfd24bcd7ab86d4e4f72e4e9a0)), closes [#5027](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5027)
+
+
+### Bug Fixes
+
+* [Mobile] Autofocus input after mobile attachment upload ([766bfdf](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/766bfdf719b47a97580805783bfe5b1d2d0e2bc4)), closes [#5036](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5036)
+* add darkmode fixes ([ec7fdd8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ec7fdd866da7a1a70ed03665df4d0cd080ff3c61)), closes [#5270](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5270)
+* Added composeDmPanel to DmsPage search and new conversation list ([ec1dcc9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ec1dcc95786ce9575ad03bd5f5c7967e63d994ed)), closes [#4708](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4708)
+* ai onboarding blur overlay gets stuck and blocks UI ([2c00ac7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2c00ac732bf3e8a11dcbba0c9251b0efbbb3f5a4)), closes [#5047](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5047)
+* analytics fix external channels ([bf93cbb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bf93cbbd13f0b39e5492ad79aadb8b48d601bcb5))
+* android always load bundled package ([8d4d25a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8d4d25acdae35b41f3160033c078723c4c43d0d9)), closes [#5174](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5174)
+* change set number to array ([95ae1a5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/95ae1a51e7fee95f53db9892ce9bab364acdf45e)), closes [#5141](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5141)
+* fcm silent updtes for iOS ([12ed51f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/12ed51f3fd44a6b07feb06985da65249cdb69c47)), closes [#5263](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5263)
+* fix no attachment to load ([176a253](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/176a2538fd0661992ae3a477c26621223302d2e5))
+* fix the link formatting behaviour in tiptap editor ([90db7be](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/90db7beaf2413dd47720a859c15bf6afb2f61b46))
+* fixed custom emoji not showing on electron ([7657a89](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7657a890803e7bdd4370d8e79784b0ad2990f339))
+* reaction message delete fix ([c64fd45](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c64fd451b69653587f0c64ddcdae7d5bee0239e9)), closes [#5154](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5154)
+* removed showing status in group dms ([275c8dc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/275c8dc84d655767a7ec46f102a31b213bc23621)), closes [#5250](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5250)
+
 ## [1.121.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.121.0...v1.121.1) (2026-04-20)
 
 
