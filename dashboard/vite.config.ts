@@ -20,8 +20,7 @@ export default defineConfig({
             'dist/version.json',
             JSON.stringify(
               {
-                version: pkg.version,
-                buildTime: Date.now()
+                version: pkg.version
               },
               null,
               2
