@@ -1,6 +1,53 @@
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import { Call } from './callHistoryItem.utils';
 
+// ── Drag & Drop helpers ──────────────────────────────────────────────────────
+
+/** Inverse of topPxForMinutes: pixel offset → minutes since midnight (raw, not snapped) */
+export function minutesFromTopPx(px: number): number {
+  return (px / HOUR_HEIGHT) * 60;
+}
+
+/** Snap a minute value to the nearest 15-minute interval */
+export function snapTo15(minutes: number): number {
+  return Math.round(minutes / 15) * 15;
+}
+
+/**
+ * Parse a dayKey string (YYYY-M-D, 0-indexed month) back to a Date at local midnight.
+ * Mirrors the dayKey() function above.
+ */
+export function parseDayKey(key: string): Date {
+  const [yearStr, monthStr, dateStr] = key.split('-');
+
+  if (yearStr === undefined || monthStr === undefined || dateStr === undefined) {
+    throw new Error(`Invalid day key: ${key}`);
+  }
+
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const date = Number(dateStr);
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(date)) {
+    throw new Error(`Invalid day key: ${key}`);
+  }
+
+  return new Date(year, month, date, 0, 0, 0, 0);
+}
+
+/**
+ * Whether a call card should be draggable.
+ * Only the organizer (or creator, as fallback) can drag future/scheduled calls.
+ */
+export function isCallDraggable(call: Call, currentUserId: string | undefined): boolean {
+  if (!currentUserId) return false;
+  if (call.status === CallStatus.ENDED || call.status === CallStatus.CANCELLED) return false;
+  if (!call.startsAt || new Date(call.startsAt).getTime() <= Date.now()) return false;
+  // organizerId is optional — fall back to createdByUserId
+  const owner = call.organizerId ?? call.createdByUserId;
+  return owner === currentUserId;
+}
+
 // Shared constants
 export const HOUR_HEIGHT = 64; // px per hour
 export const MIN_EVENT_HEIGHT = 28; // px
