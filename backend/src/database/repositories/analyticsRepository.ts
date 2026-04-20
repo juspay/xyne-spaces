@@ -194,7 +194,7 @@ export class AnalyticsRepository {
     'cmkl0nsjp01vq5n0sczlf058f', 'cmkmh8ksj00fbxkaq0u5u207c',
     'cmkmir9ys03ntskfrt63lrfex', 'cmkmiz3wb03o7skfr6cos6t3b',
     'cmkn23y86008b10br13ngegoq', 'cmkn2ohyc009vjja5vbw9qrg7',
-    'cmlpgdr0a09rj11uzf3xql7ad', 'cmkmhn5c803k3skfrc836863n'
+    'cmlpgdr0a09rj11uzf3xql7ad', 'cmkmhn5c803k3skfrc836863n','cmlv7gc0a00mrka9fol3ccjrk'
   ];
 
   private async getFilteredMessages(dateCondition: { gte: Date; lte?: Date }): Promise<FilteredMessage[]> {
@@ -2145,18 +2145,9 @@ export class AnalyticsRepository {
     // Subtract IST offset to get UTC time for start of today IST
     const startOfTodayUTC = new Date(startOfTodayIST.getTime() - IST_OFFSET_MS);
 
-    // Count messages from start of today (IST) to now
-    const messagesTodayCount = await this.prisma.message.count({
-      where: {
-        createdAt: {
-          gte: startOfTodayUTC,
-          lte: now
-        },
-        msgType: 'USER' // Only count user messages, exclude bot messages
-      }
-    });
+    const validMessages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now });
 
-    return messagesTodayCount;
+    return validMessages.length;
   }
 
   /**
@@ -2167,16 +2158,9 @@ export class AnalyticsRepository {
     // All-time metrics are calculated from Dec 15, 2025 00:00:00 IST (UTC+5:30)
     const allTimeStartDate = new Date('2025-12-14T18:30:00.000Z');
 
-    const count = await this.prisma.message.count({
-      where: {
-        msgType: 'USER', // Only count user messages, exclude bot messages
-        createdAt: {
-          gte: allTimeStartDate
-        }
-      }
-    });
+    const validMessages = await this.getFilteredMessages({ gte: allTimeStartDate });
 
-    return count;
+    return validMessages.length;
   }
 
   /**
@@ -2197,19 +2181,7 @@ export class AnalyticsRepository {
     // Subtract IST offset to get UTC time for start of today IST
     const startOfTodayUTC = new Date(startOfTodayIST.getTime() - IST_OFFSET_MS);
 
-    // Get messages from today
-    const messages = await this.prisma.message.findMany({
-      where: {
-        createdAt: {
-          gte: startOfTodayUTC,
-          lte: now
-        },
-        msgType: 'USER' // Only count user messages, exclude bot messages
-      },
-      select: {
-        createdAt: true
-      }
-    });
+    const messages = await this.getFilteredMessages({ gte: startOfTodayUTC, lte: now });
 
     // Generate hourly buckets for today
     const timeBuckets = this.generateHourlyTimeBuckets(startOfTodayUTC, now);
