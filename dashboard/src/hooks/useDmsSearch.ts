@@ -1,23 +1,30 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAllChannels } from './useChannels';
-import { useUsers } from './useUsers';
+import { useUsers, searchUsers } from './useUsers';
+import { useAuthContextValues } from './useAuth';
 import {
   isDMChannel,
   parseDMParticipantIds,
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
-import { Channel } from '@xyne/shared';
+import { Channel, ChannelScopeType, User } from '@xyne/shared';
 
 interface UseDmsSearchReturn {
   dmSearchQuery: string;
   setDmSearchQuery: (query: string) => void;
-  dmSearchResults: Channel[];
+  /** Existing DM channels matching the search query */
+  dmChannelResults: Channel[];
+  /** Workspace users with no existing 1:1 DM matching the search query */
+  userResults: User[];
+  /** Combined count for keyboard navigation */
+  totalResultCount: number;
   showDmSearchDropdown: boolean;
   setShowDmSearchDropdown: (show: boolean) => void;
   selectedDmSearchIndex: number;
   dmSearchInputRef: React.RefObject<HTMLInputElement | null>;
   handleDmSearchKeyDown: (
     e: React.KeyboardEvent<HTMLInputElement>,
-    onSelect: (channelId: string) => void,
+    onSelectChannel: (channelId: string) => void,
+    onSelectUser: (userId: string) => void,
   ) => void;
 }
 
@@ -29,11 +36,13 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
 
   const allChannels = useAllChannels();
   const allUsers = useUsers();
+  const { userID: currentUserId } = useAuthContextValues();
 
   // Build a Map for O(1) user lookup (same as cmd+k approach in ChannelCommandMenu)
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
 
-  const dmSearchResults = useMemo(() => {
+  /** Existing DM channels (1:1 and group) matching the query */
+  const dmChannelResults = useMemo(() => {
     if (!dmSearchQuery.trim()) return [];
 
     // Support comma-separated keywords (same as cmd+k via useSearchMetrics)
@@ -45,41 +54,74 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
 
     const dmChannels = allChannels.filter(channel => isDMChannel(channel.scopeType));
 
-    return dmChannels.filter(dm => {
-      const participantIds = parseDMParticipantIds(dm);
-      const participantNames = participantIds
-        .map(id => usersById.get(id)?.name?.toLowerCase())
-        .filter((name): name is string => !!name);
+    return dmChannels
+      .filter(dm => {
+        const participantIds = parseDMParticipantIds(dm);
+        const participantNames = participantIds
+          .map(id => usersById.get(id)?.name?.toLowerCase())
+          .filter((name): name is string => !!name);
 
-      return keywords.some(keyword => participantNames.some(name => name.includes(keyword)));
-    });
+        return keywords.some(keyword => participantNames.some(name => name.includes(keyword)));
+      })
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   }, [allChannels, dmSearchQuery, usersById]);
 
-  // Reset selected index when search results change
+  /** User IDs already represented by an existing 1:1 DM channel with current user */
+  const usersWithExistingDm = useMemo(() => {
+    const existing1on1Dms = allChannels.filter(ch => ch.scopeType === ChannelScopeType.DM);
+    const ids = new Set<string>();
+    for (const dm of existing1on1Dms) {
+      for (const id of parseDMParticipantIds(dm)) {
+        ids.add(id);
+      }
+    }
+    return ids;
+  }, [allChannels]);
+
+  /** Workspace users with no existing 1:1 DM, matching the query via Fuse.js */
+  const userResults = useMemo(() => {
+    if (!dmSearchQuery.trim()) return [];
+
+    return searchUsers(allUsers, dmSearchQuery, 10).filter(
+      u => u.id !== currentUserId && !usersWithExistingDm.has(u.id),
+    );
+  }, [allUsers, dmSearchQuery, currentUserId, usersWithExistingDm]);
+
+  const totalResultCount = dmChannelResults.length + userResults.length;
+
+  // Reset selected index when results change
   useEffect(() => {
     setSelectedDmSearchIndex(0);
-  }, [dmSearchResults.length]);
+  }, [totalResultCount]);
 
   const handleDmSearchKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>, onSelect: (channelId: string) => void) => {
+    (
+      e: React.KeyboardEvent<HTMLInputElement>,
+      onSelectChannel: (channelId: string) => void,
+      onSelectUser: (userId: string) => void,
+    ) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedDmSearchIndex(prev => (prev < dmSearchResults.length - 1 ? prev + 1 : prev));
+        setSelectedDmSearchIndex(prev => (prev < totalResultCount - 1 ? prev + 1 : prev));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedDmSearchIndex(prev => (prev > 0 ? prev - 1 : 0));
-      } else if (e.key === 'Enter' && dmSearchResults.length > 0) {
+      } else if (e.key === 'Enter' && totalResultCount > 0) {
         e.preventDefault();
-        const selectedChannel = dmSearchResults[selectedDmSearchIndex];
-        if (selectedChannel) {
-          onSelect(selectedChannel.id);
+        if (selectedDmSearchIndex < dmChannelResults.length) {
+          const selectedChannel = dmChannelResults[selectedDmSearchIndex];
+          if (selectedChannel) onSelectChannel(selectedChannel.id);
+        } else {
+          const userIndex = selectedDmSearchIndex - dmChannelResults.length;
+          const selectedUser = userResults[userIndex];
+          if (selectedUser) onSelectUser(selectedUser.id);
         }
       } else if (e.key === 'Escape') {
         setShowDmSearchDropdown(false);
         dmSearchInputRef.current?.blur();
       }
     },
-    [dmSearchResults, selectedDmSearchIndex],
+    [dmChannelResults, userResults, selectedDmSearchIndex, totalResultCount],
   );
 
   // Close dropdown when clicking outside the search container
@@ -98,7 +140,9 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   return {
     dmSearchQuery,
     setDmSearchQuery,
-    dmSearchResults,
+    dmChannelResults,
+    userResults,
+    totalResultCount,
     showDmSearchDropdown,
     setShowDmSearchDropdown,
     selectedDmSearchIndex,

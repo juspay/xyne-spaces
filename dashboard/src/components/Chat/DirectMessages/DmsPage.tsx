@@ -64,6 +64,27 @@ const DmSearchResultItem = ({
   );
 };
 
+// Component for user search results (start new conversation)
+interface DmUserSearchResultItemProps {
+  user: {
+    id: string;
+    name: string;
+  };
+  isSelected: boolean;
+}
+
+const DmUserSearchResultItem = ({
+  user,
+  isSelected,
+}: DmUserSearchResultItemProps): ReactElement => {
+  return (
+    <div className={`flex items-center gap-3 px-2 py-2 ${isSelected ? 'bg-accent' : ''}`}>
+      <Avatar userId={user.id} size='md' showActiveStatus className='rounded-lg' />
+      <span className='text-sm font-medium text-foreground truncate'>{user.name}</span>
+    </div>
+  );
+};
+
 // Hardcoded item heights derived from CSS (avoids DOM measurement via ref)
 // Desktop: py-3 (24px) + size-[48px] avatar + 1px border-bottom = 73px
 // Mobile: 47px DmListItem + 16px pt-4 wrapper padding = 63px
@@ -120,7 +141,8 @@ const DmsPage = (): ReactElement => {
   const {
     dmSearchQuery,
     setDmSearchQuery,
-    dmSearchResults,
+    dmChannelResults,
+    userResults,
     showDmSearchDropdown,
     setShowDmSearchDropdown,
     selectedDmSearchIndex,
@@ -235,28 +257,84 @@ const DmsPage = (): ReactElement => {
     [unreadCounts, messagesMap],
   );
 
+  // Handle new user selection (no existing DM) — navigate to compose panel inside DmsPage.
+  // Pass a unique composePanelKey in location state so the compose panel always remounts
+  // on a new selection (even if the same userId is re-selected after removing them via X).
+  const handleUserSelect = useCallback(
+    (userId: string) => {
+      setDmSearchQuery('');
+      setShowDmSearchDropdown(false);
+      void navigate(`/chat/dm/compose?userId=${userId}`, {
+        state: { composePanelKey: Date.now() },
+      });
+    },
+    [navigate, setDmSearchQuery, setShowDmSearchDropdown],
+  );
+
   // Shared search dropdown JSX to avoid duplication between mobile and desktop
   const renderSearchDropdown = (): ReactElement | null => {
     if (!showDmSearchDropdown || !dmSearchQuery.trim()) return null;
+
+    const hasChannels = dmChannelResults.length > 0;
+    const hasUsers = userResults.length > 0;
+    const noResults = !hasChannels && !hasUsers;
+
     return (
       <div className='absolute top-full left-0 right-0 mt-2 bg-background rounded-xl border border-border shadow-lg z-50 max-h-80 overflow-y-auto'>
-        {dmSearchResults.length === 0 ? (
-          <div className='px-4 py-3 text-sm text-muted-foreground'>No DMs found</div>
+        {noResults ? (
+          <div className='px-4 py-3 text-sm text-muted-foreground'>No results found</div>
         ) : (
-          dmSearchResults.map((channel, index) => (
-            <button
-              key={channel.id}
-              type='button'
-              className={`w-full text-left cursor-pointer hover:bg-accent ${
-                index === selectedDmSearchIndex ? 'bg-accent' : ''
-              }`}
-              onClick={() => void handleDmSelect(channel.id)}
-              data-track-category='DM'
-              data-track-name='SELECT_DM_SEARCH_RESULT'
-            >
-              <DmSearchResultItem channel={channel} isSelected={index === selectedDmSearchIndex} />
-            </button>
-          ))
+          <>
+            {hasChannels && (
+              <>
+                <div className='px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+                  Conversations
+                </div>
+                {dmChannelResults.map((channel, index) => (
+                  <button
+                    key={channel.id}
+                    type='button'
+                    className={`w-full text-left cursor-pointer hover:bg-accent ${
+                      index === selectedDmSearchIndex ? 'bg-accent' : ''
+                    }`}
+                    onClick={() => void handleDmSelect(channel.id)}
+                    data-track-category='DM'
+                    data-track-name='SELECT_DM_SEARCH_RESULT'
+                  >
+                    <DmSearchResultItem
+                      channel={channel}
+                      isSelected={index === selectedDmSearchIndex}
+                    />
+                  </button>
+                ))}
+              </>
+            )}
+            {hasUsers && (
+              <>
+                <div className='px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+                  Start new conversation
+                </div>
+                {userResults.map((user, userIndex) => {
+                  const absoluteIndex = dmChannelResults.length + userIndex;
+                  const isSelected = absoluteIndex === selectedDmSearchIndex;
+                  return (
+                    <button
+                      key={user.id}
+                      type='button'
+                      className={`w-full text-left cursor-pointer hover:bg-accent ${
+                        isSelected ? 'bg-accent' : ''
+                      }`}
+                      onClick={() => handleUserSelect(user.id)}
+                      data-track-category='DM'
+                      data-track-name='SELECT_NEW_DM_USER'
+                    >
+                      <DmUserSearchResultItem user={user} isSelected={isSelected} />
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </>
         )}
       </div>
     );
@@ -316,7 +394,9 @@ const DmsPage = (): ReactElement => {
                 setShowDmSearchDropdown(true);
               }}
               onFocus={() => setShowDmSearchDropdown(true)}
-              onKeyDown={e => handleDmSearchKeyDown(e, id => void handleDmSelect(id))}
+              onKeyDown={e =>
+                handleDmSearchKeyDown(e, id => void handleDmSelect(id), handleUserSelect)
+              }
               data-track-event='blur'
               data-track-category='DM'
               data-track-name='SEARCH_DMS_INPUT'
@@ -464,7 +544,9 @@ const DmsPage = (): ReactElement => {
                     setShowDmSearchDropdown(true);
                   }}
                   onFocus={() => setShowDmSearchDropdown(true)}
-                  onKeyDown={e => handleDmSearchKeyDown(e, id => void handleDmSelect(id))}
+                  onKeyDown={e =>
+                    handleDmSearchKeyDown(e, id => void handleDmSelect(id), handleUserSelect)
+                  }
                   data-testid='search-messages-input'
                   data-track-event='blur'
                   data-track-category='DM'

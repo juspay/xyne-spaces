@@ -109,6 +109,7 @@ const dashboardInstrumentation: Instrumentation = {
 };
 import { useSwipeBack } from '../hooks/useSwipeBack';
 import DmsPage from '../components/Chat/DirectMessages/DmsPage';
+import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel';
 import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
 import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 import GlobalTopBar from '../components/GlobalTopBar/GlobalTopBar';
@@ -699,7 +700,11 @@ export const router = createBrowserRouter([
                   {
                     path: 'dm',
                     element: <DmsPage />,
-                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                    children: [
+                      { index: true, element: null },
+                      { path: 'compose', element: <KeyedComposeDmPanel /> },
+                      ...sharedChatRoutes,
+                    ],
                   },
                   // Bookmarks (full screen with bookmarks list sidebar)
                   {
