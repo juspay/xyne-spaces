@@ -29,6 +29,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
+import { LinkSyncPlugin } from '../../../ui/TipTapExtensions/LinkSyncPlugin';
 import { toast } from 'sonner';
 import { StopIcon } from './StopIcon';
 import {
@@ -454,6 +455,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
             rel: 'noopener noreferrer',
           },
         }),
+        LinkSyncPlugin,
         MentionExtension.configure({
           userActions: [],
           groupActions: [],
