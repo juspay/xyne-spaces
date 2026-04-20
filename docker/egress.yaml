@@ -1,0 +1,17 @@
+# LiveKit Egress Service Configuration
+# Docs: https://docs.livekit.io/egress/overview/
+
+log_level: info
+
+# Redis connection (same as LiveKit server)
+redis:
+  address: redis:6379
+
+# LiveKit server API credentials
+api_key: devkey
+api_secret: devsecret
+ws_url: ws://livekit:7880
+
+# File upload configuration
+# In development, Egress uploads to fake-gcs via STORAGE_EMULATOR_HOST env var
+# In production, Egress uses Application Default Credentials for GCS

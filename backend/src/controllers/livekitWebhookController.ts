@@ -11,6 +11,9 @@ import { livekitWebhookACL } from './livekitWebhookACL';
 import { transcriptService } from '@/services/transcriptService';
 import { CallOrigin } from '@prisma/client';
 import { livekitService } from '@/services/liveKitService';
+import { callRecordingService } from '@/services/callRecordingService';
+import { EgressStatus } from 'livekit-server-sdk';
+import { ParticipantInfo_Kind } from '@livekit/protocol';
 
 class LiveKitWebhookController {
   private receiver: WebhookReceiver;
@@ -63,6 +66,10 @@ class LiveKitWebhookController {
 
         case 'participant_left':
           await this.handleParticipantLeft(event);
+          break;
+
+        case 'egress_ended':
+          await this.handleEgressEnded(event);
           break;
 
         default:
@@ -170,6 +177,12 @@ class LiveKitWebhookController {
       return;
     }
 
+    // Skip egress participants (the recording bot that joins to capture audio)
+    if (participant.kind === ParticipantInfo_Kind.EGRESS) {
+      logger.debug(`[LiveKit Webhook] Skipping egress participant: ${participant.identity}`);
+      return;
+    }
+
     try {
       // Check if call record already exists
       let call = await repositories.calls.findByExternalId(roomName);
@@ -247,6 +260,21 @@ class LiveKitWebhookController {
         call = result.call;
 
         logger.info(`[LiveKit Webhook] Successfully created all records for first participant in call ${roomName}`);
+
+        // Start recording if enabled via env config
+        try {
+          const recordingEnabled = callRecordingService.isRecordingEnabled();
+          if (recordingEnabled && call) {
+            const egressId = await callRecordingService.startRecording(roomName, call.createdAt);
+            if (egressId) {
+              logger.info(`[LiveKit Webhook] Started recording for call ${roomName}, egressId=${egressId}`);
+            } else {
+              logger.warn(`[LiveKit Webhook] Recording start returned no egressId for call ${roomName}`);
+            }
+          }
+        } catch (recordingError) {
+          logger.error(`[LiveKit Webhook] Failed to start recording for call ${roomName}:`, recordingError);
+        }
 
         // Generate title from thread call
         if (callOrigin === CallOrigin.CONVERSATION && existingConversationId && call) {
@@ -378,6 +406,12 @@ class LiveKitWebhookController {
       return;
     }
 
+    // Skip egress participants (the recording bot that joins to capture audio)
+    if (participant.kind === ParticipantInfo_Kind.EGRESS) {
+      logger.debug(`[LiveKit Webhook] Skipping egress participant: ${participant.identity}`);
+      return;
+    }
+
     try {
       const now = new Date();
 
@@ -411,6 +445,15 @@ class LiveKitWebhookController {
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);
 
+        // Gracefully stop egress so it can flush to GCS before the room tears down
+        try {
+          if (callRecordingService.isRecordingEnabled()) {
+            await callRecordingService.stopRecording(callId);
+          }
+        } catch (stopErr) {
+          logger.error(`[LiveKit Webhook] Failed to stop recording for call ${callId}:`, stopErr);
+        }
+
         // Trigger side effects for call end (missed call notifications, cleanup timeouts, activities)
         try {
           await callSideEffectService.handleCallEnded(result.call.id);
@@ -437,6 +480,42 @@ class LiveKitWebhookController {
       }
     } catch (error) {
       logger.error(`[LiveKit Webhook] Error handling participant leave:`, error);
+    }
+  }
+
+  /**
+   * Handle egress_ended event
+   * Called when an egress job completes (recording finished uploading to GCS)
+   */
+  private async handleEgressEnded(event: WebhookEvent): Promise<void> {
+    const egressInfo = event.egressInfo;
+    if (!egressInfo?.egressId) {
+      logger.warn('[LiveKit Webhook] egress_ended event missing egressInfo');
+      return;
+    }
+
+    const statusName = EgressStatus[egressInfo.status] ?? `UNKNOWN(${egressInfo.status})`;
+    logger.info(`[LiveKit Webhook] Egress ended: ${egressInfo.egressId}`, {
+      roomName: egressInfo.roomName,
+      status: egressInfo.status,
+      statusName,
+      error: egressInfo.error || undefined,
+    });
+
+    if (egressInfo.status !== EgressStatus.EGRESS_COMPLETE) {
+      logger.warn(
+        `[LiveKit Webhook] Egress for room ${egressInfo.roomName} did not complete successfully ` +
+        `(status=${statusName}, egressId=${egressInfo.egressId}, error=${egressInfo.error ?? 'none'}). ` +
+        `Recording will NOT be saved.`
+      );
+      return;
+    }
+
+    try {
+      await callRecordingService.handleEgressCompleted(egressInfo.roomName);
+      logger.info(`[LiveKit Webhook] Processed egress completion for room ${egressInfo.roomName}`);
+    } catch (error) {
+      logger.error(`[LiveKit Webhook] Error handling egress_ended for room ${egressInfo.roomName}:`, error);
     }
   }
 }

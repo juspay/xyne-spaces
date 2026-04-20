@@ -144,6 +144,11 @@ class WorkerService {
       const { scheduledMessageQueue } = await import('@/queues/scheduledMessageQueue');
       await scheduledMessageQueue.initialize();
 
+      // Initialize recording cleanup queue (daily cron to delete expired recordings)
+      logger.info('Initializing recording cleanup queue...');
+      const { recordingCleanupQueue } = await import('@/queues/recordingCleanupQueue');
+      await recordingCleanupQueue.initialize();
+
       if (appConfig.enableScheduledMessageWorker) {
         logger.info('Initializing notification service for scheduled message worker...');
         await notificationService.initialize();

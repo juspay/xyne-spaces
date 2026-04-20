@@ -74,6 +74,9 @@ const envSchema = Joi.object({
   LIVEKIT_URL: Joi.string().default(''),
   LIVEKIT_CLIENT_URL: Joi.string().default(''),
   LIVEKIT_SERVER_URL: Joi.string().default(''),
+  // Call Recording Configuration
+  CALL_RECORDING_ENABLED: Joi.boolean().default(false),
+  CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
   FCM_PROJECT_ID: Joi.string().allow('').default(''),
   FCM_SERVICE_ACCOUNT_BASE64: Joi.string().allow('').default(''),
   APNS_KEY_ID: Joi.string().allow('').default(''),
@@ -316,6 +319,10 @@ export const config = {
     url: envVars.LIVEKIT_URL,
     clientUrl: envVars.LIVEKIT_CLIENT_URL,
     serverUrl: envVars.LIVEKIT_SERVER_URL,
+  },
+  callRecording: {
+    enabled: envVars.CALL_RECORDING_ENABLED,
+    retentionDays: envVars.CALL_RECORDING_RETENTION_DAYS,
   },
   fcm: {
     projectId: envVars.FCM_PROJECT_ID,
