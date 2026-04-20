@@ -31,6 +31,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const hasAutoInitiatedRef = useRef(false);
+  const hasPrePopulatedRef = useRef(false);
 
   const { initiateCall } = useCallJoinOrInitiate();
   const { user: currentUser } = useAuth();
@@ -38,6 +39,10 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const [channelParticipants] = useCachedQuery(queries.channelParticipants({ channelId }), {
     enabled: isOpen,
   });
+  const [conversation] = useCachedQuery(
+    queries.getConversationById({ conversationId: conversationId ?? '' }),
+    { enabled: isOpen && !!conversationId },
+  );
   const allUsers = useUsers();
 
   const channelParticipantUserIds = useMemo(() => {
@@ -125,6 +130,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
 
     if (!isOpen) {
       hasAutoInitiatedRef.current = false;
+      hasPrePopulatedRef.current = false;
     }
   }, [
     isOpen,
@@ -133,6 +139,26 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     initiateCallWithParticipants,
     currentUser?.id,
   ]);
+
+  // Pre-populate selected participants with thread participants when conversationId is provided
+  useEffect(() => {
+    if (
+      isOpen &&
+      conversationId &&
+      conversation?.participants &&
+      !hasPrePopulatedRef.current &&
+      channel?.scopeType !== ChannelScopeType.DM
+    ) {
+      const threadParticipantIds = conversation.participants
+        .map(p => p.userId)
+        .filter(userId => userId !== currentUser?.id);
+      const preSelected = threadParticipantIds.map(userId => `user:${userId}`);
+      if (preSelected.length > 0) {
+        setSelectedParticipants(preSelected);
+        hasPrePopulatedRef.current = true;
+      }
+    }
+  }, [isOpen, conversationId, conversation?.participants, currentUser?.id, channel?.scopeType]);
 
   const handleSubmit = () => {
     const targetUserIds = selectedParticipants
@@ -151,6 +177,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const handleClose = () => {
     setSelectedParticipants([]);
     setSearchQuery('');
+    hasPrePopulatedRef.current = false;
     onClose();
   };
 
