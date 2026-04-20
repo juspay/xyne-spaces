@@ -17,7 +17,6 @@ router.get('/recordings', callController.getRecordings);
 router.get('/recordings/:callId', callController.getRecordingDetail);
 router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
-
 // Pulse org list proxy (must be before /:callId wildcard)
 router.get('/pulse-orgs', callController.getPulseOrgs);
 
@@ -30,6 +29,12 @@ router.post('/:callId/process-transcript', callController.processTranscript);
 
 // Download transcript endpoint (downloads transcript file from GCS)
 router.get('/:callId/download-transcript', callController.downloadTranscript);
+
+// Download recording endpoint (redirects to signed GCS URL for MP4)
+router.get('/:callId/download-recording', callController.downloadRecording);
+
+// Save recording attachment — creates the MessageAttachment row on first play
+router.post('/:callId/save-recording-attachment', callController.saveRecordingAttachment);
 
 // PRD Generation endpoint (generates PRD canvas from call transcript)
 router.post('/:callId/generate-prd', callController.generatePRD);

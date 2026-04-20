@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { CreateDocumentModal } from './CreateDocumentModal';
+import { recordingService } from '../../../services/Recording/recordingService';
 import { Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { CallMessageOverlay } from '../../Chat/CallMessageOverlay/CallMessageOverlay';
@@ -220,6 +222,14 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
     return attType !== 'identified_transcript';
   });
 
+  // Recording audio attachments are rendered separately by AudioPlayerButton below.
+  // Exclude them from the file grid to avoid showing "FILE 0 B" cards.
+  const isRecordingAudio = (a: AttachmentType): boolean =>
+    a.mimetype === 'audio/mp4' && (a.metadata as { type?: string } | null)?.type === 'recording';
+
+  const displayAttachments = (visibleAttachments ?? []).filter(a => !isRecordingAudio(a));
+  const recordingAttachment = attachments?.find(isRecordingAudio);
+
   return (
     <div className='w-full flex flex-col gap-1'>
       {isActiveCall && channelId ? (
@@ -233,15 +243,15 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
             </div>
           )}
 
-          {/* Attachments */}
-          {visibleAttachments && visibleAttachments.length > 0 && (
+          {/* Attachments — recording audio excluded (shown via AudioPlayerButton) */}
+          {displayAttachments.length > 0 && (
             <div>
               <div className='flex items-center gap-3 text-xs font-medium'>
                 <div className='flex items-center gap-1'>
                   <span className='text-muted-foreground'>
-                    {visibleAttachments.length > 1
-                      ? `${visibleAttachments.length} files`
-                      : visibleAttachments[0]?.originalFilename}
+                    {displayAttachments.length > 1
+                      ? `${displayAttachments.length} files`
+                      : displayAttachments[0]?.originalFilename}
                   </span>
                   <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
                     {isExpanded ? (
@@ -252,13 +262,13 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                   </button>
                 </div>
 
-                {visibleAttachments.length > 1 && (
+                {displayAttachments.length > 1 && (
                   <>
                     <span className='text-muted-foreground'>|</span>
                     <button
                       type='button'
                       onClick={() => {
-                        visibleAttachments.forEach(attachment => {
+                        displayAttachments.forEach(attachment => {
                           void downloadAttachment(attachment.id, attachment.originalFilename);
                         });
                       }}
@@ -272,7 +282,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
               {isExpanded && (
                 <div className='flex flex-col gap-3'>
                   {/* Videos first - each in separate row */}
-                  {visibleAttachments
+                  {displayAttachments
                     .filter(attachment => attachment.mimetype.startsWith('video/'))
                     .map(attachment => (
                       <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
@@ -281,11 +291,11 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                     ))}
 
                   {/* Other attachments in one row */}
-                  {visibleAttachments.filter(
+                  {displayAttachments.filter(
                     attachment => !attachment.mimetype.startsWith('video/'),
                   ).length > 0 && (
                     <div className='flex gap-3 flex-wrap'>
-                      {visibleAttachments
+                      {displayAttachments
                         .filter(attachment => !attachment.mimetype.startsWith('video/'))
                         .map(attachment => {
                           const isImageOrText =
@@ -343,6 +353,20 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                   metadata={metadata}
                   attachments={attachments}
                 />
+
+                {/* Play Recording — inline, only when recording attachment exists in Zero */}
+                {recordingAttachment && (
+                  <>
+                    <span className='text-muted-foreground'>•</span>
+                    <AudioPlayer
+                      onLoad={async signal => {
+                        await recordingService.saveRecordingAttachment(callId);
+                        return recordingService.downloadRecordingBlob(callId, signal);
+                      }}
+                      trackCategory='CallBubble'
+                    />
+                  </>
+                )}
               </div>
             )}
         </>

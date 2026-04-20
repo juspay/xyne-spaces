@@ -24,6 +24,7 @@ export interface Recording {
   durationMs: number | null;
   hasTranscript: boolean;
   hasSummary: boolean;
+  hasRecording?: boolean;
 }
 
 export interface RecordingDetail extends Recording {
@@ -35,6 +36,7 @@ export interface RecordingDetail extends Recording {
   conversationId: string | null;
   channelId: string | null;
   messageId: string | null;
+  hasRecording?: boolean;
 }
 
 interface InitiateCallResponse {
@@ -117,6 +119,28 @@ class RecordingService {
    */
   async deleteRecording(callId: string): Promise<void> {
     await apiInstance.delete(`/calls/recordings/${callId}`);
+  }
+
+  /**
+   * Ensure the recording is persisted as a MessageAttachment in the DB.
+   * Idempotent – safe to call multiple times. Returns the attachment ID.
+   */
+  async saveRecordingAttachment(callId: string): Promise<{ attachmentId: string }> {
+    const response: AxiosResponse<{ success: boolean; attachmentId: string }> =
+      await apiInstance.post(`/calls/${callId}/save-recording-attachment`);
+    return { attachmentId: response.data.attachmentId };
+  }
+
+  /**
+   * Download the raw audio blob for a recording via the streaming endpoint.
+   * Pass the signal to abort the fetch when the component unmounts mid-download.
+   */
+  async downloadRecordingBlob(callId: string, signal?: AbortSignal): Promise<Blob> {
+    const response: AxiosResponse<Blob> = await apiInstance.get(
+      `/calls/${callId}/download-recording`,
+      { responseType: 'blob', ...(signal ? { signal } : {}) },
+    );
+    return response.data;
   }
 }
 

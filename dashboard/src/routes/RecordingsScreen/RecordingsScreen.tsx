@@ -19,6 +19,7 @@ import {
 import { RecordingControlBar } from './components/RecordingControlBar';
 import { ActiveRecordingView } from './components/ActiveRecordingView';
 import { SaveTitleModal } from './components/SaveTitleModal';
+import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { toast } from 'sonner';
 import {
   formatRecordingDuration,
@@ -277,64 +278,88 @@ export default function RecordingsScreen(): ReactElement {
             /* Recordings List */
             <div className='space-y-3'>
               {recordings.map(recording => (
-                <button
+                /* Outer div — not a button so we can nest buttons inside */
+                <div
                   key={recording.id}
-                  onClick={() => handleRecordingClick(recording)}
-                  className='w-full text-left bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 p-4 hover:shadow-md transition-shadow cursor-pointer group'
-                  data-track-category='RecordingsScreen'
-                  data-track-name='view_recording'
+                  className='w-full bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 overflow-hidden hover:shadow-md transition-shadow group flex items-center'
                 >
-                  <div className='flex items-start gap-4'>
-                    {/* Icon */}
-                    <div className='flex-shrink-0 w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 transition-colors'>
-                      <Mic className='w-5 h-5 text-blue-600 dark:text-blue-400' />
-                    </div>
+                  {/* Clickable header area → navigate to detail */}
+                  <button
+                    type='button'
+                    onClick={() => handleRecordingClick(recording)}
+                    className='flex-1 min-w-0 text-left p-4 cursor-pointer'
+                    data-track-category='RecordingsScreen'
+                    data-track-name='view_recording'
+                  >
+                    <div className='flex items-start gap-4'>
+                      {/* Icon */}
+                      <div className='flex-shrink-0 w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 transition-colors'>
+                        <Mic className='w-5 h-5 text-blue-600 dark:text-blue-400' />
+                      </div>
 
-                    {/* Content */}
-                    <div className='flex-1 min-w-0'>
-                      <h3 className='font-semibold text-foreground dark:text-gray-100 mb-1 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
-                        {recording.title}
-                      </h3>
+                      {/* Content */}
+                      <div className='flex-1 min-w-0'>
+                        <h3 className='font-semibold text-foreground dark:text-gray-100 mb-1 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
+                          {recording.title}
+                        </h3>
 
-                      <div className='flex items-center gap-4 text-xs text-muted-foreground dark:text-muted-foreground mb-2'>
-                        <div className='flex items-center gap-1'>
-                          <Clock className='w-3 h-3' />
-                          <span>
-                            {formatDistanceToNow(new Date(recording.startedAt), {
-                              addSuffix: true,
-                            })}
-                          </span>
-                        </div>
-                        {recording.durationMs && (
+                        <div className='flex items-center gap-4 text-xs text-muted-foreground dark:text-muted-foreground mb-2'>
                           <div className='flex items-center gap-1'>
-                            <span>{formatDuration(recording.durationMs)}</span>
+                            <Clock className='w-3 h-3' />
+                            <span>
+                              {formatDistanceToNow(new Date(recording.startedAt), {
+                                addSuffix: true,
+                              })}
+                            </span>
                           </div>
-                        )}
-                      </div>
+                          {recording.durationMs && (
+                            <div className='flex items-center gap-1'>
+                              <span>{formatDuration(recording.durationMs)}</span>
+                            </div>
+                          )}
+                        </div>
 
-                      {/* Metadata badges */}
-                      <div className='flex items-center gap-2 flex-wrap'>
-                        {recording.hasTranscript && (
-                          <span className='inline-flex items-center gap-1 px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-md text-xs'>
-                            <FileText className='w-3 h-3' />
-                            Transcript
-                          </span>
-                        )}
-                        {recording.hasSummary && (
-                          <span className='inline-flex items-center gap-1 px-2 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 rounded-md text-xs'>
-                            AI Summary
-                          </span>
-                        )}
-                        {!recording.endedAt && (
-                          <span className='inline-flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-md text-xs'>
-                            <div className='w-2 h-2 bg-blue-500 rounded-full animate-pulse' />
-                            Recording
-                          </span>
-                        )}
+                        {/* Metadata badges */}
+                        <div className='flex items-center gap-2 flex-wrap'>
+                          {recording.hasTranscript && (
+                            <span className='inline-flex items-center gap-1 px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-md text-xs'>
+                              <FileText className='w-3 h-3' />
+                              Transcript
+                            </span>
+                          )}
+                          {recording.hasSummary && (
+                            <span className='inline-flex items-center gap-1 px-2 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 rounded-md text-xs'>
+                              AI Summary
+                            </span>
+                          )}
+                          {!recording.endedAt && (
+                            <span className='inline-flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-md text-xs'>
+                              <div className='w-2 h-2 bg-blue-500 rounded-full animate-pulse' />
+                              Recording
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+
+                  {/* Inline audio player — only present when a GCS file exists */}
+                  {recording.hasRecording && (
+                    <AudioPlayer
+                      onLoad={async signal => {
+                        await recordingService.saveRecordingAttachment(recording.externalId);
+                        return recordingService.downloadRecordingBlob(recording.externalId, signal);
+                      }}
+                      initialDurationSec={
+                        recording.durationMs ? recording.durationMs / 1000 : undefined
+                      }
+                      stopPropagation
+                      trackCategory='RecordingsScreen'
+                      showToastOnError
+                      className='flex-shrink-0 pr-4'
+                    />
+                  )}
+                </div>
               ))}
             </div>
           )}

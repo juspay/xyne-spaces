@@ -17,6 +17,7 @@ import {
   MessageSquare,
   Share2,
   Trash2,
+  Download,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
@@ -42,6 +43,7 @@ export default function RecordingDetailScreen(): ReactElement {
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Query the message for sharing using Zero - same pattern as ShareRecordingHandler
   const [message] = useCachedQuery(
@@ -104,6 +106,28 @@ export default function RecordingDetailScreen(): ReactElement {
   };
 
   const formatDuration = formatRecordingDuration;
+
+  const handleDownloadRecording = async (): Promise<void> => {
+    if (!recording) return;
+
+    try {
+      setIsDownloading(true);
+      const blob = await recordingService.downloadRecordingBlob(recording.externalId);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${recording.title || recording.externalId}.mp4`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      logRecordingError('RecordingDetailScreen.downloadRecording', err);
+      toast.error('Failed to download recording');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -244,6 +268,22 @@ export default function RecordingDetailScreen(): ReactElement {
               <Share2 className='w-4 h-4' />
               Share Recording
             </button>
+            {recording.hasRecording && (
+              <button
+                onClick={() => void handleDownloadRecording()}
+                disabled={isDownloading}
+                className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-gray-100 hover:bg-muted dark:hover:bg-gray-800 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                data-track-category='RecordingDetail'
+                data-track-name='download_recording'
+              >
+                {isDownloading ? (
+                  <Loader2 className='w-4 h-4 animate-spin' />
+                ) : (
+                  <Download className='w-4 h-4' />
+                )}
+                Download Recording
+              </button>
+            )}
             <button
               onClick={() => setIsDeleteOpen(true)}
               className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-destructive hover:bg-muted rounded-md transition-colors'

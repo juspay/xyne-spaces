@@ -125,7 +125,8 @@
     "yauzl": "^3.2.0",
     "yjs": "^13.6.27",
     "zod": "^3.25.76",
-    "zod-to-json-schema": "^3.25.0"
+    "zod-to-json-schema": "^3.25.0",
+    "@livekit/protocol": "1.44.1"
   },
   "devDependencies": {
     "@passionfroot/prisma-generator-zero": "^0.4.0",

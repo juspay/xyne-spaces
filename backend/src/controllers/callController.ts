@@ -6,6 +6,7 @@ import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { transcriptService } from '@/services/transcriptService';
 import {
+  AttachmentEntityType,
   CallOrigin,
   CallStatus,
   CallType,
@@ -22,6 +23,8 @@ import { UpdateRsvpSchema } from '@/validators/callValidator';
 import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@/services/storage/pathUtils';
+import { callRecordingService } from '@/services/callRecordingService';
+import { config } from '@/config/env';
 
 export class CallController {
   updateMeetingStatus = async (req: Request, res: Response): Promise<void> => {
@@ -669,6 +672,8 @@ export class CallController {
             logger.warn(`Failed to find head message for call ${call.externalId}`);
           }
 
+          const recordingAttachment = await repositories.messageAttachments.findRecordingByCallId(call.externalId).catch(() => null);
+
           return {
             id: call.id,
             externalId: call.externalId,
@@ -680,6 +685,7 @@ export class CallController {
               : null,
             hasTranscript: !!call.transcript,
             hasSummary: !!call.aiSummary,
+            hasRecording: !!recordingAttachment,
             messageId,
           };
         }));
@@ -762,6 +768,8 @@ export class CallController {
         logger.warn(`Failed to find message for call ${callId}: ${msgError}`);
       }
 
+      const recordingAttachment = await repositories.messageAttachments.findRecordingByCallId(callId).catch(() => null);
+
       res.json({
         success: true,
         recording: {
@@ -783,6 +791,7 @@ export class CallController {
           messageId,
           conversationId,
           channelId,
+          hasRecording: !!recordingAttachment,
         },
       });
     } catch (error) {
@@ -921,6 +930,65 @@ export class CallController {
     } catch (error) {
       logger.error(`[${callId}] download_transcript_failed | user_id=${userId}, error=${error}`);
       res.status(500).json({ success: false, error: 'Failed to download transcript' });
+    }
+  };
+
+  /**
+   * GET /api/calls/:callId/download-recording
+   * Download call recording (redirects to signed GCS URL)
+   */
+  downloadRecording = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (!call.recordingUrl) {
+        res.status(404).json({ success: false, error: 'No recording available for this call' });
+        return;
+      }
+
+      // Headless recordings are only ever created by the owner — check ownership.
+      // For regular calls the creator is already a participant, so the participant
+      // check below still covers them.  Doing ownership first avoids a DB query
+      // in the common case.
+      const isOwner = call.createdByUserId === userId;
+      if (!isOwner) {
+        const participant = await repositories.calls.findParticipant(call.id, userId);
+        if (!participant) {
+          res.status(403).json({ success: false, error: 'Access denied' });
+          return;
+        }
+      }
+
+      const recording = await callRecordingService.streamRecording(callId);
+      if (!recording) {
+        logger.warn(`[${callId}] download_recording_no_file | user_id=${userId}, recordingUrl=${call.recordingUrl}`);
+        res.status(404).json({ success: false, error: 'Recording file not found in storage' });
+        return;
+      }
+
+      res.setHeader('Content-Type', 'audio/mp4');
+      res.setHeader('Content-Disposition', `attachment; filename="${recording.filename}"`);
+      recording.stream.pipe(res);
+    } catch (error) {
+      logger.error(`[${callId}] download_recording_failed | user_id=${userId}, error=${error}`);
+      res.status(500).json({ success: false, error: 'Failed to download recording' });
     }
   };
 
@@ -1605,6 +1673,88 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to delete recording:', error);
       res.status(500).json({ success: false, error: 'Failed to delete recording' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/save-recording-attachment
+   * Idempotent: creates (or returns existing) MessageAttachment for a recording.
+   * Called by the frontend play button so the attachment is saved to DB at the
+   * moment the user first plays the recording, not eagerly on egress completion.
+   */
+  saveRecordingAttachment = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Recording not found' });
+        return;
+      }
+
+      if (call.createdByUserId !== userId) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      if (!call.recordingUrl) {
+        res.status(404).json({ success: false, error: 'No recording file available yet' });
+        return;
+      }
+
+      // Return existing attachment if already saved
+      const existing = await repositories.messageAttachments.findRecordingByCallId(callId);
+      if (existing) {
+        res.json({ success: true, attachmentId: existing.id, alreadyExists: true });
+        return;
+      }
+
+      const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
+      if (!callMessage) {
+        res.status(404).json({ success: false, error: 'Call message not found' });
+        return;
+      }
+
+      // Get real file size from GCS
+      let fileSize = 0;
+      try {
+        const meta = await callRecordingService.getRecordingMetadata(callId);
+        if (meta) fileSize = parseInt(String(meta.size || '0'), 10);
+      } catch (err) {
+        logger.warn(`[${callId}] save_recording_attachment: could not get file size: ${err}`);
+      }
+
+      const filename = call.recordingUrl.split('/').pop() ?? `recording-${callId}.mp4`;
+      const attachment = await repositories.messageAttachments.create({
+        entityId: callMessage.messageId,
+        entityType: AttachmentEntityType.CHAT,
+        originalFilename: filename,
+        size: fileSize,
+        mimetype: 'audio/mp4',
+        url: call.recordingUrl,
+        uploadedByUserId: call.createdByUserId,
+        createdBy: call.createdByUserId,
+        storageProvider: config.fileStorage.provider,
+        conversationId: callMessage.conversationId,
+        metadata: {
+          callId,
+          type: 'recording',
+        },
+      });
+
+      await repositories.messages.update(callMessage.messageId, { hasAttachment: true });
+      logger.info(`[${callId}] save_recording_attachment_created | attachment_id=${attachment.id}`);
+
+      res.json({ success: true, attachmentId: attachment.id });
+    } catch (error) {
+      logger.error(`Failed to save recording attachment for call ${callId}:`, error);
+      res.status(500).json({ success: false, error: 'Failed to save recording attachment' });
     }
   };
 

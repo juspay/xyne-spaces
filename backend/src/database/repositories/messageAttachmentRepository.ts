@@ -216,6 +216,18 @@ export class MessageAttachmentRepository {
     });
   }
 
+  async findRecordingByCallId(callId: string): Promise<MessageAttachment | null> {
+    return await this.db.messageAttachment.findFirst({
+      where: {
+        AND: [
+          { metadata: { path: ['callId'], equals: callId } },
+          { metadata: { path: ['type'], equals: 'recording' } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async findByEntityIdAndType(entityId: string, entityType: AttachmentEntityType): Promise<MessageAttachment[]> {
     return await this.db.messageAttachment.findMany({
       where: {
