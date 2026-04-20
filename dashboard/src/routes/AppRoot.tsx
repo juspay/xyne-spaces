@@ -153,7 +153,13 @@ const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null 
 
   useEffect(() => {
     if (isOnboarding) return;
-    if (isAIOnboardingCompleted()) return;
+    if (isAIOnboardingCompleted()) {
+      // Clean up stale active flag if onboarding was already completed
+      if (isAIOnboardingActive()) {
+        localStorage.removeItem('xyne-ai-onboarding-active');
+      }
+      return;
+    }
 
     // First-time trigger: pending flag set by OnboardingScreen on completion
     if (isAIOnboardingPending()) {
@@ -416,7 +422,7 @@ const AppRoot = (): ReactElement => {
                         <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
                       </PanelResizeHandle>
                       <Panel ref={xyneAIRightPanelRef} defaultSize={35} maxSize={50} minSize={25}>
-                        <div className='h-full relative'>
+                        <div className='h-full relative z-[56]'>
                           <XyneAISidebar
                             channelId={xyneAIChannelId}
                             threadInfo={xyneAIThreadInfo}
