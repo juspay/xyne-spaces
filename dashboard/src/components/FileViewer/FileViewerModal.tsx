@@ -784,6 +784,9 @@ export const AttachmentGalleryModal: React.FC = () => {
   const processedThreadIdRef = useRef<string | null>(null);
   const initialPathRef = useRef<string | null>(null);
   const prevIsOpenRef = useRef(false);
+  // True once Zero has delivered complete thread data and UPDATE has been sent to the machine.
+  // Used to hold renderContent() in a loading state until the full carousel is ready.
+  const [threadDataLoaded, setThreadDataLoaded] = useState(false);
 
   // Capture path synchronously during render when modal opens
   if (isOpen && !prevIsOpenRef.current) {
@@ -835,12 +838,13 @@ export const AttachmentGalleryModal: React.FC = () => {
     },
   );
 
-  // Reset refs when modal closes
+  // Reset refs and thread-ready gate when modal closes
   useEffect(() => {
     if (!isOpen) {
       processedThreadIdRef.current = null;
       initialPathRef.current = null;
       prevIsOpenRef.current = false;
+      setThreadDataLoaded(false);
     }
   }, [isOpen]);
 
@@ -861,7 +865,6 @@ export const AttachmentGalleryModal: React.FC = () => {
     // Prevent duplicate updates - check if we already processed this conversation
     const threadId = currentAttachment.conversationId;
     if (processedThreadIdRef.current === threadId) return;
-    processedThreadIdRef.current = threadId ?? null;
 
     // Compute all attachments from thread messages
     const allAttachments: AttachmentRef[] = threadMessages.flatMap(msg => {
@@ -884,16 +887,32 @@ export const AttachmentGalleryModal: React.FC = () => {
       });
     });
 
+    // Guard: Zero is still syncing — no attachment messages loaded yet.
+    // Don't send UPDATE and don't lock the ref so the next Zero update can retry.
+    if (allAttachments.length === 0) return;
+
     // Find the index of the originally clicked attachment
     const startIndex = allAttachments.findIndex(
       att => att.attachmentId === currentAttachment.attachmentId,
     );
 
+    // Guard: our specific attachment isn't in the thread data yet.
+    // Zero may still be syncing older messages — wait for more data.
+    if (startIndex === -1) return;
+
+    // Lock the ref only after we have valid data so that partial Zero syncs
+    // don't permanently block future retries.
+    processedThreadIdRef.current = threadId ?? null;
+
+    // Mark thread data as ready — renderContent() will stop showing the loading gate
+    // and render the full carousel on the next React render cycle.
+    setThreadDataLoaded(true);
+
     // Update machine with full thread attachments
     attachmentViewerActor.send({
       type: 'UPDATE',
       attachments: allAttachments,
-      startIndex: startIndex === -1 ? 0 : startIndex,
+      startIndex,
     });
   }, [
     threadMessages,
@@ -1017,7 +1036,47 @@ export const AttachmentGalleryModal: React.FC = () => {
 
   // Render content for current file
   const renderContent = (): JSX.Element => {
-    if (status === 'loading') {
+    // Videos stream via the /stream endpoint and never need a downloaded File blob.
+    // Render the VideoViewer immediately — before any machine-state loading checks —
+    // so we don't block on `waitingForData` or `loading` while the machine resolves
+    // the short-circuit null return for video mime types.
+    if (isVideo && fileType) {
+      if (currentAttachmentId) {
+        const ViewerComponent = fileType.component;
+        return (
+          <div className={fileType.wrapperClass}>
+            <ViewerComponent
+              source={null}
+              fileName={currentFileName}
+              attachmentId={currentAttachmentId}
+              onExpand={() => attachmentViewerActor.send({ type: 'CLOSE' })}
+              {...(initialTime !== undefined && { initialTime })}
+            />
+          </div>
+        );
+      }
+      // Video present but no attachmentId to stream with
+      return (
+        <div className='flex flex-col items-center justify-center h-full gap-3'>
+          <p className='text-gray-400'>Video cannot be streamed</p>
+          <button
+            onClick={() => void handleDownload()}
+            data-track-category='FILE_VIEWER'
+            data-track-name='DownloadVideo'
+            className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
+          >
+            <Download className='h-4 w-4' />
+            Download Video
+          </button>
+        </div>
+      );
+    }
+
+    if (shouldQueryThread && !threadDataLoaded) {
+      return <LoadingState message='Loading thread attachments...' />;
+    }
+
+    if (status === 'loading' || state.value === 'waitingForData') {
       return <LoadingState message={'Loading preview...'} />;
     }
 
@@ -1033,37 +1092,6 @@ export const AttachmentGalleryModal: React.FC = () => {
 
     if (!fileType) {
       return <UnsupportedFileState onDownload={() => void handleDownload()} />;
-    }
-
-    if (isVideo) {
-      if (currentAttachmentId) {
-        const ViewerComponent = fileType.component;
-        return (
-          <div className={fileType.wrapperClass}>
-            <ViewerComponent
-              source={null}
-              fileName={currentFileName}
-              attachmentId={currentAttachmentId}
-              onExpand={() => attachmentViewerActor.send({ type: 'CLOSE' })}
-              {...(initialTime !== undefined && { initialTime })}
-            />
-          </div>
-        );
-      }
-      return (
-        <div className='flex flex-col items-center justify-center h-full gap-3'>
-          <p className='text-gray-400'>Video cannot be streamed</p>
-          <button
-            onClick={() => void handleDownload()}
-            data-track-category='FILE_VIEWER'
-            data-track-name='DownloadVideo'
-            className='px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2'
-          >
-            <Download className='h-4 w-4' />
-            Download Video
-          </button>
-        </div>
-      );
     }
 
     if (!machineFileData) {
