@@ -131,22 +131,32 @@ const CalendarMonthView = ({
                             >
                               <PopoverPrimitive.Trigger asChild>
                                 <button
-                                  className={cn(
-                                    'relative flex items-center gap-1 text-left w-full px-1 py-0.5 rounded transition-colors cursor-pointer focus:outline-none',
-                                    meetingStatus === MeetingStatus.ACCEPTED && 'bg-primary/10',
-                                  )}
+                                  className='relative flex items-center gap-1 text-left w-full px-1 py-0.5 rounded transition-colors cursor-pointer focus:outline-none'
+                                  style={{
+                                    backgroundColor:
+                                      meetingStatus === MeetingStatus.ACCEPTED
+                                        ? '#0077FF1A'
+                                        : 'transparent',
+                                  }}
                                 >
                                   {isMaybe && !isEnded && (
                                     <div className='pointer-events-none absolute inset-0 overflow-hidden'>
-                                      <div className='absolute inset-0 call-stripe-pattern' />
+                                      <div
+                                        className='absolute inset-0'
+                                        style={{
+                                          backgroundImage:
+                                            'repeating-linear-gradient(-18deg, rgba(9, 46, 88, 0.55) 0 1px, transparent 1px 4px)',
+                                        }}
+                                      />
                                     </div>
                                   )}
                                   <div className='w-0.5 h-3.5 rounded-full shrink-0 bg-primary' />
                                   {isGoogleCalendarCall(call) && <GoogleCalendarIcon size={14} />}
                                   {isMicrosoftCalendarCall(call) && <MicrosoftIcon size={14} />}
                                   <span
-                                    className='truncate flex-1 min-w-0 leading-tight text-foreground'
+                                    className='truncate flex-1 min-w-0 leading-tight'
                                     style={{
+                                      color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
                                       fontSize: '12px',
                                       lineHeight: '18px',
                                       fontWeight: 500,
@@ -157,8 +167,9 @@ const CalendarMonthView = ({
                                   </span>
                                   {call.startsAt && (
                                     <span
-                                      className='shrink-0 tabular-nums ml-1 text-muted-foreground'
+                                      className='shrink-0 tabular-nums ml-1'
                                       style={{
+                                        color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
                                         fontSize: '10px',
                                         lineHeight: '14px',
                                         opacity: 0.7,
@@ -275,13 +286,23 @@ const CalendarMonthView = ({
                                           <button className='relative flex items-center gap-2 w-full px-4 py-2 hover:bg-muted/50 transition-colors text-left focus:outline-none'>
                                             {isMaybe && call.status !== CallStatus.ENDED && (
                                               <div className='pointer-events-none absolute inset-0 overflow-hidden'>
-                                                <div className='absolute inset-0 call-stripe-pattern' />
+                                                <div
+                                                  className='absolute inset-0'
+                                                  style={{
+                                                    backgroundImage:
+                                                      'repeating-linear-gradient(-18deg, rgba(9, 46, 88, 0.55) 0 1px, transparent 1px 4px)',
+                                                  }}
+                                                />
                                               </div>
                                             )}
-                                            <div className='w-0.5 h-4 rounded-full shrink-0 bg-primary' />
+                                            <div className='w-0.5 h-4 rounded-full shrink-0 bg-[#0077FF]' />
                                             <span
-                                              className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'
+                                              className='flex-1 min-w-0 truncate text-sm font-medium'
                                               style={{
+                                                color:
+                                                  call.status === CallStatus.ENDED
+                                                    ? 'hsl(var(--foreground))'
+                                                    : '#092E58',
                                                 textDecorationLine: isDeclined
                                                   ? 'line-through'
                                                   : 'none',
@@ -291,8 +312,13 @@ const CalendarMonthView = ({
                                             </span>
                                             {call.startsAt && (
                                               <span
-                                                className='shrink-0 text-xs text-muted-foreground tabular-nums'
+                                                className='shrink-0 text-xs tabular-nums'
                                                 style={{
+                                                  color:
+                                                    call.status === CallStatus.ENDED
+                                                      ? 'hsl(var(--muted-foreground))'
+                                                      : '#092E58',
+                                                  opacity: 0.7,
                                                   textDecorationLine: isDeclined
                                                     ? 'line-through'
                                                     : 'none',
