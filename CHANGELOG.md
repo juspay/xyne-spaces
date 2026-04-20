@@ -1,3 +1,10 @@
+## [1.121.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.121.0...v1.121.1) (2026-04-20)
+
+
+### Bug Fixes
+
+* errro handling in ui ([a50e825](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a50e825af56868c02335e43b2611ffd01446aa13)), closes [#5241](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5241)
+
 ## [1.121.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.120.0...v1.121.0) (2026-04-19)
 
 
