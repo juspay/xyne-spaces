@@ -27,6 +27,7 @@ from orchestration import CleanupManager, ParticipantTracker, RoomLifecycle
 from domain import CallContext
 from events import EventBus
 from modules import MultiUserTranscriber
+from modules.realtime_identifier import RealtimeIdentifier
 from tools import create_ticket_creation_tool, create_get_my_tickets_tool, create_invite_user_tool
 from health_server import start_health_server
 
@@ -197,6 +198,7 @@ async def entrypoint(ctx: JobContext):
         vad_min_silence_duration=config.vad_min_silence_duration,
         vad_prefix_padding_duration=0.5,  # Pre-buffer 500ms to capture speech onset
         call_id=call_id,
+        # identifier wired in below after room metadata is parsed
     )
 
     # Initialize storage bucket provider based on STORAGE_PROVIDER config
@@ -230,6 +232,14 @@ async def entrypoint(ctx: JobContext):
     transcription_storage = TranscriptionStorage(
         call_id=call_id,
         safe_call_id=safe_call_id,
+        bucket=bucket,
+        use_buffer=use_buffer,
+    )
+
+    # Initialize identified transcript storage (parallel to primary, written with real names)
+    identified_storage = TranscriptionStorage(
+        call_id=f"{call_id}_identified",
+        safe_call_id=f"{safe_call_id}_identified",
         bucket=bucket,
         use_buffer=use_buffer,
     )
@@ -275,6 +285,13 @@ async def entrypoint(ctx: JobContext):
     # Subscribe to transcription events
     event_bus.subscribe("TRANSCRIPTION", transcription_handler.handle)
     logger.info(f"event_bus_subscribed | event=TRANSCRIPTION, handler=transcription_handler")
+
+    # Subscribe to identified transcription events → second storage (real names)
+    async def handle_identified_transcription(data: dict):
+        await identified_storage.write(data)
+
+    event_bus.subscribe("IDENTIFIED_TRANSCRIPTION", handle_identified_transcription)
+    logger.info(f"event_bus_subscribed | event=IDENTIFIED_TRANSCRIPTION, handler=identified_storage")
 
     # Subscribe to AI action events (for frontend popup triggers like invite user)
     async def handle_ai_action(data: dict):
@@ -341,6 +358,11 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"room_connected | auto_subscribe=AUDIO_ONLY")
     # Set the participant name to "Xyne Automatic"
     await ctx.room.local_participant.set_name("Xyne Automatic")
+
+    # Create webhook notifier early — used both to fetch voiceprints now
+    # and to notify transcript-ready later.
+    webhook = WebhookNotifier(config.backend_url, config.transcription_agent_api_key)
+
     room_metadata = {}
     try:
         if ctx.room.metadata:
@@ -358,6 +380,18 @@ async def entrypoint(ctx: JobContext):
             if stt_model_override:
                 multi_user_transcriber.set_stt_model_override(stt_model_override)
                 logger.info(f"[STT Selection] User selected: {stt_model_override}")
+
+            # Fetch voiceprints at runtime from backend (avoids 64 KB LiveKit metadata limit
+            # and always reflects the latest enrollments for large orgs).
+            voiceprints = await webhook.fetch_voiceprints()
+            if voiceprints:
+                identifier = RealtimeIdentifier(voiceprints)
+                multi_user_transcriber._identifier = identifier
+                logger.info(
+                    f"realtime_identification_enabled | voiceprints={len(voiceprints)}"
+                )
+            else:
+                logger.info("realtime_identification_disabled | no voiceprints enrolled")
     except Exception as e:
         logger.warning(f"room_context_load_failed | error={e}")
     
@@ -426,7 +460,6 @@ async def entrypoint(ctx: JobContext):
         logger.info("Linked AgentSession and AI Manager to MultiUserTranscriber for speech interruption and adaptive turn detection")
 
     # Initialize cleanup manager
-    webhook = WebhookNotifier(config.backend_url, config.transcription_agent_api_key)
     participant_tracker = ParticipantTracker()
     
     # Note: We'll pass stt_tasks after RoomLifecycle creates them
@@ -437,6 +470,7 @@ async def entrypoint(ctx: JobContext):
         webhook=webhook,
         room=ctx.room,
         conversation_store=conversation_store,
+        additional_storages=[identified_storage],
     )
     
     # Initialize room lifecycle manager

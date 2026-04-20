@@ -6,6 +6,8 @@ dotenv.config();
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   RESEARCH_AGENT_URL: Joi.string().default(''),
+  // Python transcription agent (health server also exposes /embed-voice)
+  PYTHON_AGENT_URL: Joi.string().default(''),
   NX_GRAPH_SERVER_URL: Joi.string().default(''),
   NX_GRAPH_SERVER_URLS: Joi.string().default(''),
   RESEARCH_AGENT_API_KEY: Joi.string().default(''),
@@ -203,6 +205,7 @@ export const config = {
   env: envVars.NODE_ENV,
   isTestEnv: envVars.NODE_ENV === 'test',
   research_agent_url: envVars.RESEARCH_AGENT_URL,
+  pythonAgentUrl: envVars.PYTHON_AGENT_URL as string,
   nx_graph_server_url: envVars.NX_GRAPH_SERVER_URL,
   nx_graph_server_urls: envVars.NX_GRAPH_SERVER_URLS
     ? envVars.NX_GRAPH_SERVER_URLS.split(',').map((url: string) => url.trim())

@@ -941,6 +941,73 @@ export class UserManagementController {
     }
   };
 
+  /**
+   * Upload voice signature audio and extract/store speaker embedding.
+   * POST /api/users/me/voice-signature
+   *
+   * The audio file (WAV/OGG/MP3/WebM) is forwarded to the Python agent's
+   * /embed-voice endpoint, which returns a 256-dim float32 embedding.
+   * Only the 1024-byte packed embedding is persisted — the audio is discarded.
+   */
+  uploadVoiceSignature = async (req: Request & { user?: { id: string } }, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: 'No audio file provided' });
+        return;
+      }
+
+      const ALLOWED_AUDIO_TYPES = [
+        'audio/wav', 'audio/wave', 'audio/x-wav',
+        'audio/ogg', 'audio/mpeg', 'audio/mp3',
+        'audio/webm', 'video/webm',  // browsers record webm
+        'audio/mp4',
+      ];
+      if (!ALLOWED_AUDIO_TYPES.includes(file.mimetype)) {
+        res.status(400).json({ error: `Unsupported audio format: ${file.mimetype}` });
+        return;
+      }
+
+      // 50 MB hard cap — a 30-second WAV at 48kHz 16-bit is ~2.8 MB
+      const MAX_SIZE = 50 * 1024 * 1024;
+      if (file.size > MAX_SIZE) {
+        res.status(413).json({ error: 'Audio file too large (max 50 MB)' });
+        return;
+      }
+
+      const result = await userManagementService.uploadVoiceSignature(userId, file);
+      res.status(200).json(result);
+    } catch (error) {
+      logger.error('Error uploading voice signature:', error);
+      res.status(500).json({ error: 'Failed to process voice signature' });
+    }
+  };
+
+  /**
+   * Delete voice signature for the current user.
+   * DELETE /api/users/me/voice-signature
+   */
+  deleteVoiceSignature = async (req: Request & { user?: { id: string } }, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      await userManagementService.deleteVoiceSignature(userId);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('Error deleting voice signature:', error);
+      res.status(500).json({ error: 'Failed to delete voice signature' });
+    }
+  };
+
 }
 
 export const userManagementController = UserManagementController.getInstance();

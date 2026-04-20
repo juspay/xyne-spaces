@@ -12,6 +12,8 @@ import {
   Check,
   Camera,
   User as UserIcon,
+  Mic,
+  CheckCircle2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '../Avatar/Avatar';
@@ -37,6 +39,7 @@ import type { User } from '@xyne/shared';
 import { CommonChannelsSection } from '../../UserProfile/CommonChannelsSection';
 import { useUserPresence } from '../../../hooks/usePresence';
 import { uploadProfilePicture } from '../../../services/userProfile/userProfileService';
+import { VoiceSignatureModal } from '../../Settings/VoiceSignatureModal/VoiceSignatureModal';
 import { queryClient } from '../../../services/clients/queryClient';
 
 interface UserProfileProps {
@@ -73,6 +76,10 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
   // Picture upload state
   const [isUploadingPicture, setIsUploadingPicture] = useState(false);
   const pictureInputRef = useRef<HTMLInputElement>(null);
+
+  // Voice signature state
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+  const hasVoiceSignature = userProfile?.hasVoiceSignature ?? false;
 
   // Use useCallActions hook - channelId will be empty string initially, then update
   const { handleCallClick } = useCallActions({
@@ -851,6 +858,44 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
           ) : null}
         </div>
       </div>
+
+      {isOwnProfile && (
+        <div className='px-6 pb-4 border-t border-border pt-4'>
+          <div className='flex items-center justify-between'>
+            <div className='flex items-center gap-2.5'>
+              <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0'>
+                <Mic className='size-4 text-muted-foreground' />
+              </div>
+              <div>
+                <p className='text-sm font-medium text-foreground'>Voice Signature</p>
+                <p className='text-xs text-muted-foreground'>
+                  {hasVoiceSignature ? (
+                    <span className='flex items-center gap-1 text-green-600 dark:text-green-400'>
+                      <CheckCircle2 className='size-3' />
+                      Signature stored
+                    </span>
+                  ) : (
+                    'Not set'
+                  )}
+                </p>
+              </div>
+            </div>
+            <button
+              type='button'
+              onClick={() => setIsVoiceModalOpen(true)}
+              className='text-xs px-3 py-1.5 rounded-md bg-muted border border-border text-foreground hover:bg-border transition-colors'
+            >
+              {hasVoiceSignature ? 'Update' : 'Set up'}
+            </button>
+          </div>
+
+          <VoiceSignatureModal
+            open={isVoiceModalOpen}
+            onOpenChange={setIsVoiceModalOpen}
+            hasVoiceSignature={hasVoiceSignature}
+          />
+        </div>
+      )}
 
       {!isOwnProfile && currentUser?.id && (
         <CommonChannelsSection

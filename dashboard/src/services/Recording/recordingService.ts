@@ -28,6 +28,8 @@ export interface Recording {
 
 export interface RecordingDetail extends Recording {
   transcript: string | null;
+  identifiedTranscript: string | null;
+  hasIdentifiedTranscript: boolean;
   aiSummary: string | null;
   aiSummaryFormat?: 'markdown' | 'html';
   conversationId: string | null;

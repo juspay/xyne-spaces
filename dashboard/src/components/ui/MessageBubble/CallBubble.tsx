@@ -11,6 +11,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { ENABLE_SUMMARY_ACTION_BUTTON } from '../../../config';
+import { useSpeakerIdentificationEnabled } from '../../SpeakerIdentification/useSpeakerIdentificationEnabled';
 
 type AttachmentType = QueryResultType<
   typeof queries.conversationMessagesV2
@@ -198,6 +199,26 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
 }) => {
   const metadata = message.metadata;
   const [isExpanded, setIsExpanded] = useState(true);
+  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
+
+  // For headless recordings: show only the identified transcript (fall back to plain transcript
+  // if identified is absent). For regular calls: hide the identified transcript attachment.
+  // When the speaker identification CAC flag is off, treat everything as a regular call
+  // (hide identified_transcript entirely).
+  const isHeadless = (metadata as Record<string, unknown> | null)?.['isHeadlessRecording'] === true;
+  const visibleAttachments = attachments?.filter(att => {
+    const attMeta = att.metadata as Record<string, unknown> | null;
+    const attType = attMeta?.['type'] as string | undefined;
+    if (speakerIdentificationEnabled && isHeadless) {
+      // Prefer identified_transcript; fall back to transcript only when no identified exists
+      const hasIdentified = attachments.some(
+        a => (a.metadata as Record<string, unknown> | null)?.['type'] === 'identified_transcript',
+      );
+      return hasIdentified ? attType === 'identified_transcript' : attType === 'transcript';
+    }
+    // Regular calls or flag disabled: never show the identified transcript attachment
+    return attType !== 'identified_transcript';
+  });
 
   return (
     <div className='w-full flex flex-col gap-1'>
@@ -213,14 +234,14 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
           )}
 
           {/* Attachments */}
-          {attachments && attachments.length > 0 && (
+          {visibleAttachments && visibleAttachments.length > 0 && (
             <div>
               <div className='flex items-center gap-3 text-xs font-medium'>
                 <div className='flex items-center gap-1'>
                   <span className='text-muted-foreground'>
-                    {attachments.length > 1
-                      ? `${attachments.length} files`
-                      : attachments[0]?.originalFilename}
+                    {visibleAttachments.length > 1
+                      ? `${visibleAttachments.length} files`
+                      : visibleAttachments[0]?.originalFilename}
                   </span>
                   <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
                     {isExpanded ? (
@@ -231,13 +252,13 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                   </button>
                 </div>
 
-                {attachments.length > 1 && (
+                {visibleAttachments.length > 1 && (
                   <>
                     <span className='text-muted-foreground'>|</span>
                     <button
                       type='button'
                       onClick={() => {
-                        attachments.forEach(attachment => {
+                        visibleAttachments.forEach(attachment => {
                           void downloadAttachment(attachment.id, attachment.originalFilename);
                         });
                       }}
@@ -251,7 +272,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
               {isExpanded && (
                 <div className='flex flex-col gap-3'>
                   {/* Videos first - each in separate row */}
-                  {attachments
+                  {visibleAttachments
                     .filter(attachment => attachment.mimetype.startsWith('video/'))
                     .map(attachment => (
                       <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
@@ -260,10 +281,11 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                     ))}
 
                   {/* Other attachments in one row */}
-                  {attachments.filter(attachment => !attachment.mimetype.startsWith('video/'))
-                    .length > 0 && (
+                  {visibleAttachments.filter(
+                    attachment => !attachment.mimetype.startsWith('video/'),
+                  ).length > 0 && (
                     <div className='flex gap-3 flex-wrap'>
-                      {attachments
+                      {visibleAttachments
                         .filter(attachment => !attachment.mimetype.startsWith('video/'))
                         .map(attachment => {
                           const isImageOrText =
@@ -289,39 +311,40 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
           )}
 
           {/* Action buttons for ended calls with transcript */}
-          {!isActiveCall && message.hasAttachment && (
-            <div className='flex flex-wrap items-center gap-2 mt-2'>
-              {/* Generate PRD Button — always visible */}
-              <GeneratePRDButton
-                callId={callId}
-                messageId={message.messageId}
-                isCanvasCreated={!!metadata?.prdCanvasUrl}
-              />
+          {!isActiveCall &&
+            (message.hasAttachment || (visibleAttachments && visibleAttachments.length > 0)) && (
+              <div className='flex flex-wrap items-center gap-2 mt-2'>
+                {/* Generate PRD Button — always visible */}
+                <GeneratePRDButton
+                  callId={callId}
+                  messageId={message.messageId}
+                  isCanvasCreated={!!metadata?.prdCanvasUrl}
+                />
 
-              {/* Generate Summary Button — only shown when VITE_ENABLE_SUMMARY_ACTION_BUTTON=true */}
-              {ENABLE_SUMMARY_ACTION_BUTTON && (
-                <>
-                  <span className='text-muted-foreground'>•</span>
-                  <GenerateSummaryButton
-                    callId={callId}
-                    messageId={message.messageId}
-                    isCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
-                  />
-                </>
-              )}
+                {/* Generate Summary Button — only shown when VITE_ENABLE_SUMMARY_ACTION_BUTTON=true */}
+                {ENABLE_SUMMARY_ACTION_BUTTON && (
+                  <>
+                    <span className='text-muted-foreground'>•</span>
+                    <GenerateSummaryButton
+                      callId={callId}
+                      messageId={message.messageId}
+                      isCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
+                    />
+                  </>
+                )}
 
-              {/* Separator */}
-              <span className='text-muted-foreground'>•</span>
+                {/* Separator */}
+                <span className='text-muted-foreground'>•</span>
 
-              {/* Chat with Transcript Button — always visible */}
-              <ChatWithAskAIButton
-                channelId={channelId}
-                conversationId={conversationId}
-                metadata={metadata}
-                attachments={attachments}
-              />
-            </div>
-          )}
+                {/* Chat with Transcript Button — always visible */}
+                <ChatWithAskAIButton
+                  channelId={channelId}
+                  conversationId={conversationId}
+                  metadata={metadata}
+                  attachments={attachments}
+                />
+              </div>
+            )}
         </>
       )}
     </div>

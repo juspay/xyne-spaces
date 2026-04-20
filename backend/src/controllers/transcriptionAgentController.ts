@@ -352,6 +352,48 @@ class TranscriptionAgentController {
       res.status(500).json({ success: false, error: 'Failed to search users' });
     }
   };
+
+  /**
+   * GET /api/transcriptionAgent/voiceprints
+   * Returns all enrolled voice signatures for real-time speaker identification.
+   * Called by the Python agent at runtime instead of reading from room metadata,
+   * so there is no 64 KB LiveKit metadata limit and the list stays up-to-date.
+   */
+  getVoiceprints = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const db = DatabaseClient.getInstance();
+
+      const profiles = await db.userProfile.findMany({
+        where: { voiceSignature: { not: null } },
+        select: { userId: true, voiceSignature: true },
+      });
+
+      const userIds = profiles.map((p) => p.userId);
+      const users = await db.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true, email: true },
+      });
+
+      const userMap = new Map(users.map((u) => [u.id, u]));
+
+      const voiceprints = profiles
+        .filter((p) => p.voiceSignature)
+        .map((p) => {
+          const user = userMap.get(p.userId);
+          return {
+            userId: p.userId,
+            name: user?.name || user?.email || 'Unknown',
+            embeddingB64: (p.voiceSignature as Buffer).toString('base64'),
+          };
+        });
+
+      logger.info(`[Voiceprints] Returning ${voiceprints.length} voiceprints to agent`);
+      res.json({ success: true, voiceprints });
+    } catch (error) {
+      logger.error('[Voiceprints] Failed to fetch voiceprints:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch voiceprints' });
+    }
+  };
 }
 
 export const transcriptionAgentController = new TranscriptionAgentController();

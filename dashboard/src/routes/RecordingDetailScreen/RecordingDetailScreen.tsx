@@ -27,10 +27,12 @@ import { queries } from '../../zero/queries';
 import ForwardMessageForm from '../../components/Chat/ForwardMessageModal/ForwardMessageModal';
 import Dialog from '../../components/ui/Dialog';
 import { formatRecordingDuration, logRecordingError } from '../../utils/recordingUtils';
+import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 
 export default function RecordingDetailScreen(): ReactElement {
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
+  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
 
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -256,14 +258,22 @@ export default function RecordingDetailScreen(): ReactElement {
 
         {/* Transcript */}
         {recording.hasTranscript && recording.transcript && (
-          <div className='mb-6 bg-background rounded-lg border border-border p-6'>
+          <div className='mb-6 bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 p-6'>
+            {/* Header */}
             <div className='flex items-center gap-2 mb-4'>
-              <FileText className='w-5 h-5 text-action-primary' />
-              <h2 className='text-lg font-semibold text-foreground'>Transcript</h2>
+              <FileText className='w-4 h-4 text-muted-foreground' />
+              <h2 className='text-base font-semibold text-foreground dark:text-gray-100'>
+                {speakerIdentificationEnabled && recording.hasIdentifiedTranscript
+                  ? 'Identified Transcript'
+                  : 'Transcript'}
+              </h2>
             </div>
-            <div className='prose max-w-none'>
-              <p className='whitespace-pre-wrap text-foreground'>{recording.transcript}</p>
-            </div>
+
+            <pre className='whitespace-pre-wrap font-sans text-sm text-foreground dark:text-gray-100 leading-relaxed'>
+              {speakerIdentificationEnabled && recording.hasIdentifiedTranscript
+                ? (recording.identifiedTranscript ?? recording.transcript)
+                : recording.transcript}
+            </pre>
           </div>
         )}
 
