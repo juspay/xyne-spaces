@@ -1,7 +1,10 @@
 import { useState, useCallback } from 'react';
+import { toast } from 'sonner';
+import { copyImageToClipboard } from '../utils/clipboardUtils';
 
 type UseClipboardReturn = {
   copy: (text: string) => Promise<boolean>;
+  copyImage: (blob: Blob) => Promise<boolean>;
   success: boolean | null; // null = not attempted yet
 };
 
@@ -24,5 +27,24 @@ export function useClipboard(): UseClipboardReturn {
     }
   }, []);
 
-  return { copy, success };
+  const copyImage = useCallback(async (blob: Blob) => {
+    try {
+      await copyImageToClipboard(blob);
+      setSuccess(true);
+      toast.success('Image copied', {
+        description: 'The image has been copied to your clipboard',
+        duration: 2000,
+      });
+      return true;
+    } catch (error) {
+      setSuccess(false);
+      toast.error('Failed to copy image', {
+        description: error instanceof Error ? error.message : 'Please try again',
+        duration: 3000,
+      });
+      return false;
+    }
+  }, []);
+
+  return { copy, copyImage, success };
 }

@@ -57,6 +57,9 @@ import { logger, Event } from '../../../utils/logger';
 import { useShortcutById } from '../../../shortcuts';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
 import { useUser } from '../../../hooks/useUsers';
+import { fetchFile } from '../../../services/clients/fileFetchService';
+import { isImageFile } from '../MessageAttachment/utils';
+import { useClipboard } from '../../../hooks/useClipboard';
 import { SHAREABLE_ORIGIN } from '../../../config';
 import {
   ConversationWithTicket,
@@ -118,6 +121,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   workflowNumber,
 }) => {
   const { user } = useAuthContext();
+  const { copyImage } = useClipboard();
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
   const [isActionsDrawerOpen, setIsActionsDrawerOpen] = useState(false);
@@ -546,6 +550,22 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     stopEditing(); // release global lock
   };
 
+  // Image attachments for "Copy Image" action
+  const imageAttachments = useMemo(
+    () => (message.attachments ?? []).filter(att => isImageFile(att.mimetype)),
+    [message.attachments],
+  );
+
+  const handleCopyImage = (): void => {
+    const attachment = imageAttachments[0];
+    if (!attachment) return;
+    fetchFile(attachment.id, attachment.originalFilename, attachment.mimetype)
+      .then(file => copyImage(file))
+      .catch(() => {
+        toast.error('Failed to copy image');
+      });
+  };
+
   const canEditMessage = user?.id ? isMessageEditable(message, user.id) : false;
 
   // Check if message has meaningful text content (not just attachments)
@@ -970,6 +990,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
               isChannelArchived={channel?.isArchived ?? false}
+              {...(imageAttachments.length > 0 &&
+                !isMessageDeleted && { onCopyImage: handleCopyImage })}
             />
           )}
         </>

@@ -286,3 +286,50 @@ export const copyHtmlToClipboard = async (html: string): Promise<void> => {
 export const copyTextToClipboard = async (text: string): Promise<void> => {
   await navigator.clipboard.writeText(text);
 };
+
+/**
+ * Converts an image blob to PNG via a canvas element.
+ */
+const convertToPngBlob = (blob: Blob): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Could not get canvas context'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(pngBlob => {
+        if (!pngBlob) {
+          reject(new Error('Canvas toBlob failed'));
+          return;
+        }
+        resolve(pngBlob);
+      }, 'image/png');
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image'));
+    };
+    img.src = url;
+  });
+};
+
+/**
+ * Copies an image blob to the clipboard.
+ * Converts non-PNG images to PNG first, as browsers only support image/png for clipboard writes.
+ */
+export const copyImageToClipboard = async (blob: Blob): Promise<void> => {
+  if (typeof ClipboardItem === 'undefined') {
+    throw new Error('ClipboardItem is not supported in this browser');
+  }
+  const pngBlob = blob.type === 'image/png' ? blob : await convertToPngBlob(blob);
+  const clipboardItem = new ClipboardItem({ 'image/png': pngBlob });
+  await navigator.clipboard.write([clipboardItem]);
+};
