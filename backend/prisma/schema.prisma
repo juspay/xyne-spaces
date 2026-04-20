@@ -993,7 +993,8 @@ model UserGroupMapping {
   userId         String              // No FK constraint
   userGroupId    String              // No FK constraint
   responsibility UserResponsibility  @default(MEMBER) // User responsibility level within this group
-  onCallSetNumber  Int?                // Only set when autoRotationEnabled is true
+  onCallSetNumber    Int?                // Deprecated: use onCallSetNumbers instead. Only set when autoRotationEnabled is true
+  onCallSetNumbers   Int[]               // Array of set numbers for on-call rotation
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
@@ -1005,7 +1006,8 @@ model UserGroupMapping {
   @@index([userId])
   @@index([userGroupId])
   @@index([userGroupId, createdAt(sort: Desc), id(sort: Asc)]) // for getUserGroupMembers
-  @@index([userGroupId, onCallSetNumber]) // for on-call rotation queries
+  @@index([userGroupId, onCallSetNumber]) // for on-call rotation queries (deprecated)
+  @@index([userGroupId, onCallSetNumbers]) // for on-call rotation queries
   @@map("user_group_mappings")
   @@schema("public")
 }

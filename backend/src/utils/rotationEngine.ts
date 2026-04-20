@@ -20,18 +20,32 @@ export function getIntervalDays(interval: RotationInterval): number {
   }
 }
 
+function getSetNumbers(mapping: { onCallSetNumbers?: number[] | null }): number[] {
+  if (mapping.onCallSetNumbers && mapping.onCallSetNumbers.length > 0) {
+    return mapping.onCallSetNumbers;
+  }
+  return [1];
+}
+
 /**
  * Get the total number of sets for a user group
  * Returns the max onCallSetNumber, defaulting to 1 if no mappings exist
  */
 export async function getTotalSets(userGroupId: string): Promise<number> {
   const prisma = DatabaseClient.getInstance();
-  const result = await prisma.userGroupMapping.aggregate({
+  const mappings = await prisma.userGroupMapping.findMany({
     where: { userGroupId },
-    _max: { onCallSetNumber: true },
+    select: { onCallSetNumbers: true },
   });
 
-  return result._max.onCallSetNumber ?? 1;
+  let maxSet = 1;
+  for (const mapping of mappings) {
+    const setNumbers = getSetNumbers(mapping);
+    for (const n of setNumbers) {
+      if (n > maxSet) maxSet = n;
+    }
+  }
+  return maxSet;
 }
 
 /**
@@ -79,14 +93,12 @@ export async function applyRotationForSet(
   // Process each user
   let updatedCount = 0;
   for (const mapping of mappings) {
-    const userSetNumber = mapping.onCallSetNumber ?? 1;
+    const userSetNumbers = getSetNumbers(mapping);
     const assignmentState = mapping.user.userAssignmentStates[0];
 
-    // Skip if no assignment state exists (should be created via UI mutator)
     if (!assignmentState) continue;
 
-    // Determine if user should be on-call
-    const shouldBeOnCall = userSetNumber === targetSet && assignmentState.isActiveForAssignment;
+    const shouldBeOnCall = userSetNumbers.includes(targetSet) && assignmentState.isActiveForAssignment;
 
     // Update only if changed
     if (assignmentState.onCall !== shouldBeOnCall) {

@@ -66,6 +66,7 @@ import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+
 import { nudgeRegistry } from '@/nudges/registry';
 import { initializeRotationForGroup } from '@/utils/rotationEngine';
 import { livekitService } from '@/services/liveKitService';
@@ -5169,7 +5170,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               userGroupId,
               userId,
               responsibility: UserResponsibility.MEMBER,
-              onCallSetNumber: null, // Will be set when rotation is enabled and configured
+              onCallSetNumbers: [],
               createdAt: timestamp,
               updatedAt: timestamp,
             });
@@ -6509,7 +6510,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           userMappings: z.array(
             z.object({
               userId: z.string(),
-              onCallSetNumber: z.number().nullable(),
+              onCallSetNumbers: z.array(z.number()),
             })
           ).optional(),
           boardWeight: z.object({
@@ -6584,7 +6585,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               if (existingMapping) {
                 await tx.mutate.user_group_mappings.update({
                   id: existingMapping.id,
-                  onCallSetNumber: mapping.onCallSetNumber,
+                  onCallSetNumbers: mapping.onCallSetNumbers,
                   updatedAt: now,
                 });
               }
@@ -6720,16 +6721,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               }
             });
           } else {
-            // When disabling rotation, clean up onCallSetNumber in all user group mappings
-            const mappings = await tx.run(zql.user_group_mappings.where('userGroupId', userGroupId));
-            for (const mapping of mappings) {
-              await tx.mutate.user_group_mappings.update({
-                id: mapping.id,
-                onCallSetNumber: null,
-                updatedAt: timestamp,
-              });
-            }
-            logger.info(`[TOGGLE-ROTATION] Cleaned up onCallSetNumber for ${mappings.length} users in group ${userGroupId}`);
+            // When disabling rotation, onCallSetNumbers mappings are preserved
+            // so users don't need to reconfigure when re-enabling
+            logger.info(`[TOGGLE-ROTATION] Disabled rotation for group ${userGroupId} (set mappings preserved)`);
           }
         },
       ),

@@ -76,6 +76,7 @@ import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
 import messageMetadataBackfillRoutes from '@/routes/messageMetadataBackfill';
 import setUpdatedAtTimeRoutes from '@/routes/setUpdatedAtTime';
 import ticketMetadataBackfillRoutes from '@/routes/ticketMetadataBackfill';
+import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import aiRoutes from '@/routes/aiRoutes';
@@ -255,6 +256,7 @@ export class App {
     this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
     // Product insights recluster route (admin-only)
     this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
+    this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);
 
     // Application backfill admin routes (auth required)
     this.app.use('/api/admin/applications', authMiddleware.authenticate, applicationBackfillRoutes);

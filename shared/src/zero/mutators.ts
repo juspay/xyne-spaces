@@ -3206,7 +3206,7 @@ export const mutators = defineMutators({
             userGroupId,
             userId,
             responsibility: UserResponsibility.MEMBER, // New users added get MEMBER role by default
-            onCallSetNumber: null, // Will be set when rotation is enabled and configured
+            onCallSetNumbers: [],
             createdAt: timestamp,
             updatedAt: timestamp,
           });
@@ -4731,7 +4731,7 @@ export const mutators = defineMutators({
           .array(
             z.object({
               userId: z.string(),
-              onCallSetNumber: z.number().nullable(),
+              onCallSetNumbers: z.array(z.number()),
             }),
           )
           .optional(),
@@ -4826,7 +4826,7 @@ export const mutators = defineMutators({
             if (existingMapping) {
               await tx.mutate.user_group_mappings.update({
                 id: existingMapping.id,
-                onCallSetNumber: mapping.onCallSetNumber,
+                onCallSetNumbers: mapping.onCallSetNumbers,
                 updatedAt: now,
               });
             }

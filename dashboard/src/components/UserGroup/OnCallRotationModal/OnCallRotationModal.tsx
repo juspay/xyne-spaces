@@ -1,5 +1,5 @@
-import { ReactElement, useState, useEffect, useMemo } from 'react';
-import { Plus, AlertCircle, Trash2 } from 'lucide-react';
+import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { Plus, AlertCircle, Trash2, ChevronDown, Check } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import type { User } from '../../../machines/stateMachine';
@@ -9,9 +9,9 @@ interface OnCallRotationModalProps {
   onClose: () => void;
   groupName: string;
   users: User[];
-  userGroupMembers: Array<{ userId: string; onCallSetNumber: number }>;
+  userGroupMembers: Array<{ userId: string; onCallSetNumbers?: number[] }>;
   activeSet: number;
-  onSetsChange?: (sets: Map<string, number>) => void;
+  onSetsChange?: (sets: Map<string, number[]>) => void;
 }
 
 interface SetData {
@@ -19,6 +19,90 @@ interface SetData {
   users: User[];
   isActive: boolean;
 }
+
+interface MultiSelectDropdownProps {
+  userId: string;
+  currentSets: number[];
+  maxSetNumber: number;
+  onChange: (userId: string, newSets: number[]) => void;
+}
+
+const MultiSelectDropdown = ({
+  userId,
+  currentSets,
+  maxSetNumber,
+  onChange,
+}: MultiSelectDropdownProps): ReactElement => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleSet = (setNumber: number) => {
+    const newSets = currentSets.includes(setNumber)
+      ? currentSets.filter(s => s !== setNumber)
+      : [...currentSets, setNumber].sort((a, b) => a - b);
+    onChange(userId, newSets);
+  };
+
+  const displayText =
+    currentSets.length === 0
+      ? 'Not assigned'
+      : currentSets.length === 1
+        ? `Set ${currentSets[0]}`
+        : `${currentSets.length} sets`;
+
+  return (
+    <div ref={dropdownRef} className='relative'>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className='text-[11px] border border-border rounded-md p-1.5 bg-muted/20 flex items-center gap-1 min-w-[100px]'
+        data-track-category='UserGroups'
+        data-track-name='ToggleUserSets'
+        data-track-metadata={JSON.stringify({ userId })}
+      >
+        <span className='flex-1 text-left'>{displayText}</span>
+        <ChevronDown className='w-3 h-3' />
+      </button>
+
+      {isOpen && (
+        <div className='absolute right-0 top-full mt-1 w-32 bg-background border border-border rounded-md shadow-lg z-10 py-1'>
+          {Array.from({ length: maxSetNumber }, (_, i) => i + 1).map(setNumber => {
+            const isSelected = currentSets.includes(setNumber);
+            return (
+              <button
+                key={setNumber}
+                onClick={() => toggleSet(setNumber)}
+                className='w-full px-3 py-2 text-[11px] text-left hover:bg-muted/50 flex items-center gap-2'
+                data-track-category='UserGroups'
+                data-track-name='ToggleUserSet'
+                data-track-metadata={JSON.stringify({ setNumber, userId })}
+              >
+                <div
+                  className={`w-4 h-4 border rounded flex items-center justify-center ${
+                    isSelected ? 'bg-[#6276BE] border-[#6276BE]' : 'border-border'
+                  }`}
+                >
+                  {isSelected && <Check className='w-3 h-3 text-white' />}
+                </div>
+                Set {setNumber}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const OnCallRotationModal = ({
   isOpen,
@@ -29,19 +113,20 @@ export const OnCallRotationModal = ({
   activeSet,
   onSetsChange,
 }: OnCallRotationModalProps): ReactElement | null => {
-  const [userSets, setUserSets] = useState<Map<string, number>>(new Map());
+  const [userSets, setUserSets] = useState<Map<string, number[]>>(new Map());
   const [maxSetNumber, setMaxSetNumber] = useState<number>(1);
   const [hasChanges, setHasChanges] = useState(false);
 
   // Initialize from props when modal opens
   useEffect(() => {
     if (isOpen) {
-      const setsMap = new Map<string, number>();
+      const setsMap = new Map<string, number[]>();
       let maxSet = 1;
       for (const member of userGroupMembers) {
-        const setNumber = member.onCallSetNumber ?? 1;
-        setsMap.set(member.userId, setNumber);
-        if (setNumber > maxSet) maxSet = setNumber;
+        const setNumbers = member.onCallSetNumbers?.length ? member.onCallSetNumbers : [1];
+        setsMap.set(member.userId, setNumbers);
+        const memberMax = Math.max(...setNumbers);
+        if (memberMax > maxSet) maxSet = memberMax;
       }
       setUserSets(setsMap);
       setMaxSetNumber(maxSet);
@@ -60,12 +145,12 @@ export const OnCallRotationModal = ({
 
   const usersById = useMemo(() => new Map(users.map(u => [u.id, u])), [users]);
 
-  // Derived: sets array
+  // Derived: sets array - a user appears in ALL sets they belong to
   const sets = useMemo<SetData[]>(() => {
     return Array.from({ length: maxSetNumber }, (_, i) => {
       const setNumber = i + 1;
       const setUsers = Array.from(userSets.entries())
-        .filter(([, s]) => s === setNumber)
+        .filter(([, sets]) => sets.includes(setNumber))
         .map(([uid]) => usersById.get(uid))
         .filter((u): u is User => Boolean(u));
       return { setNumber, users: setUsers, isActive: setNumber === activeSet };
@@ -75,8 +160,18 @@ export const OnCallRotationModal = ({
   // Validation: true if any set has 0 users
   const hasEmptySet = useMemo(() => sets.some(s => s.users.length === 0), [sets]);
 
-  const handleMoveUser = (userId: string, newSetNumber: number): void => {
-    setUserSets(prev => new Map(prev).set(userId, newSetNumber));
+  const handleUserSetsChange = (userId: string, newSets: number[]): void => {
+    setUserSets(prev => {
+      const newMap = new Map(prev);
+      if (newSets.length === 0) {
+        // Ensure user is always in at least Set 1 (or we could remove them entirely)
+        // For now, keep them in Set 1 as default
+        newMap.set(userId, [1]);
+      } else {
+        newMap.set(userId, newSets);
+      }
+      return newMap;
+    });
     setHasChanges(true);
   };
 
@@ -86,13 +181,14 @@ export const OnCallRotationModal = ({
   };
 
   /**
-   * Delete an empty set and renumber all subsequent sets.
-   * When deleting Set N, all users in sets N+1, N+2, etc. have their onCallSetNumber decremented by 1.
+   * Delete an empty set and remove it from all users' assignments.
+   * When deleting Set N, renumber all sets N+1, N+2, etc. by decrementing by 1.
    *
    * Example:
    * - Before: Set 1 [A,B], Set 2 [], Set 3 [C,D], Set 4 [E]
    * - Delete Set 2 (must be empty first)
    * - After: Set 1 [A,B], Set 2 [C,D], Set 3 [E]
+   * - User C goes from [3] to [2], User E goes from [4] to [3]
    */
   const handleDeleteSet = (setNumberToDelete: number): void => {
     // Only allow deleting empty sets
@@ -102,16 +198,13 @@ export const OnCallRotationModal = ({
     }
 
     setUserSets(prev => {
-      const newMap = new Map<string, number>();
-      for (const [userId, userSetNum] of prev.entries()) {
-        if (userSetNum < setNumberToDelete) {
-          // Users in sets before the deleted one stay the same
-          newMap.set(userId, userSetNum);
-        } else if (userSetNum > setNumberToDelete) {
-          // Users in sets after the deleted one get decremented by 1
-          newMap.set(userId, userSetNum - 1);
-        }
-        // Users in the deleted set are simply not added to the new map
+      const newMap = new Map<string, number[]>();
+      for (const [userId, userSetsArr] of prev.entries()) {
+        const adjustedSets = userSetsArr
+          .filter(s => s !== setNumberToDelete) // Remove the deleted set
+          .map(s => (s > setNumberToDelete ? s - 1 : s)); // Decrement higher sets
+        // Ensure at least Set 1
+        newMap.set(userId, adjustedSets.length > 0 ? adjustedSets : [1]);
       }
       return newMap;
     });
@@ -227,25 +320,12 @@ export const OnCallRotationModal = ({
                           {user.name}
                         </span>
                       </div>
-                      <select
-                        value=''
-                        onChange={e => handleMoveUser(user.id, parseInt(e.target.value))}
-                        className='text-[11px] border border-border rounded-md p-1.5 bg-muted/20 flex-shrink-0 ml-2'
-                        data-track-category='UserGroups'
-                        data-track-name='MoveUserToSet'
-                        data-track-metadata={JSON.stringify({ userId: user.id })}
-                      >
-                        <option value='' disabled>
-                          Move to
-                        </option>
-                        {Array.from({ length: maxSetNumber }, (_, i) => i + 1)
-                          .filter(n => n !== set.setNumber)
-                          .map(n => (
-                            <option key={n} value={n}>
-                              Move to {n}
-                            </option>
-                          ))}
-                      </select>
+                      <MultiSelectDropdown
+                        userId={user.id}
+                        currentSets={userSets.get(user.id) ?? [1]}
+                        maxSetNumber={maxSetNumber}
+                        onChange={handleUserSetsChange}
+                      />
                     </div>
                   ))
                 )}
