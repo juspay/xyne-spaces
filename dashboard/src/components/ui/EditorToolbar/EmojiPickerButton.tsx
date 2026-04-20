@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Popover, Tooltip, TooltipSide } from '@juspay/blend-design-system';
-import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
+import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import { Smile, X, Image as ImageIcon } from 'lucide-react';
 import type { EmojiPickerButtonProps } from './EditorToolbar.types';
 import { emojiService } from '../../../services/Emoji/emojiService';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { useTheme } from '../../../hooks/useTheme';
 
 type AddCustomEmojiModalProps = {
   open: boolean;
@@ -142,6 +143,8 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
   const [uploadError, setUploadError] = useState<string | undefined>();
 
   const { data: customEmojis, refetch } = useCustomEmojis();
+  const { theme } = useTheme();
+  const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
 
   const handleCreateEmoji = async ({ file, name }: { name: string; file: File }): Promise<void> => {
     try {
@@ -199,6 +202,7 @@ export const EmojiPickerButton: React.FC<EmojiPickerButtonProps> = ({
         <div className='w-[350px]'>
           <EmojiPicker
             emojiStyle={EmojiStyle.NATIVE}
+            theme={emojiPickerTheme}
             style={{
               ['--epr-emoji-size' as string]: '22px',
               ['--epr-emoji-gap' as string]: '4px',

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Popover } from '../../ui/Popover';
-import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
+import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import {
   MessageCircleMore,
   SmilePlus,
@@ -27,6 +27,7 @@ import { parseReactionsMd } from '@xyne/shared';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Button from '../../ui/Button';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { useTheme } from '../../../hooks/useTheme';
 import { ConversationSubscription } from '../ConversationSubscription';
 import {
   DropdownMenu,
@@ -103,6 +104,8 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const { data: customEmojis } = useCustomEmojis();
+  const { theme } = useTheme();
+  const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
   const reactionsData = useMemo(() => parseReactionsMd(reactionsMd), [reactionsMd]);
 
   const handleEmojiOpenChange = (open: boolean): void => {
@@ -160,6 +163,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               ['--epr-emoji-size' as string]: '22px',
               ['--epr-emoji-gap' as string]: '4px',
             }}
+            theme={emojiPickerTheme}
             emojiStyle={EmojiStyle.NATIVE}
             onEmojiClick={emoji => {
               // For custom emojis, store the emojiId with a prefix

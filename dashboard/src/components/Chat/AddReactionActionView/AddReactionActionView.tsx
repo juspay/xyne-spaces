@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
-import EmojiPicker, { EmojiStyle } from 'emoji-picker-react';
+import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import { EmojiPickerEmoji } from '../../../hooks/useCustomEmojis';
+import { useTheme } from '../../../hooks/useTheme';
 
 interface AddReactionActionViewProps {
   handleEmojiSelect: (emoji: {
@@ -14,6 +15,8 @@ interface AddReactionActionViewProps {
 
 const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionActionViewProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const { theme } = useTheme();
+  const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
 
   // Blur search input on touch outside to dismiss mobile keyboard.
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -32,6 +35,7 @@ const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionA
     <div ref={containerRef} className='h-full' onTouchStart={handleTouchStart}>
       <EmojiPicker
         emojiStyle={EmojiStyle.NATIVE}
+        theme={emojiPickerTheme}
         style={{
           ['--epr-emoji-size' as string]: '22px',
           ['--epr-emoji-gap' as string]: '4px',

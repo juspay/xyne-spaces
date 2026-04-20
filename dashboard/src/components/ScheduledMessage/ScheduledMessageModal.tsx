@@ -240,7 +240,7 @@ const ScheduledMessageModal = ({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <div className='p-6'>
-        <h2 className='text-xl font-bold mb-4'>
+        <h2 className='text-xl font-bold text-foreground mb-4'>
           {isEditMode ? 'Edit Scheduled Message' : 'Create Scheduled Message'}
         </h2>
         <form
@@ -253,7 +253,10 @@ const ScheduledMessageModal = ({
           {/* Channel Selector - only for create mode */}
           {!isEditMode && (
             <div>
-              <label htmlFor='channel-select' className='block text-sm font-medium mb-1'>
+              <label
+                htmlFor='channel-select'
+                className='block text-foreground text-sm font-medium mb-1'
+              >
                 Channel
               </label>
               <Controller
@@ -286,7 +289,7 @@ const ScheduledMessageModal = ({
 
           {/* Title */}
           <div>
-            <label htmlFor='title-input' className='block text-sm font-medium mb-1'>
+            <label htmlFor='title-input' className='block text-foreground text-sm font-medium mb-1'>
               Title
             </label>
             <Controller
@@ -311,7 +314,10 @@ const ScheduledMessageModal = ({
 
           {/* Message Content */}
           <div>
-            <label htmlFor='message-inputbox' className='block text-sm font-medium mb-1'>
+            <label
+              htmlFor='message-inputbox'
+              className='block text-foreground text-sm font-medium mb-1'
+            >
               Message
             </label>
             <Controller
@@ -367,7 +373,7 @@ const ScheduledMessageModal = ({
 
           {/* Day Selection */}
           <div>
-            <span className='block text-sm font-medium mb-2'>Days</span>
+            <span className='block text-sm text-foreground font-medium mb-2'>Days</span>
 
             {/* Weekday vs Custom Radio Buttons */}
             <Controller
@@ -389,7 +395,7 @@ const ScheduledMessageModal = ({
                       data-track-name='select-weekday-mode'
                       className='w-4 h-4 text-primary focus:ring-2 focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                     />
-                    <span className='text-sm'>Weekday (Monday - Friday)</span>
+                    <span className='text-foreground text-sm'>Weekday (Monday - Friday)</span>
                   </label>
                   <label className='flex items-center gap-2 cursor-pointer'>
                     <input
@@ -411,7 +417,7 @@ const ScheduledMessageModal = ({
                       data-track-name='select-custom-mode'
                       className='w-4 h-4 text-primary focus:ring-2 focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                     />
-                    <span className='text-sm'>Custom days of the week</span>
+                    <span className='text-foreground text-sm'>Custom days of the week</span>
                   </label>
                 </div>
               )}
@@ -463,7 +469,10 @@ const ScheduledMessageModal = ({
 
           {/* Scheduled Time */}
           <div>
-            <label htmlFor='scheduled-time-input' className='block text-sm font-medium mb-1'>
+            <label
+              htmlFor='scheduled-time-input'
+              className='block text-foreground text-sm font-medium mb-1'
+            >
               Time (Local)
             </label>
             <Controller
@@ -488,7 +497,7 @@ const ScheduledMessageModal = ({
             {errors.scheduledTime && (
               <p className='text-red-500 text-xs mt-1'>{errors.scheduledTime.message}</p>
             )}
-            <p className='text-xs text-muted-foreground mt-1'>Enter time in your local timezone</p>
+            <p className='text-xs text-foreground mt-1'>Enter time in your local timezone</p>
           </div>
 
           {/* Active Toggle - only in edit mode */}

@@ -859,7 +859,7 @@ export const AssignmentConfigScreen = ({
                           setLocalRotationInterval(e.target.value as RotationInterval);
                           setHasChanges(true);
                         }}
-                        className='block w-full max-w-md px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm'
+                        className='block w-full max-w-md px-3 py-2 border border-input rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm'
                         data-track-category='UserGroups'
                         data-track-name='ChangeRotationInterval'
                       >
@@ -895,7 +895,7 @@ export const AssignmentConfigScreen = ({
                   id='board-filter'
                   value={selectedBoardId ?? ''}
                   onChange={e => setSelectedBoardId(e.target.value || null)}
-                  className='block w-full max-w-md px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm'
+                  className='block w-full max-w-md px-3 py-2 border border-input rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm'
                   data-track-event='change'
                   data-track-category='UserGroups'
                   data-track-name='SelectBoardFilter'
@@ -938,7 +938,7 @@ export const AssignmentConfigScreen = ({
                       }
                     }}
                     placeholder='1'
-                    className='block w-32 px-3 py-2 border border-input rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                    className='block w-32 px-3 py-2 border border-input rounded-md shadow-sm bg-background text-foreground focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                     data-track-event='change'
                     data-track-category='UserGroups'
                     data-track-name='SetBoardWeight'
@@ -1037,9 +1037,9 @@ export const AssignmentConfigScreen = ({
               )}
 
               {/* Info Section */}
-              <div className='bg-blue-50 border border-blue-200 rounded-lg p-4'>
-                <h3 className='font-medium text-blue-900 mb-2'>How Auto-Assignment Works</h3>
-                <ul className='text-sm text-blue-800 space-y-1 list-disc list-inside'>
+              <div className='bg-muted border border-border rounded-lg p-4'>
+                <h3 className='font-medium text-foreground mb-2'>How Auto-Assignment Works</h3>
+                <ul className='text-sm text-muted-foreground space-y-1 list-disc list-inside'>
                   <li>
                     <strong>Eligibility</strong>: Users must be Active. On-Call is preferred but not
                     required. If expertise mappings exist, experts get priority.
