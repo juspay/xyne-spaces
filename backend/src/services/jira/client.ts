@@ -68,6 +68,8 @@ export interface JiraFieldRecord {
   };
 }
 
+const JIRA_LIGHTWEIGHT_INDEX_FIELDS = ['summary', 'status', 'reporter', 'creator', 'assignee', 'labels'] as const;
+
 export interface JiraAttachmentRecord {
   id: string;
   filename: string;
@@ -194,13 +196,19 @@ export class JiraMigrationClient {
     return response.json() as Promise<T>;
   }
 
-  async fetchIssuesPage(projectKey: string, requestPageToken?: string, maxResults: number = 100, dateFrom?: string) {
+  async fetchIssuesPage(
+    projectKey: string,
+    requestPageToken?: string,
+    maxResults: number = 100,
+    dateFrom?: string,
+    fields: string[] = ['*all'],
+  ) {
     const result = await this.fetchJson<JiraSearchResponse>('/rest/api/3/search/jql', {
       method: 'POST',
       body: JSON.stringify({
         jql: buildProjectJql(projectKey, dateFrom),
         maxResults,
-        fields: ['*all'],
+        fields,
         ...(requestPageToken ? { nextPageToken: requestPageToken } : {}),
       }),
     });
@@ -226,28 +234,66 @@ export class JiraMigrationClient {
     };
   }
 
-  async fetchIssuesByKeys(projectKey: string, issueKeys: string[], dateFrom?: string): Promise<JiraIssueRecord[]> {
+  async fetchIssuesByKeys(
+    projectKey: string,
+    issueKeys: string[],
+    dateFrom?: string,
+    fields: string[] = ['*all'],
+  ): Promise<JiraIssueRecord[]> {
     const uniqueIssueKeys = [...new Set(issueKeys.map(key => key.trim().toUpperCase()).filter(Boolean))];
     if (uniqueIssueKeys.length === 0) {
       return [];
     }
-    const result = await this.fetchJson<JiraSearchResponse>('/rest/api/3/search/jql', {
-      method: 'POST',
-      body: JSON.stringify({
-        jql: buildProjectJql(projectKey, dateFrom, uniqueIssueKeys),
-        maxResults: Math.min(uniqueIssueKeys.length, 100),
-        fields: ['*all'],
-      }),
-    });
+    const issueChunks: JiraIssueRecord[] = [];
+    const chunkSize = 100;
+
+    for (let index = 0; index < uniqueIssueKeys.length; index += chunkSize) {
+      const issueKeyChunk = uniqueIssueKeys.slice(index, index + chunkSize);
+      const result = await this.fetchJson<JiraSearchResponse>('/rest/api/3/search/jql', {
+        method: 'POST',
+        body: JSON.stringify({
+          jql: buildProjectJql(projectKey, dateFrom, issueKeyChunk),
+          maxResults: Math.min(issueKeyChunk.length, chunkSize),
+          fields,
+        }),
+      });
+      issueChunks.push(...result.issues);
+    }
 
     logger.info('[JiraMigrationImport] Jira search page fetched for selected issue keys', {
       projectKey,
       requestedIssueKeyCount: uniqueIssueKeys.length,
-      returnedIssueCount: result.issues.length,
-      sampleIssueKeys: result.issues.slice(0, 10).map(issue => issue.key),
+      returnedIssueCount: issueChunks.length,
+      sampleIssueKeys: issueChunks.slice(0, 10).map(issue => issue.key),
     });
 
-    return result.issues;
+    return issueChunks;
+  }
+
+  async fetchIssuesMetadataPage(
+    projectKey: string,
+    requestPageToken?: string,
+    maxResults: number = 100,
+    dateFrom?: string,
+  ) {
+    const result = await this.fetchJson<JiraSearchResponse>('/rest/api/3/search/jql', {
+      method: 'POST',
+      body: JSON.stringify({
+        jql: buildProjectJql(projectKey, dateFrom),
+        maxResults,
+        fields: [...JIRA_LIGHTWEIGHT_INDEX_FIELDS],
+        ...(requestPageToken ? { nextPageToken: requestPageToken } : {}),
+      }),
+    });
+
+    return {
+      total: typeof result.total === 'number' ? result.total : result.issues.length,
+      issues: result.issues,
+      nextPageToken: result.nextPageToken || null,
+      hasNextPage: result.isLast !== true && Boolean(result.nextPageToken),
+      pageSize: maxResults,
+      requestPageToken: requestPageToken || null,
+    };
   }
 
   async fetchFieldDefinitions(): Promise<JiraFieldRecord[]> {

@@ -6,6 +6,7 @@ import {
   jiraMigrationService,
   type JiraMigrationExecuteRequest,
   type JiraMigrationExecuteResponse,
+  type JiraMigrationFilters,
   type JiraMigrationHistoryItem,
   type JiraMigrationJobProgress,
   type JiraMigrationPreviewResponse,
@@ -15,7 +16,8 @@ import Input from '../../components/ui/Input/Input';
 import Dialog from '../../components/ui/Dialog';
 import { toast } from 'sonner';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
-import { FolderKanban, LayoutTemplate, Hash } from 'lucide-react';
+import { EntityMultiSelector } from '../../components/ui/EntitySelector/EntityMultiSelector';
+import { FolderKanban, LayoutTemplate, Hash, User, Tag } from 'lucide-react';
 
 const actionClassMap: Record<string, string> = {
   create_board_custom_field: 'bg-blue-100 text-blue-800',
@@ -133,6 +135,8 @@ const JiraMigrationScreen = (): ReactElement => {
   const [targetChannelId, setTargetChannelId] = useState('');
   const [jiraProjectKey, setJiraProjectKey] = useState('');
   const [ticketRange, setTicketRange] = useState<TicketRange>('all');
+  const [filters, setFilters] = useState<JiraMigrationFilters>({});
+  const [isFilterEnabled, setIsFilterEnabled] = useState(false);
   const [preview, setPreview] = useState<JiraMigrationPreviewResponse | null>(null);
   const [result, setResult] = useState<JiraMigrationExecuteResponse | null>(null);
   const [migrationHistory, setMigrationHistory] = useState<JiraMigrationHistoryItem[]>([]);
@@ -382,6 +386,14 @@ const JiraMigrationScreen = (): ReactElement => {
     targetChannelId: targetChannelId.trim(),
     maxResults: 25,
     ...(resolvedDateFrom ? { dateFrom: resolvedDateFrom } : {}),
+    ...(isFilterEnabled ? { loadFilterOptions: true } : {}),
+    ...(isFilterEnabled &&
+    (filters.reporterAccountIds?.length ||
+      filters.creatorAccountIds?.length ||
+      filters.assigneeAccountIds?.length ||
+      filters.labels?.length)
+      ? { filters }
+      : {}),
     ...(nextPageToken ? { nextPageToken } : {}),
   });
 
@@ -444,7 +456,7 @@ const JiraMigrationScreen = (): ReactElement => {
     }
   };
 
-  const handleImport = async (mode: 'all' | 'page'): Promise<void> => {
+  const handleImport = async (): Promise<void> => {
     if (!canPreview) {
       toast.error('Please fill Jira project key, target project, board, and channel ID');
       return;
@@ -479,19 +491,11 @@ const JiraMigrationScreen = (): ReactElement => {
     setMigrationProgress(null);
 
     try {
-      const payload: JiraMigrationExecuteRequest =
-        mode === 'page'
-          ? {
-              ...buildPayload(pageTokens[pageIndex]),
-              issueKeys: preview?.issueSamples.map(issue => issue.key) || [],
-              statusV2Mappings: strictStatusV2Mappings,
-              skipCustomFieldIds: selectedSkipCustomFieldIds,
-            }
-          : {
-              ...buildPayload(),
-              statusV2Mappings: strictStatusV2Mappings,
-              skipCustomFieldIds: selectedSkipCustomFieldIds,
-            };
+      const payload: JiraMigrationExecuteRequest = {
+        ...buildPayload(),
+        statusV2Mappings: strictStatusV2Mappings,
+        skipCustomFieldIds: selectedSkipCustomFieldIds,
+      };
 
       const startResult = await jiraMigrationService.startMigration(payload);
       persistJiraMigrationJob({
@@ -505,7 +509,7 @@ const JiraMigrationScreen = (): ReactElement => {
         startedAt: new Date().toISOString(),
       });
       setActiveJobId(startResult.jobId);
-      toast.success(mode === 'page' ? 'Current page migration started' : 'Jira migration started');
+      toast.success('Jira migration started');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to start migration';
       setIsImportLoading(false);
@@ -612,6 +616,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setStatusV2Mappings({});
                         setSkippedCustomFieldIds({});
                         setMigrationPhase('setup');
+                        setFilters({});
+                        setIsFilterEnabled(false);
                         setPreview(null);
                         setResult(null);
                         setPageTokens([undefined]);
@@ -645,6 +651,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setStatusV2Mappings({});
                         setSkippedCustomFieldIds({});
                         setMigrationPhase('setup');
+                        setFilters({});
+                        setIsFilterEnabled(false);
                         setPreview(null);
                         setResult(null);
                         setPageTokens([undefined]);
@@ -676,6 +684,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setStatusV2Mappings({});
                         setSkippedCustomFieldIds({});
                         setMigrationPhase('setup');
+                        setFilters({});
+                        setIsFilterEnabled(false);
                         setPreview(null);
                         setResult(null);
                         setPageTokens([undefined]);
@@ -707,6 +717,8 @@ const JiraMigrationScreen = (): ReactElement => {
                         setStatusV2Mappings({});
                         setSkippedCustomFieldIds({});
                         setMigrationPhase('setup');
+                        setFilters({});
+                        setIsFilterEnabled(false);
                         setPreview(null);
                         setResult(null);
                         setPageTokens([undefined]);
@@ -737,6 +749,8 @@ const JiraMigrationScreen = (): ReactElement => {
                       setStatusV2Mappings({});
                       setSkippedCustomFieldIds({});
                       setMigrationPhase('setup');
+                      setFilters({});
+                      setIsFilterEnabled(false);
                       setPreview(null);
                       setResult(null);
                       setPageTokens([undefined]);
@@ -765,6 +779,160 @@ const JiraMigrationScreen = (): ReactElement => {
                     </p>
                   </div>
 
+                  <div className='mt-4 rounded-2xl border border-border/70 bg-background p-4'>
+                    <div className='flex items-start justify-between gap-3'>
+                      <div>
+                        <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>
+                          Ticket Filters
+                        </p>
+                        <p className='mt-2 text-sm font-medium text-foreground'>
+                          Apply assignee, reporter, creator, and label filters only when needed.
+                        </p>
+                        <p className='mt-1 text-xs text-muted-foreground'>
+                          Filters are optional. If disabled, preview uses the standard Jira flow and
+                          does not load filter metadata.
+                        </p>
+                      </div>
+                      {preview && isFilterEnabled && (
+                        <span className='rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-[11px] font-medium text-sky-800'>
+                          {preview.filteredIssueCount} matching issues
+                        </span>
+                      )}
+                    </div>
+
+                    <div className='mt-4 flex items-center justify-between rounded-xl border border-border bg-muted/10 px-4 py-3'>
+                      <div>
+                        <p className='text-sm font-medium text-foreground'>Enable Filters</p>
+                        <p className='mt-1 text-xs text-muted-foreground'>
+                          Turn this on only if you want to filter by assignee, reporter, creator, or
+                          labels.
+                        </p>
+                      </div>
+                      <input
+                        type='checkbox'
+                        data-track-category='jira_migration'
+                        data-track-name='toggle_filters'
+                        checked={isFilterEnabled}
+                        onChange={event => {
+                          const checked = event.target.checked;
+                          setIsFilterEnabled(checked);
+                          setFilters({});
+                          setPreview(null);
+                          setResult(null);
+                          setPageTokens([undefined]);
+                          setPageIndex(0);
+                        }}
+                        className='h-4 w-4 rounded border-border text-emerald-600 focus:ring-emerald-500'
+                      />
+                    </div>
+
+                    {isFilterEnabled ? (
+                      preview ? (
+                        <div className='mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4'>
+                          <div>
+                            <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                              Assignee
+                            </p>
+                            <EntityMultiSelector
+                              options={preview.filterOptions.assignees.map(user => ({
+                                value: user.accountId,
+                                label: user.displayName,
+                                ...(user.emailAddress ? { subtitle: user.emailAddress } : {}),
+                                icon: <User className='w-4 h-4 text-muted-foreground' />,
+                              }))}
+                              selectedValues={filters.assigneeAccountIds || []}
+                              onMultiSelect={values =>
+                                setFilters(previous => ({
+                                  ...previous,
+                                  assigneeAccountIds: values,
+                                }))
+                              }
+                              placeholder='Search assignees...'
+                              searchPlaceholder='Search assignees...'
+                              width='100%'
+                              inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                            />
+                          </div>
+                          <div>
+                            <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                              Reporter
+                            </p>
+                            <EntityMultiSelector
+                              options={preview.filterOptions.reporters.map(user => ({
+                                value: user.accountId,
+                                label: user.displayName,
+                                ...(user.emailAddress ? { subtitle: user.emailAddress } : {}),
+                                icon: <User className='w-4 h-4 text-muted-foreground' />,
+                              }))}
+                              selectedValues={filters.reporterAccountIds || []}
+                              onMultiSelect={values =>
+                                setFilters(previous => ({
+                                  ...previous,
+                                  reporterAccountIds: values,
+                                }))
+                              }
+                              placeholder='Search reporters...'
+                              searchPlaceholder='Search reporters...'
+                              width='100%'
+                              inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                            />
+                          </div>
+                          <div>
+                            <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                              Creator
+                            </p>
+                            <EntityMultiSelector
+                              options={preview.filterOptions.creators.map(user => ({
+                                value: user.accountId,
+                                label: user.displayName,
+                                ...(user.emailAddress ? { subtitle: user.emailAddress } : {}),
+                                icon: <User className='w-4 h-4 text-muted-foreground' />,
+                              }))}
+                              selectedValues={filters.creatorAccountIds || []}
+                              onMultiSelect={values =>
+                                setFilters(previous => ({ ...previous, creatorAccountIds: values }))
+                              }
+                              placeholder='Search creators...'
+                              searchPlaceholder='Search creators...'
+                              width='100%'
+                              inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                            />
+                          </div>
+                          <div>
+                            <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
+                              Labels
+                            </p>
+                            <EntityMultiSelector
+                              options={preview.filterOptions.labels.map(label => ({
+                                value: label,
+                                label,
+                                icon: <Tag className='w-4 h-4 text-muted-foreground' />,
+                              }))}
+                              selectedValues={filters.labels || []}
+                              onMultiSelect={values =>
+                                setFilters(previous => ({ ...previous, labels: values }))
+                              }
+                              placeholder='Search labels...'
+                              searchPlaceholder='Search labels...'
+                              width='100%'
+                              inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className='mt-4 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground'>
+                          Click Load Preview after enabling filters to fetch assignee, reporter,
+                          creator, and label options for this Jira project.
+                        </div>
+                      )
+                    ) : (
+                      <div className='mt-4 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground'>
+                        Filters are off. Preview and migration will include the normal Jira scope
+                        without loading filter option data.
+                      </div>
+                    )}
+                  </div>
+
                   <div className='mt-4 flex flex-wrap gap-2'>
                     <Button
                       onClick={() => {
@@ -774,7 +942,11 @@ const JiraMigrationScreen = (): ReactElement => {
                       }}
                       disabled={isPreviewLoading || isImportLoading || !canPreview}
                     >
-                      {isPreviewLoading ? 'Loading Jira Statuses...' : 'Start Migration'}
+                      {isPreviewLoading
+                        ? 'Loading Preview...'
+                        : preview
+                          ? 'Refresh Preview'
+                          : 'Load Preview'}
                     </Button>
                     <Button
                       variant='outline'
@@ -966,7 +1138,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     ← Edit Status Mappings
                   </Button>
                   <Button
-                    onClick={() => void handleImport('all')}
+                    onClick={() => void handleImport()}
                     disabled={isImportLoading || !hasCompleteStatusV2Mappings}
                   >
                     {isImportLoading ? 'Migrating...' : 'Migrate Tickets'}
@@ -1171,6 +1343,9 @@ const JiraMigrationScreen = (): ReactElement => {
                         <p className='mt-1 text-xs text-rose-900'>
                           Suggested emails:{' '}
                           {user.suggestedEmails.length > 0 ? user.suggestedEmails.join(', ') : '—'}
+                        </p>
+                        <p className='mt-1 text-xs text-rose-900'>
+                          Tickets: {user.issueKeys.length > 0 ? user.issueKeys.join(', ') : '—'}
                         </p>
                       </div>
                     ))}
@@ -1759,10 +1934,20 @@ const JiraMigrationScreen = (): ReactElement => {
                               <p className='mt-1 text-foreground'>{issue.reporter || '—'}</p>
                             </div>
                             <div>
+                              <p className='text-[11px] text-muted-foreground'>Creator</p>
+                              <p className='mt-1 text-foreground'>{issue.creator || '—'}</p>
+                            </div>
+                            <div>
                               <p className='text-[11px] text-muted-foreground'>Assignee</p>
                               <p className='mt-1 text-foreground'>{issue.assignee || '—'}</p>
                             </div>
                             <div>
+                              <p className='text-[11px] text-muted-foreground'>Labels</p>
+                              <p className='mt-1 text-foreground'>
+                                {issue.labels.length > 0 ? issue.labels.join(', ') : '—'}
+                              </p>
+                            </div>
+                            <div className='col-span-2'>
                               <p className='text-[11px] text-muted-foreground'>Load</p>
                               <p className='mt-1 text-foreground'>
                                 {issue.commentCount} comments • {issue.attachmentCount} attachments

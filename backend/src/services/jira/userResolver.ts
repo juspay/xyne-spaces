@@ -14,6 +14,7 @@ export interface UnresolvedJiraUser {
   displayName: string | null;
   accountId: string | null;
   suggestedEmails: string[];
+  issueKeys: string[];
 }
 
 type UserResolutionLookup = {
@@ -194,6 +195,7 @@ export class JiraUserResolver {
   async resolveUserOrNull(
     user: JiraUserLike | undefined,
     unresolvedUsers: Map<string, UnresolvedJiraUser>,
+    issueKey?: string,
   ): Promise<string | null> {
     if (!user) return null;
 
@@ -412,10 +414,13 @@ export class JiraUserResolver {
         return byEmailPrefix.id;
       }
 
-      unresolvedUsers.set(this.unresolvedUserKey(user), {
+      const unresolvedUserKey = this.unresolvedUserKey(user);
+      const existingUnresolvedUser = unresolvedUsers.get(unresolvedUserKey);
+      unresolvedUsers.set(unresolvedUserKey, {
         displayName: user.displayName || null,
         accountId: user.accountId || null,
         suggestedEmails: inferredEmails,
+        issueKeys: [...new Set([...(existingUnresolvedUser?.issueKeys || []), ...(issueKey ? [issueKey] : [])])],
       });
     }
 
@@ -431,13 +436,14 @@ export class JiraUserResolver {
     user: JiraUserLike | undefined,
     fallbackUserId: string,
     unresolvedUsers: Map<string, UnresolvedJiraUser>,
+    issueKey?: string,
   ): Promise<string> {
-    const resolvedUserId = await this.resolveUserOrNull(user, unresolvedUsers);
+    const resolvedUserId = await this.resolveUserOrNull(user, unresolvedUsers, issueKey);
     if (resolvedUserId) {
       return resolvedUserId;
     }
 
-    logger.warn('[jira-migration][user-resolution] Falling back to actor user for unresolved Jira user', {
+    logger.warn('[jira-migration][user-resolution] Falling back to configured migration user for unresolved Jira user', {
       displayName: user?.displayName || null,
       emailAddress: user?.emailAddress || null,
       accountId: user?.accountId || null,
