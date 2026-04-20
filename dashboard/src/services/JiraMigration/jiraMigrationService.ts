@@ -6,6 +6,13 @@ const JIRA_MIGRATION_BASE_URL = API_BASE_URL.replace(
   isSandBox ? '/api/migration/jira' : '/migrate/api/migration/jira',
 );
 
+export interface JiraMigrationFilters {
+  reporterAccountIds?: string[];
+  creatorAccountIds?: string[];
+  assigneeAccountIds?: string[];
+  labels?: string[];
+}
+
 export interface JiraMigrationPreviewResponse {
   jiraProject: {
     id: string;
@@ -61,10 +68,32 @@ export interface JiraMigrationPreviewResponse {
     issueType: string;
     status: string;
     reporter: string | null;
+    creator: string | null;
     assignee: string | null;
+    labels: string[];
     commentCount: number;
     attachmentCount: number;
   }>;
+  filterOptions: {
+    reporters: Array<{
+      accountId: string;
+      displayName: string;
+      emailAddress?: string;
+    }>;
+    creators: Array<{
+      accountId: string;
+      displayName: string;
+      emailAddress?: string;
+    }>;
+    assignees: Array<{
+      accountId: string;
+      displayName: string;
+      emailAddress?: string;
+    }>;
+    labels: string[];
+  };
+  appliedFilters: JiraMigrationFilters;
+  filteredIssueCount: number;
   pagination: {
     pageSize: number;
     currentPageIssueCount: number;
@@ -82,6 +111,8 @@ export interface JiraMigrationPreviewRequest {
   nextPageToken?: string;
   maxResults?: number;
   dateFrom?: string;
+  filters?: JiraMigrationFilters;
+  loadFilterOptions?: boolean;
 }
 
 export interface JiraMigrationExecuteRequest extends JiraMigrationPreviewRequest {
@@ -124,6 +155,7 @@ export interface JiraMigrationExecuteResponse {
     displayName: string | null;
     accountId: string | null;
     suggestedEmails: string[];
+    issueKeys: string[];
   }>;
   issueResults: JiraMigrationIssueResult[];
   warnings: string[];

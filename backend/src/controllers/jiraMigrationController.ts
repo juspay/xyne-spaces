@@ -25,6 +25,8 @@ export class JiraMigrationController {
         nextPageToken?: string;
         maxResults?: number;
         dateFrom?: string;
+        filters?: { reporterAccountIds?: string[]; creatorAccountIds?: string[]; assigneeAccountIds?: string[]; labels?: string[] };
+        loadFilterOptions?: boolean;
       };
 
       if (!jiraProjectKey || !targetProjectId || !targetBoardId || !targetChannelId) {
@@ -42,6 +44,13 @@ export class JiraMigrationController {
         nextPageToken: req.body.nextPageToken,
         maxResults: req.body.maxResults,
         dateFrom: typeof req.body.dateFrom === 'string' ? req.body.dateFrom : undefined,
+        loadFilterOptions: req.body.loadFilterOptions === true,
+        filters: req.body.filters && typeof req.body.filters === 'object' ? {
+          ...(Array.isArray(req.body.filters.reporterAccountIds) ? { reporterAccountIds: req.body.filters.reporterAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+          ...(Array.isArray(req.body.filters.creatorAccountIds) ? { creatorAccountIds: req.body.filters.creatorAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+          ...(Array.isArray(req.body.filters.assigneeAccountIds) ? { assigneeAccountIds: req.body.filters.assigneeAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+          ...(Array.isArray(req.body.filters.labels) ? { labels: req.body.filters.labels.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+        } : undefined,
       });
 
       res.json({ success: true, data: result });
@@ -64,6 +73,7 @@ export class JiraMigrationController {
         dateFrom?: string;
         statusV2Mappings?: Record<string, string>;
         skipCustomFieldIds?: string[];
+        filters?: { reporterAccountIds?: string[]; creatorAccountIds?: string[]; assigneeAccountIds?: string[]; labels?: string[] };
       };
 
       if (!jiraProjectKey || !targetProjectId || !targetBoardId || !targetChannelId) {
@@ -86,6 +96,12 @@ export class JiraMigrationController {
         targetChannelId,
         issueKeys: Array.isArray(req.body.issueKeys) ? req.body.issueKeys : undefined,
         dateFrom: typeof req.body.dateFrom === 'string' ? req.body.dateFrom : undefined,
+        filters: req.body.filters && typeof req.body.filters === 'object' ? {
+          ...(Array.isArray(req.body.filters.reporterAccountIds) ? { reporterAccountIds: req.body.filters.reporterAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+          ...(Array.isArray(req.body.filters.creatorAccountIds) ? { creatorAccountIds: req.body.filters.creatorAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+          ...(Array.isArray(req.body.filters.assigneeAccountIds) ? { assigneeAccountIds: req.body.filters.assigneeAccountIds.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+          ...(Array.isArray(req.body.filters.labels) ? { labels: req.body.filters.labels.filter((value: unknown): value is string => typeof value === 'string') } : {}),
+        } : undefined,
         statusV2Mappings:
           req.body.statusV2Mappings && typeof req.body.statusV2Mappings === 'object'
             ? req.body.statusV2Mappings
@@ -292,9 +308,18 @@ export class JiraMigrationController {
     const topWarnings = result.warnings.slice(0, 8);
     const unresolvedUserItems = result.unresolvedUsers.slice(0, 8).map(user => {
       const name = user.displayName || user.accountId || 'Unknown Jira user';
-      return user.suggestedEmails.length > 0
-        ? `${name} · ${user.suggestedEmails.join(', ')}`
-        : name;
+      const suggestedEmails = user.suggestedEmails.length > 0 ? user.suggestedEmails.join(', ') : null;
+      const issueKeys = user.issueKeys.length > 0 ? user.issueKeys.slice(0, 5).join(', ') : null;
+      const issueSuffix =
+        user.issueKeys.length > 5 ? ` (+${user.issueKeys.length - 5} more)` : '';
+
+      return [
+        name,
+        suggestedEmails,
+        issueKeys ? `Tickets: ${issueKeys}${issueSuffix}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
     });
     const issueDetailItems = result.issueResults
       .filter(issue => issue.status !== 'completed')

@@ -27,8 +27,10 @@ import {
 } from '@xyne/shared';
 import { adfToHtmlAsync, adfToText } from '@/services/jira/adfHtml';
 import { JiraMigrationClient } from '@/services/jira/client';
-import { JiraUserResolver } from '@/services/jira/userResolver';
+import { JiraUserResolver, type UnresolvedJiraUser } from '@/services/jira/userResolver';
 import { TicketIdService } from '@/services/ticketIdService';
+import { UserRepository } from '@/database/repositories/users';
+import { jiraMigrationProjectIndexService, type JiraMigrationFilters } from '@/services/jiraMigrationProjectIndexService';
 import {
   queueJiraImportAttachmentVespaJob,
   queueJiraImportMessageVespaJob,
@@ -115,6 +117,7 @@ export interface JiraMigrationExecuteInput {
   targetChannelId: string;
   issueKeys?: string[];
   dateFrom?: string;
+  filters?: JiraMigrationFilters;
   statusV2Mappings: Record<string, string>;
   skipCustomFieldIds?: string[];
 }
@@ -141,11 +144,7 @@ export interface JiraMigrationExecuteResult {
   reusedBoardCustomFields: number;
   linkedTickets: number;
   createdSubTickets: number;
-  unresolvedUsers: Array<{
-    displayName: string | null;
-    accountId: string | null;
-    suggestedEmails: string[];
-  }>;
+  unresolvedUsers: UnresolvedJiraUser[];
   issueResults: JiraMigrationIssueResult[];
   warnings: string[];
 }
@@ -297,6 +296,7 @@ const FORM_VALUE_PRELOAD_TICKET_BATCH_SIZE = 500;
 const FORM_VALUE_PRELOAD_FIELD_BATCH_SIZE = 100;
 const ATTACHMENT_ROW_PRELOAD_BATCH_SIZE = 1000;
 const ATTACHMENT_IMPORT_CONCURRENCY = 4;
+const JIRA_MIGRATION_FALLBACK_EMAIL = 'john.doe@gmail.com';
 
 const chunkArray = <T,>(items: T[], size: number): T[][] => {
   if (size <= 0) return [items];
@@ -465,6 +465,7 @@ export class JiraMigrationImportService {
   private ticketRepository = new TicketRepository();
   private jiraClient = new JiraMigrationClient();
   private userResolver = new JiraUserResolver();
+  private userRepository = new UserRepository();
   private externalSourceRepository = new ExternalSourceRepository();
   private cachedTicketsByIssueId = new Map<string, CachedTicketRecord>();
   private cachedTicketsByIssueKey = new Map<string, CachedTicketRecord>();
@@ -1177,7 +1178,8 @@ export class JiraMigrationImportService {
     rawValue: any,
     fieldType: string,
     fallbackUserId: string,
-    unresolvedUsers: Map<string, { displayName: string | null; accountId: string | null; suggestedEmails: string[] }>,
+    unresolvedUsers: Map<string, UnresolvedJiraUser>,
+    issueKey: string,
   ): Promise<any> {
     if (rawValue === null || rawValue === undefined) return null;
 
@@ -1190,7 +1192,7 @@ export class JiraMigrationImportService {
       const resolvedUserIds = [
         ...new Set(
           (await Promise.all(
-            jiraUsers.map(user => this.userResolver.resolveUser(user, fallbackUserId, unresolvedUsers)),
+            jiraUsers.map(user => this.userResolver.resolveUser(user, fallbackUserId, unresolvedUsers, issueKey)),
           )).filter(Boolean),
         ),
       ];
@@ -1261,8 +1263,9 @@ export class JiraMigrationImportService {
 
   private async renderJiraMessageContent(
     body: unknown,
-    unresolvedUsers: Map<string, { displayName: string | null; accountId: string | null; suggestedEmails: string[] }>,
+    unresolvedUsers: Map<string, UnresolvedJiraUser>,
     fallbackHtml: string,
+    issueKey: string,
   ): Promise<string> {
     const content = await adfToHtmlAsync(body, {
       resolveUserMention: async mention => {
@@ -1272,6 +1275,7 @@ export class JiraMigrationImportService {
             displayName: mention.displayName || mention.text,
           },
           unresolvedUsers,
+          issueKey,
         );
 
         if (!resolvedMentionUserId) {
@@ -1293,7 +1297,7 @@ export class JiraMigrationImportService {
     issue: JiraIssue,
     conversationId: string,
     fallbackUserId: string,
-    unresolvedUsers: Map<string, { displayName: string | null; accountId: string | null; suggestedEmails: string[] }>,
+    unresolvedUsers: Map<string, UnresolvedJiraUser>,
   ): Promise<{
     imported: number;
     skipped: number;
@@ -1344,12 +1348,13 @@ export class JiraMigrationImportService {
         continue;
       }
 
-      const senderId = await this.userResolver.resolveUser(comment.author, fallbackUserId, unresolvedUsers);
+      const senderId = await this.userResolver.resolveUser(comment.author, fallbackUserId, unresolvedUsers, issue.key);
       const createdAt = comment.created ? new Date(comment.created) : new Date();
       const content = await this.renderJiraMessageContent(
         comment.body,
         unresolvedUsers,
         '<p>[Imported Jira comment]</p>',
+        issue.key,
       );
       const messageId = randomUUID();
 
@@ -1578,7 +1583,7 @@ export class JiraMigrationImportService {
     comments: JiraComment[],
     commentMessageMap: Map<string, string>,
     fallbackUserId: string,
-    unresolvedUsers: Map<string, { displayName: string | null; accountId: string | null; suggestedEmails: string[] }>,
+    unresolvedUsers: Map<string, UnresolvedJiraUser>,
   ): Promise<{ imported: number; skipped: number; warnings: string[] }> {
     const issueAttachments: JiraAttachment[] = Array.isArray(issue.fields.attachment)
       ? issue.fields.attachment
@@ -1712,6 +1717,7 @@ export class JiraMigrationImportService {
           plannedMatch.attachment.author,
           fallbackUserId,
           unresolvedUsers,
+          issue.key,
         );
         const createdAttachmentId = randomUUID();
 
@@ -1797,7 +1803,7 @@ export class JiraMigrationImportService {
     ticketId: string,
     conversationId: string,
     fallbackUserId: string,
-    unresolvedUsers: Map<string, { displayName: string | null; accountId: string | null; suggestedEmails: string[] }>,
+    unresolvedUsers: Map<string, UnresolvedJiraUser>,
   ): Promise<{ imported: number; skipped: number }> {
     const attachments: JiraAttachment[] = Array.isArray(issue.fields.attachment)
       ? issue.fields.attachment
@@ -1854,7 +1860,7 @@ export class JiraMigrationImportService {
       attachmentsToImport,
       ATTACHMENT_IMPORT_CONCURRENCY,
       async attachment => {
-        const uploadedBy = await this.userResolver.resolveUser(attachment.author, fallbackUserId, unresolvedUsers);
+        const uploadedBy = await this.userResolver.resolveUser(attachment.author, fallbackUserId, unresolvedUsers, issue.key);
         const downloaded = await this.jiraClient.downloadAttachment(attachment, issue.key);
 
         return {
@@ -2417,10 +2423,7 @@ export class JiraMigrationImportService {
     this.resetExecutionCaches();
     const jiraProjectKey = input.jiraProjectKey.trim().toUpperCase();
     const warnings: string[] = [];
-    const unresolvedUsers = new Map<
-      string,
-      { displayName: string | null; accountId: string | null; suggestedEmails: string[] }
-    >();
+    const unresolvedUsers = new Map<string, UnresolvedJiraUser>();
 
     logger.info(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Migration started`, {
       targetProjectId: input.targetProjectId,
@@ -2490,6 +2493,15 @@ export class JiraMigrationImportService {
       externalSourceId,
       created: externalSourceCreated,
     } = await this.ensureExternalSource(jiraProjectKey, channel.id, board.id);
+
+    const fallbackUser = await this.userRepository.findByEmail(JIRA_MIGRATION_FALLBACK_EMAIL);
+    const fallbackUserId = fallbackUser?.id || actorUserId;
+    if (!fallbackUser) {
+      logger.warn(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Configured fallback user not found; using actor user`, {
+        configuredFallbackEmail: JIRA_MIGRATION_FALLBACK_EMAIL,
+        actorUserId,
+      });
+    }
 
     await this.userResolver.warmUserResolutionLookup();
 
@@ -2630,6 +2642,7 @@ export class JiraMigrationImportService {
           issue.fields.description,
           unresolvedUsers,
           `<p>Imported from Jira ${issue.key}</p>`,
+          issue.key,
         );
         const createdAt = issue.fields.created ? new Date(issue.fields.created) : new Date();
         const issueResult: JiraMigrationIssueResult = {
@@ -2642,8 +2655,8 @@ export class JiraMigrationImportService {
         const issueLogPrefix = buildJiraMigrationIssueLogPrefix(jiraProjectKey, issue);
 
         try {
-          const resolvedReporterId = await this.userResolver.resolveUser(reporter, actorUserId, unresolvedUsers);
-          const resolvedAssigneeId = await this.userResolver.resolveUser(assignee, actorUserId, unresolvedUsers);
+          const resolvedReporterId = await this.userResolver.resolveUser(reporter, fallbackUserId, unresolvedUsers, issue.key);
+          const resolvedAssigneeId = await this.userResolver.resolveUser(assignee, fallbackUserId, unresolvedUsers, issue.key);
           const stageMatch = {
             stageName: mappedStage.name,
             statusV2: mappedStatusV2,
@@ -2899,8 +2912,9 @@ export class JiraMigrationImportService {
             const value = await this.normalizeFormValue(
               issue.fields[jiraFieldId],
               mapping.fieldType,
-              actorUserId,
+              fallbackUserId,
               unresolvedUsers,
+              issue.key,
             );
 
             if (
@@ -3013,7 +3027,7 @@ export class JiraMigrationImportService {
             | undefined;
 
           try {
-            const commentResult = await this.importComments(externalSourceId, issue, conversationId, actorUserId, unresolvedUsers);
+            const commentResult = await this.importComments(externalSourceId, issue, conversationId, fallbackUserId, unresolvedUsers);
             importedComments += commentResult.imported;
             skippedComments += commentResult.skipped;
             importedCommentData = {
@@ -3040,7 +3054,7 @@ export class JiraMigrationImportService {
               issue,
               ticketId,
               conversationId,
-              actorUserId,
+              fallbackUserId,
               unresolvedUsers,
             );
             importedAttachments += attachmentResult.imported;
@@ -3068,7 +3082,7 @@ export class JiraMigrationImportService {
                 ticketId,
                 importedCommentData.comments,
                 importedCommentData.commentMessageMap,
-                actorUserId,
+                fallbackUserId,
                 unresolvedUsers,
               );
               importedAttachments += commentAttachmentResult.imported;
@@ -3129,11 +3143,25 @@ export class JiraMigrationImportService {
       }
     };
 
-    if (input.issueKeys && input.issueKeys.length > 0) {
-      const selectedIssues = await this.jiraClient.fetchIssuesByKeys(jiraProjectKey, input.issueKeys, input.dateFrom);
+    const resolvedIssueKeys = input.issueKeys && input.issueKeys.length > 0
+      ? input.issueKeys
+      : input.filters
+        ? jiraMigrationProjectIndexService
+            .filterIssues(
+              await jiraMigrationProjectIndexService.getProjectIssueIndex(jiraProjectKey, input.dateFrom),
+              input.filters,
+            )
+            .map(issue => issue.key)
+        : undefined;
+
+    if (resolvedIssueKeys && resolvedIssueKeys.length > 0) {
+      const selectedIssues = await this.jiraClient.fetchIssuesByKeys(jiraProjectKey, resolvedIssueKeys, input.dateFrom);
       totalIssues = selectedIssues.length;
       await ensureInitialProgress();
       await processIssuesChunk(selectedIssues);
+    } else if (input.filters) {
+      totalIssues = 0;
+      await ensureInitialProgress();
     } else {
       let nextPageToken: string | undefined;
       let hasNextPage = true;

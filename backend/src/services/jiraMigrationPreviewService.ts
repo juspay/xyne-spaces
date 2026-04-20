@@ -2,6 +2,8 @@ import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { FormContextType, FormEntityType } from '@prisma/client';
 import { logger } from '@/utils/logger';
+import { JiraMigrationClient } from '@/services/jira/client';
+import { jiraMigrationProjectIndexService, type JiraMigrationFilterOptions, type JiraMigrationFilters } from '@/services/jiraMigrationProjectIndexService';
 
 const JIRA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const JIRA_MAX_RETRY_ATTEMPTS = 5;
@@ -45,14 +47,6 @@ type JiraProjectStatusesResponse = Array<{
   }>;
 }>;
 
-type JiraSearchResponse = {
-  issues: JiraIssue[];
-  nextPageToken?: string;
-  isLast?: boolean;
-  maxResults?: number;
-  total?: number;
-};
-
 type JiraProjectResponse = {
   id: string;
   key: string;
@@ -75,6 +69,8 @@ export interface JiraMigrationPreviewInput {
   nextPageToken?: string;
   maxResults?: number;
   dateFrom?: string;
+  filters?: JiraMigrationFilters;
+  loadFilterOptions?: boolean;
 }
 
 export interface JiraMigrationPreviewResult {
@@ -132,10 +128,15 @@ export interface JiraMigrationPreviewResult {
     issueType: string;
     status: string;
     reporter: string | null;
+    creator: string | null;
     assignee: string | null;
+    labels: string[];
     commentCount: number;
     attachmentCount: number;
   }>;
+  filterOptions: JiraMigrationFilterOptions;
+  appliedFilters: JiraMigrationFilters;
+  filteredIssueCount: number;
   pagination: {
     pageSize: number;
     currentPageIssueCount: number;
@@ -293,18 +294,6 @@ const inferXyneFieldType = (field: JiraFieldDefinition, sampleValues: string[]):
 };
 
 
-const escapeJqlString = (value: string): string => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-
-const buildProjectJql = (projectKey: string, dateFrom?: string): string => {
-  const clauses = [`project = "${escapeJqlString(projectKey)}"`];
-
-  if (dateFrom) {
-    clauses.push(`created >= "${dateFrom}"`);
-  }
-
-  return `${clauses.join(' AND ')} ORDER BY created ASC`;
-};
-
 const inferStatusMatch = (
   jiraStatus: string,
   stages: Array<{ name: string }>,
@@ -328,6 +317,7 @@ const inferStatusMatch = (
 };
 
 export class JiraMigrationPreviewService {
+  private jiraClient = new JiraMigrationClient();
   private buildHeaders(): Record<string, string> {
     const { migrationBotEmail, migrationBotAuthToken } = config.jira;
     if (!config.jira.baseUrl || !migrationBotEmail || !migrationBotAuthToken) {
@@ -494,54 +484,19 @@ export class JiraMigrationPreviewService {
     }
   }
 
-  private async fetchIssuesPage(
-    projectKey: string,
-    fields: string[],
-    requestPageToken?: string,
-    maxResults: number = 25,
-    dateFrom?: string,
-  ): Promise<{
-    total: number;
-    issues: JiraIssue[];
-    nextPageToken: string | null;
-    hasNextPage: boolean;
-    pageSize: number;
-    requestPageToken: string | null;
-  }> {
-    const result = await this.fetchJson<JiraSearchResponse>('/rest/api/3/search/jql', {
-      method: 'POST',
-      body: JSON.stringify({
-        jql: buildProjectJql(projectKey, dateFrom),
-        maxResults,
-        fields,
-        ...(requestPageToken ? { nextPageToken: requestPageToken } : {}),
-      }),
-    });
-
-    logger.info('[JiraMigrationPreview] Jira search page fetched', {
-      projectKey,
-      maxResults,
-      nextPageTokenPresent: Boolean(requestPageToken),
-      returnedIssueCount: result.issues.length,
-      total: result.total,
-      isLast: result.isLast,
-      responseNextPageTokenPresent: Boolean(result.nextPageToken),
-      sampleIssueKeys: result.issues.slice(0, 5).map(issue => issue.key),
-    });
-
-    return {
-      total: typeof result.total === 'number' ? result.total : result.issues.length,
-      issues: result.issues,
-      nextPageToken: result.nextPageToken || null,
-      hasNextPage: result.isLast !== true && Boolean(result.nextPageToken),
-      pageSize: maxResults,
-      requestPageToken: requestPageToken || null,
-    };
-  }
-
   async preview(input: JiraMigrationPreviewInput): Promise<JiraMigrationPreviewResult> {
     const jiraProjectKey = input.jiraProjectKey.trim().toUpperCase();
     const pageSize = Math.min(Math.max(input.maxResults || 25, 1), 100);
+    const pageOffset = Math.max(Number.parseInt(input.nextPageToken || '0', 10) || 0, 0);
+    const appliedFilters: JiraMigrationFilters = {
+      ...(input.filters?.reporterAccountIds?.length ? { reporterAccountIds: [...new Set(input.filters.reporterAccountIds.map(value => value.trim()).filter(Boolean))] } : {}),
+      ...(input.filters?.creatorAccountIds?.length ? { creatorAccountIds: [...new Set(input.filters.creatorAccountIds.map(value => value.trim()).filter(Boolean))] } : {}),
+      ...(input.filters?.assigneeAccountIds?.length ? { assigneeAccountIds: [...new Set(input.filters.assigneeAccountIds.map(value => value.trim()).filter(Boolean))] } : {}),
+      ...(input.filters?.labels?.length ? { labels: [...new Set(input.filters.labels.map(value => value.trim()).filter(Boolean))] } : {}),
+    };
+    const shouldLoadFilters =
+      input.loadFilterOptions === true ||
+      Boolean(appliedFilters.reporterAccountIds?.length || appliedFilters.creatorAccountIds?.length || appliedFilters.assigneeAccountIds?.length || appliedFilters.labels?.length);
 
     const [project, board, channel, boardStages, fieldDefinitions, existingBoardFields, allProjectStatuses, allProjectCustomFields] = await Promise.all([
       db.project.findUnique({ where: { id: input.targetProjectId } }),
@@ -569,13 +524,49 @@ export class JiraMigrationPreviewService {
     if (!board) throw new Error('Target board not found');
     if (!channel) throw new Error('Target channel not found');
 
-    const issueData = await this.fetchIssuesPage(
-      jiraProjectKey,
-      buildPreviewIssueFields(fieldDefinitions),
-      input.nextPageToken,
-      pageSize,
-      input.dateFrom,
-    );
+    let filteredIssueCount = 0;
+    let filterOptions: JiraMigrationFilterOptions = { reporters: [], creators: [], assignees: [], labels: [] };
+    let orderedPreviewIssues: JiraIssue[] = [];
+    let filteredStatusNames = new Set<string>();
+    let responseNextPageToken: string | null = null;
+    let responseHasNextPage = false;
+
+    if (shouldLoadFilters) {
+      const projectIssueIndex = await jiraMigrationProjectIndexService.getProjectIssueIndex(jiraProjectKey, input.dateFrom);
+      const filteredIndexIssues = jiraMigrationProjectIndexService.filterIssues(projectIssueIndex, appliedFilters);
+      filterOptions = await jiraMigrationProjectIndexService.getFilterOptions(jiraProjectKey, input.dateFrom);
+      filteredIssueCount = filteredIndexIssues.length;
+      filteredStatusNames = new Set(filteredIndexIssues.map(issue => issue.status).filter(Boolean));
+      const paginatedIndexIssues = filteredIndexIssues.slice(pageOffset, pageOffset + pageSize);
+      const paginatedIssueKeys = paginatedIndexIssues.map(issue => issue.key);
+      responseNextPageToken = pageOffset + pageSize < filteredIssueCount ? String(pageOffset + pageSize) : null;
+      responseHasNextPage = pageOffset + pageSize < filteredIssueCount;
+      const previewIssues = paginatedIssueKeys.length > 0
+        ? await this.jiraClient.fetchIssuesByKeys(
+            jiraProjectKey,
+            paginatedIssueKeys,
+            input.dateFrom,
+            buildPreviewIssueFields(fieldDefinitions),
+          )
+        : [];
+
+      const previewIssuesByKey = new Map(previewIssues.map(issue => [issue.key, issue]));
+      orderedPreviewIssues = paginatedIssueKeys
+        .map(issueKey => previewIssuesByKey.get(issueKey))
+        .filter((issue): issue is JiraIssue => Boolean(issue));
+    } else {
+      const issueData = await this.jiraClient.fetchIssuesPage(
+        jiraProjectKey,
+        input.nextPageToken,
+        pageSize,
+        input.dateFrom,
+        buildPreviewIssueFields(fieldDefinitions),
+      );
+      filteredIssueCount = issueData.total;
+      orderedPreviewIssues = issueData.issues;
+      responseNextPageToken = issueData.nextPageToken;
+      responseHasNextPage = issueData.hasNextPage;
+    }
 
     const fieldDefinitionMap = new Map(fieldDefinitions.map(field => [field.id, field]));
     const customFieldStats = new Map<
@@ -584,7 +575,7 @@ export class JiraMigrationPreviewService {
     >();
     const seenStatuses = new Set<string>();
 
-    for (const issue of issueData.issues) {
+    for (const issue of orderedPreviewIssues) {
       const statusName = issue.fields.status?.name;
       if (typeof statusName === 'string' && statusName.trim()) {
         seenStatuses.add(statusName);
@@ -688,8 +679,11 @@ export class JiraMigrationPreviewService {
       })
       .sort((a, b) => a.jiraFieldName.localeCompare(b.jiraFieldName));
 
-    // Merge statuses from the project API (complete list) with statuses seen in this page's issues
-    const allStatuses = new Set([...allProjectStatuses, ...seenStatuses]);
+    const allStatuses = new Set(
+      shouldLoadFilters && filteredStatusNames.size > 0
+        ? [...filteredStatusNames, ...seenStatuses]
+        : [...allProjectStatuses, ...seenStatuses],
+    );
 
     const statusMappings = Array.from(allStatuses)
       .sort((a, b) => a.localeCompare(b))
@@ -698,14 +692,18 @@ export class JiraMigrationPreviewService {
         ...inferStatusMatch(status, boardStages),
       }));
 
-    const issueSamples = issueData.issues.slice(0, 25).map(issue => ({
+    const issueSamples = orderedPreviewIssues.slice(0, 25).map(issue => ({
       id: issue.id,
       key: issue.key,
       summary: issue.fields.summary || 'Untitled',
       issueType: issue.fields.issuetype?.name || 'Unknown',
       status: issue.fields.status?.name || 'Unknown',
       reporter: (issue.fields.reporter as JiraUser | undefined)?.displayName || null,
+      creator: (issue.fields.creator as JiraUser | undefined)?.displayName || null,
       assignee: (issue.fields.assignee as JiraUser | undefined)?.displayName || null,
+      labels: Array.isArray(issue.fields.labels)
+        ? issue.fields.labels.filter((label: unknown): label is string => typeof label === 'string')
+        : [],
       commentCount: issue.fields.comment?.total || 0,
       attachmentCount: Array.isArray(issue.fields.attachment) ? issue.fields.attachment.length : 0,
     }));
@@ -715,7 +713,7 @@ export class JiraMigrationPreviewService {
         id: jiraProjectKey,
         key: jiraProjectKey,
         name: jiraProjectKey,
-        totalIssues: issueData.total,
+        totalIssues: shouldLoadFilters ? filteredIssueCount : filteredIssueCount,
       },
       target: {
         projectId: project.id,
@@ -740,12 +738,15 @@ export class JiraMigrationPreviewService {
       statusMappings,
       customFieldMappings,
       issueSamples,
+      filterOptions,
+      appliedFilters,
+      filteredIssueCount,
       pagination: {
-        pageSize: issueData.pageSize,
-        currentPageIssueCount: issueData.issues.length,
-        nextPageToken: issueData.nextPageToken,
-        hasNextPage: issueData.hasNextPage,
-        requestPageToken: issueData.requestPageToken,
+        pageSize,
+        currentPageIssueCount: orderedPreviewIssues.length,
+        nextPageToken: responseNextPageToken,
+        hasNextPage: responseHasNextPage,
+        requestPageToken: input.nextPageToken || null,
       },
     };
   }
