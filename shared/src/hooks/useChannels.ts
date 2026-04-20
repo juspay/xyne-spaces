@@ -52,7 +52,20 @@ export const useAllChannels = (): Channel[] => {
     state => state.context.allChannels,
     shallowEqualChannels,
   );
-  return useMemo(() => channels, [channels]);
+  const visibleChannels = useSelector(
+    stateMachineActor,
+    state => state.context.visibleChannels,
+    shallowEqualVisibleChannels,
+  );
+  return useMemo(() => {
+    const combined = [...channels];
+    for (const visibleChannel of visibleChannels) {
+      if (!combined.some(c => c.id === visibleChannel.id)) {
+        combined.push(visibleChannel);
+      }
+    }
+    return combined;
+  }, [channels, visibleChannels]);
 };
 
 export const useAllVisibleChannels = (): VisibleChannel[] => {
@@ -76,8 +89,18 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.description === b?.description &&
       a?.createdAt === b?.createdAt,
   );
-
-  return channel;
+  const visibleChannel = useSelector(
+    stateMachineActor,
+    state => state.context.visibleChannels.find(c => c.id === channelId),
+    (a, b) =>
+      a?.id === b?.id &&
+      a?.name === b?.name &&
+      a?.scopeType === b?.scopeType &&
+      a?.visibility === b?.visibility &&
+      a?.description === b?.description &&
+      a?.createdAt === b?.createdAt,
+  );
+  return channel || visibleChannel;
 };
 
 export const useVisibleChannel = (channelId: string): VisibleChannel | undefined => {
@@ -111,8 +134,20 @@ export const useChannelByName = (channelName: string): Channel | undefined => {
       a?.description === b?.description &&
       a?.createdAt === b?.createdAt,
   );
+  const visibleChannel = useSelector(
+    stateMachineActor,
+    state =>
+      state.context.visibleChannels.find(c => c.name.toLowerCase() === channelName.toLowerCase()),
+    (a, b) =>
+      a?.id === b?.id &&
+      a?.name === b?.name &&
+      a?.scopeType === b?.scopeType &&
+      a?.visibility === b?.visibility &&
+      a?.description === b?.description &&
+      a?.createdAt === b?.createdAt,
+  );
 
-  return channel;
+  return channel || visibleChannel;
 };
 
 export const useChannelSearch = (query: string, limit: number): Channel[] => {
