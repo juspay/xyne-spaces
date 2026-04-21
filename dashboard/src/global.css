@@ -1313,7 +1313,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 }
 
 /* AvatarGroup styling - overlapping avatars with masked borders */
-[data-slot="avatar-group"] img {
+[data-slot="avatar-group"] [data-slot="avatar-stack-item"] img {
   border-radius: 50%;
 }
 
