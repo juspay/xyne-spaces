@@ -420,7 +420,7 @@ export class TranscriptService {
       // 14. Attach identified transcript (real-name labelled) as a second attachment when available.
       // Written by the Python agent's RealtimeIdentifier during the call into
       // transcriptions/{callId}_identified.jsonl — may not exist if no voiceprints were enrolled.
-      void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId);
+      void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId, channel.workspaceId);
     } catch (error) {
       logger.error(
         `[${callId}] transcript_processing_failed | message_id=${messageId}, error=${error instanceof Error ? error.message : JSON.stringify(error)}`,
@@ -582,6 +582,7 @@ export class TranscriptService {
     messageId: string,
     createdByUserId: string,
     conversationId: string,
+    workspaceId: string,
   ): Promise<void> {
     try {
       const speakerIdentificationEnabled = await this.isSpeakerIdentificationEnabled();
@@ -638,6 +639,7 @@ export class TranscriptService {
         const attachment = await repositories.messageAttachments.create({
           entityId: messageId,
           entityType: AttachmentEntityType.CHAT,
+          workspaceId,
           originalFilename: `call_identified_transcript.txt`,
           size: formatted.length,
           mimetype: 'text/plain',

@@ -122,7 +122,7 @@ const AuthScreen = (): ReactElement => {
           Sign in with Google
         </>
       </button>
-      <ShineBorder shineColor={['#FF4F4F']} />
+      <ShineBorder shineColor={['hsl(var(--action-primary))']} />
     </div>
   );
 

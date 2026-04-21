@@ -1723,6 +1723,14 @@ export class CallController {
         return;
       }
 
+      // Get workspaceId from call creator's user record
+      const callCreator = await repositories.users.findById(call.createdByUserId);
+      if (!callCreator || !callCreator.workspaceId) {
+        res.status(404).json({ success: false, error: 'Call creator workspace not found' });
+        return;
+      }
+      const workspaceId = callCreator.workspaceId;
+
       // Get real file size from GCS
       let fileSize = 0;
       try {
@@ -1736,6 +1744,7 @@ export class CallController {
       const attachment = await repositories.messageAttachments.create({
         entityId: callMessage.messageId,
         entityType: AttachmentEntityType.CHAT,
+        workspaceId,
         originalFilename: filename,
         size: fileSize,
         mimetype: 'audio/mp4',

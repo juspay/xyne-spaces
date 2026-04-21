@@ -145,6 +145,15 @@ class CallRecordingService {
         return;
       }
 
+      // Get workspaceId from call creator's user record
+      const callCreator = await repositories.users.findById(call.createdByUserId);
+      
+      if (!callCreator?.workspaceId) {
+        logger.warn(`[CallRecording] Could not find workspace for call creator ${call.createdByUserId}, skipping attachment creation`);
+        return;
+      }
+      const workspaceId = callCreator.workspaceId;
+
       const filename = recordingPath.split('/').pop() ?? `recording-${callExternalId}.mp4`;
 
       // Fetch real file size from storage so the attachment doesn't show "0 B" in the UI.
@@ -159,6 +168,7 @@ class CallRecordingService {
       await repositories.messageAttachments.create({
         entityId: callMessage.messageId,
         entityType: AttachmentEntityType.CHAT,
+        workspaceId,
         originalFilename: filename,
         size: fileSize,
         mimetype: 'audio/mp4',

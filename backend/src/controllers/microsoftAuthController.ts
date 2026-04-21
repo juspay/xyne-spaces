@@ -329,7 +329,7 @@ export class MicrosoftAuthController {
             logger.info(`[${requestId}] Creating user session with refresh token`);
 
             const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30); // 30 days
+            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
             const session = await this.userSessionService.createSession({
               userId: user.id,
@@ -391,7 +391,7 @@ export class MicrosoftAuthController {
         if (sessionId) {
           res.cookie('user_session_id', sessionId, {
             ...cookieOptions,
-            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
           });
         }
 
