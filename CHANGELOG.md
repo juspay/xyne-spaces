@@ -1,3 +1,11 @@
+## [1.123.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.122.0...v1.123.0) (2026-04-21)
+
+
+### Features
+
+* Implement default mute when more than 5 participants in call ([5918174](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5918174af6afeb02c9ae3e0813a0b26e90df9695)), closes [#5275](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5275)
+* rename channel ([063917f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/063917f4b03871820284008785dfbdc1d86e2d43)), closes [#5234](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5234)
+
 ## [1.122.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.121.1...v1.122.0) (2026-04-20)
 
 
