@@ -1,6 +1,7 @@
 import React, { ReactNode } from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
 import { cn } from '../../../utils/classNames';
+import { useNativeDrawerBridge } from '../../../hooks/useNativeDrawerBridge';
 
 export interface DrawerProps {
   trigger?: ReactNode;
@@ -36,6 +37,8 @@ export const Drawer = ({
   title,
   description,
 }: DrawerProps): React.ReactElement => {
+  useNativeDrawerBridge({ open, onOpenChange });
+
   return (
     <DrawerPrimitive.Root
       {...(open !== undefined && { open })}
