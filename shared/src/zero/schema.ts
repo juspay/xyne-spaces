@@ -258,6 +258,7 @@ export enum RecurringCallSeriesStatus {
 // @ts-ignore TS1294
 export enum InvitationResponse {
   INVITED = 'INVITED',
+  REQUESTED = 'REQUESTED',
   ACCEPTED = 'ACCEPTED',
   DECLINED = 'DECLINED',
   LEFT = 'LEFT',
@@ -1526,6 +1527,8 @@ export const callParticipantTable = table('call_participants')
     joinedAt: number().optional(),
     leftAt: number().optional(),
     metadata: json().optional(),
+    displayName: string().optional(),
+    isExternal: boolean(),
   })
   .primaryKey('id');
 

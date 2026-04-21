@@ -157,5 +157,30 @@ export const SCOPE_DESCRIPTIONS: Record<ApiKeyScope, string> = {
 };
 
 export interface RawBodyRequest extends Request {
-  rawBody: string; 
+  rawBody: string;
+}
+
+// ---------------------------------------------------------------------------
+// Call Lobby — shared between routes/callLobby.ts and controllers/callLobbyController.ts
+// ---------------------------------------------------------------------------
+
+export interface CallLobbyCall {
+  callId: string;
+  title: string | null;
+  callType: string;
+  status: string;
+  createdByUserId: string;
+  roomName: string;
+}
+
+export interface CallLobbySession {
+  participantId: string;
+  response: string;
+}
+
+export interface CallLobbyRequest extends Request {
+  call: CallLobbyCall;
+  callSession: CallLobbySession | null;
+  /** Set by requireCallParticipant — the authenticated participant's userId */
+  callParticipantId?: string;
 }

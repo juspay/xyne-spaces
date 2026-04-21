@@ -235,6 +235,7 @@ enum CallStatus {
 
 enum InvitationResponse {
   INVITED
+  REQUESTED    // External user waiting in lobby
   ACCEPTED
   DECLINED
   MISSED
@@ -1027,6 +1028,19 @@ model ScheduledMessage {
   @@index([channelId])
   @@index([createdBy])
   @@map("scheduled_messages")
+  @@schema("non_zero")
+}
+
+// Call messages — in-call chat for both internal and external users
+model CallMessage {
+  id            String   @id @default(cuid())
+  callId        String
+  participantId String
+  message       String
+  createdAt     DateTime @default(now())
+
+  @@index([callId, createdAt])
+  @@map("call_messages")
   @@schema("non_zero")
 }
 
@@ -2290,12 +2304,14 @@ model CallParticipant {
   userId       String              // User ID (no FK constraint)
   invitedBy    String              // User who sent invitation (no FK constraint)
   invitedAt    DateTime            @default(now())
-  response     InvitationResponse? // INVITED | ACCEPTED | null (rejected/left)
+  response     InvitationResponse? // INVITED | REQUESTED | ACCEPTED | null (rejected/left)
   meetingStatus MeetingStatus      @default(PENDING)
   respondedAt  DateTime?           // When they accepted/rejected
   joinedAt     DateTime?           // NULL = not joined yet
   leftAt       DateTime?           // NULL = still in call
   metadata     Json?               // Connection quality, device info, etc.
+  displayName  String?             // Name for external users
+  isExternal   Boolean             @default(false)  // True for external lobby users
 
   // Relations
   call Call @relation(fields: [callId], references: [id])

@@ -9,7 +9,7 @@ import {
   Download,
 } from 'lucide-react';
 import AvatarGroup from '../../components/ui/Avatar/AvatarGroup';
-import { type User, CallStatus, ChannelScopeType, InvitationResponse } from '@xyne/shared';
+import { CallStatus, ChannelScopeType, InvitationResponse } from '@xyne/shared';
 import { formatRelativeTimestamp } from '../../utils/dateUtils';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
 import {
@@ -65,8 +65,16 @@ export function CallHistoryItem({
   const otherParticipants = getOtherParticipants(call.participants, currentUserId);
   const allUsersData = useUsers();
   const participantUsers = getParticipantUsers(otherParticipants, allUsersData);
+  // userIds only contains internal users (for avatar lookup); external users have no profile avatar
   const userIds = participantUsers.map(u => u.id);
-  const primaryUser = participantUsers[0];
+
+  // Unified display names: external users use their stored displayName, internal users use the
+  // users-table name. This prevents 'Unknown' showing for external participants.
+  const participantDisplayNames = otherParticipants.map(p => {
+    if (p.isExternal) return `${p.displayName || 'Guest'} (External)`;
+    const user = allUsersData.find(u => u.id === p.userId);
+    return user?.name || 'Unknown';
+  });
 
   // Determine call status
   const anyoneJoined = hasAnyoneJoined(otherParticipants);
@@ -87,9 +95,8 @@ export function CallHistoryItem({
     call,
     channel,
     isChannelCall,
-    primaryUser,
-    allUsers: participantUsers,
     userIds,
+    participantDisplayNames,
     isOutgoingCall,
     isMissedCall,
     didNotAnswer,
@@ -107,9 +114,9 @@ interface RenderCallItemProps {
   call: Call;
   channel: { id: string; name: string; scopeType: ChannelScopeType } | undefined;
   isChannelCall: boolean;
-  primaryUser: User | undefined;
-  allUsers: User[];
   userIds: string[];
+  /** Resolved display names for all other participants (handles both internal and external users) */
+  participantDisplayNames: string[];
   isOutgoingCall: boolean;
   isMissedCall: boolean;
   didNotAnswer: boolean;
@@ -126,9 +133,8 @@ function renderCallItem({
   call,
   channel,
   isChannelCall,
-  primaryUser,
-  allUsers,
   userIds,
+  participantDisplayNames,
   isOutgoingCall,
   isMissedCall,
   didNotAnswer,
@@ -217,19 +223,17 @@ function renderCallItem({
                   {channel?.name || 'Unknown Channel'}
                 </span>
               ) : (
-                // Otherwise show participant names
+                // Otherwise show participant names (handles both internal and external users)
                 <>
-                  {primaryUser?.name || 'Unknown'}
-                  {allUsers.length > 1 && (
+                  {participantDisplayNames[0] || 'Unknown'}
+                  {participantDisplayNames.length > 1 && (
                     <span className='text-foreground font-medium'>
                       {', '}
-                      {allUsers
-                        .slice(1, 2)
-                        .map(u => u?.name)
-                        .join(', ')}
-                      {allUsers.length > 2 && (
+                      {participantDisplayNames.slice(1, 2).join(', ')}
+                      {participantDisplayNames.length > 2 && (
                         <span className='text-xs ml-1 whitespace-nowrap'>
-                          +{allUsers.length - 2} other{allUsers.length - 2 > 1 ? 's' : ''}
+                          +{participantDisplayNames.length - 2} other
+                          {participantDisplayNames.length - 2 > 1 ? 's' : ''}
                         </span>
                       )}
                     </span>

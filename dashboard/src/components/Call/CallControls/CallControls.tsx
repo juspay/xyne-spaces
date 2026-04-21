@@ -12,6 +12,7 @@ import {
   Maximize2,
   Minimize2,
   MessageSquare,
+  MessageCircleMore,
   Volume2,
   ChevronUp,
   Bot,
@@ -26,6 +27,7 @@ import { useDrawStore, sendDrawEvent } from '../../../hooks/useDrawStore';
 import { DeviceSelector } from '../DeviceSelector/DeviceSelector';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useShortcutById, useShortcut } from '../../../shortcuts';
+import { CALL_INVITE_BASE_URL } from '../../../config';
 
 interface CallControlsProps {
   isMicEnabled: boolean;
@@ -57,6 +59,13 @@ interface CallControlsProps {
   onToggleMicMenu?: () => void;
   requestedAiController: boolean;
   pendingControlRequest: { requesterId: string; requesterName: string } | null;
+  isCallChatOpen?: boolean | undefined;
+  onToggleCallChat?: (() => void) | undefined;
+  unreadCallChatCount?: number | undefined;
+  hideThreadChat?: boolean | undefined;
+  hideAIAssistant?: boolean | undefined;
+  hideMinimize?: boolean | undefined;
+  isExternalUser?: boolean | undefined;
 }
 
 export function CallControls({
@@ -86,12 +95,21 @@ export function CallControls({
   buttonPadding = 16,
   pendingControlRequest,
   requestedAiController,
+  isCallChatOpen,
+  onToggleCallChat,
+  unreadCallChatCount = 0,
+  hideThreadChat = false,
+  hideAIAssistant = false,
+  hideMinimize = false,
+  isExternalUser = false,
 }: CallControlsProps): React.ReactElement {
   const [showCopied, setShowCopied] = useState(false);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
   const [showMicMenu, setShowMicMenu] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [showShareMenu, setShowShareMenu] = useState(false);
   const reactionPickerRef = useRef<HTMLDivElement>(null);
+  const shareMenuRef = useRef<HTMLDivElement>(null);
   const { isMobile } = usePlatform();
 
   const micMenuRef = useRef<HTMLDivElement>(null);
@@ -178,6 +196,9 @@ export function CallControls({
       if (reactionPickerRef.current && !reactionPickerRef.current.contains(event.target as Node)) {
         setShowReactionPicker(false);
       }
+      if (shareMenuRef.current && !shareMenuRef.current.contains(event.target as Node)) {
+        setShowShareMenu(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -199,8 +220,18 @@ export function CallControls({
     // Keep the main menu open so user can see the selection
   };
 
-  const handleShareLink = (): void => {
+  const handleCopyInviteLink = (): void => {
+    const webUrl = `${CALL_INVITE_BASE_URL}/call/${callId}`;
+    void navigator.clipboard.writeText(webUrl).then(() => {
+      setShowShareMenu(false);
+      setShowCopied(true);
+      setTimeout(() => setShowCopied(false), 2000);
+    });
+  };
+
+  const handleCopyAppLink = (): void => {
     void navigator.clipboard.writeText(roomLink).then(() => {
+      setShowShareMenu(false);
       setShowCopied(true);
       setTimeout(() => setShowCopied(false), 2000);
     });
@@ -501,6 +532,36 @@ export function CallControls({
         {iconSize >= 16 && (
           <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
         )}
+
+        {/* Call Chat Button */}
+        {onToggleCallChat && (
+          <button
+            onClick={onToggleCallChat}
+            className={cn(
+              buttonClasses,
+              'text-white relative',
+              isCallChatOpen ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600',
+            )}
+            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_CALL_CHAT'
+            title='Call chat'
+          >
+            <MessageCircleMore
+              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+              style={{
+                transform: 'scaleX(-1)',
+                ...(hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : {}),
+              }}
+            />
+            {unreadCallChatCount > 0 && (
+              <span className='absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full'>
+                {unreadCallChatCount > 99 ? '99+' : unreadCallChatCount}
+              </span>
+            )}
+          </button>
+        )}
+
         <button
           onClick={onToggleParticipantsSidebar}
           className={cn(
@@ -526,27 +587,93 @@ export function CallControls({
         </button>
 
         {/* Share Link Button */}
-        <button
-          onClick={handleShareLink}
-          className={cn(buttonClasses, 'relative', midnightControlClass)}
-          style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-          title='Share call link'
-          data-track-category='CALLS'
-          data-track-name='SHARE_CALL_LINK'
-          data-track-metadata={JSON.stringify({ callId })}
-        >
-          <Share2
-            className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-            style={
-              hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-            }
-          />
-          {showCopied && (
-            <span className='absolute -top-8 sm:-top-10 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs sm:text-sm px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg shadow-lg whitespace-nowrap'>
-              Copied!
-            </span>
-          )}
-        </button>
+        {isExternalUser ? (
+          <button
+            onClick={handleCopyInviteLink}
+            className={cn(buttonClasses, 'relative bg-gray-700 hover:bg-gray-600 text-white')}
+            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            title='Copy call link'
+            data-track-category='CALLS'
+            data-track-name='SHARE_CALL_LINK'
+            data-track-metadata={JSON.stringify({ callId })}
+          >
+            <Share2
+              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+              style={
+                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+              }
+            />
+            {showCopied && (
+              <span className='absolute -top-8 sm:-top-10 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs sm:text-sm px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg shadow-lg whitespace-nowrap'>
+                Copied!
+              </span>
+            )}
+          </button>
+        ) : (
+          <div className='relative' ref={shareMenuRef}>
+            <button
+              onClick={() => setShowShareMenu(prev => !prev)}
+              className={cn(
+                buttonClasses,
+                showShareMenu
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-gray-700 hover:bg-gray-600 text-white',
+              )}
+              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+              title='Share call link'
+              data-track-category='CALLS'
+              data-track-name='SHARE_CALL_LINK'
+              data-track-metadata={JSON.stringify({ callId })}
+            >
+              <Share2
+                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                style={
+                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+                }
+              />
+              {showCopied && (
+                <span className='absolute -top-8 sm:-top-10 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs sm:text-sm px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg shadow-lg whitespace-nowrap'>
+                  Copied!
+                </span>
+              )}
+            </button>
+
+            {showShareMenu && (
+              <div className='absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl overflow-hidden min-w-max'>
+                <div className='px-4 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-500'>
+                  Share call link
+                </div>
+                <button
+                  onClick={handleCopyInviteLink}
+                  className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors text-left'
+                  data-track-category='CALLS'
+                  data-track-name='COPY_INVITE_LINK'
+                >
+                  <Share2 className='w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5' />
+                  <div>
+                    <div className='font-medium'>Invite external participants</div>
+                    <div className='text-xs text-gray-400'>Opens in browser — no app needed</div>
+                  </div>
+                </button>
+                <div className='h-px bg-gray-700/60 mx-3' />
+                <button
+                  onClick={handleCopyAppLink}
+                  className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-700 transition-colors text-left'
+                  data-track-category='CALLS'
+                  data-track-name='COPY_APP_LINK'
+                >
+                  <Monitor className='w-4 h-4 text-purple-400 flex-shrink-0 mt-0.5' />
+                  <div>
+                    <div className='font-medium flex items-center gap-1.5'>
+                      Share with team members
+                    </div>
+                    <div className='text-xs text-gray-400'>Opens directly in Xyne app</div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {iconSize >= 16 && (
           <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
@@ -604,85 +731,115 @@ export function CallControls({
           </div>
         )}
 
-        {/* Chat Button */}
-        <button
-          onClick={onToggleChat}
-          className={cn(
-            buttonClasses,
-            'relative',
-            isChatOpen ? 'bg-blue-600 hover:bg-blue-700 text-white' : midnightControlClass,
-          )}
-          style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-          data-track-category='CALLS'
-          data-track-name='TOGGLE_CHAT'
-          data-track-metadata={JSON.stringify({ callId: callId, isOpen: isChatOpen })}
-          title='Toggle chat'
-        >
-          <MessageSquare
-            className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-            style={
-              hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-            }
-          />
-        </button>
-
         {/* AI Assistant Button - Single button for all cases */}
-        <div className='relative'>
+        {!hideAIAssistant && (
+          <div className='relative'>
+            <button
+              onClick={handleAiButtonClick}
+              disabled={isAiButtonDisabled}
+              className={cn(buttonClasses, 'relative', getAiButtonColorClass())}
+              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+              title={getAiButtonTitle()}
+              data-track-category='CALLS'
+              data-track-name='AI_Assistant'
+              data-track-metadata={JSON.stringify({
+                isControlledByOther,
+                hasPendingRequest: hasPendingRequestFromOther,
+              })}
+            >
+              <Bot
+                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                style={
+                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+                }
+              />
+              {isControlledByOther && !hasPendingRequestFromOther && (
+                <span className='absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-background'></span>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Thread Chat Button — hidden for external users */}
+        {!hideThreadChat && (
           <button
-            onClick={handleAiButtonClick}
-            disabled={isAiButtonDisabled}
-            className={cn(buttonClasses, 'relative', getAiButtonColorClass())}
+            onClick={onToggleChat}
+            className={cn(
+              buttonClasses,
+              'text-white relative',
+              isChatOpen ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600',
+            )}
             style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            title={getAiButtonTitle()}
             data-track-category='CALLS'
-            data-track-name='AI_Assistant'
-            data-track-metadata={JSON.stringify({
-              isControlledByOther,
-              hasPendingRequest: hasPendingRequestFromOther,
-            })}
+            data-track-name='TOGGLE_CHAT'
+            data-track-metadata={JSON.stringify({ callId: callId, isOpen: isChatOpen })}
+            title='Thread chat'
           >
-            <Bot
+            <MessageSquare
               className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
               style={
                 hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
               }
             />
-            {isControlledByOther && !hasPendingRequestFromOther && (
-              <span className='absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-background'></span>
-            )}
           </button>
-        </div>
+        )}
+
+        {/* Thread Chat Button — hidden for external users */}
+        {!hideThreadChat && (
+          <button
+            onClick={onToggleChat}
+            className={cn(
+              buttonClasses,
+              'text-white relative',
+              isChatOpen ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600',
+            )}
+            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_CHAT'
+            data-track-metadata={JSON.stringify({ callId: callId, isOpen: isChatOpen })}
+            title='Thread chat'
+          >
+            <MessageSquare
+              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+              style={
+                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+              }
+            />
+          </button>
+        )}
 
         {iconSize >= 16 && (
           <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
         )}
 
         {/* Minimize/Maximize Button */}
-        <button
-          onClick={onToggleView}
-          className={cn(buttonClasses, midnightControlClass)}
-          style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-          title={viewMode === 'mini' ? 'Expand view' : 'Minimize view'}
-          data-track-category='CALLS'
-          data-track-name='TOGGLE_VIEW_MODE'
-          data-track-metadata={JSON.stringify({ callId: callId, viewMode })}
-        >
-          {viewMode === 'mini' ? (
-            <Maximize2
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          ) : (
-            <Minimize2
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          )}
-        </button>
+        {!hideMinimize && (
+          <button
+            onClick={onToggleView}
+            className={cn(buttonClasses, midnightControlClass)}
+            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            title={viewMode === 'mini' ? 'Expand view' : 'Minimize view'}
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_VIEW_MODE'
+            data-track-metadata={JSON.stringify({ callId: callId, viewMode })}
+          >
+            {viewMode === 'mini' ? (
+              <Maximize2
+                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                style={
+                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+                }
+              />
+            ) : (
+              <Minimize2
+                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
+                style={
+                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
+                }
+              />
+            )}
+          </button>
+        )}
 
         {/* Disconnect Button */}
         <button

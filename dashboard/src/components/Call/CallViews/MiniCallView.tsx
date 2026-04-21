@@ -12,6 +12,7 @@ import { ParticipantGrid } from '../ParticipantGrid/ParticipantGrid';
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
+import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 
 interface MiniCallViewProps {
   participants: ParticipantInfo[];
@@ -38,6 +39,29 @@ interface MiniCallViewProps {
   onExpand: () => void;
   onToggleThread: () => void;
   onRequestControl?: () => void;
+  /** Call participants data for sidebar (lobby approve/reject) */
+  callParticipants?:
+    | ReadonlyArray<{
+        readonly id: string;
+        readonly callId: string;
+        readonly userId: string;
+        readonly invitedBy: string;
+        readonly invitedAt: number;
+        readonly response: string | null;
+        readonly respondedAt: number | null;
+        readonly joinedAt: number | null;
+        readonly leftAt: number | null;
+        readonly metadata: unknown;
+        readonly displayName?: string | null | undefined;
+        readonly isExternal?: boolean | undefined;
+      }>
+    | undefined;
+  isHost?: boolean | undefined;
+  currentUserId?: string | null | undefined;
+  onApproveLobbyRequest?: ((participantId: string) => void) | undefined;
+  onRejectLobbyRequest?: ((participantId: string) => void) | undefined;
+  /** Called when a new remote call chat message arrives (for unread tracking) */
+  onCallChatNewMessage?: (() => void) | undefined;
 }
 
 export function MiniCallView({
@@ -56,6 +80,7 @@ export function MiniCallView({
   isChatOpen,
   channelId,
   conversationId,
+  room,
   pendingControlRequest,
   onToggleMic,
   onToggleCamera,
@@ -64,6 +89,12 @@ export function MiniCallView({
   onExpand,
   onToggleThread,
   onRequestControl,
+  callParticipants,
+  isHost: isHostProp,
+  currentUserId,
+  onApproveLobbyRequest,
+  onRejectLobbyRequest,
+  onCallChatNewMessage,
 }: MiniCallViewProps): React.ReactElement {
   const participantCount = participants.length;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -77,6 +108,9 @@ export function MiniCallView({
     startWidth: number;
     startHeight: number;
   } | null>(null);
+
+  // Show toast for incoming call chat messages
+  useCallChatNotifications(room, localParticipantId, onCallChatNewMessage);
 
   // State for participants sidebar
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
@@ -377,6 +411,11 @@ export function MiniCallView({
               <ParticipantsSidebar
                 callId={callId}
                 onClose={() => setIsParticipantsSidebarOpen(false)}
+                callParticipants={callParticipants}
+                isHost={isHostProp}
+                currentUserId={currentUserId}
+                onApproveLobbyRequest={onApproveLobbyRequest}
+                onRejectLobbyRequest={onRejectLobbyRequest}
               />
 
               <ResizeHandles showCorner={true} />

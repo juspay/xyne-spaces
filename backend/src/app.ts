@@ -52,6 +52,7 @@ import notificationRoutes from '@/routes/notifications';
 import draftRoutes from '@/routes/draftAttachments';
 import callRoutes from '@/routes/calls';
 import calendarSyncRoutes from '@/routes/calendarSync';
+import callLobbyRoutes from '@/routes/callLobby';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
@@ -233,6 +234,9 @@ export class App {
 
     // Bundle serving routes (public, no auth required - frontend static assets)
     this.app.use('/api/bundles', bundleRoutes);
+
+    // External call lobby — PUBLIC, no auth middleware
+    this.app.use('/api/call-lobby', callLobbyRoutes);
 
     this.app.use('/api/transcriptionAgent', verifyTranscriptionAgent, transcriptionAgentRoutes);
 

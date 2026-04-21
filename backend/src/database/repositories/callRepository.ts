@@ -216,6 +216,7 @@ export class CallRepository {
     return result;
   }
 
+
   async createParticipant(data: CreateCallParticipantInput): Promise<CallParticipant> {
     const result = await DatabaseClient.getInstance().callParticipant.create({
       data: {
@@ -407,16 +408,19 @@ export class CallRepository {
 
     if (totalCount === 0) return { participants: [], totalCount: 0 };
 
-    // Get user names
-    const userIds = joinedParticipants.map(p => p.userId);
-    const users = await repositories.users.getUserNamesByIds(userIds, tx);
+    const internalUserIds = joinedParticipants.filter(p => !p.isExternal).map(p => p.userId);
+    const users = internalUserIds.length > 0
+      ? await repositories.users.getUserNamesByIds(internalUserIds, tx)
+      : [];
 
     const userMap = new Map(users.map(u => [u.id, u.name]));
 
     return {
       participants: joinedParticipants.map(p => ({
         userId: p.userId,
-        userName: userMap.get(p.userId) ?? 'Unknown User',
+        userName: p.isExternal
+          ? `${p.displayName || 'Guest'} (External)`
+          : (userMap.get(p.userId) ?? 'Unknown User'),
       })),
       totalCount,
     };
@@ -505,7 +509,7 @@ export class CallRepository {
     callId: string,
     limit: number,
     tx: Prisma.TransactionClient
-  ): Promise<Array<{ userId: string }>> {
+  ): Promise<Array<{ userId: string; displayName: string | null; isExternal: boolean }>> {
     return await tx.callParticipant.findMany({
       where: {
         callId,
@@ -517,6 +521,8 @@ export class CallRepository {
       take: limit,
       select: {
         userId: true,
+        displayName: true,
+        isExternal: true,
       }
     });
   }
@@ -585,11 +591,11 @@ export class CallRepository {
         return { shouldEndCall: false, messageUpdated: false, call: null };
       }
 
-      // Find participant
+      // Find participant by userId (works for both internal and external users)
       const existingParticipant = await tx.callParticipant.findFirst({
         where: {
           callId: call.id,
-          userId: userId
+          userId: userId,
         },
         select: { id: true }
       });
@@ -1171,6 +1177,195 @@ export class CallRepository {
 
       return updatedCall;
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // External Lobby methods
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return only public-safe fields for an external-lobby page.
+   * Never exposes internal id, channelId, createdByUserId, etc.
+   */
+  async getPublicCallInfo(externalId: string): Promise<{
+    title: string | null;
+    callType: CallType;
+    status: CallStatus;
+    callId: string;
+    createdByUserId: string;
+    roomName: string;
+  } | null> {
+    const call = await DatabaseClient.getInstance().call.findUnique({
+      where: { externalId },
+      select: {
+        id: true,
+        title: true,
+        callType: true,
+        status: true,
+        createdByUserId: true,
+        externalId: true,
+      },
+    });
+    if (!call) return null;
+    return {
+      title: call.title,
+      callType: call.callType,
+      status: call.status,
+      callId: call.id,
+      createdByUserId: call.createdByUserId,
+      roomName: call.externalId, // LiveKit room name == externalId
+    };
+  }
+
+  /**
+   * Create a CallParticipant row for an external lobby request.
+   * userId is a random UUID (external users have no real account).
+   */
+  async createLobbyRequest(params: {
+    callId: string;
+    displayName: string;
+  }): Promise<CallParticipant> {
+    const { callId, displayName } = params;
+    const id = uuidv4();
+    return await DatabaseClient.getInstance().callParticipant.create({
+      data: {
+        id,
+        callId,
+        userId: id, // Use same value so LiveKit identity (= id) always matches userId
+        invitedBy: 'external_request',
+        invitedAt: new Date(),
+        response: InvitationResponse.REQUESTED,
+        isExternal: true,
+        displayName,
+        meetingStatus: MeetingStatus.PENDING,
+      },
+    });
+  }
+
+  /**
+   * Return the current response status for an external participant.
+   */
+  async getLobbyStatus(params: {
+    participantId: string;
+    callId: string;
+  }): Promise<{ response: InvitationResponse | null } | null> {
+    const row = await DatabaseClient.getInstance().callParticipant.findFirst({
+      where: {
+        id: params.participantId,
+        callId: params.callId,
+        isExternal: true,
+      },
+      select: { response: true },
+    });
+    return row;
+  }
+
+  /**
+   * Validate that an external participant is ACCEPTED, set joinedAt, and return
+   * the participant record with displayName.
+   */
+  async externalJoin(params: {
+    participantId: string;
+    callId: string;
+  }): Promise<CallParticipant | null> {
+    const { participantId, callId } = params;
+    const participant = await DatabaseClient.getInstance().callParticipant.findFirst({
+      where: {
+        id: participantId,
+        callId,
+        isExternal: true,
+        response: InvitationResponse.ACCEPTED,
+      },
+    });
+    if (!participant) return null;
+
+    return await DatabaseClient.getInstance().callParticipant.update({
+      where: { id: participantId },
+      data: { joinedAt: new Date() },
+    });
+  }
+
+  /**
+   * Reset an external participant's status back to REQUESTED for rejoin.
+   * Only works if participant was previously ACCEPTED or LEFT.
+   */
+  async rejoinLobby(params: {
+    participantId: string;
+    callId: string;
+  }): Promise<CallParticipant | null> {
+    const { participantId, callId } = params;
+    const participant = await DatabaseClient.getInstance().callParticipant.findFirst({
+      where: {
+        id: participantId,
+        callId,
+        isExternal: true,
+        response: { in: [InvitationResponse.ACCEPTED, InvitationResponse.LEFT] },
+      },
+    });
+    if (!participant) return null;
+
+    return await DatabaseClient.getInstance().callParticipant.update({
+      where: { id: participantId },
+      data: {
+        response: InvitationResponse.REQUESTED,
+        respondedAt: null,
+        joinedAt: null,
+      },
+    });
+  }
+
+  /**
+   * Return participant info for a call with resolved display names.
+   * For external users: uses displayName field.
+   * For internal users: looks up user.name from the users table.
+   */
+  async getCallParticipantsPublic(callId: string): Promise<
+    Array<{
+      id: string;
+      userId: string;
+      displayName: string;
+      isExternal: boolean;
+      response: InvitationResponse | null;
+    }>
+  > {
+    const participants = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: {
+        callId,
+        response: { in: [InvitationResponse.ACCEPTED, InvitationResponse.REQUESTED] },
+      },
+      select: {
+        id: true,
+        displayName: true,
+        isExternal: true,
+        response: true,
+        userId: true,
+      },
+      orderBy: { invitedAt: 'asc' },
+    });
+
+    // Resolve names for internal users
+    const internalUserIds = participants
+      .filter(p => !p.isExternal)
+      .map(p => p.userId);
+
+    let userNameMap = new Map<string, string>();
+    if (internalUserIds.length > 0) {
+      const users = await DatabaseClient.getInstance().user.findMany({
+        where: { id: { in: internalUserIds } },
+        select: { id: true, name: true, displayName: true },
+      });
+      userNameMap = new Map(users.map(u => [u.id, u.displayName || u.name]));
+    }
+
+    return participants.map(p => ({
+      id: p.id,
+      userId: p.userId,
+      displayName: p.isExternal
+        ? (p.displayName || 'Guest')
+        : (userNameMap.get(p.userId) || 'Unknown'),
+      isExternal: p.isExternal,
+      response: p.response,
+    }));
   }
 
 }

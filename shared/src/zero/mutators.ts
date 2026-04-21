@@ -2637,6 +2637,7 @@ export const mutators = defineMutators({
               respondedAt: null,
               joinedAt: null,
               leftAt: null,
+              isExternal: false
             });
           }
         }
@@ -2665,6 +2666,36 @@ export const mutators = defineMutators({
             updatedAt: timestamp,
           });
         }
+      },
+    ),
+    approveLobbyRequest: defineMutator(
+      z.object({ callId: z.string(), participantId: z.string() }),
+      async ({ tx, ctx, args: { callId, participantId } }) => {
+        const call = await tx.run(zql.calls.where('id', callId).one());
+        if (!call) throw new Error('Call not found');
+        if (call.createdByUserId !== ctx.userID) {
+          throw new Error('Only the call creator can admit participants');
+        }
+        await tx.mutate.call_participants.update({
+          id: participantId,
+          response: InvitationResponse.ACCEPTED,
+          respondedAt: Date.now(),
+        });
+      },
+    ),
+    rejectLobbyRequest: defineMutator(
+      z.object({ callId: z.string(), participantId: z.string() }),
+      async ({ tx, ctx, args: { callId, participantId } }) => {
+        const call = await tx.run(zql.calls.where('id', callId).one());
+        if (!call) throw new Error('Call not found');
+        if (call.createdByUserId !== ctx.userID) {
+          throw new Error('Only the call creator can decline participants');
+        }
+        await tx.mutate.call_participants.update({
+          id: participantId,
+          response: InvitationResponse.DECLINED,
+          respondedAt: Date.now(),
+        });
       },
     ),
   },

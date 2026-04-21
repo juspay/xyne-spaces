@@ -74,7 +74,9 @@ export const getCurrentUserMeetingStatus = (
  * @param userMap - Map of user IDs to user data for quick lookups
  * @returns Formatted participant text string
  */
-export const formatParticipantText = <T extends { userId: string }>(
+export const formatParticipantText = <
+  T extends { userId: string; displayName?: string | null; isExternal?: boolean },
+>(
   participants: readonly T[] | T[],
   userMap: Map<string, { id: string; name?: string }>,
 ): string => {
@@ -84,28 +86,30 @@ export const formatParticipantText = <T extends { userId: string }>(
     return fullName.split(' ')[0] || fullName;
   };
 
+  // Resolve display name: external users use their stored displayName, internal users use userMap
+  const getParticipantFirstName = (p: T): string => {
+    if (p.isExternal) return `${p.displayName?.split(' ')[0] || 'Guest'} (External)`;
+    const user = userMap.get(p.userId);
+    return getFirstName(user?.name);
+  };
+
   const count = participants.length;
   if (count === 0) return '';
 
   if (count === 1) {
     const firstParticipant = participants[0];
     if (!firstParticipant) return '';
-    const user = userMap.get(firstParticipant.userId);
-    return getFirstName(user?.name);
+    return getParticipantFirstName(firstParticipant);
   }
 
   if (count === 2) {
-    const names = participants.slice(0, 2).map(p => {
-      const user = userMap.get(p.userId);
-      return getFirstName(user?.name);
-    });
+    const names = participants.slice(0, 2).map(p => getParticipantFirstName(p));
     return names.join(' and ');
   }
 
   const firstParticipant = participants[0];
   if (!firstParticipant) return '';
-  const firstUser = userMap.get(firstParticipant.userId);
-  const firstName = getFirstName(firstUser?.name);
+  const firstName = getParticipantFirstName(firstParticipant);
   const othersCount = count - 1;
   return `${firstName} and ${othersCount} ${othersCount === 1 ? 'other' : 'others'}`;
 };
