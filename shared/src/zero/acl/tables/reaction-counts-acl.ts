@@ -12,12 +12,14 @@ export class ReactionCountsACL extends BaseQueryACL<'reaction_counts'> {
     return query.whereExists('message', (messageQ) =>
       messageQ.whereExists('conversation', (cq) =>
         cq.whereExists('channel', (chQ) =>
-          chQ.where(({ or, exists, cmp }) =>
-            or(
-              cmp('visibility', ChannelVisibility.PUBLIC),
-              exists('participants', (p) => p.where('userId', this.ctx.userID))
+          chQ
+            .where('workspaceId', '=', this.ctx.workspaceId)
+            .where(({ or, exists, cmp }) =>
+              or(
+                cmp('visibility', ChannelVisibility.PUBLIC),
+                exists('participants', (p) => p.where('userId', this.ctx.userID))
+              )
             )
-          )
         )
       )
     );

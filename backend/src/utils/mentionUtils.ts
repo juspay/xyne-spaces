@@ -165,7 +165,10 @@ export function hasMentions(content: string): boolean {
  * Extract group mentions from message content
  * Handles both HTML span group mentions and zero-width space group mentions
  */
-export async function extractGroupMentionsFromContent(content: string): Promise<ExtractedGroupMention[]> {
+export async function extractGroupMentionsFromContent(
+  content: string,
+  workspaceId: string
+): Promise<ExtractedGroupMention[]> {
   const groupMentions: ExtractedGroupMention[] = [];
   const processedGroupIds = new Set<string>(); // Prevent duplicates
 
@@ -226,11 +229,11 @@ export async function extractGroupMentionsFromContent(content: string): Promise<
 
     try {
       // Try to find group by alias first, then by name (case-insensitive)
-      let group = await userGroupRepository.findByAlias(groupName);
+      let group = await userGroupRepository.findByAlias(groupName, workspaceId);
 
       if (!group) {
         // Fallback to finding by name
-        group = await userGroupRepository.findByName(groupName);
+        group = await userGroupRepository.findByName(groupName, workspaceId);
       }
 
       if (group) {
@@ -267,6 +270,7 @@ export async function extractGroupMentionsFromContent(content: string): Promise<
  */
 export async function extractAllUsersForNotification(
   content: string,
+  workspaceId: string, // Optional workspace context for group lookups
   channelId?: string // Optional channel context for @channel and @here
 ): Promise<ExtractedMentionForNotification[]> {
   const allUsersToNotify: ExtractedMentionForNotification[] = [];
@@ -275,7 +279,7 @@ export async function extractAllUsersForNotification(
   // Get both direct user mentions and group mentions
   const [userMentions, groupMentions] = await Promise.all([
     extractMentionsFromContent(content),
-    extractGroupMentionsFromContent(content)
+    extractGroupMentionsFromContent(content, workspaceId)
   ]);
 
   // Add directly mentioned users

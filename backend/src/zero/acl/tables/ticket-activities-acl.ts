@@ -9,7 +9,16 @@ import { zql } from '../../queries';
 
 export class TicketActivitiesACL extends BaseACL<'ticket_activities'> {
 
+  private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
+    const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+    if (!ticket) throw new MutationACLError('Ticket activity not found: ticket does not exist', 'ticket_activities');
+    if (ticket.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Ticket activity not found in this workspace', 'ticket_activities');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'ticket_activities'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyTicketInWorkspace(args.ticketId, tx);
     const ticket = await tx.run(zql.tickets
       .where('id', args.ticketId)
       .whereExists('conversation', (conversation) => {

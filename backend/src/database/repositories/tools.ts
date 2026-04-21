@@ -26,10 +26,8 @@ export class ToolRepository extends BaseRepository<Tool, CreateToolInput, Update
     });
   }
 
-  async findByName(name: string): Promise<Tool | null> {
-    return await this.db.tool.findUnique({
-      where: { name },
-    });
+  async findByName(name: string, workspaceId: string): Promise<Tool | null> {
+    return await this.db.tool.findFirst({ where: { name, workspaceId } });
   }
 
   async findMany(options?: QueryOptions): Promise<Tool[]> {

@@ -10,6 +10,7 @@ import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handl
 import { unifiedBotUserService } from '@/bots/unified';
 import { v4 as uuidv4 } from 'uuid';
 import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
+import { db } from '@/database/client';
 
 interface PRData {
   prId: number;
@@ -110,7 +111,7 @@ export class ReleaseNotesController {
         markdownContent,
         context,
         ticketId,
-        xyneReleaseBot.id
+        xyneReleaseBot
       );
 
       if (!canvasViewAccessId) {
@@ -178,7 +179,7 @@ Release notes have been generated for **${ticket.title}**
     markdown: string,
     context: ReleaseContext,
     ticketId: string,
-    botId: string
+    botUser: { id: string; email: string; workspaceId: string | null; role: string | null }
   ): Promise<string | null> {
     try {
       const now = new Date();
@@ -200,13 +201,13 @@ Release notes have been generated for **${ticket.title}**
           id: canvasId,
           title: finalTitle,
           content: blocks as any,
-          createdBy: botId,
+          createdBy: botUser.id,
           viewAccessId,
           editAccessId: null,
           visibility: 'PUBLIC',
           isTemplate: false,
           isCollaborative: false,
-          lastEditedBy: botId,
+          lastEditedBy: botUser.id,
           lastEditedAt: now,
           createdAt: now,
           updatedAt: now,
@@ -225,7 +226,7 @@ Release notes have been generated for **${ticket.title}**
         data: {
           id: participantId,
           canvasId,
-          userId: botId,
+          userId: botUser.id,
           role: 'VIEWER',
           joinedAt: now,
           updatedAt: now,
@@ -234,7 +235,21 @@ Release notes have been generated for **${ticket.title}**
 
       logger.info(`[CanvasService] Created release notes canvas ${canvasId} for ticket ${context.release.xyneId}`);
 
-      const canvasHandler = new CanvasSideEffectHandler({ userID: botId });
+      // Email is globally unique in orgMember, single lookup is sufficient
+      const orgMember = await db.orgMember.findUnique({
+        where: { email: botUser.email },
+      });
+      if (!orgMember) {
+        throw new Error(`Bot ${botUser.id} is not a member of any organization`);
+      }
+
+      const canvasHandler = new CanvasSideEffectHandler({
+        userID: botUser.id,
+        workspaceId: botUser.workspaceId!,
+        role: botUser.role ?? 'MEMBER',
+        memberId: orgMember.memberId,
+        orgRole: orgMember.role,
+      });
       canvasHandler.onInsert({
         entityId: canvasId,
         entityType: 'canvases',

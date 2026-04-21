@@ -99,6 +99,7 @@ export class TicketRepository {
         channelId: data.channelId,
         xyneId: data.xyneId,
         projectId: data.projectId,
+        workspaceId: data.workspaceId,
         userGroupId: data.userGroupId,
         boardId: data.boardId,
         stageName: selectedStage.name,

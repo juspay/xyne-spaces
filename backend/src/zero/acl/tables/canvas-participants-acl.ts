@@ -7,11 +7,22 @@ import { zql } from '../../queries';
 
 export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
 
+  private async verifyWorkspace(canvasId: string, tx: Transaction<Schema>): Promise<void> {
+    const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+    if (!canvas) throw new MutationACLError('Canvas participant not found: canvas does not exist', 'canvas_participants');
+    if (!canvas.channelId) throw new MutationACLError('Canvas participant not found: canvas has no channel', 'canvas_participants');
+    const channel = await tx.run(zql.channels.where('id', canvas.channelId).one());
+    if (!channel || channel.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Canvas participant not found in this workspace', 'canvas_participants');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'canvas_participants'>>, tx: Transaction<Schema>): Promise<void> {
     const canvas = await tx.run(zql.canvases.where('id', args.canvasId).one());
     if (!canvas) {
       throw new MutationACLError('Canvas participant insert failed: the specified canvas does not exist', 'canvas_participants');
     }
+    await this.verifyWorkspace(args.canvasId, tx);
     if (canvas.visibility === CanvasVisibility.PUBLIC) {
       return; // Anyone can be added to a public canvas
     }
@@ -42,6 +53,7 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     if (!canvasParticipant) {
       throw new MutationACLError('Canvas participant update failed: participant record does not exist', 'canvas_participants');
     }
+    await this.verifyWorkspace(canvasParticipant.canvasId, tx);
     if (args.role) {
       const isRequesterParticipant = await tx
         .run(
@@ -71,6 +83,7 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     if (!canvasParticipant) {
       throw new MutationACLError('Canvas participant delete failed: participant record does not exist', 'canvas_participants');
     }
+    await this.verifyWorkspace(canvasParticipant.canvasId, tx);
     if (canvasParticipant.userId === this.ctx.userID) {
       return; // Participants can remove themselves
     }

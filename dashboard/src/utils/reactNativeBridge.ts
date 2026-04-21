@@ -178,6 +178,10 @@ export interface NativeGoogleSignInResultPayload {
   success: boolean;
   sessionId?: string | null;
   userId?: string;
+  workspaceId?: string;
+  role?: string;
+  orgRole?: string;
+  memberId?: string;
   hasRefreshToken?: boolean;
   error?: string;
   errorMessage?: string;

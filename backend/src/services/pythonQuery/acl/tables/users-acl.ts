@@ -6,8 +6,9 @@ export class UsersACL extends BaseQueryACL<Prisma.UserWhereInput> {
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.UserWhereInput | null> {
-    // All users are visible to authenticated users
-    return null
+  async getWhereClause(): Promise<Prisma.UserWhereInput> {
+    return {
+      workspaceId: this.ctx.workspaceId ?? '',
+    }
   }
 }

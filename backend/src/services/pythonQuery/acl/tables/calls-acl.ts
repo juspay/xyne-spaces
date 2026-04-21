@@ -8,10 +8,15 @@ export class CallsACL extends BaseQueryACL<Prisma.CallWhereInput> {
 
   async getWhereClause(): Promise<Prisma.CallWhereInput> {
     return {
-      OR: [
-        { createdByUserId: this.ctx.userId },
-        { participants: { some: { userId: this.ctx.userId } } },
-        { channel: { participants: { some: { userId: this.ctx.userId } } } },
+      AND: [
+        {
+          OR: [
+            { createdByUserId: this.ctx.userId },
+            { participants: { some: { userId: this.ctx.userId } } },
+            { channel: { participants: { some: { userId: this.ctx.userId } } } },
+          ],
+        },
+        { channel: { workspaceId: this.ctx.workspaceId ?? '' } },
       ],
     }
   }

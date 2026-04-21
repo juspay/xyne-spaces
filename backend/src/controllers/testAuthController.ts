@@ -6,7 +6,7 @@ import { UserService } from '@/services/userService';
 import { UserSessionService } from '@/services/userSessionService';
 import { jwtService } from '@/services/jwtService';
 import { DatabaseClient } from '@/database/client';
-import { AccessType } from '@prisma/client';
+import { AccessType, AuthProvider } from '@prisma/client';
 
 /**
  * Test-only authentication endpoints that bypass Google OAuth.
@@ -16,8 +16,12 @@ export class TestAuthController {
     private userService: UserService;
     private userSessionService: UserSessionService;
 
-    // Auto-incrementing user index - same counter pattern used in testing framework
-    private static userIndex = 0;
+    // Auto-incrementing user index - starts from timestamp to avoid collisions after server restart
+    private static userIndex = Date.now();
+
+    // Shared org and workspace for all test users (created on first login)
+    private static testOrgId: string | null = null;
+    private static testWorkspaceId: string | null = null;
 
     static generateTestUser(index: number) {
         return {
@@ -54,53 +58,112 @@ export class TestAuthController {
             TestAuthController.userIndex++;
             const testUserData = TestAuthController.generateTestUser(TestAuthController.userIndex);
 
-            logger.info(`[${requestId}] Finding/creating test user: ${testUserData.email}`);
-            const { user, isNewUser } = await this.userService.findOrCreateUser(testUserData);
-            logger.info(`[${requestId}] User resolved: ${user.email} (ID: ${user.id}, isNew: ${isNewUser})`);
+            let organization: any;
+            let workspace: any;
+            let user: any;
+            let isNewUser = true;
+            const db = DatabaseClient.getInstance();
+
+            // Recover org/workspace IDs from DB if lost after server restart
+            if (!TestAuthController.testOrgId) {
+                const existingOrg = await db.organization.findUnique({
+                    where: { name: 'Test Org' },
+                });
+                if (existingOrg) {
+                    const existingWorkspace = await db.workspace.findFirst({
+                        where: { orgId: existingOrg.orgId },
+                    });
+                    if (existingWorkspace) {
+                        TestAuthController.testOrgId = existingOrg.orgId;
+                        TestAuthController.testWorkspaceId = existingWorkspace.id;
+                        logger.info(`[${requestId}] Recovered test org/workspace IDs from DB after restart`);
+                    }
+                }
+            }
+
+            if (!TestAuthController.testOrgId) {
+                // First test login: create org + workspace + user
+                logger.info(`[${requestId}] First test login - creating org, workspace, and user: ${testUserData.email}`);
+
+                const orgName = `Test Org`;
+                const workspaceName = `Test Workspace`;
+
+                const result = await this.userService.createOrganizationWithUser(
+                    {
+                        providerUserId: testUserData.googleId,
+                        email: testUserData.email,
+                        name: testUserData.name,
+                        picture: testUserData.picture,
+                    },
+                    orgName,
+                    workspaceName,
+                    'GOOGLE'
+                );
+
+                organization = result.organization;
+                workspace = result.workspace;
+                user = result.workspaceUser;
+
+                // Store org and workspace IDs for subsequent logins
+                TestAuthController.testOrgId = organization.orgId;
+                TestAuthController.testWorkspaceId = workspace.id;
+            } else {
+                // Subsequent test logins: reuse existing org + workspace, just create a new user
+                logger.info(`[${requestId}] Subsequent test login - adding user to existing org/workspace: ${testUserData.email}`);
+
+                organization = await db.organization.findUnique({
+                    where: { orgId: TestAuthController.testOrgId! }
+                });
+                workspace = await db.workspace.findUnique({
+                    where: { id: TestAuthController.testWorkspaceId! }
+                });
+
+                // Fetch existing orgMember by email
+                let orgMember = await db.orgMember.findUnique({
+                    where: { email: testUserData.email },
+                    select: { memberId: true }
+                });
+
+                // Create OrgMember if it doesn't exist
+                if (!orgMember) {
+                    orgMember = await db.orgMember.create({
+                        data: {
+                            orgId: TestAuthController.testOrgId!,
+                            email: testUserData.email,
+                            role: 'MEMBER',
+                        },
+                        select: { memberId: true }
+                    });
+                }
+
+                // Create user in the existing workspace (or reuse if already exists)
+                let existingUser = await db.user.findFirst({
+                    where: { email: testUserData.email, workspaceId: TestAuthController.testWorkspaceId! },
+                });
+                if (existingUser) {
+                    user = existingUser;
+                    isNewUser = false;
+                } else {
+                    user = await db.user.create({
+                        data: {
+                            providerUserId: testUserData.googleId,
+                            email: testUserData.email,
+                            name: testUserData.name,
+                            picture: testUserData.picture,
+                            authProvider: 'GOOGLE' as AuthProvider,
+                            workspace: { connect: { id: TestAuthController.testWorkspaceId! } },
+                            role: 'MEMBER',
+                            orgMemberId: orgMember.memberId,
+                        },
+                    });
+                }
+            }
+
+            logger.info(`[${requestId}] Org ${organization.orgId}, workspace ${workspace.id}, user ${user.id}`);
 
             if (isAdmin) {
                 try {
-                    const db = DatabaseClient.getInstance();
-                    const defaultOrg = await db.organization.findUnique({
-                        where: { name: 'default' }
-                    });
-
-                    if (defaultOrg) {
-                        const existingMember = await db.orgMember.findUnique({
-                            where: {
-                                orgId_userId: {
-                                    orgId: defaultOrg.orgId,
-                                    userId: user.id
-                                }
-                            }
-                        });
-
-                        if (!existingMember) {
-                            await db.orgMember.create({
-                                data: {
-                                    orgId: defaultOrg.orgId,
-                                    userId: user.id,
-                                    role: 'OWNER'
-                                }
-                            });
-                            logger.info(`[${requestId}] Added user ${user.email} as OWNER of default organization`);
-                        } else {
-                            await db.orgMember.update({
-                                where: {
-                                    orgId_userId: {
-                                        orgId: defaultOrg.orgId,
-                                        userId: user.id
-                                    }
-                                },
-                                data: {
-                                    role: 'OWNER'
-                                }
-                            });
-                            logger.info(`[${requestId}] Updated user ${user.email} to OWNER of default organization`);
-                        }
-                    } else {
-                        logger.warn(`[${requestId}] Default organization not found`);
-                    }
+                    // Grant admin access to all resources for comprehensive testing
 
                    const essentialResources = [
                         { name: 'TICKETS', description: 'Ticket management endpoints' },
@@ -159,11 +222,21 @@ export class TestAuthController {
                 }
             }
 
+            // Email is globally unique in orgMember, single lookup is sufficient
+            const orgMember = await db.orgMember.findUnique({
+                where: { email: user.email },
+            });
+            if (!orgMember) {
+                throw new Error(`User ${user.email} is not a member of any organization`);
+            }
+            
             const customToken = jwtService.generateToken({
                 sub: user.id,
                 email: user.email,
                 name: user.name,
                 picture: testUserData.picture,
+                workspaceId: user.workspaceId,
+                memberId: orgMember.memberId,
             });
 
             let sessionId = null;
@@ -202,13 +275,20 @@ export class TestAuthController {
                 path: '/',
             };
 
-            res.cookie('google_access_token', customToken, {
+            // Set workspace-scoped JWT token (matches authV2Middleware expectation)
+            res.cookie(`xyne_ws_${user.workspaceId}_token`, customToken, {
                 ...cookieOptions,
                 maxAge: 24 * 60 * 60 * 1000,
             });
 
+            // Set last workspace pointer so authV2Middleware can find the right token
+            res.cookie('xyne_last_workspace', user.workspaceId, {
+                ...cookieOptions,
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+            });
+
             if (sessionId) {
-                res.cookie('user_session_id', sessionId, {
+                res.cookie('xyne_session', sessionId, {
                     ...cookieOptions,
                     maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
                 });
@@ -234,6 +314,10 @@ export class TestAuthController {
                     email: user.email,
                     name: user.name,
                     isNewUser,
+                    workspaceId: user.workspaceId,
+                    role: user.role,
+                    orgRole: orgMember.role,
+                    memberId: orgMember.memberId,
                 },
                 sessionId,
             });
@@ -247,14 +331,20 @@ export class TestAuthController {
         }
     };
 
-    testLogout = async (_req: Request, res: Response): Promise<void> => {
+    testLogout = async (req: Request, res: Response): Promise<void> => {
         const requestId = `TEST_LOGOUT_${Date.now()}`;
 
         try {
             logger.info(`[${requestId}] Test logout initiated`);
 
-            res.clearCookie('google_access_token', { path: '/' });
-            res.clearCookie('user_session_id', { path: '/' });
+            // Clear all workspace-scoped token cookies
+            for (const cookieName of Object.keys(req.cookies || {})) {
+                if (cookieName.startsWith('xyne_ws_') && cookieName.endsWith('_token')) {
+                    res.clearCookie(cookieName, { path: '/' });
+                }
+            }
+            res.clearCookie('xyne_last_workspace', { path: '/' });
+            res.clearCookie('xyne_session', { path: '/' });
             res.clearCookie('is_new_user', { path: '/' });
 
             res.status(200).json({

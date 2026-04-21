@@ -202,6 +202,7 @@ export class EmailService {
     emailId: string,
     conversationId: string,
     userId: string,
+    workspaceId: string,
     uploadedFiles: UploadedFileResult[]
   ): Promise<void> {
     if (!uploadedFiles || uploadedFiles.length === 0) {
@@ -222,6 +223,7 @@ export class EmailService {
       createdBy: userId,
       storageProvider: config.fileStorage.provider,
       conversationId: conversationId,
+      workspaceId: workspaceId,
       metadata: file.metadata || {},
     }));
 
@@ -377,6 +379,7 @@ export class EmailService {
           channelId: channelId,
           xyneId: xyneId,
           projectId: projectId,
+          workspaceId: channel.workspaceId,
           boardId: boardId,
           stageName: firstStage.name,
           ...(userGroup && { userGroupId: groupId }),
@@ -515,7 +518,7 @@ export class EmailService {
     const email = await this.emailRepository.create(emailData);
 
     // Create MessageAttachment entries for email attachments
-    await this.createEmailAttachments(email.id, conversation.conversationId, userId, uploadedFiles);
+    await this.createEmailAttachments(email.id, conversation.conversationId, userId, channel.workspaceId, uploadedFiles);
 
     // Process Google Meet links from email body and send to SAM 
     try {
@@ -635,7 +638,7 @@ export class EmailService {
       const email = await this.emailRepository.create(emailData);
 
       // Create MessageAttachment entries for email attachments
-      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, uploadedFiles);
+      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel?.workspaceId ?? '', uploadedFiles);
 
       // Process Google Meet links from reply email body and send to SAM service
       try {
@@ -740,6 +743,7 @@ export class EmailService {
           channelId: channelId,
           xyneId: xyneId,
           projectId: projectId,
+          workspaceId: channel.workspaceId,
           boardId: boardId,
           stageName: stageName,
           ...(userGroupId && { userGroupId }),

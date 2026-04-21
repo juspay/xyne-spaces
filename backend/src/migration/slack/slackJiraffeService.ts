@@ -195,6 +195,7 @@ async function ingestTicket(
    userInfoCache: UserInfoCache
 ): Promise<SlackReply[]> {
    const db = DatabaseClient.getInstance();
+   const channelRepo = new ChannelRepository();
 
    // Get or create external source
    let externalSource = await db.externalSource.findFirst({
@@ -280,12 +281,14 @@ async function ingestTicket(
          throw new Error(`Missing user email for reporter: ${ticket.reporter_name}`);
       }
 
+      const channel = await channelRepo.findById(channelId);
       userId = await findOrCreateUser(
          userInfo.profile.email,
          userInfo.profile.real_name || userInfo.profile.display_name || ticket.reporter_name,
          userInfo.deleted || false,
          userRepo,
-         userCache
+         userCache,
+         channel?.workspaceId ?? ''
       );
       await userRepo.upsertMetaDataField(userId, 'slackId', ticket.reporter_name);
    }
@@ -341,15 +344,19 @@ async function ingestTicket(
       createdAt: new Date(ticket.created_at),
    });
 
-   // Find assigned user if assigned_username exists
-   let assignedToUserId: string | undefined;
-   if (ticket.assigned_username) {
-      const assignedUserEmail = `${ticket.assigned_username}@juspay.in`;
-      const assignedUser = await userRepo.findByEmail(assignedUserEmail);
-      if (assignedUser) {
-         assignedToUserId = assignedUser.id;
-      }
-   }
+    // Find assigned user if assigned_username exists
+    let assignedToUserId: string | undefined;
+    if (ticket.assigned_username) {
+       const assignedUserEmail = `${ticket.assigned_username}@juspay.in`;
+       // Migration context - use defaultWorkspaceId from config (same pattern as qa-alert-bot)
+       const workspaceId = config.defaultWorkspaceId;
+       if (workspaceId) {
+         const assignedUser = await userRepo.findByEmail(assignedUserEmail, workspaceId);
+         if (assignedUser) {
+            assignedToUserId = assignedUser.id;
+         }
+       }
+    }
 
    // Get board ID from mapper based on task_type (uppercase), fallback to default board
    const boardId = boardMapper.get(ticket.task_type.toUpperCase().replace(/_/g, ' ')) || defaultBoardId;
@@ -365,6 +372,7 @@ async function ingestTicket(
    const { TicketIdService } = await import('../../services/ticketIdService');
    const createdTicket = await db.$transaction(async (tx) => {
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+      const channel = await channelRepo.findById(channelId);
 
       const newTicket = await tx.ticket.create({
          data: {
@@ -375,6 +383,7 @@ async function ingestTicket(
             conversationId: conversation.conversation.conversationId,
             channelId: channelId,
             projectId: projectId,
+            workspaceId: channel?.workspaceId ?? '',
             boardId: boardId,
             ...(resolvedUserGroupId && { userGroupId: resolvedUserGroupId }),
             stageName: ticket.stage?.replace(/_/g, ' ').toUpperCase() || 'TO BE PICKED',
@@ -661,12 +670,22 @@ export async function runMigrationJiraffe(input: MigrationJiraffeInput) {
                      content: "",
                      replies: threadReplies,
                   };
-                  await ingestConversationSlack({
-                     slackMessages: [slackMessage],
-                     externalSourceName: externalSourceName,
-                     channelId: input.xyneSpaceChannelId,
-                     onlyReplies: true,
-                  });
+                   // Get workspaceId from the channel
+                   const channelRepo = new ChannelRepository();
+                   const channel = await channelRepo.findById(input.xyneSpaceChannelId);
+                   const workspaceId = channel?.workspaceId || config.defaultWorkspaceId;
+                   
+                   if (!workspaceId) {
+                     throw new Error('workspaceId is required for Slack conversation ingestion');
+                   }
+                   
+                   await ingestConversationSlack({
+                      slackMessages: [slackMessage],
+                      externalSourceName: externalSourceName,
+                      channelId: input.xyneSpaceChannelId,
+                      onlyReplies: true,
+                      workspaceId,
+                   });
                   if (ENABLE_NOTIFICATIONS && messageTs) {
                      await postMessage({
                         channelId: input.channelId,

@@ -179,6 +179,7 @@ export const storeMerchantIdInForm = async (
         },
       },
       create: {
+        formId: formMapping.formId,
         entityId: ticketId,
         entityType: 'Ticket',
         fieldId: merchantField.id,
@@ -272,6 +273,7 @@ export const storeCategorizationInForms = async (
           },
         },
         create: {
+          formId: formMapping.formId,
           entityId: ticketId,
           entityType: 'Ticket',
           fieldId: field.id,

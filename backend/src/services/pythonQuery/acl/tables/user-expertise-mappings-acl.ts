@@ -6,7 +6,9 @@ export class UserExpertiseMappingsACL extends BaseQueryACL<Prisma.UserExpertiseM
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.UserExpertiseMappingWhereInput | null> {
-    return null
+  async getWhereClause(): Promise<Prisma.UserExpertiseMappingWhereInput> {
+    return {
+      userGroup: { workspaceId: this.ctx.workspaceId ?? '' },
+    }
   }
 }

@@ -78,6 +78,13 @@ export default defineConfig({
       '@/components': path.resolve(__dirname, './src/shared/components'),
       '@/hooks': path.resolve(__dirname, './src/shared/hooks'),
       '@/workflow-ui': path.resolve(__dirname, './src/workflow-ui'),
+      // Alias the real package to a private name so the shim can import it
+      // without creating a circular dependency.
+      'react-router-dom-actual': path.resolve(__dirname, 'node_modules/react-router-dom'),
+      // Transparently replace react-router-dom with our workspace-aware shim.
+      // All existing `import { useNavigate, Link } from 'react-router-dom'` calls
+      // now get workspace-prefixed versions at runtime with zero per-file changes.
+      'react-router-dom': path.resolve(__dirname, 'src/lib/react-router-dom-shim.ts'),
     },
     dedupe: ['react', 'react-dom', '@rocicorp/zero', '@tanstack/react-query', '@xstate/react', 'xstate']
   },

@@ -111,12 +111,23 @@ async function checkDbEntry(): Promise<HealthCheckResult> {
   let createdUserId: string | null = null;
 
   try {
-    // 1. Write a dummy entry
+    // Create a dummy orgMember first for health check
+    const orgMember = await prisma.orgMember.create({
+      data: {
+        email: testEmail,
+        orgId: 'health-check-org',
+        role: 'MEMBER',
+      },
+    });
+
+    // 1. Write a dummy entry - use a dummy workspaceId for health check
     const createdUser = await prisma.user.create({
       data: {
         name: 'Health Check User',
         email: testEmail,
         providerUserId: testEmail, // Must be unique
+        workspace: { connect: { id: 'health-check-workspace' } },
+        orgMemberId: orgMember.memberId,
       },
     });
     createdUserId = createdUser.id;

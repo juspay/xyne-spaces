@@ -48,6 +48,16 @@ import {
   UsersACL,
   WorkflowExecutionsACL,
   WorkflowsACL,
+  TicketAssignmentsACL,
+  TicketStageEtaACL,
+  UserProfilesACL,
+  UserPreferencesACL,
+  FormsACL,
+  FormContextMappingsACL,
+  FormFieldsACL,
+  FormEntityValuesACL,
+  WorkspacesACL,
+  InvitationsACL,
 } from './tables'
 import { UserActivityEventsAcl } from './tables/user_activity_acl'
 
@@ -186,6 +196,36 @@ export class ACLFactory {
         return new WorkflowExecutionsACL(ctx, prisma)
       case 'userActivityEvent':
         return new UserActivityEventsAcl(ctx, prisma)
+
+      case 'ticketAssignment':
+        return new TicketAssignmentsACL(ctx, prisma)
+
+      case 'ticketStageEta':
+        return new TicketStageEtaACL(ctx, prisma)
+
+      case 'userProfile':
+        return new UserProfilesACL(ctx, prisma)
+
+      case 'userPreference':
+        return new UserPreferencesACL(ctx, prisma)
+
+      case 'form':
+        return new FormsACL(ctx, prisma)
+
+      case 'formContextMapping':
+        return new FormContextMappingsACL(ctx, prisma)
+
+      case 'formFields':
+        return new FormFieldsACL(ctx, prisma)
+
+      case 'formEntityValues':
+        return new FormEntityValuesACL(ctx, prisma)
+
+      case 'workspace':
+        return new WorkspacesACL(ctx, prisma)
+
+      case 'invitation':
+        return new InvitationsACL(ctx, prisma)
 
       // Default: no ACL restriction (pass-through)
       default:

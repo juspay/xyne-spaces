@@ -93,26 +93,27 @@ export class ActivitiesBackfillController {
       // Fetch all messages for this batch
       const messages = await db.message.findMany({
         where: { messageId: { in: messageIds } },
-        select: { messageId: true, content: true },
+        select: { messageId: true, content: true, conversation: { select: { channel: { select: { workspaceId: true } } } } },
       });
-      
-      const messageMap = new Map(messages.map(m => [m.messageId, m.content]));
-      
+
+      const messageMap = new Map(messages.map(m => [m.messageId, { content: m.content, workspaceId: m.conversation.channel.workspaceId }]));
+
       // Process each activity
       for (const activity of activities) {
         if (!activity.messageId) {
           totalSkipped++;
           continue;
         }
-        
-        const content = messageMap.get(activity.messageId);
-        if (!content) {
+
+        const msgData = messageMap.get(activity.messageId);
+        if (!msgData) {
           totalSkipped++;
           continue;
         }
-        
+        const { content, workspaceId } = msgData;
+
         // Extract group mentions from message content
-        const groupMentions = await extractGroupMentionsFromContent(content);
+        const groupMentions = await extractGroupMentionsFromContent(content, workspaceId);
         const specialMentions = extractSpecialMentions(content);
 
         // Check if user is in any of the mentioned groups

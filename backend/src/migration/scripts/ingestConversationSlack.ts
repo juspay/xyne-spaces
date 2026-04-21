@@ -22,6 +22,7 @@ import {
 import { encrypt } from '../../services/encryptionService';
 import { config } from '../../config/env';
 import { conversationService } from '../../services/conversationService';
+import { db } from '@/database/client';
 
 // ============================================================================
 // Types
@@ -32,6 +33,7 @@ export interface IngestConversationSlackInput {
   externalSourceName: string;
   channelId: string;
   onlyReplies?: boolean;
+  workspaceId: string;
 }
 
 export interface IngestConversationSlackResult {
@@ -74,7 +76,8 @@ export const findOrCreateUser = async (
   userName: string,
   isDeactivated: boolean,
   userRepo: UserRepository,
-  userCache?: Map<string, { id: string; isDeactivated: boolean }>
+  userCache: Map<string, { id: string; isDeactivated: boolean }> | undefined,
+  workspaceId: string
 ): Promise<string> => {
   if (!userEmail && !userCache) {
     throw new Error(`Missing user email for user: ${userName}`);
@@ -84,15 +87,27 @@ export const findOrCreateUser = async (
     return userCache.get(userEmail)!.id;
   }
 
-  let user = await userRepo.findByEmail(userEmail);
+  let user = await userRepo.findByEmail(userEmail, workspaceId);
 
   if (!user) {
+    // Fetch existing orgMember by email
+    const orgMember = await db.orgMember.findUnique({
+      where: { email: userEmail },
+      select: { memberId: true }
+    });
+
+    if (!orgMember) {
+      throw new Error(`orgMember not found for email ${userEmail}. User must be invited to the organization first.`);
+    }
+
     user = await userRepo.create({
       email: userEmail,
       name: userName,
       providerUserId: `slack-migrated-${userEmail}`,
       authProvider: AuthProvider.GOOGLE,
       status: isDeactivated ? 'INACTIVE' : 'ACTIVE',
+      workspace: { connect: { id: workspaceId } },
+      orgMemberId: orgMember.memberId,
     });
     logger.info('[IngestSlack] User created', { userId: user.id, userEmail });
   }
@@ -123,14 +138,14 @@ export const findOrCreateApp = async (
     return existingUser.id;
   }
 
-  const creatorUser = await userRepo.findByEmail('john.doe@gmail.com');
+  const creatorUser = await db.user.findFirst({ where: { email: 'john.doe@gmail.com' } });
   if (!creatorUser) {
     throw new Error('Creator user john.doe@gmail.com not found');
   }
 
   const appRepo = new AppsRepository();
   const app = await appRepo.createApp({ name: botName, createdBy: creatorUser.id });
-  await installApp(app.id);
+  await installApp(app.id, creatorUser.workspaceId);
 
   const installedAppsRepo = new InstalledAppsRepository();
   const installed = await installedAppsRepo.findFirst({ where: { appId: app.id } });
@@ -156,7 +171,7 @@ export const findOrCreateApp = async (
 export async function ingestConversationSlack(
   input: IngestConversationSlackInput
 ): Promise<IngestConversationSlackResult> {
-  const { slackMessages, externalSourceName, channelId, onlyReplies = false } = input;
+  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId } = input;
 
   logger.info('[IngestSlack] Starting ingestion', {
     externalSourceName,
@@ -286,7 +301,8 @@ export async function ingestConversationSlack(
             userName,
             isDeactivated,
             userRepo,
-            userCache
+            userCache,
+          workspaceId
           );
         }
       }

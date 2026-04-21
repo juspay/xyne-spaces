@@ -8,33 +8,6 @@ export class TicketsACL extends BaseQueryACL<'tickets'> {
   }
 
   canSelect<TReturn>(query: Query<'tickets', Schema, TReturn>): Query<'tickets', Schema, TReturn> {
-    return query;
-
-    //   return query.whereExists('conversation', (conversation) => {
-    //     return conversation.whereExists('channel', (channel) => {
-    //         return channel.where(({cmp, or, exists, and}) => {
-    //             return or (
-    //                 and (
-    //                     cmp ('visibility', ChannelVisibility.PRIVATE),
-    //                     exists ('participants', (participants) => {
-    //                         return participants.where('userId', this.ctx.userID);
-    //                     })
-    //                 ),
-    //                 and (
-    //                     cmp ('visibility', ChannelVisibility.PUBLIC),
-    //                     exists('project', (project) => {
-    //                         return project.whereExists('channels', (channelQuery) => {
-    //                             return channelQuery
-    //                                 .where('visibility', ChannelVisibility.PUBLIC)
-    //                                 .whereExists('participants', (participants) => {
-    //                                 return participants.where('userId', this.ctx.userID);
-    //                             });
-    //                         });
-    //                     })
-    //                 )
-    //             )
-    //         })
-    //     });
-    //   })
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
   }
 }

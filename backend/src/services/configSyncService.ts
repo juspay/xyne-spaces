@@ -16,17 +16,30 @@ export class ConfigSyncService {
   public async ensureDefaultModelAndTools(): Promise<void> {
     try {
       logger.info('Ensuring default model and tools exist...');
-      
-      // Ensure default LiteLLM model exists
-      await this.ensureDefaultModel();
-      
-      // Ensure default tools exist
-      await this.ensureDefaultTools();
-      
-      // Ensure default groups and resources exist
-      await this.ensureDefaultGroupsAndResources();
-      
-      logger.info('Default model and tools check completed');
+
+      // Get all workspaces
+      const workspaces = await repositories.workspaces.findMany();
+
+      if (workspaces.length === 0) {
+        logger.warn('No workspaces found. Skipping default model and tools initialization (will run when a workspace exists).');
+        return;
+      }
+
+      // Process each workspace
+      for (const workspace of workspaces) {
+        logger.info(`Processing workspace: ${workspace.name} (${workspace.id})`);
+
+        // Ensure default LiteLLM model exists
+        await this.ensureDefaultModel(workspace.id);
+
+        // Ensure default tools exist
+        await this.ensureDefaultTools(workspace.id);
+
+        // Ensure default groups and resources exist
+        await this.ensureDefaultGroupsAndResources(workspace.id);
+      }
+
+      logger.info('Default model and tools check completed for all workspaces');
     } catch (error) {
       logger.error('Failed to ensure default model and tools:', error);
       throw error;
@@ -36,16 +49,16 @@ export class ConfigSyncService {
   /**
    * Ensure the default LiteLLM model exists
    */
-  private async ensureDefaultModel(): Promise<void> {
+  private async ensureDefaultModel(workspaceId: string): Promise<void> {
     const defaultModelUserDefinedId = appConfig.workflow.defaultModelId;
     const defaultModelName = appConfig.workflow.defaultModelName;
-    
+
     // Check if model already exists
     const existingModel = await repositories.models.findByUserDefinedId(defaultModelUserDefinedId);
-    
+
     if (!existingModel) {
       logger.info(`Creating default model: ${defaultModelUserDefinedId}`);
-      
+
       await repositories.models.create({
         userDefinedId: defaultModelUserDefinedId,
         name: defaultModelName,
@@ -55,9 +68,10 @@ export class ConfigSyncService {
           baseUrl: 'YOUR_LITELLM_BASE_URL',
           timeout: 600000,
           retries: 5
-        })
+        }),
+        workspace: { connect: { id: workspaceId } }
       });
-      
+
       logger.info(`Successfully created default model: ${defaultModelUserDefinedId}`);
     } else {
       logger.info(`Default model already exists: ${defaultModelUserDefinedId}`);
@@ -67,7 +81,7 @@ export class ConfigSyncService {
   /**
    * Ensure all default tools exist
    */
-  private async ensureDefaultTools(): Promise<void> {
+  private async ensureDefaultTools(workspaceId: string): Promise<void> {
     const defaultTools = [
       {
         name: 'read',
@@ -118,17 +132,18 @@ export class ConfigSyncService {
 
     for (const toolData of defaultTools) {
       // Check if tool already exists
-      const existingTool = await repositories.tools.findByName(toolData.name);
-      
+      const existingTool = await repositories.tools.findByName(toolData.name, workspaceId);
+
       if (!existingTool) {
         logger.info(`Creating default tool: ${toolData.name}`);
-        
+
         await repositories.tools.create({
           name: toolData.name,
           description: toolData.description,
-          status: toolData.status
+          status: toolData.status,
+          workspace: { connect: { id: workspaceId } }
         });
-        
+
         logger.info(`Successfully created default tool: ${toolData.name}`);
       } else {
         logger.info(`Default tool already exists: ${toolData.name}`);
@@ -139,19 +154,19 @@ export class ConfigSyncService {
   /**
    * Ensure default groups and resources exist in the database
    */
-  private async ensureDefaultGroupsAndResources(): Promise<void> {
+  private async ensureDefaultGroupsAndResources(workspaceId: string): Promise<void> {
     try {
       logger.info('Ensuring default groups and resources exist...');
-      
+
       // Import DatabaseClient to access Prisma client
       const { DatabaseClient } = await import('../database/client');
       const prisma = DatabaseClient.getInstance();
-      
+
       // Ensure USER-GROUPS resource exists
       const userGroupsResource = await prisma.resource.findUnique({
         where: { name: 'USER-GROUPS' }
       });
-      
+
       if (!userGroupsResource) {
         logger.info('Creating USER-GROUPS resource');
         await prisma.resource.create({
@@ -164,9 +179,11 @@ export class ConfigSyncService {
       } else {
         logger.info('USER-GROUPS resource already exists');
       }
-      
-      // Log final group distribution
-      const groups = await prisma.userGroup.findMany();
+
+      // Log final group distribution (only for this workspace)
+      const groups = await prisma.userGroup.findMany({
+        where: { workspaceId }
+      });
 
       // Fetch all group counts in a single query to avoid N+1 problem
       const groupCounts = await prisma.userGroupMapping.groupBy({
@@ -186,7 +203,7 @@ export class ConfigSyncService {
         const userCount = countsMap.get(group.id) ?? 0;
         logger.info(`  - ${group.name}: ${userCount} users`);
       }
-      
+
       logger.info('Default groups and resources setup completed');
     } catch (error) {
       logger.error('Failed to ensure default groups and resources:', error);
@@ -201,31 +218,48 @@ export class ConfigSyncService {
   public async syncConfigWithDatabase(): Promise<void> {
     try {
       logger.info('Starting configuration synchronization...');
-      
+
+      // Get all workspaces
+      const workspaces = await repositories.workspaces.findMany();
+
+      if (workspaces.length === 0) {
+        logger.warn('No workspaces found. Skipping config synchronization (will run when a workspace exists).');
+        return;
+      }
+
       // Read config.json
       const config = await this.readConfig();
-      
-      // Get the first available model (as specified in requirements)
-      const models = await repositories.models.findMany({                                                                                                                                                                                             
-        where: {
-          provider: { not: 'litellm-api' }
+
+      // Process each workspace
+      for (const workspace of workspaces) {
+        logger.info(`Synchronizing config for workspace: ${workspace.name} (${workspace.id})`);
+
+        // Get the first available model for this workspace (as specified in requirements)
+        const models = await repositories.models.findMany({
+          where: {
+            provider: { not: 'litellm-api' },
+            workspaceId: workspace.id
+          }
+        });
+        if (models.length === 0) {
+          logger.warn(`No models found for workspace ${workspace.name}. Skipping agent synchronization for this workspace.`);
+          continue;
         }
-      });
-      if (models.length === 0) {
-        throw new Error('No models found in database. At least one model is required for agent synchronization.');
+        const defaultModelId = models[0].id;
+
+        // Get all existing tools for validation (scoped to workspace)
+        const allTools = await repositories.tools.findMany({
+          where: { workspaceId: workspace.id }
+        });
+        const toolNameToIdMap = new Map(allTools.map(tool => [tool.name, tool.id]));
+
+        // Process each agent in config
+        for (const [agentName, agentConfig] of Object.entries(config)) {
+          await this.syncAgent(agentName, agentConfig, defaultModelId, toolNameToIdMap, workspace.id);
+        }
       }
-      const defaultModelId = models[0].id;
-      
-      // Get all existing tools for validation
-      const allTools = await repositories.tools.findMany();
-      const toolNameToIdMap = new Map(allTools.map(tool => [tool.name, tool.id]));
-      
-      // Process each agent in config
-      for (const [agentName, agentConfig] of Object.entries(config)) {
-        await this.syncAgent(agentName, agentConfig, defaultModelId, toolNameToIdMap);
-      }
-      
-      logger.info('Configuration synchronization completed successfully');
+
+      logger.info('Configuration synchronization completed successfully for all workspaces');
     } catch (error) {
       logger.error('Configuration synchronization failed:', error);
       throw error;
@@ -247,10 +281,11 @@ export class ConfigSyncService {
    * Synchronize a single agent with the database
    */
   private async syncAgent(
-    agentName: string, 
-    agentConfig: AgentConfig, 
+    agentName: string,
+    agentConfig: AgentConfig,
     defaultModelId: string,
-    toolNameToIdMap: Map<string, string>
+    toolNameToIdMap: Map<string, string>,
+    workspaceId: string
   ): Promise<void> {
     try {
       // Validate that all tools exist in database
@@ -259,12 +294,12 @@ export class ConfigSyncService {
         throw new Error(`Invalid tool names found for agent '${agentName}': ${invalidTools.map(t => t.name).join(', ')}`);
       }
 
-      // Check if agent name already exists using efficient query
-      const existingAgents = await repositories.agents.findMany({ 
-        where: { name: agentName } 
+      // Check if agent name already exists using efficient query (scoped to workspace)
+      const existingAgents = await repositories.agents.findMany({
+        where: { name: agentName, workspaceId }
       });
       const agentExists = existingAgents.length > 0;
-      
+
       if (agentExists) {
         logger.info(`Agent '${agentName}' already exists, skipping creation`);
         return;
@@ -272,7 +307,7 @@ export class ConfigSyncService {
 
       // Agent doesn't exist, create it as new (version 1)
       logger.info(`Creating new agent: ${agentName}`);
-      await this.createNewAgentVersion(agentName, agentConfig, defaultModelId, toolNameToIdMap, 1, "new agent");
+      await this.createNewAgentVersion(agentName, agentConfig, defaultModelId, toolNameToIdMap, 1, "new agent", workspaceId);
     } catch (error) {
       logger.error(`Failed to sync agent '${agentName}':`, error);
       throw error;
@@ -336,7 +371,8 @@ export class ConfigSyncService {
     defaultModelId: string,
     toolNameToIdMap: Map<string, string>,
     version: number,
-    reason: string
+    reason: string,
+  workspaceId: string
   ): Promise<void> {
     // Create unique userDefinedId with version
     const userDefinedId = `${agentName}-v${version}`;
@@ -350,7 +386,8 @@ export class ConfigSyncService {
       description: `Version ${version} - ${reason}`,
       version: version,
       temp: 0.1,
-      scope: 'project'
+      scope: 'project',
+      workspace: { connect: { id: workspaceId } }
     });
 
     // Create tool mappings

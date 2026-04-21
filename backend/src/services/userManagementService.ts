@@ -48,7 +48,11 @@ export class UserManagementService {
 
   // User Group Operations
   async createUserGroup(data: CreateUserGroupInput): Promise<UserGroup> {
-    await repositories.userGroups.validateNameUnique(data.name);
+    // Get workspaceId from the workspace relation for validation
+    const workspaceId = (data.workspace as any)?.connect?.id;
+    if (workspaceId) {
+      await repositories.userGroups.validateNameUnique(data.name, workspaceId);
+    }
     return repositories.userGroups.create(data);
   }
 
@@ -56,8 +60,8 @@ export class UserManagementService {
     return repositories.userGroups.findById(id);
   }
 
-  async getUserGroupByName(name: string): Promise<UserGroup | null> {
-    return repositories.userGroups.findByName(name);
+  async getUserGroupByName(name: string, workspaceId: string): Promise<UserGroup | null> {
+    return repositories.userGroups.findByName(name, workspaceId);
   }
 
   async getUserGroupWithMappings(id: string): Promise<UserGroupWithMappings | null> {
@@ -160,7 +164,11 @@ export class UserManagementService {
 
   async updateUserGroup(id: string, data: UpdateUserGroupInput): Promise<UserGroup> {
     if (data.name && typeof data.name === 'string') {
-      await repositories.userGroups.validateNameUnique(data.name, id);
+      // Get the existing group to obtain workspaceId for validation
+      const existingGroup = await repositories.userGroups.findById(id);
+      if (existingGroup) {
+        await repositories.userGroups.validateNameUnique(data.name, existingGroup.workspaceId, id);
+      }
     }
     return repositories.userGroups.update(id, data);
   }
@@ -191,12 +199,12 @@ export class UserManagementService {
     return repositories.users.findById(id);
   }
 
-  async getUserByEmail(email: string): Promise<User | null> {
-    return repositories.users.findByEmail(email);
+  async getUserByEmail(email: string, workspaceId: string): Promise<User | null> {
+    return repositories.users.findByEmail(email, workspaceId);
   }
 
-  async getUserByProviderUserId(providerUserId: string): Promise<User | null> {
-    return repositories.users.findByProviderUserId(providerUserId);
+  async getUserByProviderUserId(providerUserId: string, workspaceId: string): Promise<User | null> {
+    return repositories.users.findByProviderUserId(providerUserId, workspaceId);
   }
 
   async getUserWithMappings(id: string): Promise<UserWithMappings | null> {

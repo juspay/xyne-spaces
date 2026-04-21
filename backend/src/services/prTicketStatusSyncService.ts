@@ -13,6 +13,7 @@ import { syncUserWorkload } from '@/utils/workloadUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { PullRequestActivityHandler } from '@/zero/side-effects/tables/pull-requests-handler';
 import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
+import { db } from '@/database/client';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -74,19 +75,24 @@ export class PRTicketStatusSyncService {
   /**
    * Look up user by email and return user ID, or Bitbucket bot ID if not found
    */
-  private async resolveUpdatedBy(email: string | undefined): Promise<string> {
+  private async resolveUpdatedBy(email: string | undefined, workspaceId?: string): Promise<string> {
     if (!email) {
       return await this.getBitbucketBotId();
     }
 
     try {
-      const user = await this.userRepository.findByEmail(email);
+      // workspaceId required for unique user lookup
+      if (!workspaceId) {
+        logger.debug(`[PR-Ticket-Sync] No workspaceId for email ${email}, using fallback`);
+        return await this.getBitbucketBotId();
+      }
+      const user = await this.userRepository.findByEmail(email, workspaceId);
       if (user) {
         logger.info(`[PR-Ticket-Sync] Found user with email ${email}: ${user.id}`);
         return user.id;
       }
 
-      logger.debug(`[PR-Ticket-Sync] No user found with email ${email}, using Bitbucket bot`);
+      logger.debug(`[PR-Ticket-Sync] No user found with email ${email}, using fallback`);
       return await this.getBitbucketBotId();
     } catch (error) {
       logger.error(`[PR-Ticket-Sync] Error looking up user by email ${email}:`, error);
@@ -117,6 +123,42 @@ export class PRTicketStatusSyncService {
       logger.error('[PR-Ticket-Sync] Error getting Bitbucket bot ID:', error);
       return 'BOT';
     }
+  }
+
+  /**
+   * Fetch complete QueryContext for a user by ID.
+   * Used by side-effect handlers that need workspaceId, role, and memberId.
+   */
+  private async fetchUserContext(userId: string): Promise<{ userID: string; workspaceId: string; role: string; memberId: string; orgRole: string }> {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, workspaceId: true, role: true },
+    });
+
+    if (!user) {
+      throw new Error(`User not found: ${userId}`);
+    }
+
+    if (!user.workspaceId) {
+      throw new Error(`User ${userId} has no workspace assigned`);
+    }
+
+    // Email is globally unique in orgMember, single lookup is sufficient
+    const orgMember = await db.orgMember.findUnique({
+      where: { email: user.email },
+    });
+
+    if (!orgMember) {
+      throw new Error(`User ${userId} is not a member of any organization`);
+    }
+
+    return {
+      userID: user.id,
+      workspaceId: user.workspaceId,
+      orgRole: orgMember.role,
+      role: user.role,
+      memberId: orgMember.memberId,
+    };
   }
 
   /**
@@ -307,7 +349,8 @@ export class PRTicketStatusSyncService {
         );
         
         // Create PR activities for users when stage changed due to PR webhook
-        const prActivityHandler = new PullRequestActivityHandler({ userID: updatedBy });
+        const userContext = await this.fetchUserContext(updatedBy);
+        const prActivityHandler = new PullRequestActivityHandler(userContext);
         await prActivityHandler.onUpdate({
           entityType: 'pull_requests',
           entityId: pr.id,
@@ -608,7 +651,8 @@ export class PRTicketStatusSyncService {
       });
       
       // Trigger side effect handler to create activity for update
-      const handler = new TicketAssignmentsSideEffectHandler({ userID: updatedBy });
+      const userContext = await this.fetchUserContext(updatedBy);
+      const handler = new TicketAssignmentsSideEffectHandler(userContext);
       handler.onUpdate({
         entityId: existingAssignment.id,
         entityType: 'ticket_assignments',
@@ -626,7 +670,8 @@ export class PRTicketStatusSyncService {
       });
       
       // Trigger side effect handler to create activity
-      const handler = new TicketAssignmentsSideEffectHandler({ userID: updatedBy });
+      const userContext = await this.fetchUserContext(updatedBy);
+      const handler = new TicketAssignmentsSideEffectHandler(userContext);
       handler.onInsert({
         entityId: newAssignment.id,
         entityType: 'ticket_assignments',

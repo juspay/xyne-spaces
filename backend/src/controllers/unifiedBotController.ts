@@ -130,7 +130,7 @@ export async function chatWithBot(req: Request, res: Response): Promise<void> {
     }
 
     // Get or create DM channel
-    const channel = await unifiedDMService.getOrCreateBotDMByBotId(user.id, botId);
+    const channel = await unifiedDMService.getOrCreateBotDMByBotId(user.id, botId, user.workspaceId ?? '');
     if (!channel) {
       res.status(404).json({
         success: false,

@@ -5,14 +5,16 @@ import { encrypt, decrypt } from '@/services/encryptionService';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { isValidUrl } from '@/utils/urlUtils';
+import { db } from '@/database/client';
 
 /**
  * Install an external app
- * 
+ *
  * @param appId - The ID of the external app to install
+ * @param workspaceId - The workspace ID to install the app in
  * @returns The created installed app entry
  */
-export async function installApp(appId: string) {
+export async function installApp(appId: string, workspaceId: string) {
   try {
     // 1. Check if app is already installed
     const existingInstallation = await repositories.installedApps.findMany({
@@ -40,7 +42,26 @@ export async function installApp(appId: string) {
       .replace(/^-|-$/g, '');
     const email = `${botName}@app.xyne.ai`;
 
-    // 4. Create a new user for the app
+    // 4. Get orgId from workspace and create orgMember for the app user
+    const workspace = await db.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { orgId: true }
+    });
+    if (!workspace) {
+      throw new Error(`[INSTALL-APP] Workspace ${workspaceId} not found`);
+    }
+
+    // Create orgMember entry for the app (apps are dynamic, not pre-invited)
+    const orgMember = await db.orgMember.create({
+      data: {
+        email: email,
+        orgId: workspace.orgId,
+        role: 'MEMBER',
+      }
+    });
+    logger.info(`[INSTALL-APP] Created orgMember for app: ${orgMember.memberId}`);
+
+    // 5. Create a new user for the app
     const appUser = await repositories.users.create({
       name: app.name,
       email: email,
@@ -48,6 +69,8 @@ export async function installApp(appId: string) {
       authProvider: AuthProvider.API_KEY,
       userType: UserType.APP,
       status: 'ACTIVE',
+      workspace: { connect: { id: workspaceId } },
+      orgMemberId: orgMember.memberId,
     });
     logger.info(`[INSTALL-APP] Created new app user: ${appUser.id} for app ${appId}`);
 

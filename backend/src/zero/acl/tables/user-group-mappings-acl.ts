@@ -7,6 +7,13 @@ import { hasUserGroupsAdminAccess, verifyManagerOrTeamLead } from '../core/admin
 
 export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
 
+  private async verifyUserGroupInWorkspace(userGroupId: string, tx: Transaction<Schema>, workspaceId?: string): Promise<void> {
+    const userGroupWorkspaceId = workspaceId ?? await tx.run(zql.user_groups.where('id', userGroupId).one()).then(ug => ug?.workspaceId);
+    if (!userGroupWorkspaceId || userGroupWorkspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('User group mapping not found in this workspace', 'user_group_mappings');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'user_group_mappings'>>, tx: Transaction<Schema>): Promise<void> {
     // Check if the user group exists
     const userGroup = await tx.run(
@@ -18,6 +25,7 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
     if (!userGroup) {
       throw new MutationACLError('User group mapping insert failed: the specified group does not exist', 'user_group_mappings');
     }
+    await this.verifyUserGroupInWorkspace(args.userGroupId, tx, userGroup.workspaceId);
 
     // Allow if user has ADMIN access to USER-GROUPS resource
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
@@ -40,6 +48,7 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
     if (!userGroupMapping) {
       throw new MutationACLError('User group mapping update failed: the mapping does not exist', 'user_group_mappings');
     }
+    await this.verifyUserGroupInWorkspace(userGroupMapping.userGroupId, tx);
 
     // Allow if user has ADMIN access to USER-GROUPS resource
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);
@@ -62,6 +71,7 @@ export class UserGroupMappingsACL extends BaseACL<'user_group_mappings'> {
     if (!userGroupMapping) {
       throw new MutationACLError('User group mapping delete failed: the mapping does not exist', 'user_group_mappings');
     }
+    await this.verifyUserGroupInWorkspace(userGroupMapping.userGroupId, tx);
 
     // Allow if user has ADMIN access to USER-GROUPS resource
     const hasAdminAccess = await hasUserGroupsAdminAccess(this.ctx, tx);

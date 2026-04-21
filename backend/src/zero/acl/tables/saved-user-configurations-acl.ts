@@ -1,7 +1,7 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
 import { ChannelRole, SavedConfigVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
-import { MutationACLError, type TableSchema } from '../core/types';
+import { MutationACLError, type TableSchema, type QueryContext } from '../core/types';
 import { zql } from '../../queries';
 
 /**
@@ -39,7 +39,7 @@ async function canMakePublicView(
 }
 
 export class SavedUserConfigurationsACL extends BaseACL<'saved_user_configurations'> {
-  constructor(ctx: { userID: string }) {
+  constructor(ctx: QueryContext) {
     super(ctx, 'saved_user_configurations');
   }
 

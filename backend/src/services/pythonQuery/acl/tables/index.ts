@@ -40,6 +40,16 @@ export { UserWorkloadMappingsACL } from './user-workload-mappings-acl'
 export { UsersACL } from './users-acl'
 export { WorkflowExecutionsACL } from './workflow-executions-acl'
 export { WorkflowsACL } from './workflows-acl'
+export { TicketAssignmentsACL } from './ticket-assignments-acl'
+export { TicketStageEtaACL } from './ticket-stage-eta-acl'
+export { UserProfilesACL } from './user-profiles-acl'
+export { UserPreferencesACL } from './user-preferences-acl'
+export { FormsACL } from './forms-acl'
+export { FormContextMappingsACL } from './form-context-mappings-acl'
+export { FormFieldsACL } from './form-fields-acl'
+export { FormEntityValuesACL } from './form-entity-values-acl'
+export { WorkspacesACL } from './workspaces-acl'
+export { InvitationsACL } from './invitations-acl'
 
 // Helper utilities
 export {

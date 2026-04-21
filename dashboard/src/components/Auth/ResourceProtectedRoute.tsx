@@ -1,5 +1,5 @@
 import { ReactElement } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import { usePermissions } from '../../hooks/usePermissions';
 
 interface ResourceProtectedRouteProps {
@@ -25,8 +25,10 @@ export const ResourceProtectedRoute = ({
     return false;
   });
 
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+
   if (!hasAccess) {
-    return <Navigate to='/' replace />;
+    return <Navigate to={workspaceId ? `/${workspaceId}` : '/'} replace />;
   }
 
   return children;

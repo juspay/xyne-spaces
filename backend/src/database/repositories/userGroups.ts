@@ -25,7 +25,11 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     // Validate alias if provided
     if (data.alias) {
       this.validateAlias(data.alias);
-      await this.validateAliasUnique(data.alias);
+      // Get workspaceId from the workspace relation
+      const workspaceId = (data.workspace as any)?.connect?.id;
+      if (workspaceId) {
+        await this.validateAliasUnique(data.alias, workspaceId);
+      }
     }
 
     const userGroup = await this.db.userGroup.create({
@@ -41,10 +45,13 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
   async createWithUsers(data: CreateUserGroupWithUsersInput, actorUserId?: string): Promise<UserGroup> {
     await this.validateString(data.name, 'name', 100);
 
+    // Get workspaceId from the workspace relation for validation
+    const workspaceId = (data.workspace as any)?.connect?.id;
+
     // Validate alias if provided
-    if (data.alias) {
+    if (data.alias && workspaceId) {
       this.validateAlias(data.alias);
-      await this.validateAliasUnique(data.alias);
+      await this.validateAliasUnique(data.alias, workspaceId);
     }
 
     // Use transaction to create user group and user mappings together
@@ -55,6 +62,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
           alias: data.alias || null,
           description: data.description || null,
           metadata: data.metadata,
+          workspace: data.workspace
         },
       });
 
@@ -92,9 +100,9 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     });
   }
 
-  async findByName(name: string): Promise<UserGroup | null> {
+  async findByName(name: string, workspaceId: string): Promise<UserGroup | null> {
     return await this.db.userGroup.findUnique({
-      where: { name },
+      where: { workspaceId_name: { workspaceId, name } },
     });
   }
 
@@ -125,6 +133,12 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
   }
 
   async update(id: string, data: UpdateUserGroupInput, actorUserId?: string): Promise<UserGroup> {
+    // Get existing group to get workspaceId
+    const existingGroup = await this.findById(id);
+    if (!existingGroup) {
+      throw new Error(`User group with id '${id}' not found`);
+    }
+
     if (data.name) {
       await this.validateString(data.name, 'name', 100);
     }
@@ -132,7 +146,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     // Validate alias if provided
     if (data.alias && typeof data.alias === 'string') {
       this.validateAlias(data.alias);
-      await this.validateAliasUnique(data.alias, id);
+      await this.validateAliasUnique(data.alias, existingGroup.workspaceId, id);
     }
 
     const userGroup = await this.db.userGroup.update({
@@ -255,9 +269,9 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     });
   }
 
-  async validateNameUnique(name: string, excludeId?: string): Promise<void> {
+  async validateNameUnique(name: string, workspaceId: string, excludeId?: string): Promise<void> {
     const existing = await this.db.userGroup.findUnique({
-      where: { name },
+      where: { workspaceId_name: { workspaceId, name } },
     });
 
     if (existing && existing.id !== excludeId) {
@@ -299,9 +313,9 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
   /**
    * Validate that alias is unique
    */
-  async validateAliasUnique(alias: string, excludeId?: string): Promise<void> {
-    const existing = await this.db.userGroup.findUnique({
-      where: { alias },
+  async validateAliasUnique(alias: string, workspaceId: string, excludeId?: string): Promise<void> {
+    const existing = await this.db.userGroup.findFirst({
+      where: { workspaceId, alias },
     });
 
     if (existing && existing.id !== excludeId) {
@@ -312,9 +326,9 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
   /**
    * Find group by alias
    */
-  async findByAlias(alias: string): Promise<UserGroup | null> {
-    return await this.db.userGroup.findUnique({
-      where: { alias },
+  async findByAlias(alias: string, workspaceId: string): Promise<UserGroup | null> {
+    return await this.db.userGroup.findFirst({
+      where: { workspaceId, alias },
     });
   }
 
@@ -333,9 +347,12 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     data: CreateUserGroupInput,
     actorUserId?: string
   ): Promise<UserGroup> {
+    // Get workspaceId from the workspace relation
+    const workspaceId = (data.workspace as any)?.connect?.id;
+
     // Check if a group with the same alias already exists
-    if (data.alias) {
-      const existingGroup = await this.findByAlias(data.alias);
+    if (data.alias && workspaceId) {
+      const existingGroup = await this.findByAlias(data.alias, workspaceId);
       if (existingGroup) {
         // Merge new metadata into existing metadata
         return await this.db.userGroup.update({
@@ -345,7 +362,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
       }
     }
 
-    // No existing group found, create a new one 
+    // No existing group found, create a new one
     return await this.create(data, actorUserId);
   }
 

@@ -6,6 +6,7 @@ import { MessageRepository, CreateMessageInput } from '../database/repositories/
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository';
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
+import { ProjectRepository } from '../database/repositories/projectRepository';
 import { ChannelScopeType, ChannelVisibility, MessageType, AttachmentEntityType, Prisma } from '@prisma/client';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
@@ -38,6 +39,7 @@ export class ChannelController {
   private userRepository: UserRepository;
   private userGroupRepository: UserGroupRepository;
   private channelUserStatusRepository: ChannelUserStatusRepository;
+  private projectRepository: ProjectRepository;
 
   constructor() {
     this.channelRepository = new ChannelRepository();
@@ -48,6 +50,7 @@ export class ChannelController {
     this.userRepository = new UserRepository();
     this.userGroupRepository = new UserGroupRepository();
     this.channelUserStatusRepository = new ChannelUserStatusRepository();
+    this.projectRepository = new ProjectRepository();
   }
 
   // Helper method to get user info
@@ -434,7 +437,8 @@ export class ChannelController {
 
          // Copy attachments to the new message
          const copiedAttachments: any[] = [];
-         if (originalAttachments.length > 0) {
+         const channelWorkspaceId = await this.channelRepository.getWorkspaceId(conversation.channelId);
+        if (originalAttachments.length > 0) {
            for (const attachment of originalAttachments) {
              const copiedAttachment = await tx.messageAttachment.create({
                data: {
@@ -449,7 +453,8 @@ export class ChannelController {
                  createdBy: senderId,
                  storageProvider: attachment.storageProvider,
                  conversationId: conversation.conversationId,
-                 metadata: (attachment.metadata as Record<string, any>) || {},
+                 workspaceId: channelWorkspaceId,
+                metadata: (attachment.metadata as Record<string, any>) || {},
                  width: attachment.width ?? undefined,
                  height: attachment.height ?? undefined,
                },
@@ -501,6 +506,7 @@ export class ChannelController {
                 }
               });
 
+              const botChannelWorkspaceId = await this.channelRepository.getWorkspaceId(conversation.channelId);
               for (const originalAtt of botOriginalAttachments) {
                 await tx.messageAttachment.create({
                   data: {
@@ -515,6 +521,7 @@ export class ChannelController {
                     createdBy: senderId,
                     storageProvider: originalAtt.storageProvider,
                     conversationId: conversation.conversationId,
+                    workspaceId: botChannelWorkspaceId,
                     metadata: (originalAtt.metadata as Prisma.InputJsonValue) || {},
                     width: originalAtt.width ?? undefined,
                     height: originalAtt.height ?? undefined,
@@ -744,6 +751,7 @@ export class ChannelController {
         visibility: visibility || 'PUBLIC',
         createdBy: userId,
         projectId,
+        workspaceId: req.user!.workspaceId!,
       };
 
       const channel = await this.channelRepository.create(channelData);
@@ -923,8 +931,13 @@ export class ChannelController {
         return;
       }
 
-      // Check if channel name exists across all projects
-      const isDuplicate = await this.channelRepository.checkDuplicateName(name.trim());
+      // Check if channel name exists within the workspace
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Missing workspaceId' });
+        return;
+      }
+      const isDuplicate = await this.channelRepository.checkDuplicateName(name.trim(), workspaceId);
 
       const response: CheckDuplicateChannelResponse = {
         isDuplicate,
@@ -1250,6 +1263,7 @@ export class ChannelController {
   createNewDM = async (req: Request, res: Response): Promise<void> => {
     try {
       const currentUserId = req.user!.id;
+      const workspaceId = req.user!.workspaceId!;
       const { participantIds, message, forwardedMessage }: {
         participantIds: string[],
         message?: string,
@@ -1262,6 +1276,13 @@ export class ChannelController {
           error: 'participantIds array is required and cannot be empty',
           details: 'Provide at least one participant ID'
         });
+        return;
+      }
+
+      // Get DM project ID for this workspace
+      const dmProjectId = await this.projectRepository.getDMProjectId(workspaceId);
+      if (!dmProjectId) {
+        res.status(500).json({ error: 'DM project not found for workspace' });
         return;
       }
 
@@ -1370,7 +1391,8 @@ export class ChannelController {
           description: 'Saved messages',
           visibility: 'PRIVATE',
           createdBy: currentUserId,
-          projectId: 'default',
+          projectId: dmProjectId,
+          workspaceId,
         };
 
         const channel = await this.channelRepository.create(channelData);
@@ -1485,7 +1507,8 @@ export class ChannelController {
           description: `Direct message between ${await this.getUserInfo(currentUserId).then(u => u.name)} and ${targetUser.name}`,
           visibility: 'PRIVATE',
           createdBy: currentUserId,
-          projectId: 'default',
+          projectId: dmProjectId,
+          workspaceId,
         };
 
         const channel = await this.channelRepository.create(channelData);
@@ -1595,7 +1618,8 @@ export class ChannelController {
           name: titleForGroupDms,
           visibility: 'PRIVATE',
           createdBy: currentUserId,
-          projectId: 'default',
+          projectId: dmProjectId,
+          workspaceId,
         };
 
         const channel = await this.channelRepository.create(channelData);
@@ -1680,6 +1704,7 @@ export class ChannelController {
   addGroupDmParticipants = async (req: Request, res: Response): Promise<void> => {
     try {
       const currentUserId = req.user!.id;
+      const workspaceId = req.user!.workspaceId!;
       const { channelId } = req.params;
       const { userIds, includeHistory }: { userIds: string[], includeHistory: boolean } = req.body;
 
@@ -1695,6 +1720,13 @@ export class ChannelController {
         res.status(400).json({
           error: 'includeHistory must be a boolean'
         });
+        return;
+      }
+
+      // Get DM project ID for this workspace
+      const dmProjectId = await this.projectRepository.getDMProjectId(workspaceId);
+      if (!dmProjectId) {
+        res.status(500).json({ error: 'DM project not found for workspace' });
         return;
       }
 
@@ -1853,7 +1885,7 @@ export class ChannelController {
                 'participants_added'
               );
 
-              const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId });
+              const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId, workspaceId: req.user!.workspaceId, role: req.user!.role, orgRole: req.user!.orgRole, memberId: req.user!.memberId });
               for (const user of filteredUsers) {
                 const participant = await this.channelParticipantRepository.findParticipant(channelId, user.userId);
                 if (participant) {
@@ -1881,7 +1913,8 @@ export class ChannelController {
             name: allParticipantIds.join(','),
             visibility: 'PRIVATE',
             createdBy: currentUserId,
-            projectId: 'default',
+            projectId: dmProjectId,
+            workspaceId,
           };
 
           const newChannel = await this.channelRepository.create(channelData);
@@ -1895,7 +1928,7 @@ export class ChannelController {
           }
 
           const newlyAddedUserIds = uniqueUserIds.filter(id => id !== currentUserId);
-          const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId });
+          const handler = new ChannelParticipantsSideEffectHandler({ userID: currentUserId, workspaceId: req.user!.workspaceId, role: req.user!.role, orgRole: req.user!.orgRole, memberId: req.user!.memberId });
           if (newlyAddedUserIds.length > 0) {
             for (const userId of newlyAddedUserIds) {
               const participant = await this.channelParticipantRepository.findParticipant(newChannel.id, userId);

@@ -18,6 +18,7 @@ import { getStorageService } from '../../../../services/storage/index.js';
 import { MessageAttachmentRepository } from '../../../../database/repositories/messageAttachmentRepository.js';
 import { config } from '../../../../config/env.js';
 import { PPTX_DESIGNER_SYSTEM_PROMPT } from './prompt.js';
+import { ChannelRepository } from '../../../../database/repositories/channelRepository.js';
 
 const storageService = getStorageService();
 
@@ -390,6 +391,10 @@ export function createCreatePptTool(): Tool<
         });
 
         const messageAttachmentRepo = new MessageAttachmentRepository();
+        const channelRepository = new ChannelRepository();
+        const workspaceId = context.channelIds.length > 0
+          ? await channelRepository.getWorkspaceId(context.channelIds[0])
+          : '';
         const attachment = await messageAttachmentRepo.create({
           entityId: context.conversationId ?? context.sessionId,
           entityType: AttachmentEntityType.CHAT,
@@ -401,6 +406,7 @@ export function createCreatePptTool(): Tool<
           createdBy: context.userId,
           storageProvider: config.fileStorage.provider,
           conversationId: context.conversationId ?? null,
+          workspaceId,
           metadata: { title, type: 'presentation', source: 'create_ppt' },
         });
 

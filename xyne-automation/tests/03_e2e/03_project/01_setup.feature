@@ -11,6 +11,17 @@ Feature: Project Test Setup
     When I click the button with text "Sign in with Google" then wait for "/test/auth/login" request to be triggered and capture the response
     Then the captured response status should be 200
     And the user data should be stored in global context as "<user_context>"
+    # Complete onboarding flow for new users
+    And I click the button with text "Get Started ->"
+    And I wait for 1 seconds
+    And I click the button with text "->"
+    And I wait for 1 seconds
+    And I click the button with text "->"
+    And I wait for 1 seconds
+    And I click the button with text "->"
+    And I wait for 1 seconds
+    And I click the button with text "Open My Workspace"
+    And I wait for 2 seconds
     And I open the Xyne-Space at "<landing_page>"
 
     Examples:

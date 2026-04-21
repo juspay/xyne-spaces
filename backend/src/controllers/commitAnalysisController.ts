@@ -41,6 +41,7 @@ export interface CommitAnalysisParams {
   parentTicketId?: string;
   userName?: string;
   isHotFix?: boolean;
+  workspaceId: string;
 }
 
 // Analysis result type
@@ -216,6 +217,7 @@ export class CommitAnalysisController {
             affectedApplicationCount: affectedApplications.length,
             migrationCount: migrationLinks.length,
             envChangeCount: envChanges.length,
+            workspaceId: params.workspaceId,
           }
         );
 

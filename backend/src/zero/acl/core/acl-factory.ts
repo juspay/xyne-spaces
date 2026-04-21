@@ -51,6 +51,14 @@ import { SurfaceLinksACL } from '../tables/surface-links-acl';
 import { SavedUserConfigurationsACL } from '../tables/saved-user-configurations-acl';
 import { SavedUserConfigurationValuesACL } from '../tables/saved-user-configuration-values-acl';
 import { AppsACL } from '../tables/apps-acl';
+import { TicketAssignmentsACL } from '../tables/ticket-assignments-acl';
+import { TicketStageEtaACL } from '../tables/ticket-stage-eta-acl';
+import { UserProfilesACL } from '../tables/user-profiles-acl';
+import { UserPreferencesACL } from '../tables/user-preferences-acl';
+import { FormsACL } from '../tables/forms-acl';
+import { FormContextMappingsACL } from '../tables/form-context-mappings-acl';
+import { FormFieldsACL } from '../tables/form-fields-acl';
+import { FormEntityValuesACL } from '../tables/form-entity-values-acl';
 
 export class ACLFactory {
   /**
@@ -168,7 +176,21 @@ export class ACLFactory {
       case 'channel_user_status': 
         return new ChannelUserStatusACL(ctx);
       case 'user_profiles':
-        return new NoAcl<'user_profiles'>(ctx);
+        return new UserProfilesACL(ctx);
+      case 'user_preferences':
+        return new UserPreferencesACL(ctx);
+      case 'ticket_assignments':
+        return new TicketAssignmentsACL(ctx);
+      case 'ticket_stage_eta':
+        return new TicketStageEtaACL(ctx);
+      case 'forms':
+        return new FormsACL(ctx);
+      case 'forms_context_mapping':
+        return new FormContextMappingsACL(ctx);
+      case 'form_fields':
+        return new FormFieldsACL(ctx);
+      case 'form_entity_values':
+        return new FormEntityValuesACL(ctx);
       case 'rcas':
         return new NoAcl<'rcas'>(ctx);
       case 'impacts':

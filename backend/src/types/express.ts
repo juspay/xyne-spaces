@@ -42,9 +42,12 @@ export interface AuthenticatedUser {
   googleId: string;
   email: string;
   name: string;
+  workspaceId: string;
   isApiKeyUser?: boolean;
   scopes?: string[];
-  role?: 'admin' | 'user';
+  role: string;
+  orgRole: string;
+  memberId: string;
 }
 
 declare global {
@@ -80,6 +83,9 @@ export interface ApiKeyUser {
   scopes: string[];
   isApiKeyUser: true;
   apiKeyName?: string;
+  workspaceId: string;
+  orgRole: string;
+  memberId: string;
 }
 
 export interface CreateApiKeyRequest {

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { DatabaseClient } from '../database/client';
 import { AccessType } from '@prisma/client';
 import { logger } from '../utils/logger';
+import { repositories } from '../database/repositories/index';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -33,7 +34,7 @@ export const authorize = (resourceName: string, requiredAccess: AccessType, allo
         return;
       }
 
-      // Check for direct user access in resource_access table
+      // Check for direct user access AND group-based access via UserGroupMapping
       // Support permission hierarchy: ADMIN > WRITE > READ
       const accessTypesToCheck: AccessType[] = [requiredAccess];
       if (requiredAccess === AccessType.READ) {
@@ -42,16 +43,14 @@ export const authorize = (resourceName: string, requiredAccess: AccessType, allo
         accessTypesToCheck.push(AccessType.ADMIN);
       }
 
-      const userAccess = await prisma.resourceAccess.findFirst({
-        where: {
-          userId: userId,
-          resourceId: resource.id,
-          accessType: { in: accessTypesToCheck },
-        },
-      });
-      logger.info(`User-specific access check result: ${userAccess ? 'Found' : 'Not Found'}`);
+      const hasAccess = await repositories.resourceAccess.hasAccess(
+        userId,
+        resource.id,
+        requiredAccess
+      );
+      logger.info(`Access check result for user ${userId}: ${hasAccess ? 'Granted' : 'Denied'}`);
 
-      if (userAccess) {
+      if (hasAccess) {
         next();
         return;
       }

@@ -10,7 +10,7 @@
  * 4. Cleaning up expired user sessions
  */
 
-import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus } from '@prisma/client';
+import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, OrgRole, ProjectType } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
 
 const prisma = new PrismaClient();
@@ -179,14 +179,124 @@ async function main() {
       }
     }
 
-    // Step 4: Create default admin user
+    // Step 4: Create default organization and workspace
+    console.log('\n🏢 Creating default organization and workspace...');
+    let defaultWorkspaceId: string;
+    try {
+      // Check if default org exists
+      let defaultOrg = await prisma.organization.findFirst({
+        where: { name: 'Xyne Default' }
+      });
+
+      if (!defaultOrg) {
+        defaultOrg = await prisma.organization.create({
+          data: {
+            name: 'Xyne Default',
+            orgId: 'xyne-default-org',
+            createdBy: 'system',
+          }
+        });
+        console.log('  ✅ Created default organization');
+      } else {
+        console.log('  ✅ Default organization already exists');
+      }
+
+      // Check if default workspace exists
+      let defaultWorkspace = await prisma.workspace.findFirst({
+        where: { name: 'Default Workspace' }
+      });
+
+      if (!defaultWorkspace) {
+        defaultWorkspace = await prisma.workspace.create({
+          data: {
+            name: 'Default Workspace',
+            orgId: defaultOrg.orgId,
+            createdBy: 'system',
+          }
+        });
+        console.log('  ✅ Created default workspace');
+
+        // Create DM project for the workspace
+        await prisma.project.create({
+          data: {
+            name: 'Direct Messages',
+            code: 'DM',
+            description: 'DM project for direct message channels',
+            type: ProjectType.DM,
+            workspaceId: defaultWorkspace.id,
+            createdBy: 'system',
+          }
+        });
+        console.log('  ✅ Created DM project for default workspace');
+      } else {
+        console.log('  ✅ Default workspace already exists');
+      }
+
+      defaultWorkspaceId = defaultWorkspace.id;
+
+      // Link org to workspace if not already linked
+      const existingLink = await prisma.workspaceOrganization.findFirst({
+        where: { orgId: defaultOrg.orgId, workspaceId: defaultWorkspace.id }
+      });
+      if (!existingLink) {
+        await prisma.workspaceOrganization.create({
+          data: {
+            orgId: defaultOrg.orgId,
+            workspaceId: defaultWorkspace.id,
+            role: 'OWNER',
+          }
+        });
+        console.log('  ✅ Linked organization to workspace');
+      }
+    } catch (error) {
+      console.error('  ❌ Failed to create default organization/workspace:', error);
+      throw error;
+    }
+
+    // Step 5: Create default admin user
     console.log('\n👤 Creating default admin user...');
     try {
-      // Check if admin user already exists
-      let adminUser = await repositories.users.findByEmail(DEFAULT_ADMIN_USER.email);
-      
+      // First, ensure default org exists for orgMember creation
+      const defaultOrg = await prisma.organization.findFirst({
+        where: { name: 'Xyne Default' }
+      });
+
+      if (!defaultOrg) {
+        throw new Error('Default organization not found');
+      }
+
+      // Check if admin user already exists in the default workspace
+      let adminUser = await repositories.users.findByEmail(DEFAULT_ADMIN_USER.email, defaultWorkspaceId);
+      let orgMemberId: string;
+
       if (adminUser) {
         console.log('  ✅ Default admin user already exists');
+        
+        // Get or create orgMember for existing admin user
+        const existingOrgMember = await prisma.orgMember.findUnique({
+          where: { email: adminUser.email }
+        });
+        
+        if (existingOrgMember) {
+          orgMemberId = existingOrgMember.memberId;
+          if (existingOrgMember.role !== OrgRole.ADMIN) {
+            await prisma.orgMember.update({
+              where: { memberId: orgMemberId },
+              data: { role: OrgRole.ADMIN }
+            });
+            console.log('  ✅ Updated admin user organization role to ADMIN');
+          }
+        } else {
+          const newOrgMember = await prisma.orgMember.create({
+            data: {
+              orgId: defaultOrg.orgId,
+              email: adminUser.email,
+              role: OrgRole.ADMIN,
+            }
+          });
+          orgMemberId = newOrgMember.memberId;
+          console.log('  ✅ Created orgMember for existing admin user');
+        }
       } else {
         // Get admin group ID
         const adminGroupId = createdGroups.get('ADMIN');
@@ -194,20 +304,44 @@ async function main() {
           throw new Error('ADMIN group not found');
         }
 
-        // Create admin user
+        // Create orgMember FIRST (to get the memberId)
+        const orgMember = await prisma.orgMember.create({
+          data: {
+            orgId: defaultOrg.orgId,
+            email: DEFAULT_ADMIN_USER.email,
+            role: OrgRole.ADMIN,
+          }
+        });
+        orgMemberId = orgMember.memberId;
+        console.log('  ✅ Created orgMember for admin user');
+
+        // Create admin user with workspaceId, ADMIN role, and orgMemberId
         adminUser = await repositories.users.create({
           ...DEFAULT_ADMIN_USER,
-          userGroupId: adminGroupId
+          workspaceId: defaultWorkspaceId,
+          userGroupId: adminGroupId,
+          role: WorkspaceRole.ADMIN,
+          orgMemberId: orgMemberId,
         });
-        console.log(`  ✅ Created default admin user: ${DEFAULT_ADMIN_USER.email}`);
+        console.log(`  ✅ Created default admin user: ${DEFAULT_ADMIN_USER.email} with ADMIN role and orgMemberId`);
+
+        // Link admin user to ADMIN group via UserGroupMapping
+        await prisma.userGroupMapping.create({
+          data: {
+            userId: adminUser.id,
+            userGroupId: adminGroupId,
+          }
+        });
+        console.log('  ✅ Linked admin user to ADMIN group');
       }
 
-      // Ensure admin user is in ADMIN group
-      if (adminUser.userGroupId !== createdGroups.get('ADMIN')) {
+      // Ensure admin user has ADMIN workspace role and orgMemberId
+      if (adminUser.role !== WorkspaceRole.ADMIN || !adminUser.orgMemberId) {
         await repositories.users.update(adminUser.id, {
-          userGroupId: createdGroups.get('ADMIN')
+          role: WorkspaceRole.ADMIN,
+          orgMemberId: orgMemberId,
         });
-        console.log('  ✅ Updated admin user group membership');
+        console.log('  ✅ Updated admin user workspace role and orgMemberId');
       }
 
       // Grant direct ADMIN access to XYNE-APPS resource for admin user

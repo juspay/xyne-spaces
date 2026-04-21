@@ -2,7 +2,7 @@ import { useSelector } from '@xstate/react';
 import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { authActor } from '../machines/authMachine';
-import type { AuthState, User } from '../machines/authMachine';
+import type { AuthState, User, Workspace } from '../machines/authMachine';
 import { analyticsService } from '../services/Analytics/analyticsService';
 import { Context } from '@xyne/shared/index';
 
@@ -14,11 +14,19 @@ export interface UseAuthReturn {
   isLoading: boolean;
   state: AuthState;
   isNewUser: boolean;
+  workspaces: Workspace[];
+  pendingUserData: { email: string; name: string; picture?: string } | null;
+  isSelectingWorkspace: boolean;
+  isCreatingOrg: boolean;
+  isLoggingInToWorkspace: boolean;
+  userExistsButRemoved: boolean;
 
   signInWithGoogle: () => void;
   signInWithMicrosoft: () => void;
   logout: () => void;
   clearError: () => void;
+  selectWorkspace: (workspaceId: string) => void;
+  createOrg: (orgName: string, workspaceName: string) => void;
 }
 
 export const useAuth = (): UseAuthReturn => {
@@ -43,6 +51,20 @@ export const useAuth = (): UseAuthReturn => {
     send({ type: 'CLEAR_ERROR' });
   }, [send]);
 
+  const selectWorkspace = useCallback(
+    (workspaceId: string) => {
+      send({ type: 'SELECT_WORKSPACE', workspaceId });
+    },
+    [send],
+  );
+
+  const createOrg = useCallback(
+    (orgName: string, workspaceName: string) => {
+      send({ type: 'SUBMIT_CREATE_ORG', orgName, workspaceName });
+    },
+    [send],
+  );
+
   return {
     // State
     user: state.context.user,
@@ -53,14 +75,24 @@ export const useAuth = (): UseAuthReturn => {
       state.matches('processingOAuthCallback') ||
       state.matches('validatingSession') ||
       state.matches('loggingOut') ||
-      state.matches('authenticating'),
+      state.matches('authenticating') ||
+      state.matches('loggingInToWorkspace') ||
+      state.matches('submittingCreateOrg'),
     state: state.value as AuthState,
     isNewUser: state.context.isNewUser,
+    workspaces: state.context.workspaces,
+    pendingUserData: state.context.pendingUserData,
+    isSelectingWorkspace: state.matches('selectingWorkspace'),
+    isCreatingOrg: state.matches('creatingOrg'),
+    isLoggingInToWorkspace: state.matches('loggingInToWorkspace'),
+    userExistsButRemoved: state.context.userExistsButRemoved,
 
     signInWithGoogle,
     signInWithMicrosoft,
     logout,
     clearError,
+    selectWorkspace,
+    createOrg,
   };
 };
 
@@ -69,7 +101,13 @@ export const useAuthContextValues = (): Context => {
   if (!user) {
     throw new Error('User must be logged in to create query context');
   }
-  return { userID: user.id };
+  return {
+    userID: user.id,
+    workspaceId: user.workspaceId,
+    role: user.role,
+    orgRole: user.orgRole,
+    memberId: user.memberId,
+  };
 };
 
 // Analytics permissions hook - handles permission checking for analytics features

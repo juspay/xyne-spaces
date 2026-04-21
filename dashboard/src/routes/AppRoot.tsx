@@ -1,4 +1,4 @@
-import { createBrowserRouter, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { createBrowserRouter, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import SplashScreen from './SplashScreen/SplashScreen';
 import ProtectedRoute from '../components/Auth/ProtectedRoute';
 import { useActivityTracker } from '../hooks/useActivityTracker';
@@ -12,6 +12,7 @@ import TicketView from '../components/Tickets/TicketView/TicketView';
 import WorkflowScreen from './WorkflowScreen/WorkflowScreen';
 import VSCodeWorkspaceScreen from './VSCodeWorkspaceScreen/VSCodeWorkspaceScreen';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
+import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
 import KnowledgeBaseScreen from './KnowledgeBaseScreen/KnowledgeBase';
 import { MemoryScreen } from './MemoryScreen';
@@ -136,6 +137,10 @@ import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
+import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
+import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
+import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
+import NoOrganizationAccessScreen from './NoOrganizationAccessScreen/NoOrganizationAccessScreen';
 import DashboardCreation from './DashboardCreation/DashboardCreation';
 import QueryBuilderScreen from './QueryBuilderScreen/QueryBuilderScreen.tsx';
 import Drawer from '../components/ui/Drawer';
@@ -176,6 +181,16 @@ const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null 
   }, [isOnboarding, startOnboarding]);
 
   return null;
+};
+
+const WorkspaceRedirect = (): ReactElement => {
+  const email = localStorage.getItem('user_email');
+  const workspaceId = email ? getLastActiveWorkspaceId(email) : null;
+  if (workspaceId) {
+    return <Navigate to={`/${workspaceId}`} replace />;
+  }
+  // No workspace in storage — send to auth
+  return <Navigate to='/auth' replace />;
 };
 
 const AppRoot = (): ReactElement => {
@@ -241,8 +256,8 @@ const AppRoot = (): ReactElement => {
 
   // Initialize activity tracking
   useActivityTracker(location.pathname);
-  const isOnboarding = location.pathname === '/onboarding';
-  const isOnVSCode = location.pathname === '/vscode';
+  const isOnboarding = location.pathname.endsWith('/onboarding');
+  const isOnVSCode = location.pathname.endsWith('/vscode');
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -581,27 +596,31 @@ export const router = createBrowserRouter([
         element: <ProtectedRoute />,
         children: [
           {
-            path: '/',
+            index: true,
+            element: <WorkspaceRedirect />,
+          },
+          {
+            path: ':workspaceId',
             element: <AppRoot />,
             children: [
               {
-                path: '/',
+                index: true,
                 element: <HomeScreen />,
               },
               {
-                path: '/onboarding',
+                path: 'onboarding',
                 element: <OnboardingScreen />,
               },
               {
-                path: '/rca',
+                path: 'rca',
                 element: <RCAListScreen />,
               },
               {
-                path: '/rca/:rcaId',
+                path: 'rca/:rcaId',
                 element: <RCADetailScreen />,
               },
               {
-                path: '/chat',
+                path: 'chat',
                 element: <ChatScreen />,
                 children: [
                   // Directory routes (nested under dir)
@@ -746,7 +765,7 @@ export const router = createBrowserRouter([
                 ],
               },
               {
-                path: '/tickets',
+                path: 'tickets',
                 element: (
                   <ResourceProtectedRoute resourceName='TICKETS'>
                     <TicketsScreen />
@@ -754,7 +773,7 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/product-insights',
+                path: 'product-insights',
                 element: (
                   <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
                     <ProductInsightsScreen />
@@ -762,15 +781,15 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/tickets/:ticketId/workflow/:workflowId',
+                path: 'tickets/:ticketId/workflow/:workflowId',
                 element: <WorkflowScreen />,
               },
               {
-                path: '/tickets/:ticketId/workflow',
+                path: 'tickets/:ticketId/workflow',
                 element: <WorkflowScreen />,
               },
               {
-                path: '/agents',
+                path: 'agents',
                 element: (
                   <ResourceProtectedRoute resourceName='AGENTS'>
                     <AgentsScreen />
@@ -778,7 +797,7 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/knowledge-base',
+                path: 'knowledge-base',
                 element: (
                   <ResourceProtectedRoute resourceName='KNOWLEDGE-BASE'>
                     <KnowledgeBaseScreen />
@@ -786,11 +805,11 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/memory',
+                path: 'memory',
                 element: <MemoryScreen />,
               },
               {
-                path: '/analytics',
+                path: 'analytics',
                 element: (
                   <ResourceProtectedRoute resourceName='ANALYTICS'>
                     <AnalyticsScreen />
@@ -798,7 +817,7 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/projects',
+                path: 'projects',
                 element: (
                   <ResourceProtectedRoute resourceName='PROJECTS'>
                     <ProjectsScreen />
@@ -824,7 +843,7 @@ export const router = createBrowserRouter([
                 ],
               },
               {
-                path: '/user-groups',
+                path: 'user-groups',
                 element: (
                   <ResourceProtectedRoute resourceName='USER-GROUPS'>
                     <UserGroupsScreen />
@@ -832,7 +851,7 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/listProjects',
+                path: 'listProjects',
                 element: (
                   <ResourceProtectedRoute resourceName='LISTPROJECTS'>
                     <ProjectsListView />
@@ -840,31 +859,31 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/listProjects/:projectId',
+                path: 'listProjects/:projectId',
                 element: <ProjectDetailScreen />,
               },
               {
-                path: '/calls',
+                path: 'calls',
                 element: <CallHistoryScreen />,
               },
               {
-                path: '/call/:callId',
+                path: 'call/:callId',
                 element: <CallPage />,
               },
               {
-                path: '/calls/:callId/:callType',
+                path: 'calls/:callId/:callType',
                 element: <CallPage />,
               },
               {
-                path: '/recordings',
+                path: 'recordings',
                 element: <RecordingsScreen />,
               },
               {
-                path: '/recordings/:recordingId',
+                path: 'recordings/:recordingId',
                 element: <RecordingDetailScreen />,
               },
               {
-                path: '/user-groups/:userGroupId/assignment-config',
+                path: 'user-groups/:userGroupId/assignment-config',
                 element: (
                   <ResourceProtectedRoute resourceName='USER-GROUPS'>
                     <AssignmentConfigWrapper />
@@ -872,7 +891,7 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/analytics-dashboard',
+                path: 'analytics-dashboard',
                 element: (
                   <ResourceProtectedRoute resourceName='ANALYTICS'>
                     <DashboardCreation />
@@ -880,7 +899,7 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/analytics-dashboard/:dashboardId',
+                path: 'analytics-dashboard/:dashboardId',
                 element: (
                   <ResourceProtectedRoute resourceName='ANALYTICS'>
                     <QueryBuilderScreen />
@@ -888,7 +907,7 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/support',
+                path: 'support',
                 element: (
                   <ResourceProtectedRoute resourceName='SUPPORT'>
                     <SupportScreen />
@@ -902,15 +921,31 @@ export const router = createBrowserRouter([
                 ],
               },
               {
-                path: '/vscode',
+                path: 'vscode',
                 element: <VSCodeWorkspaceScreen />,
               },
               {
-                path: '/browser',
+                path: 'browser',
                 element: <BrowserTabsScreen />,
               },
               {
-                path: '/forms',
+                path: 'workspace-management',
+                element: (
+                  <ResourceProtectedRoute resourceName='WORKSPACE'>
+                    <WorkspaceManagementScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'organisations',
+                element: (
+                  <ResourceProtectedRoute resourceName='ORGANIZATIONS'>
+                    <OrganisationsScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
+                path: 'forms',
                 element: (
                   <ResourceProtectedRoute resourceName='FORMS'>
                     <FormScreen />
@@ -918,23 +953,23 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/scheduled-messages',
+                path: 'scheduled-messages',
                 element: <ScheduledMessageScreen />,
               },
               {
-                path: '/apps',
+                path: 'apps',
                 element: <AppsScreen />,
               },
               {
-                path: '/docs/*',
+                path: 'docs/*',
                 element: <DocsScreen />,
               },
               {
-                path: '/inspector',
+                path: 'inspector',
                 element: <Inspector />,
               },
               {
-                path: '/resource-access',
+                path: 'resource-access',
                 element: (
                   <ResourceProtectedRoute resourceName='USERS'>
                     <ResourceAccessScreen />
@@ -942,7 +977,7 @@ export const router = createBrowserRouter([
                 ),
               },
               {
-                path: '/jira-migration',
+                path: 'jira-migration',
                 element: (
                   <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
                     <JiraMigrationScreen />
@@ -1008,8 +1043,16 @@ export const router = createBrowserRouter([
         ],
       },
       {
+        path: '/invite',
+        element: <AcceptInvitation />,
+      },
+      {
         path: '/auth',
         element: <AuthScreen />,
+      },
+      {
+        path: '/no-access',
+        element: <NoOrganizationAccessScreen />,
       },
       {
         path: '/launch',

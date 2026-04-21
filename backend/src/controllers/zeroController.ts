@@ -23,9 +23,10 @@ export const handlePush = async (req: Request, res: Response): Promise<void> => 
         }
       });
 
-      // Add token from cookie to Authorization header for Zero
-      if (req.cookies?.google_access_token) {
-        headers.set('authorization', `Bearer ${req.cookies.google_access_token}`);
+      // Add token from workspace-specific cookie to Authorization header for Zero
+      const workspaceId = req.cookies?.xyne_last_workspace;
+      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
+        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
       }
 
       const webRequest = new Request(url, {
@@ -68,9 +69,10 @@ export const handleGetQueries = async (req: Request, res: Response): Promise<voi
         }
       });
 
-      // Add token from cookie to Authorization header for Zero
-      if (req.cookies?.google_access_token) {
-        headers.set('authorization', `Bearer ${req.cookies.google_access_token}`);
+      // Add token from workspace-specific cookie to Authorization header for Zero
+      const workspaceId = req.cookies?.xyne_last_workspace;
+      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
+        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
       }
 
       const webRequest = new Request(url, {
@@ -112,10 +114,11 @@ export const handleGetQueriesFallback = async (req: Request, res: Response): Pro
       }
     });
 
-    // Add token from cookie to Authorization header for Zero
-    if (req.cookies?.google_access_token) {
-      headers.set('authorization', `Bearer ${req.cookies.google_access_token}`);
-    }
+      // Add token from workspace-specific cookie to Authorization header for Zero
+      const workspaceId = req.cookies?.xyne_last_workspace;
+      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
+        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
+      }
 
     const webRequest = new Request(url, {
       method: 'POST',
@@ -158,8 +161,10 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
       }
     });
 
-    if (req.cookies?.google_access_token) {
-      headers.set('authorization', `Bearer ${req.cookies.google_access_token}`);
+    // Add token from workspace-specific cookie to Authorization header
+    const workspaceId = req.cookies?.xyne_last_workspace;
+    if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
+      headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
     }
 
     const webRequest = new Request(url, {
@@ -194,9 +199,10 @@ export const handleQueryZqlToSql = async (req: Request, res: Response): Promise<
       }
     });
 
-    // Add token from cookie to Authorization header
-    if (req.cookies?.google_access_token) {
-      headers.set('authorization', `Bearer ${req.cookies.google_access_token}`);
+    // Add token from workspace-specific cookie to Authorization header
+    const workspaceId = req.cookies?.xyne_last_workspace;
+    if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
+      headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
     }
 
     const webRequest = new Request(url, {

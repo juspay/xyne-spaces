@@ -99,7 +99,7 @@ export async function executeBotForMention({
     });
 
     if (result.stream) {
-      const handler = new MessagesSideEffectHandler({ userID: botUserId });
+      const handler = new MessagesSideEffectHandler({ userID: botUserId, workspaceId: '', role: '', orgRole: '', memberId: '' });
       for await (const event of result.stream) {
         if (event.type === 'error') {
           logger.error('[BOT-MENTION] Bot error event', {

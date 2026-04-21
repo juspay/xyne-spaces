@@ -73,6 +73,7 @@ export class ScheduleCallController {
           userId,
           targetUserIds,
           repositories.channelParticipants,
+          req.user!.workspaceId!,
           title,
         );
       }
@@ -172,6 +173,7 @@ export class ScheduleCallController {
           userId,
           targetUserIds,
           repositories.channelParticipants,
+          req.user!.workspaceId!,
           title
         );
       }
@@ -319,6 +321,7 @@ export class ScheduleCallController {
           userId,
           targetUserIds,
           repositories.channelParticipants,
+          req.user!.workspaceId!,
           title ?? call.title ?? undefined,
         );
         logger.info(`[updateScheduledCall] resolvedChannelId from DM lookup/create=${resolvedChannelId}`);
@@ -474,6 +477,7 @@ export class ScheduleCallController {
           userId,
           targetUserIds,
           repositories.channelParticipants,
+          req.user!.workspaceId!,
           title ?? series.title ?? undefined,
         );
         logger.info(`[updateRecurringSeries] resolvedChannelId from DM lookup/create=${resolvedChannelId}`);

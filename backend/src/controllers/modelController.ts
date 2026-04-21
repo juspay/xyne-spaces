@@ -201,8 +201,14 @@ export class ModelController {
   getModelsByName = async (req: Request, res: Response): Promise<void> => {
     try {
       const { name } = req.params;
+      const workspaceId = req.user?.workspaceId;
 
-      const models = await repositories.models.findByName(name);
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Missing workspaceId' });
+        return;
+      }
+
+      const models = await repositories.models.findByName(name, workspaceId);
       res.status(200).json(models);
     } catch (error) {
       logger.error('Error getting models by name:', error);

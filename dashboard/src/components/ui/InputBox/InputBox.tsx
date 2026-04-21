@@ -64,6 +64,7 @@ import { LinkSyncPlugin } from '../TipTapExtensions/LinkSyncPlugin';
 import { CanvasAttachmentModal, CanvasLinkPreview } from '../../Canvas';
 import type { Canvas } from '../../Canvas';
 import { CanvasVisibility } from '@xyne/shared';
+import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, Event } from '../../../utils/logger';
@@ -167,6 +168,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       clearDroppedFiles: providerClearDroppedFiles,
       getDroppedFilesForEntity,
     } = useDraftAttachments();
+    const shareableOrigin = useShareableOrigin();
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
 
@@ -784,7 +786,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
         // Insert canvas link into editor if attached
         if (attachedCanvas) {
-          const canvasLink = `${window.location.origin}/chat/canvas/${attachedCanvas.viewAccessId || attachedCanvas.id}`;
+          const canvasLink = `${shareableOrigin}/chat/canvas/${attachedCanvas.viewAccessId || attachedCanvas.id}`;
           // Insert as plain link - platform will unfurl to show preview
           editor?.commands.insertContent(` ${canvasLink}`);
         }

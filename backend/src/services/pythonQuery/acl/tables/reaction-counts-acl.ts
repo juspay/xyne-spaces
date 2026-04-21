@@ -6,14 +6,19 @@ export class ReactionCountsACL extends BaseQueryACL<Prisma.ReactionCountWhereInp
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.ReactionCountWhereInput | null> {
+  async getWhereClause(): Promise<Prisma.ReactionCountWhereInput> {
     return {
       message: {
         conversation: {
           channel: {
-            OR: [
-              { visibility: 'PUBLIC' },
-              { participants: { some: { userId: this.ctx.userId } } },
+            AND: [
+              { workspaceId: this.ctx.workspaceId ?? '' },
+              {
+                OR: [
+                  { visibility: 'PUBLIC' },
+                  { participants: { some: { userId: this.ctx.userId } } },
+                ],
+              },
             ],
           },
         },

@@ -46,6 +46,14 @@ import {
   WorkflowsACL,
   ReposACL,
   SavedUserConfigurationsACL,
+  TicketAssignmentsACL,
+  TicketStageEtaACL,
+  UserProfilesACL,
+  UserPreferencesACL,
+  FormsACL,
+  FormContextMappingsACL,
+  FormFieldsACL,
+  FormEntityValuesACL,
 } from '../tables';
 export class QueryACLFactory {
   static getACL<TTable extends TableName>(
@@ -138,7 +146,13 @@ export class QueryACLFactory {
       case 'user_presence':
         return new UserPresenceACL(ctx) as BaseQueryACL<TTable>;
       case 'user_profiles':
-        return new BaseQueryACL(ctx, table);
+        return new UserProfilesACL(ctx) as BaseQueryACL<TTable>;
+      case 'user_preferences':
+        return new UserPreferencesACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_assignments':
+        return new TicketAssignmentsACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_stage_eta':
+        return new TicketStageEtaACL(ctx) as BaseQueryACL<TTable>;
       case 'user_workload_mappings':
         return new UserWorkloadMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'users':
@@ -160,10 +174,13 @@ export class QueryACLFactory {
       case 'email_drafts':
         return new BaseQueryACL(ctx, table);
       case 'forms':
+        return new FormsACL(ctx) as BaseQueryACL<TTable>;
       case 'form_entity_values':
+        return new FormEntityValuesACL(ctx) as BaseQueryACL<TTable>;
       case 'form_fields':
+        return new FormFieldsACL(ctx) as BaseQueryACL<TTable>;
       case 'forms_context_mapping':
-        return new BaseQueryACL(ctx, table);
+        return new FormContextMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'dashboards':
       case 'queries':
       case 'dashboard_queries_mapping':

@@ -2,20 +2,18 @@ import { Request, Response, NextFunction } from 'express';
 import { OAuth2Client, gaxios } from 'google-auth-library';
 import axios from 'axios';
 import { jwtService } from '../services/jwtService';
-import { UserService } from '../services/userService';
 import { logger as baseLogger } from '../utils/logger';
 import '../types/express';
 import { UserSessionService } from '../services/userSessionService';
 import { config } from '@/config/env';
+import { db } from '@/database/client';
 
 const logger = baseLogger.child({ module: 'AuthV2Middleware' });
 class AuthV2Middleware {
-  private userService: UserService;
   private userSessionService: UserSessionService;
   private googleClient: OAuth2Client;
 
   constructor() {
-    this.userService = new UserService();
     this.userSessionService = new UserSessionService();
     
     const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -30,19 +28,24 @@ class AuthV2Middleware {
   }
 
   /**
-   * Helper to extract token from various sources
+   * Helper to extract token from workspace-specific cookie
+   * Uses X-Workspace-Id header or xyne_last_workspace cookie
    */
   private extractToken(req: Request): string | null {
-    if (req.cookies?.google_access_token) {
-      return req.cookies.google_access_token;
-    }
+    const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
     
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      return authHeader.substring(7);
+    if (workspaceId) {
+      return req.cookies?.[`xyne_ws_${workspaceId}_token`] || null;
     }
     
     return null;
+  }
+  
+  /**
+   * Helper to get global session ID (not workspace-scoped)
+   */
+  private getSessionId(req: Request): string | undefined {
+    return req.cookies?.xyne_session;
   }
 
   /**
@@ -50,12 +53,15 @@ class AuthV2Middleware {
    */
   private attemptRefresh = async (req: Request, res: Response, next: NextFunction): Promise<boolean> => {
     try {
-      const sessionId = req.cookies?.user_session_id;
+      const sessionId = this.getSessionId(req);
+      const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
+      
       logger.info(`[AUTH] [Auto-Refresh] Attempting refresh. Cookie found: ${!!sessionId} ${sessionId}`, {
         method: req.method,
         path: req.path,
         sessionId,
-        cookieTokenPresent: !!req.cookies?.google_access_token,
+        workspaceId,
+        workspaceTokenPresent: workspaceId ? !!req.cookies?.[`xyne_ws_${workspaceId}_token`] : false,
       });
 
       if (!sessionId) {
@@ -195,12 +201,14 @@ class AuthV2Middleware {
         googleId: session.user.providerUserId,
       });
 
-      // Generate new token
+      // Generate new token - role is fetched fresh from DB, not stored in JWT
       const customToken = jwtService.generateToken({
         sub: session.user.id,
         email: session.user.email,
         name: session.user.name,
         picture: session.user.picture,
+        workspaceId: session.user.workspaceId,
+        memberId: session.user.orgMemberId,
       });
 
       const tokenPreview = `${customToken.slice(0, 8)}...${customToken.slice(-6)}`;
@@ -212,6 +220,9 @@ class AuthV2Middleware {
 
       // Set new cookie with updated lifespan
       const isProduction = process.env.NODE_ENV === 'production';
+      const targetWorkspaceId = session.user.workspaceId;
+      
+      // Legacy cookie (backward compatibility)
       res.cookie('google_access_token', customToken, {
         httpOnly: true,
         secure: isProduction,
@@ -219,6 +230,25 @@ class AuthV2Middleware {
         path: '/',
         maxAge: config.jwt.expirationSeconds * 1000,
       });
+      
+      // NEW: Multi-workspace cookies
+      if (targetWorkspaceId) {
+        res.cookie(`xyne_ws_${targetWorkspaceId}_token`, customToken, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict',
+          path: '/',
+          maxAge: config.jwt.expirationSeconds * 1000,
+        });
+        
+        res.cookie('xyne_last_workspace', targetWorkspaceId, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict',
+          path: '/',
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        });
+      }
 
       // Attach user to request so downstream handlers work
       req.user = {
@@ -226,6 +256,10 @@ class AuthV2Middleware {
         googleId: session.user.providerUserId,
         email: session.user.email,
         name: session.user.name,
+        workspaceId: session.user.workspaceId,
+        role: session.user.role,
+        orgRole: session.user.orgMember.role,
+        memberId: session.user.orgMemberId,
       };
 
       logger.info(`[AUTH] [Auto-Refresh] SUCCESS: Token refreshed and user attached to request ${sessionId}`, {
@@ -250,21 +284,25 @@ class AuthV2Middleware {
 
   authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const logPrefix = `[Auth] [${req.method} ${req.path}]`;
-    const sessionId = req.cookies?.user_session_id;
+    const sessionId = this.getSessionId(req);
+    const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
     
     try {
       // 1. Try to get a valid access token first
       const token = this.extractToken(req);
-      const tokenSource = req.cookies?.google_access_token
-        ? 'cookie'
-        : req.headers.authorization?.startsWith('Bearer ')
-          ? 'authorization_header'
-          : 'none';
+      const tokenSource = workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]
+        ? 'workspace_cookie'
+        : req.cookies?.google_access_token
+          ? 'legacy_cookie'
+          : req.headers.authorization?.startsWith('Bearer ')
+            ? 'authorization_header'
+            : 'none';
       const tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
       logger.info(`[AUTH] ${logPrefix} Step 1: Token extraction result: ${!!token} ${sessionId}`, {
         method: req.method,
         path: req.path,
         sessionId,
+        workspaceId,
         tokenSource,
         tokenPresent: !!token,
         tokenPreview,
@@ -277,25 +315,83 @@ class AuthV2Middleware {
           const decoded = jwtService.verifyToken(token);
           
           if (decoded && decoded.sub) {
-             const user = await this.userService.getUserById(decoded.sub);
-             if (user) {
-               req.user = {
-                 id: user.id,
-                 googleId: user.providerUserId,
-                 email: user.email,
-                 name: user.name,
-               };
-               logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email} ${sessionId}`, {
-                 sessionId,
-                 tokenSource,
-                 tokenPreview,
-                 tokenSub: decoded.sub,
-                 userId: user.id,
-                 googleId: user.providerUserId,
-                 email: user.email,
-               });
-               tokenIsValid = true;
-               return next();
+              // Validate required claims in JWT token
+              if (!decoded.memberId || !decoded.workspaceId) {
+                logger.error(`[AUTH] ${logPrefix} JWT token missing required claims: memberId=${!!decoded.memberId}, workspaceId=${!!decoded.workspaceId} ${sessionId}`, {
+                  sessionId,
+                  tokenSource,
+                  tokenPreview,
+                  decodedClaims: Object.keys(decoded),
+                });
+                res.status(401).json({
+                  error: 'Invalid token',
+                  message: 'Token missing required claims. Please login again.',
+                });
+                return;
+              }
+
+              // Fetch fresh roles from database using parallel queries
+              const [user, orgMember] = await Promise.all([
+                db.user.findUnique({
+                  where: { id: decoded.sub },
+                  select: { 
+                    id: true, 
+                    role: true, 
+                    email: true, 
+                    name: true, 
+                    leftAt: true, 
+                    providerUserId: true 
+                  }
+                }),
+                db.orgMember.findUnique({
+                  where: { memberId: decoded.memberId },
+                  select: { role: true }
+                })
+              ]);
+              
+              if (user) {
+                if (user.leftAt) {
+                  logger.warn(`[AUTH] ${logPrefix} User has been removed from workspace: ${user.email} ${sessionId}`, {
+                    sessionId,
+                    tokenSource,
+                    tokenPreview,
+                    userId: user.id,
+                    leftAt: user.leftAt,
+                  });
+                  res.status(401).json({
+                    error: 'User removed from workspace',
+                    message: 'You have been removed from this workspace',
+                  });
+                  return;
+                 } else {
+                  // Use fresh roles from database
+                  const workspaceRole = user.role;
+                  const orgRole = orgMember!.role;
+                  
+                  req.user = {
+                    id: user.id,
+                    googleId: user.providerUserId,
+                    email: user.email,
+                    name: user.name,
+                    workspaceId: decoded.workspaceId,
+                    role: workspaceRole,
+                    orgRole: orgRole,
+                    memberId: decoded.memberId,
+                  };
+                  logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email} ${sessionId}`, {
+                    sessionId,
+                    tokenSource,
+                    tokenPreview,
+                    tokenSub: decoded.sub,
+                    userId: user.id,
+                    googleId: user.providerUserId,
+                    email: user.email,
+                    workspaceRole,
+                    orgRole,
+                  });
+                  tokenIsValid = true;
+                  return next();
+                }
              } else {
                logger.warn(`[AUTH] ${logPrefix} Token valid, but user not found in DB: ${decoded.sub} ${sessionId}`, {
                  sessionId,
@@ -339,25 +435,26 @@ class AuthV2Middleware {
           tokenPreview,
         });
         
-        // Only attempt if we have a session cookie
-        if (req.cookies?.user_session_id) {
-           const refreshed = await this.attemptRefresh(req, res, next);
-           if (refreshed) {
-             // Logs inside attemptRefresh will handle success details
-             return; 
-           } else {
-             logger.info(`[AUTH] ${logPrefix} ${sessionId} Refresh attempt failed.`, {
-               sessionId,
-               tokenSource,
-               tokenPreview,
-             });
-           }
-        } else {
-          logger.info(`[AUTH] ${logPrefix} No session cookie (user_session_id) present.`, {
-            tokenSource,
-            tokenPreview,
-          });
-        }
+      // Only attempt if we have a session cookie
+      const hasWorkspaceSession = sessionId !== undefined;
+      if (hasWorkspaceSession) {
+         const refreshed = await this.attemptRefresh(req, res, next);
+         if (refreshed) {
+           // Logs inside attemptRefresh will handle success details
+           return; 
+         } else {
+           logger.info(`[AUTH] ${logPrefix} ${sessionId} Refresh attempt failed.`, {
+             sessionId,
+             tokenSource,
+             tokenPreview,
+           });
+         }
+      } else {
+        logger.info(`[AUTH] ${logPrefix} No workspace session cookie present.`, {
+          tokenSource,
+          tokenPreview,
+        });
+      }
       }
 
       // 3. Final Failure

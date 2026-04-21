@@ -5,6 +5,7 @@ import type { Canvas } from '../Canvas.types';
 import type { User } from '@xyne/shared';
 import { Globe, Crown, Shield, Eye, X, CornerDownRight } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
+import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { queries } from '../../../zero/queries';
 import { useAuth } from '../../../hooks/useAuth';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
@@ -34,6 +35,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
 }) => {
   const { user: currentUser } = useAuth();
   const z = useZero();
+  const shareableOrigin = useShareableOrigin();
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [localVisibility, setLocalVisibility] = useState(canvas.visibility);
@@ -80,8 +82,8 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
 
   const handleCopyLink = (): void => {
     const viewLink = canvas.viewAccessId
-      ? `${window.location.origin}/chat/canvas/${canvas.viewAccessId}`
-      : `${window.location.origin}/chat/canvas/${canvas.id}`;
+      ? `${shareableOrigin}/chat/canvas/${canvas.viewAccessId}`
+      : `${shareableOrigin}/chat/canvas/${canvas.id}`;
     void navigator.clipboard.writeText(viewLink);
     toast.success('Link Copied', {
       description: 'The link has been copied to your clipboard.',
@@ -207,8 +209,8 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   };
 
   const viewLink = canvas.viewAccessId
-    ? `${window.location.origin}/chat/canvas/${canvas.viewAccessId}`
-    : `${window.location.origin}/chat/canvas/${canvas.id}`;
+    ? `${shareableOrigin}/chat/canvas/${canvas.viewAccessId}`
+    : `${shareableOrigin}/chat/canvas/${canvas.id}`;
 
   const isPublic = localVisibility === CanvasVisibility.PUBLIC;
   const canManageParticipants = isOwner || isEditor;

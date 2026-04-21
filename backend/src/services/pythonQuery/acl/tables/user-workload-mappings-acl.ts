@@ -6,9 +6,10 @@ export class UserWorkloadMappingsACL extends BaseQueryACL<Prisma.UserWorkloadMap
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.UserWorkloadMappingWhereInput | null> {
+  async getWhereClause(): Promise<Prisma.UserWorkloadMappingWhereInput> {
     return {
       userGroup: {
+        workspaceId: this.ctx.workspaceId ?? '',
         userGroupMappings: { some: { userId: this.ctx.userId } },
       },
     }

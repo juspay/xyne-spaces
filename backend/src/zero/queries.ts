@@ -22,6 +22,8 @@ import {
   ActivityClassification, LinkVisibility,
   NudgeState,
   SavedConfigContextType,
+  Status,
+  ProjectType,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -661,8 +663,8 @@ export const queries = defineQueries({
       if (args?.updatedAt !== undefined) {
         query = query.where(helpers =>
           helpers.or(
-            helpers.cmp('updatedAt', '>', args.updatedAt!),
-            helpers.exists('presenceStatus', p => p.where('updatedAt', '>', args.updatedAt!)),
+            helpers.cmp('updatedAt', '>', args.updatedAt),
+            helpers.exists('presenceStatus', p => p.where('updatedAt', '>', args.updatedAt)),
           ),
         );
       }
@@ -1110,7 +1112,10 @@ export const queries = defineQueries({
   ),
 
   getAllProjects: defineQuery(() => {
-    return zql.projects.orderBy('createdAt', 'desc').related('boards');
+    return zql.projects
+      .where('type', '!=', ProjectType.DM)
+      .orderBy('createdAt', 'desc')
+      .related('boards');
   }),
 
 
@@ -1189,6 +1194,10 @@ export const queries = defineQueries({
   // Query for all resources
   getAllResources: defineQuery(() => {
     return zql.resources.orderBy('name', 'asc');
+  }),
+  // Query for all invitations
+  getAllInvitations: defineQuery(() => {
+    return zql.invitations.orderBy('createdAt', 'desc');
   }),
   // Query for resource access for a specific user
   getResourceAccessForUser: defineQuery(
@@ -2123,4 +2132,45 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   userEmailSignatures: defineQuery(({ ctx }) => {
     return zql.email_signatures.where('userId', ctx.userID).orderBy('name', 'asc');
   }),
+
+  // Get workspace by ID
+  getWorkspaceById: defineQuery(
+    z.object({ workspaceId: z.string() }),
+    ({ args: { workspaceId } }) => {
+      return zql.workspaces.where('id', workspaceId).one();
+    },
+  ),
+
+  // Get organizations linked to workspace
+  workspaceOrganizations: defineQuery(
+    z.object({ workspaceId: z.string() }),
+    ({ args: { workspaceId } }) => {
+      return zql.workspace_organizations
+        .where('workspaceId', workspaceId)
+        .where('leftAt', 'IS', null)
+        .related('organization')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
+  // Get all ACTIVE organizations
+  availableOrganizations: defineQuery(
+    z.object({}),
+    () => {
+      return zql.organizations
+        .where('status', Status.ACTIVE)
+        .orderBy('name', 'asc');
+    },
+  ),
+
+  // Get active members of an organisation
+  getOrgMembers: defineQuery(
+    z.object({ orgId: z.string() }),
+    ({ args: { orgId } }) => {
+      return zql.org_members
+        .where('orgId', orgId)
+        .where('leftAt', 'IS', null)
+        .orderBy('joinedAt', 'asc');
+    },
+  ),
 });

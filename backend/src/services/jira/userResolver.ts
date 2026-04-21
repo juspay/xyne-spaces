@@ -1,5 +1,4 @@
 import { DatabaseClient } from '@/database/client';
-import { UserRepository } from '@/database/repositories/users';
 import { logger } from '@/utils/logger';
 
 const db = DatabaseClient.getInstance();
@@ -90,9 +89,13 @@ const inferEmailCandidatesFromDisplayName = (displayName?: string): string[] => 
 };
 
 export class JiraUserResolver {
-  private userRepository = new UserRepository();
   private resolvedUserCache = new Map<string, string>();
   private userResolutionLookup: UserResolutionLookup | null = null;
+  private workspaceId: string;
+
+  constructor(workspaceId: string) {
+    this.workspaceId = workspaceId;
+  }
 
   private unresolvedUserKey(user: JiraUserLike): string {
     return user.accountId || user.displayName || user.emailAddress || 'unknown';
@@ -120,6 +123,7 @@ export class JiraUserResolver {
 
     const [users, profiles] = await Promise.all([
       db.user.findMany({
+        where: { workspaceId: this.workspaceId },
         select: {
           id: true,
           name: true,
@@ -361,7 +365,9 @@ export class JiraUserResolver {
       }
 
       for (const email of inferredEmails) {
-        const byInferredEmail = await this.userRepository.findByEmail(email);
+        const byInferredEmail = await db.user.findUnique({ 
+          where: { email_workspaceId: { email, workspaceId: this.workspaceId } } 
+        });
         if (byInferredEmail) {
           logger.info('[JiraMigration] Resolved Jira user by inferred email', {
             displayName: user.displayName,
@@ -374,7 +380,9 @@ export class JiraUserResolver {
       }
 
       if (user.emailAddress) {
-        const existingByJiraEmail = await this.userRepository.findByEmail(user.emailAddress);
+        const existingByJiraEmail = await db.user.findUnique({ 
+          where: { email_workspaceId: { email: user.emailAddress, workspaceId: this.workspaceId } } 
+        });
         if (existingByJiraEmail) {
           if (userCacheKey) this.resolvedUserCache.set(userCacheKey, existingByJiraEmail.id);
           return existingByJiraEmail.id;

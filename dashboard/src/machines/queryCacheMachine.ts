@@ -1,20 +1,23 @@
 import { indexedDBService } from '../services/indexedDBService';
 import type { StorageAdapter } from '@xyne/shared/platform';
-import { QueryResultType } from '@rocicorp/zero';
+import type { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../zero/queries';
 
 export {
   queryCacheMachine,
   queryCacheActor,
   getChannelConversationsQueryHash,
+  getCallHistoryQueryHash,
   FINGERPRINT_FIELD,
+  CALL_HISTORY_KEY,
 } from '@xyne/shared/machines';
 
 export type {
-  Conversation,
+  QueryCacheConversation as Conversation,
   CacheEntry,
   QueryCacheContext,
   QueryCacheEvent,
+  CallHistoryState,
 } from '@xyne/shared/machines';
 
 // Dashboard-specific call history types (used by usePaginatedCalls)
@@ -44,7 +47,11 @@ const indexedDBStorageAdapter: StorageAdapter = {
 /**
  * Setup persistence using IndexedDB (web-specific).
  */
-export const setupQueryCachePersistence = (userId: string, schemaVersion: string): void => {
+export const setupQueryCachePersistence = (
+  userId: string,
+  schemaVersion: string,
+  _workspaceId?: string,
+): void => {
   _setupPersistence(indexedDBStorageAdapter, userId, schemaVersion);
 };
 
@@ -54,6 +61,7 @@ export const setupQueryCachePersistence = (userId: string, schemaVersion: string
 export const hydrateQueryCacheFromIndexedDB = async (
   userId: string,
   schemaVersion: string,
+  _workspaceId?: string,
 ): Promise<boolean> => {
   return _hydrateFromStorage(indexedDBStorageAdapter, userId, schemaVersion);
 };

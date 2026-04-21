@@ -59,9 +59,9 @@ export class ModelRepository extends BaseRepository<Model, CreateModelInput, Upd
     });
   }
 
-  async findByName(name: string): Promise<Model[]> {
+  async findByName(name: string, workspaceId: string): Promise<Model[]> {
     return await this.db.model.findMany({
-      where: { name },
+      where: { name, workspaceId },
     });
   }
 

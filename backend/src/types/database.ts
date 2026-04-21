@@ -128,6 +128,11 @@ export type CreateExternalStepResponseInput = Prisma.ExternalStepResponseCreateI
 export type UpdateExternalStepResponseInput = Prisma.ExternalStepResponseUpdateInput;
 
 
+// Workspace types
+export type Workspace = Prisma.WorkspaceGetPayload<{}>;
+export type CreateWorkspaceInput = Prisma.WorkspaceCreateInput;
+export type UpdateWorkspaceInput = Prisma.WorkspaceUpdateInput;
+
 // Organization types
 export type Organization = Prisma.OrganizationGetPayload<{}>;
 export type CreateOrganizationInput = Prisma.OrganizationCreateInput;

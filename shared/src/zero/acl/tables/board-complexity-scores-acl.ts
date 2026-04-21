@@ -10,7 +10,9 @@ export class BoardComplexityScoresACL extends BaseQueryACL<'board_complexity_sco
   canSelect<TReturn>(
     query: Query<'board_complexity_scores', Schema, TReturn>,
   ): Query<'board_complexity_scores', Schema, TReturn> {
-    // Allow anyone to query board complexity scores
-    return query;
+    // Optimized: board has direct workspaceId (1 hop instead of 2)
+    return query.whereExists('board', (b) =>
+      b.where('workspaceId', '=', this.ctx.workspaceId)
+    );
   }
 }

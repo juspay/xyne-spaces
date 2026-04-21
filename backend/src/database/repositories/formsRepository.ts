@@ -7,6 +7,7 @@ export interface CreateFormInput {
   formDescription?: string;
   entityType: FormEntityType;
   contextType: FormContextType;
+  workspaceId: string;
   createdBy: string;
 }
 
@@ -33,6 +34,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
         formDescription: data.formDescription?.trim() || null,
         entityType: data.entityType,
         contextType: data.contextType,
+        workspaceId: data.workspaceId,
         createdBy: data.createdBy,
       },
     });
@@ -80,6 +82,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
           formDescription: data.formDescription?.trim() || null,
           entityType: data.entityType,
           contextType: data.contextType,
+          workspaceId: data.workspaceId,
           createdBy: data.createdBy,
         },
       });
@@ -143,6 +146,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
    */
   async createManyFormEntityValues(
     data: Array<{
+      formId: string;
       entityId: string;
       entityType: string;
       fieldId: string;
@@ -152,6 +156,7 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
   ): Promise<{ count: number }> {
     return await this.db.formEntityValues.createMany({
       data: data.map(item => ({
+        formId: item.formId,
         entityId: item.entityId,
         entityType: item.entityType,
         fieldId: item.fieldId,

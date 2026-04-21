@@ -37,7 +37,7 @@ async function postOrUpdateApprovalButton(params: ApprovalButtonParams): Promise
   const { ticketId, prId, prUrl } = params;
 
   // 1. Find Varys bot user
-  const botUser = await db.user.findUnique({ where: { email: VARYS_BOT_EMAIL } });
+  const botUser = await db.user.findFirst({ where: { email: VARYS_BOT_EMAIL } });
   if (!botUser) {
     logger.debug('[PR-Check-Approval] Varys bot user not found — app not installed yet');
     return;

@@ -1,0 +1,430 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useParams } from 'react-router-dom';
+import axios from 'axios';
+import { Plus, Check, Loader2, LogIn, ChevronDown, ChevronRight } from 'lucide-react';
+import { API_BASE_URL } from '../../config';
+import {
+  getLastActiveWorkspaceName,
+  setLastActiveWorkspaceName,
+  setLastActiveWorkspaceId,
+} from '../../machines/authMachine';
+import { queryClient } from '../../services/clients/queryClient';
+
+interface WorkspaceItem {
+  id: string;
+  name: string;
+  role: string;
+  orgName: string;
+}
+
+interface WorkspacesResponse {
+  workspaces: WorkspaceItem[];
+}
+
+interface CreateWorkspaceResponse {
+  workspace: { id: string; name: string };
+  user: { id: string; email: string; name: string; workspaceId: string };
+}
+
+export const WorkspaceSwitcher: React.FC = () => {
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+
+  // Read initial name from user-bound localStorage so the button renders immediately without an API call
+  const [localWorkspaceName, setLocalWorkspaceName] = useState<string>(() => {
+    const email = localStorage.getItem('user_email');
+    return email ? (getLastActiveWorkspaceName(email) ?? '') : '';
+  });
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [switching, setSwitching] = useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showSignInList, setShowSignInList] = useState(false);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const currentWorkspace = workspaces.find(w => w.id === workspaceId);
+
+  // Keep localWorkspaceName in sync once workspaces are loaded
+  useEffect(() => {
+    if (currentWorkspace) {
+      setLocalWorkspaceName(currentWorkspace.name);
+      const email = localStorage.getItem('user_email');
+      if (email) {
+        setLastActiveWorkspaceName(email, currentWorkspace.name);
+      }
+    }
+  }, [currentWorkspace]);
+
+  const fetchWorkspaces = async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const res = await axios.get<WorkspacesResponse>(`${API_BASE_URL}/auth/workspaces`, {
+        withCredentials: true,
+      });
+      setWorkspaces(res.data.workspaces);
+    } catch {
+      // silently ignore — user can retry by closing and reopening
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // On mount: if name isn't cached yet, do a one-time silent fetch to populate it.
+  // After first load the name lives in localStorage and no API call is needed.
+  useEffect(() => {
+    if (localWorkspaceName || !workspaceId) return;
+    void (async () => {
+      try {
+        const res = await axios.get<WorkspacesResponse>(`${API_BASE_URL}/auth/workspaces`, {
+          withCredentials: true,
+        });
+        const match = res.data.workspaces.find(w => w.id === workspaceId);
+        if (match) {
+          setLocalWorkspaceName(match.name);
+          const email = localStorage.getItem('user_email');
+          if (email) {
+            setLastActiveWorkspaceName(email, match.name);
+          }
+          setWorkspaces(res.data.workspaces);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      void fetchWorkspaces();
+    } else {
+      setShowCreateForm(false);
+      setShowSignInList(false);
+      setWorkspaceName('');
+      setError(null);
+    }
+  }, [isOpen]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClick = (e: MouseEvent): void => {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node) &&
+        triggerRef.current &&
+        !triggerRef.current.contains(e.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [isOpen]);
+
+  const handleSwitch = async (targetWorkspaceId: string): Promise<void> => {
+    if (targetWorkspaceId === workspaceId) {
+      setIsOpen(false);
+      return;
+    }
+    setSwitching(targetWorkspaceId);
+    try {
+      // NEW: Call switch-workspace API instead of logout
+      await axios.post(
+        `${API_BASE_URL}/auth/switch-workspace`,
+        { workspaceId: targetWorkspaceId },
+        { withCredentials: true },
+      );
+
+      // Store the target workspace in localStorage (user-bound)
+      const email = localStorage.getItem('user_email');
+      if (email) {
+        setLastActiveWorkspaceId(email, targetWorkspaceId);
+        const switchedWs = workspaces.find(w => w.id === targetWorkspaceId);
+        if (switchedWs) setLastActiveWorkspaceName(email, switchedWs.name);
+      }
+
+      setIsOpen(false);
+      // Clear query cache to prevent stale data from previous workspace
+      queryClient.clear();
+      // Navigate to new workspace
+      window.location.href = `/${targetWorkspaceId}/chat/dir`;
+    } catch (err) {
+      setError('Failed to switch workspace. Please try again.');
+      console.error('[WorkspaceSwitcher] Switch failed:', err);
+    } finally {
+      setSwitching(null);
+    }
+  };
+
+  const handleCreate = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    if (!workspaceName.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await axios.post<CreateWorkspaceResponse>(
+        `${API_BASE_URL}/auth/create-workspace`,
+        { workspaceName: workspaceName.trim() },
+        { withCredentials: true },
+      );
+      const newWorkspaceId = res.data.user.workspaceId;
+      const email = res.data.user.email;
+      // Store user-bound workspace data
+      if (email) {
+        setLastActiveWorkspaceId(email, newWorkspaceId);
+        setLastActiveWorkspaceName(email, workspaceName.trim());
+      }
+      localStorage.setItem('user_id', res.data.user.id);
+      setIsOpen(false);
+      window.location.href = `/${newWorkspaceId}/chat/dir`;
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        const msg = (err.response?.data as { message?: string } | undefined)?.message;
+        setError(msg ?? 'Failed to create workspace.');
+      } else {
+        setError('Failed to create workspace.');
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // Deterministic color from workspace name
+  const getInitialColor = (name: string): string => {
+    const colors = [
+      '#e05d44',
+      '#e07b44',
+      '#c0a030',
+      '#4caf50',
+      '#2196f3',
+      '#9c27b0',
+      '#e91e63',
+      '#00bcd4',
+      '#ff5722',
+      '#607d8b',
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    return colors[Math.abs(hash) % colors.length]!;
+  };
+
+  // Use loaded workspace name first, fall back to localStorage value
+  const displayName = currentWorkspace?.name ?? localWorkspaceName;
+  const initial = displayName?.[0]?.toUpperCase() ?? '?';
+  const bgColor = displayName ? getInitialColor(displayName) : '#607d8b';
+
+  return (
+    <div className='relative'>
+      {/* Trigger: shows initials with deterministic color */}
+      <button
+        ref={triggerRef}
+        onClick={() => setIsOpen(prev => !prev)}
+        className='size-8 rounded-lg flex items-center justify-center text-white text-xs font-bold cursor-pointer hover:opacity-85 transition-opacity'
+        style={{ backgroundColor: bgColor }}
+        aria-label='Switch workspace'
+        data-testid='workspace-switcher-trigger'
+        data-track-category='Workspace_Switcher'
+        data-track-name='Open_Switcher'
+        title={displayName || 'Workspace'}
+      >
+        {initial}
+      </button>
+
+      {isOpen && (
+        <div
+          ref={popoverRef}
+          className='absolute left-0 top-full mt-1 z-50 w-64 rounded-xl border border-border bg-background shadow-xl'
+        >
+          {/* Header */}
+          <div className='px-3 pt-3 pb-1'>
+            <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+              Workspaces
+            </p>
+          </div>
+
+          {/* Workspace list */}
+          <div className='max-h-56 overflow-y-auto py-1'>
+            {loading ? (
+              <div className='flex items-center justify-center py-4'>
+                <Loader2 size={16} className='animate-spin text-muted-foreground' />
+              </div>
+            ) : workspaces.length === 0 ? (
+              <p className='text-xs text-muted-foreground px-3 py-2'>No workspaces found.</p>
+            ) : (
+              workspaces.map(ws => {
+                const isActive = ws.id === workspaceId;
+                const isSwitching = switching === ws.id;
+                return (
+                  <button
+                    key={ws.id}
+                    onClick={() => void handleSwitch(ws.id)}
+                    disabled={isSwitching}
+                    data-track-category='Workspace_Switcher'
+                    data-track-name='Switch_Workspace'
+                    className='w-full flex items-center gap-2.5 px-3 py-2 hover:bg-muted transition-colors text-left disabled:opacity-60'
+                  >
+                    {/* Workspace icon with deterministic color */}
+                    <div
+                      className='size-7 rounded-md flex items-center justify-center text-white text-xs font-bold shrink-0'
+                      style={{ backgroundColor: getInitialColor(ws.name) }}
+                    >
+                      {ws.name[0]?.toUpperCase() ?? '?'}
+                    </div>
+                    <div className='flex-1 min-w-0'>
+                      <p className='text-sm font-medium text-foreground truncate'>{ws.name}</p>
+                      <p className='text-xs text-muted-foreground truncate'>{ws.orgName}</p>
+                    </div>
+                    {isSwitching ? (
+                      <Loader2 size={14} className='animate-spin text-muted-foreground shrink-0' />
+                    ) : isActive ? (
+                      <Check size={14} className='text-green-500 shrink-0' />
+                    ) : null}
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          <div className='border-t border-border' />
+
+          {/* Add a workspace — 3 options */}
+          <div className='py-1'>
+            <p className='px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+              Add a workspace
+            </p>
+
+            {/* Sign in to another workspace — expands list of user's workspaces */}
+            <button
+              onClick={() => setShowSignInList(prev => !prev)}
+              data-track-category='Workspace_Switcher'
+              data-track-name='Sign_In_Another_Workspace'
+              className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
+            >
+              <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
+                <LogIn size={14} className='text-foreground' />
+              </div>
+              <span className='text-sm text-foreground flex-1'>Sign in to another workspace</span>
+              {showSignInList ? (
+                <ChevronDown size={14} className='text-muted-foreground shrink-0' />
+              ) : (
+                <ChevronRight size={14} className='text-muted-foreground shrink-0' />
+              )}
+            </button>
+
+            {showSignInList && (
+              <div className='ml-4 border-l border-border pl-2 pb-1'>
+                {loading ? (
+                  <div className='flex items-center justify-center py-3'>
+                    <Loader2 size={14} className='animate-spin text-muted-foreground' />
+                  </div>
+                ) : workspaces.length === 0 ? (
+                  <p className='text-xs text-muted-foreground px-2 py-2'>
+                    No other workspaces found.
+                  </p>
+                ) : (
+                  workspaces.map(ws => {
+                    const isActive = ws.id === workspaceId;
+                    const isSwitching = switching === ws.id;
+                    return (
+                      <button
+                        key={ws.id}
+                        onClick={() => void handleSwitch(ws.id)}
+                        disabled={isSwitching}
+                        data-track-category='Workspace_Switcher'
+                        data-track-name='Switch_Workspace_SignIn'
+                        className='w-full flex items-center gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
+                      >
+                        <div
+                          className='size-6 rounded flex items-center justify-center text-white text-xs font-bold shrink-0'
+                          style={{ backgroundColor: getInitialColor(ws.name) }}
+                        >
+                          {ws.name[0]?.toUpperCase() ?? '?'}
+                        </div>
+                        <div className='flex-1 min-w-0'>
+                          <p className='text-xs font-medium text-foreground truncate'>{ws.name}</p>
+                          <p className='text-xs text-muted-foreground truncate'>{ws.orgName}</p>
+                        </div>
+                        {isSwitching ? (
+                          <Loader2
+                            size={12}
+                            className='animate-spin text-muted-foreground shrink-0'
+                          />
+                        ) : isActive ? (
+                          <Check size={12} className='text-green-500 shrink-0' />
+                        ) : null}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+
+            {/* Create a new workspace */}
+            {showCreateForm ? (
+              <form
+                onSubmit={e => void handleCreate(e)}
+                className='px-3 pb-3 pt-1 flex flex-col gap-2'
+              >
+                {error && <p className='text-xs text-red-500'>{error}</p>}
+                <input
+                  type='text'
+                  placeholder='Workspace name'
+                  value={workspaceName}
+                  onChange={e => setWorkspaceName(e.target.value)}
+                  data-track-category='Workspace_Switcher'
+                  data-track-name='Workspace_Name_Input'
+                  className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
+                  required
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
+                />
+                <div className='flex gap-2'>
+                  <button
+                    type='submit'
+                    disabled={creating || !workspaceName.trim()}
+                    data-track-category='Workspace_Switcher'
+                    data-track-name='Create_Workspace'
+                    className='flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:opacity-90'
+                  >
+                    {creating ? 'Creating…' : 'Create'}
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setShowCreateForm(false);
+                      setError(null);
+                    }}
+                    data-track-category='Workspace_Switcher'
+                    data-track-name='Cancel_Create_Workspace'
+                    className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                onClick={() => setShowCreateForm(true)}
+                data-track-category='Workspace_Switcher'
+                data-track-name='Show_Create_Workspace_Form'
+                className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
+              >
+                <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
+                  <Plus size={14} className='text-foreground' />
+                </div>
+                <span className='text-sm text-foreground'>Create a new workspace</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

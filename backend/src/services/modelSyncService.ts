@@ -38,6 +38,7 @@ class ModelSyncService {
           name: modelId,
           provider: 'litellm-api',
           credentials: JSON.stringify({}),
+          workspaceId: config.defaultWorkspaceId,
         })),
       });
 

@@ -60,11 +60,11 @@ import { useUser } from '../../../hooks/useUsers';
 import { fetchFile } from '../../../services/clients/fileFetchService';
 import { isImageFile } from '../MessageAttachment/utils';
 import { useClipboard } from '../../../hooks/useClipboard';
-import { SHAREABLE_ORIGIN } from '../../../config';
 import {
   ConversationWithTicket,
   MessageWithOptionalNudgeCounts,
 } from '../../ui/MessageBubble/MessageBubble.types';
+import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { SubTicketModal } from '../../Tickets/SubTicketModal/SubTicketModal';
 import { ForwardMessageForm } from '../ForwardMessageModal/ForwardMessageModal';
 import { xyneAIActor, type ThreadInfo } from '../../../machines/xyneAIMachine';
@@ -130,6 +130,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const { onMessageChange } = useSummaryCache();
   const { togglePin } = usePin();
   const navigate = useNavigate();
+  const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
   const { editingMessageId, requestEdit, stopEditing } = useEditContext();
@@ -423,10 +424,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     if (conversationId) {
       if (context === 'thread') {
         // Thread message: include full path with conversation + messageId in hash
-        messageLink = `${SHAREABLE_ORIGIN}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`;
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`;
       } else {
         // Channel message: only channel in path, conversation in hash
-        messageLink = `${SHAREABLE_ORIGIN}/chat/dir/${channelId}#origin=${conversationId}`;
+        messageLink = `${shareableOrigin}/chat/dir/${channelId}#origin=${conversationId}`;
       }
     }
 

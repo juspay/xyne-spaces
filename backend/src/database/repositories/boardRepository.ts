@@ -14,6 +14,7 @@ export interface CreateBoardInput {
   description?: string;
   projectId: string;
   createdBy: string;
+  workspaceId: string;
   boardType?: BoardType;
 }
 
@@ -58,6 +59,7 @@ export class BoardRepository {
     await this.validateString(data.name, 'name', 255);
     await this.validateString(data.projectId, 'projectId');
     await this.validateString(data.createdBy, 'createdBy');
+    await this.validateString(data.workspaceId, 'workspaceId');
 
     await this.validateNameUnique(data.name, data.projectId);
 
@@ -73,6 +75,7 @@ export class BoardRepository {
           name: data.name,
           description: data.description,
           projectId: data.projectId,
+          workspaceId: data.workspaceId,
           createdBy: data.createdBy,
           boardType: data.boardType || BoardType.DEFAULT,
         },

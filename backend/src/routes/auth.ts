@@ -2,6 +2,7 @@ import express from 'express';
 import { AuthV2Controller } from '../controllers/authV2Controller';
 import { authV2Middleware } from '../middleware/authV2Middleware';
 import { userManagementController } from '../controllers/userManagementController';
+import { logger } from '../utils/logger'; 
 
 const router = express.Router();
 const authV2Controller = new AuthV2Controller();
@@ -26,11 +27,19 @@ router.get('/me', authV2Middleware.authenticate, (req, res) => {
       googleId: req.user!.googleId,
       email: req.user!.email,
       name: req.user!.name,
+      workspaceId: req.user!.workspaceId,
     }
   });
 });
 
 router.get('/validate', authV2Middleware.authenticate, (req, res) => {
+  // [DEBUG] Log if there's a pending invitation cookie — if so, user is already logged in
+  // but has an unprocessed invitation. This is the root cause of landing on wrong workspace.
+  const pendingInvitation = req.cookies?.pending_invitation_id;
+  logger.info(`[DEBUG] [/validate] user=${req.user!.id} email=${req.user!.email} workspaceId=${(req.user as any).workspaceId ?? 'unknown'} pending_invitation_id=${pendingInvitation ?? 'NONE'}`);
+  if (pendingInvitation) {
+    logger.warn(`[DEBUG] [/validate] ⚠️ User already has a session but pending_invitation_id cookie exists (${pendingInvitation}). OAuth callback will be skipped — invitation will NOT be auto-accepted via callback flow.`);
+  }
   return res.json({
     success: true,
     user: {
@@ -38,10 +47,18 @@ router.get('/validate', authV2Middleware.authenticate, (req, res) => {
       googleId: req.user!.googleId,
       email: req.user!.email,
       name: req.user!.name,
+      workspaceId: req.user!.workspaceId,
     }
   });
 });
 
 router.get('/permissions', authV2Middleware.authenticate, userManagementController.getCurrentUserPermissions);
+
+router.post('/login-workspace', authV2Controller.loginWorkspace);
+router.post('/create-org', authV2Controller.createOrg);
+
+router.get('/workspaces', authV2Middleware.authenticate, authV2Controller.getWorkspaces);
+router.post('/switch-workspace', authV2Middleware.authenticate, authV2Controller.switchWorkspace);
+router.post('/create-workspace', authV2Middleware.authenticate, authV2Controller.createWorkspaceAuth);
 
 export default router;

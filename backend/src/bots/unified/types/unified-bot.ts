@@ -52,8 +52,10 @@ export interface BotDefinitionBase {
   readonly id: string;
   /** Display name shown to users */
   readonly name: string;
-  /** Bot email address (for DB user record, must be unique) */
+  /** Bot email address (for DB user record, must be unique per workspace) */
   readonly email: string;
+  /** Workspace this bot belongs to (set during sync, not at registration) */
+  readonly workspaceId?: string;
   /** Avatar URL */
   readonly picture?: string;
   /** Description shown in command palette */

@@ -6,11 +6,21 @@ import { zql } from '../../queries';
 
 export class ReactionCountsACL extends BaseACL<'reaction_counts'> {
 
+  private async verifyConversationInWorkspace(conversationId: string, tx: Transaction<Schema>): Promise<void> {
+    const conversation = await tx.run(zql.conversations.where('conversationId', conversationId).one());
+    if (!conversation) throw new MutationACLError('Reaction count not found: conversation does not exist', 'reaction_counts');
+    const channel = await tx.run(zql.channels.where('id', conversation.channelId).one());
+    if (channel?.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Reaction count not found in this workspace', 'reaction_counts');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'reaction_counts'>>, tx: Transaction<Schema>): Promise<void> {
     const message = await tx.run(zql.messages.where('messageId', args.messageId).related('conversation').one());
     if (!message || !message.conversation) {
       throw new MutationACLError('Reaction count insert failed: the specified message or its conversation does not exist', 'reaction_counts');
     }
+    await this.verifyConversationInWorkspace(message.conversation.conversationId, tx);
 
     const channel = await tx.run(zql.channels.where('id', message.conversation.channelId).one());
     const channelParticipant = await tx.run(zql.channel_participants
@@ -30,6 +40,7 @@ export class ReactionCountsACL extends BaseACL<'reaction_counts'> {
     if (!countWithMessage || !countWithMessage.message || !countWithMessage.message.conversation) {
       throw new MutationACLError('Reaction count update failed: the reaction count or its message does not exist', 'reaction_counts');
     }
+    await this.verifyConversationInWorkspace(countWithMessage.message.conversation.conversationId, tx);
 
     const channel = await tx.run(zql.channels.where('id', countWithMessage.message.conversation.channelId).one());
     const channelParticipant = await tx.run(zql.channel_participants
@@ -49,6 +60,7 @@ export class ReactionCountsACL extends BaseACL<'reaction_counts'> {
     if (!countWithMessage || !countWithMessage.message || !countWithMessage.message.conversation) {
       throw new MutationACLError('Reaction count delete failed: the reaction count or its message does not exist', 'reaction_counts');
     }
+    await this.verifyConversationInWorkspace(countWithMessage.message.conversation.conversationId, tx);
 
     const channel = await tx.run(zql.channels.where('id', countWithMessage.message.conversation.channelId).one());
     const channelParticipant = await tx.run(zql.channel_participants

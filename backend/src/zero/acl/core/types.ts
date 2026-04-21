@@ -3,6 +3,10 @@ import { Schema } from '@xyne/shared';
 
 export type QueryContext = {
   userID: string;
+  workspaceId: string;
+  role: string;
+  orgRole: string;
+  memberId: string;
 };
 
 export type TableName = keyof typeof schema.tables;

@@ -96,6 +96,13 @@ apiConfig.interceptors.request.use(
       config.headers['Access-Control-Allow-Credentials'] = 'true';
       config.headers['x-request-id'] = requestId;
 
+      // NEW: Add X-Workspace-Id header for multi-workspace support
+      // Extract workspaceId from current URL path (e.g., /:workspaceId/chat)
+      const pathMatch = window.location.pathname.match(/^\/([^/]+)/);
+      if (pathMatch && pathMatch[1] && pathMatch[1] !== 'auth') {
+        config.headers['x-workspace-id'] = pathMatch[1];
+      }
+
       const zeroClientId = logger.zeroClientId;
       if (zeroClientId) {
         config.headers['x-client-id'] = zeroClientId;

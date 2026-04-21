@@ -10,7 +10,15 @@ import { zql } from '../../queries';
 
 export class BoardComplexityScoresACL extends BaseACL<'board_complexity_scores'> {
 
+  private async verifyUserGroupInWorkspace(userGroupId: string, tx: Transaction<Schema>): Promise<void> {
+    const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+    if (!userGroup || userGroup.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Board complexity score not found in this workspace', 'board_complexity_scores');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'board_complexity_scores'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
@@ -32,6 +40,7 @@ export class BoardComplexityScoresACL extends BaseACL<'board_complexity_scores'>
     if (!score) {
       throw new MutationACLError('Board complexity score update failed: score does not exist', 'board_complexity_scores');
     }
+    await this.verifyUserGroupInWorkspace(score.userGroupId, tx);
 
     // Check if user is a group member
     const membership = await tx.run(
@@ -49,6 +58,7 @@ export class BoardComplexityScoresACL extends BaseACL<'board_complexity_scores'>
   }
 
   async canUpsert(args: any, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings

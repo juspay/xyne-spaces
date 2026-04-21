@@ -6,13 +6,18 @@ export class ConversationParticipantsACL extends BaseQueryACL<Prisma.Conversatio
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.ConversationParticipantWhereInput | null> {
+  async getWhereClause(): Promise<Prisma.ConversationParticipantWhereInput> {
     return {
       conversation: {
         channel: {
-          OR: [
-            { visibility: 'PUBLIC' },
-            { participants: { some: { userId: this.ctx.userId } } },
+          AND: [
+            { workspaceId: this.ctx.workspaceId ?? '' },
+            {
+              OR: [
+                { visibility: 'PUBLIC' },
+                { participants: { some: { userId: this.ctx.userId } } },
+              ],
+            },
           ],
         },
       },

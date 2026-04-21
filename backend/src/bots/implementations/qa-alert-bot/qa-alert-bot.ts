@@ -13,6 +13,8 @@ import { ConversationRepository } from '@/database/repositories/conversationRepo
 import { unifiedBotUserService } from '@/bots/unified/index.js';
 import { UserGroupRepository } from '@/database/repositories/userGroups';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
+import { config } from '@/config/env';
+import { db } from '@/database/client';
 
 
 
@@ -184,6 +186,31 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
   private messageRepository = new MessageRepository();
   private conversationRepository = new ConversationRepository();
 
+  /**
+   * Fetch complete context for bot user including workspaceId, role, and memberId
+   */
+  private async fetchBotContext(botUser: { id: string; email: string; workspaceId?: string | null; role?: string | null }): Promise<{ workspaceId: string; role: string; orgRole: string; memberId: string }> {
+    const workspaceId = botUser.workspaceId ?? config.defaultWorkspaceId ?? '';
+    if (!workspaceId) {
+      throw new Error('QA Alert Bot has no workspace assigned');
+    }
+    
+    // Email is globally unique in orgMember, single lookup is sufficient
+    const orgMember = await db.orgMember.findUnique({
+      where: { email: botUser.email },
+    });
+    if (!orgMember) {
+      throw new Error(`QA Alert Bot is not a member of any organization`);
+    }
+    
+    return {
+      workspaceId,
+      role: botUser.role ?? 'MEMBER',
+      orgRole: orgMember.role,
+      memberId: orgMember.memberId,
+    };
+  }
+
 
   protected async *executeInternal(
     _input: QaAlertBotInput,
@@ -237,7 +264,7 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
      
       let groupMention: string | undefined;
        if(userGroupAlias){
-        const userGroup = await this.userGroupRepository.findByAlias(userGroupAlias);
+        const userGroup = await this.userGroupRepository.findByAlias(userGroupAlias, config.defaultWorkspaceId);
         if (userGroup) {
           const memberCount = await this.userGroupRepository.getUserCount(userGroup.id);
           groupMention = formatGroupMention(userGroup.id, userGroup.name, userGroup.alias, memberCount);
@@ -257,7 +284,9 @@ export class QaAlertBot extends UnifiedBaseBot<QaAlertBotInput, QaAlertBotOutput
 
 });
 
-      const handler = new MessagesSideEffectHandler({ userID: qaAlertBot.id });
+      // Fetch complete bot context
+      const { workspaceId, role, orgRole, memberId } = await this.fetchBotContext(qaAlertBot);
+      const handler = new MessagesSideEffectHandler({ userID: qaAlertBot.id, workspaceId, role, orgRole, memberId });
 
       if (lastMessage) {
         try {

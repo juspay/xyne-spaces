@@ -6,20 +6,25 @@ export class CallParticipantsACL extends BaseQueryACL<Prisma.CallParticipantWher
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.CallParticipantWhereInput | null> {
+  async getWhereClause(): Promise<Prisma.CallParticipantWhereInput> {
     return {
-      call: {
-        OR: [
-          { createdByUserId: this.ctx.userId },
-          { participants: { some: { userId: this.ctx.userId } } },
-          {
-            channel: {
-              visibility: 'PUBLIC',
-              participants: { some: { userId: this.ctx.userId } },
-            },
+      AND: [
+        {
+          call: {
+            OR: [
+              { createdByUserId: this.ctx.userId },
+              { participants: { some: { userId: this.ctx.userId } } },
+              {
+                channel: {
+                  visibility: 'PUBLIC',
+                  participants: { some: { userId: this.ctx.userId } },
+                },
+              },
+            ],
           },
-        ],
-      },
+        },
+        { call: { channel: { workspaceId: this.ctx.workspaceId ?? '' } } },
+      ],
     }
   }
 }

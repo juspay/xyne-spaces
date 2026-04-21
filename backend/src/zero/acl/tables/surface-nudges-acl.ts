@@ -14,6 +14,16 @@ const allowedUpdateFields = new Set([
 ]);
 
 export class SurfaceNudgesACL extends BaseACL<'surface_nudges'> {
+
+  private async verifyChannelInWorkspace(channelId: string, tx: Transaction<Schema>): Promise<void> {
+    const channel = await tx.run(zql.channels.where('id', channelId).one());
+    if (!channel) throw new MutationACLError('Surface nudge not found: channel does not exist', 'surface_nudges');
+    const project = await tx.run(zql.projects.where('id', channel.projectId).one());
+    if (!project || project.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Surface nudge not found in this workspace', 'surface_nudges');
+    }
+  }
+
   async canInsert(_args: InsertValue<TableSchema<'surface_nudges'>>, _tx: Transaction<Schema>): Promise<void> {
     throw new MutationACLError('Surface nudge insert failed: nudges are system-managed', 'surface_nudges');
   }
@@ -61,6 +71,7 @@ export class SurfaceNudgesACL extends BaseACL<'surface_nudges'> {
       if (!conversation || !conversation.channel) {
         throw new MutationACLError('Surface nudge update failed: conversation not found', 'surface_nudges');
       }
+      await this.verifyChannelInWorkspace(conversation.channel.id, tx);
 
       if (conversation.channel.visibility !== ChannelVisibility.PUBLIC) {
         const participant = await tx.run(

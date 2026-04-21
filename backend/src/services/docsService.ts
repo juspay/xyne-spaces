@@ -528,11 +528,21 @@ export class DocsService {
         const conversationRepository = new ConversationRepository();
         const messageRepository = new MessageRepository();
 
+        // Get user's workspaceId
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { workspaceId: true }
+        });
+        if (!user?.workspaceId) {
+            throw new Error('User workspace not found');
+        }
+
         // Find or create DM channel with the docs publisher bot (using database user ID)
         const dmChannelId = await channelRepository.findOrCreateDMChannel(
             userId,
             [botUser.id],
-            channelParticipantRepository
+            channelParticipantRepository,
+            user.workspaceId
         );
 
         const parsed = this.parseQuartoRepo(userRepo);

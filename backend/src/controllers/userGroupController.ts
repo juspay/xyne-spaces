@@ -36,6 +36,7 @@ export class UserGroupController {
         description,
         metadata,
         userIds: userIds && userIds.length > 0 ? userIds : undefined,
+        workspace: { connect: { id: req.user!.workspaceId! } }
       }, req.user?.id);
 
       res.status(201).json(group);

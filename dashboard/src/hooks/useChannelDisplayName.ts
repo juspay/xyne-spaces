@@ -7,6 +7,7 @@ import {
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 import { useUsers } from './useUsers';
 import { getUserDisplayName } from '../utils/userDisplayName';
+import { useAuthContextValues } from './useAuth';
 
 interface ChannelDisplay {
   displayName: string;
@@ -14,29 +15,32 @@ interface ChannelDisplay {
   isLoading: boolean;
 }
 
-const DEFAULT_CHANNEL: Channel = {
-  id: '',
-  name: 'Unknown Channel',
-  description: null,
-  scopeType: ChannelScopeType.DEFAULT,
-  visibility: ChannelVisibility.PUBLIC,
-  type: ChannelType.DEFAULT,
-  createdAt: 0,
-  createdBy: '',
-  updatedAt: 0,
-  metadata: null,
-  projectId: '',
-  isMigrated: null,
-  lastActivityAt: 0,
-  participantCount: 0,
-  addUserPolicy: null,
-  isArchived: false,
-};
-
 export const useChannelDisplayName = (
   channel: Channel | null | undefined,
   currentUserId: string,
 ): ChannelDisplay => {
+  const { workspaceId } = useAuthContextValues();
+
+  const DEFAULT_CHANNEL: Channel = {
+    id: '',
+    name: 'Unknown Channel',
+    description: null,
+    scopeType: ChannelScopeType.DEFAULT,
+    visibility: ChannelVisibility.PUBLIC,
+    type: ChannelType.DEFAULT,
+    createdAt: 0,
+    createdBy: '',
+    updatedAt: 0,
+    metadata: null,
+    projectId: '',
+    isMigrated: null,
+    lastActivityAt: 0,
+    participantCount: 0,
+    addUserPolicy: null,
+    isArchived: false,
+    workspaceId: workspaceId,
+  };
+
   // Use fallback for null/undefined channels
   const safeChannel = channel || DEFAULT_CHANNEL;
   const userIdsToFetch = useMemo(

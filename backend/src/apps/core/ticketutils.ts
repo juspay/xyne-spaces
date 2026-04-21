@@ -139,6 +139,9 @@ export async function createTicketWithConversation(
     const finalConversationId = conversationResult.conversationId;
     const messageId = conversationResult.messageId;
 
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
+    const workspaceId = project?.workspaceId ?? '';
+
     // Generate xyneId and create ticket in a transaction
     const ticket = await prisma.$transaction(async (tx) => {
       // Generate xyneId using project-scoped format
@@ -154,6 +157,7 @@ export async function createTicketWithConversation(
         conversationId: finalConversationId,
         channelId,
         projectId,
+        workspaceId,
         boardId,
         priority: priority || TicketPriority.LOW,
         xyneId,

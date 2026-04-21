@@ -1,4 +1,5 @@
 import { ReactElement, useState, useCallback, useEffect, useRef } from 'react';
+import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import {
   FileText,
   RefreshCw,
@@ -88,6 +89,7 @@ const DocsViewer = ({
   onClose,
 }: DocsViewerProps): ReactElement => {
   const [isLoading, setIsLoading] = useState(true);
+  const shareableOrigin = useShareableOrigin();
   const [hasError, setHasError] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -135,7 +137,7 @@ const DocsViewer = ({
   }, []);
 
   const handleShare = useCallback(() => {
-    const url = `${window.location.origin}/docs/${repoName}/${branchName}`;
+    const url = `${shareableOrigin}/docs/${repoName}/${branchName}`;
     navigator.clipboard
       .writeText(url)
       .then(() => toast.success('Link copied to clipboard!'))

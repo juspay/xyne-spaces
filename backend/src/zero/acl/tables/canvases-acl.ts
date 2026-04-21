@@ -6,7 +6,17 @@ import { zql } from '../../queries';
 
 export class CanvasesACL extends BaseACL<'canvases'> {
 
+  private async verifyWorkspace(channelId: string | null | undefined, tx: Transaction<Schema>): Promise<void> {
+    if (!channelId) return;
+    const channel = await tx.run(zql.channels.where('id', channelId).one());
+    if (!channel) throw new MutationACLError('Canvas not found: channel does not exist', 'canvases');
+    if (channel.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Canvas not found in this workspace', 'canvases');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'canvases'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyWorkspace(args.channelId, tx);
     if (args.channelId) {
       const channel = await tx.run(zql.channels.where('id', args.channelId).one());
       if (!channel) {
@@ -28,18 +38,9 @@ export class CanvasesACL extends BaseACL<'canvases'> {
     }
   }
 
-  async canUpdate(_args: UpdateValue<TableSchema<'canvases'>>, _tx: Transaction<Schema>): Promise<void> {
-    // const isParticipant = await tx
-    //   .query
-    //   .canvas_participants
-    //   .where('canvasId', args.id)
-    //   .where('userId', this.ctx.userID)
-    //   .one()
-    //   .run();
-
-    // if (!isParticipant) {
-    //   throw new MutationACLError('Canvas update failed: only canvas participants can modify the canvas', 'canvases');
-    // }
+  async canUpdate(args: UpdateValue<TableSchema<'canvases'>>, tx: Transaction<Schema>): Promise<void> {
+    const canvas = await tx.run(zql.canvases.where('id', args.id).one());
+    await this.verifyWorkspace(canvas?.channelId, tx);
     // Allow all canvas updates - permission checking is handled in the mutator
     return;
   }
@@ -50,6 +51,7 @@ export class CanvasesACL extends BaseACL<'canvases'> {
     if (!canvas) {
       throw new MutationACLError('Canvas delete failed: canvas not found', 'canvases');
     }
+    await this.verifyWorkspace(canvas.channelId, tx);
 
     if (canvas.channel?.isArchived) {
       throw new MutationACLError('Canvas delete failed: cannot delete canvases in archived channel', 'canvases');

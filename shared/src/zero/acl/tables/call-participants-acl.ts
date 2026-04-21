@@ -9,17 +9,16 @@ export class CallParticipantsACL extends BaseQueryACL<'call_participants'> {
   }
 
   canSelect<TReturn>(query: Query<'call_participants', Schema, TReturn>): Query<'call_participants', Schema, TReturn> {
-    return query.where(({ exists }) =>
-      exists('call', (call) =>
-        call.where(({ or, exists, cmp }) =>
-          or(
-            cmp('createdByUserId', this.ctx.userID),
-            exists('participants', (p) => p.where('userId', this.ctx.userID)),
-            exists('channel', (ch) =>
-              ch
-                .where('visibility', '=', ChannelVisibility.PUBLIC)
-                .whereExists('participants', (p) => p.where('userId', this.ctx.userID))
-            )
+    return query.whereExists('call', (call) =>
+      call.where(({ or, exists, cmp }) =>
+        or(
+          cmp('createdByUserId', this.ctx.userID),
+          exists('participants', (p) => p.where('userId', this.ctx.userID)),
+          exists('channel', (ch) =>
+            ch
+              .where('workspaceId', '=', this.ctx.workspaceId)
+              .where('visibility', '=', ChannelVisibility.PUBLIC)
+              .whereExists('participants', (p) => p.where('userId', this.ctx.userID))
           )
         )
       )

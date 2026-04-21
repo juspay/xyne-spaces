@@ -5,8 +5,29 @@ import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
 
 export class ChannelsACL extends BaseACL<'channels'> {
-  async canInsert(_args: InsertValue<TableSchema<'channels'>>, _tx: Transaction<Schema>): Promise<void> {
-      // Any user can create a channel
+  private async verifyChannelInWorkspace(
+    channelId: string,
+    tx: Transaction<Schema>
+  ): Promise<void> {
+    const channel = await tx.run(zql.channels.where('id', channelId).one());
+    if (!channel) {
+      throw new MutationACLError('Channel not found', 'channels');
+    }
+    if (channel.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Channel not found in workspace', 'channels');
+    }
+  }
+
+  async canInsert(args: InsertValue<TableSchema<'channels'>>, tx: Transaction<Schema>): Promise<void> {
+    if (args.projectId) {
+      const project = await tx.run(zql.projects.where('id', args.projectId).one());
+      if (!project) {
+        throw new MutationACLError('Channel insert failed: the specified project does not exist', 'channels');
+      }
+      if (project.workspaceId !== this.ctx.workspaceId) {
+        throw new MutationACLError('Channel insert failed: project not found in workspace', 'channels');
+      }
+    }
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'channels'>>, tx: Transaction<Schema>): Promise<void> {
@@ -18,6 +39,8 @@ export class ChannelsACL extends BaseACL<'channels'> {
     if (channel.isArchived && args.isArchived !== false) {
       throw new MutationACLError('Channel update failed: cannot update archived channel', 'channels');
     }
+
+    await this.verifyChannelInWorkspace(args.id, tx);
 
     const currentUserParticipantData = await tx.run(zql.channel_participants
       .where('channelId', args.id)
@@ -43,6 +66,7 @@ export class ChannelsACL extends BaseACL<'channels'> {
   }
 
   async canDelete(_args: DeleteID<TableSchema<'channels'>>, _tx: Transaction<Schema>): Promise<void> {
+
     throw new MutationACLError('Channel delete failed: channels cannot be deleted, use archive instead', 'channels');
   }
 }

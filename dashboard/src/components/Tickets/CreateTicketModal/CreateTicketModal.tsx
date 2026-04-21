@@ -3,6 +3,7 @@ import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useZero } from '../../../hooks/useZero';
+import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import {
   AttachmentEntityType,
   BaseTicketType,
@@ -177,6 +178,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   onTicketCreated,
 }) => {
   const zero = useZero();
+  const shareableOrigin = useShareableOrigin();
   const { user } = useAuth();
   const {
     addDroppedFiles: providerAddDroppedFiles,
@@ -1073,7 +1075,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Handle duplicate ticket copy link
   const handleDuplicateTicketCopyLink = (link: string): void => {
-    const ticketUrl = `${window.location.origin}${link}`;
+    const ticketUrl = `${shareableOrigin}${link}`;
 
     navigator.clipboard
       .writeText(ticketUrl)

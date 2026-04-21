@@ -23,6 +23,7 @@ import {
   schema,
   LinkVisibility,
   NudgeState,
+  Status,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -2002,5 +2003,42 @@ export const queries = defineQueries({
       .where('contextId', boardId)
       .related('values')
       .orderBy('createdAt', 'desc');
+  }),
+
+  getWorkspaceById: defineQuery(
+    z.object({ workspaceId: z.string() }),
+    ({ args: { workspaceId } }) => {
+      return zql.workspaces.where('id', workspaceId).one();
+    },
+  ),
+
+  // Get organizations linked to workspace
+  workspaceOrganizations: defineQuery(
+    z.object({ workspaceId: z.string() }),
+    ({ args: { workspaceId } }) => {
+      return zql.workspace_organizations
+        .where('workspaceId', workspaceId)
+        .where('leftAt', 'IS', null)
+        .related('organization')
+        .orderBy('createdAt', 'desc');
+    },
+  ),
+
+  // Get all ACTIVE organizations
+  availableOrganizations: defineQuery(z.object({}), () => {
+    return zql.organizations.where('status', Status.ACTIVE).orderBy('name', 'asc');
+  }),
+
+  // Get active members of an organisation
+  getOrgMembers: defineQuery(z.object({ orgId: z.string() }), ({ args: { orgId } }) => {
+    return zql.org_members
+      .where('orgId', orgId)
+      .where('leftAt', 'IS', null)
+      .orderBy('joinedAt', 'asc');
+  }),
+
+  // Get all workspace invitations (filtered client-side by workspaceId)
+  getAllInvitations: defineQuery(z.object({}), () => {
+    return zql.invitations.orderBy('createdAt', 'desc');
   }),
 });

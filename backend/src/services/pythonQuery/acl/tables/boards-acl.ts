@@ -6,7 +6,10 @@ export class BoardsACL extends BaseQueryACL<Prisma.BoardWhereInput> {
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.BoardWhereInput | null> {
-    return null
+  async getWhereClause(): Promise<Prisma.BoardWhereInput> {
+    // Direct workspaceId check - no need to traverse through project
+    return {
+      workspaceId: this.ctx.workspaceId ?? '',
+    }
   }
 }

@@ -6,6 +6,14 @@ import { zql } from '../../queries';
 
 export class MessagesACL extends BaseACL<'messages'> {
 
+  private async verifyConversationInWorkspace(conversationId: string, tx: Transaction<Schema>, workspaceId?: string): Promise<void> {
+    const conversationWorkspaceId = workspaceId ?? await tx.run(zql.conversations.where('conversationId', conversationId).related('channel').one()).then(c => c?.channel?.workspaceId);
+    if (!conversationWorkspaceId) throw new MutationACLError('Message not found: conversation does not exist', 'messages');
+    if (conversationWorkspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Message not found in this workspace', 'messages');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'messages'>>, tx: Transaction<Schema>): Promise<void> {
     const conversation = await tx.run(zql.conversations.where('conversationId', '=', args.conversationId).related('channel').one());
     if (!conversation || !conversation.channel) {
@@ -14,6 +22,7 @@ export class MessagesACL extends BaseACL<'messages'> {
     if (conversation.channel.isArchived) {
       throw new MutationACLError('Message insert failed: cannot send messages in archived channel', 'messages');
     }
+    await this.verifyConversationInWorkspace(args.conversationId, tx, conversation.channel.workspaceId);
     if (conversation.channel.visibility === ChannelVisibility.PUBLIC) {
       return;
     }
@@ -27,7 +36,7 @@ export class MessagesACL extends BaseACL<'messages'> {
       return;
     }
 
-    throw new MutationACLError('Message insert failed: only channel participants can send messages in private channels', 'messages'); 
+    throw new MutationACLError('Message insert failed: only channel participants can send messages in private channels', 'messages');
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'messages'>>, tx: Transaction<Schema>): Promise<void> {
@@ -35,6 +44,7 @@ export class MessagesACL extends BaseACL<'messages'> {
     if (!message) {
       throw new MutationACLError('Message update failed: message does not exist', 'messages');
     }
+    await this.verifyConversationInWorkspace(message.conversationId, tx);
     if (message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM) {
       return;
     }
@@ -46,6 +56,7 @@ export class MessagesACL extends BaseACL<'messages'> {
     if (!message) {
       throw new MutationACLError('Message delete failed: message does not exist', 'messages');
     }
+    await this.verifyConversationInWorkspace(message.conversationId, tx);
     if (message.senderId === this.ctx.userID || message.msgType === MessageType.SYSTEM) {
       return;
     }

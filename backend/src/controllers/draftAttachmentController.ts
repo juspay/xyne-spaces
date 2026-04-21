@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { DatabaseClient } from '../database/client';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
+import { ChannelRepository } from '../database/repositories/channelRepository';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { logger } from '../utils/logger';
 import { AttachmentEntityType } from '@prisma/client';
@@ -9,9 +10,11 @@ import { config } from '@/config/env';
 export class DraftAttachmentController {
   private db = DatabaseClient.getInstance();
   private channelParticipantRepository: ChannelParticipantRepository;
+  private channelRepository: ChannelRepository;
 
   constructor() {
     this.channelParticipantRepository = new ChannelParticipantRepository();
+    this.channelRepository = new ChannelRepository();
   }
 
   /**
@@ -133,6 +136,9 @@ export class DraftAttachmentController {
 
       logger.info(`Uploading ${files.length} draft attachments using fileUploadService`);
 
+      // Fetch workspaceId from channel
+      const draftWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
+
       // Prepare fileMetadata array format for fileUploadService
       const fileMetadataArray = parsedFileMetadata.map((metadata, index) => ({
         fileIndex: index,
@@ -205,6 +211,7 @@ export class DraftAttachmentController {
               createdBy: userId,
               storageProvider: config.fileStorage.provider,
               conversationId: conversationId || null,
+              workspaceId: draftWorkspaceId,
               width: finalWidth,
               height: finalHeight,
               thumbnailUrl,

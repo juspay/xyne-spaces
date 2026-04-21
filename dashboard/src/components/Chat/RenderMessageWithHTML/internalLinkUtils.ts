@@ -121,6 +121,25 @@ export const isExternalUrl = (url: string): boolean => {
   }
 };
 
+/**
+ * Converts legacy internal Xyne URL formats to the current format.
+ * Handles old workspace-scoped paths and legacy hostname rewrites.
+ */
+export const patchLegacyInternalUrl = (href: string): string => {
+  try {
+    const url = new URL(href, window.location.origin);
+    // Legacy workspace-scoped paths: /workspace/<id>/chat/... → /chat/...
+    const workspacePrefixMatch = url.pathname.match(/^\/workspace\/[^/]+(\/.*)$/);
+    if (workspacePrefixMatch) {
+      url.pathname = workspacePrefixMatch[1] ?? href;
+      return url.toString();
+    }
+    return href;
+  } catch {
+    return href;
+  }
+};
+
 export const getAnchorTargetProps = (url: string): AnchorTargetProps => {
   return isExternalUrl(url) ? { target: '_blank', rel: 'noopener noreferrer' } : {};
 };

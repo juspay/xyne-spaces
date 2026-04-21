@@ -42,7 +42,7 @@ interface PRCheckRequestedPayload {
 async function findVarysInstalledApp(): Promise<{ webhookUrl: string; userId: string } | null> {
   try {
     // Find the Varys bot user by email (source of truth)
-    const botUser = await db.user.findUnique({
+    const botUser = await db.user.findFirst({
       where: { email: VARYS_BOT_EMAIL },
     });
 

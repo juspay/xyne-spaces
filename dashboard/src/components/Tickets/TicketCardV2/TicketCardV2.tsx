@@ -1,6 +1,7 @@
 import React from 'react';
 import { Ticket, TicketPriority, TicketStatus, TicketStatusV2, TicketTag } from '@xyne/shared';
 import { TicketCard } from '../TicketCard/TicketCard';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 
 type TicketCardSummary = {
   id: string;
@@ -30,7 +31,7 @@ interface TicketCardV2Props {
   isConversation?: boolean;
 }
 
-const buildTicketFromSummary = (summary: TicketCardSummary): Ticket => {
+const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string): Ticket => {
   const now = Date.now();
   return {
     id: summary.id,
@@ -59,10 +60,12 @@ const buildTicketFromSummary = (summary: TicketCardSummary): Ticket => {
     stageName: summary.stageName ?? '',
     ticketType: summary.ticketType ?? null,
     isArchived: false,
+    workspaceId: workspaceId,
   };
 };
 
 export const TicketCardV2: React.FC<TicketCardV2Props> = props => {
-  const ticket = buildTicketFromSummary(props.ticket);
+  const { workspaceId } = useAuthContextValues();
+  const ticket = buildTicketFromSummary(props.ticket, workspaceId);
   return <TicketCard {...props} ticket={ticket} />;
 };

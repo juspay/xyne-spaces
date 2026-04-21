@@ -1,26 +1,48 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { Schema } from '@xyne/shared';
+import { OrgRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
 
+/**
+ * Organizations ACL
+ * Controls access to organization operations
+ * Uses ctx.orgRole for fast role checks (no DB traversal needed)
+ */
 export class OrganizationsACL extends BaseACL<'organizations'> {
+
+  /**
+   * Check if the current user has ADMIN or OWNER role using context
+   * Fast check - no DB query needed
+   */
+  private isAdminOrOwner(): boolean {
+    return this.ctx.orgRole === OrgRole.ADMIN || this.ctx.orgRole === OrgRole.OWNER;
+  }
 
   async canInsert(_args: InsertValue<TableSchema<'organizations'>>, _tx: Transaction<Schema>): Promise<void> {
     // Any user can create an organization
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'organizations'>>, tx: Transaction<Schema>): Promise<void> {
-    const createdByUserId = await tx.run(zql.organizations.where('orgId', args.orgId).one());
-    if (createdByUserId && createdByUserId.createdBy !== this.ctx.userID) {
-      throw new MutationACLError('Organization update failed: only the organization creator can modify settings', 'organizations');
+    const org = await tx.run(zql.organizations.where('orgId', args.orgId).one());
+    if (org && org.createdBy === this.ctx.userID) {
+      return;
+    }
+
+    if (!this.isAdminOrOwner()) {
+      throw new MutationACLError('Organization update failed: only admins, owners, or creator can modify settings', 'organizations');
     }
   }
 
   async canDelete(args: DeleteID<TableSchema<'organizations'>>, tx: Transaction<Schema>): Promise<void> {
-     const createdByUserId = await tx.run(zql.organizations.where('orgId', args.orgId).one());
-    if (createdByUserId && createdByUserId.createdBy !== this.ctx.userID) {
-      throw new MutationACLError('Organization delete failed: only the organization creator can delete it', 'organizations');
+    const org = await tx.run(zql.organizations.where('orgId', args.orgId).one());
+    if (org && org.createdBy === this.ctx.userID) {
+      return;
+    }
+
+    // ADMIN or OWNER can delete
+    if (!this.isAdminOrOwner()) {
+      throw new MutationACLError('Organization delete failed: only admins, owners, or creator can delete', 'organizations');
     }
   }
 }

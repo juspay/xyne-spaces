@@ -25,8 +25,12 @@ interface AuthProviderProps {
 
 const AuthContext = createContext<UseAuthReturn | undefined>(undefined);
 
-const buildUserFromId = (userId: string): User => ({
-  id: userId,
+const buildUserFromPayload = (payload: NativeGoogleSignInResultPayload): User => ({
+  id: payload.userId!,
+  workspaceId: payload.workspaceId ?? '',
+  role: payload.role ?? '',
+  orgRole: payload.orgRole ?? '',
+  memberId: payload.memberId ?? '',
 });
 
 type AuthMeResponse = {
@@ -105,7 +109,7 @@ const handleNativeSignInResult = (
     });
     return;
   }
-  const fallbackUser = buildUserFromId(payload.userId);
+  const fallbackUser = buildUserFromPayload(payload);
 
   const processNativeSignIn = async (): Promise<void> => {
     try {

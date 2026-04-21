@@ -7,6 +7,6 @@ export class ProjectsACL extends BaseQueryACL<'projects'> {
   }
 
   canSelect<TReturn>(query: Query<'projects', Schema, TReturn>): Query<'projects', Schema, TReturn> {
-    return query;
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
   }
 }

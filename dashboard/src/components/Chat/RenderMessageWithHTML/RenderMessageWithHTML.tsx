@@ -17,11 +17,11 @@ import {
   getInternalLinkLabel,
   isExternalUrl,
   parseInternalXyneLink,
+  patchLegacyInternalUrl,
   shouldReplaceWithSemanticLabel,
   type InternalXyneLinkKind,
 } from './internalLinkUtils';
 import { useAuthContextValues } from '../../../hooks/useAuth';
-import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover';
 import { useChannel } from '../../../hooks/useChannels';
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
@@ -49,7 +49,7 @@ interface RenderMessageWithHTMLProps {
 
 const MAX_HTML_LENGTH = 100000;
 
-const URL_REGEX = /(?:https?|ssh):\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
+const URL_REGEX = /https?:\/\/[^\s<]+[^<.,:;"')\]\s]/gi;
 
 const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
   switch (kind) {
@@ -72,8 +72,6 @@ const InternalXyneLink = ({
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
   const channel = useChannel(parsedLink?.channelId ?? '');
-  const { userID } = useAuthContextValues();
-  const { displayName: channelDisplayName } = useChannelDisplayName(channel ?? null, userID);
   const [ticket] = useCachedQuery(queries.ticketById({ ticketId: parsedLink?.ticketId ?? '' }), {
     enabled: !!parsedLink?.ticketId,
   });
@@ -106,12 +104,7 @@ const InternalXyneLink = ({
     });
   };
 
-  const linkLabel = getInternalLinkLabel(
-    parsedLink,
-    channel ? channelDisplayName : undefined,
-    ticket?.xyneId,
-    canvas?.title,
-  );
+  const linkLabel = getInternalLinkLabel(parsedLink, channel?.name, ticket?.xyneId, canvas?.title);
   const leadingIcon = getInternalLinkIcon(parsedLink.kind);
 
   if (!shouldReplaceWithSemanticLabel(children, resolvedHref)) {
@@ -172,7 +165,7 @@ const InternalXyneLink = ({
         data-track-metadata={JSON.stringify({ href: resolvedHref, kind: parsedLink.kind })}
       >
         {copied ? (
-          <Check className='h-3 w-3 text-status-success' />
+          <Check className='h-3 w-3 text-green-600' />
         ) : (
           <Copy className='h-3 w-3 text-muted-foreground' />
         )}
@@ -954,8 +947,9 @@ const parseNode = (
   }
 
   if (tag === 'a') {
-    const href = el.getAttribute('href');
+    let href = el.getAttribute('href');
     if (href && isValidURL(href)) {
+      href = patchLegacyInternalUrl(href);
       const urlObj = new URL(href, window.location.origin);
       if (parseInternalXyneLink(href)) {
         const { key, ...restProps } = props;

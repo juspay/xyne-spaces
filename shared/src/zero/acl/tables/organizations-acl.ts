@@ -1,5 +1,6 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
+import { OrgRole } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 
 export class OrganizationsACL extends BaseQueryACL<'organizations'> {
@@ -8,11 +9,11 @@ export class OrganizationsACL extends BaseQueryACL<'organizations'> {
   }
 
   canSelect<TReturn>(query: Query<'organizations', Schema, TReturn>): Query<'organizations', Schema, TReturn> {
-    return query.where(({ or, cmp, exists }) =>
-      or(
-        cmp('createdBy', this.ctx.userID),
-        exists('members', (om) => om.where('userId', this.ctx.userID))
-      )
+    if (this.ctx.orgRole === OrgRole.ADMIN || this.ctx.orgRole === OrgRole.OWNER) {
+      return query;
+    }
+    return query.whereExists('members', (m) =>
+      m.where('memberId', '=', this.ctx.memberId).where('leftAt', 'IS', null)
     );
   }
 }

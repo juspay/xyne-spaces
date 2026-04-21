@@ -51,9 +51,9 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     });
   }
 
-  async findByEmail(email: string): Promise<User | null> {
+  async findByEmail(email: string, workspaceId: string): Promise<User | null> {
     return await this.db.user.findUnique({
-      where: { email },
+      where: { email_workspaceId: { email, workspaceId } },
     });
   }
 
@@ -63,9 +63,9 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     });
   }
 
-  async findByProviderUserId(providerUserId: string): Promise<User | null> {
+  async findByProviderUserId(providerUserId: string, workspaceId: string): Promise<User | null> {
     return await this.db.user.findUnique({
-      where: { providerUserId },
+      where: { providerUserId_workspaceId: { providerUserId, workspaceId } },
     });
   }
 
@@ -330,9 +330,9 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     return await this.enrichUsersWithMappings(users);
   }
 
-  async validateEmailUnique(email: string, excludeId?: string): Promise<void> {
+  async validateEmailUnique(email: string, workspaceId: string, excludeId?: string): Promise<void> {
     const existing = await this.db.user.findUnique({
-      where: { email },
+      where: { email_workspaceId: { email, workspaceId } },
     });
 
     if (existing && existing.id !== excludeId) {
@@ -340,9 +340,9 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     }
   }
 
-  async validateProviderUserIdUnique(providerUserId: string, excludeId?: string): Promise<void> {
+  async validateProviderUserIdUnique(providerUserId: string, workspaceId: string, excludeId?: string): Promise<void> {
     const existing = await this.db.user.findUnique({
-      where: { providerUserId },
+      where: { providerUserId_workspaceId: { providerUserId, workspaceId } },
     });
 
     if (existing && existing.id !== excludeId) {

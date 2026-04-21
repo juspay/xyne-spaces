@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, LucideCommand, Search } from 'lucide-react';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
 import { invokeShortcut } from '../../shortcuts';
 import { toast } from 'sonner';
+import { WorkspaceSwitcher } from '../AppSidebar/WorkspaceSwitcher';
 
 const NavigationAndSearch = (): ReactElement => {
   const navigate = useNavigate();
@@ -129,7 +130,12 @@ const GlobalTopBar = (): ReactElement => {
       <div
         style={{ width: '12%', minWidth: '80px' } as React.CSSProperties}
         className='lg:w-[19%]'
-      />
+        // no-drag so the button is clickable
+      >
+        <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} className='ml-1 mt-1'>
+          <WorkspaceSwitcher />
+        </div>
+      </div>
       <div className='flex-1 flex items-center justify-between'>
         <NavigationAndSearch />
         <div className='flex gap-1' style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>

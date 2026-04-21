@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, WorkspaceRole } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -16,23 +16,43 @@ async function assignUserToGroup() {
   console.log(`🔧 Assigning ${email} to DEVELOPER group...`);
 
   try {
-    // Find DEVELOPER group
+    // Find default workspace first
+    const defaultWorkspace = await prisma.workspace.findFirst({
+      where: { name: 'Default Workspace' }
+    });
+
+    if (!defaultWorkspace) {
+      console.error('❌ Default Workspace not found. Please run seed-acl.ts first.');
+      return;
+    }
+
+    // Find DEVELOPER group in the default workspace
     const developerGroup = await prisma.userGroup.findUnique({
-      where: { name: 'DEVELOPER' }
+      where: {
+        workspaceId_name: {
+          workspaceId: defaultWorkspace.id,
+          name: 'DEVELOPER'
+        }
+      }
     });
 
     if (!developerGroup) {
-      console.error('❌ DEVELOPER group not found');
+      console.error('❌ DEVELOPER group not found in default workspace');
       return;
     }
 
     // Find or create user
     let user = await prisma.user.findUnique({
-      where: { email }
+      where: {
+        email_workspaceId: {
+          email,
+          workspaceId: defaultWorkspace.id
+        }
+      }
     });
 
     if (!user) {
-      console.log(`👤 User ${email} not found, creating new user...`);
+      console.log(`👤 User ${email} not found in default workspace, creating new user...`);
 
       // Extract name from email
       const emailUser = email.split('@')[0];
@@ -46,10 +66,12 @@ async function assignUserToGroup() {
           name: name || 'Developer',
           authProvider: 'GOOGLE',
           providerUserId: `dev-${email.replace(/[^a-zA-Z0-9]/g, '-')}`,
-          status: 'ACTIVE'
+          status: 'ACTIVE',
+          workspaceId: defaultWorkspace.id,
+          role: WorkspaceRole.MEMBER,
         }
       });
-      console.log(`✅ Created user ${email}`);
+      console.log(`✅ Created user ${email} in default workspace`);
     }
 
     // Ensure user is linked to DEVELOPER group via UserGroupMapping

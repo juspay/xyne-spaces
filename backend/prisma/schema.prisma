@@ -263,10 +263,17 @@ enum ConversationParticipation {
   @@schema("public")
 }
 
+enum ProjectType {
+  DEFAULT
+  DM
+  @@schema("public")
+}
+
 model Agent {
   id            String   @id @default(cuid())
   userDefinedId String   @unique
   modelId       String
+  workspaceId   String
   systemPrompt  String
   description   String?
   name          String
@@ -279,6 +286,7 @@ model Agent {
 
   // Relations
   model              Model               @relation(fields: [modelId], references: [id])
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id])
   agentToolsMappings AgentToolsMapping[]
   agentSteps         AgentStep[] // <-- Required for Prisma validation
 
@@ -291,6 +299,7 @@ model Agent {
 model Model {
   id            String   @id @default(cuid())
   userDefinedId String   @unique
+  workspaceId   String
   name          String
   provider      String
   credentials   String // JSON string for credentials
@@ -298,15 +307,18 @@ model Model {
   updatedAt     DateTime @updatedAt
 
   // Relations
-  agents Agent[]
+  agents    Agent[]
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
 
+  @@index([workspaceId])
   @@map("models")
   @@schema("public")
 }
 
 model Tool {
   id          String   @id @default(cuid())
-  name        String   @unique
+  workspaceId String
+  name        String
   description String?
   status      String   @default("Enabled") // Enabled/Disabled
   createdAt   DateTime @default(now())
@@ -314,7 +326,9 @@ model Tool {
 
   // Relations
   agentToolsMappings AgentToolsMapping[]
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id])
 
+  @@unique([name, workspaceId])
   @@map("tools")
   @@schema("public")
 }
@@ -363,6 +377,7 @@ model Ticket {
   referenceTicket  String[]          // Array of ticket IDs for related tickets (duplicates, related incidents, etc.)
   xyneId           String            @unique // Human readable ID
   projectId        String            // Project to which the ticket is linked
+  workspaceId      String            // Workspace for ACL optimization (denormalized from project)
   userGroupId      String?            // User group to which the ticket belongs
   boardId          String            // Board to which the ticket belongs
   stageName        String            // Current stage of the ticket
@@ -416,6 +431,7 @@ model SubTicket {
   id                String    @id @default(cuid())
   title             String
   description       String?
+  workspaceId       String    // Workspace for ACL optimization
   mappedTicketId    String?   // Refers to L1 ticket of the other team (optional - set later when linking)
   createdBy         String    // The user who created the sub ticket
   updatedBy         String    // Refers to updatedBy of mappedTicket (mandatory)
@@ -833,8 +849,9 @@ model ApiKey {
 // User Management Models
 model UserGroup {
   id          String   @id @default(cuid())
-  name        String   @unique // Xyne Space Developers | Frontend Team | Backend Team
-  alias       String?  @unique // xyne-space-dev | frontend | backend (for mentions)
+  workspaceId String
+  name        String   // Xyne Space Developers | Frontend Team | Backend Team
+  alias       String?  // xyne-space-dev | frontend | backend (for mentions)
   description String?
   metadata    Json? // Team-specific config: statuses, skills, etc.
   autoRotationEnabled  Boolean           @default(false)
@@ -851,7 +868,9 @@ model UserGroup {
   workloadMappings     UserWorkloadMapping[]
   expertiseMappings    UserExpertiseMapping[]
   isActive    Boolean     @default(true)
+  workspace            Workspace            @relation(fields: [workspaceId], references: [id])
 
+  @@unique([workspaceId, name])
   @@map("user_groups")
   @@schema("public")
 }
@@ -862,6 +881,21 @@ enum SessionStatus {
   REVOKED
   @@schema("public")
 }
+
+enum Status {
+  ACTIVE
+  ARCHIVED
+  DELETED
+  @@schema("public")
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  GUEST
+  @@schema("public")
+} 
 
 model UserSession {
   id                  String        @id @default(cuid())
@@ -894,14 +928,18 @@ model UserSession {
 model User {
   id             String       @id @default(cuid())
   name           String
-  email          String       @unique
+  email          String
   picture        String?      // Google profile picture URL
   authProvider   AuthProvider @default(GOOGLE)
-  providerUserId String       @unique
+  providerUserId String
   status         UserStatus   @default(ACTIVE)
   userType       UserType     @default(USER) // USER or BOT
   metadata       Json? // Flexible user metadata
   displayName    String?
+  workspaceId    String
+  role           WorkspaceRole   @default(MEMBER)
+  orgMemberId    String       // Links to org_members.memberId for organization membership
+  leftAt         DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   // Presence display fields promoted from user_presence for query performance (dual-written)
@@ -913,6 +951,7 @@ model User {
   assignmentUnavailableUntil DateTime? // @see user_presence.assignmentUnavailableUntil
 
   // Relations
+  workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
   resourceAccess            ResourceAccess[]
   auditLogs                 ACLAuditLog[]
   sessions                  UserSession[]           // User can have multiple sessions (multi-device support)
@@ -939,6 +978,10 @@ model User {
   appsCreated               Apps[]                @relation("AppsCreatedBy")
   installedAppsFor          InstalledApps[]        @relation("InstalledAppsUser")
 
+  @@unique([providerUserId, workspaceId])
+  @@unique([email, workspaceId])
+  @@index([email])
+  @@index([providerUserId])
   @@map("users")
   @@schema("public")
 }
@@ -1288,11 +1331,16 @@ model Organization {
   createdBy   String   // User ID (no FK constraint)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  status      Status   @default(ACTIVE)
   metadata    Json?
 
   // Relations
   members OrgMember[]
+  workspaces Workspace[]
 
+  workspaceOrgs         WorkspaceOrganization[]
+  invitations           Invitation[]
+  @@index([status, name])
   @@map("organizations")
   @@schema("public")
 }
@@ -1300,38 +1348,120 @@ model Organization {
 model OrgMember {
   memberId    String   @id @default(cuid())
   orgId       String   // Organization ID (no FK constraint)
-  userId      String   // User ID (no FK constraint)
+  email       String   @unique // Email address — globally unique, one org per email
   role        OrgRole  // OWNER | ADMIN | MEMBER | VIEWER
   joinedAt    DateTime @default(now())
   invitedBy   String?  // Who invited this user (no FK constraint)
+  leftAt      DateTime?
 
   // Relations
   organization Organization @relation(fields: [orgId], references: [orgId])
 
-  @@unique([orgId, userId]) // User can only be member once per org
-  @@index([orgId]) // Fast org member lookup
-  @@index([userId]) // Fast user org lookup
+  @@index([orgId])
+  @@index([orgId, joinedAt])
   @@map("org_members")
+  @@schema("public")
+}
+
+model WorkspaceOrganization {
+  id           String      @id @default(cuid())
+  orgId        String
+  workspaceId  String
+  role         WorkspaceRole
+  leftAt       DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [orgId], onDelete: Cascade)
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, workspaceId])
+  @@index([orgId])
+  @@index([workspaceId])
+  @@index([workspaceId, createdAt(sort: Desc), id])
+  @@map("workspace_organizations")
+  @@schema("public")
+}
+
+// Workspace Models
+model Workspace {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  description String?
+  createdBy   String
+  status      Status   @default(ACTIVE)
+  metadata    Json?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  organization      Organization         @relation(fields: [orgId], references: [orgId])
+  users             User[]
+  invitations       Invitation[]
+  projects          Project[]
+  workspaceOrgs     WorkspaceOrganization[]
+  agents            Agent[]
+  models            Model[]
+  tools             Tool[]
+  userGroups        UserGroup[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("workspaces")
+  @@schema("public")
+}
+
+
+model Invitation {
+  id           String        @id @default(cuid())
+  orgId        String?
+  workspaceId  String?
+  email        String
+  role         WorkspaceRole @default(MEMBER)
+  invitedBy    String
+  invitedAt    DateTime      @default(now())
+  expiredAt    DateTime?     // Expiration date - 15 days from creation by default, or updated on revoke
+  acceptedAt   DateTime?     // When the invitation was accepted
+  invitationId String?       @unique // Unique link ID for invitation URL
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relations
+  organization Organization? @relation(fields: [orgId], references: [orgId], onDelete: Cascade)
+  workspace    Workspace?    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([workspaceId])
+  @@index([email])
+  @@index([invitationId])
+  @@index([createdAt(sort: Desc), id])
+  @@map("invitations")
   @@schema("public")
 }
 
 // Project Models
 model Project {
   id              String    @id @default(cuid())
-  name            String    @unique
-  code            String    @unique  // Project shortcode for ticket IDs (e.g., EUL, INF)
+  name            String
+  code            String    // Project shortcode for ticket IDs (e.g., EUL, INF)
   ticketSequence  Int       @default(0)  // Atomic counter for project-scoped ticket numbering
   description     String?
+  workspaceId     String    // Workspace this project belongs to
+  type            ProjectType  @default(DEFAULT)
   createdBy       String    // User ID (no FK constraint)
   updatedBy       String?   // User ID (no FK constraint)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime? @updatedAt
 
   // Relations
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
   tickets  Ticket[]
   channels Channel[]
   boards   Board[]
 
+  @@unique([name, workspaceId])
+  @@unique([code, workspaceId])
   @@map("projects")
   @@schema("public")
 }
@@ -1342,6 +1472,7 @@ model Board {
   name        String
   boardType   BoardType @default(DEFAULT)
   projectId   String    // Project ID (no FK constraint)
+  workspaceId String    // Workspace for ACL optimization (denormalized from project)
   createdBy   String    // User ID (no FK constraint)
   updatedBy   String?   // User ID (no FK constraint)
   description String?   // Board description
@@ -1412,6 +1543,7 @@ model Channel {
   createdBy       String            // User ID (no FK constraint)
   metadata        Json?             // Additional metadata for future extension
   projectId       String            // Project to which the channel is linked
+  workspaceId     String            // Workspace for ACL optimization (denormalized from project)
   participantCount Int                    @default(0)
   isMigrated      Boolean?                @default(false)
   addUserPolicy   ChannelAddUserPolicy?  @default(EVERYONE)
@@ -1428,8 +1560,8 @@ model Channel {
   channelStats       ChannelStats?
 
   @@index([projectId])
+  @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
   @@index([createdBy])
-  @@index([visibility, id]) // for userAllChannels
   @@index([isArchived])
   @@map("channels")
   @@schema("public")
@@ -1472,7 +1604,8 @@ model ChannelParticipant {
   @@index([userId]) // Fast user channel lookup
   @@index([userId, isStarred]) // Fast Starred Channels Lookup
   @@index([userId, isClosed]) // Fast closed DMs lookup
-  @@index([channelId, userId, id]) 
+  @@index([channelId, userId, id])
+  @@index([userId, role, id])
   @@map("channel_participants")
   @@schema("public")
 }
@@ -1525,7 +1658,7 @@ model Conversation {
   pinned            Boolean  @default(false)
   ticketId          String?  // Direct reference to ticket (no FK constraint)
   metadata          Json?
-  callId            String?  
+  callId            String?
   replies_md        String?
   ticket_md         String?
   initial_message_md String?
@@ -1537,8 +1670,9 @@ model Conversation {
   messages        Message[]
   createdByUser   User                     @relation("ConversationCreatedBy", fields: [createdBy], references: [id])
   participants    ConversationParticipant[]
+  messageAttachments MessageAttachment[]
 
-  @@index([channelId, lastActivityAt]) // Fast channel conversation lookup
+  @@index([channelId, lastActivityAt])
   @@index([channelId]) // Alternative simple index
   @@index([ticketId]) // Fast ticket lookup
   @@index([callId])
@@ -1621,7 +1755,7 @@ model EmailSignature {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([userId])
+  @@index([userId, name, id])
   @@map("email_signatures")
   @@schema("public")
 }
@@ -1683,6 +1817,7 @@ model MessageAttachment {
   id                 String                @id @default(cuid())
   entityType         AttachmentEntityType  // TICKET or CHAT or DRAFT
   entityId           String                // Ticket id or message id (mandatory)
+  workspaceId        String                // Workspace for ACL optimization
   storageProvider    String                // Storage provider where file is stored
   originalFilename   String                // Original filename uploaded by user
   mimetype           String                // image/png, application/pdf, etc.
@@ -1697,6 +1832,9 @@ model MessageAttachment {
   conversationId     String?                // Every message belongs to a conversation (no FK constraint)
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
+
+  // Relations
+  conversation       Conversation?          @relation(fields: [conversationId], references: [conversationId])
 
   @@index([entityType])
   @@index([conversationId])
@@ -2476,6 +2614,7 @@ model Form {
   formDescription String?
   entityType      FormEntityType
   contextType     FormContextType
+  workspaceId     String         // Workspace for ACL optimization
   createdBy       String
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
@@ -2520,6 +2659,7 @@ model FormEntityValues {
   id              String   @id @default(cuid())
   entityId        String   // ID of the entity (e.g., ticketId, userId, etc.)
   entityType      String   // Type of entity (e.g., "TICKET", "USER", etc.)
+  formId          String   // Reference to Form
   fieldId         String   // Reference to FormFieldsMapping.id
   contextId       String?  // Context ID (e.g., stageId) for scoping values per context
   fieldValue      String   // Value stored as String (backward compatibility)

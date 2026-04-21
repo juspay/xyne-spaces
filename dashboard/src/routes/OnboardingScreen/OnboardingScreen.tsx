@@ -105,8 +105,10 @@ const OnboardingScreen: React.FC = () => {
     // Send event to auth machine to update isNewUser state
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
 
-    // Navigate to home without full page reload
-    void navigate('/');
+    const workspaceId = currentUser?.workspaceId;
+    if (workspaceId) {
+      void navigate(`/${workspaceId}/chat/dir`);
+    }
   };
 
   const nextStep = (): void => {

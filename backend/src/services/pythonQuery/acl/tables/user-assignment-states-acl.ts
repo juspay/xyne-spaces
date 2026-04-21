@@ -6,7 +6,9 @@ export class UserAssignmentStatesACL extends BaseQueryACL<Prisma.UserAssignmentS
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.UserAssignmentStateWhereInput | null> {
-    return null
+  async getWhereClause(): Promise<Prisma.UserAssignmentStateWhereInput> {
+    return {
+      userGroup: { workspaceId: this.ctx.workspaceId ?? '' },
+    }
   }
 }

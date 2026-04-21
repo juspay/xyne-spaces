@@ -6,7 +6,9 @@ export class ProjectsACL extends BaseQueryACL<Prisma.ProjectWhereInput> {
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.ProjectWhereInput | null> {
-    return null
+  async getWhereClause(): Promise<Prisma.ProjectWhereInput> {
+    return {
+      workspaceId: this.ctx.workspaceId ?? '',
+    }
   }
 }

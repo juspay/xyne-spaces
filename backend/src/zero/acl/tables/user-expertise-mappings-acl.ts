@@ -10,7 +10,15 @@ import { zql } from '../../queries';
 
 export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'> {
 
+  private async verifyUserGroupInWorkspace(userGroupId: string, tx: Transaction<Schema>): Promise<void> {
+    const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+    if (!userGroup || userGroup.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('User expertise mapping not found in this workspace', 'user_expertise_mappings');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'user_expertise_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
@@ -32,6 +40,7 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
     if (!mapping) {
       throw new MutationACLError('User expertise mapping update failed: mapping does not exist', 'user_expertise_mappings');
     }
+    await this.verifyUserGroupInWorkspace(mapping.userGroupId, tx);
 
     // Check if user is a group member
     const membership = await tx.run(
@@ -54,6 +63,7 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
     if (!mapping) {
       throw new MutationACLError('User expertise mapping delete failed: mapping does not exist', 'user_expertise_mappings');
     }
+    await this.verifyUserGroupInWorkspace(mapping.userGroupId, tx);
 
     // Check if user is a group member
     const membership = await tx.run(
@@ -71,6 +81,7 @@ export class UserExpertiseMappingsACL extends BaseACL<'user_expertise_mappings'>
   }
 
   async canUpsert(args: any, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings

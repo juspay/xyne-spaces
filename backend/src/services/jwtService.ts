@@ -7,6 +7,8 @@ export interface JwtPayload {
   email: string;
   name: string;
   picture?: string;
+  workspaceId: string;
+  memberId: string;
   iat?: number;
   exp?: number;
   iss?: string;
@@ -37,6 +39,8 @@ export class JwtService {
           email: payload.email,
           name: payload.name,
           picture: payload.picture,
+          workspaceId: payload.workspaceId,
+          memberId: payload.memberId,
         },
         this.secret,
         {

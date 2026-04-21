@@ -53,6 +53,9 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  WorkspaceRole,
+  Status,
+  OrgRole,
 } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { generatePlainTextContent } from "@/utils/contentUtils";
@@ -88,6 +91,10 @@ export type AuthData = {
   sub: string;
   email: string;
   name: string;
+  workspaceId: string;
+  role: string;
+  orgRole: string;
+  memberId: string;
 };
 
 export type ParticipantOperationType = 'participants_added' | 'participants_removed' | 'participants_joined';
@@ -560,7 +567,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           // send system message for joined participants
           const newParticipants = [{ userId: authData.sub, userName: authData.name }];
-          const messageSender: AuthData = { name: "system", sub: "system", email: "" }
+          const messageSender: AuthData = { name: "system", sub: "system", email: "", workspaceId: "", role: "", memberId: "", orgRole: "" }
           await sendAddAndRemoveParticipantsSystemMessage(tx, { channel, newParticipants, authData: messageSender, operationType: 'participants_joined' })
         },
       ),
@@ -2018,23 +2025,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
            // Copy attachments from the original message
           for (const attachment of attachmentsArray) {
             if (!attachment) continue;
-             await tx.mutate.message_attachments.insert({
-               id: uuidv4(),
-               entityId: messageId,
-               entityType: attachment.entityType,
-               originalFilename: attachment.originalFilename,
-               size: attachment.size,
-               mimetype: attachment.mimetype,
-               url: attachment.url,
-               thumbnailUrl: attachment.thumbnailUrl,
-               uploadedByUserId: authData.sub,
-               createdBy: authData.sub,
-               storageProvider: attachment.storageProvider,
-               conversationId: conversationId,
-               metadata: attachment.metadata,
-               createdAt: now,
-               isDeleted: false,
-             });
+            await tx.mutate.message_attachments.insert({
+              id: uuidv4(),
+              entityId: messageId,
+              entityType: attachment.entityType,
+              originalFilename: attachment.originalFilename,
+              size: attachment.size,
+              mimetype: attachment.mimetype,
+              url: attachment.url,
+              thumbnailUrl: attachment.thumbnailUrl,
+              uploadedByUserId: authData.sub,
+              createdBy: authData.sub,
+              storageProvider: attachment.storageProvider,
+              conversationId: conversationId,
+              workspaceId: authData.workspaceId,
+              metadata: attachment.metadata, 
+              createdAt: now,
+              isDeleted: false,
+            });
           }
 
           // --- Call Message Forwarding Specifics ---
@@ -2102,26 +2110,27 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                       .where('entityType', AttachmentEntityType.CHAT)
                    );
 
-                   for (let j = 0; j < originalAtts.length; j++) {
-                     const attInfo = originalAtts[j]!;
-                     await tx.mutate.message_attachments.insert({
-                        id: uuidv4(),
-                        entityId: clonedMessageId,
-                        entityType: AttachmentEntityType.CHAT,
-                        originalFilename: attInfo.originalFilename,
-                        size: attInfo.size,
-                        mimetype: attInfo.mimetype,
-                        url: (attInfo as any).url || (attInfo as any).fileUrl || '',
-                        thumbnailUrl: attInfo.thumbnailUrl,
-                        uploadedByUserId: authData.sub,
-                        createdBy: authData.sub,
-                        storageProvider: (attInfo as any).storageProvider || config.fileStorage.provider,
-                        conversationId: conversationId,
-                        metadata: attInfo.metadata as any,
-                        createdAt: now,
+                    for (let j = 0; j < originalAtts.length; j++) {
+                      const attInfo = originalAtts[j]!;
+                      await tx.mutate.message_attachments.insert({
+                         id: uuidv4(),
+                         entityId: clonedMessageId,
+                         entityType: AttachmentEntityType.CHAT,
+                         originalFilename: attInfo.originalFilename,
+                         size: attInfo.size,
+                         mimetype: attInfo.mimetype,
+                         url: (attInfo as any).url || (attInfo as any).fileUrl || '',
+                         thumbnailUrl: attInfo.thumbnailUrl,
+                         uploadedByUserId: authData.sub,
+                         createdBy: authData.sub,
+                         storageProvider: (attInfo as any).storageProvider || config.fileStorage.provider,
+                         conversationId: conversationId,
+                         workspaceId: authData.workspaceId,
+                         metadata: attInfo.metadata as any,
+                         createdAt: now,
                         isDeleted: false,
-                     });
-                   }
+                      });
+                    }
                 }
               }
             }
@@ -4848,6 +4857,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             updatedAt: timestamp,
             stageProgression: null,
             assignedTo: null,
+            workspaceId: authData.workspaceId,
           });
 
           // Create the mapping
@@ -7099,6 +7109,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           // Upsert the form entity value
           await tx.mutate.form_entity_values.insert({
             id,
+            formId: formField.formId,
             entityId,
             entityType,
             fieldId,
@@ -7406,6 +7417,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 metadata: null,
                 conversationId: conversationId || null,
                 isDeleted: false,
+                workspaceId: authData.workspaceId,
               });
             }
           }
@@ -8556,9 +8568,9 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               fieldValue: value.fieldValue,
               createdAt: timestamp,
               updatedAt: timestamp,
-            });
-          }
-        }
+            })
+          };
+        },
       ),
       update: defineMutator(
         z.object({
@@ -8649,6 +8661,26 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           }
 
           await tx.mutate.saved_user_configurations.delete({ id: configId });
+        },
+      ),
+    },
+    workspace: {
+      update: defineMutator(
+        z.object({
+          workspaceId: z.string(),
+          timestamp: z.number(),
+          updates: z.object({
+            name: z.string().optional(),
+            description: z.string().optional(),
+          }),
+        }),
+        async ({ tx, args: { workspaceId, timestamp, updates } }) => {
+          // ACL check is handled by WorkspacesACL
+          await tx.mutate.workspaces.update({
+            id: workspaceId,
+            ...updates,
+            updatedAt: timestamp,
+          });
         }
       ),
     },
@@ -8786,6 +8818,269 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id,
             isDefault: true,
             updatedAt: timestamp,
+          });
+        },
+      ),
+    },
+
+    users: {
+      updateRole: defineMutator(
+        z.object({
+          workspaceId: z.string(),
+          userId: z.string(),
+          updates: z.object({
+            role: z.enum([WorkspaceRole.ADMIN, WorkspaceRole.MEMBER]).optional(),
+          }),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { userId, updates, timestamp } }) => {
+          // ACL check is handled by UsersACL
+          await tx.mutate.users.update({
+            id: userId,
+            ...updates,
+            updatedAt: timestamp,
+          });
+        }
+      ),
+
+      remove: defineMutator(
+        z.object({
+          workspaceId: z.string(),
+          userId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { userId, timestamp } }) => {
+          // ACL check is handled by UsersACL
+          await tx.mutate.users.update({
+            id: userId,
+            leftAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      ),
+    },
+    org: {
+      create: defineMutator(
+        z.object({
+          orgId: z.string(),
+          orgName: z.string(),
+          orgDescription: z.string().optional(),
+          workspaceId: z.string(),
+          workspaceOrgId: z.string(),
+          memberId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({
+          tx,
+          args: { orgId, orgName, orgDescription, workspaceId, workspaceOrgId, memberId, timestamp },
+        }) => {
+          const admin = await tx.run(
+            zql.users
+              .where('id', authData.sub)
+              .where('workspaceId', workspaceId)
+              .where('role', WorkspaceRole.ADMIN)
+              .where('leftAt', 'IS', null)
+              .one(),
+          );
+          if (!admin) throw new Error('Admin access required');
+
+          const existing = await tx.run(
+            zql.organizations
+              .where('name', orgName)
+              .where('status', Status.ACTIVE)
+              .one(),
+          );
+          if (existing) throw new Error('Organization name already exists');
+
+          await tx.mutate.organizations.insert({
+            orgId,
+            name: orgName,
+            description: orgDescription || '',
+            status: Status.ACTIVE,
+            createdBy: authData.sub,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+
+          await tx.mutate.workspace_organizations.insert({
+            id: workspaceOrgId,
+            workspaceId,
+            orgId,
+            role: WorkspaceRole.ADMIN,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+
+          await tx.mutate.org_members.insert({
+            memberId,
+            orgId,
+            email: admin.email,
+            role: OrgRole.OWNER,
+            joinedAt: timestamp,
+          });
+        },
+      ),
+    },
+    workspaceOrg: {
+      add: defineMutator(
+        z.object({
+          workspaceId: z.string(),
+          orgId: z.string(),
+          id: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { workspaceId, orgId, id, timestamp } }) => {
+          const admin = await tx.run(
+            zql.users
+              .where('id', authData.sub)
+              .where('workspaceId', workspaceId)
+              .where('role', WorkspaceRole.ADMIN)
+              .where('leftAt', 'IS', null)
+              .one()
+          );
+          if (!admin) throw new Error('Admin access required');
+
+          // Check if already linked (active)
+          const existingActive = await tx.run(
+            zql.workspace_organizations
+              .where('workspaceId', workspaceId)
+              .where('orgId', orgId)
+              .where('leftAt', 'IS', null)
+              .one()
+          );
+          if (existingActive) throw new Error('Organization already linked');
+
+          // Check if there's a previously removed entry
+          const existingRemoved = await tx.run(
+            zql.workspace_organizations
+              .where('workspaceId', workspaceId)
+              .where('orgId', orgId)
+              .one()
+          );
+
+          if (existingRemoved) {
+            // Reactivate the existing entry by clearing leftAt
+            await tx.mutate.workspace_organizations.update({
+              id: existingRemoved.id,
+              leftAt: null,
+              updatedAt: timestamp,
+            });
+          } else {
+            // Create new entry
+            await tx.mutate.workspace_organizations.insert({
+              id,
+              workspaceId,
+              orgId,
+              role: WorkspaceRole.MEMBER,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        }
+      ),
+      remove: defineMutator(
+        z.object({
+          workspaceId: z.string(),
+          orgId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { workspaceId, orgId, timestamp } }) => {
+          const admin = await tx.run(
+            zql.users
+              .where('id', authData.sub)
+              .where('workspaceId', workspaceId)
+              .where('role', WorkspaceRole.ADMIN)
+              .where('leftAt', 'IS', null)
+              .one()
+          );
+          if (!admin) throw new Error('Admin access required');
+
+          const link = await tx.run(
+            zql.workspace_organizations
+              .where('workspaceId', workspaceId)
+              .where('orgId', orgId)
+              .where('leftAt', 'IS', null)
+              .one()
+          );
+          if (link) {
+            await tx.mutate.workspace_organizations.update({
+              id: link.id,
+              leftAt: timestamp,
+            });
+          }
+        }
+      ),
+    },
+    invitation: {
+      revoke: defineMutator(
+        z.object({
+          invitationId: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { invitationId, timestamp } }) => {
+          const invitation = await tx.run(
+            zql.invitations.where('id', invitationId).one()
+          );
+          if (!invitation || !invitation.workspaceId) throw new Error('Invitation not found');
+
+          const admin = await tx.run(
+            zql.users
+              .where('id', authData.sub)
+              .where('workspaceId', invitation.workspaceId)
+              .where('role', WorkspaceRole.ADMIN)
+              .where('leftAt', 'IS', null)
+              .one()
+          );
+          if (!admin) throw new Error('Admin access required');
+
+          await tx.mutate.invitations.update({
+            id: invitationId,
+            expiredAt: timestamp,
+          });
+        }
+      ),
+    },
+    orgMember: {
+      add: defineMutator(
+        z.object({
+          memberId: z.string(),
+          orgId: z.string(),
+          email: z.string(),
+          role: z.string(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { memberId, orgId, email, role, timestamp } }) => {
+          // Reactivate a previously soft-deleted membership if one exists
+          const existing = await tx.run(
+            zql.org_members.where('orgId', orgId).where('email', email).one(),
+          );
+          if (existing) {
+            await tx.mutate.org_members.update({
+              memberId: existing.memberId,
+              leftAt: null,
+              joinedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.org_members.insert({
+              memberId,
+              orgId,
+              email,
+              role: role as OrgRole,
+              joinedAt: timestamp,
+            });
+          }
+        },
+      ),
+      remove: defineMutator(
+        z.object({
+          memberId: z.string(),
+          timestamp: z.number(),
+        }),
+        // Soft-delete: set leftAt so the member is excluded from active queries
+        async ({ tx, args: { memberId, timestamp } }) => {
+          await tx.mutate.org_members.update({
+            memberId,
+            leftAt: timestamp,
           });
         },
       ),

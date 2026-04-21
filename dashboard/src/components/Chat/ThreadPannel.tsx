@@ -56,7 +56,7 @@ import Tooltip from '../ui/Tooltip';
 import { mixpanelService } from '../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../services/Analytics/mixpanel.types';
 import { useScope } from '../../shortcuts';
-import { SHAREABLE_ORIGIN } from '../../config';
+import { useShareableOrigin } from '../../hooks/useShareableOrigin';
 import GlobalCommandMenu from '../GlobalCommandMenu/GlobalCommandMenu';
 import type { ContextItem } from './ThreadContextPanel/ThreadContextPanel.types';
 import { isElectronApp, isStandaloneWindow, standaloneNavigate } from '../../utils/electronApp';
@@ -112,6 +112,7 @@ export const ThreadMessages = ({
   const { baseRoute, buildChannelRoute } = useRouteContext();
 
   const currentUser = useSelf();
+  const shareableOrigin = useShareableOrigin();
 
   const outletContext = useOutletContext<{ onClose?: () => void } | null>();
   const resolvedOnClose = onClose ?? outletContext?.onClose;
@@ -662,7 +663,7 @@ export const ThreadMessages = ({
     if (!ticket) return;
 
     // Use shareable origin from environment variable
-    const minimizedTicketViewRoute = `${SHAREABLE_ORIGIN}/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`;
+    const minimizedTicketViewRoute = `${shareableOrigin}/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`;
     void navigator.clipboard.writeText(minimizedTicketViewRoute);
     toast.success('Link copied', {
       description: 'Ticket link copied to clipboard',

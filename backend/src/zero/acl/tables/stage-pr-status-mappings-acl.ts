@@ -10,12 +10,20 @@ import { zql } from '../../queries';
 export class StagePRStatusMappingsACL extends BaseACL<'stage_pr_status_mappings'> {
 
   async canInsert(args: InsertValue<TableSchema<'stage_pr_status_mappings'>>, tx: Transaction<Schema>): Promise<void> {
-    // Get the stage with its board to check if user is the board creator
+    // Get the stage with its board to check workspace and creator
     const stageWithBoard = await tx.run(zql.stages.where('id', args.stageId).related('board').one());
 
     if (!stageWithBoard || !stageWithBoard.board) {
       throw new MutationACLError(
         'Stage PR status mapping insert failed: the specified stage does not exist or has no board',
+        'stage_pr_status_mappings'
+      );
+    }
+
+    // Direct workspaceId check - no project lookup needed
+    if (stageWithBoard.board.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError(
+        'Stage PR status mapping insert failed: workspace ID mismatch',
         'stage_pr_status_mappings'
       );
     }
@@ -29,7 +37,7 @@ export class StagePRStatusMappingsACL extends BaseACL<'stage_pr_status_mappings'
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'stage_pr_status_mappings'>>, tx: Transaction<Schema>): Promise<void> {
-    // Get the mapping with its stage and board to check if user is the board creator
+    // Get the mapping with its stage and board to check workspace and creator
     const mappingWithStageAndBoard = await tx.run(
       zql.stage_pr_status_mappings
         .where('id', args.id)
@@ -51,6 +59,14 @@ export class StagePRStatusMappingsACL extends BaseACL<'stage_pr_status_mappings'
       );
     }
 
+    // Direct workspaceId check - no project lookup needed
+    if (mappingWithStageAndBoard.stage.board.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError(
+        'Stage PR status mapping update failed: workspace ID mismatch',
+        'stage_pr_status_mappings'
+      );
+    }
+
     if (mappingWithStageAndBoard.stage.board.createdBy !== this.ctx.userID) {
       throw new MutationACLError(
         'Stage PR status mapping update failed: only the board creator can modify PR status mappings',
@@ -60,7 +76,7 @@ export class StagePRStatusMappingsACL extends BaseACL<'stage_pr_status_mappings'
   }
 
   async canDelete(args: DeleteID<TableSchema<'stage_pr_status_mappings'>>, tx: Transaction<Schema>): Promise<void> {
-    // Get the mapping with its stage and board to check if user is the board creator
+    // Get the mapping with its stage and board to check workspace and creator
     const mappingWithStageAndBoard = await tx.run(
       zql.stage_pr_status_mappings
         .where('id', args.id)
@@ -78,6 +94,14 @@ export class StagePRStatusMappingsACL extends BaseACL<'stage_pr_status_mappings'
     if (!mappingWithStageAndBoard.stage.board) {
       throw new MutationACLError(
         'Stage PR status mapping delete failed: the stage has no board',
+        'stage_pr_status_mappings'
+      );
+    }
+
+    // Direct workspaceId check - no project lookup needed
+    if (mappingWithStageAndBoard.stage.board.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError(
+        'Stage PR status mapping delete failed: workspace ID mismatch',
         'stage_pr_status_mappings'
       );
     }
