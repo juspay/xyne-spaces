@@ -1,3 +1,27 @@
+## [1.125.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.124.0...v1.125.0) (2026-04-21)
+
+
+### Features
+
+* Add autofocus to DMS search on page ([d705699](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d705699ea6f34f44b63b790d0d54c8117c3e4e78)), closes [#5302](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5302)
+* add slack-style emoji autocomplete in chat input ([6a029cd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6a029cd3923d8920b3d8aa709ffca05915d64360)), closes [#4978](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4978)
+* allow external people to join calls ([c0986f4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c0986f495b7ae85322fea4c540b4792113378c69)), closes [#5329](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5329) [#5320](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5320) [#5309](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5309) [#5232](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5232)
+* Create call by dragging in calendar ([a2f3a66](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a2f3a66f00c5252ec2c40d061837fb1972a10dcf)), closes [#5268](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5268)
+* org and workspace ([ed475a4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ed475a4099adbf0c7aa42adca1c6ff4192315d7b)), closes [#4473](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4473)
+
+
+### Bug Fixes
+
+* changed the app.json as per current xyne spaces app ([bd8118a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bd8118a7109b5cb7862e5fa499abc5db1ef28999)), closes [#5271](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5271)
+* Fix channel search input focus not moving ([810c1ac](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/810c1ac425ff71410847a82926a46c75790ecee5))
+* fix UI of GroupDM Avatar ([8ec57a5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8ec57a55cbcf2033d05398d92394865d6e9a537b))
+* fixes mobile dropdown back button issue ([a04eb6d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a04eb6d9c9dafb9c93ccfc81bd7b8ba4cb49a5d3))
+* fixes ticket card overflow issue in kanban ([99f3f91](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/99f3f912293a014f79dffb88b0f70b6e29b840aa))
+* fixing hardcoded things in PR-4473 ([1a4278e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1a4278ec7a75403822307b4bc4bfe8629213fc67))
+* native app ui bugs ([b256458](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b2564581dc6c8a824b5ee57357cfd7339bbdc647)), closes [#5135](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5135)
+* protected route redirecting to chat on refresh ([bc0e865](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bc0e8652571a5bb469af7fa7297185a364e0f7c7)), closes [#5262](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5262)
+* screen picker modal not showing ([c3bc6cd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c3bc6cd7e89406612577ece24faa0fbc750ecbdb)), closes [#5308](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5308)
+
 ## [1.124.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.123.0...v1.124.0) (2026-04-21)
 
 
