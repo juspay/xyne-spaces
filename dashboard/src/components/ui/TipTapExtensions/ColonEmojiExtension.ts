@@ -3,6 +3,7 @@ import { Extension, InputRule } from '@tiptap/core';
 import { Plugin } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { findCustomEmoji, findUnicodeEmoji } from '../../../utils/emojiLookup';
+import { unifiedToNative } from '../../../utils/emojiSearch';
 import type { EmojiPickerEmoji } from '../../../hooks/useCustomEmojis';
 
 const EMOJI_NAME_REGEX = /:([a-zA-Z0-9_+-]+):$/;
@@ -15,13 +16,6 @@ function createInlineEmojiNode(emojiName: string, customEmoji: EmojiPickerEmoji)
     title: emojiName,
     'data-emoji': 'true',
   };
-}
-
-function unifiedToEmoji(unified: string): string {
-  return unified
-    .split('-')
-    .map(code => String.fromCodePoint(parseInt(code, 16)))
-    .join('');
 }
 
 /**
@@ -51,7 +45,7 @@ function insertEmoji(
 
   const unicodeEmoji = findUnicodeEmoji(emojiName);
   if (unicodeEmoji) {
-    const emojiChar = unifiedToEmoji(unicodeEmoji.unified);
+    const emojiChar = unifiedToNative(unicodeEmoji.unified);
     view.dispatch(view.state.tr.delete(startPos, endPos).insertText(emojiChar, startPos));
     return true;
   }
@@ -89,7 +83,7 @@ export const ColonEmojiExtension = Extension.create<{
 
           const unicodeEmoji = findUnicodeEmoji(emojiName);
           if (unicodeEmoji) {
-            const emojiChar = unifiedToEmoji(unicodeEmoji.unified);
+            const emojiChar = unifiedToNative(unicodeEmoji.unified);
             state.tr.insertText(emojiChar, range.from, range.to);
           }
         },

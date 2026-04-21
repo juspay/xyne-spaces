@@ -1,6 +1,17 @@
 // emojiLookup.ts
 import type { EmojiPickerEmoji } from '../hooks/useCustomEmojis';
-import emojiData from 'emoji-datasource/emoji.json';
+import type { EmojiDatasourceEntry } from 'emoji-datasource/emoji.json';
+
+let emojiDataCache: EmojiDatasourceEntry[] | null = null;
+
+/** Trigger lazy load of emoji data so it's ready for sync lookups. */
+export function preloadEmojiData(): void {
+  if (!emojiDataCache) {
+    void import('emoji-datasource/emoji.json').then(m => {
+      emojiDataCache = m.default;
+    });
+  }
+}
 
 export const findCustomEmoji = (
   name: string,
@@ -11,28 +22,31 @@ export const findCustomEmoji = (
 };
 
 export const findUnicodeEmoji = (name: string) => {
-  if (!name) return undefined;
-  const emoji = emojiData.find(e => e.short_names?.includes(name.toLowerCase()));
+  if (!name || !emojiDataCache) return undefined;
+  const emoji = emojiDataCache.find(e => e.short_names.includes(name.toLowerCase()));
   if (!emoji) return undefined;
   return { unified: emoji.unified };
 };
 
 /**
  * Lookup map from ASCII text emoticons (e.g. ":)", ":(", ":D") to their unified
- * Unicode code point string. Built once from emoji-datasource/emoji.json using the
- * `text` and `texts` fields.  Longer emoticons are added first so that more-specific
- * matches win when the lookup map is consulted.
+ * Unicode code point string. Built lazily from emojiDataCache using the `text` and
+ * `texts` fields. Longer emoticons are added first so that more-specific matches win.
  */
-const textEmoticonMap: Map<string, string> = (() => {
-  type EmojiEntry = {
-    unified: string;
-    text?: string | null;
-    texts?: string[] | null;
-  };
+type EmojiEntryWithText = {
+  unified: string;
+  text?: string | null;
+  texts?: string[] | null;
+};
 
-  // Collect all (emoticon, unified) pairs
+let textEmoticonMap: Map<string, string> | null = null;
+
+function getTextEmoticonMap(): Map<string, string> {
+  if (textEmoticonMap) return textEmoticonMap;
+  if (!emojiDataCache) return new Map();
+
   const pairs: Array<{ text: string; unified: string }> = [];
-  (emojiData as EmojiEntry[]).forEach(entry => {
+  (emojiDataCache as EmojiEntryWithText[]).forEach(entry => {
     if (!entry.unified) return;
     const candidates: string[] = [];
     if (entry.text) candidates.push(entry.text);
@@ -55,8 +69,9 @@ const textEmoticonMap: Map<string, string> = (() => {
       map.set(text, unified);
     }
   });
-  return map;
-})();
+  textEmoticonMap = map;
+  return textEmoticonMap;
+}
 
 /**
  * Returns the unified code point string for a text emoticon (e.g. ":)" → "1F603"),
@@ -64,7 +79,7 @@ const textEmoticonMap: Map<string, string> = (() => {
  */
 export const findEmojiByText = (text: string): { unified: string } | undefined => {
   if (!text) return undefined;
-  const unified = textEmoticonMap.get(text);
+  const unified = getTextEmoticonMap().get(text);
   if (!unified) return undefined;
   return { unified };
 };
@@ -73,7 +88,7 @@ export const findEmojiByText = (text: string): { unified: string } | undefined =
  * Returns all registered text emoticon strings (e.g. [":)", ":(", ":D", ...]).
  * Used by the TipTap extension to build the input-rule regex.
  */
-export const getTextEmoticons = (): string[] => Array.from(textEmoticonMap.keys());
+export const getTextEmoticons = (): string[] => Array.from(getTextEmoticonMap().keys());
 /** Convert a unified code string like "1F603" or "2764-FE0F" to an emoji character */
 function unifiedToEmoji(unified: string): string {
   return unified

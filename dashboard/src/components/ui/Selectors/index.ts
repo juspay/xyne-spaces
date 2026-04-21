@@ -10,6 +10,7 @@ export type { BaseSelectorPluginConfig } from './BaseSelectorPlugin';
 
 export { MentionSelector } from './MentionSelector';
 export { CommandSelector } from './CommandSelector';
+export { EmojiSelector } from './EmojiSelector';
 
 export type {
   MentionResult,
@@ -23,6 +24,7 @@ export {
   detectMentionTrigger,
   detectCommandTrigger,
   detectChannelTrigger,
+  detectEmojiTrigger,
   getPopoverPosition,
   getAbsolutePosition,
   getTextBeforeCursor,
