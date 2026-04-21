@@ -13,6 +13,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { EndCallModal } from '../EndCallModal/EndCallModal';
 import { useIsCallHost, useIsOnlyParticipant, useCallParticipants } from '../../../hooks/useCalls';
 import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
+import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
 
 export interface CustomLiveKitRoomProps {
   token: string;
@@ -302,6 +303,7 @@ export function CustomLiveKitRoom({
             onTicketCreated={handleTicketCreated}
           />
         )}
+        <ScreenPickerModal />
       </>
     );
   }
@@ -365,6 +367,7 @@ export function CustomLiveKitRoom({
           onTicketCreated={handleTicketCreated}
         />
       )}
+      <ScreenPickerModal />
     </>
   );
 }
