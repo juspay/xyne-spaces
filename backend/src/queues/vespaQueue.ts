@@ -5,7 +5,7 @@ import { db } from '@/database/client';
 import { registerVespaBackfillQueueMetrics } from '@/services/otel/vespaMetrics';
 
 class VespaQueue {
-	private queue: Bull.Queue<VespaJob> | null = null;
+	private queues: Map<string, Bull.Queue<VespaJob>> = new Map();
 	private isInitialized = false;
 	private isInitializing = false;
 
@@ -33,7 +33,12 @@ class VespaQueue {
 				})
 			};
 
-			this.queue = new Bull<VespaJob>('vespa-ingestion', {
+			const queueNames = (process.env.VESPA_QUEUE_NAMES || 'vespa-ingestion')
+				.split(',')
+				.map(n => n.trim())
+				.filter(Boolean);
+
+			const bullOptions = {
 				redis: redisConfig,
 				defaultJobOptions: {
 					attempts: 3,
@@ -46,14 +51,18 @@ class VespaQueue {
 					stalledInterval: 30 * 1000,    // 30 seconds
 					maxStalledCount: 1,            // Max stalled jobs before failing
 				}
-			});
-
+			};
 			this.setupEventListeners();
+			for (const name of queueNames) {
+				this.queues.set(name, new Bull<VespaJob>(name, bullOptions));
+			}
 
 			this.isInitialized = true;
-			logger.info('✓ VespaQueue initialized for all schemas');
+			logger.info(`✓ VespaQueue initialized for all schemas (queues: ${queueNames.join(', ')})`);
 
-			registerVespaBackfillQueueMetrics(() => this.getStats());
+			for (const name of queueNames) {
+				registerVespaBackfillQueueMetrics(name, () => this.getStats(name));
+			}
 		} catch (error) {
 			logger.error('Failed to initialize vespa queue:', error);
 			this.isInitialized = false;
@@ -62,19 +71,19 @@ class VespaQueue {
 		}
 	}
 
-	getQueue(): Bull.Queue<VespaJob> | null {
-		return this.queue;
+	getQueue(queueName: string): Bull.Queue<VespaJob> | undefined {
+		return this.queues.get(queueName);
 	}
 
 	get isReady(): boolean {
-		return this.isInitialized && this.queue !== null;
+		return this.isInitialized && this.queues.size > 0;
 	}
 
 	/**
 	 * Set up event listeners for queue monitoring
 	 */
 	private setupEventListeners(): void {
-		if (!this.queue) return;
+		if (!this.queues.size) return;
 
 	}
 
@@ -82,28 +91,22 @@ class VespaQueue {
 	/**
 	 * Add a job to the queue
 	 */
-	async addJob({ schema, docId, jobType, data, userId, app }: VespaJob): Promise<Bull.Job<VespaJob>> {
-		if (!this.queue || !this.isInitialized) {
+	async addJob(vespaJob: VespaJob): Promise<Bull.Job<VespaJob>[]> {
+		if (this.queues.size === 0 || !this.isInitialized) {
 			throw new Error('Vespa queue not initialized Properly');
 		}
 
+		const { schema, jobType, docId } = vespaJob;
 		try {
-			const job = await this.queue.add(`vespa-${schema}`,
-				{
-					schema,
-					docId,
-					jobType,
-					data,
-					app,
-					userId
-				},
-				{
-					priority: jobType === 'delete' ? 1 : 5,
-				}
+			const jobData: VespaJob = vespaJob;
+			const jobOpts = { priority: jobType === 'delete' ? 1 : 5 };
+
+			const jobs = await Promise.all(
+				[...this.queues.values()].map(q => q.add(`vespa-${schema}`, jobData, jobOpts))
 			);
 
 			logger.info(`Queue vespa ingestion job successfully ${schema}/${jobType}/${docId}`)
-			return job;
+			return jobs;
 		} catch (error) {
 			logger.error(
 				`Failed to add Vespa job: ${schema}/${jobType}/${docId}`,
@@ -116,24 +119,19 @@ class VespaQueue {
 	/**
 	 * Get queue statistics
 	 */
-	async getStats() {
-		if (!this.queue) {
-			return {
-				waiting: 0,
-				active: 0,
-				completed: 0,
-				failed: 0,
-				delayed: 0,
-				total: 0,
-			};
+	async getStats(queueName: string) {
+		const q = this.queues.get(queueName);
+		if (!q) {
+			logger.warn(`Queue '${queueName}' not found. Available: ${[...this.queues.keys()].join(', ')}`);
+			return { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0, total: 0 };
 		}
 
 		const [waiting, active, completed, failed, delayed] = await Promise.all([
-			this.queue.getWaitingCount(),
-			this.queue.getActiveCount(),
-			this.queue.getCompletedCount(),
-			this.queue.getFailedCount(),
-			this.queue.getDelayedCount(),
+			q.getWaitingCount(),
+			q.getActiveCount(),
+			q.getCompletedCount(),
+			q.getFailedCount(),
+			q.getDelayedCount(),
 		]);
 
 		return {
@@ -152,27 +150,23 @@ class VespaQueue {
 	async getJobs(
 		page: number = 1,
 		limit: number = 10,
-		state: 'waiting' | 'active' | 'delayed' | 'completed' | 'failed' | 'all' = 'failed'
+		state: 'waiting' | 'active' | 'delayed' | 'completed' | 'failed' | 'all' = 'failed',
+		queueName: string
 	) {
-		if (!this.queue) {
-			return {
-				jobs: [],
-				total: 0,
-				page,
-				limit,
-				totalPages: 0,
-			};
+		const q = this.queues.get(queueName);
+		if (!q) {
+			logger.warn(`Queue '${queueName}' not found. Available: ${[...this.queues.keys()].join(', ')}`);
+			return { jobs: [], total: 0, page, limit, totalPages: 0 };
 		}
-
 		let jobs: any[] = [];
 
 		if (state === 'all') {
 			const [waiting, active, delayed, completed, failed] = await Promise.all([
-				this.queue.getWaiting(),
-				this.queue.getActive(),
-				this.queue.getDelayed(),
-				this.queue.getCompleted(),
-				this.queue.getFailed(),
+				q.getWaiting(),
+				q.getActive(),
+				q.getDelayed(),
+				q.getCompleted(),
+				q.getFailed(),
 			]);
 			jobs = [
 				...waiting.map(job => ({ ...job, state: 'waiting' })),
@@ -185,19 +179,19 @@ class VespaQueue {
 			let stateJobs: any[] = [];
 			switch (state) {
 				case 'waiting':
-					stateJobs = await this.queue.getWaiting();
+					stateJobs = await q.getWaiting();
 					break;
 				case 'active':
-					stateJobs = await this.queue.getActive();
+					stateJobs = await q.getActive();
 					break;
 				case 'delayed':
-					stateJobs = await this.queue.getDelayed();
+					stateJobs = await q.getDelayed();
 					break;
 				case 'completed':
-					stateJobs = await this.queue.getCompleted();
+					stateJobs = await q.getCompleted();
 					break;
 				case 'failed':
-					stateJobs = await this.queue.getFailed();
+					stateJobs = await q.getFailed();
 					break;
 			}
 			jobs = stateJobs.map(job => ({ ...job, state }));
@@ -233,17 +227,14 @@ class VespaQueue {
 	/**
  * Retry all failed jobs from Queue
  */
-	async retryAllFailedJobs() {
-		if (!this.queue) {
-			logger.warn('⚠ Queue not initialized');
-			return {
-				success: 0,
-				failed: 0,
-				errors: ['Queue not initialized'],
-			};
+	async retryAllFailedJobs(queueName: string) {
+		const q = this.queues.get(queueName);
+		if (!q) {
+			logger.warn(`Queue '${queueName}' not found. Available: ${[...this.queues.keys()].join(', ')}`);
+			return { success: 0, failed: 0, errors: [`Queue '${queueName}' does not exist`], total: 0 };
 		}
 
-		const failedJobs = await this.queue.getFailed();
+		const failedJobs = await q.getFailed();
 		let success = 0;
 		let failed = 0;
 		const errors: string[] = [];
@@ -385,23 +376,23 @@ class VespaQueue {
 	 * Clear all jobs from queue (use with caution!)
 	 */
 	async clearQueue(): Promise<void> {
-		if (!this.queue) {
+		if (this.queues.size === 0) {
 			logger.warn(':warning: Vespa queue not initialized');
 			return;
 		}
 
-		await this.queue.empty();
-		logger.warn(':warning: Vespa queue cleared');
+		await Promise.all([...this.queues.values()].map(q => q.empty()));
+		logger.warn(':warning: Vespa queues cleared');
 	}
 
 	/**
 	 * Gracefully close the queue
 	 */
 	async close(): Promise<void> {
-		if (!this.queue) {
+		if (this.queues.size === 0) {
 			logger.info('VespaQueue already closed or never initialized');
 		} else {
-			await this.queue.close();
+			await Promise.all([...this.queues.values()].map(q => q.close()));
 			logger.info('VespaQueue closed');
 		}
 	}

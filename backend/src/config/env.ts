@@ -196,6 +196,9 @@ const envSchema = Joi.object({
   JIRA_MIGRATION_BOT_AUTH_TOKEN: Joi.string().allow('').default(''),
   // Bit-Bot Integration
   ENABLE_FILE_INDEXING: Joi.boolean().default(false),
+  VESPA_QUEUE_NAMES: Joi.string().default(''),
+  VESPA_FEED_URL: Joi.string().uri().default(''),
+  VESPA_QUERY_URL: Joi.string().uri().default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);

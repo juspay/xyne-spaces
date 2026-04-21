@@ -1,10 +1,9 @@
 
-import config, { CLUSTER, NAMESPACE, vespaBaseHost } from "../vespaConfig"
+import config, { CLUSTER, NAMESPACE } from "../vespaConfig"
 import { logger } from "@/utils/logger"
 import { createVespaService, createDefaultConfig, type VespaDependencies } from "../src"
 
 const vespaConfig = createDefaultConfig({
-    vespaBaseHost: vespaBaseHost,
     page: config.VespaPageSize,
     isDebugMode: config.isDebugMode,
     namespace: NAMESPACE,
