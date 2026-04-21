@@ -22,6 +22,7 @@ interface CalendarMonthViewProps {
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
+  onCreateCall?: (date: Date) => void;
 }
 
 const DAYS_OF_WEEK = DAY_NAMES;
@@ -53,6 +54,7 @@ const CalendarMonthView = ({
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
+  onCreateCall,
 }: CalendarMonthViewProps): ReactElement => {
   const today = new Date();
   const year = currentMonth.getFullYear();
@@ -108,10 +110,33 @@ const CalendarMonthView = ({
               return (
                 <div
                   key={di}
+                  role={day && onCreateCall ? 'gridcell' : undefined}
+                  tabIndex={day && onCreateCall ? 0 : undefined}
                   className={cn(
                     'border-r last:border-r-0 border-border p-1.5 min-h-[120px] flex flex-col',
                     !day && 'bg-muted/10',
+                    day && onCreateCall && 'cursor-pointer',
                   )}
+                  onClick={
+                    day && onCreateCall
+                      ? () => {
+                          if (openCallId ?? openOverflowDay) return;
+                          onCreateCall(day);
+                        }
+                      : undefined
+                  }
+                  onKeyDown={
+                    day && onCreateCall
+                      ? e => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            if (openCallId ?? openOverflowDay) return;
+                            onCreateCall(day);
+                          }
+                        }
+                      : undefined
+                  }
+                  data-track-category={day && onCreateCall ? 'Calls' : undefined}
+                  data-track-name={day && onCreateCall ? 'calendar-month-cell-create' : undefined}
                 >
                   {day && (
                     <>
@@ -131,6 +156,9 @@ const CalendarMonthView = ({
                             >
                               <PopoverPrimitive.Trigger asChild>
                                 <button
+                                  onClick={e => e.stopPropagation()}
+                                  data-track-category='Calls'
+                                  data-track-name='calendar-month-call-pill'
                                   className='relative flex items-center gap-1 text-left w-full px-1 py-0.5 rounded transition-colors cursor-pointer focus:outline-none'
                                   style={{
                                     backgroundColor:
@@ -229,7 +257,13 @@ const CalendarMonthView = ({
                             }}
                           >
                             <PopoverPrimitive.Trigger asChild>
-                              <button className='text-[11px] font-medium px-1 cursor-pointer hover:underline text-left focus:outline-none text-action-primary'>
+                              <button
+                                onClick={e => e.stopPropagation()}
+                                data-track-category='Calls'
+                                data-track-name='calendar-month-overflow'
+                                className='text-[11px] font-medium px-1 cursor-pointer hover:underline text-left focus:outline-none'
+                                style={{ color: '#6276BE' }}
+                              >
                                 +{overflow} more
                               </button>
                             </PopoverPrimitive.Trigger>

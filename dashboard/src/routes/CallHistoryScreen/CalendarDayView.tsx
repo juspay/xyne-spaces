@@ -16,6 +16,7 @@ import DragOverlayCard from './DragOverlayCard';
 import RecurringRescheduleDialog from './RecurringRescheduleDialog';
 import { useDragReschedule, type DragPreview } from './useDragReschedule';
 import { useResizeEndTime, type ResizePreview } from './useResizeEndTime';
+import { useDragCreate } from './useDragCreate';
 import { CalendarEventGhost } from './CalendarEventGhost';
 import {
   POPOVER_CONTENT_CLASS,
@@ -33,6 +34,7 @@ import {
   dayKey,
   isCallDraggable,
 } from './CalenderViewUtils';
+import { CalendarTimeSlotCell } from './CalendarTimeSlotCell';
 
 interface CalendarDayViewProps {
   calls: Call[];
@@ -42,6 +44,7 @@ interface CalendarDayViewProps {
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
+  onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
 }
 
 const TIME_GUTTER_WIDTH = 90;
@@ -99,7 +102,10 @@ function DayViewCallCard({
           ref={setNodeRef}
           {...attributes}
           {...(draggable ? listeners : {})}
+          onClick={e => e.stopPropagation()}
           title={call.title ?? 'Call'}
+          data-track-category='Calls'
+          data-track-name='calendar-day-call-card'
           className='group absolute left-2 right-2 rounded overflow-hidden text-left border-l-[3px] z-[5] focus:outline-none'
           style={{
             top,
@@ -219,12 +225,37 @@ function DayViewCallCard({
 
 // ── Droppable day column ──────────────────────────────────────────────────────
 
-function DroppableDayColumn({ date, children }: { date: Date; children: ReactNode }): ReactElement {
+function DroppableDayColumn({
+  date,
+  children,
+  isPopoverOpen,
+  onCreateCallAtSlot,
+  onDragCreatePointerDown,
+  consumeDragEnd,
+}: {
+  date: Date;
+  children: ReactNode;
+  isPopoverOpen: boolean;
+  onCreateCallAtSlot: ((startsAt: Date, endsAt: Date) => void) | undefined;
+  onDragCreatePointerDown:
+    | ((e: React.PointerEvent<HTMLDivElement>, date: Date) => void)
+    | undefined;
+  consumeDragEnd: (() => boolean) | undefined;
+}): ReactElement {
   const { setNodeRef } = useDroppable({ id: dayKey(date) });
+
   return (
-    <div ref={setNodeRef} className='flex-1 relative'>
+    <CalendarTimeSlotCell
+      setNodeRef={setNodeRef}
+      date={date}
+      isPopoverOpen={isPopoverOpen}
+      onCreateCallAtSlot={onCreateCallAtSlot}
+      onDragCreatePointerDown={onDragCreatePointerDown}
+      consumeDragEnd={consumeDragEnd}
+      trackName='calendar-day-slot-create'
+    >
       {children}
-    </div>
+    </CalendarTimeSlotCell>
   );
 }
 
@@ -271,6 +302,7 @@ const CalendarDayView = ({
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
+  onCreateCallAtSlot,
 }: CalendarDayViewProps): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
@@ -303,6 +335,11 @@ const CalendarDayView = ({
     confirmSingleResize,
     cancelSingleResize,
   } = useResizeEndTime(scrollRef);
+
+  const { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd } = useDragCreate(
+    scrollRef,
+    onCreateCallAtSlot,
+  );
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -398,7 +435,13 @@ const CalendarDayView = ({
             </div>
 
             {/* Day column */}
-            <DroppableDayColumn date={currentDay}>
+            <DroppableDayColumn
+              date={currentDay}
+              isPopoverOpen={openCallId !== null}
+              onCreateCallAtSlot={onCreateCallAtSlot}
+              onDragCreatePointerDown={onDragCreatePointerDown}
+              consumeDragEnd={consumeDragEnd}
+            >
               {/* Hour grid lines */}
               {HOURS.map(hour => (
                 <div
@@ -422,6 +465,18 @@ const CalendarDayView = ({
 
               {/* Resize ghost */}
               {resizePreview && <ResizeGhost resizePreview={resizePreview} />}
+
+              {/* Drag-create ghost */}
+              {dragCreatePreview && (
+                <CalendarEventGhost
+                  top={topPxForMinutes(dragCreatePreview.startMins)}
+                  height={Math.max(
+                    MIN_EVENT_HEIGHT,
+                    topPxForMinutes(dragCreatePreview.endMins - dragCreatePreview.startMins),
+                  )}
+                  formattedTime={dragCreatePreview.formattedTime}
+                />
+              )}
 
               {/* Call event blocks */}
               {dayCalls.map(call => {

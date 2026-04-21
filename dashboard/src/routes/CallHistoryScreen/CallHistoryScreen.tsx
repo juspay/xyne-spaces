@@ -79,6 +79,10 @@ const CallHistoryScreen = (): ReactElement => {
   const location = useLocation();
   const allChannels = useAllChannels();
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [scheduleInitialTime, setScheduleInitialTime] = useState<{
+    startsAt: Date;
+    endsAt: Date;
+  } | null>(null);
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
@@ -269,6 +273,23 @@ const CallHistoryScreen = (): ReactElement => {
     if (newTab !== 'upcoming') {
       setViewMode('list');
     }
+  };
+
+  const handleCreateCallAtSlot = (startsAt: Date, endsAt: Date) => {
+    setScheduleInitialTime({ startsAt, endsAt });
+    setIsScheduleModalOpen(true);
+  };
+
+  const handleCreateCallOnDay = (date: Date) => {
+    if (isSameDay(date, new Date())) {
+      setScheduleInitialTime(null);
+      setIsScheduleModalOpen(true);
+      return;
+    }
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    const start = new Date(date);
+    start.setHours(11, 0, 0, 0);
+    handleCreateCallAtSlot(start, new Date(start.getTime() + ONE_HOUR_MS));
   };
 
   const handleCalendarPrev = () => {
@@ -959,6 +980,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
                   onEditClick={call => handleEditClick(call)}
+                  onCreateCall={handleCreateCallOnDay}
                 />
               )}
               {calendarSubView === 'week' && (
@@ -970,6 +992,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
                   onEditClick={call => handleEditClick(call)}
+                  onCreateCallAtSlot={handleCreateCallAtSlot}
                 />
               )}
               {calendarSubView === 'day' && (
@@ -981,6 +1004,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
                   onEditClick={call => handleEditClick(call)}
+                  onCreateCallAtSlot={handleCreateCallAtSlot}
                 />
               )}
             </div>
@@ -1080,7 +1104,12 @@ const CallHistoryScreen = (): ReactElement => {
       {/* Schedule Call Modal (create) */}
       <ScheduleCallModal
         isOpen={isScheduleModalOpen}
-        onClose={() => setIsScheduleModalOpen(false)}
+        onClose={() => {
+          setIsScheduleModalOpen(false);
+          setScheduleInitialTime(null);
+        }}
+        initialStartsAt={scheduleInitialTime?.startsAt ?? null}
+        initialEndsAt={scheduleInitialTime?.endsAt ?? null}
       />
 
       {/* Schedule Call Modal (edit) */}

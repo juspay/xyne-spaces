@@ -1,3 +1,4 @@
+import type React from 'react';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import { Call } from './callHistoryItem.utils';
 
@@ -6,6 +7,32 @@ import { Call } from './callHistoryItem.utils';
 /** Inverse of topPxForMinutes: pixel offset → minutes since midnight (raw, not snapped) */
 export function minutesFromTopPx(px: number): number {
   return (px / HOUR_HEIGHT) * 60;
+}
+
+/**
+ * Returns a click handler for time-grid slot cells (day/week views).
+ * Computes the clicked time from the pointer Y offset, snaps to 30-min boundaries,
+ * and calls onCreateCallAtSlot with a 1-hour window.
+ */
+export function createSlotClickHandler(
+  date: Date,
+  isPopoverOpen: boolean,
+  consumeDragEnd: (() => boolean) | undefined,
+  onCreateCallAtSlot: ((startsAt: Date, endsAt: Date) => void) | undefined,
+): (e: React.MouseEvent<HTMLDivElement>) => void {
+  return (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isPopoverOpen || consumeDragEnd?.()) return;
+    if (!onCreateCallAtSlot) return;
+    const rawMins = minutesFromTopPx(e.clientY - e.currentTarget.getBoundingClientRect().top);
+    const hour = Math.floor(rawMins / 60);
+    const snappedStart = hour * 60 + (rawMins % 60 < 30 ? 0 : 30);
+    const start = new Date(date);
+    start.setHours(Math.floor(snappedStart / 60), snappedStart % 60, 0, 0);
+    const end = new Date(date);
+    const snappedEnd = snappedStart + 60;
+    end.setHours(Math.floor(snappedEnd / 60), snappedEnd % 60, 0, 0);
+    onCreateCallAtSlot(start, end);
+  };
 }
 
 /** Snap a minute value to the nearest 15-minute interval */
