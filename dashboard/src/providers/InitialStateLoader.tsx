@@ -98,6 +98,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   const persistenceSetup = useRef(false);
 
   const [isHydrated, setIsHydrated] = useState(false);
+  const [permissionsHydrated, setPermissionsHydrated] = useState(false);
   const context = useAuthContextValues();
   const zero = useZero();
   const state = useConnectionState();
@@ -441,6 +442,11 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     enabled: !!context.userID,
   });
 
+  // Reset permission hydration when auth identity changes.
+  useEffect(() => {
+    setPermissionsHydrated(false);
+  }, [context.userID]);
+
   useEffect(() => {
     if (isQueryCompleted(visibleChannelsDetails)) {
       const channels = (visibleChannels || [])
@@ -458,6 +464,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
         type: 'SET_USER_PERMISSIONS',
         permissions: permissionsQuery.data.permissions || [],
       });
+      setPermissionsHydrated(true);
     }
 
     if (isQueryCompleted(bookmarksDetails)) {
@@ -489,7 +496,9 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     usersLoaded &&
     channelsLoaded &&
     areQueriesCompleted([bookmarksDetails, visibleChannelsDetails]) &&
-    permissionsQuery.isSuccess;
+    permissionsQuery.isSuccess &&
+    permissionsQuery.data?.success === true &&
+    permissionsHydrated;
 
   if (areAllQueriesCompleted) {
     return (
