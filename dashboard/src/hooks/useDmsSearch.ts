@@ -66,6 +66,10 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   }, [allChannels, dmSearchQuery, usersById]);
 
+  // Autofocus search input when navigating to DM page
+  useEffect(() => {
+    dmSearchInputRef.current?.focus();
+  }, []);
   /** User IDs already represented by an existing 1:1 DM channel with current user */
   const usersWithExistingDm = useMemo(() => {
     const existing1on1Dms = allChannels.filter(ch => ch.scopeType === ChannelScopeType.DM);
