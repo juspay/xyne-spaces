@@ -33,12 +33,14 @@ import { EditorToolbar } from '../EditorToolbar';
 import { EmojiPickerButton } from '../EditorToolbar';
 import { MentionSelector } from '../Selectors';
 import { CommandSelector } from '../Selectors';
+import { EmojiSelector } from '../Selectors';
 import { AttachmentPreview } from '../files';
 import type { UploadedFile } from '../files/Files.types';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import type { MentionResult } from '../Selectors/Selectors.types';
 import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
+import { EmojiSelectorExtension, emojiSelectorPluginKey } from '../TipTapExtensions';
 import { ChannelMentionExtension, channelMentionPluginKey } from '../TipTapExtensions';
 import { TableExtensions } from '../TipTapExtensions';
 import { ColonEmojiExtension } from '../TipTapExtensions/ColonEmojiExtension';
@@ -74,6 +76,7 @@ const getFileExtension = (name: string): string => {
   const dotIndex = name.lastIndexOf('.');
   return dotIndex > 0 ? name.slice(dotIndex).toLowerCase() : '';
 };
+import { preloadEmojiData } from '../../../utils/emojiLookup';
 
 const lowlight = createLowlight(common);
 
@@ -115,6 +118,9 @@ const MaxListDepthPlugin = Extension.create({
     ];
   },
 });
+
+// Eagerly start loading emoji data so it's ready for sync lookups
+preloadEmojiData();
 
 export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
   (
@@ -452,6 +458,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         }),
         ChannelMentionExtension,
         CommandsExtension,
+        EmojiSelectorExtension,
         ...TableExtensions,
       ],
       content: value || '',
@@ -539,12 +546,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             const mentionState = mentionPluginKey.getState(view.state);
             const channelMentionState = channelMentionPluginKey.getState(view.state);
             const commandState = commandPluginKey.getState(view.state);
+            const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
 
             // If any menu is open, let it handle the Enter key
             if (
               (mentionState?.isOpen && mentionState.items.length > 0) ||
               (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
-              (commandState?.isOpen && commandState.items.length > 0)
+              (commandState?.isOpen && commandState.items.length > 0) ||
+              (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
             ) {
               return false;
             }
@@ -989,6 +998,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           {...(onChannelSearch && { onMentionSearch: onChannelSearch })}
           {...(onChannelSelect && { onMentionSelect: handleChannelSelect })}
         />
+
+        {features.emojiPicker && (
+          <EmojiSelector editor={editor} customEmojis={customEmojis ?? []} />
+        )}
 
         <div
           className={`

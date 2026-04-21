@@ -4,6 +4,9 @@ export type { MentionOptions, MentionPluginState } from './MentionExtension';
 export { CommandsExtension, commandPluginKey } from './CommandsExtension';
 export type { CommandPluginState } from './CommandsExtension';
 
+export { EmojiSelectorExtension, emojiSelectorPluginKey } from './EmojiSelectorExtension';
+export type { EmojiSelectorPluginState } from './EmojiSelectorExtension';
+
 export { ChannelMentionExtension, channelMentionPluginKey } from './ChannelMentionExtension';
 export type {
   ChannelMentionOptions,

@@ -77,6 +77,10 @@ export const detectChannelTrigger = (editor: Editor): TriggerMatch | null => {
   return detectTrigger(editor, /#([\w-]*)$/);
 };
 
+export const detectEmojiTrigger = (editor: Editor): TriggerMatch | null => {
+  return detectTrigger(editor, /(?:^|[\s\u200B]):(\w{2,})$/);
+};
+
 export const getAbsolutePosition = (editor: Editor, pos: number): EditorPosition | null => {
   const { view } = editor;
   const coords = view.coordsAtPos(pos);

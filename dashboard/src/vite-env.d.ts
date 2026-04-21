@@ -25,3 +25,13 @@ interface ImportMeta {
 }
 
 declare const __APP_VERSION__: string;
+
+declare module 'emoji-datasource/emoji.json' {
+  export interface EmojiDatasourceEntry {
+    short_name: string;
+    short_names: string[];
+    unified: string;
+  }
+  const data: EmojiDatasourceEntry[];
+  export default data;
+}
