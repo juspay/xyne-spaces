@@ -45,7 +45,8 @@ export class VespaWorker {
 			// Worker connects to the EXISTING queue created by the API server
 			// Multiple Bull instances with the same name share the same Redis queue
 			// The API server (vespaBullQueue) is the producer, worker is the consumer
-			this.queue = new Bull<VespaJob>('vespa-ingestion', {
+			const queueName = process.env.VESPA_WORKER_QUEUE_NAME || 'vespa-ingestion';
+			this.queue = new Bull<VespaJob>(queueName, {
 				redis: redisConfig,
 				defaultJobOptions: {
 					attempts: 3,           // Retry failed jobs 3 times
@@ -60,7 +61,7 @@ export class VespaWorker {
 				}
 			});
 
-			logger.info('[VESPA_WORKER] Connected to existing vespa-ingestion queue in Redis');
+			logger.info(`[VESPA_WORKER] Connected to existing ${queueName} queue in Redis`);
 
 			// Setup the worker to process jobs
 			this.setupWorker();

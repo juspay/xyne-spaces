@@ -8,12 +8,13 @@ function getMeter(): Meter {
 
 
 // Vespa backfill queue gauges
-let _backfillQueueGaugesRegistered = false;
+const _registeredQueues = new Set<string>();
 export function registerVespaBackfillQueueMetrics(
+  queueName: string,
   getStats: () => Promise<{ waiting: number; active: number; completed: number; failed: number; delayed: number; total: number }>
 ): void {
-  if (_backfillQueueGaugesRegistered) return;
-  _backfillQueueGaugesRegistered = true;
+  if (_registeredQueues.has(queueName)) return;
+  _registeredQueues.add(queueName);
 
   const meter = getMeter();
   const states = ['waiting', 'active', 'completed', 'failed', 'delayed', 'total'] as const;
@@ -24,7 +25,7 @@ export function registerVespaBackfillQueueMetrics(
       unit: '1',
     }).addCallback(async (result) => {
       const stats = await getStats();
-      result.observe(stats[state]);
+      result.observe(stats[state], { queue: queueName });
     });
   }
 }

@@ -44,10 +44,8 @@ class VespaClient {
     this.maxRetries = config?.vespaMaxRetryAttempts || 3;
     this.retryDelay = config?.vespaRetryDelay || 1000;
 
-    const baseHost = config?.vespaBaseHost || 'localhost';
-
-    this.feedEndpoint = config?.feedEndpoint || `http://${baseHost}:8080`;
-    this.queryEndpoint = config?.queryEndpoint || `http://${baseHost}:8081`;
+    this.feedEndpoint = config?.feedEndpoint || `http://localhost:8080`;
+    this.queryEndpoint = config?.queryEndpoint || `http://localhost:8081`;
 
     const maxConnections = config?.maxConnections || 16;
     const agentOptions = {

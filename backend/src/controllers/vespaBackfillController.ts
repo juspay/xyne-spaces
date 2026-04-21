@@ -761,6 +761,7 @@ export class AdminBackfillController {
       const schemasParam = req.query.schemas as string | undefined;
       const fromTimestampParam = req.query.fromTimestamp as string | undefined;
       const filtersParam = req.query.filters as string | undefined;
+      const queueName = req.query.queueName as string;
 
       // Determine which schemas to backfill
       const requestedSchemas = schemasParam
@@ -831,7 +832,7 @@ export class AdminBackfillController {
       logger.info(`📊 Backfilling schemas: ${schemasToBackfill.join(', ')}`);
 
       // Get initial queue stats
-      const initialStats = await vespaQueue.getStats();
+      const initialStats = await vespaQueue.getStats(queueName);
 
       // Generate a unique job ID for tracking
       const backfillJobId = `backfill-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -874,6 +875,7 @@ export class AdminBackfillController {
       AdminBackfillController.executeBackfillInBackground(
         schemasToBackfill,
         backfillJobId,
+        queueName,
         cutoffTime,
         fromTime,
         filters,
@@ -901,6 +903,7 @@ export class AdminBackfillController {
   private static async executeBackfillInBackground(
     schemasToBackfill: string[],
     backfillJobId: string,
+    queueName: string,
     cutoffTime?: Date,
     fromTime?: Date | null,
     filters?: BackfillFilters | null,
@@ -948,7 +951,7 @@ export class AdminBackfillController {
       }
 
       const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);
-      const finalStats = await vespaQueue.getStats();
+      const finalStats = await vespaQueue.getStats(queueName);
 
       logger.info(`✅ Background backfill job ${backfillJobId} completed successfully`);
       logger.info(`📊 Total jobs queued: ${totalQueued}`);
@@ -965,10 +968,12 @@ export class AdminBackfillController {
    * @route GET /api/admin/vespa-backfill/stats
    * @access Authenticated users
    */
-  public static async getQueueStats(_req: Request, res: Response): Promise<void> {
+  public static async getQueueStats(req: Request, res: Response): Promise<void> {
     try {
+      const queueName = req.query.queueName as string;
+
       logger.debug('[Backfill] Fetching queue stats...');
-      const stats = await vespaQueue.getStats();
+      const stats = await vespaQueue.getStats(queueName);
       logger.debug(`[Backfill] Queue stats: ${JSON.stringify(stats)}`);
 
       res.status(200).json({
@@ -998,6 +1003,7 @@ export class AdminBackfillController {
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 100;
       const state = (req.query.state as string) || 'failed';
+      const queueName = req.query.queueName as string;
 
       // Validate state parameter
       const validStates = ['waiting', 'active', 'delayed', 'completed', 'failed', 'all'];
@@ -1014,7 +1020,8 @@ export class AdminBackfillController {
       const result = await vespaQueue.getJobs(
         page,
         limit,
-        state as 'waiting' | 'active' | 'delayed' | 'completed' | 'failed' | 'all'
+        state as 'waiting' | 'active' | 'delayed' | 'completed' | 'failed' | 'all',
+        queueName
       );
 
       res.status(200).json({
@@ -1039,10 +1046,11 @@ export class AdminBackfillController {
    * @route POST /api/admin/vespa-backfill/retry-failed
    * @access Authenticated users
    */
-  public static async retryFailedJobs(_req: Request, res: Response): Promise<void> {
+  public static async retryFailedJobs(req: Request, res: Response): Promise<void> {
     try {
+      const queueName = req.query.queueName as string;
       // Use the centralized retryAllFailedJobs function from vespaBullQueue
-      const result = await vespaQueue.retryAllFailedJobs();
+      const result = await vespaQueue.retryAllFailedJobs(queueName);
 
       res.status(200).json({
         success: true,
@@ -1075,6 +1083,7 @@ export class AdminBackfillController {
   public static async clearJobsByState(req: Request, res: Response): Promise<void> {
     try {
       const state = req.query.state as string;
+      const queueName = req.query.queueName as string;
 
       // Validate state parameter
       const validStates: readonly string[] = ['wait', 'active', 'delayed', 'completed', 'failed', 'all'];
@@ -1088,7 +1097,7 @@ export class AdminBackfillController {
         return;
       }
 
-      const queue = vespaQueue.getQueue();
+      const queue = vespaQueue.getQueue(queueName);
       if (!queue) {
         res.status(500).json({
           success: false,
@@ -1099,7 +1108,7 @@ export class AdminBackfillController {
       }
 
       // Get stats before clearing for reporting
-      const statsBefore = await vespaQueue.getStats();
+      const statsBefore = await vespaQueue.getStats(queueName);
 
       if (state === 'all') {
         // Clear all states
@@ -1117,7 +1126,7 @@ export class AdminBackfillController {
         await queue.clean(0, state as 'completed' | 'failed' | 'wait' | 'active' | 'delayed');
       } 
 
-      const statsAfter = await vespaQueue.getStats();
+      const statsAfter = await vespaQueue.getStats(queueName);
 
       res.status(200).json({
         success: true,
