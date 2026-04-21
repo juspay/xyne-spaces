@@ -436,6 +436,7 @@ const Info = ({
             channel={channel}
             {...(previousChannelId !== undefined && { previousChannelId })}
             isParticipant={isParticipant}
+            userRole={currentUserParticipant?.role ?? null}
             {...(onClose && { onClose })}
             isDM={isDM}
             dmUserId={targetUserId}
