@@ -43,6 +43,9 @@ import { logger, Event } from '../utils/logger';
 // Set LiveKit log level
 setLogLevel('warn');
 
+// Auto-mute threshold: mute the joining user when more than this many remote participants are already in the call
+const DEFAULT_MUTE_THRESHOLD = 5;
+
 export interface ParticipantInfo {
   identity: string;
   name?: string;
@@ -1061,10 +1064,15 @@ export const roomMachine = setup({
       if (context.room) {
         const enableTracksAndSelectDevices = async (): Promise<void> => {
           try {
-            // First, enable tracks and wait for them to be created
-            await context.room!.localParticipant.setMicrophoneEnabled(true);
+            const alreadyJoinedCount = context.room!.remoteParticipants.size;
+            const shouldMuteByDefault = alreadyJoinedCount > DEFAULT_MUTE_THRESHOLD;
 
-            // This triggers the ActiveDeviceChanged event that the UI listens to
+            if (!shouldMuteByDefault) {
+              // Fewer than or equal to threshold members — enable mic as normal
+              await context.room!.localParticipant.setMicrophoneEnabled(true);
+            }
+
+            // Always select default audio devices regardless of mute state
             await context.room!.switchActiveDevice('audioinput', 'default');
             await context.room!.switchActiveDevice('audiooutput', 'default');
           } catch {
