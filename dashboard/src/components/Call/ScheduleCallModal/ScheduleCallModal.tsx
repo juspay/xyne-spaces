@@ -51,6 +51,9 @@ interface ScheduleCallModalProps {
   mode?: 'create' | 'edit';
   /** Called after a successful edit save. */
   onSuccess?: () => void;
+  /** Pre-fill start/end when opening in create mode from a calendar click. */
+  initialStartsAt?: Date | null;
+  initialEndsAt?: Date | null;
 }
 
 interface ScheduleCallFormData {
@@ -134,6 +137,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   initialCall,
   mode = 'create',
   onSuccess,
+  initialStartsAt,
+  initialEndsAt,
 }) => {
   const user = useSelf();
   const allUsers = useUsers();
@@ -399,17 +404,20 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       setIsRecurring(!!initialCall.recurringSeriesId);
     } else {
       const displayName = getUserDisplayName(user);
+      const start = initialStartsAt ?? defaultStart;
+      const end = initialEndsAt ?? new Date(start.getTime() + 60 * 60 * 1000);
       if (displayName !== 'Unknown') {
-        const firstName = displayName.split(' ')[0];
         reset({
-          title: `${firstName}'s Call`,
-          startsAt: defaultStart,
-          endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
+          title: `${displayName.split(' ')[0]}'s Call`,
+          startsAt: start,
+          endsAt: end,
           participants: [],
         });
       }
+      setRecurringStartTime(toHHMM(start));
+      setRecurringEndTime(toHHMM(end));
     }
-  }, [isOpen]);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── When series data arrives: pre-fill recurrence UI ────────────────────
   useEffect(() => {

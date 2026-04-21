@@ -16,6 +16,7 @@ import DragOverlayCard from './DragOverlayCard';
 import RecurringRescheduleDialog from './RecurringRescheduleDialog';
 import { useDragReschedule, type DragPreview } from './useDragReschedule';
 import { useResizeEndTime, type ResizePreview } from './useResizeEndTime';
+import { useDragCreate } from './useDragCreate';
 import { CalendarEventGhost } from './CalendarEventGhost';
 import {
   POPOVER_CONTENT_CLASS,
@@ -36,6 +37,7 @@ import {
   computeOverlapIndices,
   isCallDraggable,
 } from './CalenderViewUtils';
+import { CalendarTimeSlotCell } from './CalendarTimeSlotCell';
 
 interface CalendarWeekViewProps {
   calls: Call[];
@@ -45,6 +47,7 @@ interface CalendarWeekViewProps {
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
+  onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
 }
 
 const TIME_GUTTER_WIDTH = 80;
@@ -110,7 +113,10 @@ function WeekViewCallCard({
           ref={setNodeRef}
           {...attributes}
           {...(draggable ? listeners : {})}
+          onClick={e => e.stopPropagation()}
           title={call.title ?? 'Call'}
+          data-track-category='Calls'
+          data-track-name='calendar-week-call-card'
           className='group absolute right-1 rounded overflow-hidden text-left border-l-[3px] z-[5] focus:outline-none'
           style={{
             top,
@@ -235,21 +241,42 @@ interface DroppableDayColumnProps {
   date: Date;
   isToday: boolean;
   children: ReactNode;
+  isPopoverOpen: boolean;
+  onCreateCallAtSlot: ((startsAt: Date, endsAt: Date) => void) | undefined;
+  onDragCreatePointerDown:
+    | ((e: React.PointerEvent<HTMLDivElement>, date: Date) => void)
+    | undefined;
+  consumeDragEnd: (() => boolean) | undefined;
 }
 
-function DroppableDayColumn({ date, isToday, children }: DroppableDayColumnProps): ReactElement {
+function DroppableDayColumn({
+  date,
+  isToday,
+  children,
+  isPopoverOpen,
+  onCreateCallAtSlot,
+  onDragCreatePointerDown,
+  consumeDragEnd,
+}: DroppableDayColumnProps): ReactElement {
   const { setNodeRef, isOver } = useDroppable({ id: dayKey(date) });
+
   return (
-    <div
-      ref={setNodeRef}
+    <CalendarTimeSlotCell
+      setNodeRef={setNodeRef}
+      date={date}
+      isPopoverOpen={isPopoverOpen}
+      onCreateCallAtSlot={onCreateCallAtSlot}
+      onDragCreatePointerDown={onDragCreatePointerDown}
+      consumeDragEnd={consumeDragEnd}
+      trackName='calendar-week-slot-create'
       className={cn(
-        'flex-1 relative border-r last:border-r-0 border-border',
+        'border-r last:border-r-0 border-border',
         isToday && 'bg-primary/[0.02]',
         isOver && 'bg-primary/[0.04]',
       )}
     >
       {children}
-    </div>
+    </CalendarTimeSlotCell>
   );
 }
 
@@ -308,6 +335,7 @@ const CalendarWeekView = ({
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
+  onCreateCallAtSlot,
 }: CalendarWeekViewProps): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
@@ -340,6 +368,11 @@ const CalendarWeekView = ({
     confirmSingleResize,
     cancelSingleResize,
   } = useResizeEndTime(scrollRef);
+
+  const { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd } = useDragCreate(
+    scrollRef,
+    onCreateCallAtSlot,
+  );
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -496,7 +529,15 @@ const CalendarWeekView = ({
                   const colDateKey = dayKey(day);
 
                   return (
-                    <DroppableDayColumn key={i} date={day} isToday={isToday}>
+                    <DroppableDayColumn
+                      key={i}
+                      date={day}
+                      isToday={isToday}
+                      isPopoverOpen={openCallId !== null}
+                      onCreateCallAtSlot={onCreateCallAtSlot}
+                      onDragCreatePointerDown={onDragCreatePointerDown}
+                      consumeDragEnd={consumeDragEnd}
+                    >
                       {/* Move-drag ghost */}
                       {dragPreview && (
                         <DropGhost
@@ -509,6 +550,21 @@ const CalendarWeekView = ({
                       {/* Resize ghost */}
                       {resizePreview && (
                         <ResizeGhost resizePreview={resizePreview} columnDateKey={colDateKey} />
+                      )}
+
+                      {/* Drag-create ghost */}
+                      {dragCreatePreview?.dateKey === colDateKey && (
+                        <CalendarEventGhost
+                          compact
+                          top={topPxForMinutes(dragCreatePreview.startMins)}
+                          height={Math.max(
+                            MIN_EVENT_HEIGHT,
+                            topPxForMinutes(
+                              dragCreatePreview.endMins - dragCreatePreview.startMins,
+                            ),
+                          )}
+                          formattedTime={dragCreatePreview.formattedTime}
+                        />
                       )}
 
                       {dayCalls.map((call, callIdx) => {
