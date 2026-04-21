@@ -91,9 +91,9 @@ export const DmListItem = ({
     const senderFirstName =
       lastMessage.senderId === context.userID
         ? 'You'
-        : (lastMessageSender?.name?.split(' ')[0] ?? 'Unknown');
+        : (lastMessageSender?.name?.split(' ')[0] ?? '');
 
-    const prefix = `${senderFirstName}: `;
+    const prefix = senderFirstName ? `${senderFirstName}: ` : '';
 
     return (
       <>
@@ -346,15 +346,20 @@ const DMItemAvatar = ({
     const participantIds = parseDMParticipantIds(channel);
     const otherParticipantIds = participantIds.filter(id => id !== currentUserId);
     return (
-      <div className='size-[44px] rounded-md shrink-0 flex items-center justify-center overflow-visible mt-[3px]'>
+      <div className='size-10 rounded-[8px] shrink-0 flex items-center justify-center overflow-visible'>
         <AvatarGroup userIds={otherParticipantIds} size='md' isGroupDMAvatar />
       </div>
     );
   }
 
   return (
-    <div className='size-[44px] rounded-md shrink-0 flex items-center justify-center overflow-visible mt-[3px]'>
-      <Avatar userId={userId} size='lg' showActiveStatus={scopeType === ChannelScopeType.DM} />
+    <div className='relative size-10 shrink-0 rounded-[8px] overflow-visible'>
+      <Avatar
+        userId={userId}
+        size='lg'
+        className='size-full rounded-[8px]'
+        showActiveStatus={scopeType === ChannelScopeType.DM}
+      />
     </div>
   );
 };

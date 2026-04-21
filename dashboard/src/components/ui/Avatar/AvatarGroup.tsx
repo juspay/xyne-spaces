@@ -142,22 +142,22 @@ const AvatarGroup = ({
         {...props}
       >
         {backUserId && (
-          <div className='absolute bottom-0 right-0 w-7 h-7 rounded-md ring-1 ring-background overflow-hidden z-10'>
+          <div className='absolute bottom-0 right-0 w-7 h-7 rounded-md ring-1 ring-background overflow-hidden z-10 [&_[data-slot="avatar"]]:rounded-md'>
             <Avatar
               userId={backUserId}
               size='sm'
               showActiveStatus={false}
-              className='w-full h-full rounded-none object-cover'
+              className='w-full h-full rounded-none'
             />
           </div>
         )}
         {frontUserId && (
-          <div className='absolute top-0 left-0 w-7 h-7 rounded-md ring-1 ring-background overflow-hidden z-0'>
+          <div className='absolute top-0 left-0 w-7 h-7 rounded-md ring-1 ring-background overflow-hidden z-0 [&_[data-slot="avatar"]]:rounded-md'>
             <Avatar
               userId={frontUserId}
               size='sm'
               showActiveStatus={false}
-              className='w-full h-full rounded-none object-cover'
+              className='w-full h-full rounded-none'
             />
           </div>
         )}
