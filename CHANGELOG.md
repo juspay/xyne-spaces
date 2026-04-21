@@ -1,3 +1,10 @@
+## [1.124.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.123.0...v1.124.0) (2026-04-21)
+
+
+### Features
+
+* Redis job to multiple workers ([4074bfd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4074bfd050ce3a15b5c28df30b916e92feea960f)), closes [#5194](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5194)
+
 ## [1.123.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.122.0...v1.123.0) (2026-04-21)
 
 
