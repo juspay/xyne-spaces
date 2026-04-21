@@ -70,6 +70,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
 
   const [isEditingPriority, setIsEditingPriority] = useState(false);
   const [isEditingAssignee, setIsEditingAssignee] = useState(false);
+  const [showAllTags, setShowAllTags] = useState(false);
 
   const isStageOverdue = isStageEtaOverdue(ticket);
   const hasDueDate = !!ticket.eta;
@@ -468,7 +469,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
               </div>
             )}
             <div className='w-full pt-4 sm:pt-2 flex items-center justify-end flex-wrap gap-x-[15px]'>
-              <div className='flex items-center gap-4 w-full justify-between'>
+              <div className='flex items-end gap-4 w-full justify-between'>
                 <div className={cn('flex-wrap gap-2 items-center', isCompact ? 'flex' : 'hidden')}>
                   {/* Due Date or Placeholder */}
                   <div>
@@ -487,59 +488,71 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                       ))}
                   </div>
                   {/* Tags Section - Now Editable */}
-                  <button
-                    className='flex items-center justify-between'
-                    onClick={e => e.stopPropagation()}
-                    data-track-category='Tickets'
-                    data-track-name='EditTagsDropdown'
-                  >
-                    {showTags &&
-                      (isEditingTags ? (
-                        <div className='min-w-[200px]'>
-                          <TagSelector
-                            availableTags={availableTags}
-                            selectedTags={selectedTagNames}
-                            onTagsChange={handleTagsChange}
-                            stopEditing={() => setIsEditingTags(false)}
-                          />
-                        </div>
-                      ) : (
-                        <button
-                          className='flex items-center gap-2 flex-wrap cursor-pointer'
-                          onClick={e => {
-                            e.stopPropagation();
-                            setIsEditingTags(true);
-                          }}
-                          data-track-category='Tickets'
-                          data-track-name='EditTagsInline'
-                          data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                        >
-                          {hasTags ? (
-                            <>
-                              <span className='inline-flex max-w-[120px] items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border bg-card text-muted-foreground border-border'>
-                                <span className='w-2 h-2 rounded-full bg-xyne-purple-400 shrink-0'></span>
-                                <span className='truncate'>{tags[0]?.name}</span>
-                              </span>
+                  {showTags &&
+                    (isEditingTags ? (
+                      // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions, local-rules/require-tracking-on-click
+                      <div className='min-w-[200px]' onClick={e => e.stopPropagation()}>
+                        <TagSelector
+                          availableTags={availableTags}
+                          selectedTags={selectedTagNames}
+                          onTagsChange={handleTagsChange}
+                          stopEditing={() => setIsEditingTags(false)}
+                        />
+                      </div>
+                    ) : hasTags ? (
+                      <>
+                        {(showAllTags ? tags : tags.slice(0, 1)).map(tag => (
+                          <button
+                            key={tag.id}
+                            type='button'
+                            className='inline-flex max-w-[120px] items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border bg-card text-muted-foreground border-border cursor-pointer'
+                            onClick={e => {
+                              e.stopPropagation();
+                              setIsEditingTags(true);
+                            }}
+                            data-track-category='Tickets'
+                            data-track-name='EditTagsInline'
+                            data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                          >
+                            <span className='w-2 h-2 rounded-full bg-xyne-purple-400 shrink-0' />
+                            <span className='truncate'>{tag.name}</span>
+                          </button>
+                        ))}
 
-                              {tags.length > 1 && (
-                                <span className='inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border bg-card text-muted-foreground border-border'>
-                                  +{tags.length - 1}
-                                </span>
-                              )}
-                            </>
-                          ) : isCompact ? (
-                            <Tooltip content='Add tags'>
-                              <div className='flex items-center gap-1.5 px-1.5 py-1 rounded-md border border-border bg-muted hover:border-input transition-colors'>
-                                <Tag
-                                  className='w-3.5 h-3.5 text-muted-foreground'
-                                  strokeWidth={2}
-                                />
-                              </div>
-                            </Tooltip>
-                          ) : null}
-                        </button>
-                      ))}
-                  </button>
+                        {!showAllTags && tags.length > 1 && (
+                          <button
+                            type='button'
+                            onClick={e => {
+                              e.stopPropagation();
+                              setShowAllTags(true);
+                            }}
+                            className='inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border bg-card text-muted-foreground border-border cursor-pointer hover:border-input'
+                            data-track-category='Tickets'
+                            data-track-name='ExpandTicketTags'
+                            data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                          >
+                            +{tags.length - 1}
+                          </button>
+                        )}
+                      </>
+                    ) : isCompact ? (
+                      <button
+                        type='button'
+                        onClick={e => {
+                          e.stopPropagation();
+                          setIsEditingTags(true);
+                        }}
+                        data-track-category='Tickets'
+                        data-track-name='EditTagsInline'
+                        data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                      >
+                        <Tooltip content='Add tags'>
+                          <div className='flex items-center gap-1.5 px-1.5 py-1 rounded-md border border-border bg-muted hover:border-input transition-colors'>
+                            <Tag className='w-3.5 h-3.5 text-muted-foreground' strokeWidth={2} />
+                          </div>
+                        </Tooltip>
+                      </button>
+                    ) : null)}
                 </div>
                 {/* Priority - mobile */}
                 {!isCompact && showPriority && (

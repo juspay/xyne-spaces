@@ -97,6 +97,8 @@ const VirtualizedStageList: React.FC<{
           return (
             <div
               key={ticket.id}
+              data-index={virtualItem.index}
+              ref={virtualizer.measureElement}
               className='absolute left-0 top-0 w-full pb-1.5'
               style={{
                 transform: `translateY(${virtualItem.start}px)`,
