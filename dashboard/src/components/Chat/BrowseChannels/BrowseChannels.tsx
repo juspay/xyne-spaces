@@ -1,4 +1,4 @@
-import { ReactElement, useState, useMemo, useEffect } from 'react';
+import { ReactElement, useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Hash, Lock, Users, Search, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
 import Input from '../../ui/Input';
@@ -17,6 +17,11 @@ const BrowseChannels = (): ReactElement => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
 
   const channels = useBrowsableChannels();
   const users = useUsers();
@@ -113,6 +118,7 @@ const BrowseChannels = (): ReactElement => {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className='pl-9'
+              ref={searchInputRef}
             />
           </div>
 
