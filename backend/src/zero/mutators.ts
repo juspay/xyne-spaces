@@ -1278,6 +1278,47 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           });
         },
       ),
+      renameChannel: defineMutator(
+        z.object({
+          channelId: z.string(),
+          name: z.string().min(2).max(80),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { channelId, name, timestamp } }) => {
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          if (!channel) {
+            throw new Error("Channel doesn't exist");
+          }
+
+          if (channel.scopeType !== ChannelScopeType.DEFAULT) {
+            throw new Error('Only default channels can be renamed');
+          }
+
+          // Check if user is a participant
+          const participant = await tx.run(zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', authData.sub)
+            .one());
+
+          if (!participant) {
+            throw new Error('Only channel participants can rename the channel');
+          }
+
+
+          // Check for duplicate name
+          const existingChannel = await tx.run(zql.channels.where('name', name).one());
+          if (existingChannel && existingChannel.id !== channelId) {
+            throw new Error('A channel with this name already exists');
+          }
+
+          await tx.mutate.channels.update({
+            id: channelId,
+            name,
+            updatedAt: timestamp,
+          });
+
+        },
+      ),
       reopenDm: defineMutator(
         z.object({ channelId: z.string(), updatedAt: z.number() }),
         async ({ tx, args: { channelId, updatedAt } }) => {
