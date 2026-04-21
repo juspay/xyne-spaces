@@ -94,16 +94,13 @@ export function getCallTitleFromParticipants(
   allUsers: User[],
   currentUserId: string | undefined,
 ): string {
-  // Get other participants (excluding current user)
   const otherParticipants = getOtherParticipants(participants, currentUserId);
-  const participantUsers = getParticipantUsers(otherParticipants, allUsers);
+  if (otherParticipants.length === 0) return 'Unknown';
 
-  if (participantUsers.length === 0) {
-    return 'Unknown';
-  }
-
-  const firstNames = participantUsers.map(user => {
-    const fullName = user.name || 'Unknown';
+  const userMap = new Map(allUsers.map(u => [u.id, u]));
+  const firstNames = otherParticipants.map(p => {
+    if (p.isExternal) return `${p.displayName?.split(' ')[0] || 'Guest'} (External)`;
+    const fullName = userMap.get(p.userId)?.name || 'Unknown';
     return fullName.split(' ')[0];
   });
 

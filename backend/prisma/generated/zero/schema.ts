@@ -202,6 +202,7 @@ export enum CallStatus {
 
 export enum InvitationResponse {
   INVITED = "INVITED",
+  REQUESTED = "REQUESTED",
   ACCEPTED = "ACCEPTED",
   DECLINED = "DECLINED",
   MISSED = "MISSED",
@@ -1028,6 +1029,16 @@ export const scheduledMessageTable = table("scheduled_messages")
   })
   .primaryKey("id");
 
+export const callMessageTable = table("call_messages")
+  .columns({
+    id: string(),
+    callId: string(),
+    participantId: string(),
+    message: string(),
+    createdAt: number(),
+  })
+  .primaryKey("id");
+
 export const userGroupMappingTable = table("user_group_mappings")
   .columns({
     id: string(),
@@ -1734,6 +1745,8 @@ export const callParticipantTable = table("call_participants")
     joinedAt: number().optional(),
     leftAt: number().optional(),
     metadata: json().optional(),
+    displayName: string().optional(),
+    isExternal: boolean(),
   })
   .primaryKey("id");
 
@@ -3390,6 +3403,8 @@ export const schema = createSchema(
       userPreferenceTable,
       userSkillTable,
       scheduledMessageTable,
+      callMessageTable,
+      scheduledMessageTable,
       userGroupMappingTable,
       userAssignmentStateTable,
       boardComplexityScoreTable,
@@ -3573,6 +3588,8 @@ export type UserSession = Row<typeof schema.tables.user_sessions>;
 export type User = Row<typeof schema.tables.users>;
 export type UserPreference = Row<typeof schema.tables.user_preferences>;
 export type UserSkill = Row<typeof schema.tables.user_skills>;
+export type ScheduledMessage = Row<typeof schema.tables.scheduled_messages>;
+export type CallMessage = Row<typeof schema.tables.call_messages>;
 export type ScheduledMessage = Row<typeof schema.tables.scheduled_messages>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
 export type UserAssignmentState = Row<typeof schema.tables.user_assignment_states>;

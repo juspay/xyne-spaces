@@ -3473,6 +3473,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             joinedAt: now,
             leftAt: null,
             meetingStatus: MeetingStatus.ACCEPTED,
+            isExternal: false,
           });
 
           // Invite specific users or all channel participants
@@ -3495,6 +3496,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   joinedAt: null,
                   leftAt: null,
                   meetingStatus: MeetingStatus.PENDING,
+                  isExternal: false,
                 });
               }
             }
@@ -3512,6 +3514,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   userId: participant.userId,
                   invitedBy: authData.sub,
                   invitedAt: now,
+                  isExternal: false,
                   response: InvitationResponse.INVITED,
                   respondedAt: null,
                   joinedAt: null,
@@ -3606,6 +3609,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               joinedAt: now,
               leftAt: null,
               meetingStatus: MeetingStatus.ACCEPTED,
+              isExternal: false,
             });
           }
         },
@@ -3779,6 +3783,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                 joinedAt: null,
                 leftAt: null,
                 meetingStatus: MeetingStatus.PENDING,
+                isExternal: false
               });
             }
           }
@@ -3809,6 +3814,36 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               updatedAt: timestamp,
             });
           }
+        }
+      ),
+      approveLobbyRequest: defineMutator(
+        z.object({ callId: z.string(), participantId: z.string() }),
+        async ({ tx, args: { callId, participantId } }) => {
+          const call = await tx.run(zql.calls.where('id', callId).one());
+          if (!call) throw new Error('Call not found');
+          if (call.createdByUserId !== authData.sub) {
+            throw new Error('Only the call creator can admit participants');
+          }
+          await tx.mutate.call_participants.update({
+            id: participantId,
+            response: InvitationResponse.ACCEPTED,
+            respondedAt: Date.now(),
+          });
+        }
+      ),
+      rejectLobbyRequest: defineMutator(
+        z.object({ callId: z.string(), participantId: z.string() }),
+        async ({ tx, args: { callId, participantId } }) => {
+          const call = await tx.run(zql.calls.where('id', callId).one());
+          if (!call) throw new Error('Call not found');
+          if (call.createdByUserId !== authData.sub) {
+            throw new Error('Only the call creator can decline participants');
+          }
+          await tx.mutate.call_participants.update({
+            id: participantId,
+            response: InvitationResponse.DECLINED,
+            respondedAt: Date.now(),
+          });
         }
       ),
     },

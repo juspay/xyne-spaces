@@ -40,16 +40,31 @@ function CallParticipantsContent({
             key={participant.userId}
             className='flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors'
           >
-            <Avatar userId={participant.userId ?? null} size='md' />
+            <Avatar
+              userId={participant.isExternal ? null : (participant.userId ?? null)}
+              size='md'
+            />
             <div className='flex-1 min-w-0'>
               <h4 className='text-sm font-medium text-foreground truncate'>
-                {usersById.get(participant.userId)?.name ?? 'Unknown User'}
+                {participant.isExternal
+                  ? participant.displayName || 'Guest'
+                  : (usersById.get(participant.userId)?.name ?? 'Unknown User')}
                 {participant.userId === currentUserId && (
                   <span className='text-muted-foreground font-normal'> (you)</span>
                 )}
+                {participant.isExternal && (
+                  <span className='ml-1.5 text-[10px] font-medium bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1.5 py-0.5 rounded'>
+                    External
+                  </span>
+                )}
+                {participant.isExternal && (
+                  <span className='ml-1.5 text-[10px] font-medium bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 px-1.5 py-0.5 rounded'>
+                    External
+                  </span>
+                )}
               </h4>
               <p className='text-xs text-muted-foreground truncate'>
-                {usersById.get(participant.userId)?.email ?? ''}
+                {!participant.isExternal && (usersById.get(participant.userId)?.email ?? '')}
               </p>
             </div>
           </div>

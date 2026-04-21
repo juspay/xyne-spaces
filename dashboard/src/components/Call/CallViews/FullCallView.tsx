@@ -17,6 +17,8 @@ import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/Connec
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
 import { useReactions } from '../hooks/useReactions';
 import { ReactionsOverlay } from '../components/ReactionsOverlay';
+import { CallChatPanel } from '../CallChatPanel/CallChatPanel';
+import { useCallChatNotifications } from '../hooks/useCallChatNotifications';
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -43,6 +45,47 @@ interface FullCallViewProps {
   onMinimize: () => void;
   onToggleThread: () => void;
   onRequestControl?: () => void;
+  /** Optional: pass call participants data to sidebar (avoids Zero dependency) */
+  callParticipants?:
+    | ReadonlyArray<{
+        readonly id: string;
+        readonly callId: string;
+        readonly userId: string;
+        readonly invitedBy: string;
+        readonly invitedAt: number;
+        readonly response: string | null;
+        readonly respondedAt: number | null;
+        readonly joinedAt: number | null;
+        readonly leftAt: number | null;
+        readonly metadata: unknown;
+        readonly displayName?: string | null | undefined;
+        readonly isExternal?: boolean | undefined;
+      }>
+    | undefined;
+  /** Optional: override host detection */
+  isHost?: boolean | undefined;
+  /** Optional: override current user ID */
+  currentUserId?: string | null | undefined;
+  /** Optional: callback when host admits a lobby participant */
+  onApproveLobbyRequest?: ((participantId: string) => void) | undefined;
+  /** Optional: callback when host declines a lobby participant */
+  onRejectLobbyRequest?: ((participantId: string) => void) | undefined;
+  /** Optional: hide invite button in sidebar */
+  hideInvite?: boolean | undefined;
+  /** Hide thread panel chat button (for external users) */
+  hideThreadChat?: boolean | undefined;
+  /** Hide AI assistant button (for external users) */
+  hideAIAssistant?: boolean | undefined;
+  /** Hide minimize button (for external users) */
+  hideMinimize?: boolean | undefined;
+  /** Whether the current user is an external (unauthenticated) user */
+  isExternalUser?: boolean | undefined;
+  /** Call chat panel state */
+  isCallChatOpen?: boolean | undefined;
+  onToggleCallChat?: (() => void) | undefined;
+  unreadCallChatCount?: number | undefined;
+  /** Called when a new remote call chat message arrives (for unread tracking) */
+  onCallChatNewMessage?: (() => void) | undefined;
 }
 
 export function FullCallView({
@@ -70,6 +113,20 @@ export function FullCallView({
   onToggleThread,
   onRequestControl,
   requestedAiController,
+  callParticipants,
+  isHost: isHostProp,
+  currentUserId,
+  onApproveLobbyRequest,
+  onRejectLobbyRequest,
+  hideInvite,
+  hideThreadChat = false,
+  hideAIAssistant = false,
+  hideMinimize = false,
+  isExternalUser = false,
+  isCallChatOpen = false,
+  onToggleCallChat,
+  unreadCallChatCount = 0,
+  onCallChatNewMessage,
 }: FullCallViewProps): React.ReactElement {
   // ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS
   // UI state
@@ -140,13 +197,16 @@ export function FullCallView({
   // Handle toggling participants sidebar (closes chat if open)
   const handleToggleParticipantsSidebar = useCallback((): void => {
     setIsParticipantsSidebarOpen(prev => {
-      // If opening participants sidebar, close chat
+      // If opening participants sidebar, close chat and call chat
       if (!prev && isChatOpen) {
         onToggleThread();
       }
+      if (!prev && isCallChatOpen && onToggleCallChat) {
+        onToggleCallChat();
+      }
       return !prev;
     });
-  }, [isChatOpen, onToggleThread]);
+  }, [isChatOpen, onToggleThread, isCallChatOpen, onToggleCallChat]);
 
   // Close participants sidebar when chat opens
   useEffect(() => {
@@ -155,8 +215,12 @@ export function FullCallView({
     }
   }, [isChatOpen, isParticipantsSidebarOpen]);
 
-  // Determine if any sidebar is open (for layout adjustments)
-  const isSidebarOpen = isChatOpen || isParticipantsSidebarOpen;
+  // Show toast for incoming call chat messages
+  useCallChatNotifications(room, localParticipantId, onCallChatNewMessage);
+
+  // Determine if any right sidebar is open (for layout adjustments)
+  const isRightSidebarOpen = isChatOpen || isParticipantsSidebarOpen;
+  const isSidebarOpen = isRightSidebarOpen || isCallChatOpen;
 
   return (
     <div
@@ -187,7 +251,10 @@ export function FullCallView({
           // Screen share layout with sidebar
           <div
             className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
-            style={{ paddingRight: isSidebarOpen ? 'min(500px, 100vw)' : '0' }}
+            style={{
+              paddingRight: isRightSidebarOpen ? 'min(500px, 100vw)' : '0',
+              paddingLeft: isCallChatOpen ? 'min(400px, 100vw)' : '0',
+            }}
           >
             <ScreenShareView
               focusedScreenShare={focusedScreenShare}
@@ -205,7 +272,10 @@ export function FullCallView({
           // Normal grid layout when no screen share
           <div
             className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
-            style={{ paddingRight: isSidebarOpen ? 'min(500px, 100vw)' : '0' }}
+            style={{
+              paddingRight: isRightSidebarOpen ? 'min(500px, 100vw)' : '0',
+              paddingLeft: isCallChatOpen ? 'min(400px, 100vw)' : '0',
+            }}
           >
             <ParticipantGrid
               participants={participants}
@@ -251,9 +321,11 @@ export function FullCallView({
         <div
           className='absolute bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-1rem)] sm:w-auto max-w-[calc(100%-1rem)] transition-transform duration-300'
           style={{
-            transform: isSidebarOpen
-              ? 'translateX(calc(-50% - min(250px, 50vw)))'
-              : 'translateX(-50%)',
+            transform: isRightSidebarOpen
+              ? `translateX(calc(-50% - min(250px, 50vw)${isCallChatOpen ? ' + min(200px, 50vw)' : ''}))`
+              : isCallChatOpen
+                ? 'translateX(calc(-50% + min(200px, 50vw)))'
+                : 'translateX(-50%)',
           }}
         >
           <CallControls
@@ -281,9 +353,30 @@ export function FullCallView({
             viewMode='full'
             requestedAiController={requestedAiController}
             pendingControlRequest={pendingControlRequest}
+            isCallChatOpen={isCallChatOpen}
+            onToggleCallChat={onToggleCallChat}
+            unreadCallChatCount={unreadCallChatCount}
+            hideThreadChat={hideThreadChat}
+            hideAIAssistant={hideAIAssistant}
+            hideMinimize={hideMinimize}
+            isExternalUser={isExternalUser}
           />
         </div>
       </CallStateTransition>
+
+      {/* Call Chat Panel - Left Sidebar */}
+      {isCallChatOpen && onToggleCallChat && (
+        <div className='fixed left-0 top-0 h-full w-full md:w-[400px] bg-background shadow-xl z-[60]'>
+          <CallChatPanel
+            room={room}
+            externalId={callId}
+            localParticipantId={localParticipantId}
+            onClose={onToggleCallChat}
+            onNewMessage={onCallChatNewMessage}
+            isExternalUser={isExternalUser}
+          />
+        </div>
+      )}
 
       {/* Thread Panel - Sidebar */}
       {isChatOpen && channelId && conversationId && (
@@ -299,7 +392,16 @@ export function FullCallView({
       {/* Participants Sidebar */}
       {isParticipantsSidebarOpen && (
         <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
-          <ParticipantsSidebar callId={callId} onClose={handleToggleParticipantsSidebar} />
+          <ParticipantsSidebar
+            callId={callId}
+            onClose={handleToggleParticipantsSidebar}
+            callParticipants={callParticipants}
+            isHost={isHostProp}
+            currentUserId={currentUserId}
+            onApproveLobbyRequest={onApproveLobbyRequest}
+            onRejectLobbyRequest={onRejectLobbyRequest}
+            hideInvite={hideInvite}
+          />
         </div>
       )}
 

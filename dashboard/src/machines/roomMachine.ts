@@ -117,6 +117,8 @@ export interface RoomContext {
     dismissed: boolean;
   };
   pushToTalkState: 'idle' | 'active';
+  isCallChatOpen: boolean;
+  unreadCallChatCount: number;
 }
 
 // Events for Room operations
@@ -154,6 +156,8 @@ export type RoomMachineEvent =
   | { type: 'SCREEN_SHARE_FAILED' }
   | { type: 'TOGGLE_VIEW' }
   | { type: 'TOGGLE_CHAT' }
+  | { type: 'TOGGLE_CALL_CHAT' }
+  | { type: 'INCREMENT_UNREAD_CALL_CHAT' }
   | { type: 'TOGGLE_AI_ASSISTANT' }
   | { type: 'ADD_CHAT_MESSAGE'; message: ChatMessage }
   | { type: 'DISCONNECT'; endForAll?: boolean }
@@ -1058,6 +1062,8 @@ export const roomMachine = setup({
       ticketAssignedToName: () => null,
       ticketBoardId: () => null,
       permissionError: () => ({ type: null as PermissionErrorType, dismissed: false }),
+      isCallChatOpen: () => false,
+      unreadCallChatCount: () => 0,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1140,6 +1146,8 @@ export const roomMachine = setup({
       dismissed: false,
     },
     pushToTalkState: 'idle',
+    isCallChatOpen: false,
+    unreadCallChatCount: 0,
   },
   id: 'roomMachine',
   on: {
@@ -1564,6 +1572,18 @@ export const roomMachine = setup({
           actions: assign({
             isChatOpen: ({ context }) => !context.isChatOpen,
             unreadChatCount: ({ context }) => (!context.isChatOpen ? 0 : context.unreadChatCount),
+          }),
+        },
+        TOGGLE_CALL_CHAT: {
+          actions: assign({
+            isCallChatOpen: ({ context }) => !context.isCallChatOpen,
+            unreadCallChatCount: ({ context }) =>
+              !context.isCallChatOpen ? 0 : context.unreadCallChatCount,
+          }),
+        },
+        INCREMENT_UNREAD_CALL_CHAT: {
+          actions: assign({
+            unreadCallChatCount: ({ context }) => context.unreadCallChatCount + 1,
           }),
         },
         TOGGLE_AI_ASSISTANT: {

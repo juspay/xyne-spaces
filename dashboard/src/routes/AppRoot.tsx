@@ -152,6 +152,21 @@ import { buildGrafanaLogsExploreUrl } from '../components/Inspector/grafanaUrl';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
+import { ExternalLobbyPage } from './ExternalLobby/ExternalLobbyPage';
+
+/** Auth-aware call route: authenticated users join via CallPage, others see external lobby */
+function CallRouteHandler(): ReactElement | null {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (isAuthenticated) {
+    return (
+      <ZeroProvider>
+        <CallPage />
+      </ZeroProvider>
+    );
+  }
+  return <ExternalLobbyPage />;
+}
 
 /** Auto-triggers AI onboarding after the existing 6-step onboarding completes, or resumes on refresh */
 const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null => {
@@ -867,10 +882,6 @@ export const router = createBrowserRouter([
                 element: <CallHistoryScreen />,
               },
               {
-                path: 'call/:callId',
-                element: <CallPage />,
-              },
-              {
                 path: 'calls/:callId/:callType',
                 element: <CallPage />,
               },
@@ -991,11 +1002,7 @@ export const router = createBrowserRouter([
 
       {
         path: '/call/:callId',
-        element: (
-          <ZeroProvider>
-            <CallPage />
-          </ZeroProvider>
-        ),
+        element: <CallRouteHandler />,
       },
       {
         path: '/redirected',

@@ -396,9 +396,10 @@ const CallHistoryScreen = (): ReactElement => {
         return true;
       }
 
-      // Search by participant names
+      // Search by participant names (handles both internal and external users)
       const participantNames = call.participants
         ?.map(p => {
+          if (p.isExternal) return (p.displayName || '').toLowerCase();
           const user = allUsersData.find(u => u.id === p.userId);
           return getUserDisplayName(user).toLowerCase();
         })

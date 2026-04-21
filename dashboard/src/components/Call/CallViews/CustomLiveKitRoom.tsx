@@ -1,7 +1,8 @@
-import { useEffect, useCallback, useMemo, useState } from 'react';
+import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import type { Zero } from '@rocicorp/zero';
-import { CallType } from '@xyne/shared';
+import { CallType, InvitationResponse } from '@xyne/shared';
+import { toast } from 'sonner';
 import { roomActor } from '../../../machines/roomMachine';
 import { MiniCallView } from './MiniCallView';
 import { FullCallView } from './FullCallView';
@@ -14,6 +15,7 @@ import { EndCallModal } from '../EndCallModal/EndCallModal';
 import { useIsCallHost, useIsOnlyParticipant, useCallParticipants } from '../../../hooks/useCalls';
 import { useScreenPickerFlag } from '../../ScreenPicker/useScreenPickerFlag';
 import { ScreenPickerModal } from '../../ScreenPicker/ScreenPickerModal';
+import { mutators } from '../../../zero/mutators';
 
 export interface CustomLiveKitRoomProps {
   token: string;
@@ -62,6 +64,8 @@ export function CustomLiveKitRoom({
     ticketDescription,
     ticketBoardId,
     isNativeMode,
+    isCallChatOpen,
+    unreadCallChatCount,
   } = snapshot.context;
 
   // Compute state from LiveKit instead of storing in context
@@ -147,6 +151,59 @@ export function CustomLiveKitRoom({
 
   const isOnlyParticipant = useIsOnlyParticipant(callParticipants);
 
+  const internalCallId = useMemo(() => {
+    const activeCall = activeCalls.find(c => c.externalId === externalId);
+    return (activeCall as { id?: string } | undefined)?.id;
+  }, [activeCalls, externalId]);
+
+  // Lobby requests from external users — only visible to the call host
+  const lobbyRequests = useMemo(
+    () =>
+      isHost
+        ? callParticipants.filter(p => p.response === InvitationResponse.REQUESTED && p.isExternal)
+        : [],
+    [isHost, callParticipants],
+  );
+
+  // Toast notification when new lobby request arrives
+  const prevLobbyCountRef = useRef(lobbyRequests.length);
+  useEffect(() => {
+    if (lobbyRequests.length > prevLobbyCountRef.current) {
+      const newest = lobbyRequests[lobbyRequests.length - 1];
+      if (newest) {
+        toast.info(
+          `${(newest as { displayName?: string }).displayName ?? 'Someone'} is requesting to join`,
+          {
+            duration: 5000,
+          },
+        );
+        void new Audio('/sounds/notification.wav').play().catch(() => {});
+      }
+    }
+    prevLobbyCountRef.current = lobbyRequests.length;
+  }, [lobbyRequests]);
+
+  // Lobby approval handlers
+  const handleApproveLobbyRequest = useCallback(
+    (participantId: string) => {
+      if (!zero || !internalCallId) return;
+      void zero.mutate(
+        mutators.calls.approveLobbyRequest({ callId: internalCallId, participantId }),
+      );
+    },
+    [zero, internalCallId],
+  );
+
+  const handleRejectLobbyRequest = useCallback(
+    (participantId: string) => {
+      if (!zero || !internalCallId) return;
+      void zero.mutate(
+        mutators.calls.rejectLobbyRequest({ callId: internalCallId, participantId }),
+      );
+    },
+    [zero, internalCallId],
+  );
+
   const handleDisconnect = useCallback(
     (endForAll = false) => {
       if (isChatOpen) {
@@ -177,6 +234,16 @@ export function CustomLiveKitRoom({
       roomActor.send({ type: 'TOGGLE_CHAT' });
     }
   }, [channelId, metadata]);
+
+  const handleToggleCallChat = useCallback(() => {
+    roomActor.send({ type: 'TOGGLE_CALL_CHAT' });
+  }, []);
+
+  const handleCallChatNewMessage = useCallback(() => {
+    if (!isCallChatOpen) {
+      roomActor.send({ type: 'INCREMENT_UNREAD_CALL_CHAT' });
+    }
+  }, [isCallChatOpen]);
 
   // AI Invite dialog handlers
   const handleCloseInviteDialog = useCallback(() => {
@@ -271,6 +338,12 @@ export function CustomLiveKitRoom({
           onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
           onToggleThread={handleToggleThread}
           onRequestControl={handleRequestControl}
+          callParticipants={callParticipants}
+          isHost={isHost}
+          currentUserId={user?.id ?? null}
+          onApproveLobbyRequest={handleApproveLobbyRequest}
+          onRejectLobbyRequest={handleRejectLobbyRequest}
+          onCallChatNewMessage={handleCallChatNewMessage}
         />
         <EndCallModal
           isOpen={showEndCallModal}
@@ -335,6 +408,15 @@ export function CustomLiveKitRoom({
         onToggleThread={handleToggleThread}
         onRequestControl={handleRequestControl}
         requestedAiController={isAiControlRequested}
+        callParticipants={callParticipants}
+        isHost={isHost}
+        currentUserId={user?.id ?? null}
+        onApproveLobbyRequest={handleApproveLobbyRequest}
+        onRejectLobbyRequest={handleRejectLobbyRequest}
+        isCallChatOpen={isCallChatOpen}
+        onToggleCallChat={handleToggleCallChat}
+        unreadCallChatCount={unreadCallChatCount}
+        onCallChatNewMessage={handleCallChatNewMessage}
       />
       <EndCallModal
         isOpen={showEndCallModal}
