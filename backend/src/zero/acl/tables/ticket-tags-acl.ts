@@ -9,7 +9,16 @@ import { zql } from '../../queries';
 
 export class TicketTagsACL extends BaseACL<'ticket_tags'> {
 
+  private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
+    const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+    if (!ticket) throw new MutationACLError('Ticket tag not found: ticket does not exist', 'ticket_tags');
+    if (ticket.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Ticket tag not found in this workspace', 'ticket_tags');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'ticket_tags'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyTicketInWorkspace(args.ticketId, tx);
     const ticket = await tx.run(zql.tickets
       .where('id', args.ticketId)
       .whereExists('conversation', (conversation) => {
@@ -46,6 +55,10 @@ export class TicketTagsACL extends BaseACL<'ticket_tags'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'ticket_tags'>>, tx: Transaction<Schema>): Promise<void> {
+    const tag = await tx.run(zql.ticket_tags.where('id', args.id).one());
+    if (tag) {
+      await this.verifyTicketInWorkspace(tag.ticketId, tx);
+    }
     const hasAccess = await tx.run(zql.ticket_tags
       .where('id', args.id)
       .whereExists('ticket', (ticket) => {
@@ -85,6 +98,10 @@ export class TicketTagsACL extends BaseACL<'ticket_tags'> {
 
   async canDelete(args: DeleteID<TableSchema<'ticket_tags'>>, tx: Transaction<Schema>): Promise<void> {
     // Verify user has access to the parent ticket before allowing deletion
+    const tag = await tx.run(zql.ticket_tags.where('id', args.id).one());
+    if (tag) {
+      await this.verifyTicketInWorkspace(tag.ticketId, tx);
+    }
     const hasAccess = await tx.run(zql.ticket_tags
       .where('id', args.id)
       .whereExists('ticket', (ticket) => {

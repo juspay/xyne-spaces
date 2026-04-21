@@ -59,6 +59,7 @@ export class FormController {
           formDescription,
           contextType,
           entityType,
+          workspaceId: req.user!.workspaceId!,
           fields,
           createdBy: req.user?.id || '',
         },

@@ -8,6 +8,6 @@ export class UserGroupsACL extends BaseQueryACL<'user_groups'> {
   }
 
   canSelect<TReturn>(query: Query<'user_groups', Schema, TReturn>): Query<'user_groups', Schema, TReturn> {
-    return query;
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
   }
 }

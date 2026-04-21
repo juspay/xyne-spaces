@@ -6,8 +6,9 @@ export class UserGroupsACL extends BaseQueryACL<Prisma.UserGroupWhereInput> {
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.UserGroupWhereInput | null> {
-    // No restriction - open access (matches Zero's behavior)
-    return null
+  async getWhereClause(): Promise<Prisma.UserGroupWhereInput> {
+    return {
+      workspaceId: this.ctx.workspaceId ?? '',
+    }
   }
 }

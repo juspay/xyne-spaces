@@ -1,7 +1,8 @@
-import { PrismaClient, User, AccessType, UserPresenceStatus, AuthProvider } from '@prisma/client';
+import { PrismaClient, User, AccessType, UserPresenceStatus, AuthProvider, ProjectType } from '@prisma/client';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { DatabaseClient } from '@/database/client';
+import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -19,6 +20,10 @@ interface GoogleUserData {
   picture?: string;
 }
 
+export interface UserWithOrgRole extends User {
+  orgRole?: string;
+}
+
 export class UserService {
   private prisma: PrismaClient;
 
@@ -27,12 +32,28 @@ export class UserService {
   }
 
   /**
-   * Find an existing user by Provider User ID
+   * Get org role by memberId
    */
-  async findUserByProviderUserId(providerUserId: string): Promise<User | null> {
+  async getOrgRole(memberId: string): Promise<string | undefined> {
+    try {
+      const orgMember = await this.prisma.orgMember.findUnique({
+        where: { memberId },
+        select: { role: true },
+      });
+      return orgMember?.role ?? undefined;
+    } catch (error) {
+      logger.error('Error getting org role:', error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Find an existing user by Google ID and workspace 
+   */
+  async findUserByGoogleId(googleId: string, workspaceId: string): Promise<User | null> {
     try {
       return await this.prisma.user.findUnique({
-        where: { providerUserId },
+        where: { providerUserId_workspaceId: { providerUserId: googleId, workspaceId } }
       });
     } catch (error) {
       logger.error('Error finding user by Provider User ID:', error);
@@ -41,20 +62,12 @@ export class UserService {
   }
 
   /**
-   * Find an existing user by Google ID (using providerUserId)
-   * @deprecated Use findUserByProviderUserId instead
+   * Find an existing user by Provider User ID and workspace
    */
-  async findUserByGoogleId(googleId: string): Promise<User | null> {
-    return this.findUserByProviderUserId(googleId);
-  }
-
-  /**
-   * Find an existing user by Provider User ID
-   */
-  async getUserByProviderUserId(providerUserId: string): Promise<User | null> {
+  async getUserByProviderUserId(providerUserId: string, workspaceId: string): Promise<User | null> {
     try {
       return await this.prisma.user.findUnique({
-        where: { providerUserId },
+        where: { providerUserId_workspaceId: { providerUserId, workspaceId } }
       });
     } catch (error) {
       logger.error('Error finding user by Provider User ID:', error);
@@ -63,12 +76,12 @@ export class UserService {
   }
 
   /**
-   * Find an existing user by email
+   * Find an existing user by email and workspace
    */
-  async findUserByEmail(email: string): Promise<User | null> {
+  async findUserByEmail(email: string, workspaceId: string): Promise<User | null> {
     try {
       return await this.prisma.user.findUnique({
-        where: { email },
+        where: { email_workspaceId: { email, workspaceId } }
       });
     } catch (error) {
       logger.error('Error finding user by email:', error);
@@ -79,11 +92,22 @@ export class UserService {
   /**
    * Create a new user from OAuth data
    */
-  async createUser(userData: OAuthUserData | GoogleUserData): Promise<User> {
+  async createUser(userData: OAuthUserData | GoogleUserData, workspaceId?: string): Promise<User> {
     try {
       // Handle both new OAuthUserData format and legacy GoogleUserData format
       const provider = 'provider' in userData ? userData.provider : AuthProvider.GOOGLE;
       const providerUserId = 'provider' in userData ? userData.providerUserId : userData.googleId;
+
+      // Fetch existing orgMember by email to get memberId
+      // orgMember should already exist (created during invitation or org setup)
+      const orgMember = await this.prisma.orgMember.findUnique({
+        where: { email: userData.email },
+        select: { memberId: true }
+      });
+
+      if (!orgMember) {
+        throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
+      }
 
       const user = await this.prisma.user.create({
         data: {
@@ -92,6 +116,8 @@ export class UserService {
           email: userData.email,
           name: userData.name,
           picture: userData.picture,
+          workspace: { connect: { id: workspaceId } },
+          orgMemberId: orgMember.memberId,
         },
       });
 
@@ -313,12 +339,10 @@ export class UserService {
    * This is the main method used by the auth middleware
    * Returns both the user and a flag indicating if the user was newly created
    */
-  async findOrCreateUser(
-    googleUserData: GoogleUserData
-  ): Promise<{ user: User; isNewUser: boolean }> {
+  async findOrCreateUser(googleUserData: GoogleUserData, workspaceId: string): Promise<{ user: UserWithOrgRole; isNewUser: boolean }> {
     try {
       // First, try to find user by Google ID
-      let user = await this.findUserByGoogleId(googleUserData.googleId);
+      let user = await this.findUserByGoogleId(googleUserData.googleId, workspaceId);
       let isNewUser = false;
 
       if (user) {
@@ -337,11 +361,14 @@ export class UserService {
           });
         }
 
-        return { user, isNewUser };
+        // Fetch org role
+        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+
+        return { user: { ...user, orgRole }, isNewUser };
       }
 
       // User doesn't exist with this Google ID, check by email
-      user = await this.findUserByEmail(googleUserData.email);
+      user = await this.findUserByEmail(googleUserData.email, workspaceId);
 
       if (user) {
         // User exists with this email but different Google ID
@@ -355,17 +382,23 @@ export class UserService {
           picture: googleUserData.picture,
         });
 
-        return { user, isNewUser };
+        // Fetch org role
+        const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
+
+        return { user: { ...user, orgRole }, isNewUser };
       }
 
       // User doesn't exist at all, create new user
       logger.info(`Creating new user for: ${googleUserData.email}`);
-      user = await this.createUser(googleUserData);
+      user = await this.createUser(googleUserData, workspaceId);
       isNewUser = true;
+
+      // Fetch org role for new user
+      const orgRole = user.orgMemberId ? await this.getOrgRole(user.orgMemberId) : undefined;
 
       // Note: ensureUserPresence is called in createUser(), so no need to call it here
 
-      return { user, isNewUser };
+      return { user: { ...user, orgRole }, isNewUser };
     } catch (error) {
       logger.error('Error in findOrCreateUser:', error);
       throw new Error('Failed to find or create user');
@@ -378,11 +411,12 @@ export class UserService {
    * Returns both the user and a flag indicating if the user was newly created
    */
   async findOrCreateOAuthUser(
-    oauthUserData: OAuthUserData
+    oauthUserData: OAuthUserData,
+    workspaceId: string
   ): Promise<{ user: User; isNewUser: boolean }> {
     try {
       // First, try to find user by Provider User ID
-      let user = await this.findUserByProviderUserId(oauthUserData.providerUserId);
+      let user = await this.getUserByProviderUserId(oauthUserData.providerUserId, workspaceId);
       let isNewUser = false;
 
       if (user) {
@@ -413,7 +447,7 @@ export class UserService {
       }
 
       // User doesn't exist with this Provider ID, check by email
-      user = await this.findUserByEmail(oauthUserData.email);
+      user = await this.findUserByEmail(oauthUserData.email, workspaceId);
 
       if (user) {
         // User exists with this email but different provider
@@ -437,7 +471,7 @@ export class UserService {
 
       // User doesn't exist at all, create new user
       logger.info(`Creating new user for: ${oauthUserData.email} via ${oauthUserData.provider}`);
-      user = await this.createUser(oauthUserData);
+      user = await this.createUser(oauthUserData, workspaceId);
       isNewUser = true;
 
       return { user, isNewUser };
@@ -448,13 +482,31 @@ export class UserService {
   }
 
   /**
-   * Get user by ID with related data
+   * Get user by ID with org member data
    */
-  async getUserById(userId: string): Promise<User | null> {
+  async getUserById(userId: string): Promise<(User & { orgMember?: { memberId: string; role: string } | null }) | null> {
     try {
-      return await this.prisma.user.findUnique({
+      const user = await this.prisma.user.findUnique({
         where: { id: userId },
       });
+      
+      if (!user) {
+        return null;
+      }
+      
+      // Fetch org member separately since there's no explicit relation
+      const orgMember = user.orgMemberId ? await this.prisma.orgMember.findUnique({
+        where: { memberId: user.orgMemberId },
+        select: {
+          memberId: true,
+          role: true,
+        },
+      }) : null;
+      
+      return {
+        ...user,
+        orgMember,
+      };
     } catch (error) {
       logger.error('Error getting user by ID:', error);
       throw new Error('Failed to get user');
@@ -567,6 +619,417 @@ export class UserService {
     } catch (error) {
       logger.error('Error invalidating refresh token:', error);
       throw new Error('Failed to invalidate refresh token');
+    }
+  }
+
+  /**
+   * Get all workspaces for an email address
+   * Used during workspace selection flow (no auth user yet)
+   */
+  async getWorkspacesByEmail(email: string): Promise<Array<{
+    id: string;
+    name: string;
+    role: string;
+    orgId: string;
+    orgName: string;
+  }>> {
+    try {
+      logger.info(`[getWorkspacesByEmail] Querying workspaces for email: ${email}`);
+      const workspaceUsers = await this.prisma.user.findMany({
+        where: {
+          email,
+          leftAt: null,
+        },
+        include: {
+          workspace: {
+            include: {
+              organization: true
+            }
+          }
+        }
+      });
+
+      logger.info(`[getWorkspacesByEmail] Found ${workspaceUsers.length} active workspace users for email: ${email}`);
+      workspaceUsers.forEach(u => {
+        logger.info(`[getWorkspacesByEmail] - User ${u.id} in workspace ${u.workspace?.id}`);
+      });
+
+      // Return flat list of workspaces for frontend
+      return workspaceUsers.map(wsUser => ({
+        id: wsUser.workspace!.id,
+        name: wsUser.workspace!.name,
+        role: wsUser.role || 'MEMBER',
+        orgId: wsUser.workspace!.organization.orgId,
+        orgName: wsUser.workspace!.organization.name
+      }));
+    } catch (error) {
+      logger.error('Error getting workspaces by email:', error);
+      throw new Error('Failed to get workspaces');
+    }
+  }
+
+  /**
+   * Check if user exists in the system but has no active workspace memberships
+   * Used to show appropriate message when user was removed from all workspaces
+   */
+  async userExistsButNoActiveWorkspaces(email: string): Promise<boolean> {
+    try {
+      const userCount = await this.prisma.user.count({
+        where: {
+          email,
+        },
+      });
+
+      const activeCount = await this.prisma.user.count({
+        where: {
+          email,
+          leftAt: null,
+        },
+      });
+
+      return userCount > 0 && activeCount === 0;
+    } catch (error) {
+      logger.error('Error checking user workspace status:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Create or get workspace-scoped user record
+   * Called after temp token is verified
+   */
+  async createOrGetWorkspaceUser(userData: {
+    providerUserId: string;
+    email: string;
+    name: string;
+    picture?: string | null;
+    workspaceId: string;
+    authProvider?: string;
+  }): Promise<{ user: User; isNewUser: boolean }> {
+    try {
+      // Try to find existing workspace user by providerUserId
+      let workspaceUser = await this.prisma.user.findUnique({
+        where: {
+          providerUserId_workspaceId: {
+            providerUserId: userData.providerUserId,
+            workspaceId: userData.workspaceId
+          }
+        }
+      });
+
+      if (workspaceUser) {
+        return { user: workspaceUser, isNewUser: false };
+      }
+
+      // Also check by email (for users created by seed script with different providerUserId)
+      workspaceUser = await this.prisma.user.findUnique({
+        where: {
+          email_workspaceId: {
+            email: userData.email,
+            workspaceId: userData.workspaceId
+          }
+        }
+      });
+
+      if (workspaceUser) {
+        // Update the providerUserId to match the real provider ID
+        workspaceUser = await this.prisma.user.update({
+          where: { id: workspaceUser.id },
+          data: { providerUserId: userData.providerUserId }
+        });
+        return { user: workspaceUser, isNewUser: false };
+      }
+
+      // Get workspace to check org membership
+      const workspace = await this.prisma.workspace.findUnique({
+        where: { id: userData.workspaceId },
+        include: { organization: true }
+      });
+
+      if (!workspace) {
+        throw new Error('Workspace not found');
+      }
+
+      // Check if user is invited to this workspace
+      const invitation = await this.prisma.invitation.findFirst({
+        where: {
+          workspaceId: userData.workspaceId,
+          email: userData.email
+        }
+      });
+
+      // Find if there's an existing user with this email in the org
+      const existingOrgUsers = await this.prisma.user.findMany({
+        where: {
+          email: userData.email,
+          workspace: {
+            orgId: workspace.orgId
+          }
+        }
+      });
+
+      const hasAccess = invitation || existingOrgUsers.length > 0;
+
+      if (!hasAccess) {
+        throw new Error('User does not have access to this workspace');
+      }
+
+      const role = invitation?.role || 'MEMBER';
+
+      // Fetch existing orgMember by email
+      const orgMember = await this.prisma.orgMember.findUnique({
+        where: { email: userData.email },
+        select: { memberId: true }
+      });
+
+      if (!orgMember) {
+        throw new Error(`orgMember not found for email ${userData.email}. User must be invited to the organization first.`);
+      }
+
+      workspaceUser = await this.prisma.user.create({
+        data: {
+          providerUserId: userData.providerUserId,
+          email: userData.email,
+          name: userData.name,
+          picture: userData.picture,
+          authProvider: (userData.authProvider || 'GOOGLE') as AuthProvider,
+          workspace: { connect: { id: userData.workspaceId } },
+          role,
+          orgMemberId: orgMember.memberId,
+        }
+      });
+
+      logger.info(`Created workspace user for ${userData.email} in workspace ${userData.workspaceId}`);
+      return { user: workspaceUser, isNewUser: true };
+    } catch (error) {
+      logger.error('Error creating workspace user:', error);
+      throw new Error('Failed to create workspace user');
+    }
+  }
+
+  /**
+   * Create organization with default workspace and user
+   * Called after temp token is verified
+   */
+  async createOrganizationWithUser(
+    userData: {
+      providerUserId: string;
+      email: string;
+      name: string;
+      picture?: string | null;
+    },
+    orgName: string,
+    workspaceName: string,
+    authProvider: string = 'GOOGLE'
+  ): Promise<{ organization: any; workspace: any; workspaceUser: User; isNewUser: boolean }> {
+    try {
+      // Check if organization already exists
+      const existingOrg = await this.prisma.organization.findUnique({
+        where: { name: orgName }
+      });
+
+      if (existingOrg) {
+        throw new Error(`Organization with name "${orgName}" already exists. Please choose a different name.`);
+      }
+
+      // Create organization
+      const organization = await this.prisma.organization.create({
+        data: {
+          name: orgName,
+          createdBy: userData.providerUserId, // Using providerUserId as creator reference
+          status: 'ACTIVE'
+        }
+      });
+
+      // Create workspace
+      const workspace = await this.prisma.workspace.create({
+        data: {
+          orgId: organization.orgId,
+          name: workspaceName,
+          createdBy: userData.providerUserId,
+          status: 'ACTIVE'
+        }
+      });
+
+      // Create DM project for the workspace
+      await this.prisma.project.create({
+        data: {
+          name: 'Direct Messages',
+          code: 'DM',
+          description: 'DM project for direct message channels',
+          type: ProjectType.DM,
+          workspaceId: workspace.id,
+          createdBy: userData.providerUserId,
+        }
+      });
+
+      // Link workspace to organization
+      await this.prisma.workspaceOrganization.create({
+        data: {
+          orgId: organization.orgId,
+          workspaceId: workspace.id,
+          role: 'ADMIN'
+        }
+      });
+
+      // Add user as OrgMember first so they can create additional workspaces later
+      const orgMember = await this.prisma.orgMember.create({
+        data: {
+          orgId: organization.orgId,
+          email: userData.email,
+          role: 'OWNER',
+        }
+      });
+
+      // Create workspace user as OWNER
+      const workspaceUser = await this.prisma.user.create({
+        data: {
+          providerUserId: userData.providerUserId,
+          email: userData.email,
+          name: userData.name,
+          picture: userData.picture,
+          authProvider: authProvider as AuthProvider,
+          workspace: { connect: { id: workspace.id } },
+          role: 'OWNER',
+          orgMemberId: orgMember.memberId,
+        }
+      });
+
+      // Grant full admin resource access to the workspace owner
+      await this.grantWorkspaceOwnerResources(workspaceUser.id, workspaceUser.email);
+
+      // Sync all hardcoded bots into the new workspace
+      await unifiedBotUserService.syncAllBotUsers(workspace.id);
+
+      logger.info(`Created organization ${orgName} with workspace ${workspaceName} for ${userData.email}`);
+      return { organization, workspace, workspaceUser, isNewUser: true };
+    } catch (error) {
+      logger.error('Error creating organization:', error);
+      throw new Error('Failed to create organization');
+    }
+  }
+
+  /**
+   * Create a new workspace under the user's existing organization.
+   * Looks up the user's org via OrgMember, then creates the workspace.
+   */
+  async createWorkspaceInOrg(
+    userData: {
+      userId: string;
+      providerUserId: string;
+      email: string;
+      name: string;
+      picture?: string | null;
+    },
+    workspaceName: string
+  ): Promise<{ organization: any; workspace: any; workspaceUser: User }> {
+    // Find the user's org membership
+    const orgMember = await this.prisma.orgMember.findFirst({
+      where: { email: userData.email },
+      include: { organization: true },
+      orderBy: { joinedAt: 'asc' },
+    });
+
+    if (!orgMember) {
+      throw new Error('No organization found for this user. Create an organization first.');
+    }
+
+    const org = orgMember.organization;
+
+    // Create workspace under existing org
+    const workspace = await this.prisma.workspace.create({
+      data: {
+        orgId: org.orgId,
+        name: workspaceName,
+        createdBy: userData.providerUserId,
+        status: 'ACTIVE',
+      },
+    });
+
+    // Create DM project for the workspace
+    await this.prisma.project.create({
+      data: {
+        name: 'Direct Messages',
+        code: 'DM',
+        description: 'DM project for direct message channels',
+        type: ProjectType.DM,
+        workspaceId: workspace.id,
+        createdBy: userData.providerUserId,
+      }
+    });
+
+    // Link workspace to organization
+    await this.prisma.workspaceOrganization.create({
+      data: {
+        orgId: org.orgId,
+        workspaceId: workspace.id,
+        role: 'ADMIN',
+      },
+    });
+
+    // Fetch orgMember for the user (reuse existing orgMember if available)
+    const userOrgMember = orgMember || await this.prisma.orgMember.findUnique({
+      where: { email: userData.email },
+      select: { memberId: true }
+    });
+
+    if (!userOrgMember) {
+      throw new Error(`orgMember not found for email ${userData.email}. User must be added to the organization first.`);
+    }
+
+    // Create workspace-scoped user as OWNER
+    const workspaceUser = await this.prisma.user.create({
+      data: {
+        providerUserId: userData.providerUserId,
+        email: userData.email,
+        name: userData.name,
+        picture: userData.picture,
+        authProvider: 'GOOGLE',
+        workspace: { connect: { id: workspace.id } },
+        role: 'OWNER',
+        orgMemberId: orgMember.memberId,
+      },
+    });
+
+    // Grant full admin resource access to the workspace owner
+    await this.grantWorkspaceOwnerResources(workspaceUser.id, workspaceUser.email);
+
+    // Sync all hardcoded bots into the new workspace
+    await unifiedBotUserService.syncAllBotUsers(workspace.id);
+
+    logger.info(`Created workspace "${workspaceName}" under org "${org.name}" for ${userData.email}`);
+    return { organization: org, workspace, workspaceUser };
+  }
+
+  /**
+   * Grant full admin-level resource access to a workspace owner/creator.
+   * Called when a user creates a new org+workspace or a new workspace in an existing org.
+   */
+  async grantWorkspaceOwnerResources(userId: string, email: string): Promise<void> {
+    const ADMIN_RESOURCES = [
+      'TICKETS', 'WORKFLOWS', 'AGENTS', 'MODELS', 'TOOLS',
+      'AGENT-TOOLS-MAPPINGS', 'EXTERNAL-STEP-RESPONSE', 'ANALYTICS',
+      'USER-MANAGEMENT', 'USERS', 'FORMS', 'SUPPORT', 'PROJECTS',
+      'PRODUCT-INSIGHTS', 'LISTPROJECTS', 'CHANNELS', 'CANVASES',
+    ];
+    try {
+      for (const resourceName of ADMIN_RESOURCES) {
+        try {
+          const resource = await repositories.resources.findByName(resourceName);
+          if (resource) {
+            await repositories.resourceAccess.grantAccess(
+              { userId, resourceId: resource.id, accessType: AccessType.ADMIN },
+              userId,
+            );
+            logger.debug(`[grantWorkspaceOwnerResources] Granted WRITE on ${resourceName} for ${email}`);
+          }
+        } catch (err) {
+          logger.error(`[grantWorkspaceOwnerResources] Failed to grant ${resourceName} for ${email}:`, err);
+        }
+      }
+      logger.info(`[grantWorkspaceOwnerResources] Admin resources granted to workspace owner ${email}`);
+    } catch (err) {
+      logger.error(`[grantWorkspaceOwnerResources] Outer error for ${email}:`, err);
     }
   }
 

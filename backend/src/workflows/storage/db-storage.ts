@@ -240,6 +240,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
           uploadedByUserId: 'system',
           createdBy: 'system',
           conversationId: null,
+          workspaceId: config.defaultWorkspaceId,
           metadata: {
             workflowExecutionId,
             checkpointId: stepName,
@@ -2947,7 +2948,9 @@ export class DBWorkflowStorage implements WorkflowStorage {
 
     // If modelName is provided, override the defaultModel
     if (modelName) {
-      const model = await repositories.models.findByName(modelName);
+      // Get workspaceId from the agent's model if available, otherwise use default
+      const workspaceId = fullAgent.model?.workspaceId;
+      const model = await repositories.models.findByName(modelName, workspaceId);
       if (model && model.length > 0) {
         agentConfig = {
           ...agentConfig,

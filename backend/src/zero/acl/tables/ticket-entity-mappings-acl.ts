@@ -9,7 +9,16 @@ import { zql } from '../../queries';
 
 export class TicketEntityMappingsACL extends BaseACL<'ticket_entity_mappings'> {
 
+  private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
+    const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+    if (!ticket) throw new MutationACLError('Ticket entity mapping not found: ticket does not exist', 'ticket_entity_mappings');
+    if (ticket.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Ticket entity mapping not found in this workspace', 'ticket_entity_mappings');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'ticket_entity_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyTicketInWorkspace(args.ticketId, tx);
     const ticket = await tx.run(zql.tickets
       .where('id', args.ticketId)
       .whereExists('conversation', (conversation) => {
@@ -46,6 +55,10 @@ export class TicketEntityMappingsACL extends BaseACL<'ticket_entity_mappings'> {
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'ticket_entity_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    const mapping = await tx.run(zql.ticket_entity_mappings.where('id', args.id).one());
+    if (mapping) {
+      await this.verifyTicketInWorkspace(mapping.ticketId, tx);
+    }
     const hasAccess = await tx.run(zql.ticket_entity_mappings
       .where('id', args.id)
       .whereExists('ticket', (ticket) => {
@@ -85,6 +98,10 @@ export class TicketEntityMappingsACL extends BaseACL<'ticket_entity_mappings'> {
 
   async canDelete(args: DeleteID<TableSchema<'ticket_entity_mappings'>>, tx: Transaction<Schema>): Promise<void> {
     // Verify user has access to the parent ticket before allowing deletion
+    const mappingForWorkspace = await tx.run(zql.ticket_entity_mappings.where('id', args.id).one());
+    if (mappingForWorkspace) {
+      await this.verifyTicketInWorkspace(mappingForWorkspace.ticketId, tx);
+    }
     const hasAccess = await tx.run(zql.ticket_entity_mappings
       .where('id', args.id)
       .whereExists('ticket', (ticket) => {

@@ -11,6 +11,7 @@ const channelController = new ChannelController();
 const OpenDmBodySchema = z.object({
   targetUserId: z.string().min(1).trim(),
   userId: z.string().min(1).trim(), // injected by authenticateApp (bot's userId)
+  workspaceId: z.string().min(1).trim(),
 });
 
 router.post('/openDm', async (req: Request, res: Response) => {
@@ -19,10 +20,10 @@ router.post('/openDm', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Validation error', details: result.error.errors });
     return;
   }
-  const { targetUserId, userId: botUserId } = result.data;
+  const { targetUserId, userId: botUserId, workspaceId } = result.data;
   try {
     const { unifiedDMService } = await import('@/bots/unified/services/unified-dm-service');
-    const channel = await unifiedDMService.getOrCreateBotDM(targetUserId, botUserId);
+    const channel = await unifiedDMService.getOrCreateBotDM(targetUserId, botUserId, workspaceId);
     res.status(200).json({ channelId: channel.id });
   } catch (error) {
     logger.error('[openDm] Failed to open DM:', error);

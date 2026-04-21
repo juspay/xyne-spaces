@@ -20,6 +20,7 @@ import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canv
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
+import { db } from '@/database/client';
 import type {
   BlockNoteBlock,
   BlockNoteTableBlock,
@@ -612,7 +613,6 @@ export class CallDocumentService {
           errorHandling: {
             maxRetries: 5,
             retryDelay: 120000,
-            maxDelay: 960000,
           },
         },
         events: {
@@ -923,9 +923,31 @@ export class CallDocumentService {
 
       logger.info(`[CallDocumentService] Created detailed summary canvas ${canvasId} for call ${callId} with Xyne Automatic and call creator as owners`);
 
+      // Fetch complete context for the user to pass to side-effect handler
+      const user = await db.user.findUnique({
+        where: { id: createdByUserId },
+        select: { id: true, email: true, workspaceId: true, role: true },
+      });
+      if (!user || !user.workspaceId) {
+        throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
+      }
+      // Email is globally unique in orgMember, single lookup is sufficient
+      const orgMember = await db.orgMember.findUnique({
+        where: { email: user.email },
+      });
+      if (!orgMember) {
+        throw new Error(`User ${createdByUserId} is not a member of any organization`);
+      }
+
       // Manually call canvas handler for activities and notifications
       // (Canvas is created via Prisma, not Zero mutator, so handler won't auto-trigger)
-      const canvasHandler = new CanvasSideEffectHandler({ userID: createdByUserId });
+      const canvasHandler = new CanvasSideEffectHandler({
+        userID: user.id,
+        workspaceId: user.workspaceId,
+        role: user.role,
+        memberId: orgMember.memberId,
+        orgRole: orgMember.role,
+      });
       canvasHandler.onInsert({
         entityId: canvasId,
         entityType: 'canvases',

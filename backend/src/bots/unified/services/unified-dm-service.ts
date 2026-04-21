@@ -30,7 +30,7 @@ class UnifiedDMService {
    * @param userId - The human user's ID
    * @param botUserId - The bot user's database ID
    */
-  async getOrCreateBotDM(userId: string, botUserId: string): Promise<Channel> {
+  async getOrCreateBotDM(userId: string, botUserId: string, workspaceId: string): Promise<Channel> {
     // Check for existing DM
     const existingDM = await channelRepository.getDMChannel(userId, botUserId);
     if (existingDM) {
@@ -61,6 +61,7 @@ class UnifiedDMService {
       visibility: ChannelVisibility.PRIVATE,
       createdBy: userId,
       projectId: 'default',
+      workspaceId,
     });
 
     // Add participants
@@ -78,7 +79,7 @@ class UnifiedDMService {
    * @param userId - The human user's ID
    * @param botId - The bot ID from the catalog
    */
-  async getOrCreateBotDMByBotId(userId: string, botId: string): Promise<Channel | null> {
+  async getOrCreateBotDMByBotId(userId: string, botId: string, workspaceId: string): Promise<Channel | null> {
     // Get bot user from catalog
     const entry = botCatalog.getById(botId);
     if (!entry) {
@@ -98,7 +99,7 @@ class UnifiedDMService {
       botUserId = botUser.id;
     }
 
-    return this.getOrCreateBotDM(userId, botUserId);
+    return this.getOrCreateBotDM(userId, botUserId, workspaceId);
   }
 
   /**

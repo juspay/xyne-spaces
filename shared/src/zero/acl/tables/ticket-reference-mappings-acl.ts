@@ -10,36 +10,8 @@ export class TicketReferenceMappingsACL extends BaseQueryACL<'ticket_reference_m
   canSelect<TReturn>(
     query: Query<'ticket_reference_mappings', Schema, TReturn>,
   ): Query<'ticket_reference_mappings', Schema, TReturn> {
-    return query;
-
-    // TODO: Commenting this to find a better way for acl and ticket/workflows/executions etc level
-    // return query.whereExists('sourceTicket', (ticket) => {
-    //   return ticket.whereExists('conversation', (conversation) => {
-    //     return conversation.whereExists('channel', (channel) => {
-    //       return channel.where(({ cmp, or, exists, and }) => {
-    //         return or(
-    //           and(
-    //             cmp('visibility', ChannelVisibility.PRIVATE),
-    //             exists('participants', (participants) => {
-    //               return participants.where('userId', this.ctx.userID);
-    //             })
-    //           ),
-    //           and(
-    //             cmp('visibility', ChannelVisibility.PUBLIC),
-    //             exists('project', (project) => {
-    //               return project.whereExists('channels', (channelQuery) => {
-    //                 return channelQuery
-    //                   .where('visibility', ChannelVisibility.PUBLIC)
-    //                   .whereExists('participants', (participants) => {
-    //                     return participants.where('userId', this.ctx.userID);
-    //                   });
-    //               });
-    //             })
-    //           )
-    //         );
-    //       });
-    //     });
-    //   });
-    // });
+    return query.whereExists('sourceTicket', (t) =>
+      t.where('workspaceId', '=', this.ctx.workspaceId)
+    );
   }
 }

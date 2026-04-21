@@ -9,13 +9,6 @@ export class CanvasesACL extends BaseQueryACL<'canvases'> {
   }
 
   canSelect<TReturn>(query: Query<'canvases', Schema, TReturn>): Query<'canvases', Schema, TReturn> {
-    return query;
-    // return query.where(({ exists, cmp, or }) =>
-    //   or(
-    //     cmp('createdBy', this.ctx.userID),
-    //     cmp('visibility', CanvasVisibility.PUBLIC),
-    //     exists('participants', (c) => c.where('userId', this.ctx.userID))
-    //   )
-    // );
+    return query.whereExists('createdByUser', (u) => u.where('workspaceId', '=', this.ctx.workspaceId));
   }
 }

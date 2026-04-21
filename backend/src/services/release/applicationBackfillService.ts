@@ -81,7 +81,7 @@ export class ApplicationBackfillService {
     }
   }
 
-  async backFillReleaseForms(createdBy: string): Promise<void> {
+  async backFillReleaseForms(createdBy: string, workspaceId: string): Promise<void> {
     logger.info('Setting up forms...');
 
     // Create or get MIGRATION form
@@ -102,6 +102,7 @@ export class ApplicationBackfillService {
           formDescription: 'Form for tracking database migrations in releases',
           entityType: FormEntityType.RELEASE_MIGRATION_FORM,
           contextType: FormContextType.RELEASE_CHANGE,
+          workspaceId,
           createdBy,
           fields: formSchema.fields.map(field => ({
             fieldName: field.name,
@@ -132,6 +133,7 @@ export class ApplicationBackfillService {
           formDescription: 'Form for tracking environment variable changes in releases',
           entityType: FormEntityType.RELEASE_ENV_FORM,
           contextType: FormContextType.RELEASE_CHANGE,
+          workspaceId,
           createdBy,
           fields: formSchema.fields.map(field => ({
             fieldName: field.name,
@@ -162,6 +164,7 @@ export class ApplicationBackfillService {
           formDescription: 'Form for getting release specs',
           entityType: FormEntityType.TICKET,
           contextType: FormContextType.BOARD,
+          workspaceId,
           createdBy,
           fields: formSchema.fields.map(field => ({
             fieldName: field.name,
@@ -220,10 +223,6 @@ export class ApplicationBackfillService {
     logger.info('Starting application backfill...');
 
     try {
-      // Setup ReleaseChangeType, forms, and lookup values first
-      await this.backFillReleaseForms(createdBy);
-      await this.backFillTicketTypeLookups();
-
       // Validate and get channel if provided
       let validChannel: Channel | undefined;
       if (channelId) {
@@ -234,6 +233,10 @@ export class ApplicationBackfillService {
       } else {
         throw new Error('No channelId provided. Applications will be created without a channel.');
       }
+
+      // Setup ReleaseChangeType, forms, and lookup values first
+      await this.backFillReleaseForms(createdBy, validChannel.workspaceId);
+      await this.backFillTicketTypeLookups();
 
       logger.info('Creating applications...');
 
@@ -267,10 +270,20 @@ export class ApplicationBackfillService {
         });
 
         if (!board) {
+          // Fetch project to get workspaceId
+          const project = await db.project.findUnique({
+            where: { id: validChannel.projectId },
+            select: { workspaceId: true },
+          });
+          if (!project) {
+            throw new Error('Project not found');
+          }
+
           board = await db.board.create({
             data: {
               name: boardName,
               projectId: validChannel.projectId,
+              workspaceId: project.workspaceId,
               createdBy,
               createdAt: new Date(),
               boardType: BoardType.RELEASE

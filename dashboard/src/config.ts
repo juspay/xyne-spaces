@@ -71,3 +71,8 @@ export const SHAREABLE_ORIGIN = window.location.origin;
 // Auto-generation still runs regardless of this flag
 export const ENABLE_SUMMARY_ACTION_BUTTON: boolean =
   import.meta.env['VITE_ENABLE_SUMMARY_ACTION_BUTTON'] === 'true';
+
+// Workspace ID used to rewrite legacy in-app links that don't contain a workspace segment.
+// Set VITE_DEFAULT_WORKSPACE_ID in .env.local to the default workspace ID.
+export const DEFAULT_WORKSPACE_ID: string =
+  (import.meta.env['VITE_DEFAULT_WORKSPACE_ID'] as string) ?? '';

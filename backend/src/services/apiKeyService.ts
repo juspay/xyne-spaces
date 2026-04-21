@@ -52,7 +52,7 @@ export class ApiKeyService {
    * @param apiKey The API key to validate
    * @param userHeaders Optional headers containing user details (X-User-Name, X-User-Email)
    */
-  async validateApiKey(apiKey: string, userHeaders?: { name?: string; email?: string }): Promise<ApiKeyUser | null> {
+  async validateApiKey(apiKey: string, userHeaders?: { name?: string; email?: string; workspaceId?: string }): Promise<ApiKeyUser | null> {
     try {
       // Check for environment API key first
       const envApiKey = process.env.API_KEY;
@@ -67,12 +67,28 @@ export class ApiKeyService {
         
         // Create or find a real user in the database for environment API key
         try {
+          const workspaceId = userHeaders?.workspaceId;
+          if (!workspaceId) {
+            logger.error('workspaceId is required for API key authentication');
+            return null;
+          }
           // Find existing user by email or create a new one
           let user = await this.db.user.findUnique({
-            where: { email: userEmail }
+            where: { email_workspaceId: { email: userEmail, workspaceId } }
           });
 
           if (!user) {
+            // Fetch existing orgMember by email
+            const orgMember = await this.db.orgMember.findUnique({
+              where: { email: userEmail },
+              select: { memberId: true }
+            });
+
+            if (!orgMember) {
+              logger.error(`Cannot create API key user: orgMember not found for email ${userEmail}`);
+              return null;
+            }
+
             // Create new user for environment API key
             user = await this.db.user.create({
               data: {
@@ -80,7 +96,9 @@ export class ApiKeyService {
                 email: userEmail,
                 authProvider: 'API_KEY',
                 providerUserId: `env_api_${Buffer.from(userEmail).toString('base64')}`,
-                status: 'ACTIVE'
+                status: 'ACTIVE',
+                workspace: { connect: { id: workspaceId } },
+                orgMemberId: orgMember.memberId,
               }
             });
             logger.info(`Created new user for environment API key: ${userEmail} (${user.id})`);
@@ -95,6 +113,12 @@ export class ApiKeyService {
             logger.info(`Found existing user for environment API key: ${userEmail} (${user.id})`);
           }
 
+          // Fetch org member for role
+          const orgMember = await this.db.orgMember.findUnique({
+            where: { memberId: user.orgMemberId },
+            select: { role: true }
+          });
+
           // Return admin user for the environment key with real user ID
           return {
             id: user.id, // Use real database user ID
@@ -107,6 +131,9 @@ export class ApiKeyService {
             ],
             isApiKeyUser: true,
             apiKeyName: 'Environment API Key',
+            workspaceId: user.workspaceId,
+            orgRole: orgMember!.role,
+            memberId: user.orgMemberId,
           };
         } catch (dbError) {
           logger.error('Error creating/finding user for environment API key:', dbError);
@@ -122,6 +149,9 @@ export class ApiKeyService {
             ],
             isApiKeyUser: true,
             apiKeyName: 'Environment API Key',
+            workspaceId: userHeaders?.workspaceId ?? '',
+            orgRole: '',
+            memberId: '',
           };
         }
       }
@@ -203,6 +233,12 @@ export class ApiKeyService {
       // Determine user role (admin if has any ADMIN access)
       const isAdmin = allPermissions.some(p => p.access === AccessType.ADMIN);
 
+      // Fetch org member for role
+      const orgMember = await this.db.orgMember.findUnique({
+        where: { memberId: apiKeyRecord.user.orgMemberId },
+        select: { role: true }
+      });
+
       return {
         id: apiKeyRecord.user.id,
         username: apiKeyRecord.user.name,
@@ -211,6 +247,9 @@ export class ApiKeyService {
         scopes,
         isApiKeyUser: true,
         apiKeyName: apiKeyRecord.name,
+        workspaceId: apiKeyRecord.user.workspaceId,
+        orgRole: orgMember!.role,
+        memberId: apiKeyRecord.user.orgMemberId,
       };
 
     } catch (error) {
@@ -267,24 +306,47 @@ export class ApiKeyService {
    */
   async createApiKey(request: CreateApiKeyRequest, createdByUserId: string): Promise<CreateApiKeyResponse> {
     try {
+      const creatingUser = await this.db.user.findUnique({
+        where: { id: createdByUserId }
+      });
+      if (!creatingUser) {
+        throw new Error('Creating user not found');
+      }
+      const workspaceId = creatingUser.workspaceId;
+
       // Generate the actual API key
       const rawApiKey = this.generateApiKey();
       const keyHash = this.hashApiKey(rawApiKey);
       const base64Key = Buffer.from(rawApiKey).toString('base64');
 
       // Calculate expiration date
-      const expiresAt = request.expiresInDays 
+      const expiresAt = request.expiresInDays
         ? new Date(Date.now() + request.expiresInDays * 24 * 60 * 60 * 1000)
         : null;
+
+      // Generate email for API key user
+      const apiKeyUserEmail = `${request.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}@api.xyne.juspay.in`;
+
+      // Fetch existing orgMember by email (should exist for workspace members)
+      const orgMember = await this.db.orgMember.findFirst({
+        where: { email: apiKeyUserEmail },
+        select: { memberId: true }
+      });
+
+      if (!orgMember) {
+        throw new Error(`orgMember not found for API key user email ${apiKeyUserEmail}. User must be added to the organization first.`);
+      }
 
       // Create API key user in database
       const apiKeyUser = await this.db.user.create({
         data: {
           name: request.name,
-          email: `${request.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}@api.xyne.juspay.in`,
+          email: apiKeyUserEmail,
           authProvider: AuthProvider.API_KEY,
           providerUserId: `api_${crypto.randomUUID()}`,
           status: UserStatus.ACTIVE,
+          workspace: { connect: { id: workspaceId } },
+          orgMemberId: orgMember.memberId,
         }
       });
 

@@ -12,13 +12,29 @@ export interface User {
   name?: string;
   email?: string;
   googleId?: string;
+  picture?: string;
+  workspaceId: string;
+  role: string;
+  orgRole: string;
+  memberId: string;
   [key: string]: string | undefined;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  role: string;
 }
 
 interface AuthContext {
   user: User | null;
   error: string | null;
   isNewUser: boolean;
+  workspaces: Workspace[];
+  pendingUserData: { email: string; name: string; picture?: string } | null;
+  selectedWorkspaceId: string | null;
+  orgData: { orgName: string; workspaceName: string } | null;
+  userExistsButRemoved: boolean;
 }
 
 type AuthEvent =
@@ -28,7 +44,10 @@ type AuthEvent =
   | { type: 'SESSION_VALIDATED'; user: User; isNewUser?: boolean }
   | { type: 'AUTH_ERROR'; message: string }
   | { type: 'CLEAR_ERROR' }
-  | { type: 'COMPLETE_ONBOARDING' };
+  | { type: 'COMPLETE_ONBOARDING' }
+  | { type: 'SELECT_WORKSPACE'; workspaceId: string }
+  | { type: 'CREATE_ORG' }
+  | { type: 'SUBMIT_CREATE_ORG'; orgName: string; workspaceName: string };
 
 export type AuthState =
   | 'checkingSession'
@@ -41,7 +60,7 @@ export type AuthState =
   | 'testAuthenticating';
 
 interface ValidateSessionResponse {
-  user: User;
+  user: User & { workspaceId?: string };
 }
 
 interface ApiErrorResponse {
@@ -49,12 +68,17 @@ interface ApiErrorResponse {
 }
 
 interface OAuthCallbackOutput {
-  user: User;
+  user?: User;
+  workspaces: Workspace[];
+  pendingUserData: { email: string; name: string; picture?: string };
+  autoLoginWorkspace?: string;
+  isNewUser?: boolean;
+  userExistsButRemoved?: boolean;
 }
 
 interface XStateEvent {
   type: string;
-  output?: OAuthCallbackOutput & { isNewUser?: boolean };
+  output?: OAuthCallbackOutput;
 }
 
 const clearPersistedSession = (): void => {
@@ -67,10 +91,31 @@ const clearOnboardingCookie = (): void => {
   Cookies.remove('is_new_user');
 };
 
+export const getLastActiveWorkspaceId = (email: string): string | null => {
+  return localStorage.getItem(`lastActiveWorkspaceId_${email}`);
+};
+
+export const setLastActiveWorkspaceId = (email: string, workspaceId: string): void => {
+  localStorage.setItem(`lastActiveWorkspaceId_${email}`, workspaceId);
+};
+
+export const getLastActiveWorkspaceName = (email: string): string | null => {
+  return localStorage.getItem(`lastActiveWorkspaceName_${email}`);
+};
+
+export const setLastActiveWorkspaceName = (email: string, workspaceName: string): void => {
+  localStorage.setItem(`lastActiveWorkspaceName_${email}`, workspaceName);
+};
+
 const createClearedContext = (): AuthContext => ({
   user: null,
   error: null,
   isNewUser: false,
+  workspaces: [],
+  pendingUserData: null,
+  selectedWorkspaceId: null,
+  orgData: null,
+  userExistsButRemoved: false,
 });
 
 export const authMachine = createMachine(
@@ -86,6 +131,11 @@ export const authMachine = createMachine(
       user: null,
       error: null,
       isNewUser: false,
+      workspaces: [],
+      pendingUserData: null,
+      selectedWorkspaceId: null,
+      orgData: null,
+      userExistsButRemoved: false,
     },
     states: {
       checkingSession: {
@@ -96,8 +146,17 @@ export const authMachine = createMachine(
           let user = null;
 
           if (userId) {
-            user = { id: userId, ...(userEmail && { email: userEmail }) };
+            user = {
+              id: userId,
+              workspaceId: '',
+              role: '',
+              orgRole: '',
+              memberId: '',
+              ...(userEmail && { email: userEmail }),
+            };
           }
+
+          const lastActiveWorkspaceId = userEmail ? getLastActiveWorkspaceId(userEmail) : null;
 
           // Check for is_new_user cookie
           const isNewUserCookie = Cookies.get('is_new_user');
@@ -107,6 +166,7 @@ export const authMachine = createMachine(
             user: user,
             error: null,
             isNewUser: isNewUser,
+            selectedWorkspaceId: lastActiveWorkspaceId,
           };
         }),
         always: [
@@ -115,7 +175,7 @@ export const authMachine = createMachine(
             guard: 'hasOAuthCallback',
           },
           {
-            target: 'authenticated',
+            target: 'validatingSession',
             guard: 'hasStoredSession',
           },
           {
@@ -126,38 +186,225 @@ export const authMachine = createMachine(
       processingOAuthCallback: {
         invoke: {
           src: 'processOAuthCallback',
+          onDone: [
+            {
+              // User already exists in a workspace (legacy flow or session refresh)
+              target: 'authenticated',
+              guard: 'hasUserInOutput',
+              actions: [
+                assign(({ context, event }) => {
+                  const output = (event as XStateEvent).output;
+                  if (output?.user) {
+                    localStorage.setItem('user_id', output.user.id);
+                    if (output.user.email) {
+                      localStorage.setItem('user_email', output.user.email);
+                      if (window.electronAPI?.setUserEmail) {
+                        window.electronAPI.setUserEmail(output.user.email);
+                      }
+                      if (output.user.workspaceId) {
+                        setLastActiveWorkspaceId(output.user.email, output.user.workspaceId);
+                      }
+                    }
+                  }
+                  return {
+                    user: output?.user || context.user,
+                    error: null,
+                    isNewUser: output?.isNewUser ?? context.isNewUser,
+                    workspaces: [],
+                    pendingUserData: null,
+                  };
+                }),
+                'trackLoginSuccess',
+              ],
+            },
+            {
+              // Has autoLoginWorkspace from invitation flow - auto-login to that workspace
+              target: 'loggingInToWorkspace',
+              guard: 'hasAutoLoginWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = event.output as OAuthCallbackOutput | undefined;
+                return {
+                  ...context,
+                  workspaces: output?.workspaces || [],
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: output?.autoLoginWorkspace || null,
+                  error: null,
+                };
+              }),
+            },
+            {
+              // Has lastActiveWorkspaceId in localStorage - auto-login to that workspace
+              target: 'loggingInToWorkspace',
+              guard: 'hasLastActiveWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = event.output as OAuthCallbackOutput | undefined;
+                const email = output?.pendingUserData?.email;
+                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                return {
+                  ...context,
+                  workspaces: output?.workspaces || [],
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: lastWorkspaceId,
+                  error: null,
+                };
+              }),
+            },
+            {
+              // Has workspaces but no lastActiveWorkspaceId - show selection UI
+              target: 'selectingWorkspace',
+              guard: 'hasWorkspaces',
+              actions: assign(({ context, event }) => {
+                const output = event.output as OAuthCallbackOutput | undefined;
+                return {
+                  ...context,
+                  workspaces: output?.workspaces || [],
+                  pendingUserData: output?.pendingUserData || null,
+                  error: null,
+                };
+              }),
+            },
+            {
+              // No workspaces - show create org UI or removed user message
+              target: 'creatingOrg',
+              actions: assign(({ context, event }) => {
+                const output = event.output as OAuthCallbackOutput | undefined;
+                return {
+                  ...context,
+                  workspaces: [],
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+          ],
+          onError: {
+            target: 'unauthenticated',
+            actions: 'setError',
+          },
+        },
+      },
+      selectingWorkspace: {
+        on: {
+          SELECT_WORKSPACE: {
+            target: 'loggingInToWorkspace',
+            actions: assign(({ context, event }) => ({
+              ...context,
+              selectedWorkspaceId: (event as { type: 'SELECT_WORKSPACE'; workspaceId: string })
+                .workspaceId,
+            })),
+          },
+          CREATE_ORG: {
+            target: 'creatingOrg',
+          },
+          AUTH_ERROR: {
+            target: 'unauthenticated',
+            actions: 'setError',
+          },
+        },
+      },
+      loggingInToWorkspace: {
+        invoke: {
+          src: 'loginWorkspace',
+          input: ({ context }) => ({ workspaceId: context.selectedWorkspaceId! }),
           onDone: {
             target: 'authenticated',
             actions: [
               assign(({ context, event }) => {
                 const output = (event as XStateEvent).output;
-
                 if (output?.user) {
-                  // Store user data in cookies
                   localStorage.setItem('user_id', output.user.id);
                   if (output.user.email) {
                     localStorage.setItem('user_email', output.user.email);
-                    // Send email to Electron for logging (only during initial OAuth login)
                     if (window.electronAPI?.setUserEmail) {
                       window.electronAPI.setUserEmail(output.user.email);
                     }
+                    if (output.user.workspaceId) {
+                      setLastActiveWorkspaceId(output.user.email, output.user.workspaceId);
+                    }
                   }
                 }
-
-                // Session tokens are set via HTTP-only cookies from backend
-                // No need to store in localStorage or set cookies from frontend
-
                 return {
                   user: output?.user || context.user,
                   error: null,
                   isNewUser: output?.isNewUser ?? context.isNewUser,
+                  workspaces: [],
+                  pendingUserData: null,
+                  selectedWorkspaceId: null,
                 };
               }),
               'trackLoginSuccess',
             ],
           },
           onError: {
+            target: 'selectingWorkspace',
+            actions: 'setError',
+          },
+        },
+      },
+      creatingOrg: {
+        on: {
+          SUBMIT_CREATE_ORG: {
+            target: 'submittingCreateOrg',
+            actions: assign(({ context, event }) => ({
+              ...context,
+              orgData: event as {
+                type: 'SUBMIT_CREATE_ORG';
+                orgName: string;
+                workspaceName: string;
+              },
+            })),
+          },
+          AUTH_ERROR: {
             target: 'unauthenticated',
+            actions: 'setError',
+          },
+        },
+      },
+      submittingCreateOrg: {
+        invoke: {
+          src: 'createOrg',
+          input: ({ context }) => ({
+            orgName: context.orgData!.orgName,
+            workspaceName: context.orgData!.workspaceName,
+          }),
+          onDone: {
+            target: 'authenticated',
+            actions: [
+              assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                if (output?.user) {
+                  localStorage.setItem('user_id', output.user.id);
+                  if (output.user.email) {
+                    localStorage.setItem('user_email', output.user.email);
+                    if (window.electronAPI?.setUserEmail) {
+                      window.electronAPI.setUserEmail(output.user.email);
+                    }
+                    if (output.user.workspaceId) {
+                      setLastActiveWorkspaceId(output.user.email, output.user.workspaceId);
+                      if (context.orgData?.workspaceName) {
+                        setLastActiveWorkspaceName(
+                          output.user.email,
+                          context.orgData.workspaceName,
+                        );
+                      }
+                    }
+                  }
+                }
+                return {
+                  user: output?.user || context.user,
+                  error: null,
+                  isNewUser: true,
+                  workspaces: [],
+                  pendingUserData: null,
+                  orgData: null,
+                };
+              }),
+              'trackLoginSuccess',
+            ],
+          },
+          onError: {
+            target: 'creatingOrg',
             actions: 'setError',
           },
         },
@@ -323,6 +570,15 @@ export const authMachine = createMachine(
                 const output = (event as XStateEvent).output;
                 if (output?.user) {
                   localStorage.setItem('user_id', output.user.id);
+                  if (output.user.email) {
+                    localStorage.setItem('user_email', output.user.email);
+                    if (window.electronAPI?.setUserEmail) {
+                      window.electronAPI.setUserEmail(output.user.email);
+                    }
+                    if (output.user.workspaceId) {
+                      setLastActiveWorkspaceId(output.user.email, output.user.workspaceId);
+                    }
+                  }
                 }
                 return {
                   user: output?.user || context.user,
@@ -360,6 +616,26 @@ export const authMachine = createMachine(
         return !!userId;
       },
       isTestEnvironment: () => isTestEnv,
+      hasUserInOutput: ({ event }) => {
+        const e = event as { output?: OAuthCallbackOutput };
+        return !!e.output?.user?.id;
+      },
+      hasLastActiveWorkspace: ({ event }) => {
+        const e = event as { output?: OAuthCallbackOutput };
+        const email = e.output?.pendingUserData?.email;
+        if (!email) return false;
+        const lastWorkspaceId = getLastActiveWorkspaceId(email);
+        if (!lastWorkspaceId) return false;
+        return (e.output?.workspaces || []).some((w: Workspace) => w.id === lastWorkspaceId);
+      },
+      hasWorkspaces: ({ event }) => {
+        const e = event as { output?: OAuthCallbackOutput };
+        return (e.output?.workspaces || []).length > 0;
+      },
+      hasAutoLoginWorkspace: ({ event }) => {
+        const e = event as { output?: OAuthCallbackOutput };
+        return !!e.output?.autoLoginWorkspace;
+      },
     },
     actions: {
       clearSessionCookies: () => {
@@ -507,6 +783,12 @@ export const authMachine = createMachine(
         const success = urlParams.get('success');
         const error = urlParams.get('error');
         const errorMessage = urlParams.get('message');
+        const workspacesJson = urlParams.get('workspaces');
+        const email = urlParams.get('email');
+        const name = urlParams.get('name');
+        const picture = urlParams.get('picture');
+        const autoLoginWorkspace = urlParams.get('autoLoginWorkspace');
+        const userExistsButRemoved = urlParams.get('userExistsButRemoved') === 'true';
 
         window.history.replaceState({}, document.title, window.location.pathname);
 
@@ -514,9 +796,74 @@ export const authMachine = createMachine(
           return Promise.reject(new Error(`Authentication failed: ${errorMessage || error}`));
         }
 
-        if (success === 'true') {
+        if (success === 'true' && email && name) {
+          // Parse workspaces from URL
+          let workspaces: Workspace[] = [];
           try {
-            const headers: Record<string, string> = {};
+            if (workspacesJson) {
+              workspaces = JSON.parse(workspacesJson) as Workspace[];
+            }
+          } catch {
+            workspaces = [];
+          }
+
+          return Promise.resolve({
+            workspaces,
+            pendingUserData: { email, name, picture: picture || undefined },
+            autoLoginWorkspace: autoLoginWorkspace || undefined,
+            userExistsButRemoved,
+          });
+        }
+
+        return Promise.reject(new Error('No valid OAuth callback parameters found'));
+      }),
+      loginWorkspace: fromPromise(async ({ input }: { input: { workspaceId: string } }) => {
+        try {
+          const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+          };
+          headers['x-request-id'] = uuidv4();
+          if (logger.zeroClientId) {
+            headers['x-client-id'] = logger.zeroClientId;
+          }
+          if (logger.zeroClientGroupId) {
+            headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
+          }
+          const userEmail = logger.emailId;
+          if (userEmail) {
+            headers['x-user-email'] = userEmail;
+          }
+
+          const response = await axios.post(
+            `${API_BASE_URL}/auth/login-workspace`,
+            { workspaceId: input.workspaceId },
+            {
+              withCredentials: true,
+              headers,
+            },
+          );
+
+          const data = response.data as { user: User; isNewUser?: boolean };
+          if (data.user) {
+            return { user: data.user, isNewUser: data.isNewUser ?? false };
+          }
+          throw new Error('Login to workspace failed: No user data');
+        } catch (error) {
+          if (axios.isAxiosError(error)) {
+            const errorData = error.response?.data as { error?: string; message?: string };
+            throw new Error(
+              errorData?.message || errorData?.error || 'Failed to login to workspace',
+            );
+          }
+          throw new Error('Failed to login to workspace');
+        }
+      }),
+      createOrg: fromPromise(
+        async ({ input }: { input: { orgName: string; workspaceName: string } }) => {
+          try {
+            const headers: Record<string, string> = {
+              'Content-Type': 'application/json',
+            };
             headers['x-request-id'] = uuidv4();
             if (logger.zeroClientId) {
               headers['x-client-id'] = logger.zeroClientId;
@@ -528,33 +875,32 @@ export const authMachine = createMachine(
             if (userEmail) {
               headers['x-user-email'] = userEmail;
             }
-            // Note: Using direct axios call instead of apiInstance
-            const response = await axios.get(`${API_BASE_URL}/v2/auth/me`, {
-              withCredentials: true,
-              headers: {
-                // eslint-disable-next-line @typescript-eslint/naming-convention
-                'Content-Type': 'application/json',
-                ...headers,
+
+            const response = await axios.post(
+              `${API_BASE_URL}/auth/create-org`,
+              { orgName: input.orgName, workspaceName: input.workspaceName },
+              {
+                withCredentials: true,
+                headers,
               },
-            });
+            );
 
-            const data = response.data as { success: boolean; user: User };
-            if (data.success && data.user) {
-              // Check for is_new_user cookie after successful auth
-              const isNewUserCookie = Cookies.get('is_new_user');
-              const isNewUser = isNewUserCookie === 'true';
-
-              return Promise.resolve({ user: data.user, isNewUser });
+            const data = response.data as { user: User; isNewUser?: boolean };
+            if (data.user) {
+              return { user: data.user, isNewUser: true };
             }
-
-            return Promise.reject(new Error('Failed to fetch user data'));
-          } catch {
-            return Promise.reject(new Error('Failed to fetch user data after OAuth callback'));
+            throw new Error('Create org failed: No user data');
+          } catch (error) {
+            if (axios.isAxiosError(error)) {
+              const errorData = error.response?.data as { error?: string; message?: string };
+              throw new Error(
+                errorData?.message || errorData?.error || 'Failed to create organization',
+              );
+            }
+            throw new Error('Failed to create organization');
           }
-        }
-
-        return Promise.reject(new Error('No valid OAuth callback parameters found'));
-      }),
+        },
+      ),
       validateSession: fromPromise(async () => {
         try {
           const headers: Record<string, string> = {};

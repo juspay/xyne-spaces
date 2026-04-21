@@ -6,7 +6,11 @@ export class BoardComplexityScoresACL extends BaseQueryACL<Prisma.BoardComplexit
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.BoardComplexityScoreWhereInput | null> {
-    return null
+  async getWhereClause(): Promise<Prisma.BoardComplexityScoreWhereInput> {
+    return {
+      board: {
+        workspaceId: this.ctx.workspaceId ?? '',
+      },
+    }
   }
 }

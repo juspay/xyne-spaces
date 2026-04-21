@@ -8,7 +8,17 @@ import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 
 export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappings'> {
+
+  private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
+    const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+    if (!ticket) throw new MutationACLError('Ticket reference mapping not found: ticket does not exist', 'ticket_reference_mappings');
+    if (ticket.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Ticket reference mapping not found in this workspace', 'ticket_reference_mappings');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'ticket_reference_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyTicketInWorkspace(args.sourceTicketId, tx);
     const ticket = await tx.run(zql.tickets
       .where('id', args.sourceTicketId)
       .whereExists('conversation', (conversation) => {
@@ -45,6 +55,10 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'ticket_reference_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    const mapping = await tx.run(zql.ticket_reference_mappings.where('id', args.id).one());
+    if (mapping) {
+      await this.verifyTicketInWorkspace(mapping.sourceTicketId, tx);
+    }
     const hasAccess = await tx.run(zql.ticket_reference_mappings
       .where('id', args.id)
       .whereExists('sourceTicket', (ticket) => {
@@ -83,6 +97,10 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
   }
 
   async canDelete(args: DeleteID<TableSchema<'ticket_reference_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    const mapping = await tx.run(zql.ticket_reference_mappings.where('id', args.id).one());
+    if (mapping) {
+      await this.verifyTicketInWorkspace(mapping.sourceTicketId, tx);
+    }
     const hasAccess = await tx.run(zql.ticket_reference_mappings
       .where('id', args.id)
       .whereExists('sourceTicket', (ticket) => {

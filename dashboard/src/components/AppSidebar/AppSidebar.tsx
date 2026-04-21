@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { useAuth } from '../../hooks/useAuth';
 import { usePermissions } from '../../hooks/usePermissions';
@@ -43,6 +43,7 @@ import {
   ArrowRightLeft,
   AppWindow,
   SearchCode,
+  Building2,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -80,6 +81,8 @@ const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarClock },
   { path: '/apps', label: 'Apps', icon: AppWindow },
   { path: '/inspector', label: 'Inspector', icon: SearchCode },
+  { path: '/workspace-management', label: 'Workspace Management', icon: Settings },
+  { path: '/organisations', label: 'Organisations', icon: Building2 },
 ];
 
 const mobileNavigationItems = [
@@ -142,6 +145,7 @@ const mobileNavigationItems = [
 
 const AppSidebar = (): ReactElement => {
   const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
   const { user } = useAuth();
   const currentUser = useSelf();
   const permissions = usePermissions();
@@ -159,7 +163,11 @@ const AppSidebar = (): ReactElement => {
     return '/' + (pathname.split('/')[1] || '');
   };
 
-  const activeRoute = getActiveRoute(location.pathname);
+  const activeRoute = getActiveRoute(
+    workspaceId && location.pathname.startsWith(`/${workspaceId}`)
+      ? location.pathname.slice(`/${workspaceId}`.length) || '/'
+      : location.pathname,
+  );
 
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
 

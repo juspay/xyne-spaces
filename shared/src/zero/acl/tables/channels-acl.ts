@@ -8,11 +8,13 @@ export class ChannelsACL extends BaseQueryACL<'channels'> {
   }
 
   canSelect<TReturn>(query: Query<'channels', Schema, TReturn>): Query<'channels', Schema, TReturn> {
-    return query.where(({ or, cmp, exists }) =>
-      or(
-        cmp('visibility', '=', ChannelVisibility.PUBLIC),
-        exists('participants', (p) => p.where('userId', this.ctx.userID))
-      )
-    );
+    return query
+      .where('workspaceId', '=', this.ctx.workspaceId)
+      .where(({ or, cmp, exists }) =>
+        or(
+          cmp('visibility', '=', ChannelVisibility.PUBLIC),
+          exists('participants', (p) => p.where('userId', this.ctx.userID))
+        )
+      );
   }
 }

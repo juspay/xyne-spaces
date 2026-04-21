@@ -14,4 +14,6 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/support': 'SUPPORT',
   '/product-insights': 'PRODUCT-INSIGHTS',
   '/projects': 'PROJECTS',
+  '/workspace-management': 'WORKSPACE',
+  '/organisations': 'ORGANIZATIONS',
 };

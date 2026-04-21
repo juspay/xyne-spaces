@@ -39,7 +39,7 @@ router.post('/', async (req: Request, res: Response) => {
     const translated = translateQueryAST(ast)
 
     // Apply ACLs
-    const aclContext = { userId}
+    const aclContext = { userId, workspaceId: req.user?.workspaceId }
     const acl = ACLFactory.getACL(translated.modelName, aclContext, readReplicaDb)
     const whereWithAcl = await acl.applyToWhere(translated.args.where as Record<string, unknown>)
 

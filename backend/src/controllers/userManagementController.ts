@@ -514,7 +514,8 @@ export class UserManagementController {
       const group = await userManagementService.createUserGroup({
         name: name.trim(),
         alias: alias?.trim() || null,
-        description: description?.trim() || null
+        description: description?.trim() || null,
+        workspace: { connect: { id: req.user!.workspaceId! } }
       });
 
       res.status(201).json({

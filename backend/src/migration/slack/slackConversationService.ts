@@ -222,10 +222,20 @@ async function processBatch(
 
   // Ingest if xyneSpaceChannelId is provided
   if (xyneSpaceChannelId && conversationHistory.length > 0) {
+    // Get workspaceId from the channel
+    const channelRepo = new ChannelRepository();
+    const channel = await channelRepo.findById(xyneSpaceChannelId);
+    const workspaceId = channel?.workspaceId || config.defaultWorkspaceId;
+    
+    if (!workspaceId) {
+      throw new Error('workspaceId is required for Slack conversation ingestion');
+    }
+    
     await ingestConversationSlack({
       slackMessages: conversationHistory,
       externalSourceName,
       channelId: xyneSpaceChannelId,
+      workspaceId,
     });
 
     if (ENABLE_NOTIFICATIONS && messageTs) {
@@ -302,8 +312,12 @@ async function addChannelParticipantsBeforeMigration(
 
   const channelMemberIds = await extractChannelMembers(slackChannelId);
   const userRepo = new UserRepository();
+  const channelRepo = new ChannelRepository();
   const userInfoCache: UserInfoCache = new Map();
   const userCache = new Map<string, { id: string; isDeactivated: boolean }>();
+
+  const channel = await channelRepo.findById(xyneChannelId);
+  const workspaceId = channel?.workspaceId ?? '';
 
   const usersToBeAdded: UserToAdd[] = [];
   const failedUsers: ParticipantFailure[] = [];
@@ -325,7 +339,8 @@ async function addChannelParticipantsBeforeMigration(
             userInfo.userName,
             userInfo.isDeactivated ?? false,
             userRepo,
-            userCache
+            userCache,
+            workspaceId
           );
         }
         if (resolvedUserId) {

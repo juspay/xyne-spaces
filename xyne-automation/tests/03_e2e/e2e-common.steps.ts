@@ -182,6 +182,7 @@ Then(
       email: user.email,
       name: user.name,
       isNewUser: user.isNewUser,
+      workspaceId: user.workspaceId,
       sessionId: sessionId,
       browserSession: this.activeContextName,
       context: this.context,

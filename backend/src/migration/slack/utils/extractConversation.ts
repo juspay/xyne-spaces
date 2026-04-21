@@ -338,8 +338,13 @@ export async function getUserInfo(slackUID: string, cache: UserInfoCache): Promi
 
   try {
     const userRepo = new UserRepository();
-    const userByEmail = await userRepo.findByEmail(userInfo.profile.email);
-    
+    // Migration context - workspaceId from config (same pattern as qa-alert-bot)
+    const workspaceId = config.defaultWorkspaceId;
+    if (!workspaceId) {
+      return {};
+    }
+    const userByEmail = await userRepo.findByEmail(userInfo.profile.email, workspaceId);
+
     if (userByEmail) {
       await userRepo.upsertMetaDataField(userByEmail.id, 'slackId', slackUID);
       

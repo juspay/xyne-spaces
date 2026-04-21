@@ -9,6 +9,7 @@ import { UserRepository } from "@/database/repositories/users";
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
+import { db } from '@/database/client';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -23,6 +24,7 @@ export interface CommitAnalysisCanvasMetadata {
   affectedApplicationCount: number;
   migrationCount: number;
   envChangeCount: number;
+  workspaceId?: string;
 }
 
 export async function createCommitAnalysisCanvas(
@@ -108,9 +110,31 @@ export async function createCommitAnalysisCanvas(
       `[CanvasService] Created commit analysis canvas ${canvasId} with ${results.length} commits for ${metadata.workspace}/${metadata.repoSlug}`
     );
 
+    // Fetch complete context for the user to pass to side-effect handler
+    const user = await db.user.findUnique({
+      where: { id: createdByUserId },
+      select: { id: true, email: true, workspaceId: true, role: true },
+    });
+    if (!user || !user.workspaceId) {
+      throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
+    }
+    // Email is globally unique in orgMember, single lookup is sufficient
+    const orgMember = await db.orgMember.findUnique({
+      where: { email: user.email },
+    });
+    if (!orgMember) {
+      throw new Error(`User ${createdByUserId} is not a member of any organization`);
+    }
+
     // Manually call canvas handler for activities and notifications
     // (Canvas is created via Prisma, not Zero mutator, so handler won't auto-trigger)
-    const canvasHandler = new CanvasSideEffectHandler({ userID: createdByUserId });
+    const canvasHandler = new CanvasSideEffectHandler({
+      userID: user.id,
+      workspaceId: user.workspaceId,
+      role: user.role,
+      memberId: orgMember.memberId,
+      orgRole: orgMember.role,
+    });
     canvasHandler.onInsert({
       entityId: canvasId,
       entityType: 'canvases',
@@ -164,7 +188,7 @@ async function formatCommitAnalysisToBlockNote(
   const userLookupCache = new Map<string, { userId: string; username: string; userEmail: string; userPicture: string } | null>();
   const userRepository = new UserRepository();
 
-  const lookupUserByEmail = async (email: string | undefined): Promise<{ userId: string; username: string; userEmail: string; userPicture: string } | null> => {
+  const lookupUserByEmail = async (email: string | undefined, workspaceId: string): Promise<{ userId: string; username: string; userEmail: string; userPicture: string } | null> => {
     if (!email) return null;
 
     // Check cache first
@@ -173,7 +197,7 @@ async function formatCommitAnalysisToBlockNote(
     }
 
     try {
-      const user = await userRepository.findByEmail(email);
+      const user = await userRepository.findByEmail(email, workspaceId);
       if (user) {
         const userData = {
           userId: user.id,
@@ -408,7 +432,9 @@ async function formatCommitAnalysisToBlockNote(
     });
 
     // Author - with mention if user found
-    const authorUser = await lookupUserByEmail(pr.author.emailAddress);
+    const authorUser = metadata.workspaceId 
+      ? await lookupUserByEmail(pr.author.emailAddress, metadata.workspaceId)
+      : null;
     const authorContent: BlockNoteInlineContent[] = [
       { type: 'text', text: 'Author: ', styles: { bold: true } },
     ];

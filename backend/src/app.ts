@@ -31,6 +31,7 @@ import userManagementRoutes from '@/routes/userManagement';
 import channelRoutes from '@/routes/channels';
 import conversationRoutes from '@/routes/conversations';
 import organizationRoutes from '@/routes/organizations';
+import invitationRoutes from '@/routes/invitations';
 import reactionRoutes from '@/routes/reactionRoutes';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
@@ -319,6 +320,7 @@ export class App {
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
+    this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes
@@ -597,7 +599,12 @@ export class App {
     // Initialize unified bot framework
     logger.info('Initializing unified bot framework...');
     initializeBotRegistry(); // Register all bots (internal + external) with unified catalog
-    await unifiedBotUserService.syncAllBotUsers(); // Sync all bots to database
+    // Sync bots for all existing workspaces
+    const dbClient = DatabaseClient.getInstance();
+    const workspaces = await dbClient.workspace.findMany({ select: { id: true } });
+    for (const ws of workspaces) {
+      await unifiedBotUserService.syncAllBotUsers(ws.id);
+    }
     botCatalog.markInitialized();
     logger.info(`Unified bot framework initialized with ${botCatalog.count} bot(s)`);
 

@@ -25,6 +25,7 @@ import { Platform, serializeMessagePreviewMd, serializeLinkPreviewMd, parseLinkP
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
+import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
 import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
@@ -36,6 +37,7 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 
 const LARGE_GROUP_DM_THRESHOLD = 8;
 const messageAttachmentRepository = new MessageAttachmentRepository();
+const channelRepository = new ChannelRepository();
 
 export class MessagesSideEffectHandler extends BaseSideEffectHandler {
   async onInsert(job: SideEffectJobConfig): Promise<void> {
@@ -223,7 +225,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
-    const mentionedUsers = await extractAllUsersForNotification(content, channelId);
+    const workspaceId = await channelRepository.getWorkspaceId(channelId);
+    const mentionedUsers = await extractAllUsersForNotification(content, workspaceId, channelId);
     const channelParticipantIds = new Set(channelParticipants.map(p => p.userId));
     const validMentionedUsers = mentionedUsers
       .filter(u => u.mentionSource === 'direct' || u.mentionSource === 'group')

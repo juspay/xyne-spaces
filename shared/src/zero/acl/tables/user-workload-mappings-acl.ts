@@ -10,11 +10,13 @@ export class UserWorkloadMappingsACL extends BaseQueryACL<'user_workload_mapping
   canSelect<TReturn>(
     query: Query<'user_workload_mappings', Schema, TReturn>,
   ): Query<'user_workload_mappings', Schema, TReturn> {
-    // Users can only see workload data for groups they belong to
+    // Users can only see workload data for groups they belong to within their workspace
     return query.whereExists('userGroup', (userGroupQuery) => {
-      return userGroupQuery.whereExists('userGroupMappings', (mappingQuery) => {
-        return mappingQuery.where('userId', this.ctx.userID);
-      });
+      return userGroupQuery
+        .where('workspaceId', '=', this.ctx.workspaceId)
+        .whereExists('userGroupMappings', (mappingQuery) => {
+          return mappingQuery.where('userId', this.ctx.userID);
+        });
     });
   }
 }

@@ -10,7 +10,15 @@ import { zql } from '../../queries';
 
 export class UserAssignmentStatesACL extends BaseACL<'user_assignment_states'> {
 
+  private async verifyUserGroupInWorkspace(userGroupId: string, tx: Transaction<Schema>): Promise<void> {
+    const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+    if (!userGroup || userGroup.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('User assignment state not found in this workspace', 'user_assignment_states');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'user_assignment_states'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings
@@ -32,6 +40,7 @@ export class UserAssignmentStatesACL extends BaseACL<'user_assignment_states'> {
     if (!state) {
       throw new MutationACLError('User assignment state update failed: state does not exist', 'user_assignment_states');
     }
+    await this.verifyUserGroupInWorkspace(state.userGroupId, tx);
 
     // Check if user is a group member
     const membership = await tx.run(
@@ -49,6 +58,7 @@ export class UserAssignmentStatesACL extends BaseACL<'user_assignment_states'> {
   }
 
   async canUpsert(args: any, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     // Check if user is a group member
     const membership = await tx.run(
       zql.user_group_mappings

@@ -19,6 +19,7 @@
 
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { config } from '@/config/env';
 import { getStorageService, type StorageService } from './storage';
 import { redisService } from './redisService';
 import { workflowManager } from '@/workflows/services/workflowManager';
@@ -78,11 +79,15 @@ export class GcsPollingService {
 
     let project, board, userGroup, systemUser;
 
+    const defaultWorkspaceId = config.defaultWorkspaceId;
+    if (!defaultWorkspaceId) {
+      throw new Error('DEFAULT_WORKSPACE_ID not configured in env');
+    }
+
     try {
-      [project, userGroup, systemUser] = await Promise.all([
-        db.project.findUnique({ where: { name: projectName } }),
-        db.userGroup.findUnique({ where: { name: userGroupName } }),
-        db.user.findUnique({ where: { email: systemUserEmail } }),
+      [project, userGroup] = await Promise.all([
+        db.project.findUnique({ where: { name_workspaceId: { name: projectName, workspaceId: defaultWorkspaceId } } }),
+        db.userGroup.findUnique({ where: { workspaceId_name: { name: userGroupName, workspaceId: defaultWorkspaceId } } }),
       ]);
     } catch (error) {
       throw new Error(`Database query failed: ${error}`);
@@ -90,6 +95,14 @@ export class GcsPollingService {
 
     if (!project) {
       throw new Error(`Project not found: ${projectName}`);
+    }
+
+    try {
+      systemUser = await db.user.findUnique({
+        where: { email_workspaceId: { email: systemUserEmail, workspaceId: project.workspaceId } },
+      });
+    } catch (error) {
+      throw new Error(`Database query failed: ${error}`);
     }
 
     // Fetch board with both name and projectId (now required due to unique constraint)

@@ -82,7 +82,7 @@ import { FileBubble } from '../../ui/FileBubble/FileBubble';
 import { StageFormModal } from '../StageFormModal/StageFormModal';
 import Tooltip from '../../ui/Tooltip';
 import WorkflowTriggerModal from '../../Workflow/WorkflowTriggerModal';
-import { SHAREABLE_ORIGIN } from '../../../config';
+import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import ApprovalNudgeBanner from './ApprovalNudgeBanner';
 import { isReleaseTicket } from '@xyne/shared';
 import { generateReleaseNotes } from '../../../services/ticketBoardService';
@@ -293,6 +293,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 }) => {
   const zero = useZero();
   const navigate = useNavigate();
+  const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
@@ -587,6 +588,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       // Field exists in form definition but has no value - create a placeholder entry
       return {
         id: `placeholder-${formField.id}`,
+        formId: formMapping.formId,
         fieldId: formField.id,
         entityId: ticketId,
         entityType: FormEntityType.TICKET,
@@ -1402,7 +1404,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     if (!ticket) return;
 
     // Use shareable origin from environment variable
-    const minimizedTicketViewRoute = `${SHAREABLE_ORIGIN}/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`;
+    const minimizedTicketViewRoute = `${shareableOrigin}/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticket.id}?selectedTab=details`;
     void navigator.clipboard.writeText(minimizedTicketViewRoute);
     toast.success('Link copied', {
       description: 'Ticket link copied to clipboard',

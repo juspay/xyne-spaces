@@ -457,6 +457,7 @@ export class AttachmentController {
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: null,
+        workspaceId: req.user?.workspaceId ?? '',
         metadata: file.metadata || {},
       }));
 

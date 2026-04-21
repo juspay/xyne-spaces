@@ -278,6 +278,17 @@ export class TranscriptService {
         `[${callId}] call_found | status=${call.status}, created_by=${call.createdByUserId}`
       );
 
+      // Get channel for workspaceId
+      if (!call.channelId) {
+        logger.error(`[${callId}] channel_id_missing`);
+        return;
+      }
+      const channel = await repositories.channels.findById(call.channelId);
+      if (!channel) {
+        logger.error(`[${callId}] channel_not_found | channel_id=${call.channelId}`);
+        return;
+      }
+
       // Note: Status check removed - webhook only fires when room disconnects,
       // which means all users have left (agent is always the last to leave)
 
@@ -371,6 +382,7 @@ export class TranscriptService {
           createdBy: call.createdByUserId,
           storageProvider: config.fileStorage.provider,
           conversationId: callMessage.conversationId,
+          workspaceId: channel.workspaceId,
           metadata: {
             callId,
             type: 'transcript',

@@ -9,7 +9,7 @@ import type { FlowJson } from '@/bots/json-ui/types';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { MessageRepository } from '@/database/repositories/messageRepository';
 import { Ticket, PrismaClient } from '@prisma/client';
-import { DatabaseClient } from '@/database/client';
+import { DatabaseClient, db } from '@/database/client';
 import { LLMClient, UserMessage, createUserMessage } from '@framework';
 import { workflowManager } from '@/workflows/services/workflowManager';
 import { workflowRerunService } from '@/workflows/services/workflowRerunService';
@@ -427,7 +427,8 @@ Provide a concise but informative summary:`;
 
       // Check for existing ticket with same conversation
       const existingTicket = await this.prisma.ticket.findFirst({
-        where: { conversationId: context.conversationId }
+        where: { conversationId: context.conversationId },
+        include: {project: true}
       });
 
       let ticket;
@@ -489,13 +490,37 @@ Provide a concise but informative summary:`;
         let botUser = await repositories.users.findById(botId);
         if (!botUser) {
           logger.info(`[TicketBot] Bot user not found, creating bot user: ${botId}`);
+          const workspaceId = existingTicket.project?.workspaceId;
+          if (!workspaceId) {
+            throw new Error(`[TicketBot] Cannot create bot user: workspaceId not found on ticket's project`);
+          }
+
+          // Get orgId from workspace and create orgMember for the bot
+          const workspace = await db.workspace.findUnique({
+            where: { id: workspaceId },
+            select: { orgId: true }
+          });
+          if (!workspace) {
+            throw new Error(`[TicketBot] Cannot create bot user: workspace ${workspaceId} not found`);
+          }
+
+          const orgMember = await db.orgMember.create({
+            data: {
+              email: botEmail,
+              orgId: workspace.orgId,
+              role: 'MEMBER',
+            }
+          });
+          logger.info(`[TicketBot] Created orgMember for bot: ${orgMember.memberId}`);
+
           botUser = await repositories.users.create({
             id: botId,
             name: botName,
             email: botEmail,
             picture: botPicture,
             providerUserId: botId, // Use bot ID as provider user ID
-            // Add any other required fields for user creation
+            workspace: { connect: { id: workspaceId } },
+            orgMemberId: orgMember.memberId,
           });
           logger.info(`[TicketBot] Bot user created successfully:`, botUser);
         } else {

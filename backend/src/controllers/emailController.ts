@@ -170,6 +170,7 @@ export class EmailController {
         try {
           // Create attachment records for each Zoho attachment ID
           // Note: Zoho attachment IDs are stored with external URL pattern
+          const emailWorkspaceId = await this.channelRepo.getWorkspaceId(conversation.channelId);
           for (const attachmentId of attachmentIds) {
             await this.messageAttachmentRepo.create({
               entityType: AttachmentEntityType.EMAIL,
@@ -182,6 +183,7 @@ export class EmailController {
               uploadedByUserId: req.user?.id || 'system',
               storageProvider: 'zoho',
               conversationId: conversationId,
+              workspaceId: emailWorkspaceId,
               metadata: { zohoAttachmentId: attachmentId, source: 'zoho_upload' },
             });
           }

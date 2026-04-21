@@ -10,7 +10,14 @@ import { hasProjectAdminAccess } from '../core/admin-access';
 
 export class ProjectAcl extends BaseACL<'projects'> {
 
-    async canInsert(_args: InsertValue<TableSchema<'projects'>>, tx: Transaction<Schema>): Promise<void> {
+    private verifyWorkspace(workspaceId: string | null | undefined): void {
+        if (!workspaceId || workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Project not found in this workspace', 'projects');
+        }
+    }
+
+    async canInsert(args: InsertValue<TableSchema<'projects'>>, tx: Transaction<Schema>): Promise<void> {
+        this.verifyWorkspace(args.workspaceId);
         // Only project admins can insert projects
         const hasAdminAccess = await hasProjectAdminAccess(this.ctx, tx);
         if (!hasAdminAccess) {
@@ -23,6 +30,7 @@ export class ProjectAcl extends BaseACL<'projects'> {
         if (!project) {
             throw new MutationACLError('Project update failed: project does not exist', 'projects');
         }
+        this.verifyWorkspace(project.workspaceId);
 
         // Allow if user is the creator
         if (project.createdBy === this.ctx.userID) {
@@ -43,6 +51,7 @@ export class ProjectAcl extends BaseACL<'projects'> {
         if (!project) {
             throw new MutationACLError('Project delete failed: project does not exist', 'projects');
         }
+        this.verifyWorkspace(project.workspaceId);
 
         // Allow if user is the creator
         if (project.createdBy === this.ctx.userID) {
@@ -63,6 +72,7 @@ export class ProjectAcl extends BaseACL<'projects'> {
         if (!project) {
             throw new MutationACLError('Project upsert failed: project does not exist for update', 'projects');
         }
+        this.verifyWorkspace(project.workspaceId);
 
         // Allow if user is the creator
         if (project.createdBy === this.ctx.userID) {

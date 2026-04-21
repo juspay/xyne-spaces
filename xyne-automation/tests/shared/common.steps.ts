@@ -7,6 +7,7 @@ import { expect } from 'chai';
 import { uiLogger } from '@/lib/logger';
 
 import '@/fixtures/cucumber.parameters';
+import { StoredUserContext } from '@/fixtures/cucumber.types';
 import { CustomWorld, scope } from '@/fixtures/cucumber.world';
 
 // ============================================
@@ -21,26 +22,57 @@ When('I wait for {int} seconds', async function (this: CustomWorld, seconds: num
 // Path Navigation Steps
 // ============================================
 
-When('I open the Xyne-Space at {string}', async function (this: CustomWorld, endpoint: string) {
-  if (!this.page) throw new Error('Browser not initialized');
-
-  let url: string;
-
-  if (endpoint.startsWith('/')) {
-    url = `${this.config.dashboard.baseUrl}${endpoint}`;
-  } else {
+/**
+ * Resolves workspace-scoped URLs for test automation.
+ * If the active browser session has a logged-in user with workspaceId,
+ * paths like /listprojects are automatically resolved to /{workspaceId}/listprojects
+ */
+function resolveWorkspaceUrl(
+  endpoint: string,
+  baseUrl: string,
+  userData: Map<string, StoredUserContext>,
+  activeContextName?: string
+): string {
+  // If endpoint doesn't start with /, look it up in stored paths
+  let path = endpoint;
+  if (!endpoint.startsWith('/')) {
     const storedPath = scope.pathData.get(endpoint);
     if (!storedPath) {
       throw new Error(`Path "${endpoint}" not found in storage. Make sure it was created first.`);
     }
-    // If stored path starts with /, use it as-is; otherwise treat as channel ID for backward compatibility
-    if (storedPath.startsWith('/')) {
-      url = `${this.config.dashboard.baseUrl}${storedPath}`;
-    } else {
-      url = `${this.config.dashboard.baseUrl}/chat/${storedPath}`;
+    path = storedPath;
+  }
+
+  // Check if we have an active browser session with a workspace-scoped user
+  if (activeContextName) {
+    for (const [, userContext] of userData) {
+      if (
+        userContext.browserSession === activeContextName &&
+        userContext.workspaceId &&
+        !path.startsWith(`/${userContext.workspaceId}`)
+      ) {
+        // Prepend workspaceId to the path
+        return `${baseUrl}/${userContext.workspaceId}${path}`;
+      }
     }
   }
 
+  return `${baseUrl}${path}`;
+}
+
+When('I open the Xyne-Space at {string}', async function (this: CustomWorld, endpoint: string) {
+  if (!this.page) throw new Error('Browser not initialized');
+
+  const url = resolveWorkspaceUrl(
+    endpoint,
+    this.config.dashboard.baseUrl,
+    this.userData,
+    this.activeContextName
+  );
+
+  await this.page.addInitScript(() => {
+    localStorage.setItem('xyne-ai-onboarding-completed', 'true');
+  });
   await this.page.goto(url);
   await this.page.waitForLoadState('networkidle');
 

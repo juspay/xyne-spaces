@@ -1,9 +1,11 @@
 import { Request, Response } from 'express';
 import { OrganizationRepository, CreateOrganizationInput } from '../database/repositories/organizationRepository';
 import { UserRepository } from '../database/repositories/users';
-import { OrgRole } from '@prisma/client';
+import { OrgRole, ProjectType } from '@prisma/client';
 import { DatabaseClient } from '../database/client';
-import {logger} from '@/utils/logger';
+import { logger } from '@/utils/logger';
+import { invitationService } from '@/services/invitationService';
+import { config } from '@/config/env';
 
 // Create OrgMemberRepository interface since we don't have the full file yet
 interface OrgMember {
@@ -107,23 +109,35 @@ export class OrganizationController {
     };
   }
 
-  // POST /api/organizations - Create new organization
+  // POST /api/organizations - Create new organization with workspace, owner, and invitation
   createOrganization = async (req: Request, res: Response): Promise<void> => {
+    const db = DatabaseClient.getInstance();
     try {
       const {
         name,
         description,
+        workspaceName,
+        ownerEmail,
       }: {
         name: string;
         description?: string;
+        workspaceName: string;
+        ownerEmail: string;
       } = req.body;
 
       const userId = req.user!.id;
-      
 
       // Validate required fields
       if (!name || name.trim() === '') {
         res.status(400).json({ error: 'Organization name is required' });
+        return;
+      }
+      if (!workspaceName || workspaceName.trim() === '') {
+        res.status(400).json({ error: 'Workspace name is required' });
+        return;
+      }
+      if (!ownerEmail || ownerEmail.trim() === '') {
+        res.status(400).json({ error: 'Owner email is required' });
         return;
       }
 
@@ -134,31 +148,87 @@ export class OrganizationController {
         return;
       }
 
-      // Create organization
+      // 1. Create organization
       const orgData: CreateOrganizationInput = {
         name: name.trim(),
         description: description?.trim(),
         createdBy: userId,
       };
-
       const organization = await this.organizationRepository.create(orgData);
 
-      // Add creator as organization owner
-      await this.orgMemberRepository.create({
+      // 2. Create workspace for the org
+      const workspace = await db.workspace.create({
+        data: {
+          orgId: organization.orgId,
+          name: workspaceName.trim(),
+          createdBy: userId,
+          status: 'ACTIVE',
+        },
+      });
+
+      // 3. Create DM project for the workspace (required by the system)
+      await db.project.create({
+        data: {
+          name: 'Direct Messages',
+          code: 'DM',
+          description: 'DM project for direct message channels',
+          type: ProjectType.DM,
+          workspaceId: workspace.id,
+          createdBy: userId,
+        },
+      });
+
+      // 4. Link workspace to organization
+      await db.workspaceOrganization.create({
+        data: {
+          orgId: organization.orgId,
+          workspaceId: workspace.id,
+          role: 'ADMIN',
+        },
+      });
+
+      // 5. Add ownerEmail as org OWNER (email-only, no user account yet)
+      await db.orgMember.create({
+        data: {
+          orgId: organization.orgId,
+          email: ownerEmail.trim().toLowerCase(),
+          role: OrgRole.OWNER,
+          invitedBy: userId,
+        },
+      });
+
+      // 6. Create and send invitation to the workspace
+      const invitation = await invitationService.createInvitation({
+        email: ownerEmail.trim().toLowerCase(),
+        role: 'MEMBER',
+        workspaceId: workspace.id,
+        invitedBy: userId,
         orgId: organization.orgId,
-        userId,
-        role: 'OWNER',
+      });
+
+      await invitationService.sendInvitationEmail({
+        to: ownerEmail.trim(),
+        inviterName: req.user!.name || 'Admin',
+        workspaceName: workspaceName.trim(),
+        invitationLink: `${config.frontendUrl}/invite?workspaceId=${workspace.id}&invitationId=${invitation.invitationId || invitation.id}`,
+        invitationId: invitation.invitationId || invitation.id,
       });
 
       res.status(201).json({
         orgId: organization.orgId,
         name: organization.name,
         description: organization.description,
-        createdBy: organization.createdBy,
-        createdAt: organization.createdAt,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        ownerEmail: ownerEmail.trim().toLowerCase(),
+        invitationSent: true,
       });
     } catch (error) {
       logger.error('Error creating organization:', error);
+      if (error instanceof Error && error.message.includes('already exists')) {
+        res.status(409).json({ error: error.message });
+        return;
+      }
       res.status(500).json({ error: 'Internal server error' });
     }
   };

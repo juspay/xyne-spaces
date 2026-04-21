@@ -1,5 +1,5 @@
 import { BaseRepository } from './base';
-import { Channel, ChannelScopeType, ChannelVisibility, ChannelType } from '@prisma/client';
+import { Channel, ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@prisma/client';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { formatDateTimeShort } from '@/utils/dateUtils';
@@ -12,6 +12,7 @@ export interface CreateChannelInput {
   visibility?: ChannelVisibility;
   createdBy: string;
   projectId: string;
+  workspaceId: string;
 }
 
 export interface UpdateChannelInput {
@@ -44,8 +45,8 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       await this.validateEnum(data.visibility, 'visibility', ['PUBLIC', 'PRIVATE']);
     }
 
-    // Check for duplicate channel name across all projects
-    const isDuplicate = await this.checkDuplicateName(data.name);
+    // Check for duplicate channel name within the workspace
+    const isDuplicate = await this.checkDuplicateName(data.name, data.workspaceId);
     if (isDuplicate) {
       throw new Error(`Channel with name "${data.name}" already exists.`);
     }
@@ -58,6 +59,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         visibility: data.visibility || 'PUBLIC',
         createdBy: data.createdBy,
         projectId: data.projectId,
+        workspaceId: data.workspaceId,
       }
     });
 
@@ -119,6 +121,17 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     return await this.db.channel.findUnique({
       where: { id }
     });
+  }
+
+  async getWorkspaceId(channelId: string): Promise<string> {
+    const channel = await this.db.channel.findUnique({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
+    if (!channel?.workspaceId) {
+      throw new Error(`Could not find workspaceId for channel ${channelId}`);
+    }
+    return channel.workspaceId;
   }
 
   async findMany(options?: QueryOptions): Promise<Channel[]>;
@@ -281,11 +294,9 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     });
   }
 
-  async checkDuplicateName(name: string): Promise<boolean> {
+  async checkDuplicateName(name: string, workspaceId: string): Promise<boolean> {
     const existingChannel = await this.db.channel.findFirst({
-      where: {
-        name: name
-      }
+      where: { name, project: { workspaceId } }
     });
     return !!existingChannel;
   }
@@ -308,6 +319,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
    * @param userId - The ID of the user initiating the channel creation
    * @param invitedUserIds - Array of user IDs to include in the channel
    * @param channelParticipants - Channel participants repository for adding users
+   * @param workspaceId - The workspace ID to get the DM project from
    * @param channelName - Optional friendly name override (e.g. scheduled call title)
    * @returns The channel ID (either existing or newly created)
    */
@@ -315,11 +327,27 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     userId: string,
     invitedUserIds: string[],
     channelParticipants: any, // We'll pass this from the controller to avoid circular dependency
+    workspaceId: string,
     channelName?: string
   ): Promise<string> {
     if (invitedUserIds.length === 0) {
       throw new Error('No users to invite');
     }
+
+    // Get DM project for this workspace
+    const dmProject = await this.db.project.findFirst({
+      where: {
+        workspaceId,
+        code: 'DM',
+        type: ProjectType.DM,
+      },
+    });
+
+    if (!dmProject) {
+      throw new Error('DM project not found for workspace');
+    }
+
+    const projectId = dmProject.id;
 
     // Single user - create or find DM channel
     if (invitedUserIds.length === 1) {
@@ -340,7 +368,8 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         name: dmChannelName,
         visibility: ChannelVisibility.PRIVATE,
         createdBy: userId,
-        projectId: 'default',
+        projectId,
+        workspaceId,
       });
 
       // Add both users as participants
@@ -372,7 +401,8 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         name: groupDmName,
         visibility: ChannelVisibility.PRIVATE,
         createdBy: userId,
-        projectId: 'default',
+        projectId,
+        workspaceId,
       });
 
       // Add all users as participants
@@ -398,7 +428,8 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       name: friendlyName,
       visibility: ChannelVisibility.PRIVATE,
       createdBy: userId,
-      projectId: 'default',
+      projectId,
+      workspaceId,
     });
 
     // Add all users as participants
@@ -409,4 +440,5 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
     return privateChannel.id;
   }
+
 }

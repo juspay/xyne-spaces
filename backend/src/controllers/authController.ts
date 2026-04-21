@@ -252,7 +252,8 @@ export class AuthController {
       // Find or create user in database
       logger.info(`🔍 [${requestId}] 👤 Finding/creating user in database...`);
       const userStartTime = Date.now();
-      const { user } = await this.userService.findOrCreateUser(googleUserData);
+      const workspaceId = req.body.workspaceId || req.query.workspaceId;
+      const { user } = await this.userService.findOrCreateUser(googleUserData, workspaceId as string);
       const userEndTime = Date.now();
       logger.info(`✅ [${requestId}] User resolved in ${userEndTime - userStartTime}ms: ${user.email} (DB ID: ${user.id})`);
 
@@ -261,6 +262,8 @@ export class AuthController {
         email: user.email,
         name: user.name,
         picture: googleUserData.picture,
+        workspaceId: user.workspaceId ?? undefined,
+        memberId: user.orgMemberId,
       });
 
       let sessionId = null;
@@ -471,6 +474,8 @@ export class AuthController {
         email: session.user.email,
         name: session.user.name,
         picture: payload.picture,
+        workspaceId: session.user.workspaceId,
+        memberId: session.user.orgMemberId,
       });
 
       // Set HTTP-only cookie for refreshed token
@@ -638,7 +643,8 @@ export class AuthController {
       logger.info(`👤 [${requestId}] User: ${googleUserData.email}`);
       // Find or create user
       logger.info(`🔍 [${requestId}] Finding/creating user...`);
-      const { user } = await this.userService.findOrCreateUser(googleUserData);
+      const workspaceId = req.body.workspaceId || req.query.workspaceId;
+      const { user } = await this.userService.findOrCreateUser(googleUserData, workspaceId as string);
       logger.info(`✅ [${requestId}] User resolved: ${user.email} (ID: ${user.id})`);
 
       // Ensure user presence entry exists (create if not exists, update timestamps if exists)
@@ -651,6 +657,8 @@ export class AuthController {
         email: user.email,
         name: user.name,
         picture: payload.picture,
+        workspaceId: user.workspaceId,
+        memberId: user.orgMemberId,
       });
 
       let sessionId = null;
@@ -800,6 +808,8 @@ export class AuthController {
         email: session.user.email,
         name: session.user.name,
         picture: session.user.picture,
+        workspaceId: session.user.workspaceId,
+        memberId: session.user.orgMemberId,
       });
 
       // Update session activity

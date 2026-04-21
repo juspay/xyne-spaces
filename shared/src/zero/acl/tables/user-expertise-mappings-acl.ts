@@ -10,7 +10,6 @@ export class UserExpertiseMappingsACL extends BaseQueryACL<'user_expertise_mappi
   canSelect<TReturn>(
     query: Query<'user_expertise_mappings', Schema, TReturn>,
   ): Query<'user_expertise_mappings', Schema, TReturn> {
-    // Anyone can see the user expertise mappings
-    return query;
+    return query.whereExists('userGroup', (ug) => ug.where('workspaceId', '=', this.ctx.workspaceId));
   }
 }

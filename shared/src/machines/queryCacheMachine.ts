@@ -3,6 +3,7 @@ import type { StorageAdapter } from '../platform/storage.js';
 import { queries } from '../zero/queries.js';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { QueryResult } from '@rocicorp/zero/react';
+import type { Context } from '../zero/schema.js';
 
 /**
  * Query Cache Machine
@@ -209,7 +210,7 @@ export const getChannelConversationsQueryHash = (context: { userID: string }): s
         direction: 'forward' as const,
         isMember: false,
       },
-      ctx: context,
+      ctx: context as Context,
     });
     // @ts-expect-error - hash() is part of QueryImpl, not public Query interface
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call
@@ -228,7 +229,7 @@ export const getCallHistoryQueryHash = (): string => {
   try {
     const query = queries.userCallHistory.fn({
       args: { limit: 1, start: null },
-      ctx: {} as { userID: string },
+      ctx: {} as Context,
     });
     // @ts-expect-error - hash() is part of QueryImpl, not public Query interface
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call

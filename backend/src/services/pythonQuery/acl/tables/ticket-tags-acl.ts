@@ -6,7 +6,9 @@ export class TicketTagsACL extends BaseQueryACL<Prisma.TicketTagWhereInput> {
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.TicketTagWhereInput | null> {
-    return null
+  async getWhereClause(): Promise<Prisma.TicketTagWhereInput> {
+    return {
+      ticket: { workspaceId: this.ctx.workspaceId ?? '' },
+    }
   }
 }

@@ -226,6 +226,11 @@ export enum ConversationParticipation {
   MENTIONED = "MENTIONED",
 }
 
+export enum ProjectType {
+  DEFAULT = "DEFAULT",
+  DM = "DM",
+}
+
 export enum AuthProvider {
   GOOGLE = "GOOGLE",
   MICROSOFT = "MICROSOFT",
@@ -259,6 +264,19 @@ export enum SessionStatus {
   ACTIVE = "ACTIVE",
   EXPIRED = "EXPIRED",
   REVOKED = "REVOKED",
+}
+
+export enum Status {
+  ACTIVE = "ACTIVE",
+  ARCHIVED = "ARCHIVED",
+  DELETED = "DELETED",
+}
+
+export enum WorkspaceRole {
+  OWNER = "OWNER",
+  ADMIN = "ADMIN",
+  MEMBER = "MEMBER",
+  GUEST = "GUEST",
 }
 
 export enum ACLAuditEventType {
@@ -579,6 +597,7 @@ export const agentTable = table("agents")
     id: string(),
     userDefinedId: string(),
     modelId: string(),
+    workspaceId: string(),
     systemPrompt: string(),
     description: string().optional(),
     name: string(),
@@ -595,6 +614,7 @@ export const modelTable = table("models")
   .columns({
     id: string(),
     userDefinedId: string(),
+    workspaceId: string(),
     name: string(),
     provider: string(),
     credentials: string(),
@@ -606,6 +626,7 @@ export const modelTable = table("models")
 export const toolTable = table("tools")
   .columns({
     id: string(),
+    workspaceId: string(),
     name: string(),
     description: string().optional(),
     status: string(),
@@ -650,6 +671,7 @@ export const ticketTable = table("tickets")
     referenceTicket: json<string[]>(),
     xyneId: string(),
     projectId: string(),
+    workspaceId: string(),
     userGroupId: string().optional(),
     boardId: string(),
     stageName: string(),
@@ -663,6 +685,7 @@ export const subTicketTable = table("sub_tickets")
     id: string(),
     title: string(),
     description: string().optional(),
+    workspaceId: string(),
     mappedTicketId: string().optional(),
     createdBy: string(),
     updatedBy: string(),
@@ -909,6 +932,7 @@ export const apiKeyTable = table("api_keys")
 export const userGroupTable = table("user_groups")
   .columns({
     id: string(),
+    workspaceId: string(),
     name: string(),
     alias: string().optional(),
     description: string().optional(),
@@ -954,6 +978,10 @@ export const userTable = table("users")
     userType: enumeration<UserType>(),
     metadata: json().optional(),
     displayName: string().optional(),
+    workspaceId: string(),
+    role: enumeration<WorkspaceRole>(),
+    orgMemberId: string(),
+    leftAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     statusEmoji: string().optional(),
@@ -984,6 +1012,21 @@ export const userSkillTable = table("user_skills")
     enabled: boolean(),
   })
   .primaryKey("userId", "name");
+
+export const scheduledMessageTable = table("scheduled_messages")
+  .columns({
+    id: string(),
+    title: string(),
+    messageContent: string(),
+    channelId: string(),
+    daysOfWeek: string(),
+    scheduledTime: string(),
+    isActive: boolean(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
 
 export const userGroupMappingTable = table("user_group_mappings")
   .columns({
@@ -1149,6 +1192,7 @@ export const organizationTable = table("organizations")
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
+    status: enumeration<Status>(),
     metadata: json().optional(),
   })
   .primaryKey("orgId");
@@ -1157,12 +1201,56 @@ export const orgMemberTable = table("org_members")
   .columns({
     memberId: string(),
     orgId: string(),
-    userId: string(),
+    email: string(),
     role: enumeration<OrgRole>(),
     joinedAt: number(),
     invitedBy: string().optional(),
+    leftAt: number().optional(),
   })
   .primaryKey("memberId");
+
+export const workspaceOrganizationTable = table("workspace_organizations")
+  .columns({
+    id: string(),
+    orgId: string(),
+    workspaceId: string(),
+    role: enumeration<WorkspaceRole>(),
+    leftAt: number().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const workspaceTable = table("workspaces")
+  .columns({
+    id: string(),
+    orgId: string(),
+    name: string(),
+    description: string().optional(),
+    createdBy: string(),
+    status: enumeration<Status>(),
+    metadata: json().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const invitationTable = table("invitations")
+  .columns({
+    id: string(),
+    orgId: string().optional(),
+    workspaceId: string().optional(),
+    email: string(),
+    role: enumeration<WorkspaceRole>(),
+    invitedBy: string(),
+    invitedAt: number(),
+    expiredAt: number().optional(),
+    acceptedAt: number().optional(),
+    invitationId: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
 
 export const projectTable = table("projects")
   .columns({
@@ -1171,6 +1259,8 @@ export const projectTable = table("projects")
     code: string(),
     ticketSequence: number(),
     description: string().optional(),
+    workspaceId: string(),
+    type: enumeration<ProjectType>(),
     createdBy: string(),
     updatedBy: string().optional(),
     createdAt: number(),
@@ -1184,6 +1274,7 @@ export const boardTable = table("boards")
     name: string(),
     boardType: enumeration<BoardType>(),
     projectId: string(),
+    workspaceId: string(),
     createdBy: string(),
     updatedBy: string().optional(),
     description: string().optional(),
@@ -1232,6 +1323,7 @@ export const channelTable = table("channels")
     createdBy: string(),
     metadata: json().optional(),
     projectId: string(),
+    workspaceId: string(),
     participantCount: number(),
     isMigrated: boolean().optional(),
     addUserPolicy: enumeration<ChannelAddUserPolicy>().optional(),
@@ -1276,6 +1368,7 @@ export const channelUserStatusTable = table("channel_user_status")
     selectedBoardId: string().optional(),
     isRecapSubscribed: boolean(),
     lastSeenRecapDate: number().optional(),
+    customRecapPrompt: string().optional(),
     desktopNotificationLevel: enumeration<NotificationLevel>(),
     mobileNotificationLevel: enumeration<NotificationLevel>(),
     isDeleted: boolean(),
@@ -1391,6 +1484,7 @@ export const messageAttachmentTable = table("message_attachments")
     id: string(),
     entityType: enumeration<AttachmentEntityType>(),
     entityId: string(),
+    workspaceId: string(),
     storageProvider: string(),
     originalFilename: string(),
     mimetype: string(),
@@ -1783,6 +1877,7 @@ export const formTable = table("forms")
     formDescription: string().optional(),
     entityType: enumeration<FormEntityType>(),
     contextType: enumeration<FormContextType>(),
+    workspaceId: string(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -1817,6 +1912,7 @@ export const formEntityValuesTable = table("form_entity_values")
     id: string(),
     entityId: string(),
     entityType: string(),
+    formId: string(),
     fieldId: string(),
     contextId: string().optional(),
     fieldValue: string(),
@@ -2059,11 +2155,13 @@ export const releaseAttributionTable = table("release_attributions")
 
 export const channelDailyRecapTable = table("channel_daily_recaps")
   .columns({
+    id: string(),
     channelId: string(),
     recapDate: number(),
     summary: string(),
+    userId: string().optional(),
   })
-  .primaryKey("channelId", "recapDate");
+  .primaryKey("id");
 
 export const sessionRecordingFileTable = table("session_recording_files")
   .columns({
@@ -2147,6 +2245,11 @@ export const agentTableRelationships = relationships(agentTable, ({ one, many })
     destField: ["id"],
     destSchema: modelTable,
   }),
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
+  }),
   agentToolsMappings: many({
     sourceField: ["id"],
     destField: ["agentId"],
@@ -2159,19 +2262,29 @@ export const agentTableRelationships = relationships(agentTable, ({ one, many })
   })
 }));
 
-export const modelTableRelationships = relationships(modelTable, ({ many }) => ({
+export const modelTableRelationships = relationships(modelTable, ({ one, many }) => ({
   agents: many({
     sourceField: ["id"],
     destField: ["modelId"],
     destSchema: agentTable,
+  }),
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
   })
 }));
 
-export const toolTableRelationships = relationships(toolTable, ({ many }) => ({
+export const toolTableRelationships = relationships(toolTable, ({ one, many }) => ({
   agentToolsMappings: many({
     sourceField: ["id"],
     destField: ["toolId"],
     destSchema: agentToolsMappingTable,
+  }),
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
   })
 }));
 
@@ -2481,7 +2594,7 @@ export const apiKeyTableRelationships = relationships(apiKeyTable, ({ one }) => 
   })
 }));
 
-export const userGroupTableRelationships = relationships(userGroupTable, ({ many }) => ({
+export const userGroupTableRelationships = relationships(userGroupTable, ({ one, many }) => ({
   resourceAccess: many({
     sourceField: ["id"],
     destField: ["groupId"],
@@ -2511,6 +2624,11 @@ export const userGroupTableRelationships = relationships(userGroupTable, ({ many
     sourceField: ["id"],
     destField: ["userGroupId"],
     destSchema: userExpertiseMappingTable,
+  }),
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
   })
 }));
 
@@ -2523,6 +2641,11 @@ export const userSessionTableRelationships = relationships(userSessionTable, ({ 
 }));
 
 export const userTableRelationships = relationships(userTable, ({ one, many }) => ({
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
+  }),
   resourceAccess: many({
     sourceField: ["id"],
     destField: ["userId"],
@@ -2780,6 +2903,21 @@ export const organizationTableRelationships = relationships(organizationTable, (
     sourceField: ["orgId"],
     destField: ["orgId"],
     destSchema: orgMemberTable,
+  }),
+  workspaces: many({
+    sourceField: ["orgId"],
+    destField: ["orgId"],
+    destSchema: workspaceTable,
+  }),
+  workspaceOrgs: many({
+    sourceField: ["orgId"],
+    destField: ["orgId"],
+    destSchema: workspaceOrganizationTable,
+  }),
+  invitations: many({
+    sourceField: ["orgId"],
+    destField: ["orgId"],
+    destSchema: invitationTable,
   })
 }));
 
@@ -2791,7 +2929,86 @@ export const orgMemberTableRelationships = relationships(orgMemberTable, ({ one 
   })
 }));
 
-export const projectTableRelationships = relationships(projectTable, ({ many }) => ({
+export const workspaceOrganizationTableRelationships = relationships(workspaceOrganizationTable, ({ one }) => ({
+  organization: one({
+    sourceField: ["orgId"],
+    destField: ["orgId"],
+    destSchema: organizationTable,
+  }),
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
+  })
+}));
+
+export const workspaceTableRelationships = relationships(workspaceTable, ({ one, many }) => ({
+  organization: one({
+    sourceField: ["orgId"],
+    destField: ["orgId"],
+    destSchema: organizationTable,
+  }),
+  users: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: userTable,
+  }),
+  invitations: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: invitationTable,
+  }),
+  projects: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: projectTable,
+  }),
+  workspaceOrgs: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: workspaceOrganizationTable,
+  }),
+  agents: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: agentTable,
+  }),
+  models: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: modelTable,
+  }),
+  tools: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: toolTable,
+  }),
+  userGroups: many({
+    sourceField: ["id"],
+    destField: ["workspaceId"],
+    destSchema: userGroupTable,
+  })
+}));
+
+export const invitationTableRelationships = relationships(invitationTable, ({ one }) => ({
+  organization: one({
+    sourceField: ["orgId"],
+    destField: ["orgId"],
+    destSchema: organizationTable,
+  }),
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
+  })
+}));
+
+export const projectTableRelationships = relationships(projectTable, ({ one, many }) => ({
+  workspace: one({
+    sourceField: ["workspaceId"],
+    destField: ["id"],
+    destSchema: workspaceTable,
+  }),
   tickets: many({
     sourceField: ["id"],
     destField: ["projectId"],
@@ -2952,6 +3169,11 @@ export const conversationTableRelationships = relationships(conversationTable, (
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: conversationParticipantTable,
+  }),
+  messageAttachments: many({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: messageAttachmentTable,
   })
 }));
 
@@ -3006,6 +3228,14 @@ export const messageSearchTableRelationships = relationships(messageSearchTable,
     sourceField: ["messageId"],
     destField: ["messageId"],
     destSchema: messageTable,
+  })
+}));
+
+export const messageAttachmentTableRelationships = relationships(messageAttachmentTable, ({ one }) => ({
+  conversation: one({
+    sourceField: ["conversationId"],
+    destField: ["conversationId"],
+    destSchema: conversationTable,
   })
 }));
 
@@ -3159,6 +3389,7 @@ export const schema = createSchema(
       userTable,
       userPreferenceTable,
       userSkillTable,
+      scheduledMessageTable,
       userGroupMappingTable,
       userAssignmentStateTable,
       boardComplexityScoreTable,
@@ -3172,6 +3403,9 @@ export const schema = createSchema(
       pullRequestsTable,
       organizationTable,
       orgMemberTable,
+      workspaceOrganizationTable,
+      workspaceTable,
+      invitationTable,
       projectTable,
       boardTable,
       stageTable,
@@ -3277,6 +3511,9 @@ export const schema = createSchema(
       pullRequestsTableRelationships,
       organizationTableRelationships,
       orgMemberTableRelationships,
+      workspaceOrganizationTableRelationships,
+      workspaceTableRelationships,
+      invitationTableRelationships,
       projectTableRelationships,
       boardTableRelationships,
       stageTableRelationships,
@@ -3288,6 +3525,7 @@ export const schema = createSchema(
       conversationParticipantTableRelationships,
       messageTableRelationships,
       messageSearchTableRelationships,
+      messageAttachmentTableRelationships,
       reactionTableRelationships,
       reactionCountTableRelationships,
       externalMessageTableRelationships,
@@ -3335,6 +3573,7 @@ export type UserSession = Row<typeof schema.tables.user_sessions>;
 export type User = Row<typeof schema.tables.users>;
 export type UserPreference = Row<typeof schema.tables.user_preferences>;
 export type UserSkill = Row<typeof schema.tables.user_skills>;
+export type ScheduledMessage = Row<typeof schema.tables.scheduled_messages>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
 export type UserAssignmentState = Row<typeof schema.tables.user_assignment_states>;
 export type BoardComplexityScore = Row<typeof schema.tables.board_complexity_scores>;
@@ -3348,6 +3587,9 @@ export type ACLAuditLog = Row<typeof schema.tables.acl_audit_logs>;
 export type PullRequests = Row<typeof schema.tables.pull_requests>;
 export type Organization = Row<typeof schema.tables.organizations>;
 export type OrgMember = Row<typeof schema.tables.org_members>;
+export type WorkspaceOrganization = Row<typeof schema.tables.workspace_organizations>;
+export type Workspace = Row<typeof schema.tables.workspaces>;
+export type Invitation = Row<typeof schema.tables.invitations>;
 export type Project = Row<typeof schema.tables.projects>;
 export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;

@@ -6,7 +6,9 @@ export class TicketEntityMappingsACL extends BaseQueryACL<Prisma.TicketEntityMap
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.TicketEntityMappingWhereInput | null> {
-    return null
+  async getWhereClause(): Promise<Prisma.TicketEntityMappingWhereInput> {
+    return {
+      ticket: { workspaceId: this.ctx.workspaceId ?? '' },
+    }
   }
 }

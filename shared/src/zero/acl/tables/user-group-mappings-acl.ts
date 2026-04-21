@@ -8,6 +8,6 @@ export class UserGroupMappingsACL extends BaseQueryACL<'user_group_mappings'> {
   }
 
   canSelect<TReturn>(query: Query<'user_group_mappings', Schema, TReturn>): Query<'user_group_mappings', Schema, TReturn> {
-    return query;
+    return query.whereExists('userGroup', (ug) => ug.where('workspaceId', '=', this.ctx.workspaceId));
   }
 }

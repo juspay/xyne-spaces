@@ -1,6 +1,7 @@
 import { UserRepository } from '../../../../database/repositories/users';
 import { UserGroupRepository } from '../../../../database/repositories/userGroups';
 import { DatabaseClient } from '../../../../database/client';
+import { config } from '../../../../config/env';
 
 import { logger } from '../../../../utils/logger';
 import { WebClient } from '@slack/web-api';
@@ -114,7 +115,7 @@ async function fetchSlackGroupInfo(slackGroupId: string, botOauthToken: string):
 async function resolveApiUser(
   slackUserId: string,
   botOauthToken: string
-): Promise<{ dbUserId?: string; displayName?: string }> {
+, workspaceId: string): Promise<{ dbUserId?: string; displayName?: string }> {
   if (!slackUserId || !botOauthToken) {
     return {};
   }
@@ -128,7 +129,7 @@ async function resolveApiUser(
     return { displayName };
   }
   const userRepo = new UserRepository();
-  const user = await userRepo.findByEmail(slackUser.profile.email);
+  const user = await userRepo.findByEmail(slackUser.profile.email, workspaceId);
   return { dbUserId: user?.id, displayName };
 }
 
@@ -148,6 +149,7 @@ async function resolveApiGroup(slackGroupId: string, botOauthToken: string): Pro
     metadata: {
       slackGroupId: slackGroup.id,
     },
+    workspace: { connect: { id: config.defaultWorkspaceId } },
   });
   const userRepo = new UserRepository();
   const userResults = await Promise.allSettled(
@@ -180,7 +182,7 @@ async function resolveSlackIds(
   slackUserId: string[],
   botOauthToken: string,
   type: 'user' | 'group'
-): Promise<Map<string, ResolvedEntry> | undefined> {
+, workspaceId?: string): Promise<Map<string, ResolvedEntry> | undefined> {
   if (slackUserId.length === 0 || (type !== 'user' && type !== 'group')) {
     return undefined;
   }
@@ -211,7 +213,7 @@ async function resolveSlackIds(
     const apiResults = await Promise.allSettled(
       slackIdsToFetch.map((slackId) =>
         type === 'user'
-          ? resolveApiUser(slackId, botOauthToken)
+          ? resolveApiUser(slackId, botOauthToken, workspaceId ?? '')
           : resolveApiGroup(slackId, botOauthToken).then((id) => ({ dbUserId: id, displayName: undefined }))
       )
     );
@@ -243,7 +245,7 @@ function resolveSpecialMentions(text: string): string {
 export async function resolveSlackMentions(
   text: string,
   botOauthToken: string,
-  isStringified: boolean = false
+  isStringified: boolean = false,
 ): Promise<string> {
   const userIds = extractAllSlackIds(text, true);
   const groupIds = extractAllSlackIds(text, false);
@@ -251,8 +253,11 @@ export async function resolveSlackMentions(
     return resolveSpecialMentions(text);
   }
 
-  const userMapper = await resolveSlackIds(userIds, botOauthToken, 'user');
-  const groupMapper = await resolveSlackIds(groupIds, botOauthToken, 'group');
+  // Use provided workspaceId or fall back to default
+  const resolvedWorkspaceId = config.defaultWorkspaceId;
+
+  const userMapper = await resolveSlackIds(userIds, botOauthToken, 'user', resolvedWorkspaceId);
+  const groupMapper = await resolveSlackIds(groupIds, botOauthToken, 'group', resolvedWorkspaceId);
   const quote = isStringified ? "'" : '"'
   const userRepo = new UserRepository();
   const groupRepo = new UserGroupRepository();

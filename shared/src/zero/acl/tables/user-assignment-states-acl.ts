@@ -10,7 +10,6 @@ export class UserAssignmentStatesACL extends BaseQueryACL<'user_assignment_state
   canSelect<TReturn>(
     query: Query<'user_assignment_states', Schema, TReturn>,
   ): Query<'user_assignment_states', Schema, TReturn> {
-    // Allow anyone to query user assignment states
-    return query;
+    return query.whereExists('userGroup', (ug) => ug.where('workspaceId', '=', this.ctx.workspaceId));
   }
 }

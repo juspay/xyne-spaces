@@ -8,7 +8,7 @@ export class UsersACL extends BaseQueryACL<'users'> {
   }
 
   canSelect<TReturn>(query: Query<'users', Schema, TReturn>): Query<'users', Schema, TReturn> {
-    // All users are visible to authenticated users
-    return query;
+    // All users are visible to authenticated users within the same workspace
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
   }
 }

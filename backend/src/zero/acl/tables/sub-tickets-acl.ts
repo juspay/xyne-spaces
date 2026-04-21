@@ -9,11 +9,19 @@ import { zql } from '../../queries';
 
 export class SubTicketsACL extends BaseACL<'sub_tickets'> {
 
-  async canInsert(_args: InsertValue<TableSchema<'sub_tickets'>>, _tx: Transaction<Schema>): Promise<void> {
-    // Anyone can create subtickets as long as they are authenticated
+  async canInsert(args: InsertValue<TableSchema<'sub_tickets'>>, _tx: Transaction<Schema>): Promise<void> {
+    if (args.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Sub-ticket not in this workspace', 'sub_tickets');
+    }
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'sub_tickets'>>, tx: Transaction<Schema>): Promise<void> {
+    // Get existing subTicket to verify workspace
+    const subTicket = await tx.run(zql.sub_tickets.where('id', args.id).one());
+    if (!subTicket || subTicket.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Sub-ticket not found in this workspace', 'sub_tickets');
+    }
+
     const hasAccess = await tx.run(zql.ticket_sub_ticket_mappings
       .where('subTicketId', args.id)
       .whereExists('ticket', (ticket) => {

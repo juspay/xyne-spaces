@@ -2,6 +2,10 @@ import { PrismaClient } from '@prisma/client'
 
 export interface ACLContext {
   userId: string
+  workspaceId?: string
+  role?: string
+  orgRole?: string
+  memberId?: string
 }
 
 export class BaseQueryACL<TWhereInput = Record<string, unknown>> {

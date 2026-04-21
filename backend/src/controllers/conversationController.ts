@@ -293,6 +293,7 @@ export class ConversationController {
           createdBy: userId,
           storageProvider: config.fileStorage.provider,
           conversationId: conversation.conversationId,
+          workspaceId: req.user!.workspaceId!,
           metadata: file.metadata || {},
         }));
 
@@ -369,7 +370,7 @@ export class ConversationController {
 
       await unreadService.markChannelAsViewed(channelId, userId, conversation.conversationId);
 
-      const handler = new MessagesSideEffectHandler({ userID: userId });
+      const handler = new MessagesSideEffectHandler({ userID: userId, workspaceId: req.user!.workspaceId!, role: req.user!.role!, memberId: req.user!.memberId!, orgRole: req.user!.orgRole!});
       handler.onInsert({
         entityId: message.messageId,
         entityType: 'messages',
@@ -746,6 +747,7 @@ export class ConversationController {
           createdBy: userId,
           storageProvider: config.fileStorage.provider,
           conversationId: conversationId,
+          workspaceId: req.user!.workspaceId!,
           metadata: file.metadata || {},
         }));
 
@@ -821,7 +823,7 @@ export class ConversationController {
       // Also broadcast via Redis for horizontal scaling (using session method for now)
       await redisService.broadcastMessageToSession(conversationId, chatMessage);
 
-      const handler = new MessagesSideEffectHandler({ userID: userId });
+      const handler = new MessagesSideEffectHandler({ userID: userId, workspaceId: req.user!.workspaceId!, role: req.user!.role!, memberId: req.user!.memberId!, orgRole: req.user!.orgRole!});
       handler.onInsert({
         entityId: message.messageId,
         entityType: 'messages',

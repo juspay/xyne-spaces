@@ -52,6 +52,7 @@ export { ActivityEventRepository } from './activityEventRepository';
 export { AppsRepository } from './appsRepository';
 export { InstalledAppsRepository } from './installedAppsRepository';
 export { ScheduledCallRepository } from './scheduledCallRepository';
+export { WorkspaceRepository } from './workspaces';
 
 // Import statements for the container
 import { AgentRepository } from './agents';
@@ -96,6 +97,7 @@ import { ActivityEventRepository } from './activityEventRepository';
 import { AppsRepository } from './appsRepository';
 import { InstalledAppsRepository } from './installedAppsRepository';
 import { ScheduledCallRepository } from './scheduledCallRepository';
+import { WorkspaceRepository } from './workspaces';
 
 // Repository container for dependency injection
 export class RepositoryContainer {
@@ -140,6 +142,7 @@ export class RepositoryContainer {
   public apps: AppsRepository;
   public installedApps: InstalledAppsRepository;
   public scheduledCalls: ScheduledCallRepository;
+  public workspaces: WorkspaceRepository;
 
   private constructor() {
     this.agents = new AgentRepository();
@@ -181,6 +184,7 @@ export class RepositoryContainer {
     this.apps = new AppsRepository();
     this.installedApps = new InstalledAppsRepository();
     this.scheduledCalls = new ScheduledCallRepository();
+    this.workspaces = new WorkspaceRepository();
   }
 
   static getInstance(): RepositoryContainer {

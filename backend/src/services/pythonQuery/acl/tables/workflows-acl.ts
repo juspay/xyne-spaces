@@ -6,7 +6,12 @@ export class WorkflowsACL extends BaseQueryACL<Prisma.WorkflowWhereInput> {
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.WorkflowWhereInput | null> {
-    return null
+  async getWhereClause(): Promise<Prisma.WorkflowWhereInput> {
+    return {
+      OR: [
+        { ticketId: null },
+        { ticket: { workspaceId: this.ctx.workspaceId ?? '' } },
+      ],
+    }
   }
 }

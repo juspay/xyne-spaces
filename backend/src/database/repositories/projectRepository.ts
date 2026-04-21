@@ -1,5 +1,5 @@
 import { BaseRepository } from './base';
-import { Project, TicketStatusV2 } from '@prisma/client';
+import { Project, ProjectType, TicketStatusV2 } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
 import { sanitizeProjectCode } from '@xyne/shared';
 //import { queueProjectIngestion } from '@/queues/vespaQueue';
@@ -9,6 +9,8 @@ export interface CreateProjectInput {
   description?: string;
   createdBy: string;
   code: string;
+  workspaceId: string;
+  type?: ProjectType;
 }
 
 export interface UpdateProjectInput {
@@ -37,10 +39,10 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     }
 
     // Check for duplicate name
-    await this.validateNameUnique(data.name);
+    await this.validateNameUnique(data.name, undefined, data.workspaceId);
 
     // Validate project code
-    await this.validateProjectCode(data.code);
+    await this.validateProjectCode(data.code, undefined, data.workspaceId);
 
     // Use transaction to create project and default board together
     const result =  await this.db.$transaction(async (tx) => {
@@ -50,6 +52,8 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
           description: data.description,
           createdBy: data.createdBy,
           code: data.code,
+          type: ProjectType.DEFAULT,
+          workspace: { connect: { id: data.workspaceId } },
         }
       });
 
@@ -58,6 +62,7 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
         data: {
           name: data.name,
           projectId: project.id,
+          workspaceId: data.workspaceId,
           createdBy: data.createdBy,
         }
       });
@@ -150,10 +155,8 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     });
   }
 
-  async findByName(name: string): Promise<Project | null> {
-    return await this.db.project.findUnique({
-      where: { name }
-    });
+  async findByName(name: string, workspaceId: string): Promise<Project | null> {
+    return await this.db.project.findFirst({ where: { name, workspaceId } });
   }
 
   async findMany(options?: QueryOptions): Promise<Project[]> {
@@ -182,10 +185,10 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     );
   }
 
-  async update(id: string, data: UpdateProjectInput): Promise<Project> {
-    if (data.name) {
+  async update(id: string, data: UpdateProjectInput, workspaceId?: string): Promise<Project> {
+    if (data.name && workspaceId) {
       await this.validateString(data.name, 'name', 255);
-      await this.validateNameUnique(data.name, id);
+      await this.validateNameUnique(data.name, id, workspaceId);
     }
 
     if (data.description) {
@@ -266,19 +269,19 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     return result;
   }
 
-  async validateNameUnique(name: string, excludeId?: string): Promise<void> {
-    const existing = await this.db.project.findUnique({
-      where: { name },
+  async validateNameUnique(name: string, excludeId: string | undefined, workspaceId: string): Promise<void> {
+    const existing = await this.db.project.findFirst({
+      where: { name, workspaceId }
     });
 
     if (existing && existing.id !== excludeId) {
-      throw new Error(`Project with name '${name}' already exists`);
+      throw new Error(`Project with name '${name}' already exists in this workspace`);
     }
   }
 
-  async checkDuplicateName(name: string, excludeId?: string): Promise<boolean> {
-    const existing = await this.db.project.findUnique({
-      where: { name },
+  async checkDuplicateName(name: string, excludeId: string | undefined, workspaceId: string): Promise<boolean> {
+    const existing = await this.db.project.findFirst({
+      where: { name, workspaceId }
     });
     return !!(existing && existing.id !== excludeId);
   }
@@ -300,7 +303,7 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
    * Validate project code format and uniqueness
    * Format: 3+ uppercase alphanumeric characters (e.g., "EUL", "INT", "PROJ", "PRO1", "XY2")
    */
-  async validateProjectCode(code: string, excludeId?: string): Promise<void> {
+  async validateProjectCode(code: string, excludeId: string | undefined, workspaceId: string): Promise<void> {
     // Sanitize using shared utility
     const sanitizedCode = sanitizeProjectCode(code);
 
@@ -311,7 +314,7 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
 
     // Check uniqueness
     const existing = await this.db.project.findFirst({
-      where: { code: sanitizedCode },
+      where: { code: sanitizedCode, workspaceId }
     });
 
     if (existing && existing.id !== excludeId) {
@@ -323,10 +326,10 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
    * Check if project code exists and return existing project info if it does
    * Returns null if code is available
    */
-  async checkDuplicateCodeWithInfo(code: string, excludeId?: string): Promise<{ exists: boolean; existingProject?: { name: string } }> {
+  async checkDuplicateCodeWithInfo(code: string, excludeId: string | undefined, workspaceId: string): Promise<{ exists: boolean; existingProject?: { name: string } }> {
     const sanitizedCode = sanitizeProjectCode(code);
     const existing = await this.db.project.findFirst({
-      where: { code: sanitizedCode },
+      where: { code: sanitizedCode, workspaceId }
     });
 
     if (existing && existing.id !== excludeId) {
@@ -341,8 +344,22 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
   /**
    * Check if project code exists (legacy method for backward compatibility)
    */
-  async checkDuplicateCode(code: string, excludeId?: string): Promise<boolean> {
-    const result = await this.checkDuplicateCodeWithInfo(code, excludeId);
+  async checkDuplicateCode(code: string, excludeId: string | undefined, workspaceId: string): Promise<boolean> {
+    const result = await this.checkDuplicateCodeWithInfo(code, excludeId, workspaceId);
     return result.exists;
+  }
+
+  /**
+   * Get the DM project ID for a workspace
+   */
+  async getDMProjectId(workspaceId: string): Promise<string | null> {
+    const project = await this.db.project.findFirst({
+      where: {
+        workspaceId,
+        code: 'DM',
+        type: ProjectType.DM,
+      },
+    });
+    return project?.id ?? null;
   }
 }

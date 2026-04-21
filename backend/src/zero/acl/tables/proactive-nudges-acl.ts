@@ -11,6 +11,16 @@ const allowedUpdateFields = new Set([
 ]);
 
 export class ProactiveNudgesACL extends BaseACL<'proactive_nudges'> {
+
+  private async verifyChannelInWorkspace(channelId: string, tx: Transaction<Schema>): Promise<void> {
+    const channel = await tx.run(zql.channels.where('id', channelId).one());
+    if (!channel) throw new MutationACLError('Proactive nudge not found: channel does not exist', 'proactive_nudges');
+    const project = await tx.run(zql.projects.where('id', channel.projectId).one());
+    if (!project || project.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Proactive nudge not found in this workspace', 'proactive_nudges');
+    }
+  }
+
   async canInsert(_args: InsertValue<TableSchema<'proactive_nudges'>>, _tx: Transaction<Schema>): Promise<void> {
     throw new MutationACLError('Proactive nudge insert failed: nudges are system-managed', 'proactive_nudges');
   }
@@ -50,6 +60,7 @@ export class ProactiveNudgesACL extends BaseACL<'proactive_nudges'> {
     if (!conversation || !conversation.channel) {
       throw new MutationACLError('Proactive nudge update failed: conversation not found', 'proactive_nudges');
     }
+    await this.verifyChannelInWorkspace(conversation.channel.id, tx);
 
     if (conversation.channel.visibility !== ChannelVisibility.PUBLIC) {
       const participant = await tx.run(

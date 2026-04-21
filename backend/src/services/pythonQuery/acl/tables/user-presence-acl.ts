@@ -6,8 +6,9 @@ export class UserPresenceACL extends BaseQueryACL<Prisma.UserPresenceWhereInput>
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.UserPresenceWhereInput | null> {
-    // No restriction - open access (matches Zero's behavior)
-    return null
+  async getWhereClause(): Promise<Prisma.UserPresenceWhereInput> {
+    return {
+      userId: this.ctx.userId,
+    }
   }
 }

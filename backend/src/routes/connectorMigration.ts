@@ -8,6 +8,7 @@ import { workflowStatusSyncService } from '@/workflows/services/workflowStatusSy
 import { DatabaseClient } from '@/database/client'
 import {logger} from '@/utils/logger';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import { config } from '@/config/env';
 
 const router = Router()
 const prisma = DatabaseClient.getInstance()
@@ -65,6 +66,7 @@ router.post('/trigger', async (req, res) => {
       updatedBy: 'system',
       conversationId: 'system-connector-migration',
       projectId: 'connector-migration',
+      workspaceId: config.defaultWorkspaceId,
       userGroupId: 'system',
       boardId: 'system',
       xyneId

@@ -9,15 +9,35 @@ import { zql } from '../../queries';
 
 export class WOrkflowsAcl extends BaseACL<'workflows'> {
 
+    private async verifyWorkspace(ticketId: string | null | undefined, tx: Transaction<Schema>, workspaceId?: string): Promise<void> {
+        // If no ticketId (system workflows), allow
+        if (!ticketId) return;
+        const ticketWorkspaceId = workspaceId ?? await tx.run(zql.tickets.where('id', ticketId).one()).then(t => t?.workspaceId);
+        if (!ticketWorkspaceId || ticketWorkspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Workflow not found in this workspace', 'workflows');
+        }
+    }
+
     async canInsert(args: InsertValue<TableSchema<'workflows'>>, tx: Transaction<Schema>): Promise<void> {
-        const ticket = await tx.run(zql.tickets.where('id', args.ticketId).one());
+        // If no ticketId (system workflows), allow
+        if (!args.ticketId) return;
+
+        // Fetch ticket with project for workspace check and participant check
+        const ticket = await tx.run(zql.tickets.where('id', args.ticketId).related('project').one());
         if (!ticket) {
             throw new MutationACLError('Workflow insert failed: the associated ticket does not exist', 'workflows');
         }
+
+        await this.verifyWorkspace(args.ticketId, tx, ticket.workspaceId);
+
+        if (!ticket.project) {
+            throw new MutationACLError('Workflow insert failed: the associated project does not exist', 'workflows');
+        }
+
         const isParticipant = await tx
             .run(
             zql.channels
-            .where('projectId', ticket.projectId)
+            .where('projectId', ticket.project.id)
             .whereExists('participants', (participants) => {
                 return participants.where('userId', this.ctx.userID)
             })

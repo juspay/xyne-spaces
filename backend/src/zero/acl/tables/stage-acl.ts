@@ -10,15 +10,19 @@ import { hasProjectAdminAccess } from '../core/admin-access';
 
 export class StageAcl extends BaseACL<'stages'> {
 
-    async canInsert(args: InsertValue<TableSchema<'stages'>>, tx: Transaction<Schema>): Promise<void> {
-        const boardWithProject = await tx.run(zql.boards.where('id', args.boardId).related('project').one());
-
-        if (!boardWithProject || !boardWithProject.project) {
-            throw new MutationACLError('Stage insert failed: the specified board does not exist or has no project', 'stages');
+    private async verifyBoardWorkspace(boardId: string, tx: Transaction<Schema>): Promise<{ board: any }> {
+        const board = await tx.run(zql.boards.where('id', boardId).one());
+        if (!board || board.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Stage not found in this workspace', 'stages');
         }
+        return { board };
+    }
+
+    async canInsert(args: InsertValue<TableSchema<'stages'>>, tx: Transaction<Schema>): Promise<void> {
+        const { board } = await this.verifyBoardWorkspace(args.boardId, tx);
 
         // Allow if user is the board creator
-        if (boardWithProject.createdBy === this.ctx.userID) {
+        if (board.createdBy === this.ctx.userID) {
             return;
         }
 
@@ -35,6 +39,11 @@ export class StageAcl extends BaseACL<'stages'> {
         const stage = await tx.run(zql.stages.where('id', args.id).related('board').one());
         if (!stage || !stage.board) {
             throw new MutationACLError('Stage update failed: stage or its board does not exist', 'stages');
+        }
+        
+        // Direct workspaceId check - no project lookup needed
+        if (stage.board.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Stage update failed: workspace ID mismatch', 'stages');
         }
 
         // Allow if user is the board creator
@@ -56,6 +65,11 @@ export class StageAcl extends BaseACL<'stages'> {
         if (!stage || !stage.board) {
             throw new MutationACLError('Stage delete failed: stage or its board does not exist', 'stages');
         }
+        
+        // Direct workspaceId check - no project lookup needed
+        if (stage.board.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Stage delete failed: workspace ID mismatch', 'stages');
+        }
 
         // Allow if user is the board creator
         if (stage.board.createdBy === this.ctx.userID) {
@@ -75,6 +89,11 @@ export class StageAcl extends BaseACL<'stages'> {
         const stage = await tx.run(zql.stages.where('id', args.id).related('board').one());
         if (!stage || !stage.board) {
             throw new MutationACLError('Stage upsert failed: stage or its board does not exist', 'stages');
+        }
+        
+        // Direct workspaceId check - no project lookup needed
+        if (stage.board.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Stage upsert failed: workspace ID mismatch', 'stages');
         }
 
         // Allow if user is the board creator

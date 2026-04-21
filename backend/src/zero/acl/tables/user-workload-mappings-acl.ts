@@ -9,7 +9,15 @@ import { zql } from '../../queries';
 
 export class UserWorkloadMappingsACL extends BaseACL<'user_workload_mappings'> {
 
+  private async verifyUserGroupInWorkspace(userGroupId: string, tx: Transaction<Schema>): Promise<void> {
+    const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
+    if (!userGroup || userGroup.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('User workload mapping not found in this workspace', 'user_workload_mappings');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'user_workload_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     // Only group members can track workload
     const membership = await tx.run(
       zql.user_group_mappings
@@ -29,6 +37,7 @@ export class UserWorkloadMappingsACL extends BaseACL<'user_workload_mappings'> {
     if (!mapping) {
       throw new MutationACLError('User workload mapping update failed: mapping does not exist', 'user_workload_mappings');
     }
+    await this.verifyUserGroupInWorkspace(mapping.userGroupId, tx);
 
     // Only group members can update
     const membership = await tx.run(
@@ -44,6 +53,7 @@ export class UserWorkloadMappingsACL extends BaseACL<'user_workload_mappings'> {
   }
 
   async canUpsert(args: any, tx: Transaction<Schema>): Promise<void> {
+    await this.verifyUserGroupInWorkspace(args.userGroupId, tx);
     // Only group members can upsert
     const membership = await tx.run(
       zql.user_group_mappings

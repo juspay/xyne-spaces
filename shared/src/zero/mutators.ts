@@ -45,6 +45,9 @@ import {
   SavedConfigContextType,
   SavedConfigVisibility,
   SavedConfigEntityName,
+  WorkspaceRole,
+  Status,
+  OrgRole,
 
 } from './schema.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
@@ -1572,6 +1575,7 @@ export const mutators = defineMutators({
                   uploadedByUserId: ctx.userID,
                   createdBy: ctx.userID,
                   isDeleted: false,
+                  workspaceId: ctx.workspaceId,
                 });
               }
             }
@@ -2544,6 +2548,7 @@ export const mutators = defineMutators({
               createdAt: existingDraft?.createdAt || timestamp,
               createdBy: ctx.userID,
               url: '', // Will be populated after upload completes
+              workspaceId: ctx.workspaceId,
               metadata: attachmentMetadata,
               conversationId: conversationId || null,
               isDeleted: false,
@@ -3017,6 +3022,7 @@ export const mutators = defineMutators({
           updatedAt: timestamp,
           stageProgression: null,
           assignedTo: null,
+          workspaceId: ctx.workspaceId,
         });
 
         // Create the mapping
@@ -5337,6 +5343,7 @@ export const mutators = defineMutators({
           entityId,
           entityType,
           fieldId,
+          formId: formField.formId,
           ...(contextId && { contextId }),
           fieldValue: '',
           actualFieldValue,
@@ -6330,6 +6337,231 @@ export const mutators = defineMutators({
           id,
           isDefault: true,
           updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+  workspace: {
+    update: defineMutator(
+      z.object({
+        workspaceId: z.string(),
+        timestamp: z.number(),
+        updates: z.object({
+          name: z.string().optional(),
+          description: z.string().optional(),
+        }),
+      }),
+      async ({ tx, args: { workspaceId, timestamp, updates } }) => {
+        await tx.mutate.workspaces.update({
+          id: workspaceId,
+          ...updates,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
+  users: {
+    updateRole: defineMutator(
+      z.object({
+        workspaceId: z.string(),
+        userId: z.string(),
+        updates: z.object({
+          role: z.enum([WorkspaceRole.ADMIN, WorkspaceRole.MEMBER]).optional(),
+        }),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { userId, updates, timestamp } }) => {
+        await tx.mutate.users.update({
+          id: userId,
+          ...updates,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    remove: defineMutator(
+      z.object({
+        workspaceId: z.string(),
+        userId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { userId, timestamp } }) => {
+        await tx.mutate.users.update({
+          id: userId,
+          leftAt: timestamp,
+        });
+      },
+    ),
+  },
+  org: {
+    create: defineMutator(
+      z.object({
+        orgId: z.string(),
+        orgName: z.string(),
+        orgDescription: z.string().optional(),
+        workspaceId: z.string(),
+        workspaceOrgId: z.string(),
+        memberId: z.string(),
+        creatorEmail: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: {
+          orgId,
+          orgName,
+          orgDescription,
+          workspaceId,
+          workspaceOrgId,
+          memberId,
+          creatorEmail,
+          timestamp,
+        },
+      }) => {
+        // Insert organization
+        await tx.mutate.organizations.insert({
+          orgId,
+          name: orgName,
+          description: orgDescription || '',
+          status: Status.ACTIVE,
+          createdBy: ctx.userID,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+
+        // Link to workspace with ADMIN role
+        await tx.mutate.workspace_organizations.insert({
+          id: workspaceOrgId,
+          workspaceId,
+          orgId,
+          role: WorkspaceRole.ADMIN,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+
+        // Add the creator as an OrgMember with OWNER role (identified by email)
+        await tx.mutate.org_members.insert({
+          memberId,
+          orgId,
+          email: creatorEmail,
+          role: OrgRole.OWNER,
+          joinedAt: timestamp,
+        });
+      },
+    ),
+  },
+  workspaceOrg: {
+    add: defineMutator(
+      z.object({
+        workspaceId: z.string(),
+        orgId: z.string(),
+        id: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { workspaceId, orgId, id, timestamp } }) => {
+        // Check if there's a previously removed entry
+        const existing = await tx.run(
+          zql.workspace_organizations.where('workspaceId', workspaceId).where('orgId', orgId).one(),
+        );
+
+        if (existing) {
+          // Reactivate the existing entry by clearing leftAt
+          await tx.mutate.workspace_organizations.update({
+            id: existing.id,
+            leftAt: null,
+            updatedAt: timestamp,
+          });
+        } else {
+          // Create new entry
+          await tx.mutate.workspace_organizations.insert({
+            id,
+            workspaceId,
+            orgId,
+            role: WorkspaceRole.MEMBER,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      },
+    ),
+    remove: defineMutator(
+      z.object({
+        workspaceId: z.string(),
+        orgId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { workspaceId, orgId, timestamp } }) => {
+        const link = await tx.run(
+          zql.workspace_organizations
+            .where('workspaceId', workspaceId)
+            .where('orgId', orgId)
+            .where('leftAt', 'IS', null)
+            .one(),
+        );
+        if (link) {
+          await tx.mutate.workspace_organizations.update({
+            id: link.id,
+            leftAt: timestamp,
+          });
+        }
+      },
+    ),
+  },
+  invitation: {
+    revoke: defineMutator(
+      z.object({
+        invitationId: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { invitationId, timestamp } }) => {
+        await tx.mutate.invitations.update({
+          id: invitationId,
+          expiredAt: timestamp,
+        });
+      },
+    ),
+  },
+  orgMember: {
+    add: defineMutator(
+      z.object({
+        memberId: z.string(),
+        orgId: z.string(),
+        email: z.string(),
+        role: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, args: { memberId, orgId, email, role, timestamp } }) => {
+        // Reactivate a previously soft-deleted membership if one exists (matched by email)
+        const existing = await tx.run(
+          zql.org_members.where('orgId', orgId).where('email', email).one(),
+        );
+        if (existing) {
+          await tx.mutate.org_members.update({
+            memberId: existing.memberId,
+            leftAt: null,
+            joinedAt: timestamp,
+          });
+        } else {
+          await tx.mutate.org_members.insert({
+            memberId,
+            orgId,
+            email,
+            role: role as OrgRole,
+            joinedAt: timestamp,
+          });
+        }
+      },
+    ),
+    remove: defineMutator(
+      z.object({
+        memberId: z.string(),
+        timestamp: z.number(),
+      }),
+      // Soft-delete: set leftAt so the member is excluded from active queries
+      async ({ tx, args: { memberId, timestamp } }) => {
+        await tx.mutate.org_members.update({
+          memberId,
+          leftAt: timestamp,
         });
       },
     ),

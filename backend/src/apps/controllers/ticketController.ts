@@ -136,7 +136,7 @@ export class TicketController {
       // Resolve assignedToEmail to userId if provided
       let assignedTo: string | undefined;
       if (assignedToEmail) {
-        const user = await repositories.users.findByEmail(assignedToEmail);
+        const user = await repositories.users.findByEmail(assignedToEmail, req.user!.workspaceId!);
         if (!user) {
           res.status(404).json({
             error: `User with email ${assignedToEmail} not found`,
@@ -150,7 +150,7 @@ export class TicketController {
       // Resolve assignedUserGroupAlias to userGroupId if provided
       let userGroupId: string | undefined;
       if (assignedUserGroupAlias) {
-        const userGroup = await repositories.userGroups.findByAlias(assignedUserGroupAlias);
+        const userGroup = await repositories.userGroups.findByAlias(assignedUserGroupAlias, req.user!.workspaceId!);
         if (!userGroup) {
           res.status(404).json({
             error: `User group with alias ${assignedUserGroupAlias} not found`,

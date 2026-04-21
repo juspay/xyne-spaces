@@ -11,9 +11,18 @@ import { hasProjectAdminAccess } from '../core/admin-access';
 export class BoardAcl extends BaseACL<'boards'> {
 
     async canInsert(args: InsertValue<TableSchema<'boards'>>, tx: Transaction<Schema>): Promise<void> {
+        // Verify board's workspaceId matches context (direct check, no project lookup)
+        if (args.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Board insert failed: workspace ID mismatch', 'boards');
+        }
+
+        // Verify project exists and belongs to the same workspace
         const project = await tx.run(zql.projects.where('id', args.projectId).one());
         if (!project) {
             throw new MutationACLError('Board insert failed: the specified project does not exist', 'boards');
+        }
+        if (project.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Board insert failed: project workspace mismatch', 'boards');
         }
 
         // Allow if user has PROJECT ADMIN access
@@ -39,6 +48,11 @@ export class BoardAcl extends BaseACL<'boards'> {
         if (!board) {
             throw new MutationACLError('Board update failed: board does not exist', 'boards');
         }
+        
+        // Direct workspaceId check - no need to traverse through project
+        if (board.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Board update failed: workspace ID mismatch', 'boards');
+        }
 
         // Allow if user is the creator
         if (board.createdBy === this.ctx.userID) {
@@ -58,6 +72,11 @@ export class BoardAcl extends BaseACL<'boards'> {
         const board = await tx.run(zql.boards.where('id', args.id).one());
         if (!board) {
             throw new MutationACLError('Board delete failed: board does not exist', 'boards');
+        }
+        
+        // Direct workspaceId check - no need to traverse through project
+        if (board.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Board delete failed: workspace ID mismatch', 'boards');
         }
 
         // Allow if user is the creator

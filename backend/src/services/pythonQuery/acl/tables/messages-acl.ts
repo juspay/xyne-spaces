@@ -15,9 +15,14 @@ export class MessagesACL extends BaseQueryACL<Prisma.MessageWhereInput> {
         {
           conversation: {
             channel: {
-              OR: [
-                { visibility: 'PUBLIC' },
-                { participants: { some: { userId: this.ctx.userId } } },
+              AND: [
+                { workspaceId: this.ctx.workspaceId ?? '' },
+                {
+                  OR: [
+                    { visibility: 'PUBLIC' },
+                    { participants: { some: { userId: this.ctx.userId } } },
+                  ],
+                },
               ],
             },
           },

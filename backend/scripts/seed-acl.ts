@@ -10,7 +10,7 @@
  * 4. Cleaning up expired user sessions
  */
 
-import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus } from '@prisma/client';
+import { PrismaClient, AccessType, AuthProvider, UserStatus, SessionStatus, WorkspaceRole, ProjectType } from '@prisma/client';
 import { repositories } from '../src/database/repositories/index';
 
 const prisma = new PrismaClient();
@@ -34,6 +34,8 @@ const ESSENTIAL_RESOURCES = [
   { name: 'LISTPROJECTS', description: 'Project listing and management access' },
   { name: 'CHANNELS', description: 'Read only will not allow to create channel' },
   { name: 'CANVASES', description: 'Canvases creation access' },
+  { name: 'WORKSPACE', description: 'Workspace management access' },
+  { name: 'ORGANIZATIONS', description: 'Organization management access' },
 ];
 
 // Default user groups with their permissions
@@ -66,6 +68,8 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'LISTPROJECTS', accessType: AccessType.READ },
       { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
       { resourceName: 'CANVASES', accessType: AccessType.WRITE },
+      { resourceName: 'WORKSPACE', accessType: AccessType.WRITE },
+      { resourceName: 'ORGANIZATIONS', accessType: AccessType.READ },
     ]
   },
   {
@@ -86,6 +90,7 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'LISTPROJECTS', accessType: AccessType.READ },
       { resourceName: 'CHANNELS', accessType: AccessType.READ },
       { resourceName: 'CANVASES', accessType: AccessType.READ },
+      { resourceName: 'WORKSPACE', accessType: AccessType.READ },
     ]
   }
 ];
@@ -97,7 +102,20 @@ const DEFAULT_ADMIN_USER = {
   authProvider: AuthProvider.GOOGLE,
   providerUserId: 'admin-seed-user-001',
   status: UserStatus.ACTIVE,
+  role: WorkspaceRole.ADMIN,
 };
+
+// Default organization and workspace
+const DEFAULT_ORG = {
+  name: 'Xyne Default',
+  orgId: 'xyne-default-org',
+  createdBy: 'system-seed',
+};
+
+const DEFAULT_WORKSPACE = {
+  name: 'Default Workspace',
+  createdBy: 'system-seed',
+}; 
 
 async function main() {
   console.log('🚀 Starting ACL system seeding...');
@@ -127,31 +145,102 @@ async function main() {
       }
     }
 
-    // Step 2: Create default user groups
+    // Step 2: Create default organization and workspace (must be before user groups)
+    console.log('\n🏢 Creating default organization and workspace...');
+    let defaultWorkspaceId: string;
+    try {
+      // Check if default org exists
+      let defaultOrg = await prisma.organization.findFirst({
+        where: { orgId: DEFAULT_ORG.orgId }
+      });
+
+      if (!defaultOrg) {
+        defaultOrg = await prisma.organization.create({
+          data: DEFAULT_ORG
+        });
+        console.log('  ✅ Created default organization');
+      } else {
+        console.log('  ✅ Default organization already exists');
+      }
+
+      // Check if default workspace exists
+      let defaultWorkspace = await prisma.workspace.findFirst({
+        where: { name: DEFAULT_WORKSPACE.name, orgId: defaultOrg.orgId }
+      });
+
+      if (!defaultWorkspace) {
+        defaultWorkspace = await prisma.workspace.create({
+          data: {
+            name: DEFAULT_WORKSPACE.name,
+            orgId: defaultOrg.orgId,
+            createdBy: DEFAULT_WORKSPACE.createdBy,
+          }
+        });
+        console.log('  ✅ Created default workspace');
+
+        // Create DM project for the workspace
+        await prisma.project.create({
+          data: {
+            name: 'Direct Messages',
+            code: 'DM',
+            description: 'DM project for direct message channels',
+            type: ProjectType.DM,
+            workspaceId: defaultWorkspace.id,
+            createdBy: DEFAULT_WORKSPACE.createdBy,
+          }
+        });
+        console.log('  ✅ Created DM project for default workspace');
+      } else {
+        console.log('  ✅ Default workspace already exists');
+      }
+
+      defaultWorkspaceId = defaultWorkspace.id;
+
+      // Link org to workspace if not already linked
+      const existingLink = await prisma.workspaceOrganization.findFirst({
+        where: { orgId: defaultOrg.orgId, workspaceId: defaultWorkspace.id }
+      });
+      if (!existingLink) {
+        await prisma.workspaceOrganization.create({
+          data: {
+            orgId: defaultOrg.orgId,
+            workspaceId: defaultWorkspace.id,
+            role: 'OWNER',
+          }
+        });
+        console.log('  ✅ Linked organization to workspace');
+      }
+    } catch (error) {
+      console.error('  ❌ Failed to create default organization/workspace:', error);
+      throw error;
+    }
+
+    // Step 3: Create default user groups (requires workspace)
     console.log('\n👥 Creating default user groups...');
     const createdGroups = new Map<string, string>();
 
     for (const groupData of DEFAULT_USER_GROUPS) {
       try {
-        // Check if group already exists
-        let group = await prisma.userGroup.findUnique({
-          where: { name: groupData.name }
+        // Check if group already exists in this workspace
+        let group = await prisma.userGroup.findFirst({
+          where: { name: groupData.name, workspaceId: defaultWorkspaceId }
         });
 
         if (group) {
           console.log(`  ✅ User group ${groupData.name} already exists`);
           createdGroups.set(groupData.name, group.id);
         } else {
-          // Create new group
+          // Create new group with workspaceId
           group = await repositories.userGroups.create({
             name: groupData.name,
-            description: groupData.description
+            description: groupData.description,
+            workspaceId: defaultWorkspaceId,
           });
           createdGroups.set(groupData.name, group.id);
           console.log(`  ✅ Created user group: ${groupData.name}`);
         }
 
-        // Step 3: Set up permissions for each group
+        // Step 4: Set up permissions for each group
         if (!group) {
           console.error(`  ❌ Group ${groupData.name} not found, skipping permissions`);
           continue;
@@ -199,7 +288,63 @@ async function main() {
       }
     }
 
-    // Step 4: Create default admin user
+    // Step 4: Create default organization and workspace
+    console.log('\n🏢 Creating default organization and workspace...');
+    try {
+      // Check if default org exists
+      let defaultOrg = await prisma.organization.findFirst({
+        where: { orgId: DEFAULT_ORG.orgId }
+      });
+
+      if (!defaultOrg) {
+        defaultOrg = await prisma.organization.create({
+          data: DEFAULT_ORG
+        });
+        console.log('  ✅ Created default organization');
+      } else {
+        console.log('  ✅ Default organization already exists');
+      }
+
+      // Check if default workspace exists
+      let defaultWorkspace = await prisma.workspace.findFirst({
+        where: { name: DEFAULT_WORKSPACE.name, orgId: defaultOrg.orgId }
+      });
+
+      if (!defaultWorkspace) {
+        defaultWorkspace = await prisma.workspace.create({
+          data: {
+            name: DEFAULT_WORKSPACE.name,
+            orgId: defaultOrg.orgId,
+            createdBy: DEFAULT_WORKSPACE.createdBy,
+          }
+        });
+        console.log('  ✅ Created default workspace');
+      } else {
+        console.log('  ✅ Default workspace already exists');
+      }
+
+      defaultWorkspaceId = defaultWorkspace.id;
+
+      // Link org to workspace if not already linked
+      const existingLink = await prisma.workspaceOrganization.findFirst({
+        where: { orgId: defaultOrg.orgId, workspaceId: defaultWorkspace.id }
+      });
+      if (!existingLink) {
+        await prisma.workspaceOrganization.create({
+          data: {
+            orgId: defaultOrg.orgId,
+            workspaceId: defaultWorkspace.id,
+            role: 'OWNER',
+          }
+        });
+        console.log('  ✅ Linked organization to workspace');
+      }
+    } catch (error) {
+      console.error('  ❌ Failed to create default organization/workspace:', error);
+      throw error;
+    }
+
+    // Step 5: Create default admin user
     console.log('\n👤 Creating default admin user...');
     try {
       // Get admin group ID
@@ -208,20 +353,32 @@ async function main() {
         throw new Error('ADMIN group not found');
       }
 
-      // Check if admin user already exists
-      let adminUser = await repositories.users.findByEmail(DEFAULT_ADMIN_USER.email);
+      // Check if admin user already exists in the default workspace
+      let adminUser = await repositories.users.findByEmail(DEFAULT_ADMIN_USER.email, defaultWorkspaceId);
 
       if (adminUser) {
         console.log('  ✅ Default admin user already exists');
       } else {
-        // Create admin user
+        // Create orgMember FIRST to get memberId
+        const orgMember = await prisma.orgMember.create({
+          data: {
+            email: DEFAULT_ADMIN_USER.email,
+            orgId: DEFAULT_ORG.orgId,
+            role: 'OWNER',
+          }
+        });
+        console.log(`  ✅ Created orgMember with id: ${orgMember.memberId}`);
+
+        // Create admin user with workspaceId and orgMemberId
         adminUser = await repositories.users.create({
-          ...DEFAULT_ADMIN_USER
+          ...DEFAULT_ADMIN_USER,
+          workspaceId: defaultWorkspaceId,
+          orgMemberId: orgMember.memberId,
         });
         console.log(`  ✅ Created default admin user: ${DEFAULT_ADMIN_USER.email}`);
       }
 
-      // Ensure admin user is in ADMIN group
+      // Ensure admin user is in ADMIN group via UserGroupMapping
       const existingMapping = await prisma.userGroupMapping.findUnique({
         where: {
           userId_userGroupId: {
@@ -242,20 +399,182 @@ async function main() {
       } else {
         console.log('  ✅ Admin user already linked to ADMIN group');
       }
+
+      // Grant direct ADMIN access to ALL resources for this user (required for ACL checks)
+      console.log('  🔐 Granting direct ADMIN access to all resources...');
+      let grantedCount = 0;
+
+      for (const [resourceName, resourceId] of createdResources) {
+        const existingDirectPermission = await prisma.resourceAccess.findFirst({
+          where: {
+            userId: adminUser.id,
+            resourceId: resourceId,
+            accessType: AccessType.ADMIN,
+          },
+        });
+
+        if (!existingDirectPermission) {
+          await prisma.resourceAccess.create({
+            data: {
+              userId: adminUser.id,
+              resourceId: resourceId,
+              accessType: AccessType.ADMIN,
+            },
+          });
+          grantedCount++;
+        }
+      }
+
+      if (grantedCount > 0) {
+        console.log(`  ✅ Granted direct ADMIN access to ${grantedCount} resources`);
+      } else {
+        console.log('  ✅ Direct ADMIN access already exists for all resources');
+      }
+
+      // Ensure admin user is in OrgMember table
+      const existingOrgMember = await prisma.orgMember.findFirst({
+        where: {
+          email: adminUser.email,
+          orgId: DEFAULT_ORG.orgId
+        }
+      });
+
+      if (!existingOrgMember) {
+        await prisma.orgMember.create({
+          data: {
+            email: adminUser.email,
+            orgId: DEFAULT_ORG.orgId,
+            role: 'OWNER',
+          }
+        });
+        console.log('  ✅ Linked admin user to organization as OWNER');
+      } else {
+        console.log('  ✅ Admin user already linked to organization');
+      }
     } catch (error) {
       console.error('  ❌ Failed to create default admin user:', error);
       throw error;
     }
 
-    // Step 5: Developer user assignment
+    // Step 5: Create DEFAULT_ADMIN_EMAIL user if set
+    const defaultAdminEmail = process.env.DEFAULT_ADMIN_EMAIL;
+    if (defaultAdminEmail && defaultAdminEmail !== DEFAULT_ADMIN_USER.email) {
+      console.log(`\n👤 Creating DEFAULT_ADMIN_EMAIL user (${defaultAdminEmail})...`);
+      try {
+        // Check if user already exists in the default workspace
+        let defaultAdminUser = await repositories.users.findByEmail(defaultAdminEmail, defaultWorkspaceId);
+
+        if (defaultAdminUser) {
+          console.log(`  ✅ Default admin email user already exists: ${defaultAdminEmail}`);
+        } else {
+          // Create orgMember FIRST to get memberId
+          const orgMember = await prisma.orgMember.create({
+            data: {
+              email: defaultAdminEmail,
+              orgId: DEFAULT_ORG.orgId,
+              role: 'OWNER',
+            }
+          });
+          console.log(`  ✅ Created orgMember with id: ${orgMember.memberId}`);
+
+          // Create user with workspaceId and orgMemberId
+          defaultAdminUser = await repositories.users.create({
+            name: defaultAdminEmail.split('@')[0],
+            email: defaultAdminEmail,
+            authProvider: AuthProvider.GOOGLE,
+            providerUserId: `admin-${Date.now()}`,
+            status: UserStatus.ACTIVE,
+            workspaceId: defaultWorkspaceId,
+            role: WorkspaceRole.ADMIN,
+            orgMemberId: orgMember.memberId,
+          });
+          console.log(`  ✅ Created default admin email user: ${defaultAdminEmail}`);
+        }
+
+        // Ensure user is in ADMIN group
+        const adminGroupId = createdGroups.get('ADMIN');
+        if (adminGroupId) {
+          const existingMapping = await prisma.userGroupMapping.findUnique({
+            where: {
+              userId_userGroupId: {
+                userId: defaultAdminUser.id,
+                userGroupId: adminGroupId
+              }
+            }
+          });
+
+          if (!existingMapping) {
+            await prisma.userGroupMapping.create({
+              data: {
+                userId: defaultAdminUser.id,
+                userGroupId: adminGroupId
+              }
+            });
+            console.log('  ✅ Linked default admin email user to ADMIN group');
+          }
+        }
+
+        // Grant direct ADMIN access to ALL resources
+        console.log('  🔐 Granting direct ADMIN access to all resources...');
+        let grantedCount = 0;
+        for (const [resourceName, resourceId] of createdResources) {
+          const existingDirectPermission = await prisma.resourceAccess.findFirst({
+            where: {
+              userId: defaultAdminUser.id,
+              resourceId: resourceId,
+              accessType: AccessType.ADMIN,
+            },
+          });
+
+          if (!existingDirectPermission) {
+            await prisma.resourceAccess.create({
+              data: {
+                userId: defaultAdminUser.id,
+                resourceId: resourceId,
+                accessType: AccessType.ADMIN,
+              },
+            });
+            grantedCount++;
+          }
+        }
+
+        if (grantedCount > 0) {
+          console.log(`  ✅ Granted direct ADMIN access to ${grantedCount} resources`);
+        }
+
+        // Ensure user is in OrgMember table
+        const existingOrgMember = await prisma.orgMember.findFirst({
+          where: {
+            email: defaultAdminUser.email,
+            orgId: DEFAULT_ORG.orgId
+          }
+        });
+
+        if (!existingOrgMember) {
+          await prisma.orgMember.create({
+            data: {
+              email: defaultAdminUser.email,
+              orgId: DEFAULT_ORG.orgId,
+              role: 'OWNER',
+            }
+          });
+          console.log('  ✅ Linked default admin email user to organization as OWNER');
+        }
+      } catch (error) {
+        console.error(`  ❌ Failed to create DEFAULT_ADMIN_EMAIL user:`, error);
+        // Don't throw - this is optional
+      }
+    }
+
+    // Step 6: Developer user assignment
     // Note: Developer users are assigned via assign-user-group.ts script after they log in
     console.log('\n👤 Developer users will be assigned via assign-user-group.ts script');
 
-    // Step 6: Clean up expired user sessions
+    // Step 7: Clean up expired user sessions
     console.log('\n🧹 Cleaning up expired user sessions...');
     try {
       const now = new Date();
-      
+
       // Find expired sessions
       const expiredSessions = await prisma.userSession.findMany({
         where: {
@@ -288,7 +607,51 @@ async function main() {
       // Don't throw - this is not critical
     }
 
-    // Step 7: Verify setup
+    // Step 8: Ensure all bot users are in OrgMember table
+    console.log('\n🤖 Ensuring all bot users are in org_member table...');
+    try {
+      const { UserType } = await import('@prisma/client');
+
+      // Find all bots (using string literal since UserType enum may not be generated yet)
+      const botUsers = await prisma.user.findMany({
+        where: { userType: 'BOT' }
+      });
+
+      let addedCount = 0;
+
+      for (const botUser of botUsers) {
+        // Check if bot is already in org_member
+        const existingOrgMember = await prisma.orgMember.findFirst({
+          where: {
+            email: botUser.email,
+            orgId: DEFAULT_ORG.orgId
+          }
+        });
+
+        if (!existingOrgMember) {
+          await prisma.orgMember.create({
+            data: {
+              email: botUser.email,
+              orgId: DEFAULT_ORG.orgId,
+              role: 'MEMBER', // Bots are regular members, not owners
+            }
+          });
+          addedCount++;
+          console.log(`    ✅ Added bot '${botUser.email}' to org_member`);
+        }
+      }
+
+      if (addedCount > 0) {
+        console.log(`  ✅ Added ${addedCount} bot(s) to org_member table`);
+      } else {
+        console.log('  ✅ All bots are already in org_member table');
+      }
+    } catch (error) {
+      console.error('  ❌ Failed to add bots to org_member:', error);
+      // Don't throw - this is not critical
+    }
+
+    // Step 9: Verify setup
     console.log('\n🔍 Verifying ACL setup...');
     
     // Verify resources

@@ -56,8 +56,14 @@ export class ToolController {
   getToolByName = async (req: Request, res: Response): Promise<void> => {
     try {
       const { name } = req.params;
+      const workspaceId = req.user?.workspaceId;
 
-      const tool = await repositories.tools.findByName(name);
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Missing workspaceId' });
+        return;
+      }
+
+      const tool = await repositories.tools.findByName(name, workspaceId);
 
       if (!tool) {
         res.status(404).json({ error: 'Tool not found' });

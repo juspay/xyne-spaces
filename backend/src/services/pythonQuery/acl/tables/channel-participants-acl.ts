@@ -8,16 +8,21 @@ export class ChannelParticipantsACL extends BaseQueryACL<Prisma.ChannelParticipa
 
   async getWhereClause(): Promise<Prisma.ChannelParticipantWhereInput> {
     return {
-      OR: [
-        { userId: this.ctx.userId },
+      AND: [
         {
-          channel: {
-            OR: [
-              { visibility: 'PUBLIC' },
-              { participants: { some: { userId: this.ctx.userId } } },
-            ],
-          },
+          OR: [
+            { userId: this.ctx.userId },
+            {
+              channel: {
+                OR: [
+                  { visibility: 'PUBLIC' },
+                  { participants: { some: { userId: this.ctx.userId } } },
+                ],
+              },
+            },
+          ],
         },
+        { channel: { workspaceId: this.ctx.workspaceId ?? '' } },
       ],
     }
   }

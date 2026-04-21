@@ -16,6 +16,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   const { user } = useAuth();
   const isRefreshing = useRef(false);
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
+  const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
 
   const [zero, setZero] = useState<Zero | null>(null);
 
@@ -41,25 +42,47 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
       }
     };
 
-    const zeroObj = new Zero({
-      userID: user.id,
-      auth: authFunction,
-      server: VITE_ZERO_SERVER,
-      schema,
-      mutators: mutators,
-      hiddenTabDisconnectDelay: 60000,
-      context: { userID: user.id },
-      maxHeaderLength: 3072,
-      onUpdateNeeded: (reason: UpdateNeededReason): void => {
-        void handleUpdateNeeded(reason);
-      },
-    });
+    const prevWorkspaceId = prevWorkspaceIdRef.current;
+    const currentWorkspaceId = user.workspaceId ?? '';
+    prevWorkspaceIdRef.current = currentWorkspaceId;
 
-    setZero(zeroObj);
+    const initZero = async (): Promise<void> => {
+      // If workspaceId changed, drop all local databases to prevent stale cross-workspace cache
+      if (prevWorkspaceId !== undefined && prevWorkspaceId !== currentWorkspaceId) {
+        try {
+          await dropAllDatabases();
+        } catch {
+          // Ignore errors during drop
+        }
+      }
 
-    return () => {
-      void zeroObj.close();
+      const zeroObj = new Zero({
+        userID: user.id,
+        auth: authFunction,
+        server: VITE_ZERO_SERVER,
+        schema,
+        mutators: mutators,
+        hiddenTabDisconnectDelay: 60000,
+        context: {
+          userID: user.id,
+          workspaceId: currentWorkspaceId,
+          role: user.role,
+          orgRole: user.orgRole,
+          memberId: user.memberId,
+        },
+        maxHeaderLength: 3072,
+        onUpdateNeeded: (reason: UpdateNeededReason): void => {
+          void handleUpdateNeeded(reason);
+        },
+      });
+
+      setZero(prev => {
+        void prev?.close();
+        return zeroObj;
+      });
     };
+
+    void initZero();
   }, [user, refreshCount]);
 
   if (!zero) {

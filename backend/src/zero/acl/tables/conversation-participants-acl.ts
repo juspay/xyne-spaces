@@ -6,19 +6,23 @@ import { zql } from '../../queries';
 
 export class ConversationParticipantsACL extends BaseACL<'conversation_participants'> {
 
-  async canInsert(args: InsertValue<TableSchema<'conversation_participants'>>, tx: Transaction<Schema>): Promise<void> {
-    const conversation = await tx
-      .run(
-      zql.conversations
-      .where('conversationId', args.conversationId)
-      .related('channel')
-      .one());
-
-    if (!conversation || !conversation.channel) {
-      throw new MutationACLError('Conversation participant insert failed: the conversation or its channel does not exist', 'conversation_participants')
+  private async verifyConversationInWorkspace(conversationId: string, tx: Transaction<Schema>, workspaceId?: string): Promise<void> {
+    const conversationWorkspaceId = workspaceId ?? await tx.run(zql.conversations.where('conversationId', conversationId).related('channel').one()).then(c => c?.channel?.workspaceId);
+    if (!conversationWorkspaceId) throw new MutationACLError('Conversation participant not found: conversation does not exist', 'conversation_participants');
+    if (conversationWorkspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Conversation participant not found in this workspace', 'conversation_participants');
     }
+  }
 
-    if (conversation.channel.isArchived) {
+  async canInsert(args: InsertValue<TableSchema<'conversation_participants'>>, tx: Transaction<Schema>): Promise<void> {
+    const conversation = await tx.run(zql.conversations.where('conversationId', args.conversationId).related('channel').one());
+
+    if (!conversation) {
+      throw new MutationACLError('Conversation participant insert failed: the conversation does not exist', 'conversation_participants')
+    }
+    await this.verifyConversationInWorkspace(args.conversationId, tx, conversation.channel?.workspaceId);
+
+    if (conversation.channel?.isArchived) {
       throw new MutationACLError('Conversation participant insert failed: cannot join conversations in archived channel', 'conversation_participants')
     }
 
@@ -43,9 +47,12 @@ export class ConversationParticipantsACL extends BaseACL<'conversation_participa
       zql.conversation_participants
       .where('id', args.id)
       .one());
-    
+
     if (participantInfo?.userId != this.ctx.userID) {
       throw new MutationACLError('Conversation participant update failed: you can only modify your own participant details', 'conversation_participants')
+    }
+    if (participantInfo) {
+      await this.verifyConversationInWorkspace(participantInfo.conversationId, tx);
     }
   }
 

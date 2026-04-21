@@ -34,21 +34,26 @@ export class AuthMiddleware {
 
   /**
    * Middleware to authenticate requests using Google JWT tokens
+   * Supports multi-workspace cookies (workspace-specific tokens)
    */
   authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const authHeader = req.headers.authorization;
-    const sessionIdHeader = req.headers['x-session-id'] as string;
-    const sessionIdCookie = req.cookies?.user_session_id;
-    const requestSessionId = sessionIdHeader || sessionIdCookie;
+    
+    // Get workspace ID from header or last_workspace cookie
+    const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
+    const workspaceToken = workspaceId ? req.cookies?.[`xyne_ws_${workspaceId}_token`] : undefined;
+    const workspaceSession = workspaceId ? req.cookies?.[`xyne_ws_${workspaceId}_session`] : undefined;
+    
+    // For logging - use workspace session if available
+    const requestSessionId = workspaceSession;
 
     logger.info(`[AUTH] Auth middleware called for ${req.method} ${req.path}`, {
       method: req.method,
       path: req.path,
       authHeaderPresent: !!authHeader,
-      sessionIdHeader,
-      sessionIdCookie,
+      workspaceId,
+      workspaceTokenPresent: !!workspaceToken,
       sessionId: requestSessionId,
-      cookieTokenPresent: !!req.cookies?.google_access_token,
       clientIp: req.ip,
     });
 
@@ -75,6 +80,7 @@ export class AuthMiddleware {
           const userHeaders = {
             name: req.headers['x-user-name'] as string,
             email: req.headers['x-user-email'] as string,
+            workspaceId: req.headers['x-workspace-id'] as string,
           };
 
           const apiKeyUser = await apiKeyService.validateApiKey(apiKey, userHeaders);
@@ -88,6 +94,9 @@ export class AuthMiddleware {
               isApiKeyUser: true,
               scopes: apiKeyUser.scopes,
               role: apiKeyUser.role,
+              workspaceId: apiKeyUser.workspaceId,
+              orgRole: apiKeyUser.orgRole,
+              memberId: apiKeyUser.memberId,
             };
 
             logger.info(
@@ -165,18 +174,22 @@ export class AuthMiddleware {
           emailVerified: true,
         };
 
-        const { user } = await this.userService!.findOrCreateUser(devUserData);
+        const devWorkspaceId = req.headers['x-workspace-id'] as string;
+        const { user } = await this.userService!.findOrCreateUser(devUserData, devWorkspaceId);
 
-        // Attach user to request object
-        req.user = {
-          id: user.id,
-          googleId: user.providerUserId,
-          email: user.email,
-          name: user.name,
-          isApiKeyUser: false,
-          scopes: [],
-          role: 'user',
-        };
+      // Attach user to request object
+      req.user = {
+        id: user.id,
+        googleId: user.providerUserId,
+        email: user.email,
+        name: user.name,
+        workspaceId: user.workspaceId,
+        isApiKeyUser: false,
+        scopes: [],
+        role: user.role,
+        orgRole: user.orgRole!,
+        memberId: user.orgMemberId,
+      };
 
         logger.info(`[AUTH] Dev mode authenticated user: ${user.email} (${user.id}) [sessionId=${requestSessionId ?? 'missing'}]`, {
           userId: user.id,
@@ -207,81 +220,84 @@ export class AuthMiddleware {
       // Normal Google JWT authentication
       // Extract token from Authorization header OR HTTP-only cookie
       // Also get session ID from header or cookie
-      const sessionId = requestSessionId;
-      if (sessionId) {
-        req.authenticatedSessionId = sessionId;
+      if (workspaceSession) {
+        req.authenticatedSessionId = workspaceSession;
       }
 
       logger.info(
-        `[AUTH] Auth header: ${authHeader ? 'Present' : 'Missing'}, Session ID: ${sessionId ? 'Present' : 'Missing'} [sessionId=${sessionId ?? 'missing'}]`,
+        `[AUTH] Auth header: ${authHeader ? 'Present' : 'Missing'}, Workspace: ${workspaceId ? 'Present' : 'Missing'} [workspaceId=${workspaceId ?? 'missing'}]`,
         {
-          sessionIdHeader,
-          sessionIdCookie,
+          workspaceId,
+          workspaceTokenPresent: !!workspaceToken,
+          workspaceSessionPresent: !!workspaceSession,
           authHeaderPresent: !!authHeader,
-          cookieTokenPresent: !!req.cookies?.google_access_token,
         }
       );
 
-      // Try to get token from Authorization header first, then from cookie
+      // Try to get token from Authorization header first, then from workspace-specific cookie
       let token: string | undefined;
-      let tokenSource: 'authorization_header' | 'cookie' | 'session_refresh' | 'none' = 'none';
+      let tokenSource: 'authorization_header' | 'workspace_cookie' | 'session_refresh' | 'none' = 'none';
       let tokenPreview: string | undefined;
 
       if (authHeader && authHeader.startsWith('Bearer ')) {
         token = authHeader.split(' ')[1];
         tokenSource = 'authorization_header';
         tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
-        logger.info(`[AUTH] Token extracted from Authorization header [sessionId=${sessionId ?? 'missing'}]`, {
+        logger.info(`[AUTH] Token extracted from Authorization header [sessionId=${workspaceSession ?? 'missing'}]`, {
           tokenSource,
           tokenPresent: !!token,
           tokenPreview,
         });
-      } else if (req.cookies?.google_access_token) {
-        token = req.cookies.google_access_token;
-        tokenSource = 'cookie';
+      } else if (workspaceToken) {
+        token = workspaceToken;
+        tokenSource = 'workspace_cookie';
         tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
-        logger.info(`[AUTH] Token extracted from HTTP-only cookie [sessionId=${sessionId ?? 'missing'}]`, {
+        logger.info(`[AUTH] Token extracted from workspace cookie [workspaceId=${workspaceId}, sessionId=${workspaceSession ?? 'missing'}]`, {
           tokenSource,
+          workspaceId,
           tokenPresent: !!token,
           tokenPreview,
         });
       }
 
-      // If no token but session ID exists, try to refresh instead of rejecting
-      if (!token && sessionId) {
-        logger.info(`[AUTH] No token found but session ID exists, attempting refresh [sessionId=${sessionId}]`, {
+      // If no token but workspace session exists, try to refresh instead of rejecting
+      if (!token && workspaceSession) {
+        logger.info(`[AUTH] No token found but workspace session exists, attempting refresh [sessionId=${workspaceSession}]`, {
           tokenSource,
           tokenPresent: !!token,
+          workspaceId,
         });
         try {
-          logger.info(`[AUTH] Calling refreshTokenBySession from authenticate: missing token with session fallback [sessionId=${sessionId}]`, {
+          logger.info(`[AUTH] Calling refreshTokenBySession from authenticate: missing token with session fallback [sessionId=${workspaceSession}]`, {
             method: req.method,
             path: req.path,
           });
-          const refreshResult = await this.refreshTokenBySession(sessionId);
+          const refreshResult = await this.refreshTokenBySession(workspaceSession);
 
           if (refreshResult.success && refreshResult.customToken) {
             token = refreshResult.customToken;
             tokenSource = 'session_refresh';
             tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
 
-            // Set new token in HTTP-only cookie
+            // Set new token in workspace-specific cookie
             const isProduction = process.env.NODE_ENV === 'production';
-            res.cookie('google_access_token', refreshResult.customToken, {
-              httpOnly: true,
-              secure: isProduction,
-              sameSite: 'strict',
-              path: '/',
-              maxAge: config.jwt.expirationSeconds * 1000,
-            });
+            if (workspaceId) {
+              res.cookie(`xyne_ws_${workspaceId}_token`, refreshResult.customToken, {
+                httpOnly: true,
+                secure: isProduction,
+                sameSite: 'strict',
+                path: '/',
+                maxAge: config.jwt.expirationSeconds * 1000,
+              });
 
-            // Update req.cookies for downstream handlers
-            if (!req.cookies) {
-              req.cookies = {};
+              // Update req.cookies for downstream handlers
+              if (!req.cookies) {
+                req.cookies = {};
+              }
+              req.cookies[`xyne_ws_${workspaceId}_token`] = refreshResult.customToken;
             }
-            req.cookies.google_access_token = refreshResult.customToken;
 
-            logger.info(`[AUTH] Token successfully created via session refresh [sessionId=${sessionId}]`, {
+            logger.info(`[AUTH] Token successfully created via session refresh [sessionId=${workspaceSession}]`, {
               tokenSource,
               tokenPresent: !!token,
               tokenPreview,
@@ -290,7 +306,7 @@ export class AuthMiddleware {
             throw new Error('Session refresh failed');
           }
         } catch (refreshError) {
-          logger.error(`[AUTH] Failed to refresh via session [sessionId=${sessionId}]:`, {
+          logger.error(`[AUTH] Failed to refresh via session [sessionId=${workspaceSession}]:`, {
             tokenSource,
             error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
             stack: refreshError instanceof Error ? refreshError.stack : undefined,
@@ -305,7 +321,7 @@ export class AuthMiddleware {
 
       // If still no token, reject
       if (!token) {
-        logger.warn(`[AUTH] Authentication failed: No token and no valid session [sessionId=${sessionId ?? 'missing'}]`, {
+        logger.warn(`[AUTH] Authentication failed: No token and no valid session [sessionId=${workspaceSession ?? 'missing'}]`, {
           tokenSource,
           authHeaderPresent: !!authHeader,
           cookieTokenPresent: !!req.cookies?.google_access_token,
@@ -329,7 +345,7 @@ export class AuthMiddleware {
 
         if (timeUntilExpiry < 5 * 60) {
           // Less than 5 minutes
-          logger.info(`[AUTH] Token is about to expire in ${timeUntilExpiry}s, considering refresh [sessionId=${sessionId ?? 'missing'}]`, {
+          logger.info(`[AUTH] Token is about to expire in ${timeUntilExpiry}s, considering refresh [sessionId=${workspaceSession ?? 'missing'}]`, {
             tokenSource,
             tokenPreview,
             tokenSub: payload?.sub,
@@ -339,7 +355,7 @@ export class AuthMiddleware {
         }
       } catch (verifyError) {
         logger.info(
-          `[AUTH] JWT token verification failed [sessionId=${sessionId ?? 'missing'}]:`,
+          `[AUTH] JWT token verification failed [sessionId=${workspaceSession ?? 'missing'}]`,
           {
             tokenSource,
             tokenPreview,
@@ -350,19 +366,19 @@ export class AuthMiddleware {
       }
 
       // If token is expired or about to expire, try to refresh using session
-      if (isTokenExpired && sessionId) {
-        logger.info(`[AUTH] Attempting to refresh token using session ID [sessionId=${sessionId}]`, {
+      if (isTokenExpired && workspaceSession) {
+        logger.info(`[AUTH] Attempting to refresh token using session ID [sessionId=${workspaceSession}]`, {
           tokenSource,
           tokenPreview,
           tokenSub: payload?.sub,
         });
 
         try {
-          logger.info(`[AUTH] Calling refreshTokenBySession from authenticate: expired token refresh path [sessionId=${sessionId}]`, {
+          logger.info(`[AUTH] Calling refreshTokenBySession from authenticate: expired token refresh path [sessionId=${workspaceSession}]`, {
             method: req.method,
             path: req.path,
           });
-          const refreshResult = await this.refreshTokenBySession(sessionId);
+          const refreshResult = await this.refreshTokenBySession(workspaceSession);
 
           if (refreshResult.success && refreshResult.customToken) {
             // Verify the new custom JWT token
@@ -384,7 +400,7 @@ export class AuthMiddleware {
             }
             req.cookies.google_access_token = refreshResult.customToken;
 
-            logger.info(`[AUTH] Token successfully refreshed via session and cookie updated [sessionId=${sessionId}]`, {
+            logger.info(`[AUTH] Token successfully refreshed via session and cookie updated [sessionId=${workspaceSession}]`, {
               tokenSource: 'session_refresh',
               tokenPresent: true,
               tokenPreview: refreshResult.customToken
@@ -396,7 +412,7 @@ export class AuthMiddleware {
             throw new Error('Token refresh failed');
           }
         } catch (refreshError) {
-          logger.error(`[AUTH] Failed to refresh token [sessionId=${sessionId}]:`, {
+          logger.error(`[AUTH] Failed to refresh token [sessionId=${workspaceSession}]:`, {
             tokenSource,
             tokenPreview,
             error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
@@ -418,7 +434,7 @@ export class AuthMiddleware {
       }
 
       if (!payload) {
-        logger.warn(`[AUTH] JWT payload missing after verification [sessionId=${sessionId ?? 'missing'}]`, {
+        logger.warn(`[AUTH] JWT payload missing after verification [sessionId=${workspaceSession ?? 'missing'}]`, {
           tokenSource,
           tokenPreview,
         });
@@ -431,7 +447,7 @@ export class AuthMiddleware {
 
       // Extract user information from custom JWT token
       // Since we're using our own JWT, we can directly get user from database using the sub (user ID)
-      logger.info(`[AUTH] Looking up user from verified token payload [sessionId=${sessionId ?? 'missing'}]`, {
+      logger.info(`[AUTH] Looking up user from verified token payload [sessionId=${workspaceSession ?? 'missing'}]`, {
         tokenSource,
         tokenPreview,
         tokenSub: payload.sub,
@@ -440,7 +456,7 @@ export class AuthMiddleware {
       const user = await this.userService!.getUserById(payload.sub);
 
       if (!user) {
-        logger.warn(`[AUTH] User not found for verified token payload [sessionId=${sessionId ?? 'missing'}]`, {
+        logger.warn(`[AUTH] User not found for verified token payload [sessionId=${workspaceSession ?? 'missing'}]`, {
           tokenSource,
           tokenPreview,
           tokenSub: payload.sub,
@@ -452,18 +468,36 @@ export class AuthMiddleware {
         return;
       }
 
+      // Validate required claims in JWT token
+      if (!payload.memberId || !payload.workspaceId) {
+        logger.error(`[AUTH] JWT token missing required claims: memberId=${!!payload.memberId}, workspaceId=${!!payload.workspaceId} [sessionId=${workspaceSession ?? 'missing'}]`, {
+          tokenSource,
+          tokenPreview,
+          tokenSub: payload.sub,
+          decodedClaims: Object.keys(payload),
+        });
+        res.status(401).json({
+          error: 'Invalid token',
+          message: 'Token missing required claims. Please login again.',
+        });
+        return;
+      }
+
       // Attach user to request object
       req.user = {
         id: user.id,
         googleId: user.providerUserId,
         email: user.email,
         name: user.name,
+        workspaceId: user.workspaceId,
         isApiKeyUser: false,
-        scopes: [], // JWT users get scopes from database/session
-        role: 'user', // Default role, can be enhanced with role management
+        scopes: [],
+        role: user.role,
+        orgRole: user.orgMember!.role,
+        memberId: payload.memberId,
       };
 
-      logger.info(`[AUTH] Authenticated user: ${user.email} (${user.id}) [sessionId=${sessionId ?? 'missing'}]`, {
+      logger.info(`[AUTH] Authenticated user: ${user.email} (${user.id}) [sessionId=${workspaceSession ?? 'missing'}]`, {
         tokenSource,
         tokenPreview,
         tokenSub: payload.sub,
@@ -535,11 +569,14 @@ export class AuthMiddleware {
         userId: session.user.id,
         email: session.user.email,
       });
+      
       const customToken = jwtService.generateToken({
         sub: session.user.id,
         email: session.user.email,
         name: session.user.name,
         picture: session.user.picture,
+        workspaceId: session.user.workspaceId,
+        memberId: session.user.orgMemberId,
       });
 
       // Update session activity
@@ -669,8 +706,11 @@ export class AuthMiddleware {
     logger.info(`[AUTH] Zero auth middleware called for ${req.method} ${req.path}`);
 
     try {
-      // Get JWT token from HTTP-only cookie
-      let token = req.cookies?.google_access_token;
+      // Get workspace ID from header or cookie
+      const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
+      
+      // Get JWT token from workspace-specific cookie
+      let token = workspaceId ? req.cookies?.[`xyne_ws_${workspaceId}_token`] : undefined;
 
       // Try API Key authentication first
       const authHeader = req.headers.authorization;
@@ -684,7 +724,10 @@ export class AuthMiddleware {
 
       // If no token, return 401 immediately (NO auto-refresh for Zero endpoints)
       if (!token) {
-        logger.warn('[AUTH] Zero auth failed: No token provided');
+        logger.warn('[AUTH] Zero auth failed: No token provided', {
+          workspaceId,
+          workspaceTokenPresent: !!req.cookies?.[`xyne_ws_${workspaceId}_token`],
+        });
         res.status(401).json({
           error: 'Authentication required',
           message: 'No token provided',
@@ -737,9 +780,12 @@ export class AuthMiddleware {
         googleId: user.providerUserId,
         email: user.email,
         name: user.name,
+        workspaceId: user.workspaceId,
         isApiKeyUser: false,
         scopes: [],
-        role: 'user',
+        role: user.role,
+        orgRole: user.orgMember!.role,
+        memberId: payload.memberId,
       };
 
       const existingContext = loggerContext.getStore();

@@ -285,90 +285,63 @@ export class AuthV2Controller {
         picture: payload.picture,
       };
 
-      logger.info(`[${requestId}] Finding/creating user: ${googleUserData.email}`);
-      const { user, isNewUser } = await this.userService.findOrCreateUser(googleUserData);
+      logger.info(`[${requestId}] [DEBUG] Google auth success for: ${googleUserData.email}`);
 
-      // Ensure user presence entry exists (create if not exists, update timestamps if exists)
-      await this.userService.ensureUserPresence(user.id);
-      logger.info(`[${requestId}] User presence ensured for user ${user.id}`);
+      let workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
+      logger.info(`[${requestId}] [DEBUG] User has ${workspaces.length} workspace(s) before invitation check`);
 
-      const customToken = jwtService.generateToken({
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        picture: payload.picture,
-      });
+      const pendingInvitationId = req.cookies?.pending_invitation_id as string | undefined;
 
-      let sessionId = null;
+      const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
-      if (refresh_token) {
-        try {
-          logger.info(`[${requestId}] Creating user session`);
-
-          const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-          const accessTokenExpiry = payload.exp ? new Date(payload.exp * 1000) : undefined;
-
-          const deviceInfo = JSON.stringify({
-            userAgent: req.headers['user-agent'],
-            acceptLanguage: req.headers['accept-language'],
-            timestamp: new Date().toISOString(),
-            platform: stateData.platform,
-          });
-
-          const session = await this.userSessionService.createSession({
-            userId: user.id,
-            refreshToken: refresh_token,
-            refreshTokenExpiry,
-            accessToken: access_token ?? undefined,
-            accessTokenExpiry,
-            deviceInfo,
-            ipAddress: req.ip || req.connection.remoteAddress || undefined,
-          });
-
-          sessionId = session.id;
-          logger.info(`[${requestId}] Session created: ${sessionId}`);
-        } catch (sessionError) {
-          logger.error(`[${requestId}] Session creation failed:`, sessionError);
-        }
-      }
-
+      // Store pending auth data in cookie for later loginWorkspace/createOrg call
       const isProduction = process.env.NODE_ENV === 'production';
-      const cookieOptions = {
+      res.cookie('google_access_token', JSON.stringify({
+        user: googleUserData,
+        provider: 'google',
+        refreshToken: refresh_token,
+        accessToken: access_token,
+      }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
         path: '/',
-      };
-
-      res.cookie('google_access_token', customToken, {
-        ...cookieOptions,
-        maxAge: config.jwt.expirationSeconds * 1000,
+        maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
       });
 
-      if (sessionId) {
-        res.cookie('user_session_id', sessionId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-      }
-
-      // Set onboarding cookie for new users
-      if (isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false, // Allow frontend to read this cookie
-          secure: isProduction,
-          sameSite: 'strict',
-          path: '/',
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-        logger.info(`[${requestId}] Set is_new_user cookie for new user: ${user.email}`);
-      }
-
       const frontendUrl = stateData.redirectTo ?? this.getFrontendUrl(req);
-      logger.info(`[${requestId}] Redirecting to frontend with success`);
-      res.redirect(`${frontendUrl}?success=true`);
+
+      // If an invitation is pending, redirect back to the invite page for explicit acceptance.
+      // The google_access_token cookie (set above) carries identity for acceptInvitation + loginWorkspace.
+      // Clear pending_invitation_id now — it is one-time-use; clearing it here prevents a
+      // subsequent re-login (e.g. after workspace switch) from re-triggering this flow with
+      // an already-accepted invitation.
+      if (pendingInvitationId) {
+        logger.info(`[${requestId}] Pending invitation ${pendingInvitationId} found — redirecting to invite page for ${googleUserData.email}`);
+        res.clearCookie('pending_invitation_id', { path: '/' });
+        const inviteParams = new URLSearchParams({
+          loginComplete: 'true',
+          invitationId: pendingInvitationId,
+          loggedInEmail: googleUserData.email,
+        });
+        res.redirect(`${frontendUrl}/invite?${inviteParams.toString()}`);
+        return;
+      }
+
+      logger.info(`[${requestId}] Redirecting to frontend with workspaces`);
+
+      // Redirect with workspaces (frontend will select workspace)
+      const params = new URLSearchParams({
+        success: 'true',
+        email: googleUserData.email,
+        name: googleUserData.name,
+        picture: googleUserData.picture || '',
+        workspaces: JSON.stringify(workspaces),
+        userExistsButRemoved: String(userExistsButRemoved),
+      });
+
+      res.redirect(`${frontendUrl}?${params.toString()}`);
+      return;
     } catch (error) {
       logger.error(`[${requestId}] Callback error:`, error);
 
@@ -386,7 +359,8 @@ export class AuthV2Controller {
     try {
       logger.info(`[${requestId}] Refresh session endpoint called`);
 
-      const sessionId = req.cookies?.user_session_id;
+      // Get session from global session cookie
+      const sessionId = req.cookies?.xyne_session;
 
       if (!sessionId) {
         logger.warn(`[${requestId}] No session ID cookie found`);
@@ -427,6 +401,8 @@ export class AuthV2Controller {
         email: session.user.email,
         name: session.user.name,
         picture: session.user.picture,
+        workspaceId: session.user.workspaceId ?? undefined,
+        memberId: session.user.orgMemberId,
       });
 
       await this.userSessionService.updateSession(session.id, {
@@ -436,14 +412,18 @@ export class AuthV2Controller {
       const isProduction = process.env.NODE_ENV === 'production';
 
       const cookieMaxAge = config.jwt.expirationSeconds * 1000;
+      const targetWorkspaceId = session.user.workspaceId;
 
-      res.cookie('google_access_token', customToken, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict',
-        path: '/',
-        maxAge: cookieMaxAge,
-      });
+      // Set workspace-specific token cookie
+      if (targetWorkspaceId) {
+        res.cookie(`xyne_ws_${targetWorkspaceId}_token`, customToken, {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict',
+          path: '/',
+          maxAge: cookieMaxAge,
+        });
+      }
 
       logger.info(`[${requestId}] New JWT cookie set for user: ${session.user.email}`);
 
@@ -564,91 +544,33 @@ export class AuthV2Controller {
         picture: payload.picture,
       };
 
-      logger.info(`[${requestId}] Finding/creating user: ${googleUserData.email}`);
-      const { user, isNewUser } = await this.userService.findOrCreateUser(googleUserData);
+      logger.info(`[${requestId}] Getting workspaces for: ${googleUserData.email}`);
+      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
+      const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
-      // Ensure user presence entry exists (create if not exists, update timestamps if exists)
-      await this.userService.ensureUserPresence(user.id);
-      logger.info(`[${requestId}] User presence ensured for user ${user.id}`);
-
-      const customToken = jwtService.generateToken({
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        picture: payload.picture,
-      });
-
-      let sessionId = null;
-
-      if (refresh_token) {
-        try {
-          logger.info(`[${requestId}] Creating user session`);
-
-          const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-          const accessTokenExpiry = payload.exp ? new Date(payload.exp * 1000) : undefined;
-
-          const deviceInfo = JSON.stringify({
-            userAgent: req.headers['user-agent'],
-            acceptLanguage: req.headers['accept-language'],
-            timestamp: new Date().toISOString(),
-            platform: 'electron',
-          });
-
-          const session = await this.userSessionService.createSession({
-            userId: user.id,
-            refreshToken: refresh_token,
-            refreshTokenExpiry,
-            accessToken: access_token ?? undefined,
-            accessTokenExpiry,
-            deviceInfo,
-            ipAddress: req.ip || undefined,
-          });
-
-          sessionId = session.id;
-          logger.info(`[${requestId}] Session created: ${sessionId}`);
-        } catch (sessionError) {
-          logger.error(`[${requestId}] Session creation failed:`, sessionError);
-        }
-      }
-
+      // Store pending auth data for later loginWorkspace/createOrg call
       const isProduction = process.env.NODE_ENV === 'production';
-      const cookieOptions = {
+      res.cookie('google_access_token', JSON.stringify({
+        user: googleUserData,
+        provider: 'google',
+        refreshToken: refresh_token,
+        accessToken: access_token,
+      }), {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict' as const,
         path: '/',
-      };
-
-      res.cookie('google_access_token', customToken, {
-        ...cookieOptions,
-        maxAge: config.jwt.expirationSeconds * 1000,
+        maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
       });
-
-      if (sessionId) {
-        res.cookie('user_session_id', sessionId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-      }
-
-      // Set onboarding cookie for new users
-      if (isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
-          secure: isProduction,
-          sameSite: 'strict',
-          path: '/',
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-        logger.info(`[${requestId}] Set is_new_user cookie for new user: ${user.email}`);
-      }
 
       logger.info(`[${requestId}] Electron code exchange successful`);
       res.status(200).json({
         success: true,
-        message: 'Authentication successful',
+        email: googleUserData.email,
+        name: googleUserData.name,
+        picture: googleUserData.picture,
+        workspaces,
+        userExistsButRemoved,
       });
     } catch (error) {
       logger.error(`[${requestId}] Electron code exchange error:`, error);
@@ -751,56 +673,9 @@ export class AuthV2Controller {
         picture: payload.picture,
       };
 
-      logger.info(`[${requestId}] Finding/creating user: ${googleUserData.email}`);
-      const { user, isNewUser } = await this.userService.findOrCreateUser(googleUserData);
+      logger.info(`[${requestId}] Google auth success for: ${googleUserData.email}`);
 
-      // Ensure user presence entry exists (create if not exists, update timestamps if exists)
-      await this.userService.ensureUserPresence(user.id);
-      logger.info(`[${requestId}] User presence ensured for user ${user.id}`);
-
-      const customToken = jwtService.generateToken({
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        picture: payload.picture,
-      });
-
-      let sessionId = null;
-
-      if (refresh_token) {
-        try {
-          logger.info(`[${requestId}] Creating user session`);
-
-          const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-          const accessTokenExpiry = payload.exp ? new Date(payload.exp * 1000) : undefined;
-
-          const deviceInfo = JSON.stringify({
-            userAgent: req.headers['user-agent'],
-            acceptLanguage: req.headers['accept-language'],
-            timestamp: new Date().toISOString(),
-            platform: isMobileNative ? 'mobile-native' : 'mobile',
-          });
-
-          const session = await this.userSessionService.createSession({
-            userId: user.id,
-            refreshToken: refresh_token,
-            refreshTokenExpiry,
-            accessToken: access_token ?? undefined,
-            accessTokenExpiry,
-            deviceInfo,
-            ipAddress: req.ip || req.connection.remoteAddress || undefined,
-          });
-
-          sessionId = session.id;
-          logger.info(`[${requestId}] Session created: ${sessionId}`);
-        } catch (sessionError) {
-          logger.error(`[${requestId}] Session creation failed:`, sessionError);
-        }
-      } else {
-        logger.warn(`[${requestId}] No refresh token received from Google`);
-      }
+      const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
 
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieOptions = {
@@ -808,50 +683,43 @@ export class AuthV2Controller {
         secure: isProduction || isMobileNative, // Must be secure for sameSite: 'none'
         sameSite: (isMobileNative ? 'none' : 'strict') as 'none' | 'strict',
         path: '/',
+        maxAge: 10 * 60 * 1000, // 10 minutes
       };
 
-      res.cookie('google_access_token', customToken, {
-        ...cookieOptions,
-        maxAge: config.jwt.expirationSeconds * 1000,
-      });
-
-      if (sessionId) {
-        res.cookie('user_session_id', sessionId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-      }
-
-      // Set onboarding cookie for new users
-      if (isNewUser) {
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
-          secure: isProduction || isMobileNative,
-          sameSite: isMobileNative ? 'none' : 'strict',
-          path: '/',
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-        logger.info(`[${requestId}] Set is_new_user cookie for new user: ${user.email}`);
-      }
+      // Store all Google auth data in one cookie (until workspace selection)
+      const customToken = {
+        user: googleUserData,
+        refreshToken: refresh_token || null,
+        accessToken: access_token || null,
+      };
+      res.cookie('google_auth_pending', JSON.stringify(customToken), cookieOptions);
+      logger.info(`[${requestId}] Stored pending auth data for workspace selection`);
 
       if (isMobileNative) {
-        logger.info(`[${requestId}] Mobile auth successful for: ${user.email}`);
+        logger.info(`[${requestId}] Mobile auth successful for: ${googleUserData.email}`);
         res.status(200).json({
           success: true,
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            picture: user.picture,
-          },
-          token: customToken,
-          isNewUser,
+          email: googleUserData.email,
+          name: googleUserData.name,
+          picture: googleUserData.picture,
+          workspaces,
         });
         return;
       }
 
-      logger.info(`[${requestId}] Redirecting to frontend with success`);
-      res.redirect(`${frontendUrl}?success=true`);
+      logger.info(`[${requestId}] Redirecting to frontend with workspaces`);
+
+      // Redirect with workspaces (frontend will select workspace)
+      const params = new URLSearchParams({
+        success: 'true',
+        email: googleUserData.email,
+        name: googleUserData.name,
+        picture: googleUserData.picture || '',
+        workspaces: JSON.stringify(workspaces),
+      });
+
+      res.redirect(`${frontendUrl}?${params.toString()}`);
+      return;
     } catch (error) {
       logger.error(`[${requestId}] Callback error:`, error);
 
@@ -876,14 +744,26 @@ export class AuthV2Controller {
     try {
       logger.info(`[${requestId}] Processing logout`);
 
-      const sessionId = req.cookies?.user_session_id;
+      // Find and revoke global session
+      const sessionId = req.cookies?.xyne_session;
+      
       if (sessionId) {
         logger.info(`[${requestId}] Revoking session: ${sessionId} for user ${req.user?.email}`);
         await this.userSessionService.revokeSession(sessionId);
       }
 
-      res.clearCookie('google_access_token', { path: '/' });
-      res.clearCookie('user_session_id', { path: '/' });
+      // Clear global session cookie
+      res.clearCookie('xyne_session', { path: '/' });
+      
+      // Clear all workspace-specific token cookies (session is now global)
+      for (const cookieName of Object.keys(req.cookies || {})) {
+        if (cookieName.startsWith('xyne_ws_') && cookieName.endsWith('_token')) {
+          res.clearCookie(cookieName, { path: '/' });
+        }
+      }
+      
+      // Clear last workspace cookie
+      res.clearCookie('xyne_last_workspace', { path: '/' });
 
       if (req.headers.accept?.includes('application/json')) {
         res.status(200).json({
@@ -908,6 +788,550 @@ export class AuthV2Controller {
         const frontendUrl = this.getFrontendUrl(req);
         res.redirect(`${frontendUrl}?error=logout_failed`);
       }
+    }
+  };
+
+  /**
+   * Login to a specific workspace
+   * POST /api/auth/login-workspace
+   */
+  loginWorkspace = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceId } = req.body;
+
+      logger.info(`[DEBUG] [loginWorkspace] Called with workspaceId=${workspaceId ?? 'MISSING'} pending_invitation_id=${req.cookies?.pending_invitation_id ?? 'NONE'} has_google_access_token=${!!req.cookies?.google_access_token}`);
+
+      if (!workspaceId) {
+        res.status(400).json({
+          error: 'Missing required fields',
+          message: 'workspaceId is required'
+        });
+        return;
+      }
+
+      // Get pending auth data from cookie
+      const pendingAuthCookie = req.cookies?.google_access_token;
+      if (!pendingAuthCookie) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Pending auth data not found or expired'
+        });
+        return;
+      }
+
+      let customToken;
+      try {
+        customToken = JSON.parse(pendingAuthCookie);
+      } catch {
+        res.status(401).json({
+          error: 'Invalid auth data',
+          message: 'Pending auth data is corrupted'
+        });
+        return;
+      }
+
+      const { user: oauthUserData, provider, refreshToken: pendingRefreshToken, accessToken: pendingAccessToken } = customToken;
+
+      if (!oauthUserData?.email) {
+        res.status(401).json({
+          error: 'Invalid auth data',
+          message: 'User data missing from pending auth'
+        });
+        return;
+      }
+
+      logger.info(`[LOGIN-WORKSPACE] User ${oauthUserData.email} logging into workspace ${workspaceId} via ${provider}`);
+
+      // Create workspace-scoped user (or get existing)
+      const { user: workspaceUser, isNewUser } = await this.userService.createOrGetWorkspaceUser({
+        providerUserId: oauthUserData.providerUserId || oauthUserData.googleId,
+        email: oauthUserData.email,
+        name: oauthUserData.name,
+        picture: oauthUserData.picture,
+        workspaceId,
+        authProvider: provider,
+      });
+
+      // Ensure user presence for workspace-scoped user
+      await this.userService.ensureUserPresence(workspaceUser.id);
+      let sessionId = null;
+
+      if (pendingRefreshToken) {
+        try {
+          const refreshTokenExpiry = new Date();
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+
+
+          const deviceInfo = JSON.stringify({
+            userAgent: req.headers['user-agent'],
+            acceptLanguage: req.headers['accept-language'],
+            timestamp: new Date().toISOString(),
+          });
+
+          const session = await this.userSessionService.createSession({
+            userId: workspaceUser.id,
+            refreshToken: pendingRefreshToken,
+            refreshTokenExpiry,
+            accessToken: pendingAccessToken,
+            deviceInfo,
+            ipAddress: req.ip || req.connection.remoteAddress || undefined,
+          });
+
+          sessionId = session.id;
+          logger.info(`[LOGIN-WORKSPACE] Session created: ${sessionId}`);
+        } catch (sessionError) {
+          logger.error(`[LOGIN-WORKSPACE] Session creation failed:`, sessionError);
+        }
+      }
+
+      const token = jwtService.generateToken({
+        sub: workspaceUser.id,
+        email: workspaceUser.email,
+        name: workspaceUser.name,
+        picture: workspaceUser.picture || undefined,
+        workspaceId: workspaceUser.workspaceId ?? undefined,
+        memberId: workspaceUser.orgMemberId,
+      });
+
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieOptions = {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'strict' as const,
+        path: '/',
+      };
+
+      // Set workspace-specific cookies only
+      res.cookie(`xyne_ws_${workspaceId}_token`, token, {
+        ...cookieOptions,
+        maxAge: config.jwt.expirationSeconds * 1000,
+      });
+
+      // Set last workspace pointer
+      res.cookie('xyne_last_workspace', workspaceId, {
+        ...cookieOptions,
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      });
+
+      if (sessionId) {
+        res.cookie('xyne_session', sessionId, {
+          ...cookieOptions,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+        });
+      }
+
+      // Set is_new_user cookie for new users (readable by frontend)
+      if (isNewUser) {
+        res.cookie('is_new_user', 'true', {
+          httpOnly: false,
+          secure: isProduction,
+          sameSite: 'strict' as const,
+          path: '/',
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+        logger.info(`[LOGIN-WORKSPACE] Set is_new_user cookie for new user: ${workspaceUser.email}`);
+      }
+
+      const orgRole = workspaceUser.orgMemberId
+        ? (await this.userService.getOrgRole(workspaceUser.orgMemberId)) ?? ''
+        : '';
+
+      // Clear pending auth cookie and return success
+      res.clearCookie('google_access_token', { path: '/' });
+      res.status(200).json({
+        success: true,
+        workspaceId,
+        user: {
+          id: workspaceUser.id,
+          googleId: workspaceUser.providerUserId,
+          email: workspaceUser.email,
+          name: workspaceUser.name,
+          picture: workspaceUser.picture,
+          workspaceId: workspaceUser.workspaceId,
+          role: workspaceUser.role,
+          orgRole: orgRole,
+          memberId: workspaceUser.orgMemberId,
+        },
+        isNewUser,
+      });
+    } catch (error) {
+      logger.error('Error logging into workspace:', error);
+      res.status(500).json({
+        error: 'Failed to login to workspace',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
+  /**
+   * Create a new organization and workspace
+   * POST /api/auth/create-org
+   */
+  createOrg = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { orgName, workspaceName } = req.body as { orgName: string; workspaceName: string };
+
+      // Get pending auth data from cookie
+      const pendingAuthCookie = req.cookies?.google_access_token;
+      if (!pendingAuthCookie) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Pending auth data not found or expired'
+        });
+        return;
+      }
+
+      let customToken;
+      try {
+        customToken = JSON.parse(pendingAuthCookie);
+      } catch {
+        res.status(401).json({
+          error: 'Invalid auth data',
+          message: 'Pending auth data is corrupted'
+        });
+        return;
+      }
+
+      const { user: oauthUserData, provider, refreshToken: pendingRefreshToken } = customToken;
+
+      if (!oauthUserData?.email) {
+        res.status(401).json({
+          error: 'Invalid auth data',
+          message: 'User data missing from pending auth'
+        });
+        return;
+      }
+
+      logger.info(`[CREATE-ORG] User ${oauthUserData.email} creating org "${orgName}" with workspace "${workspaceName}" via ${provider}`);
+
+      const userData = {
+        providerUserId: oauthUserData.providerUserId || oauthUserData.googleId,
+        email: oauthUserData.email,
+        name: oauthUserData.name,
+        picture: oauthUserData.picture,
+      };
+
+      const { organization, workspace, workspaceUser } = await this.userService.createOrganizationWithUser(
+        userData,
+        orgName,
+        workspaceName,
+        provider
+      );
+
+      // Ensure user presence for workspace-scoped user
+      await this.userService.ensureUserPresence(workspaceUser.id);
+      let sessionId = null;
+
+      if (pendingRefreshToken) {
+        try {
+          const refreshTokenExpiry = new Date();
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+
+          const deviceInfo = JSON.stringify({
+            userAgent: req.headers['user-agent'],
+            acceptLanguage: req.headers['accept-language'],
+            timestamp: new Date().toISOString(),
+          });
+
+          const session = await this.userSessionService.createSession({
+            userId: workspaceUser.id,
+            refreshToken: pendingRefreshToken,
+            refreshTokenExpiry,
+            deviceInfo,
+            ipAddress: req.ip || req.connection.remoteAddress || undefined,
+          });
+
+          sessionId = session.id;
+          logger.info(`[CREATE-ORG] Session created: ${sessionId}`);
+        } catch (sessionError) {
+          logger.error(`[CREATE-ORG] Session creation failed:`, sessionError);
+        }
+      }
+
+      const token = jwtService.generateToken({
+        sub: workspaceUser.id,
+        email: workspaceUser.email,
+        name: workspaceUser.name,
+        picture: workspaceUser.picture || undefined,
+        workspaceId: workspaceUser.workspaceId ?? undefined,
+        memberId: workspaceUser.orgMemberId,
+      });
+
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieOptions = {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'strict' as const,
+        path: '/',
+      };
+
+      // Set workspace-specific cookies
+      const targetWorkspaceId = workspaceUser.workspaceId;
+      
+      res.cookie(`xyne_ws_${targetWorkspaceId}_token`, token, {
+        ...cookieOptions,
+        maxAge: config.jwt.expirationSeconds * 1000,
+      });
+
+      if (sessionId) {
+        res.cookie('xyne_session', sessionId, {
+          ...cookieOptions,
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        });
+      }
+      
+      // Set last workspace pointer
+      res.cookie('xyne_last_workspace', targetWorkspaceId, {
+        ...cookieOptions,
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      });
+
+      // Set is_new_user cookie for new users (readable by frontend)
+      res.cookie('is_new_user', 'true', {
+        httpOnly: false,
+        secure: isProduction,
+        sameSite: 'strict' as const,
+        path: '/',
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      });
+
+      // Clear pending auth cookie
+      res.clearCookie('google_access_token', { path: '/' });
+
+      logger.info(`[CREATE-ORG] Created org ${organization.orgId} with workspace ${workspace.id}`);
+
+      res.status(201).json({
+        organization: {
+          id: organization.orgId,
+          name: organization.name
+        },
+        workspace: {
+          id: workspace.id,
+          name: workspace.name
+        },
+        user: {
+          id: workspaceUser.id,
+          email: workspaceUser.email,
+          name: workspaceUser.name,
+          picture: workspaceUser.picture,
+          role: workspaceUser.role,
+          workspaceId: workspaceUser.workspaceId
+        },
+        isNewUser: true
+      });
+
+    } catch (error) {
+      logger.error('Error creating organization:', error);
+      res.status(500).json({
+        error: 'Failed to create organization',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  };
+
+  /**
+   * Get all workspaces the authenticated user belongs to (by email)
+   * GET /api/auth/workspaces
+   */
+  getWorkspaces = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const email = req.user!.email;
+      const workspaces = await this.userService.getWorkspacesByEmail(email);
+      res.status(200).json({ workspaces });
+    } catch (error) {
+      logger.error('Error getting workspaces:', error);
+      res.status(500).json({
+        error: 'Failed to get workspaces',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
+  /**
+   * Switch to a different workspace (user already authenticated).
+   * Finds the User record for this email in the target workspace,
+   * issues a new JWT + creates a new UserSession — no OAuth triggered.
+   * POST /api/auth/switch-workspace
+   */
+  switchWorkspace = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceId } = req.body as { workspaceId?: string };
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Missing required fields', message: 'workspaceId is required' });
+        return;
+      }
+
+      const currentUser = req.user!;
+
+      // Find the User record scoped to the target workspace
+      const targetUser = await this.userService.findUserByEmail(currentUser.email, workspaceId);
+      if (!targetUser) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'You do not have access to this workspace',
+        });
+        return;
+      }
+
+      await this.userService.ensureUserPresence(targetUser.id);
+
+      // Get existing session from global session cookie
+      // We reuse the same session across workspaces (session belongs to user, not workspace)
+      const sessionId = req.cookies?.xyne_session;
+      
+      // Verify session exists and is valid
+      let validSessionId: string | null = null;
+      if (sessionId) {
+        const currentSession = await this.userSessionService.getSessionById(sessionId);
+        if (currentSession && currentSession.status === 'ACTIVE') {
+          validSessionId = currentSession.id;
+          logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
+        }
+      }
+      
+      if (!validSessionId) {
+        logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
+      }
+
+      const token = jwtService.generateToken({
+        sub: targetUser.id,
+        email: targetUser.email,
+        name: targetUser.name,
+        picture: targetUser.picture || undefined,
+        workspaceId: targetUser.workspaceId ?? undefined,
+        memberId: targetUser.orgMemberId,
+      });
+
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
+
+      // Set workspace-specific cookies
+      res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
+      res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+      
+      // Set global session cookie (reusing existing session)
+      if (validSessionId) {
+        res.cookie('xyne_session', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+      }
+
+      logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
+
+      res.status(200).json({
+        user: {
+          id: targetUser.id,
+          email: targetUser.email,
+          name: targetUser.name,
+          picture: targetUser.picture,
+          workspaceId: targetUser.workspaceId,
+          role: targetUser.role,
+          memberId: targetUser.orgMemberId,
+        },
+      });
+    } catch (error) {
+      logger.error('Error switching workspace:', error);
+      res.status(500).json({
+        error: 'Failed to switch workspace',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  };
+
+  /**
+   * Create a new org + workspace while already authenticated (no google_auth_pending cookie needed).
+   * POST /api/auth/create-workspace
+   */
+  createWorkspaceAuth = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { workspaceName } = req.body as { workspaceName?: string };
+      if (!workspaceName) {
+        res.status(400).json({ error: 'Missing required fields', message: 'workspaceName is required' });
+        return;
+      }
+
+      const currentUser = req.user!;
+      const fullUser = await this.userService.getUserById(currentUser.id);
+      if (!fullUser) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
+        { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture },
+        workspaceName,
+      );
+
+      await this.userService.ensureUserPresence(workspaceUser.id);
+
+      // Reuse refresh token from current session
+      // Get global session cookie
+      const sessionId = req.cookies?.xyne_session;
+      
+      const currentSession = sessionId ? await this.userSessionService.getSessionById(sessionId) : null;
+
+      let newSessionId: string | null = null;
+      if (currentSession?.refreshToken) {
+        try {
+          const refreshTokenExpiry = new Date();
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          const newSession = await this.userSessionService.createSession({
+            userId: workspaceUser.id,
+            refreshToken: currentSession.refreshToken,
+            refreshTokenExpiry,
+            accessToken: currentSession.accessToken ?? undefined,
+            deviceInfo: JSON.stringify({ userAgent: req.headers['user-agent'], timestamp: new Date().toISOString() }),
+            ipAddress: req.ip || req.connection.remoteAddress || undefined,
+          });
+          newSessionId = newSession.id;
+        } catch (sessionError) {
+          logger.error('[CREATE-WORKSPACE-AUTH] Session creation failed:', sessionError);
+        }
+      }
+
+      const token = jwtService.generateToken({
+        sub: workspaceUser.id,
+        email: workspaceUser.email,
+        name: workspaceUser.name,
+        picture: workspaceUser.picture || undefined,
+        workspaceId: workspaceUser.workspaceId ?? undefined,
+        memberId: workspaceUser.orgMemberId,
+      });
+
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
+
+      // Set workspace-specific cookies
+      const targetWorkspaceId = workspaceUser.workspaceId;
+      
+      res.cookie(`xyne_ws_${targetWorkspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
+      if (newSessionId) {
+        res.cookie('xyne_session', newSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+      }
+      res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+      res.cookie('is_new_user', 'true', {
+        httpOnly: false, secure: isProduction, sameSite: 'strict' as const, path: '/', maxAge: 24 * 60 * 60 * 1000,
+      });
+
+      logger.info(`[CREATE-WORKSPACE-AUTH] Created org ${organization.orgId} / workspace ${workspace.id} for ${currentUser.email}`);
+
+      res.status(201).json({
+        organization: { id: organization.orgId, name: organization.name },
+        workspace: { id: workspace.id, name: workspace.name },
+        user: {
+          id: workspaceUser.id,
+          email: workspaceUser.email,
+          name: workspaceUser.name,
+          picture: workspaceUser.picture,
+          workspaceId: workspaceUser.workspaceId,
+        },
+        isNewUser: true,
+      });
+    } catch (error) {
+      logger.error('Error creating workspace:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      res.status(message.includes('already exists') ? 409 : 500).json({
+        error: 'Failed to create workspace',
+        message,
+      });
     }
   };
 }

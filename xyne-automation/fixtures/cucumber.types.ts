@@ -40,6 +40,7 @@ export interface TestUserData {
   email: string;
   name: string;
   isNewUser: boolean;
+  workspaceId?: string;
 }
 
 /**
@@ -50,6 +51,7 @@ export interface StoredUserContext {
   email: string;
   name: string;
   isNewUser: boolean;
+  workspaceId?: string;
   sessionId: string;
   browserSession: string;
   context: BrowserContext;

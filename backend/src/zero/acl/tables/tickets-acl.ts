@@ -9,17 +9,23 @@ import { zql } from '../../queries';
 
 export class TicketACl extends BaseACL<'tickets'> {
 
+    private async verifyTicketInWorkspace(ticketId: string, tx: Transaction<Schema>): Promise<void> {
+        const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
+        if (!ticket) throw new MutationACLError('Ticket not found', 'tickets');
+        if (ticket.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Ticket not found in this workspace', 'tickets');
+        }
+    }
+
     async canInsert(args: InsertValue<TableSchema<'tickets'>>, tx: Transaction<Schema>): Promise<void> {
-        const project = await tx.run(zql.projects.where('id', args.projectId).one());
-        if (!project) {
-            throw new MutationACLError('Ticket insert failed: the specified project does not exist', 'tickets');
+        if (args.workspaceId !== this.ctx.workspaceId) {
+            throw new MutationACLError('Ticket not found in this workspace', 'tickets');
         }
 
         const channel = await tx.run(zql.channels.where('id', args.channelId).one());
         if (channel?.isArchived) {
             throw new MutationACLError('Ticket insert failed: cannot create tickets in archived channel', 'tickets');
         }
-
         const isParticipant = await tx
             .run(
             zql.channels
@@ -40,6 +46,7 @@ export class TicketACl extends BaseACL<'tickets'> {
         if (!ticket) {
             throw new MutationACLError('Ticket update failed: ticket does not exist', 'tickets');
         }
+        await this.verifyTicketInWorkspace(ticket.id, tx);
 
         if (ticket.isArchived && args.isArchived === false) {
             throw new MutationACLError('Ticket update failed: cannot unarchive ticket - archival is permanent', 'tickets');

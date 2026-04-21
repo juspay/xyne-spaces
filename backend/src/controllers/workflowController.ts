@@ -103,6 +103,7 @@ export class WorkflowController {
         uploadedByUserId: 'system',
         createdBy: 'system',
         conversationId: null,
+        workspaceId: config.defaultWorkspaceId,
         metadata: {
           workflowExecutionId: newExecutionId,
           checkpointId: stepName,

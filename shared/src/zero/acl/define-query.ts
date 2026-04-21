@@ -58,7 +58,7 @@ function applyQueryACL<TQuery>(
   args?: SelectArgs
 ): TQuery {
   const tableName = getTableNameFromQuery(query);
-  const acl = QueryACLFactory.getACL(tableName, { userID: ctx.userID });
+  const acl = QueryACLFactory.getACL(tableName, ctx);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return acl.canSelect(query as any, args) as TQuery;
 }

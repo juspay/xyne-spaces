@@ -47,7 +47,8 @@ import { PrismaClient,
   FormFieldType,
   FormContextType,
   FormEntityType,
-  DocType
+  DocType,
+  ProjectType
 } from '@prisma/client';
 import { createId } from '@paralleldrive/cuid2';
 
@@ -428,6 +429,7 @@ async function main() {
           name: 'Xyne Spaces',
           code: 'XYNE',
           description: 'Unified collaboration platform',
+          type: ProjectType.DEFAULT
           createdBy: user1.id,
           updatedBy: user2.id
         }
@@ -438,6 +440,7 @@ async function main() {
           name: 'Internal Tools',
           code: 'INT',
           description: 'Internal productivity tools',
+          type: ProjectType.DEFAULT,
           createdBy: user3.id,
           updatedBy: user4.id
         }

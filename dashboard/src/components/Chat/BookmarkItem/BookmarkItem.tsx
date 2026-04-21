@@ -276,6 +276,7 @@ export const BookmarkItem = ({
   return (
     <div
       onClick={handleClick}
+      data-testid={`bookmark-item-${entityId}`}
       data-track-category='CHAT_BOOKMARK'
       data-track-name='Open_Bookmark'
       data-track-metadata={JSON.stringify({ entityId, entityType })}

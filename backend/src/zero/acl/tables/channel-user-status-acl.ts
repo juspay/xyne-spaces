@@ -9,9 +9,19 @@ const DISALLOWED_DM_NOTIFICATION_LEVELS = [NotificationLevel.MENTIONS_ONLY, Noti
 
 export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
 
+  private async verifyChannelInWorkspace(channelId: string, tx: Transaction<Schema>, workspaceId?: string): Promise<void> {
+    const channelWorkspaceId = workspaceId ?? await tx.run(zql.channels.where('id', '=', channelId).one()).then(c => c?.workspaceId);
+    if (!channelWorkspaceId) throw new MutationACLError('Channel user status not found: channel does not exist', 'channel_user_status');
+    if (channelWorkspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Channel user status not found in this workspace', 'channel_user_status');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'channel_user_status'>>, tx: Transaction<Schema>): Promise<void> {
-    // Fetch the channel to check addUserPolicy
+    // Fetch the channel to check workspace and addUserPolicy
     const channel = await tx.run(zql.channels.where('id', '=', args.channelId).one());
+    if (!channel) throw new MutationACLError('Channel user status insert failed: channel does not exist', 'channel_user_status');
+    await this.verifyChannelInWorkspace(args.channelId, tx, channel.workspaceId);
 
     // Verify requesting user is a channel participant and get their record
     const requestingParticipant = await this.verifyChannelParticipant(args.channelId, tx, 'insert');
@@ -31,6 +41,7 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     if (!status) {
       throw new MutationACLError('Channel user status update failed: status record does not exist', 'channel_user_status');
     }
+    await this.verifyChannelInWorkspace(status.channelId, tx);
     
     const argsKeys = Object.keys(args);
     
@@ -87,13 +98,13 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     }
 
     // Prevent updates to immutable fields (id, channelId, userId should not be in args)
-    if ('id' in args && args.id !== status.id) {
+    if (args.id !== undefined && args.id !== status.id) {
       throw new MutationACLError('Channel user status update failed: id cannot be modified', 'channel_user_status');
     }
-    if ('channelId' in args) {
+    if (args.channelId !== undefined) {
       throw new MutationACLError('Channel user status update failed: channelId cannot be modified', 'channel_user_status');
     }
-    if ('userId' in args) {
+    if (args.userId !== undefined) {
       throw new MutationACLError('Channel user status update failed: userId cannot be modified', 'channel_user_status');
     }
 
@@ -108,6 +119,7 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     if (!status) {
       throw new MutationACLError('Channel user status delete failed: status record does not exist', 'channel_user_status');
     }
+    await this.verifyChannelInWorkspace(status.channelId, tx);
     
     // Allow delete if:
     // 1. The requesting user is the owner of the status record, OR

@@ -57,8 +57,14 @@ class ScheduledMessageWorker {
     );
 
     // Get or create the scheduler bot user
+    const channelForBot = await db.channel.findUnique({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
+    const channelWorkspaceId = channelForBot?.workspaceId ?? '';
+
     const botEmail = 'scheduler-bot@bot.xyne.ai';
-    let botUser = await db.user.findUnique({ where: { email: botEmail } });
+    let botUser = await db.user.findFirst({ where: { email: botEmail, workspaceId: channelWorkspaceId } });
 
     if (!botUser) {
       logger.info(`[SCHEDULED-MESSAGE-WORKER] Creating scheduler bot user: ${botEmail}`);
@@ -70,6 +76,8 @@ class ScheduledMessageWorker {
           providerUserId: 'bot_scheduler-bot',
           status: UserStatus.ACTIVE,
           userType: UserType.BOT,
+          orgMemberId: '',
+          workspace: { connect: { id: channelWorkspaceId } },
           metadata: {
             botId: 'scheduler-bot',
             description: 'Posts scheduled messages to channels',
@@ -92,7 +100,7 @@ class ScheduledMessageWorker {
     });
 
     try {
-      const handler = new MessagesSideEffectHandler({ userID: botUser.id });
+      const handler = new MessagesSideEffectHandler({ userID: botUser.id, workspaceId: channelWorkspaceId, role: '', orgRole: '', memberId: '' });
       await handler.onInsert({
         entityId: result.message.messageId,
         entityType: 'messages',

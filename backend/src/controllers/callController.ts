@@ -216,7 +216,8 @@ export class CallController {
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
           [botUser.id],
-          repositories.channelParticipants
+          repositories.channelParticipants,
+          req.user!.workspaceId!
         );
       }
       // If no channelId but invitedUserIds is provided, find or create channel
@@ -224,7 +225,8 @@ export class CallController {
         finalChannelId = await repositories.channels.findOrCreateDMChannel(
           userId,
           invitedUserIds,
-          repositories.channelParticipants
+          repositories.channelParticipants,
+          req.user!.workspaceId!
         );
       }
 

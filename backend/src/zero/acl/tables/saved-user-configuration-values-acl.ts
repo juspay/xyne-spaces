@@ -1,7 +1,7 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
 import { FormFieldType, SavedConfigEntityName, Schema, TicketPriority, schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
-import { MutationACLError, type TableSchema } from '../core/types';
+import { MutationACLError, type TableSchema, type QueryContext } from '../core/types';
 import { zql } from '../../queries';
 
 const ticketCols = schema.tables.tickets.columns;
@@ -187,7 +187,7 @@ async function validateFormEntityValue(
 }
 
 export class SavedUserConfigurationValuesACL extends BaseACL<'saved_user_configuration_values'> {
-  constructor(ctx: { userID: string }) {
+  constructor(ctx: QueryContext) {
     super(ctx, 'saved_user_configuration_values');
   }
 

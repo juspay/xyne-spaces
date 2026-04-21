@@ -40,6 +40,8 @@ export class BoardController {
         return;
       }
 
+      const workspaceId = project.workspaceId;
+
       // Validate stages if provided
       if (stages && Array.isArray(stages)) {
         for (const stage of stages) {
@@ -70,6 +72,7 @@ export class BoardController {
         name: name.trim(),
         description: description?.trim(),
         projectId: projectId.trim(),
+        workspaceId: workspaceId,
         createdBy: userId,
         stages: stages && stages.length > 0 ? stages : undefined,
         boardType: boardType || BoardType.DEFAULT,

@@ -13,12 +13,14 @@ export class ChannelParticipantsACL extends BaseQueryACL<'channel_participants'>
       or(
         cmp('userId', this.ctx.userID),
         exists('channel', (ch) =>
-          ch.where(({ or, cmp, exists }) =>
-            or(
-              cmp('visibility', '=', ChannelVisibility.PUBLIC),
-              exists('participants', (p) => p.where('userId', this.ctx.userID))
+          ch
+            .where('workspaceId', '=', this.ctx.workspaceId)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('visibility', '=', ChannelVisibility.PUBLIC),
+                exists('participants', (p) => p.where('userId', this.ctx.userID))
+              )
             )
-          )
         )
       )
     );

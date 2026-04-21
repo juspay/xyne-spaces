@@ -30,9 +30,9 @@ export class ProjectController {
       }
 
       // Check for duplicate name before creating
-      const isDuplicate = await this.projectRepository.checkDuplicateName(name.trim());
+      const isDuplicate = await this.projectRepository.checkDuplicateName(name.trim(), undefined, req.user!.workspaceId!);
       if (isDuplicate) {
-        res.status(409).json({ error: `Project with name '${name.trim()}' already exists` });
+        res.status(409).json({ error: `Project with name '${name.trim()}' already exists in this workspace` });
         return;
       }
 
@@ -56,7 +56,7 @@ export class ProjectController {
       }
 
       // Check code uniqueness
-      const duplicateCheck = await this.projectRepository.checkDuplicateCodeWithInfo(sanitizedCode);
+      const duplicateCheck = await this.projectRepository.checkDuplicateCodeWithInfo(sanitizedCode, undefined, req.user!.workspaceId!);
       if (duplicateCheck.exists) {
         res.status(409).json({
           error: `Duplicate project code used by project ${duplicateCheck.existingProject?.name}`,
@@ -70,6 +70,7 @@ export class ProjectController {
         description: description?.trim(),
         createdBy: userId,
         code: sanitizedCode,
+        workspaceId: req.user!.workspaceId!,
       });
 
       // Queue Vespa job in background - worker will handle all processing

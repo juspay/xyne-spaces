@@ -6,11 +6,12 @@ export class ExternalStepResponsesACL extends BaseQueryACL<Prisma.ExternalStepRe
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.ExternalStepResponseWhereInput | null> {
+  async getWhereClause(): Promise<Prisma.ExternalStepResponseWhereInput> {
     return {
       workflowExecution: {
         workflow: {
           ticket: {
+            project: { workspaceId: this.ctx.workspaceId ?? '' },
             channel: {
               OR: [
                 { visibility: 'PUBLIC' },

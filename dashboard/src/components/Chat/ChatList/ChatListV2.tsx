@@ -317,9 +317,17 @@ const ChatListV2: React.FC<ChatListProps> = ({
     if (latesMessageExists && conversations.length > 0) {
       const latestMessageFromConversation = conversations[conversations.length - 1];
       if (latestMessageFromConversation) {
-        setCurrentNewestConversationId({
-          conversationId: latestMessageFromConversation.conversationId,
-          createdAt: latestMessageFromConversation.createdAt,
+        setCurrentNewestConversationId(prev => {
+          if (
+            prev.conversationId === latestMessageFromConversation.conversationId &&
+            prev.createdAt === latestMessageFromConversation.createdAt
+          ) {
+            return prev; // same values — bail out and avoid re-render loop
+          }
+          return {
+            conversationId: latestMessageFromConversation.conversationId,
+            createdAt: latestMessageFromConversation.createdAt,
+          };
         });
       }
     }

@@ -97,6 +97,7 @@ export class CanvasController {
         uploadedByUserId: userId,
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
+        workspaceId: req.user?.workspaceId ?? '',
         metadata: {
           ...uploadedFile.metadata,
           canvasId,

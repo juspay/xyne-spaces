@@ -100,6 +100,8 @@ export class ApplicationRepository {
 
         const result = await prisma.$transaction(async (tx) => {
           const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+          const project = await tx.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
+          const ticketWorkspaceId = project?.workspaceId ?? '';
 
           const prLinks = prLinksByApplication.get(application.id) || [];
           const prLinksSection = prLinks.length > 0
@@ -117,6 +119,7 @@ export class ApplicationRepository {
               channelId,
               xyneId,
               projectId,
+              workspaceId: ticketWorkspaceId,
               boardId: application.boardId,
               statusV2: TicketStatusV2.TODO,
               priority: TicketPriority.LOW,
@@ -143,6 +146,7 @@ export class ApplicationRepository {
               conversationId,
               mappedTicketId: ticket.id,
               assignedTo: null,
+              workspaceId: ticketWorkspaceId,
             },
           });
 

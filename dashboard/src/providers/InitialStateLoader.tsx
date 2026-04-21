@@ -239,7 +239,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
         if (context.userID) {
           const hydrationStartTime = Date.now();
           // User is logged in - hydrate their specific database
-          await hydrateQueryCacheFromIndexedDB(context.userID, schemaVersion);
+          await hydrateQueryCacheFromIndexedDB(context.userID, schemaVersion, context.workspaceId);
 
           const hydrationLatency = Date.now() - hydrationStartTime;
 
@@ -263,7 +263,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
 
   useEffect(() => {
     if (context.userID && !persistenceSetup.current && isHydrated) {
-      setupQueryCachePersistence(context.userID, schemaVersion);
+      setupQueryCachePersistence(context.userID, schemaVersion, context.workspaceId);
       persistenceSetup.current = true;
     }
   }, [context.userID, schemaVersion, isHydrated]);

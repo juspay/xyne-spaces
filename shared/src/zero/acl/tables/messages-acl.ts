@@ -18,12 +18,14 @@ export class MessagesACL extends BaseQueryACL<'messages'> {
       })
       .whereExists('conversation', (c) =>
         c.whereExists('channel', (ch) =>
-          ch.where(({ or, cmp, exists }) =>
-            or(
-              cmp('visibility', '=', ChannelVisibility.PUBLIC),
-              exists('participants', (p) => p.where('userId', this.ctx.userID))
+          ch
+            .where('workspaceId', '=', this.ctx.workspaceId)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('visibility', '=', ChannelVisibility.PUBLIC),
+                exists('participants', (p) => p.where('userId', this.ctx.userID))
+              )
             )
-          )
         )
       );
   }

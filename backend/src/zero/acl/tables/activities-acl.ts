@@ -6,6 +6,13 @@ import { zql } from '../../queries';
 
 export class ActivitiesACL extends BaseACL<'activities'> {
 
+  private async verifyWorkspace(userId: string, tx: Transaction<Schema>): Promise<void> {
+    const user = await tx.run(zql.users.where('id', userId).one());
+    if (!user || user.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Activity not found in this workspace', 'activities');
+    }
+  }
+
   async canInsert(_args: InsertValue<TableSchema<'activities'>>, _tx: Transaction<Schema>): Promise<void> {
     //Any user can insert activity for any other user
   }
@@ -14,6 +21,7 @@ export class ActivitiesACL extends BaseACL<'activities'> {
     if (args.isRead !== undefined) {
       const activity = await tx.run(zql.activities.where('id', '=', args.id).where('userId', this.ctx.userID).one());
       if (activity) {
+        await this.verifyWorkspace(activity.userId, tx);
         return;
       }
       throw new MutationACLError('Activity update failed: you can only update activities assigned to you', 'activities');

@@ -108,6 +108,7 @@ type CachedTicketRecord = {
   description: string | null;
   createdBy: string;
   assignedTo: string | null;
+  workspaceId: string;
 };
 
 export interface JiraMigrationExecuteInput {
@@ -464,7 +465,7 @@ const parseTicketStatusV2 = (value: string): TicketStatusV2 | null => {
 export class JiraMigrationImportService {
   private ticketRepository = new TicketRepository();
   private jiraClient = new JiraMigrationClient();
-  private userResolver = new JiraUserResolver();
+  private userResolver = new JiraUserResolver(config.defaultWorkspaceId);
   private userRepository = new UserRepository();
   private externalSourceRepository = new ExternalSourceRepository();
   private cachedTicketsByIssueId = new Map<string, CachedTicketRecord>();
@@ -793,6 +794,7 @@ export class JiraMigrationImportService {
             description: true,
             createdBy: true,
             assignedTo: true,
+            workspaceId: true,
           },
         });
 
@@ -821,6 +823,7 @@ export class JiraMigrationImportService {
         description: mappedTicket.description,
         createdBy: mappedTicket.createdBy,
         assignedTo: mappedTicket.assignedTo,
+        workspaceId: mappedTicket.workspaceId,
       };
 
       this.cacheTicketRecord(cachedTicket, issueRef.issueId, issueRef.issueKey);
@@ -902,6 +905,7 @@ export class JiraMigrationImportService {
     boardId: string,
     boardName: string,
     actorUserId: string,
+    workspaceId: string,
     fieldDefinitions: JiraFieldDefinition[],
     issues: JiraIssue[],
     existingFieldMap: Map<string, { fieldId: string; fieldType: string }>,
@@ -939,7 +943,7 @@ export class JiraMigrationImportService {
       return { formId: null, createdCount: 0, reusedCount: 0, fieldMap: new Map() };
     }
 
-    const formId = await this.ensureBoardForm(boardId, boardName, actorUserId);
+    const formId = await this.ensureBoardForm(boardId, boardName, actorUserId, workspaceId);
     const existingFields = await db.formFields.findMany({
       where: { formId },
       orderBy: { createdAt: 'asc' },
@@ -1138,7 +1142,7 @@ export class JiraMigrationImportService {
     return stages;
   }
 
-  private async ensureBoardForm(boardId: string, boardName: string, actorUserId: string) {
+  private async ensureBoardForm(boardId: string, boardName: string, actorUserId: string, workspaceId: string) {
     const existingMapping = await db.formContextMapping.findFirst({
       where: {
         contextId: boardId,
@@ -1157,6 +1161,7 @@ export class JiraMigrationImportService {
         formDescription: `Imported Jira custom fields for ${boardName}`,
         contextType: FormContextType.BOARD,
         entityType: FormEntityType.TICKET,
+        workspaceId: workspaceId,
         createdBy: actorUserId,
       },
     });
@@ -1235,6 +1240,7 @@ export class JiraMigrationImportService {
           description: true,
           createdBy: true,
           assignedTo: true,
+          workspaceId: true,
         },
       });
 
@@ -1247,6 +1253,7 @@ export class JiraMigrationImportService {
           description: existingTicket.description,
           createdBy: existingTicket.createdBy,
           assignedTo: existingTicket.assignedTo,
+          workspaceId: existingTicket.workspaceId,
         };
         this.cacheTicketRecord(cachedRecord, issueId, issueKey);
         return cachedRecord;
@@ -1584,6 +1591,7 @@ export class JiraMigrationImportService {
     commentMessageMap: Map<string, string>,
     fallbackUserId: string,
     unresolvedUsers: Map<string, UnresolvedJiraUser>,
+    workspaceId: string,
   ): Promise<{ imported: number; skipped: number; warnings: string[] }> {
     const issueAttachments: JiraAttachment[] = Array.isArray(issue.fields.attachment)
       ? issue.fields.attachment
@@ -1737,6 +1745,7 @@ export class JiraMigrationImportService {
             createdBy: uploadedBy,
             storageProvider: config.fileStorage.provider,
             conversationId,
+            workspaceId,
             width: plannedMatch.mediaRef.width,
             height: plannedMatch.mediaRef.height,
             createdAt: plannedMatch.attachment.created ? new Date(plannedMatch.attachment.created) : new Date(),
@@ -1804,6 +1813,7 @@ export class JiraMigrationImportService {
     conversationId: string,
     fallbackUserId: string,
     unresolvedUsers: Map<string, UnresolvedJiraUser>,
+    workspaceId: string,
   ): Promise<{ imported: number; skipped: number }> {
     const attachments: JiraAttachment[] = Array.isArray(issue.fields.attachment)
       ? issue.fields.attachment
@@ -1833,6 +1843,7 @@ export class JiraMigrationImportService {
       createdBy: string;
       storageProvider: string;
       conversationId: string;
+      workspaceId: string;
       createdAt: Date;
     }> = [];
     const attachmentsToImport: JiraAttachment[] = [];
@@ -1876,6 +1887,7 @@ export class JiraMigrationImportService {
           createdBy: uploadedBy,
           storageProvider: config.fileStorage.provider,
           conversationId,
+          workspaceId,
           createdAt: attachment.created ? new Date(attachment.created) : new Date(),
         };
       },
@@ -2267,6 +2279,7 @@ export class JiraMigrationImportService {
           updatedBy: actorUserId,
           conversationId: candidate.childTicket.conversationId,
           assignedTo: candidate.childTicket.assignedTo || null,
+          workspaceId: candidate.childTicket.workspaceId,
         },
       });
 
@@ -2494,7 +2507,7 @@ export class JiraMigrationImportService {
       created: externalSourceCreated,
     } = await this.ensureExternalSource(jiraProjectKey, channel.id, board.id);
 
-    const fallbackUser = await this.userRepository.findByEmail(JIRA_MIGRATION_FALLBACK_EMAIL);
+    const fallbackUser = await this.userRepository.findByEmail(JIRA_MIGRATION_FALLBACK_EMAIL, project.workspaceId);
     const fallbackUserId = fallbackUser?.id || actorUserId;
     if (!fallbackUser) {
       logger.warn(`${buildJiraMigrationProjectLogPrefix(jiraProjectKey)} Configured fallback user not found; using actor user`, {
@@ -2586,6 +2599,7 @@ export class JiraMigrationImportService {
         board.id,
         board.name,
         actorUserId,
+        project.workspaceId,
         fieldDefinitions,
         issuesChunk,
         fieldMap,
@@ -2596,6 +2610,7 @@ export class JiraMigrationImportService {
       for (const [jiraFieldId, mapping] of incrementalFieldSetup.fieldMap.entries()) {
         fieldMap.set(jiraFieldId, mapping);
       }
+      const currentFormId = incrementalFieldSetup.formId;
 
       const pageTicketIds = [
         ...new Set(
@@ -2756,6 +2771,7 @@ export class JiraMigrationImportService {
                   ticketType: issue.fields.issuetype?.name || undefined,
                   stageName: stageMatch.stageName,
                   createdAt: createdAt.toISOString(),
+                  workspaceId: project.workspaceId,
                 },
                 tx as any,
               );
@@ -2824,6 +2840,7 @@ export class JiraMigrationImportService {
                 description: ticket.description,
                 createdBy: ticket.createdBy,
                 assignedTo: ticket.assignedTo,
+                workspaceId: project.workspaceId,
               },
               issue.id,
               issue.key,
@@ -2900,6 +2917,7 @@ export class JiraMigrationImportService {
           }
 
           const formEntityValuesData: Array<{
+            formId: string;
             entityId: string;
             entityType: FormEntityType;
             fieldId: string;
@@ -2926,14 +2944,17 @@ export class JiraMigrationImportService {
               continue;
             }
 
-            formEntityValuesData.push({
-              entityId: ticketId,
-              entityType: FormEntityType.TICKET,
-              fieldId: mapping.fieldId,
-              contextId: board.id,
-              fieldValue: '',
-              actualFieldValue: value,
-            });
+            if (currentFormId) {
+              formEntityValuesData.push({
+                formId: currentFormId,
+                entityId: ticketId,
+                entityType: FormEntityType.TICKET,
+                fieldId: mapping.fieldId,
+                contextId: board.id,
+                fieldValue: '',
+                actualFieldValue: value,
+              });
+            }
           }
 
           try {
@@ -3056,6 +3077,7 @@ export class JiraMigrationImportService {
               conversationId,
               fallbackUserId,
               unresolvedUsers,
+              project.workspaceId,
             );
             importedAttachments += attachmentResult.imported;
             skippedAttachments += attachmentResult.skipped;
@@ -3084,6 +3106,7 @@ export class JiraMigrationImportService {
                 importedCommentData.commentMessageMap,
                 fallbackUserId,
                 unresolvedUsers,
+                project.workspaceId,
               );
               importedAttachments += commentAttachmentResult.imported;
               skippedAttachments += commentAttachmentResult.skipped;

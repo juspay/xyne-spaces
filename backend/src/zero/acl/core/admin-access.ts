@@ -1,7 +1,7 @@
 import { Transaction } from '@rocicorp/zero';
-import { Schema, AccessType, UserResponsibility } from '@xyne/shared';
+import { Schema, AccessType, UserResponsibility, WorkspaceRole } from '@xyne/shared';
 import { zql } from '../../queries';
-import { MutationACLError, TableName } from './types';
+import { MutationACLError, QueryContext, TableName } from './types';
 
 /**
  * Checks if the current user has ADMIN access to the PROJECTS resource (direct or via group).
@@ -75,6 +75,22 @@ export async function hasUserGroupsAdminAccess(ctx: { userID: string }, tx: Tran
     if (groupAccess) return true;
   }
   return false;
+}
+
+/**
+ * Verify user has ADMIN or OWNER role using context (no DB query needed)
+ * Use this when ctx.role is already populated from JWT
+ */
+export function verifyWorkspaceAdminOrOwnerFromContext(
+  ctx: QueryContext,
+  tableName: string = 'workspaces'
+): void {
+  if (ctx.role !== WorkspaceRole.ADMIN && ctx.role !== WorkspaceRole.OWNER) {
+    throw new MutationACLError(
+      'Admin or Owner access required for this workspace operation',
+      tableName
+    );
+  }
 }
 
 export async function verifyManagerOrTeamLead(ctx: { userID: string }, userGroupId: string, tx: Transaction<Schema>, tableName: TableName = 'user_group_mappings'): Promise<void> {

@@ -6,10 +6,11 @@ import type {
   BotEvent,
 } from '@/bots/unified/types/index.js'
 import { logger } from '@/utils/logger'
-import { Channel, MessageType, User, UserGroup } from '@prisma/client'
+import { Channel, MessageType, User } from '@prisma/client'
 import axios from 'axios'
 import { superpositionClient } from '@/services/superpositionClient'
 import { UserGroupRepository, UserRepository } from '@/database/repositories'
+import { db } from '@/database/client'
 import * as yaml from 'js-yaml'
 import jwt from "jsonwebtoken";
 import { getStorageService, type FileMetadata } from '@/services/storage'
@@ -127,19 +128,8 @@ export class SupportBot extends UnifiedBaseBot<SupportBotInput, SupportBotOutput
   } | null> {
     try {
       const supportGroupAlias = await superpositionClient.getStringValue(CAC_KEYS.support_group_name, "itsupport", {})
-      const response = await axios.get(
-        `${this.BACKEND_URL}/api/apps/usergroups/list`,
-        {
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.APP_JWT_KEY}` 
-          },
-          timeout: 30000,
-        }
-      )
-      const userGroups = response.data as Array <UserGroup>;
-      const supportGroup = userGroups.find(group => group.name === supportGroupAlias)
+      const botUser = await db.user.findUnique({ where: { id: this.botUserId }, select: { workspaceId: true } })
+      const supportGroup = await this.userGroupRepository.findByName(supportGroupAlias, botUser?.workspaceId ?? '')
       if (supportGroup) {
         const memberCount = supportGroup ? await this.userGroupRepository.getUserCount(supportGroup.id) : 0
         return {

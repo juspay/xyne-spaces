@@ -1,9 +1,10 @@
 import { ReactElement, useRef } from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation, useParams } from 'react-router-dom';
 import { Bookmark, ArrowLeft } from 'lucide-react';
 import { useBookmarkGrouping } from '../../../hooks/useBookmarkGrouping';
 import { BookmarkItem } from '../BookmarkItem/BookmarkItem';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
+import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import {
   PanelGroup,
   Panel,
@@ -15,8 +16,15 @@ import { usePlatform } from '../../../hooks/usePlatform';
 const BookmarksPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
   const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const pathWithoutWorkspace = workspaceId
+    ? location.pathname.slice(`/${workspaceId}`.length)
+    : location.pathname;
 
-  const isOnIndexRoute = location.pathname === '/chat/bookmarks';
+  const isOnIndexRoute = pathWithoutWorkspace === '/chat/bookmarks';
+
+  const lastVisitedChannelId = useLastVisitedChannel();
+  const backPath = lastVisitedChannelId ? `/chat/dir/${lastVisitedChannelId}` : '/chat/dir';
 
   const bookmarksPanelRef = useRef<ImperativePanelHandle>(null);
 
@@ -34,7 +42,7 @@ const BookmarksPanel = (): ReactElement => {
           {/* Back Button */}
           {!isMobile && (
             <Link
-              to='/chat/dir'
+              to={backPath}
               className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200'
               aria-label='Go back'
               data-testid='bookmarks-go-back-link'

@@ -131,11 +131,9 @@ export async function handleMutate(request: Request): Promise<unknown> {
           vespaJobs = createVespaJobsAccumulator();
           sideEffectJobs = createSideEffectJobsAccumulator();
 
-          const wrappedTx = wrapTransactionWithACL(tx, { userID: authData.sub }, vespaJobs, sideEffectJobs);
-
+          const wrappedTx = wrapTransactionWithACL(tx, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId}, vespaJobs, sideEffectJobs);
           const mutator = mustGetMutator(mutators, mutatorName);
-
-          return mutator.fn({ tx: wrappedTx, args, ctx: { userID: authData.sub } });
+          return mutator.fn({ tx: wrappedTx, args, ctx: { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId } });
         }),
       request
     );
@@ -203,7 +201,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
         }
       })
     )
-    processSideEffectJobs(sideEffectJobs, { userID: authData.sub });
+    processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId });
 
     return result;
   } catch (error) {
@@ -240,7 +238,7 @@ export async function handleQueries(request: Request): Promise<any> {
       (queryName, args) => {
         capturedQueryName = queryName;
         const query = mustGetQuery(queries, queryName);
-        const context: Context = { userID: authData.sub };
+        const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId };
         return query.fn({ args, ctx: context });
       },
       schema,
@@ -277,7 +275,7 @@ export async function handleQueriesFallback(request: Request): Promise<any> {
     throw new Error("Unauthorized");
   }
 
-  const context: Context = { userID: authData.sub };
+  const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, memberId: authData.memberId, orgRole: authData.orgRole };
 
   try {
     const body = await request.json();
@@ -341,7 +339,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
     throw new Error("Unauthorized");
   }
 
-  const context: Context = { userID: authData.sub };
+  const context: Context = { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, memberId: authData.memberId, orgRole: authData.orgRole };
 
   try {
     const body = await request.json();
@@ -440,7 +438,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
       const mutators = createMutators(authData, asyncTasks);
       const wrappedTx = wrapTransactionWithACL(
         tx,
-        { userID: authData.sub },
+        { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId },
         vespaJobs,
         sideEffectJobs
       );
@@ -448,7 +446,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
       await mutator.fn({
         tx: wrappedTx,
         args: mutation.args,
-        ctx: { userID: authData.sub }
+        ctx: { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId }
       });
     });
     Promise.allSettled(asyncTasks.map(task => task()));
@@ -484,7 +482,7 @@ export async function handleMutateFallback(request: Request): Promise<unknown> {
         }
       })
     );
-    processSideEffectJobs(sideEffectJobs, { userID: authData.sub });
+    processSideEffectJobs(sideEffectJobs, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId });
     return { success: true };
   } catch (error) {
     console.error('Fallback mutate request failed:', error);

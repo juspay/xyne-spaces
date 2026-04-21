@@ -7,8 +7,10 @@ export class StagesACL extends BaseQueryACL<Prisma.StageWhereInput> {
   }
 
   async getWhereClause(): Promise<Prisma.StageWhereInput> {
+    // Direct workspaceId check through board - no need to traverse through project
     return {
       board: {
+        workspaceId: this.ctx.workspaceId ?? '',
         project: {
           channels: {
             some: {

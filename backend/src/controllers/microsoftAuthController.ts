@@ -3,11 +3,11 @@ import { AuthorizationCode } from 'simple-oauth2';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
-import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { AuthProvider } from '@prisma/client';
 import '../types/express';
+import { jwtService } from '../services/jwtService';
 import { config } from '@/config/env';
 
 export class MicrosoftAuthController {
@@ -291,6 +291,9 @@ export class MicrosoftAuthController {
           throw new Error('Email not available in Microsoft profile');
         }
 
+        const workspaces = await this.userService.getWorkspacesByEmail(microsoftUserData.email);
+        logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
+
         logger.info(`[${requestId}] Finding/creating user: ${microsoftUserData.email}`);
         const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
           provider: AuthProvider.MICROSOFT,
@@ -298,7 +301,7 @@ export class MicrosoftAuthController {
           email: microsoftUserData.email,
           name: microsoftUserData.name,
           picture: microsoftUserData.picture,
-        });
+        }, workspaces[0]?.id ?? '');
 
         // Ensure user presence entry exists
         await this.userService.ensureUserPresence(user.id);
@@ -313,6 +316,8 @@ export class MicrosoftAuthController {
           email: user.email,
           name: user.name,
           picture: user.picture ?? undefined,
+          workspaceId: user.workspaceId ?? undefined,
+          memberId: user.orgMemberId ?? undefined,
         });
 
         // Create user session
@@ -324,7 +329,7 @@ export class MicrosoftAuthController {
             logger.info(`[${requestId}] Creating user session with refresh token`);
 
             const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
+            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30); // 30 days
 
             const session = await this.userSessionService.createSession({
               userId: user.id,
@@ -364,17 +369,15 @@ export class MicrosoftAuthController {
           return;
         }
 
-        // Set HTTP-only cookies
+        const userExistsButRemoved = workspaces.length === 0
+          ? await this.userService.userExistsButNoActiveWorkspaces(microsoftUserData.email)
+          : false;
+
         const isProduction = process.env.NODE_ENV === 'production';
-        const cookieOptions: {
-          httpOnly: boolean;
-          secure: boolean;
-          sameSite: 'strict' | 'lax' | 'none';
-          path: string;
-        } = {
+        const cookieOptions = {
           httpOnly: true,
           secure: isProduction,
-          sameSite: 'strict',
+          sameSite: 'strict' as const,
           path: '/',
         };
 
@@ -388,7 +391,7 @@ export class MicrosoftAuthController {
         if (sessionId) {
           res.cookie('user_session_id', sessionId, {
             ...cookieOptions,
-            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
           });
         }
 
@@ -401,12 +404,16 @@ export class MicrosoftAuthController {
         }
 
         // Redirect to frontend with success
+        const frontendUrl = this.getFrontendUrl(req);
         const params = new URLSearchParams({
           success: 'true',
+          email: microsoftUserData.email,
+          name: microsoftUserData.name,
+          picture: microsoftUserData.picture || '',
+          workspaces: JSON.stringify(workspaces),
+          userExistsButRemoved: String(userExistsButRemoved),
         });
 
-        const frontendUrl = this.getFrontendUrl(req);
-        logger.info(`[${requestId}] Redirecting to frontend: ${frontendUrl}?${params.toString()}`);
         res.redirect(`${frontendUrl}?${params.toString()}`);
       } else {
         logger.error(`[${requestId}] Microsoft OAuth client not configured`);
@@ -554,6 +561,9 @@ export class MicrosoftAuthController {
         throw new Error('Email not available in Microsoft profile');
       }
 
+      const workspaces = await this.userService.getWorkspacesByEmail(email);
+      logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
+
       logger.info(`[${requestId}] Finding/creating user: ${email}`);
       const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
         provider: AuthProvider.MICROSOFT,
@@ -561,7 +571,7 @@ export class MicrosoftAuthController {
         email,
         name: profile.displayName,
         picture: undefined,
-      });
+      }, workspaces[0]?.id ?? '');
 
       await this.userService.ensureUserPresence(user.id);
 
@@ -574,6 +584,8 @@ export class MicrosoftAuthController {
         email: user.email,
         name: user.name,
         picture: user.picture ?? undefined,
+        workspaceId: user.workspaceId ?? undefined,
+        memberId: user.orgMemberId ?? undefined,
       });
 
       let sessionId: string | null = null;
@@ -777,6 +789,9 @@ export class MicrosoftAuthController {
         return;
       }
 
+      const workspaces = await this.userService.getWorkspacesByEmail(email);
+      logger.info(`[${requestId}] User has ${workspaces.length} workspace(s)`);
+
       logger.info(`[${requestId}] Finding/creating user: ${email}`);
       const { user, isNewUser } = await this.userService.findOrCreateOAuthUser({
         provider: AuthProvider.MICROSOFT,
@@ -784,7 +799,7 @@ export class MicrosoftAuthController {
         email,
         name: profile.displayName,
         picture: undefined,
-      });
+      }, workspaces[0]?.id ?? '');
 
       await this.userService.ensureUserPresence(user.id);
 
@@ -797,6 +812,8 @@ export class MicrosoftAuthController {
         email: user.email,
         name: user.name,
         picture: user.picture ?? undefined,
+        workspaceId: user.workspaceId ?? undefined,
+        memberId: user.orgMemberId ?? undefined,
       });
 
       // Create a user session with the Microsoft refresh token (held on the

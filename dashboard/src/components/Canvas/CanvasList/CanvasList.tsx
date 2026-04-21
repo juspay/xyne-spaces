@@ -33,6 +33,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { queries } from '../../../zero/queries';
 import { CanvasParticipantsTray, type ParticipantItem } from '../CanvasParticipantsTray';
 import { useNavigate } from 'react-router-dom';
+import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
 
@@ -93,6 +94,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   selectedCanvasId,
 }) => {
   const navigate = useNavigate();
+  const shareableOrigin = useShareableOrigin();
   const { isMobile } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingCanvasId, setDeletingCanvasId] = useState<string | null>(null);
@@ -496,7 +498,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                               e.stopPropagation();
                               if (isQuartoDoc && canvas.userRepo) {
                                 // For Quarto docs, copy the docs link directly
-                                const docsLink = `${window.location.origin}/docs/${canvas.userRepo}`;
+                                const docsLink = `${shareableOrigin}/docs/${canvas.userRepo}`;
                                 void navigator.clipboard.writeText(docsLink);
                               } else {
                                 setShareCanvas(canvas);

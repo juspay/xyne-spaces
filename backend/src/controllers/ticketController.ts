@@ -163,6 +163,9 @@ export class TicketController {
       }
       const channelId = conversation.channelId;
 
+      // Get workspaceId from channel
+      const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
+
       // Generate xyneId using project-scoped format
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
@@ -176,6 +179,7 @@ export class TicketController {
         conversationId,
         channelId,
         projectId,
+        workspaceId: channelWorkspaceId,
         boardId,
         statusV2: statusV2 as TicketStatusV2,
         priority: priority.toUpperCase() as TicketPriority,
@@ -456,6 +460,7 @@ export class TicketController {
 
           conversationId = existingConversation.conversationId;
           const channelIdFromConversation = existingConversation.channelId;
+          const existingConversationWorkspaceId = await this.channelRepository.getWorkspaceId(channelIdFromConversation);
 
           ticket = await this.ticketRepository.createTicket({
             title,
@@ -466,6 +471,7 @@ export class TicketController {
             conversationId,
             channelId: channelIdFromConversation,
             projectId,
+            workspaceId: existingConversationWorkspaceId,
             userGroupId,
             boardId,
             statusV2: statusV2 as TicketStatusV2,
@@ -576,6 +582,8 @@ export class TicketController {
 
           conversationId = conversation.conversationId;
 
+          const newConversationWorkspaceId = await this.channelRepository.getWorkspaceId(channelId!);
+
           ticket = await this.ticketRepository.createTicket({
             title,
             description,
@@ -585,6 +593,7 @@ export class TicketController {
             conversationId,
             channelId: channelId!,
             projectId,
+            workspaceId: newConversationWorkspaceId,
             userGroupId,
             boardId,
             statusV2: statusV2 as TicketStatusV2,
@@ -654,6 +663,11 @@ export class TicketController {
           });
         }
 
+        // Get workspaceId from channel for attachments
+        const ticketChannelWorkspaceId = channelId
+          ? await this.channelRepository.getWorkspaceId(channelId)
+          : '';
+
         // Create attachment records for uploaded files (inside transaction)
         if (uploadedFiles.length > 0) {
           const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
@@ -670,6 +684,7 @@ export class TicketController {
             createdBy: finalCreatedBy,
             storageProvider: config.fileStorage.provider,
             conversationId: conversationId,
+            workspaceId: ticketChannelWorkspaceId,
             metadata: file.metadata || {},
           }));
 
@@ -840,6 +855,7 @@ export class TicketController {
                 const value = dynamicFields[field.fieldName];
                 // Provide both fields for backward compatibility
                 return {
+                  formId: formMapping.formId,
                   entityId: ticket.id,
                   entityType: FormEntityType.TICKET,
                   fieldId: field.id,
@@ -1037,6 +1053,7 @@ export class TicketController {
           parentTicketId,
           userName: req.user?.name,
           isHotFix: ticket.ticketType === BaseTicketType.Hotfix,
+          workspaceId: xyneReleaseBot?.workspaceId || req.user?.workspaceId!,
         }).then((result) => {
           if (result.success) {
             logger.info(`[Ticket Creation] Commit analysis completed for ticket ${ticket.xyneId}`);

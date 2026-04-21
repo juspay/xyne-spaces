@@ -5,6 +5,14 @@ import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
 export class CallParticipantsACL extends BaseACL<'call_participants'> {
 
+  private async verifyChannelInWorkspace(channelId: string, tx: Transaction<Schema>): Promise<void> {
+    const channel = await tx.run(zql.channels.where('id', channelId).one());
+    if (!channel) throw new MutationACLError('Call participant not found: channel does not exist', 'call_participants');
+    if (channel.workspaceId !== this.ctx.workspaceId) {
+      throw new MutationACLError('Call participant not found in this workspace', 'call_participants');
+    }
+  }
+
   async canInsert(args: InsertValue<TableSchema<'call_participants'>>, tx: Transaction<Schema>): Promise<void> {
     const callData = await tx.run(zql.calls.where('id', args.callId).related('channel').one());
     if (!callData || !callData.channel) {
@@ -15,6 +23,7 @@ export class CallParticipantsACL extends BaseACL<'call_participants'> {
       throw new MutationACLError('Call participant insert failed: cannot join calls in archived channel', 'call_participants');
     }
 
+    await this.verifyChannelInWorkspace(callData.channel.id, tx);
     const isParticipant = await tx.run(zql.channel_participants
       .where('channelId', callData.channel.id)
       .where('userId', this.ctx.userID)

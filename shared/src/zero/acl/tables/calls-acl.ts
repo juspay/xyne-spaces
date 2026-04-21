@@ -13,7 +13,9 @@ export class CallsACL extends BaseQueryACL<'calls'> {
         cmp('createdByUserId', this.ctx.userID),
         exists('participants', (p) => p.where('userId', this.ctx.userID)),
         exists('channel', (ch) =>
-          ch.whereExists('participants', (p) => p.where('userId', this.ctx.userID))
+          ch
+            .where('workspaceId', '=', this.ctx.workspaceId)
+            .whereExists('participants', (p) => p.where('userId', this.ctx.userID))
         ),
       )
     );

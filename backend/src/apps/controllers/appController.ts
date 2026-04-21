@@ -48,7 +48,7 @@ export class AppController {
       .replace(/^-|-$/g, '');
 
       const botEmail = `${botName}@app.xyne.ai`;
-      const existingUser = await repositories.users.findByEmail(botEmail);
+      const existingUser = await repositories.users.findByEmail(botEmail, req.user!.workspaceId);
       if (existingUser) {
         res.status(409).json({
           error: `An app with name "${name}" already exists`,
@@ -113,9 +113,18 @@ export class AppController {
       }
 
       const { appId } = paramsResult.data;
+      const workspaceId = req.user?.workspaceId;
+
+      if (!workspaceId) {
+        res.status(400).json({
+          error: 'Workspace ID is required',
+          code: 'WORKSPACE_REQUIRED',
+        });
+        return;
+      }
 
       // Install the app
-      const installedApp = await installApp(appId);
+      const installedApp = await installApp(appId, workspaceId);
 
       res.status(201).json(installedApp);
     } catch (error) {

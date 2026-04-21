@@ -1,5 +1,5 @@
 import { ReactElement, useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation, useParams } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useZero } from '../../../hooks/useZero';
 import {
@@ -154,7 +154,11 @@ const ActivityListView = (): ReactElement => {
   const { isMobile } = usePlatform();
   const lastVisitedChannelId = useLastVisitedChannel();
   const location = useLocation();
-  const isOnIndexRoute = location.pathname === '/chat/activity';
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const pathWithoutWorkspace = workspaceId
+    ? location.pathname.slice(`/${workspaceId}`.length)
+    : location.pathname;
+  const isOnIndexRoute = pathWithoutWorkspace === '/chat/activity';
 
   const activityPanelRef = useRef<ImperativePanelHandle>(null);
 

@@ -263,6 +263,7 @@ export class ReleaseService {
 			const formEntityValuesData = formFields
 				.filter((field) => formValuesRecord[field.fieldName] !== undefined)
 				.map((field) => ({
+					formId: form.id,
 					entityId: releaseChangeTypeId,
 					entityType: formEntity,
 					fieldId: field.id,

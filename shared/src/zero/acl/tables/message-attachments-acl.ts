@@ -8,6 +8,6 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
   }
 
   canSelect<TReturn>(query: Query<'message_attachments', Schema, TReturn>): Query<'message_attachments', Schema, TReturn> {
-    return query;
+    return query.where('workspaceId', '=', this.ctx.workspaceId);
   }
 }

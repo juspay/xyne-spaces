@@ -6,8 +6,10 @@ export class MessageAttachmentsACL extends BaseQueryACL<Prisma.MessageAttachment
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.MessageAttachmentWhereInput | null> {
-    // No restriction - open access (matches Zero's behavior)
-    return null
+  async getWhereClause(): Promise<Prisma.MessageAttachmentWhereInput> {
+    // Optimized: message_attachments has direct workspaceId (0 hops instead of 2)
+    return {
+      workspaceId: this.ctx.workspaceId ?? '',
+    }
   }
 }

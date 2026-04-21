@@ -29,6 +29,10 @@ const envSchema = Joi.object({
   API_KEYS_CONFIG: Joi.string().default(''),
   GOOGLE_CLIENT_ID: Joi.string().allow('').default(''),
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').default(''),
+  // Email sender configuration (Google OAuth2 via nodemailer)
+  GOOGLE_REFRESH_TOKEN: Joi.string().allow('').default(''),
+  EMAIL_FROM: Joi.string().allow('').default(''),
+  EMAIL_FROM_NAME: Joi.string().allow('').default(''),
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   SESSION_EXPIRY_DAYS: Joi.number().default(365), // Session cookie expiry in days (default 1 year)
@@ -59,6 +63,7 @@ const envSchema = Joi.object({
   BACKEND_URL: Joi.string().default(''),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default(''),
+  FRONTEND_URL: Joi.string().allow('').default(''),
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
@@ -154,6 +159,8 @@ const envSchema = Joi.object({
   // Default model ID for config sync service
   DEFAULT_MODEL_ID: Joi.string().default(''),
   DEFAULT_MODEL_NAME: Joi.string().default(''),
+  // Default workspace ID for integrations that need it
+  DEFAULT_WORKSPACE_ID: Joi.string().allow('').default(''),
   // oh-my-opencode Plugin Configuration
   OPENCODE_PLUGIN_ENABLED: Joi.boolean().default(true),
   OPENCODE_PLUGIN_VERSION: Joi.string().allow('').default(''),
@@ -248,6 +255,7 @@ export const config = {
     defaultModelId: envVars.DEFAULT_MODEL_ID,
     defaultModelName: envVars.DEFAULT_MODEL_NAME,
   },
+  defaultWorkspaceId: envVars.DEFAULT_WORKSPACE_ID,
   fileStorage: {
     provider: envVars.STORAGE_PROVIDER,
   },
@@ -297,6 +305,7 @@ export const config = {
   backendUrl: envVars.BACKEND_URL,
   slackBotToken: envVars.SLACK_BOT_TOKEN,
   slackFrontendUrl: envVars.SLACK_FRONTEND_URL,
+  frontendUrl: envVars.FRONTEND_URL,
   slackSigningSecret: envVars.SLACK_SIGNING_SECRET,
   slackMigrationApprovals: envVars.SLACK_MIGRATION_APPROVALS
     ? envVars.SLACK_MIGRATION_APPROVALS.split(',')
@@ -460,8 +469,15 @@ export const config = {
     baseUrl: envVars.JUSPAY_JIRA_BASEURL as string,
     eulerBotEmail: envVars.JIRA_EULER_BOT_EMAIL as string,
     eulerBotAuthToken: envVars.JIRA_EULER_BOT_AUTH_TOKEN as string,
-    migrationBotEmail: envVars.JIRA_MIGRATION_BOT_EMAIL as string,
+    migrationBotEmail: envVars.JIRA_MIGRATION_BOT_EMAIL as string, 
     migrationBotAuthToken: envVars.JIRA_MIGRATION_BOT_AUTH_TOKEN as string,
   },
   enableFileIndexing: envVars.ENABLE_FILE_INDEXING as boolean,
+  email: {
+    clientId: envVars.GOOGLE_CLIENT_ID as string,
+    clientSecret: envVars.GOOGLE_CLIENT_SECRET as string,
+    refreshToken: envVars.GOOGLE_REFRESH_TOKEN as string,
+    fromEmail: envVars.EMAIL_FROM as string,
+    fromName: envVars.EMAIL_FROM_NAME as string,
+  },
 };
