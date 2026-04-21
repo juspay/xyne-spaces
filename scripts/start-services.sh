@@ -235,6 +235,18 @@ else
     echo -e "${BLUE}Syncing database schema...${NC}"
     npx dotenv -e .env.local -- npx prisma db push
     echo -e "${GREEN}✓ Database schema is up to date${NC}"
+    
+    # Check if default workspace exists, create if not
+    echo -e "${BLUE}🔍 Checking for default workspace...${NC}"
+    WORKSPACE_EXISTS=$($COMPOSE_CMD -f ../docker-compose.dev.yml exec -T postgres psql -U xyne -d xyne_dev_db -t -c "SELECT COUNT(*) FROM workspaces WHERE name = 'Default Workspace';" 2>&1 | xargs)
+    
+    if [ "$WORKSPACE_EXISTS" = "0" ] || [ -z "$WORKSPACE_EXISTS" ]; then
+      echo -e "${YELLOW}⚠️  Default workspace not found. Running seed...${NC}"
+      npx dotenv -e .env.local -- npx tsx scripts/seed-acl.ts
+      echo -e "${GREEN}✓ ACL system seeded${NC}"
+    else
+      echo -e "${GREEN}✓ Default workspace exists${NC}"
+    fi
   fi
 
   echo -e "${GREEN}✓ Database ready${NC}"
