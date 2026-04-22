@@ -110,6 +110,18 @@ const SlideContent: React.FC<{
   const isVideo = fileType?.displayName === 'Video';
   const shouldDisableGestures = disableGestures && fileType?.displayName === 'Image';
 
+  const [viewerResetKey, setViewerResetKey] = useState(0);
+  const prevActiveRef = useRef(isActive);
+
+  useEffect(() => {
+    if (prevActiveRef.current && !isActive) {
+      // Slide just became inactive — remount the viewer so zoom/state is
+      // cleared before the user potentially swipes back to this slide.
+      setViewerResetKey(k => k + 1);
+    }
+    prevActiveRef.current = isActive;
+  }, [isActive]);
+
   useEffect(() => {
     // Only fetch when this slide is active (visible)
     if (!isActive) return;
@@ -183,6 +195,7 @@ const SlideContent: React.FC<{
   return (
     <div className={`${fileType.wrapperClass} max-w-full max-h-full`}>
       <ViewerComponent
+        key={viewerResetKey}
         source={fileData}
         fileName={file.fileName}
         {...(shouldDisableGestures && { disableGestures: true })}

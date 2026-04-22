@@ -15,6 +15,19 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+
+  // Sets the scale for image transform
+  const [gestureScale, setGestureScale] = useState(1);
+  // To enable zooming centered at other parts of the image apart from actual center
+  const [transformOrigin, setTransformOrigin] = useState('50% 50%');
+  // Mutable ref mirroring gestureScale, used to avoid stale closure.
+  // Listeners read scale correctly without effect re-run
+  const gestureScaleRef = useRef(1);
+  // Records the finger distance and scale when the second finger lands.
+  // Every subsequent touchmove computes its ratio against this anchor
+  const pinchRef = useRef<{ startDist: number; startScale: number } | null>(null);
+  const disableGesturesContainerRef = useRef<HTMLDivElement>(null);
+
   const transformRef = useRef<ReactZoomPanPinchContentRef>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const { isMobile } = usePlatform();
@@ -31,8 +44,114 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
     setImageError(false);
     setImageUrl(url);
 
+    // Resetting any pinch-zoom from the previous image
+    gestureScaleRef.current = 1;
+    setGestureScale(1);
+    setTransformOrigin('50% 50%');
+    pinchRef.current = null;
+
     return () => URL.revokeObjectURL(url);
   }, [source]);
+
+  // ─── Non-passive touch + wheel listeners for pinch-zoom ─────────────────────
+  useEffect(() => {
+    if (!disableGestures) return;
+    const el = disableGesturesContainerRef.current;
+    if (!el) return;
+
+    const getTouchDistance = (touches: TouchList): number | null => {
+      const t0 = touches[0];
+      const t1 = touches[1];
+      if (!t0 || !t1) return null;
+      const dx = t0.clientX - t1.clientX;
+      const dy = t0.clientY - t1.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const onTouchStart = (e: TouchEvent): void => {
+      if (e.touches.length === 2) {
+        const dist = getTouchDistance(e.touches);
+        if (dist === null) return;
+        pinchRef.current = {
+          startDist: dist,
+          startScale: gestureScaleRef.current,
+        };
+        // Set transform-origin to the midpoint between the two fingers,
+        // expressed as a percentage of the image element so zooming
+        // expands toward where the user is actually pinching.
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        if (t0 && t1 && imageRef.current) {
+          const rect = imageRef.current.getBoundingClientRect();
+          const midX = (t0.clientX + t1.clientX) / 2;
+          const midY = (t0.clientY + t1.clientY) / 2;
+          const originX = ((midX - rect.left) / rect.width) * 100;
+          const originY = ((midY - rect.top) / rect.height) * 100;
+          setTransformOrigin(`${originX}% ${originY}%`);
+        }
+      } else {
+        // Single finger — clear pinch state so a stale ref can't interfere.
+        pinchRef.current = null;
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent): void => {
+      if (e.touches.length !== 2 || !pinchRef.current) return;
+
+      const newDist = getTouchDistance(e.touches);
+      if (newDist === null) return;
+
+      // Prevent the parent swipe-carousel from treating two fingers as a swipe.
+      e.preventDefault();
+      const ratio = newDist / pinchRef.current.startDist;
+      const newScale = Math.min(Math.max(pinchRef.current.startScale * ratio, 1), 5);
+
+      gestureScaleRef.current = newScale;
+      setGestureScale(newScale);
+    };
+
+    const onTouchEnd = (e: TouchEvent): void => {
+      if (e.touches.length < 2) {
+        pinchRef.current = null;
+      }
+    };
+
+    // ── Laptop trackpad support, purely for testing pinch gesture on laptop itself────────────────────────────────────────────────
+    // On desktop browsers a physical pinch on trackpad fires wheel events with
+    // ctrlKey=true (Chrome, Firefox, Safari all do this). We don't want this to interfere
+    // with our pinch gesture so we prevent default.
+    const onWheel = (e: WheelEvent): void => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      // On trackpad, use the cursor position as the focal point.
+      if (imageRef.current) {
+        const rect = imageRef.current.getBoundingClientRect();
+        const originX = ((e.clientX - rect.left) / rect.width) * 100;
+        const originY = ((e.clientY - rect.top) / rect.height) * 100;
+        setTransformOrigin(`${originX}% ${originY}%`);
+      }
+      // deltaY is negative when pinching out (zoom-in) and positive when pinching in (zoom-out)
+      const delta = -e.deltaY * 0.01;
+      const newScale = Math.min(Math.max(gestureScaleRef.current + delta, 1), 5);
+      gestureScaleRef.current = newScale;
+      setGestureScale(newScale);
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    // To prevent being treated like a swipe
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    // To prevent wheel event on laptop trackpad on pinch gesture
+    el.addEventListener('wheel', onWheel, { passive: false });
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('wheel', onWheel);
+    };
+    // gestureScaleRef doesn't trigger re-runs and the handlers don't close over any changing state.
+  }, [disableGestures]);
 
   const handleZoomIn = useCallback(() => {
     if (transformRef.current) {
@@ -159,7 +278,11 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
 
   if (disableGestures) {
     return (
-      <div className='h-full w-full relative' style={{ touchAction: 'pan-x' }}>
+      <div
+        ref={disableGesturesContainerRef}
+        className='h-full w-full relative'
+        style={{ touchAction: 'none', overflow: 'hidden' }}
+      >
         <div className='absolute inset-0 overflow-hidden'>
           <div
             className='absolute inset-0 scale-110'
@@ -189,7 +312,12 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
               onLoad={handleImageLoad}
               onError={handleImageError}
               className='select-none max-h-screen max-w-full h-auto w-auto object-contain origin-center'
-              style={{ transform: `rotate(${rotation}deg)` }}
+              style={{
+                transform: `rotate(${rotation}deg) scale(${gestureScale})`,
+                transformOrigin,
+                // A short transition to smooth out the discrete setState calls without adding perceptible lag.
+                transition: 'transform 0.05s ease-out',
+              }}
             />
           )}
         </div>
