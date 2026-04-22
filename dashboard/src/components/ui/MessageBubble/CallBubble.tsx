@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { CreateDocumentModal } from './CreateDocumentModal';
 import { recordingService } from '../../../services/Recording/recordingService';
-import { Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, ClipboardList, FileText } from 'lucide-react';
 import { AudioPlayer } from '../AudioPlayer/AudioPlayer';
+import { CanvasPreview } from '../../Canvas/CanvasPreview/CanvasPreview';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
-import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { CallMessageOverlay } from '../../Chat/CallMessageOverlay/CallMessageOverlay';
 import { useGeneratePRD } from '../../../hooks/useGeneratePRD';
 import { useGenerateDetailedSummary } from '../../../hooks/useGenerateDetailedSummary';
@@ -59,16 +59,13 @@ export const GeneratePRDButton: React.FC<{
         type='button'
         onClick={() => setIsModalOpen(true)}
         disabled={isLoading}
-        className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
-        style={{ color: 'var(--call-action-button-color)' }}
+        className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
+        title={isCanvasCreated ? 'Generate Another PRD' : 'Generate PRD'}
       >
         {isLoading ? (
-          <>
-            <Loader2 className='w-4 h-4 animate-spin' />
-            <span>Generating...</span>
-          </>
+          <Loader2 className='h-4 w-4 animate-spin' />
         ) : (
-          <span>{isCanvasCreated ? 'Generate Another PRD' : 'Generate PRD'}</span>
+          <ClipboardList className='h-4 w-4' />
         )}
       </button>
 
@@ -111,16 +108,13 @@ const GenerateSummaryButton: React.FC<{
         type='button'
         onClick={() => setIsModalOpen(true)}
         disabled={isLoading}
-        className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed'
-        style={{ color: 'var(--call-action-button-color)' }}
+        className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
+        title={isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}
       >
         {isLoading ? (
-          <>
-            <Loader2 className='w-4 h-4 animate-spin' />
-            <span>Generating...</span>
-          </>
+          <Loader2 className='h-4 w-4 animate-spin' />
         ) : (
-          <span>{isCanvasCreated ? 'Generate Another Summary' : 'Generate Summary'}</span>
+          <FileText className='h-4 w-4' />
         )}
       </button>
 
@@ -178,10 +172,10 @@ const ChatWithAskAIButton: React.FC<{
     <button
       type='button'
       onClick={handleClick}
-      className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all'
-      style={{ color: 'var(--call-action-button-color)' }}
+      className='p-2 hover:bg-accent rounded-lg transition-colors text-muted-foreground hover:text-foreground'
+      title='Chat with Transcript'
     >
-      <span>Chat with Transcript</span>
+      <img alt='Ask AI' width='16' height='16' src='/svgs/icons/ai-bot-gradient-star.svg' />
     </button>
   );
 };
@@ -200,7 +194,6 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
   attachments,
 }) => {
   const metadata = message.metadata;
-  const [isExpanded, setIsExpanded] = useState(true);
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
 
   // For headless recordings: show only the identified transcript (fall back to plain transcript
@@ -222,7 +215,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
     return attType !== 'identified_transcript';
   });
 
-  // Recording audio attachments are rendered separately by AudioPlayerButton below.
+  // Recording audio attachments are rendered separately by AudioPlayer below.
   // Exclude them from the file grid to avoid showing "FILE 0 B" cards.
   const isRecordingAudio = (a: AttachmentType): boolean =>
     a.mimetype === 'audio/mp4' && (a.metadata as { type?: string } | null)?.type === 'recording';
@@ -231,144 +224,108 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
   const recordingAttachment = attachments?.find(isRecordingAudio);
 
   return (
-    <div className='w-full flex flex-col gap-1'>
+    <div className='w-full flex flex-col gap-2'>
       {isActiveCall && channelId ? (
         <CallMessageOverlay callId={callId} channelId={channelId} />
       ) : (
         <>
-          {/* Call ended message content */}
-          {message.content && (
-            <div className='text-sm text-muted-foreground visual-regression-hide'>
-              {message.content}
-            </div>
+          {/* AI description shown as message body once generated (callEndedText signals the swap happened) */}
+          {metadata?.['callEndedText'] && message.content && (
+            <div className='jp-message-html text-sm whitespace-pre-wrap'>{message.content}</div>
           )}
 
-          {/* Attachments — recording audio excluded (shown via AudioPlayerButton) */}
+          {/* Detailed summary canvas preview */}
+          {metadata?.['detailedSummaryCanvasUrl'] &&
+            (() => {
+              const url = String(metadata['detailedSummaryCanvasUrl']);
+              const canvasId = url.split('/').pop();
+              return canvasId ? (
+                <div className='mt-1'>
+                  <CanvasPreview canvasId={canvasId} />
+                </div>
+              ) : null;
+            })()}
+
+          {/* Attachments — recording audio excluded (shown via AudioPlayer in action icons) */}
           {displayAttachments.length > 0 && (
-            <div>
-              <div className='flex items-center gap-3 text-xs font-medium'>
-                <div className='flex items-center gap-1'>
-                  <span className='text-muted-foreground'>
-                    {displayAttachments.length > 1
-                      ? `${displayAttachments.length} files`
-                      : displayAttachments[0]?.originalFilename}
-                  </span>
-                  <button type='button' onClick={() => setIsExpanded(!isExpanded)}>
-                    {isExpanded ? (
-                      <ChevronDown className='w-4 h-4 text-muted-foreground' />
-                    ) : (
-                      <ChevronRight className='w-4 h-4 text-muted-foreground' />
-                    )}
-                  </button>
-                </div>
+            <div className='mt-1'>
+              <div className='flex flex-col gap-3'>
+                {/* Videos first - each in separate row */}
+                {displayAttachments
+                  .filter(attachment => attachment.mimetype.startsWith('video/'))
+                  .map(attachment => (
+                    <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
+                      <MessageAttachment attachment={attachment} />
+                    </div>
+                  ))}
 
-                {displayAttachments.length > 1 && (
-                  <>
-                    <span className='text-muted-foreground'>|</span>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        displayAttachments.forEach(attachment => {
-                          void downloadAttachment(attachment.id, attachment.originalFilename);
-                        });
-                      }}
-                      className='flex items-center gap-2 text-muted-foreground hover:text-foreground'
-                    >
-                      <span>Download all</span>
-                    </button>
-                  </>
+                {/* Other attachments in one row */}
+                {displayAttachments.filter(attachment => !attachment.mimetype.startsWith('video/'))
+                  .length > 0 && (
+                  <div className='flex gap-3 flex-wrap'>
+                    {displayAttachments
+                      .filter(attachment => !attachment.mimetype.startsWith('video/'))
+                      .map((attachment, index) => {
+                        const isImageOrText =
+                          attachment.mimetype.startsWith('image/') ||
+                          attachment.mimetype === 'text/plain';
+
+                        // Only pass action icons to the first transcript attachment
+                        const isTranscript =
+                          attachment.mimetype === 'text/plain' ||
+                          attachment.originalFilename.endsWith('.txt');
+                        const callActionIcons =
+                          !isActiveCall && message.hasAttachment && isTranscript && index === 0 ? (
+                            <>
+                              <GeneratePRDButton
+                                callId={callId}
+                                messageId={message.messageId}
+                                isCanvasCreated={!!metadata?.prdCanvasUrl}
+                              />
+                              {ENABLE_SUMMARY_ACTION_BUTTON && (
+                                <GenerateSummaryButton
+                                  callId={callId}
+                                  messageId={message.messageId}
+                                  isCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
+                                />
+                              )}
+                              <ChatWithAskAIButton
+                                channelId={channelId}
+                                conversationId={conversationId}
+                                metadata={metadata}
+                                attachments={attachments}
+                              />
+                              {recordingAttachment && (
+                                <AudioPlayer
+                                  onLoad={async signal => {
+                                    await recordingService.saveRecordingAttachment(callId);
+                                    return recordingService.downloadRecordingBlob(callId, signal);
+                                  }}
+                                  trackCategory='CallBubble'
+                                />
+                              )}
+                            </>
+                          ) : undefined;
+
+                        return (
+                          <div
+                            key={attachment.id}
+                            className={`flex items-center gap-2 py-2 text-sm ${
+                              !isImageOrText ? 'w-[256px] aspect-square' : ''
+                            }`}
+                          >
+                            <MessageAttachment
+                              attachment={attachment}
+                              {...(callActionIcons && { extraActions: callActionIcons })}
+                            />
+                          </div>
+                        );
+                      })}
+                  </div>
                 )}
               </div>
-              {isExpanded && (
-                <div className='flex flex-col gap-3'>
-                  {/* Videos first - each in separate row */}
-                  {displayAttachments
-                    .filter(attachment => attachment.mimetype.startsWith('video/'))
-                    .map(attachment => (
-                      <div key={attachment.id} className='flex items-center gap-2 py-2 text-sm'>
-                        <MessageAttachment attachment={attachment} />
-                      </div>
-                    ))}
-
-                  {/* Other attachments in one row */}
-                  {displayAttachments.filter(
-                    attachment => !attachment.mimetype.startsWith('video/'),
-                  ).length > 0 && (
-                    <div className='flex gap-3 flex-wrap'>
-                      {displayAttachments
-                        .filter(attachment => !attachment.mimetype.startsWith('video/'))
-                        .map(attachment => {
-                          const isImageOrText =
-                            attachment.mimetype.startsWith('image/') ||
-                            attachment.mimetype === 'text/plain';
-
-                          return (
-                            <div
-                              key={attachment.id}
-                              className={`flex items-center gap-2 py-2 text-sm ${
-                                !isImageOrText ? 'w-[256px] aspect-square' : ''
-                              }`}
-                            >
-                              <MessageAttachment attachment={attachment} />
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
-
-          {/* Action buttons for ended calls with transcript */}
-          {!isActiveCall &&
-            (message.hasAttachment || (visibleAttachments && visibleAttachments.length > 0)) && (
-              <div className='flex flex-wrap items-center gap-2 mt-2'>
-                {/* Generate PRD Button — always visible */}
-                <GeneratePRDButton
-                  callId={callId}
-                  messageId={message.messageId}
-                  isCanvasCreated={!!metadata?.prdCanvasUrl}
-                />
-
-                {/* Generate Summary Button — only shown when VITE_ENABLE_SUMMARY_ACTION_BUTTON=true */}
-                {ENABLE_SUMMARY_ACTION_BUTTON && (
-                  <>
-                    <span className='text-muted-foreground'>•</span>
-                    <GenerateSummaryButton
-                      callId={callId}
-                      messageId={message.messageId}
-                      isCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
-                    />
-                  </>
-                )}
-
-                {/* Separator */}
-                <span className='text-muted-foreground'>•</span>
-
-                {/* Chat with Transcript Button — always visible */}
-                <ChatWithAskAIButton
-                  channelId={channelId}
-                  conversationId={conversationId}
-                  metadata={metadata}
-                  attachments={attachments}
-                />
-
-                {/* Play Recording — inline, only when recording attachment exists in Zero */}
-                {recordingAttachment && (
-                  <>
-                    <span className='text-muted-foreground'>•</span>
-                    <AudioPlayer
-                      onLoad={async signal => {
-                        await recordingService.saveRecordingAttachment(callId);
-                        return recordingService.downloadRecordingBlob(callId, signal);
-                      }}
-                      trackCategory='CallBubble'
-                    />
-                  </>
-                )}
-              </div>
-            )}
         </>
       )}
     </div>

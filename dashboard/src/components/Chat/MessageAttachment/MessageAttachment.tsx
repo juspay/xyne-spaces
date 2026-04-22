@@ -71,6 +71,7 @@ interface MessageAttachmentProps {
   channelId?: string;
   replyCount?: number;
   allThreadAttachments?: AttachmentRef[];
+  extraActions?: React.ReactNode;
 }
 
 //to check the who can delete and delete the attachment
@@ -500,7 +501,16 @@ const InlineTextFile: React.FC<{
   conversationId?: string;
   channelId?: string;
   replyCount?: number;
-}> = ({ attachmentId, fileName, metadata, conversationId, channelId, replyCount }) => {
+  extraActions?: React.ReactNode;
+}> = ({
+  attachmentId,
+  fileName,
+  metadata,
+  conversationId,
+  channelId,
+  replyCount,
+  extraActions,
+}) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -614,6 +624,7 @@ const InlineTextFile: React.FC<{
           >
             <Download className='h-4 w-4 text-muted-foreground' />
           </button>
+          {extraActions}
         </div>
       </div>
     );
@@ -651,6 +662,7 @@ const InlineTextFile: React.FC<{
         >
           <Download className='h-4 w-4 text-muted-foreground' />
         </button>
+        {extraActions}
       </div>
 
       {/* Expandable Content */}
@@ -1094,6 +1106,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
   channelId,
   replyCount,
   allThreadAttachments,
+  extraActions,
 }) => {
   const { isMobile } = usePlatform();
   const isOpen = useSelector(
@@ -1188,6 +1201,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(conversationId && { conversationId })}
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
+        {...(extraActions && { extraActions })}
       />
     );
   }

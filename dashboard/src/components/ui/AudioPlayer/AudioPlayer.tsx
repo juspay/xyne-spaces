@@ -167,11 +167,9 @@ export function AudioPlayer({
         disabled={state === 'loading'}
         data-track-category={trackCategory}
         data-track-name='play_recording'
-        className='inline-flex items-center gap-1.5 text-sm font-medium hover:underline transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline'
-        style={{ color: 'var(--call-action-button-color)' }}
+        className='p-2 hover:bg-accent rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-muted-foreground hover:text-foreground'
       >
         <Play className='w-4 h-4 flex-shrink-0 translate-x-[0.5px]' />
-        <span>Play Recording</span>
       </button>
     </div>
   );
