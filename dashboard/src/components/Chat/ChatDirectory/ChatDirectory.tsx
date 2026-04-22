@@ -1,4 +1,4 @@
-import { ReactElement, useState, useMemo, useEffect } from 'react';
+import { ReactElement, useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -54,6 +54,7 @@ const ChatDirectory = ({
 }: ChatDirectoryProps): ReactElement | null => {
   const navigate = useNavigate();
   const location = useLocation();
+  const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel();
@@ -192,6 +193,57 @@ const ChatDirectory = ({
   const handleAddChannelSubmit = (data: CreateChannelFormData): void => {
     createChannelMutation.mutate(data);
   };
+
+  // j/k navigate through starred + channels + DMs as one continuous list when
+  // focus is inside the sidebar list container. j/k appends ?nofocus=1 so the
+  // chat input does NOT auto-focus (keyboard navigation should stay in the
+  // sidebar); Enter navigates without the param so normal auto-focus kicks in.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      if (e.key !== 'j' && e.key !== 'k' && e.key !== 'Enter') return;
+      const active = document.activeElement;
+      if (!listContainerRef.current || !active || !listContainerRef.current.contains(active)) {
+        return;
+      }
+      const tag = (active as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (active as HTMLElement).isContentEditable) {
+        return;
+      }
+      const flat = [...starred, ...channels, ...directMessages];
+      if (flat.length === 0) return;
+      const match = location.pathname.match(/^\/chat\/dir\/([^/?#]+)/);
+      const currentId = match?.[1] ?? null;
+
+      if (e.key === 'Enter') {
+        // Confirm current selection → focus the chat input directly
+        // (URL may already be on this channel thanks to j/k navigation).
+        e.preventDefault();
+        e.stopPropagation();
+        const input = document.querySelector<HTMLElement>(
+          '[aria-label="Message input"] [contenteditable="true"], [aria-label="Message input"]',
+        );
+        input?.focus();
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+      const currentIndex = currentId ? flat.findIndex(c => c.id === currentId) : -1;
+      const delta = e.key === 'j' ? 1 : -1;
+      const nextIndex =
+        currentIndex < 0
+          ? delta > 0
+            ? 0
+            : flat.length - 1
+          : Math.max(0, Math.min(flat.length - 1, currentIndex + delta));
+      const next = flat[nextIndex];
+      if (next && next.id !== currentId) {
+        void navigate(`/chat/dir/${next.id}?nofocus=1`);
+      }
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
+  }, [starred, channels, directMessages, location.pathname, navigate]);
 
   // only use drawer/modal for mobile view otherwise change route
   const handleAddDirectMessage = (): void => {
@@ -423,7 +475,14 @@ const ChatDirectory = ({
         <hr className='border-sidebar-divider h-[0.5px]' />
       </div>
 
-      <div className=' flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1'>
+      <div
+        ref={listContainerRef}
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={0}
+        role='region'
+        aria-label='Channels and direct messages'
+        className=' flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
+      >
         <Accordion.Root
           type='multiple'
           className='space-y-4'

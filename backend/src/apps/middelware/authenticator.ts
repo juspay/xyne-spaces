@@ -5,27 +5,23 @@ import { decrypt } from '@/services/encryptionService';
 import { repositories } from '@/database/repositories';
 import jwt from 'jsonwebtoken';
 
-
 const TokenPayloadSchema = z.object({
-    appId: z.string().min(1, 'appId is required').trim(),
-    userId: z.string().min(1, 'userId is required').trim(),
-  });
+  appId: z.string().min(1, 'appId is required').trim(),
+  userId: z.string().min(1, 'userId is required').trim(),
+});
 
-
-
-/**
- * Helper function to send error response
- */
-function sendError(res: Response, status: number, error: string, message: string): void {
-  res.status(status).json({
-    error,
-    message,
-  });
-}
-
+// Generic error message — don't leak internal details to attackers
+const AUTH_ERROR_MSG = 'Authentication failed';
 
 /**
- * Middleware to authenticate external app requests using JWT token from Authorization header
+ * Middleware to authenticate external app requests using JWT token from Authorization header.
+ *
+ * Security flow:
+ * 1. Extract JWT from Authorization header
+ * 2. Decode header only to get appId (from unverified payload — only used for DB lookup)
+ * 3. Look up signing secret from DB
+ * 4. Verify JWT signature using the secret — this is where trust is established
+ * 5. Validate verified payload structure
  */
 export async function authenticateApp(
   req: Request,
@@ -35,83 +31,77 @@ export async function authenticateApp(
   try {
     // 1. Extract JWT token from Authorization header
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      logger.error('[APP-AUTH] Authorization header is missing or does not start with Bearer');
-      sendError(res, 401, 'Unauthorized', 'JWT token is required in Authorization header (Bearer token)');
+    if (!authHeader?.startsWith('Bearer ')) {
+      sendError(res, 401);
       return;
     }
 
-    const jwtToken = authHeader.substring(7); // Remove 'Bearer ' prefix
-    if (!jwtToken || jwtToken.trim().length === 0) {
-      logger.error('[APP-AUTH] JWT token is missing after Bearer prefix');
-      sendError(res, 401, 'Unauthorized', 'JWT token is required in Authorization header');
+    const jwtToken = authHeader.substring(7);
+    if (!jwtToken.trim()) {
+      sendError(res, 401);
       return;
     }
 
-    // 2. Decode and validate JWT token payload with Zod
+    // 2. Decode WITHOUT verification — only to extract appId/userId for DB lookup.
+    // We don't trust this data yet. It's only used to find the signing secret.
     const decoded = jwt.decode(jwtToken);
     const tokenResult = TokenPayloadSchema.safeParse(decoded);
     if (!tokenResult.success) {
-      logger.error(`[APP-AUTH] Token payload validation failed:`, tokenResult.error);
-      sendError(res, 401, 'Unauthorized', `Invalid token payload`);
+      logger.warn('[APP-AUTH] Token payload structure invalid');
+      sendError(res, 401);
       return;
     }
 
     const { appId, userId } = tokenResult.data;
 
-    // 4. Look up installedApp record using appId and userId
+    // 3. Look up installed app to get signing secret
     const installedApp = await repositories.installedApps.findFirst({
-      where: {
-        appId,
-        userId,
-      },
+      where: { appId, userId },
     });
 
     if (!installedApp) {
-      logger.error(`[APP-AUTH] No installed app found for appId: ${appId} and userId: ${userId}`);
-      sendError(res, 401, 'Unauthorized', 'App installation not found');
+      // Don't log appId/userId — attacker could be probing
+      logger.warn('[APP-AUTH] Installed app not found');
+      sendError(res, 401);
       return;
     }
 
-    // 5. Decrypt the signingSecret from the database
+    // 4. Decrypt signing secret and VERIFY the JWT — this is the actual auth check
     const signingSecret = decrypt(installedApp.signingSecret);
 
-    // 6. Verify the JWT token using the signingSecret
-    const verified = jwt.verify(jwtToken, signingSecret);
-    
-    // Validate verified payload structure
-    const verifiedResult = TokenPayloadSchema.safeParse(verified);
-    if (!verifiedResult.success) {
-      logger.error(`[APP-AUTH] Verified token payload validation failed:`, verifiedResult.error);
-      sendError(res, 401, 'Unauthorized', `Invalid verified token payload`);
+    let verified: unknown;
+    try {
+      verified = jwt.verify(jwtToken, signingSecret, {
+        algorithms: ['HS256'],  // Restrict to expected algorithm — prevents algorithm confusion attacks
+      });
+    } catch (error) {
+      logger.warn('[APP-AUTH] JWT verification failed');
+      sendError(res, 401);
       return;
     }
 
-    // Authentication successful - append userId and appId to request body
-    req.body.userId = userId;
-    req.body.appId = appId;
+    // 5. Validate the VERIFIED payload — now we trust this data
+    const verifiedResult = TokenPayloadSchema.safeParse(verified);
+    if (!verifiedResult.success) {
+      logger.warn('[APP-AUTH] Verified token payload invalid');
+      sendError(res, 401);
+      return;
+    }
+
+    // Use values from verified token, not the unverified decode
+    req.body.userId = verifiedResult.data.userId;
+    req.body.appId = verifiedResult.data.appId;
 
     next();
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError || error instanceof jwt.NotBeforeError) {
-      logger.error(`[APP-AUTH] JWT verification failed:`, error);
-      sendError(res, 401, 'Unauthorized', 'Invalid or expired token');
-      return;
-    }
-    
-    if (error instanceof Error) {
-      const errorMessage = error.message.toLowerCase();
-      if (errorMessage.includes('invalid encrypted data format') || 
-          errorMessage.includes('invalid iv length') ||
-          errorMessage.includes('bad decrypt')) {
-        logger.error(`[APP-AUTH] Failed to decrypt signing secret:`, error);
-        sendError(res, 401, 'Unauthorized', 'Token verification failed');
-        return;
-      }
-    }
-    
-    // All other errors are unexpected
-    logger.error('[APP-AUTH] Unexpected error in authentication middleware:', error);
-    sendError(res, 500, 'Internal server error', 'Authentication failed');
+    logger.error('[APP-AUTH] Unexpected error:', error);
+    sendError(res, 500);
   }
+}
+
+function sendError(res: Response, status: number): void {
+  res.status(status).json({
+    error: status === 500 ? 'Internal server error' : 'Unauthorized',
+    message: AUTH_ERROR_MSG,
+  });
 }

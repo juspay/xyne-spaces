@@ -373,10 +373,17 @@ export class TicketController {
 
       // Use authenticated user's ID as createdBy and updatedBy if not provided
       const userId = req.user?.id;
-      if (!userId) {
+      if (!userId || !req.user) {
         res.status(401).json({ error: 'User not authenticated' });
         return;
       }
+      const queryContext = {
+        userID: userId,
+        workspaceId: req.user.workspaceId,
+        role: req.user.role,
+        orgRole: req.user.orgRole,
+        memberId: req.user.memberId,
+      };
 
       const finalCreatedBy = createdBy || userId;
       const finalUpdatedBy = updatedBy || userId;
@@ -903,13 +910,7 @@ export class TicketController {
             await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
             fraAssignedUserId = fullRoles.member;
 
-            const ticketsHandler = new TicketsSideEffectHandler({ 
-              userID: userId,
-              workspaceId: ticket.workspaceId,
-              role: req.user!.role,
-              orgRole: req.user!.orgRole,
-              memberId: req.user!.memberId,
-            });
+            const ticketsHandler = new TicketsSideEffectHandler(queryContext);
             ticketsHandler.onUpdate({
               entityId: ticket.id,
               entityType: 'tickets',
@@ -927,13 +928,7 @@ export class TicketController {
             }).catch(err => logger.error('[Ticket Creation] TicketsSideEffectHandler error:', err));
           }
 
-          const assignmentsHandler = new TicketAssignmentsSideEffectHandler({ 
-            userID: userId,
-            workspaceId: ticket.workspaceId,
-            role: req.user!.role,
-            orgRole: req.user!.orgRole,
-            memberId: req.user!.memberId,
-          });
+          const assignmentsHandler = new TicketAssignmentsSideEffectHandler(queryContext);
           const fraAssignments = [fullRoles.manager, fullRoles.teamLead, fullRoles.prReviewer, fullRoles.qa].filter((a): a is RoleAssignment => Boolean(a));
           for (const assignment of fraAssignments) {
             assignmentsHandler.onInsert({
@@ -963,13 +958,7 @@ export class TicketController {
       // Send notification for regular auto-assignment (non-FRA)
       // FRA notifications are handled by side-effect handlers above
       if (!pendingFullRoleAssignment && ticket.assignedTo && ticket.assignedTo !== userId) {
-        const ticketsHandler = new TicketsSideEffectHandler({ 
-          userID: userId,
-          workspaceId: ticket.workspaceId,
-          role: req.user!.role,
-          orgRole: req.user!.orgRole,
-          memberId: req.user!.memberId,
-        });
+        const ticketsHandler = new TicketsSideEffectHandler(queryContext);
         ticketsHandler.onUpdate({
           entityId: ticket.id,
           entityType: 'tickets',

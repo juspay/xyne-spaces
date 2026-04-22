@@ -206,6 +206,8 @@ const envSchema = Joi.object({
   VESPA_QUEUE_NAMES: Joi.string().default(''),
   VESPA_FEED_URL: Joi.string().uri().default(''),
   VESPA_QUERY_URL: Joi.string().uri().default(''),
+  // Microsoft Graph API
+  MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default(''),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -479,5 +481,8 @@ export const config = {
     refreshToken: envVars.GOOGLE_REFRESH_TOKEN as string,
     fromEmail: envVars.EMAIL_FROM as string,
     fromName: envVars.EMAIL_FROM_NAME as string,
+  },
+  microsoftGraph: {
+    baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,
   },
 };

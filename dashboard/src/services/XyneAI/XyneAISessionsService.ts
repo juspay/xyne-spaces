@@ -9,9 +9,22 @@ import type {
   StoredMessage,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
+interface SessionsResponse {
+  sessions: SessionListItem[];
+}
+
 // ============================================================================
 // API response types
 // ============================================================================
+
+export async function fetchSessionsByConversationId(
+  conversationId: string,
+): Promise<SessionListItem[]> {
+  const response = await apiInstance.get<SessionsResponse>('/xyne-ai/sessions', {
+    params: { conversationId },
+  });
+  return response.data.sessions;
+}
 
 export interface SessionListItem {
   sessionId: string;
@@ -21,6 +34,17 @@ export interface SessionListItem {
   isStarred: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SessionDetailMessage {
+  id: string;
+  type: 'user' | 'bot';
+  content: string;
+  timestamp: string;
+  summarizerOutput?: {
+    summary: string;
+    keyPoints: Array<{ text: string; citations?: unknown[] }>;
+  };
 }
 
 export interface BackendMessage {

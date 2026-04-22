@@ -42,6 +42,12 @@ export class EmailRepository {
     });
   }
 
+  async findByExternalMessageId(externalMessageId: string): Promise<Email | null> {
+    return await this.db.email.findUnique({
+      where: { externalMessageId },
+    });
+  }
+
   async findByConversationId(conversationId: string): Promise<Email[]> {
     return await this.db.email.findMany({
       where: { conversationId },

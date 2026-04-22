@@ -23,6 +23,7 @@ export interface CreateChannelRequest {
   visibility?: 'PUBLIC' | 'PRIVATE';
   projectId: string;
   participants?: string[];
+  type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT';
 }
 
 export interface CreateChannelResponse {
@@ -97,13 +98,17 @@ export class ChannelService {
     return response.data;
   }
 
-  async createChannel(formData: CreateChannelFormData): Promise<CreateChannelResponse> {
+  async createChannel(
+    formData: CreateChannelFormData,
+    channelType: 'DEFAULT' | 'EMAIL' | 'SUPPORT' = 'DEFAULT',
+  ): Promise<CreateChannelResponse> {
     const requestData = {
       name: formData.name,
       scopeType: 'DEFAULT',
       description: formData.description || '',
       visibility: formData.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
       projectId: formData.projectId,
+      type: channelType,
     };
 
     const response = await apiInstance.post<CreateChannelResponse>('/channels', requestData);

@@ -14,6 +14,7 @@ import { MessageAttachmentRepository } from '@/database/repositories/messageAtta
 import { logger } from '@/utils/logger';
 import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType } from '@prisma/client';
 import { ZohoService } from '@/services/zohoService';
+import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 
 interface ReplyEmailRequest {
   body: string;
@@ -96,36 +97,52 @@ export class EmailController {
         return res.status(404).json({ error: 'External source not found' });
       }
 
-      // Get ticketId and fromEmailAddress from initial email
-      const ticketId = initialEmail.externalThreadId;
+      // Get fromEmailAddress from initial email
       const fromEmailAddress = initialEmail.to[0]; // Reply from the original recipient address
 
-      // Use external source ID as sourceId for Zoho API
-      const sourceId = externalSource.id;
+      logger.info(`[EmailController] Sending ${type} via ${externalSource.sourceType} for conversation ${conversationId}`);
 
-      // 5. Initialize Zoho service and send reply
-      const zohoService = ZohoService.fromEncryptedCredentials(
-        externalSource.credentials,
-        sourceId
-      );
+      // 5. Send reply via the appropriate provider
+      let result: { threadId: string };
 
-      const attachmentIds = req.body.attachmentIds || [];
-      logger.info(`[EmailController] Sending ${type} to ticket ${ticketId} for conversation ${conversationId} with ${attachmentIds.length} attachments`);
-      const result = await zohoService.sendReply({
-        ticketId,
-        content: body,
-        to: toRecipients,
-        cc: ccRecipients,
-        bcc: bccRecipients,
-        fromEmailAddress,
-        attachmentIds,
-        // Only set when externalMessageId differs from externalThreadId (ticket ID).
-        // For initial emails (TICKET_ADD), both fields store the ticket ID — not a valid thread ID for Zoho.
-        // For reply emails (TICKET_THREAD_ADD), externalMessageId is the actual Zoho thread ID.
-        inReplyToThreadId: latestEmail.externalMessageId !== latestEmail.externalThreadId
-          ? latestEmail.externalMessageId
-          : undefined,
-      });
+      if (externalSource.sourceType === 'microsoft') {
+        const sender = MicrosoftDeskService.createEmailSender(
+          externalSource.credentials,
+          externalSource.id
+        );
+        result = await sender.replyToConversation({
+          content: body,
+          subject: initialEmail.subject,
+          to: toRecipients,
+          cc: ccRecipients,
+          bcc: bccRecipients,
+          latestExternalMessageId: latestEmail.externalMessageId,
+        });
+      } else {
+        // Zoho (default)
+        const attachmentIds = req.body.attachmentIds || [];
+        const ticketId = initialEmail.externalThreadId;
+        const sourceId = externalSource.id;
+
+        const zohoService = ZohoService.fromEncryptedCredentials(
+          externalSource.credentials,
+          sourceId
+        );
+
+        const zohoResult = await zohoService.sendReply({
+          ticketId,
+          content: body,
+          to: toRecipients,
+          cc: ccRecipients,
+          bcc: bccRecipients,
+          fromEmailAddress,
+          attachmentIds,
+          inReplyToThreadId: latestEmail.externalMessageId !== latestEmail.externalThreadId
+            ? latestEmail.externalMessageId
+            : undefined,
+        });
+        result = { threadId: zohoResult.threadId };
+      }
 
       // 6. Save reply in database
       const emailType = type === 'REPLY' ? EmailType.REPLY : EmailType.REPLY_ALL;
@@ -165,41 +182,39 @@ export class EmailController {
         logger.warn(`[EmailController] Failed to delete draft for conversation ${conversationId}:`, error);
       }
 
-      // 8. Store attachment references in MessageAttachment table for UI display
-      if (attachmentIds.length > 0) {
-        try {
-          // Create attachment records for each Zoho attachment ID
-          // Note: Zoho attachment IDs are stored with external URL pattern
-          const emailWorkspaceId = await this.channelRepo.getWorkspaceId(conversation.channelId);
-          for (const attachmentId of attachmentIds) {
-            await this.messageAttachmentRepo.create({
-              entityType: AttachmentEntityType.EMAIL,
-              entityId: newEmail.id,
-              url: `https://desk.zoho.com/api/v1/uploads/${attachmentId}`, // Zoho attachment URL pattern
-              originalFilename: `attachment-${attachmentId}`, // Generic name since we don't have original filename
-              size: 0, // Size unknown from Zoho response
-              mimetype: 'application/octet-stream', // Generic type
-              createdBy: req.user?.id || 'system',
-              uploadedByUserId: req.user?.id || 'system',
-              storageProvider: 'zoho',
-              conversationId: conversationId,
-              workspaceId: emailWorkspaceId,
-              metadata: { zohoAttachmentId: attachmentId, source: 'zoho_upload' },
-            });
-          }
-          logger.info(`[EmailController] Stored ${attachmentIds.length} attachment references for email: ${newEmail.id}`);
-        } catch (error) {
-          logger.warn(`[EmailController] Failed to store attachment references:`, error);
-        }
-      }
-
-      // Get stored attachments for response
+      // 8. Store Zoho attachment references in MessageAttachment table for UI display
       let storedAttachments: any[] = [];
-      if (attachmentIds.length > 0) {
-        try {
-          storedAttachments = await this.messageAttachmentRepo.findByEntityIdAndType(newEmail.id, AttachmentEntityType.EMAIL);
-        } catch (error) {
-          logger.warn(`[EmailController] Failed to fetch stored attachments:`, error);
+      if (externalSource.sourceType === 'zoho') {
+        const attachmentIds = req.body.attachmentIds || [];
+        if (attachmentIds.length > 0) {
+          try {
+          const emailWorkspaceId = await this.channelRepo.getWorkspaceId(conversation.channelId);
+            for (const attachmentId of attachmentIds) {
+              await this.messageAttachmentRepo.create({
+                entityType: AttachmentEntityType.EMAIL,
+                entityId: newEmail.id,
+                url: `https://desk.zoho.com/api/v1/uploads/${attachmentId}`,
+                originalFilename: `attachment-${attachmentId}`,
+                size: 0,
+                mimetype: 'application/octet-stream',
+                createdBy: req.user?.id || 'system',
+                uploadedByUserId: req.user?.id || 'system',
+                storageProvider: 'zoho',
+                conversationId: conversationId,
+              workspaceId: emailWorkspaceId,
+                metadata: { zohoAttachmentId: attachmentId, source: 'zoho_upload' },
+              });
+            }
+            logger.info(`[EmailController] Stored ${attachmentIds.length} attachment references for email: ${newEmail.id}`);
+          } catch (error) {
+            logger.warn(`[EmailController] Failed to store attachment references:`, error);
+          }
+
+          try {
+            storedAttachments = await this.messageAttachmentRepo.findByEntityIdAndType(newEmail.id, AttachmentEntityType.EMAIL);
+          } catch (error) {
+            logger.warn(`[EmailController] Failed to fetch stored attachments:`, error);
+          }
         }
       }
 

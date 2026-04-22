@@ -2134,6 +2134,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: ticketTagTable,
   }),
+  emails: many({
+    sourceField: ['conversationId'],
+    destField: ['conversationId'],
+    destSchema: emailTable,
+  }),
   referencesOut: many({
     sourceField: ['id'],
     destField: ['sourceTicketId'],

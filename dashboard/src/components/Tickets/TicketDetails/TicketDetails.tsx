@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useZero } from '../../../hooks/useZero';
+import { useShortcut } from '../../../shortcuts';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -297,6 +298,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const location = useLocation();
   const { isMobile } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
+
+  // j / k navigate between tickets when the detail view exposes navigation callbacks.
+  useShortcut('j', () => onNavigateNext?.(), {
+    scope: 'global',
+    description: 'Next ticket',
+    category: 'Tickets',
+    enabled: !!(onNavigateNext && navigation?.canNavigateNext),
+  });
+  useShortcut('k', () => onNavigatePrevious?.(), {
+    scope: 'global',
+    description: 'Previous ticket',
+    category: 'Tickets',
+    enabled: !!(onNavigatePrevious && navigation?.canNavigatePrevious),
+  });
 
   // State declarations
   const [editingTitle, setEditingTitle] = useState(false);

@@ -33,6 +33,7 @@ export class AdapterFactory {
       preprocess: flow?.preprocess?.bind(flow),
       getSourceNameFromDB: flow?.getSourceNameFromDB?.bind(flow),
       isTestPayload: flow?.isTestPayload?.bind(flow),
+      isTestQueryParam: flow?.isTestQueryParam?.bind(flow),
       transform: transformer.transform.bind(transformer),
       postprocess: postprocessor?.process.bind(postprocessor) ||
                   transformer.postprocess?.bind(transformer),

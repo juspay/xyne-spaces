@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { TicketStatus } from '@xyne/shared';
+import { TicketStatus, TicketPriority } from '@xyne/shared';
 
 export interface TicketListItem {
   id: string;
@@ -8,7 +8,10 @@ export interface TicketListItem {
   status: TicketStatus | string;
   stageName?: string | null;
   createdAt: number;
+  priority?: TicketPriority | string | null;
+  assignedTo?: string | null;
   metadata?: unknown;
+  emails?: readonly unknown[] | null;
   _raw?: Record<string, unknown>;
 }
 

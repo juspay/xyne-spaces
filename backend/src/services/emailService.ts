@@ -354,42 +354,72 @@ export class EmailService {
       select: { id: true },
     });
 
-    // Step 1: Create conversation
-    const conversationData: CreateConversationInput = {
-      channelId,
-      createdBy: userId,
-      initialMessageId: 'temp', // Will be updated after message creation
-    };
+    // Create conversation + email + ticket in a single transaction.
+    // Email has @@unique on externalMessageId — if a duplicate notification arrives
+    // concurrently, the transaction rolls back everything (no orphaned tickets).
+    let txResult: { conversation: any; ticket: any; email: any };
+    try {
+      txResult = await this.prisma.$transaction(async (tx) => {
+      // Create conversation
+      const conv = await tx.conversation.create({
+        data: {
+          channelId,
+          createdBy: userId,
+          initialMessageId: 'temp',
+        },
+      });
 
-    const conversation = await this.conversationRepository.create(conversationData);
+      // Create email FIRST — unique constraint on externalMessageId acts as dedup lock.
+      // If this fails (P2002), the entire transaction rolls back.
+      const createdEmail = await tx.email.create({
+        data: {
+          type: EmailType.DEFAULT,
+          subject: emailSubject,
+          body: emailBody,
+          to: emailTo,
+          from: emailFrom,
+          cc: emailCc || [],
+          bcc: emailBcc || [],
+          conversationId: conv.conversationId,
+          externalThreadId,
+          externalMessageId,
+        },
+      });
 
-    // Step 2: Create ticket and generate xyneId in a transaction
-    const ticket = await this.prisma.$transaction(async (tx) => {
-      // Generate xyneId using project-scoped format
+      // Generate xyneId and create ticket
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
-
-      // Create ticket using transaction client
       const createdTicket = await tx.ticket.create({
         data: {
           title: emailSubject,
           description: emailBody,
           createdBy: userId,
           updatedBy: userId,
-          conversationId: conversation.conversationId,
-          channelId: channelId,
-          xyneId: xyneId,
-          projectId: projectId,
+          conversationId: conv.conversationId,
+          channelId,
+          xyneId,
+          projectId,
           workspaceId: channel.workspaceId,
-          boardId: boardId,
+          boardId,
           stageName: firstStage.name,
           ...(userGroup && { userGroupId: groupId }),
           ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
-        }
+        },
       });
 
       await syncConversationTicketMdFromPrismaTicket(tx, createdTicket);
-      return createdTicket;
+
+      return { conversation: conv, ticket: createdTicket, email: createdEmail };
     });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        logger.warn(`[EmailService] Duplicate externalMessageId skipped: ${externalMessageId}`);
+        return { isDuplicate: true };
+      }
+      throw err;
+    }
+    const { conversation, ticket, email } = txResult;
+
+    // --- Side effects (outside transaction) ---
 
     this.pushVespaJobForTicket(ticket.id, userId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
@@ -424,14 +454,13 @@ export class EmailService {
           });
 
           await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
-          
+
           // Sync workload mapping for the assigned user
           try {
             await syncUserWorkload(assignmentResult.assignedUserId, groupId, boardId, userId);
             logger.info(`[EmailService] Synced workload for user ${assignmentResult.assignedUserId}`);
           } catch (workloadError) {
             logger.error('[EmailService] Error syncing workload:', workloadError);
-            // Don't fail the assignment if workload sync fails
             }
           }
         }
@@ -440,9 +469,10 @@ export class EmailService {
       }
     }
 
-    // Start workflow (controlled by config)
+    // Start workflow (only for Zoho sources, controlled by config)
+    const isZohoSource = sourceName?.startsWith('zoho');
     let workflowResult: { workflowId: string; executionId: string; status: string } | null = null;
-    if (config.zoho.autoWorkflowEnabled) {
+    if (isZohoSource && config.zoho.autoWorkflowEnabled) {
       try {
         workflowResult = await workflowManager.startWorkflow({
           ticketId: ticket.id,
@@ -459,7 +489,7 @@ export class EmailService {
       logger.info(`[EmailService] Skipping auto-workflow for ticket ${ticket.id} (ZOHO_AUTO_WORKFLOW_ENABLED=false)`);
     }
 
-    // Step 3: Create BOT message with ticket (always created first)
+    // Create BOT message with ticket
     const messageData: CreateMessageInput = {
       conversationId: conversation.conversationId,
       senderId: userId,
@@ -480,8 +510,7 @@ export class EmailService {
     });
     await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
-    //Create SYSTEM message for WorkflowBubble (only when workflow is enabled, AFTER ticket message)
-    if (config.zoho.autoWorkflowEnabled) {
+    if (isZohoSource && config.zoho.autoWorkflowEnabled) {
       const messageDataSys: CreateMessageInput = {
         conversationId: conversation.conversationId,
         senderId: userId,
@@ -500,22 +529,6 @@ export class EmailService {
       };
       await this.messageRepository.create(messageDataSys, true);
     }
-
-    // Create email entry with type DEFAULT
-    const emailData = {
-      type: EmailType.DEFAULT,
-      subject: emailSubject,
-      body: emailBody,
-      to: emailTo,
-      from: emailFrom,
-      cc: emailCc,
-      bcc: emailBcc,
-      conversationId: conversation.conversationId,
-      externalThreadId: externalThreadId,
-      externalMessageId: externalMessageId,
-    };
-
-    const email = await this.emailRepository.create(emailData);
 
     // Create MessageAttachment entries for email attachments
     await this.createEmailAttachments(email.id, conversation.conversationId, userId, channel.workspaceId, uploadedFiles);

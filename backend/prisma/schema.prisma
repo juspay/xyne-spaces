@@ -1741,9 +1741,9 @@ model Email {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([externalMessageId])
   @@index([conversationId])
   @@index([externalThreadId])
-  @@index([externalMessageId])
   @@map("emails")
   @@schema("public")
 }

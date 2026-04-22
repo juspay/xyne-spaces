@@ -648,7 +648,8 @@ export class ChannelController {
         description,
         visibility,
         projectId,
-        participants
+        participants,
+        type: channelType
       }: {
         scopeType: ChannelScopeType;
         scopeId?: string;
@@ -657,6 +658,7 @@ export class ChannelController {
         visibility?: ChannelVisibility;
         projectId: string;
         participants?: string[];
+        type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT';
       } = req.body;
 
       const userId = req.user!.id;
@@ -752,6 +754,7 @@ export class ChannelController {
         createdBy: userId,
         projectId,
         workspaceId: req.user!.workspaceId!,
+        type: channelType || 'DEFAULT',
       };
 
       const channel = await this.channelRepository.create(channelData);

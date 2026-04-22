@@ -12,6 +12,8 @@ import { ExternalSource } from '@prisma/client';
 export enum ExternalSourcePlatform {
   ZOHO = 'zoho',
   SLACK = 'slack',
+  MICROSOFT = 'microsoft',
+  GOOGLE = 'google',
 }
 
 /**
@@ -165,6 +167,10 @@ export interface ExternalSourceAdapter {
 
   /** Optional: Check if the payload is a test payload and return response if it is */
   isTestPayload?(payload: unknown): TestPayloadResult;
+
+  /** Optional: Handle webhook verification via query params (e.g., ?validationToken).
+   *  Runs BEFORE source DB lookup — source may not exist yet during subscription setup. */
+  isTestQueryParam?(query: Record<string, string | undefined>): TestPayloadResult;
 
   /** Transform platform-specific data to NormalizedData */
   transform(payload: unknown): Promise<ParseResult<NormalizedData>>;
