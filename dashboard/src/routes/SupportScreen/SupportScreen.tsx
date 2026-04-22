@@ -1512,6 +1512,26 @@ const EmailComposer = ({
     conversationId: conversationId || '',
   });
   const [emailContent, setEmailContent] = useState<string>('');
+
+  // Persist the AI draft exactly once, on the streaming → finished transition.
+  // Two problems this avoids:
+  //  - writing during streaming (would hammer Zero on every chunk)
+  //  - re-firing whenever `saveDraft`'s identity flips. The underlying Zero
+  //    live query (`getDraftForConversation`) re-emits on every upsert, which
+  //    rebuilds the `saveDraft` callback, which re-triggers this effect —
+  //    a self-sustaining save loop that saturates the Zero socket.
+  const saveDraftRef = useRef(saveDraft);
+  useEffect(() => {
+    saveDraftRef.current = saveDraft;
+  }, [saveDraft]);
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    const justFinished = wasStreamingRef.current && !aiDraft.isStreaming;
+    wasStreamingRef.current = aiDraft.isStreaming;
+    if (!justFinished || !aiDraft.isDraftActive) return;
+    const content = aiDraft.draftContent?.trim();
+    if (content) saveDraftRef.current(aiDraft.draftContent);
+  }, [aiDraft.isStreaming, aiDraft.isDraftActive, aiDraft.draftContent]);
   const [hasAcceptedDraft, setHasAcceptedDraft] = useState<boolean>(false);
   const [isSending, setIsSending] = useState<boolean>(false);
   const users = useUsers();
