@@ -15,3 +15,18 @@ export const TRUSTED_ORIGINS: string[] = [
   'https://xyne-spaces.web',
   'https://spaces.sandbox.xyne.juspay.net',
 ];
+
+/**
+ * Paths hosted on internal Xyne domains that live outside the React app.
+ * Links to these paths should open in the system browser (Electron) or a
+ * new tab (web) rather than being routed within the React app.
+ *
+ * Used by:
+ *  - dashboard/src/components/Chat/RenderMessageWithHTML/internalLinkUtils.ts
+ *  - electron/src/window/manager.ts
+ *
+ * Add new entries here when a new external tool/service is deployed on the
+ * same domain (e.g. '/grafana', '/kibana').
+ * Matching is prefix-based: '/claw' covers '/claw' and '/claw/anything'.
+ */
+export const EXTERNAL_XYNE_PATHS: string[] = ['/claw', '/changelog', '/demo', '/apps/downloads'];

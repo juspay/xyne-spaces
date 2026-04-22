@@ -1,4 +1,5 @@
 import React from 'react';
+import { EXTERNAL_XYNE_PATHS } from '@xyne/shared';
 
 export type InternalXyneLinkKind =
   | 'canvas'
@@ -118,6 +119,20 @@ export const isExternalUrl = (url: string): boolean => {
     return new URL(url, window.location.origin).origin !== window.location.origin;
   } catch {
     return true;
+  }
+};
+
+export const isExternalXynePath = (url: string): boolean => {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const isXyneHost =
+      INTERNAL_XYNE_HOSTS.has(parsed.hostname) || parsed.origin === window.location.origin;
+    if (!isXyneHost) return false;
+    return EXTERNAL_XYNE_PATHS.some(
+      p => parsed.pathname === p || parsed.pathname.startsWith(p + '/'),
+    );
+  } catch {
+    return false;
   }
 };
 

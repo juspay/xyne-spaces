@@ -59,6 +59,8 @@ const App = (): ReactElement => {
 
       if (anchor.protocol === 'blob:') return;
 
+      if (anchor.target === '_blank') return;
+
       // Check origin directly from anchor element
       if (anchor.origin === window.location.origin || TRUSTED_ORIGINS.includes(anchor.origin)) {
         event.preventDefault();
