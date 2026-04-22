@@ -911,17 +911,11 @@ export const mutators = defineMutators({
         const participant = await tx.run(
           zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
         );
-
         if (!participant) {
           throw new Error('Only channel participants can update the description');
         }
-
-        // Get user info for system message
+        // Get user info for system message (optional — user may not be in local replica yet)
         const user = await tx.run(zql.users.where('id', ctx.userID).one());
-        if (!user) {
-          throw new Error('User not found');
-        }
-
         await tx.mutate.channels.update({
           id: channelId,
           description: description,
@@ -967,7 +961,7 @@ export const mutators = defineMutators({
             operationType: 'description_updated',
             newDescription: description,
             userId: ctx.userID,
-            userName: user.name,
+            userName: user?.name,
           },
         });
 
