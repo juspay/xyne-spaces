@@ -3,12 +3,14 @@ const isElectronBundled = window.location.protocol.startsWith('xyne-spaces');
 
 const hostname = window.location.hostname;
 export const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
-export const isTestEnv = import.meta.env.MODE === 'test' || hostname === 'dashboard';
+export const isSandboxLocal = hostname.endsWith('.localhost');
+export const isTestEnv =
+  import.meta.env.MODE === 'test' || hostname === 'dashboard' || isSandboxLocal;
 
 export const isSandBox = hostname.includes('sandbox');
-export const isProd = !isLocalhost && !isSandBox;
+export const isProd = !isLocalhost && !isSandBox && !isSandboxLocal;
 
-const protocol = isLocalhost || isTestEnv ? 'http' : 'https';
+const protocol = isLocalhost || isTestEnv || isSandboxLocal ? 'http' : 'https';
 
 const ELECTRON_BACKEND_URL = isProd
   ? 'https://app.spaces.xyne.juspay.net'
@@ -20,21 +22,22 @@ const ELECTRON_BACKEND_ZERO_URL = isProd
   : isSandBox
     ? 'https://app.spaces.sandbox.xyne.juspay.net'
     : 'http://localhost:4848';
-const backendPort = isLocalhost ? ':3001' : isTestEnv ? ':5173' : '';
+const isDockerTestEnv = isTestEnv && !isSandboxLocal;
+const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
 
 export const API_BASE_URL = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/api`
   : `${protocol}://${hostname}${backendPort}/api`;
 
 // Zero Cache
-const zeroCachePort = isLocalhost ? ':4848' : isTestEnv ? ':5173' : '';
+const zeroCachePort = isLocalhost ? ':4848' : isDockerTestEnv ? ':5173' : '';
 export const VITE_ZERO_SERVER = isElectronBundled
   ? `${ELECTRON_BACKEND_ZERO_URL}/zero`
   : `${protocol}://${hostname}${zeroCachePort}/zero`;
 
 // OpenTelemetry
-const otelHost = isTestEnv ? 'otel-collector' : hostname;
-const otelPort = isLocalhost || isTestEnv ? ':4318' : '';
+const otelHost = isDockerTestEnv ? 'otel-collector' : hostname;
+const otelPort = isLocalhost || isDockerTestEnv ? ':4318' : '';
 export const OTEL_METRICS_ENDPOINT = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/godel/v1/metrics`
   : `${protocol}://${otelHost}${otelPort}/godel/v1/metrics`;

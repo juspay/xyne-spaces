@@ -10,6 +10,7 @@ import { resolveChannelId } from '../utils/channelUtils';
 import { MessageType } from '@xyne/shared';
 import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
+import { redisService } from '@/services/redisService';
 
 const ChatActionBodySchema = z.object({
   text: z.string().optional(), // plain text or Slack BlockKit — processed through parser
@@ -59,6 +60,20 @@ const ChannelHistoryQuerySchema = z.object({
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
 );
+
+/**
+ * Ephemeral agent progress signal — no DB write, just Redis pub/sub.
+ * Published by xyne-claw-auth while an agent is running. Consumed by the dashboard
+ * to render <AgentSpinner /> inline (same transport as the typing indicator).
+ */
+const AgentProgressBodySchema = z.object({
+  conversationId: z.string().min(1).trim(),
+  channelId: z.string().min(1).trim().optional(),
+  userId: z.string().min(1).trim(),     // agent's spacesAppUserId — must be channel participant
+  agentSlug: z.string().min(1).trim().optional(),
+  toolLabel: z.string().optional(),
+  status: z.enum(['working', 'done']).default('working'),
+});
 
 const ConversationRepliesQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
@@ -261,6 +276,68 @@ export class ChatController {
   };
 
   /**
+   * Publish an ephemeral agent progress signal (no DB write).
+   * POST /api/apps/chat/agentProgress
+   *
+   * Body: { conversationId, channelId?, userId (agent), agentSlug?, toolLabel?, status }
+   * Delivery: Redis pub/sub on `session:{channelId}:messages` — same channel as typing indicator,
+   * so the dashboard WebSocket already subscribes. msgType=SYSTEM so it does not persist.
+   */
+  agentProgress = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const parsed = AgentProgressBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: parsed.error.errors });
+        return;
+      }
+      const { conversationId, channelId, userId, agentSlug, toolLabel, status } = parsed.data;
+
+      // Resolve channelId if only conversationId was given — dashboard subscribes on channel.
+      const resolvedChannelId = await resolveChannelId(channelId, conversationId);
+
+      const now = new Date().toISOString();
+      const payload = {
+        conversationId,
+        channelId: resolvedChannelId,
+        agentSlug,
+        agentUserId: userId,
+        toolLabel: toolLabel ?? null,
+        status,
+        timestamp: now,
+      };
+
+      // Persist current state in a Redis hash so clients that open the thread mid-run
+      // (or reload) can rehydrate. TTL = 10 min matches the client's stale backstop;
+      // a single tool step may run for minutes without emitting new progress events,
+      // so anything shorter would vanish the spinner even though the agent is still working.
+      const stateKey = `agent_progress:conversation:${conversationId}`;
+      const stateTtlSeconds = 10 * 60;
+      if (status === 'done') {
+        await redisService.deleteHashField(stateKey, userId);
+      } else {
+        await redisService.setHashField(stateKey, userId, JSON.stringify(payload), stateTtlSeconds);
+      }
+
+      // Broadcast the live event to subscribed sockets.
+      const event = {
+        messageId: `agent_progress_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        conversationId,
+        senderId: userId,
+        senderName: agentSlug ?? 'agent',
+        content: JSON.stringify({ type: 'agent_progress', data: payload }),
+        msgType: 'SYSTEM' as const,
+        createdAt: new Date(),
+      };
+      await redisService.broadcastMessageToSession(resolvedChannelId, event);
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('[agentProgress] publish error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
    * Get channel history with cursor-based pagination
    * GET /api/external-event/chat/channelHistory?channelId=xxx&limit=1000&cursor=xxx
    */
@@ -377,24 +454,23 @@ export class ChatController {
     const context = typeof body.context === 'object' && body.context !== null ? body.context : {};
     const messageId = typeof body.messageId === 'string' ? body.messageId : '';
     const conversationId = typeof body.conversationId === 'string' ? body.conversationId : '';
+    const callerUserId = req.user?.id;
 
     if (!actionId || !actionableUrl || !messageId || !conversationId) {
       res.status(400).json({ error: 'actionId, actionableUrl, messageId, conversationId are required' });
       return;
     }
 
-    // Get user ID from authenticated request
-    const userId = req.user?.id;
-
     // Acknowledge immediately so the frontend isn't blocked
     res.status(200).json({ success: true });
 
     // Forward to the external URL server-side (no CORS issues)
+    // callerUserId is derived from the authenticated session (XYNE-12145)
     try {
       const callbackRes = await fetch(actionableUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actionId, context, messageId, conversationId, userId }),
+        body: JSON.stringify({ actionId, context, messageId, conversationId, callerUserId }),
         signal: AbortSignal.timeout(30_000),
       });
       if (!callbackRes.ok) {

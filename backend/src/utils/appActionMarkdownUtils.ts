@@ -4,6 +4,7 @@ import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import { load as yamlLoad, dump as yamlDump } from 'js-yaml';
 import { db } from '@/database/client';
+import { messageMetadataService } from '@/services/messageMetadataService';
 
 function parseFrontmatter(markdown: string): { data: Record<string, unknown>; end: number } | null {
   const tree = unified()
@@ -36,7 +37,7 @@ export async function updateAppActionStatus(
 ): Promise<void> {
   const message = await db.message.findUnique({
     where: { messageId },
-    select: { content: true },
+    select: { content: true, conversationId: true },
   });
 
   if (!message) {
@@ -81,4 +82,7 @@ export async function updateAppActionStatus(
     where: { messageId },
     data: { content: updatedContent, edited: true },
   });
+
+  // Sync to conversations.initial_message_md so Zero picks up the change
+  await messageMetadataService.syncInitialMessageMd(message.conversationId);
 }

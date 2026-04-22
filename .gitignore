@@ -208,3 +208,6 @@ lotus/ios/lotus.xcodeproj/project.xcworkspace/
 # Agents
 .sisyphus/
 .airborne
+
+# Sandbox environments (agent worktrees)
+.sandboxes/

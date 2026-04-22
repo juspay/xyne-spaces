@@ -38,11 +38,10 @@ import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
+import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
 import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
@@ -479,17 +478,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const ticketSuggestions = parsedMarkdown.ticketSuggestions;
   const ticketsCreated = parsedMarkdown.ticketsCreated;
 
+  const { user } = useAuth();
+
   const hasAppActions = metadata?.['hasAppActions'] === true;
   const parsedAppActions = useMemo(() => {
-    if (hasAppActions) {
-      return parseMarkdownWithAppActions(message.content);
+    if (!hasAppActions) {
+      return { appActions: [], actioned: [], content: message.content };
     }
-    return { appActions: [], actioned: [], content: message.content };
-  }, [hasAppActions, message.content]);
+    const parsed = parseMarkdownWithAppActions(message.content);
+    // Only show active buttons to the intended user
+    const visibleActions = parsed.appActions.filter(a => {
+      const ctx = a.context ?? {};
+      return ctx['mentionedUserId'] === user?.id || ctx['userId'] === user?.id;
+    });
+    return { ...parsed, appActions: visibleActions };
+  }, [hasAppActions, message.content, user?.id]);
 
   const isPulseActionablesMessage = metadata?.['messageSubtype'] === 'pulse_actionables';
 
-  const { user } = useAuth();
   const { isMobile } = usePlatform();
   const sender = useUser(message.senderId);
   const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
@@ -928,17 +934,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 />
               ) : isMarkdownContent ? (
                 <>
-                  <div
-                    className={
-                      metadata?.messageSubtype === 'call_summary'
-                        ? 'bot-markdown-content-call-summary'
-                        : 'bot-markdown-content'
-                    }
-                  >
-                    <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                      {parsedMarkdown.content}
-                    </Markdown>
-                  </div>
+                  <MarkdownMessageRenderer
+                    content={parsedMarkdown.content}
+                    markdownComponents={markdownComponents}
+                    messageSubtype={metadata?.messageSubtype}
+                  />
                   {(ticketSuggestions.length > 0 || ticketsCreated.length > 0) && channelId && (
                     <TicketSuggestions
                       suggestions={ticketSuggestions}

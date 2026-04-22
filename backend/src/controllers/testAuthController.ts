@@ -42,7 +42,8 @@ export class TestAuthController {
         const requestId = `TEST_LOGIN_${Date.now()}`;
 
         try {
-            if (!config.isTestEnv) {
+            const enableDevAuth = process.env.ENABLE_DEV_AUTH === 'true' && process.env.NODE_ENV === 'development';
+            if (!config.isTestEnv && !enableDevAuth) {
                 logger.error(`[${requestId}] Test login attempted in non-test environment!`);
                 res.status(403).json({
                     error: 'Forbidden',
@@ -53,10 +54,23 @@ export class TestAuthController {
 
             const isAdmin = req.body.isAdmin === true || req.query.isAdmin === 'true';
 
-            logger.info(`[${requestId}] Test login initiated (isAdmin: ${isAdmin})`);
-
-            TestAuthController.userIndex++;
-            const testUserData = TestAuthController.generateTestUser(TestAuthController.userIndex);
+            let testUserData;
+            if (enableDevAuth && process.env.DEFAULT_ADMIN_EMAIL) {
+                const adminEmail = process.env.DEFAULT_ADMIN_EMAIL;
+                const emailUser = adminEmail.split('@')[0];
+                const name = emailUser.split(/[.\-_]/).map((part: string) =>
+                    part.charAt(0).toUpperCase() + part.slice(1)
+                ).join(' ');
+                testUserData = {
+                    googleId: `dev-admin-${adminEmail.replace(/[^a-zA-Z0-9]/g, '-')}`,
+                    email: adminEmail,
+                    name: name || 'Sandbox Admin',
+                    picture: `https://ui-avatars.com/api/?name=Sandbox+Admin&background=random`,
+                };
+            } else {
+                TestAuthController.userIndex++;
+                testUserData = TestAuthController.generateTestUser(TestAuthController.userIndex);
+            }
 
             let organization: any;
             let workspace: any;

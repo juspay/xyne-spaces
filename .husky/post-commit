@@ -8,29 +8,50 @@ BLUE='\033[0;34m'
 CYAN_BOLD='\033[1;36m'
 NC='\033[0m' # No Color
 
-exec < /dev/tty
+# Non-interactive control (for agents / CI):
+#   XYNE_RUN_TESTS=0 or CI=1 → skip tests silently
+#   XYNE_RUN_TESTS=1         → run tests without prompting
+#   unset + TTY available    → prompt as before
+#   unset + no TTY           → skip with a helpful message
+if [ "$XYNE_RUN_TESTS" = "0" ] || [ -n "$CI" ]; then
+    exit 0
+fi
 
-echo ""
-echo "🧪 ${CYAN_BOLD}Run automation tests now?${NC}"
-echo "   ${YELLOW}(Running tests locally is faster and more reliable than waiting for Jenkins)${NC}"
-echo ""
-printf "   Run tests? [Y/n] "
-read -r response
+RUN_TESTS=false
 
-case "$response" in
-    [yY][eE][sS]|[yY]|"")
-        echo "   ${GREEN}Running tests...${NC}"
-        RUN_TESTS=true
-        ;;
-    *)
-        echo "   ${YELLOW}Skipping tests.${NC}"
-        echo ""
-        echo "   ${BLUE}You can retrigger this flow later by running:${NC}"
-        echo "      npm run test && npm run test:push"
-        echo ""
-        exit 0
-        ;;
-esac
+if [ "$XYNE_RUN_TESTS" = "1" ]; then
+    RUN_TESTS=true
+elif ( exec </dev/tty ) 2>/dev/null; then
+    exec < /dev/tty
+
+    echo ""
+    echo "🧪 ${CYAN_BOLD}Run automation tests now?${NC}"
+    echo "   ${YELLOW}(Running tests locally is faster and more reliable than waiting for Jenkins)${NC}"
+    echo ""
+    printf "   Run tests? [Y/n] "
+    read -r response
+
+    case "$response" in
+        [yY][eE][sS]|[yY]|"")
+            echo "   ${GREEN}Running tests...${NC}"
+            RUN_TESTS=true
+            ;;
+        *)
+            echo "   ${YELLOW}Skipping tests.${NC}"
+            echo ""
+            echo "   ${BLUE}You can retrigger this flow later by running:${NC}"
+            echo "      npm run test && npm run test:push"
+            echo ""
+            exit 0
+            ;;
+    esac
+else
+    echo ""
+    echo "ℹ️  Non-interactive shell — skipping post-commit test prompt."
+    echo "   Set XYNE_RUN_TESTS=1 to run automation tests, or XYNE_RUN_TESTS=0 (or CI=1) to silence this message."
+    echo "   Run later with: npm run test && npm run test:push"
+    exit 0
+fi
 
 if [ "$RUN_TESTS" = "true" ]; then
   echo ""

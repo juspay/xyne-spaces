@@ -5,6 +5,8 @@ import { ChatEventType, ChatActionResponse, ChannelHistoryResponse, ChannelHisto
 import { UploadedFileResult } from '@/services/fileUploadService';
 import { repositories } from '@/database/repositories';
 import { decodeCursor, paginateResults } from './paginationUtils';
+import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
+import { buildUserQueryContext } from '@/utils/queryContext';
 
 /**
  * Find or create a conversation and add a message
@@ -52,6 +54,15 @@ export async function findOrCreateConversation(
         uploadedFiles: uploadedFiles,
       });
 
+      // Trigger side effects for notifications, activities, and unread counts
+      const ctx = await buildUserQueryContext(userId);
+      const handler = new MessagesSideEffectHandler(ctx);
+      handler.onInsert({
+        entityId: result.message.messageId,
+        entityType: 'messages',
+        operation: 'insert'
+      }).catch(err => logger.error('[INGEST-CONVERSATION] Side-effect handler error: addMessageToConversation', err));
+
       return {
         eventType: ChatEventType.MESSAGE_POSTED,
         conversationId: result.conversation.conversationId,
@@ -69,6 +80,15 @@ export async function findOrCreateConversation(
         messageMetadata: metadata,
         uploadedFiles: uploadedFiles,
       });
+
+      // Trigger side effects for notifications, activities, and unread counts
+      const ctx = await buildUserQueryContext(userId);
+      const handler = new MessagesSideEffectHandler(ctx);
+      handler.onInsert({
+        entityId: result.message.messageId,
+        entityType: 'messages',
+        operation: 'insert'
+      }).catch(err => logger.error('[INGEST-CONVERSATION] Side-effect handler error: createConversationWithMessage', err));
 
       return {
         eventType: ChatEventType.MESSAGE_POSTED,
