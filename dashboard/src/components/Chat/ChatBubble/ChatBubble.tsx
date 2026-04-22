@@ -178,6 +178,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     conversation?.conversationId,
   ]);
   const [showHoverActions, setShowHoverActions] = useState(false);
+
   const [showLinkPreview, setShowLinkPreview] = useState(true);
   const [showCanvasPreview, setShowCanvasPreview] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -190,6 +191,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const isScrollingRef = useRef(false);
   const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const touchEndedInsideRef = useRef(false);
+  const isMouseHoveringRef = useRef(false);
 
   useEffect(() => {
     setIsEditing(editingMessageId === message.messageId);
@@ -222,6 +224,13 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   useEffect(() => {
     onEmojiPickerOpenChange?.(isEmojiPickerOpen);
   }, [isEmojiPickerOpen, onEmojiPickerOpenChange]);
+
+  // When both sub-menus are closed and the mouse has left, hide the action tray.
+  useEffect(() => {
+    if (!isEmojiPickerOpen && !isDropdownOpen && !isMouseHoveringRef.current) {
+      setShowHoverActions(false);
+    }
+  }, [isEmojiPickerOpen, isDropdownOpen]);
 
   const handleActionsDrawerOpenChange = (open: boolean): void => {
     setIsActionsDrawerOpen(open);
@@ -804,10 +813,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       }}
       onMouseEnter={() => {
         if (!isMobile) {
+          isMouseHoveringRef.current = true;
           setShowHoverActions(true);
         }
       }}
       onMouseLeave={() => {
+        isMouseHoveringRef.current = false;
         if (!isEmojiPickerOpen && !isDropdownOpen) {
           setShowHoverActions(false);
         }
