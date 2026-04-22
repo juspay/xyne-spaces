@@ -1,3 +1,11 @@
+## [1.125.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.125.0...v1.125.1) (2026-04-22)
+
+
+### Bug Fixes
+
+* draft ai fix ([42c7ce8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/42c7ce81f9a05a0f717d07a0e8a6cd0cf3364d97)), closes [#5339](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5339)
+* support-screen-fixes ([0ec7f9e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0ec7f9e6dcde34a4bd9b5dbe1fc5e005e61a27a6)), closes [#5332](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5332)
+
 ## [1.125.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.124.0...v1.125.0) (2026-04-21)
 
 
