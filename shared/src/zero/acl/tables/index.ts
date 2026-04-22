@@ -42,7 +42,9 @@ export { UsersACL } from './users-acl';
 export { UserWorkloadMappingsACL } from './user-workload-mappings-acl';
 export { WorkflowExecutionsACL } from './workflow-executions-acl';
 export { WorkflowsACL } from './workflows-acl';
+/** @deprecated Use ChannelRecapsACL instead */
 export { ChannelDailyRecapsACL } from './channel-daily-recaps-acl';
+export { ChannelRecapsACL } from './channel-recaps-acl';
 export { SavedUserConfigurationsACL } from './saved-user-configurations-acl';
 export { TicketAssignmentsACL } from './ticket-assignments-acl';
 export { TicketStageEtaACL } from './ticket-stage-eta-acl';

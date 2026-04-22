@@ -3,13 +3,12 @@ import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
 
-/** @deprecated Use ChannelRecapsACL instead */
-export class ChannelDailyRecapsACL extends BaseQueryACL<'channel_daily_recaps'> {
+export class ChannelRecapsACL extends BaseQueryACL<'channel_recaps'> {
   constructor(ctx: Context) {
-    super(ctx, 'channel_daily_recaps');
+    super(ctx, 'channel_recaps');
   }
 
-  canSelect<TReturn>(query: Query<'channel_daily_recaps', Schema, TReturn>): Query<'channel_daily_recaps', Schema, TReturn> {
+  canSelect<TReturn>(query: Query<'channel_recaps', Schema, TReturn>): Query<'channel_recaps', Schema, TReturn> {
     // Base recaps (userId IS NULL): accessible to channel participants or public channels in the workspace
     // Custom recaps (userId = userID): only accessible to the specific user who owns them
     return query.where(({ or, cmp, and, exists }) =>

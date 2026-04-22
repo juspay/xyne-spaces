@@ -13,6 +13,7 @@ export {
   CanvasParticipantsACL,
   CanvasesACL,
   ChannelDailyRecapsACL,
+  ChannelRecapsACL,
   ChannelParticipantsACL,
   ChannelsACL,
   ChannelStatsACL,

@@ -78,6 +78,7 @@ import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
 import messageMetadataBackfillRoutes from '@/routes/messageMetadataBackfill';
+import channelRecapBackfillRoutes from '@/routes/channelRecapBackfill';
 import setUpdatedAtTimeRoutes from '@/routes/setUpdatedAtTime';
 import ticketMetadataBackfillRoutes from '@/routes/ticketMetadataBackfill';
 import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
@@ -260,6 +261,8 @@ export class App {
     }
     this.app.use('/migrate/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
     this.app.use('/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
+    this.app.use('/migrate/api/admin/channel-recap-backfill', channelRecapBackfillRoutes);
+    this.app.use('/migrate/api/admin/channel-recap-backfill', channelRecapBackfillRoutes);
     this.app.use('/api/admin/set-updated-at-time', setUpdatedAtTimeRoutes);
     this.app.use('/api/admin/ticket-metadata-backfill', ticketMetadataBackfillRoutes);
     // Ticket duplicate backfill route (always available, no vespa flag)

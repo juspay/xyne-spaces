@@ -124,7 +124,7 @@ export class RecapWorker {
       logger.info(`[RECAP_WORKER] Deleting recaps older than ${cutoffDateStr} (retention: ${retentionDays} days)`);
 
       // Delete recaps older than cutoff date
-      const result = await db.channelDailyRecap.deleteMany({
+      const result = await db.channelRecap.deleteMany({
         where: {
           recapDate: {
             lt: cutoffDate,

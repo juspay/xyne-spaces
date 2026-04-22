@@ -58,7 +58,7 @@ export async function calculateUnreadCount(userId: string): Promise<number> {
     const yesterday = new Date(`${yesterdayDateStr}T00:00:00Z`);
 
     // Check if there are any recaps for yesterday - use exact date match since recapDate is normalized to midnight IST
-    const recaps = await db.channelDailyRecap.findMany({
+    const recaps = await db.channelRecap.findMany({
       where: {
         channelId: { in: channelIds },
         recapDate: yesterday,

@@ -1941,7 +1941,18 @@ export const surfaceLinkTable = table('surface_links')
   })
   .primaryKey('id');
 
+/** @deprecated Use channelRecapTable instead */
 export const channelDailyRecapTable = table('channel_daily_recaps')
+  .columns({
+    id: string(),
+    channelId: string(),
+    recapDate: number(),
+    summary: string(),
+    userId: string().optional(), // null for base recap, actual userId for custom recap
+  })
+  .primaryKey('id');
+
+export const channelRecapTable = table('channel_recaps')
   .columns({
     id: string(),
     channelId: string(),
@@ -3585,7 +3596,17 @@ export const releaseAttributionTableRelationships = relationships(releaseAttribu
 }));
 
 // Channel Daily Recaps Relationships
+/** @deprecated Use channelRecapTableRelationships instead */
 export const channelDailyRecapTableRelationships = relationships(channelDailyRecapTable, ({ one }) => ({
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+}));
+
+// Channel Recaps Relationships
+export const channelRecapTableRelationships = relationships(channelRecapTable, ({ one }) => ({
   channel: one({
     sourceField: ['channelId'],
     destField: ['id'],
@@ -3701,6 +3722,8 @@ export const schema = createSchema({
     surfaceLinkTable,
     // Channel Daily Recaps
     channelDailyRecapTable,
+    // Channel Recaps
+    channelRecapTable,
     // Apps
     appsTable,
     installedAppsTable,
@@ -3795,6 +3818,8 @@ export const schema = createSchema({
     surfaceLinkTableRelationships,
     // Channel Daily Recaps
     channelDailyRecapTableRelationships,
+    // Channel Recaps
+    channelRecapTableRelationships,
     // Apps
     appsTableRelationships,
     installedAppsTableRelationships,
@@ -3896,7 +3921,11 @@ export type ReleaseAttribution = Row<typeof schema.tables.release_attributions>;
 export type SurfaceLink = Row<typeof schema.tables.surface_links>;
 
 // Channel Daily Recaps Types
+/** @deprecated Use ChannelRecap instead */
 export type ChannelDailyRecap = Row<typeof schema.tables.channel_daily_recaps>;
+
+// Channel Recaps Types
+export type ChannelRecap = Row<typeof schema.tables.channel_recaps>;
 
 // Apps Types
 export type Apps = Row<typeof schema.tables.apps>;
