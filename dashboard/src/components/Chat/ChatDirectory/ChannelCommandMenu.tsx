@@ -657,6 +657,14 @@ const ChannelCommandMenu = ({
   // Show bots section when typing @ but no bot selected yet
   const showBotsSuggestions = search.startsWith('@') && !selectedBot;
 
+  useEffect(() => {
+    if (showBotsSuggestions) {
+      setMentionSearchType(null);
+      setMentionSearchQuery('');
+      setSelectedMentionIndex(0);
+    }
+  }, [showBotsSuggestions]);
+
   // Track previous search text to detect when cleared
   const prevSearchTextRef = useRef('');
 
