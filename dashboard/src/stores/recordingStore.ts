@@ -8,6 +8,7 @@ import { Room, RoomConnectOptions, RoomEvent, DataPacket_Kind } from 'livekit-cl
 import { recordingService } from '../services/Recording/recordingService';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
+import { formatDuration } from '../utils/dateUtils';
 
 let transcriptUnsubscribe: (() => void) | null = null;
 let transcriptIdCounter = 0;
@@ -243,7 +244,7 @@ export const recordingStore = createStore({
       transcriptIdCounter = 0;
 
       // Show toast
-      const duration = durationMs ? `${Math.floor(durationMs / 1000)}s` : 'Unknown duration';
+      const duration = durationMs ? formatDuration(durationMs) : 'Unknown duration';
       toast.success('Recording stopped', {
         description: `Recording saved (${duration})`,
         duration: 3000,

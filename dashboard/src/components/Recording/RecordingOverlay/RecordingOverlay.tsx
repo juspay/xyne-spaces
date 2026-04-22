@@ -14,7 +14,10 @@ import {
   sendRecordingEvent,
   useTranscriptStream,
 } from '../../../hooks/useRecordingStore';
-import { formatRecordingDuration } from '../../../utils/recordingUtils';
+import { formatRecordingDuration, generateRecordingTitle } from '../../../utils/recordingUtils';
+import { recordingService } from '../../../services/Recording/recordingService';
+import { SaveTitleModal } from '../../../routes/RecordingsScreen/components/SaveTitleModal';
+import { toast } from 'sonner';
 
 interface DragState {
   startX: number;
@@ -150,6 +153,7 @@ export function RecordingOverlay(): React.ReactElement | null {
 
   const status = useRecordingStore(ctx => ctx.status);
   const startTime = useRecordingStore(ctx => ctx.startTime);
+  const externalId = useRecordingStore(ctx => ctx.externalId);
 
   // Subscribe to transcript stream so transcripts are captured even when overlay is visible
   useTranscriptStream();
@@ -167,131 +171,170 @@ export function RecordingOverlay(): React.ReactElement | null {
     { x: 64, y: 32 },
   );
 
+  // Title modal state — same pattern as RecordingsScreen
+  const [showTitleModal, setShowTitleModal] = useState(false);
+  const [savingTitle, setSavingTitle] = useState(false);
+  const lastExternalIdRef = useRef<string | null>(null);
+
+  // Keep ref in sync so it survives the store reset on stopRecording
+  useEffect(() => {
+    if (externalId) {
+      lastExternalIdRef.current = externalId;
+    }
+  }, [externalId]);
+
   const handleStop = (): void => {
+    // Capture externalId before stopRecording resets the store
+    lastExternalIdRef.current = externalId;
     sendRecordingEvent({ type: 'stopRecording' });
+    setShowTitleModal(true);
+  };
+
+  const handleSaveTitle = async (title: string): Promise<void> => {
+    setSavingTitle(true);
+    try {
+      if (lastExternalIdRef.current) {
+        await recordingService.updateRecordingTitle(lastExternalIdRef.current, title);
+      }
+      setShowTitleModal(false);
+      sendRecordingEvent({ type: 'clearTranscripts' });
+      toast.success('Recording saved', { description: title });
+    } catch {
+      toast.error('Failed to save title');
+    } finally {
+      setSavingTitle(false);
+    }
   };
 
   const handlePauseResume = (): void => {
     sendRecordingEvent({ type: isPaused ? 'resumeRecording' : 'pauseRecording' });
   };
 
-  // Visibility guards
-  if (!isActive || isOnRecordingsPage) {
+  // Visibility guards — but keep rendering if modal is open so user can save
+  if ((!isActive && !showTitleModal) || isOnRecordingsPage) {
     return null;
   }
 
   return createPortal(
-    <div
-      ref={containerRef}
-      className='fixed z-[60] pointer-events-auto'
-      style={{
-        left: `${position.x}px`,
-        bottom: `${position.y}px`,
-        cursor: isDragging ? 'grabbing' : 'default',
-      }}
-    >
-      {/* Drag Handle */}
-      <button
-        type='button'
-        className='absolute -top-6 left-0 right-0 h-6 flex items-center justify-center cursor-grab active:cursor-grabbing bg-transparent border-none'
-        onMouseDown={handleMouseDown}
-        onTouchStart={handleTouchStart}
-        aria-label='Drag recording overlay'
-        data-track-category='RecordingOverlay'
-        data-track-name='drag_handle'
+    <>
+      <SaveTitleModal
+        isOpen={showTitleModal}
+        defaultTitle={generateRecordingTitle(startTime)}
+        onSave={handleSaveTitle}
+        isSaving={savingTitle}
+      />
+      <div
+        ref={containerRef}
+        className='fixed z-[60] pointer-events-auto'
+        style={{
+          left: `${position.x}px`,
+          bottom: `${position.y}px`,
+          cursor: isDragging ? 'grabbing' : 'default',
+        }}
       >
-        <div className='bg-muted-foreground/50 dark:bg-gray-600 rounded-full px-3 py-0.5 shadow-sm pointer-events-none'>
-          <GripVertical className='w-3 h-3 text-muted-foreground dark:text-muted' />
-        </div>
-      </button>
-
-      {/* Card */}
-      <div className='bg-background dark:bg-gray-800 rounded-lg shadow-2xl border border-border dark:border-gray-700 p-4 w-[200px]'>
-        {/* Header */}
-        <div className='flex items-center gap-3 mb-3'>
-          <div className='relative'>
-            {isRecording && (
-              <span className='flex h-3 w-3'>
-                <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75' />
-                <span className='relative inline-flex rounded-full h-3 w-3 bg-red-500' />
-              </span>
-            )}
-            {isPaused && (
-              <span className='relative inline-flex rounded-full h-3 w-3 bg-yellow-500' />
-            )}
-            {isStarting && (
-              <span className='animate-pulse relative inline-flex rounded-full h-3 w-3 bg-blue-500' />
-            )}
-          </div>
-
-          <div className='flex-1'>
-            <div className='font-semibold text-sm text-foreground dark:text-gray-100'>
-              {isStarting ? 'Starting...' : isPaused ? 'Paused' : 'Recording'}
-            </div>
-            <div className='text-xs text-muted-foreground dark:text-muted-foreground'>
-              {isStarting ? 'Connecting...' : formatRecordingDuration(elapsedTime)}
-            </div>
-          </div>
-        </div>
-
-        {/* Waveform */}
-        {isRecording && (
-          <div className='flex items-center justify-center gap-[3px] h-8 mb-3'>
-            {Array.from({ length: 12 }, (_, i) => (
-              <div
-                key={i}
-                className='w-1 bg-emerald-500 rounded-full'
-                style={{
-                  animation: `waveform 0.6s ease-in-out ${i * 0.05}s infinite alternate`,
-                }}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Controls */}
-        <div className='flex items-center justify-center gap-2'>
-          <button
-            onClick={handlePauseResume}
-            disabled={isStarting}
-            className='flex items-center justify-center w-10 h-10 rounded-full bg-muted dark:bg-gray-700'
-            data-track-category='RecordingOverlay'
-            data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
-          >
-            {isPaused ? <Play /> : <Pause />}
-          </button>
-
-          <button
-            onClick={handleStop}
-            disabled={isStarting}
-            className='flex items-center justify-center w-12 h-12 rounded-full bg-red-500'
-            data-track-category='RecordingOverlay'
-            data-track-name='stop_recording'
-          >
-            <Square className='text-white fill-current' />
-          </button>
-        </div>
-
-        {/* Link */}
+        {/* Drag Handle */}
         <button
-          onClick={() => void navigate('/recordings')}
-          className='mt-3 w-full flex items-center justify-center gap-1.5 text-xs text-blue-600'
+          type='button'
+          className='absolute -top-6 left-0 right-0 h-6 flex items-center justify-center cursor-grab active:cursor-grabbing bg-transparent border-none'
+          onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
+          aria-label='Drag recording overlay'
           data-track-category='RecordingOverlay'
-          data-track-name='go_to_recordings'
+          data-track-name='drag_handle'
         >
-          <Mic className='w-3 h-3' />
-          Go to Recording
+          <div className='bg-muted-foreground/50 dark:bg-gray-600 rounded-full px-3 py-0.5 shadow-sm pointer-events-none'>
+            <GripVertical className='w-3 h-3 text-muted-foreground dark:text-muted' />
+          </div>
         </button>
-      </div>
 
-      {/* Keyframes */}
-      <style>{`
+        {/* Card */}
+        <div className='bg-background dark:bg-gray-800 rounded-lg shadow-2xl border border-border dark:border-gray-700 p-4 w-[200px]'>
+          {/* Header */}
+          <div className='flex items-center gap-3 mb-3'>
+            <div className='relative'>
+              {isRecording && (
+                <span className='flex h-3 w-3'>
+                  <span className='animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75' />
+                  <span className='relative inline-flex rounded-full h-3 w-3 bg-red-500' />
+                </span>
+              )}
+              {isPaused && (
+                <span className='relative inline-flex rounded-full h-3 w-3 bg-yellow-500' />
+              )}
+              {isStarting && (
+                <span className='animate-pulse relative inline-flex rounded-full h-3 w-3 bg-blue-500' />
+              )}
+            </div>
+
+            <div className='flex-1'>
+              <div className='font-semibold text-sm text-foreground dark:text-gray-100'>
+                {isStarting ? 'Starting...' : isPaused ? 'Paused' : 'Recording'}
+              </div>
+              <div className='text-xs text-muted-foreground dark:text-muted-foreground'>
+                {isStarting ? 'Connecting...' : formatRecordingDuration(elapsedTime)}
+              </div>
+            </div>
+          </div>
+
+          {/* Waveform */}
+          {isRecording && (
+            <div className='flex items-center justify-center gap-[3px] h-8 mb-3'>
+              {Array.from({ length: 12 }, (_, i) => (
+                <div
+                  key={i}
+                  className='w-1 bg-emerald-500 rounded-full'
+                  style={{
+                    animation: `waveform 0.6s ease-in-out ${i * 0.05}s infinite alternate`,
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Controls */}
+          <div className='flex items-center justify-center gap-2'>
+            <button
+              onClick={handlePauseResume}
+              disabled={isStarting}
+              className='flex items-center justify-center w-10 h-10 rounded-full bg-muted dark:bg-gray-700'
+              data-track-category='RecordingOverlay'
+              data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
+            >
+              {isPaused ? <Play /> : <Pause />}
+            </button>
+
+            <button
+              onClick={handleStop}
+              disabled={isStarting}
+              className='flex items-center justify-center w-12 h-12 rounded-full bg-red-500'
+              data-track-category='RecordingOverlay'
+              data-track-name='stop_recording'
+            >
+              <Square className='text-white fill-current' />
+            </button>
+          </div>
+
+          {/* Link */}
+          <button
+            onClick={() => void navigate('/recordings')}
+            className='mt-3 w-full flex items-center justify-center gap-1.5 text-xs text-blue-600'
+            data-track-category='RecordingOverlay'
+            data-track-name='go_to_recordings'
+          >
+            <Mic className='w-3 h-3' />
+            Go to Recording
+          </button>
+        </div>
+
+        {/* Keyframes */}
+        <style>{`
         @keyframes waveform {
           from { height: 20%; }
           to { height: 100%; }
         }
       `}</style>
-    </div>,
+      </div>
+    </>,
     document.body,
   );
 }
