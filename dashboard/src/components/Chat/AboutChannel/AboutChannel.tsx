@@ -39,6 +39,7 @@ const AboutChannel = ({
   const [editName, setEditName] = useState(channel.name);
   const [nameError, setNameError] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
+  const [isSavingDescription, setIsSavingDescription] = useState(false);
   const zero = useZero();
   const navigate = useNavigate();
   const location = useLocation();
@@ -72,7 +73,7 @@ const AboutChannel = ({
     setEditDescription(channel.description || '');
   };
 
-  const handleSaveDescription = (): void => {
+  const handleSaveDescription = async (): Promise<void> => {
     if (!channel) return;
 
     if (editDescription === channel.description) {
@@ -81,7 +82,8 @@ const AboutChannel = ({
     }
 
     try {
-      void zero.mutate(
+      setIsSavingDescription(true);
+      const result = await zero.mutate(
         mutators.channel.updateDescription({
           channelId: channel.id,
           description: editDescription.trim(),
@@ -90,10 +92,17 @@ const AboutChannel = ({
           timestamp: Date.now(),
           conversationParticipantId: uuidv4(),
         }),
-      );
+      ).server;
+      if (result.type === 'error') {
+        throw new Error(result.error.message || 'Failed to update description');
+      }
       setIsEditingDescription(false);
+      toast.success(`Channel description updated`);
     } catch (error) {
       console.error('Failed to update channel description:', error);
+      toast.error('Failed to update channel description. Please try again.');
+    } finally {
+      setIsSavingDescription(false);
     }
   };
 
@@ -105,7 +114,7 @@ const AboutChannel = ({
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSaveDescription();
+      void handleSaveDescription();
     } else if (e.key === 'Escape') {
       handleCancelEdit();
     }
@@ -325,12 +334,12 @@ const AboutChannel = ({
                   <Button
                     variant='ghost'
                     size='sm'
-                    onClick={handleSaveDescription}
+                    onClick={() => void handleSaveDescription()}
                     data-track-category='ABOUT_CHANNEL_FORM'
                     data-track-name='Save_Description'
                     data-track-metadata={JSON.stringify({ channelId: channel?.id })}
                   >
-                    Save
+                    {isSavingDescription ? 'Saving…' : 'Save'}
                   </Button>
                 </div>
               </div>
