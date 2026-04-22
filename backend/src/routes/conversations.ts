@@ -8,6 +8,9 @@ const conversationController = new ConversationController();
 // Keep replyToConversation for file upload handling
 router.post('/:conversationId/messages', uploadMultiple, conversationController.replyToConversation);
 
+// Read current ephemeral agent-progress signals for a conversation (dashboard rehydrate on thread open)
+router.get('/:conversationId/agent-progress', conversationController.getAgentProgress);
+
 // Update message content (for ticket suggestion → ticket created flow)
 router.put('/:conversationId/messages/:messageId/ticket-suggestion', conversationController.updateTicketSuggestion);
 

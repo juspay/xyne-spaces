@@ -65,6 +65,11 @@ apps
 electron
 xyne-automation
 ysweet
+site
 scripts/*
 !scripts/setup-fake-gcs.sh
 !scripts/setup-fake-gcs-test.sh
+
+# Sandbox artifacts
+.sandboxes
+.sisyphus

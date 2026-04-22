@@ -1,4 +1,4 @@
-import express, { Application } from 'express';
+import express, { Application, Request, Response } from 'express';
 import { createServer, Server as HttpServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -279,8 +279,9 @@ export class App {
     // Apply general rate limiter to all API routes from this point onward
 
     // Test-only routes - only register when NODE_ENV=test
-    // This will be only used on CI automation testing
-    if (config.isTestEnv) {
+    // Test auth routes - used for CI automation testing and sandbox environments
+    const enableDevAuth = process.env.ENABLE_DEV_AUTH === 'true' && process.env.NODE_ENV === 'development';
+    if (config.isTestEnv || enableDevAuth) {
       logger.info('Registering test routes (/api/test/*)');
       this.app.use('/api/test', testAuthRoutes);
     }
@@ -348,15 +349,17 @@ export class App {
     this.app.use('/api/apps', appRoutes);
 
     // Internal S2S endpoints (trusted service-to-service calls)
-    this.app.post('/api/internal/postAsUser', (req, res, next) => {
+    const validateS2SKey = (req: Request, res: Response, next: express.NextFunction): void => {
       const s2sKey = process.env['INTERNAL_S2S_KEY'];
       if (!s2sKey || req.headers['x-s2s-key'] !== s2sKey) {
         res.status(401).json({ error: 'Invalid or missing S2S key' });
         return;
       }
       next();
-    }, new ChatController().postMessage);
-    
+    };
+
+    this.app.post('/api/internal/postAsUser', validateS2SKey, new ChatController().postMessage);
+
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes

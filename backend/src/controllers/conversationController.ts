@@ -1548,4 +1548,30 @@ export class ConversationController {
       res.status(500).json({ error: 'Internal server error' });
     }
   };
+
+  /**
+   * Snapshot of in-flight agent-progress signals for this conversation.
+   * Read-only view of the Redis hash written by xyne-claw-auth's agentProgress publisher.
+   * Used by the dashboard when the thread panel opens so spinners re-hydrate after
+   * leaving and re-entering the thread.
+   * GET /api/conversations/:conversationId/agent-progress
+   */
+  getAgentProgress = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { conversationId } = req.params;
+      if (!conversationId) {
+        res.status(400).json({ error: 'conversationId is required' });
+        return;
+      }
+      const key = `agent_progress:conversation:${conversationId}`;
+      const raw = await redisService.getAllHashFields(key);
+      const data = Object.values(raw)
+        .map((v) => { try { return JSON.parse(v) as unknown; } catch { return null; } })
+        .filter((v): v is Record<string, unknown> => v !== null);
+      res.status(200).json({ success: true, data });
+    } catch (error) {
+      logger.error('[agentProgress/get] error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
 }

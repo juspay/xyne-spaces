@@ -17,8 +17,9 @@ EOSQL
 echo "Configuring PostgreSQL for Zero (WAL level = logical)..."
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
     ALTER SYSTEM SET wal_level = logical;
-    ALTER SYSTEM SET max_replication_slots = 10;
-    ALTER SYSTEM SET max_wal_senders = 10;
+    ALTER SYSTEM SET max_replication_slots = 20;
+    ALTER SYSTEM SET max_wal_senders = 20;
+    ALTER SYSTEM SET max_connections = 300;
     SELECT pg_reload_conf();
 EOSQL
 

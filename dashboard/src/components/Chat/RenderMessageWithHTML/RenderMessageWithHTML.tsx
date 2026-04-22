@@ -231,7 +231,7 @@ const CanvasLink = ({
   );
 };
 
-function MentionRenderer({ userId }: { userId: string }): JSX.Element {
+export function MentionRenderer({ userId }: { userId: string }): JSX.Element {
   const context = useAuthContextValues();
   const users = useUsers();
   const displayName = getUserDisplayNameById(users, userId);
@@ -257,7 +257,7 @@ function MentionRenderer({ userId }: { userId: string }): JSX.Element {
   );
 }
 
-function ChannelMentionRenderer({
+export function ChannelMentionRenderer({
   channelId,
   channelName,
   isPrivate,
@@ -378,7 +378,7 @@ function ChannelMentionRenderer({
   );
 }
 
-function GroupMentionRenderer({
+export function GroupMentionRenderer({
   groupId,
   groupName,
   alias,

@@ -25,6 +25,7 @@ import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
 import { v4 as uuidv4 } from 'uuid';
 import { useMentionSearch } from '../../../hooks/useMentionSearch';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
+import { AgentProgressIndicator } from './AgentProgressIndicator';
 import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import { websocketService } from '../../../services/clients/socketClient';
 import { processMessageForSending } from './ChatInput.utils';
@@ -537,84 +538,87 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             </p>
           </div>
         ) : (
-          <InputBox
-            id={currentSessionId}
-            channelId={channelId}
-            autoFocus={isMobile ? false : autoFocus} // eslint-disable-line jsx-a11y/no-autofocus
-            ref={inputBoxRef}
-            key={`inputBox-${channelId}-${conversationId}`}
-            mentionItems={mentionResults}
-            onMentionSearch={handleMentionSearch}
-            channelItems={channelItems}
-            onChannelSearch={handleChannelSearch}
-            onSendMessage={handleSendMessage}
-            onContentChange={handleContentChange}
-            onTyping={handleTyping}
-            placeholder={placeholderText}
-            typingUsers={typingUsers}
-            showTypingIndicator={showTypingIndicator}
-            {...(editorValue !== undefined && { value: editorValue })}
-            {...(messageId && onCancel && { onCancel: handleCancelEdit })}
-            {...(conversationId && { conversationId })}
-            className={className}
-            features={{
-              richText: true,
-              commands: true,
-              mentions: true,
-              fileAttachments: true,
-              emojiPicker: true,
-            }}
-            allowedFileTypes={[...ALLOWED_FILE_TYPES]}
-            {...(conversationId &&
-              !messageId && {
-                onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
-                alsoSendToChannelChecked: alsoSendToChannel,
-              })}
-            {...(channel?.scopeType === ChannelScopeType.DEFAULT &&
-              canCreateTicket &&
-              !conversationId && {
-                onCreateTicket: (description: string | undefined) => {
-                  void (async () => {
-                    if (isSupportChannel && user) {
-                      const messageContent = description || 'Support request';
-                      try {
-                        // Backend handles everything: ticket creation, bot message, workflow trigger
-                        const ticketPayload: CreateTicketRequest = {
-                          title: messageContent,
-                          description: messageContent,
-                          channelId: channelId,
-                          projectId: (channel.projectId as string | null) || '',
-                          createdBy: user.id,
-                          updatedBy: user.id,
-                          ticketType: BaseTicketType.Support,
-                          ...(conversationId && { sourceConversationId: conversationId }),
-                        };
+          <>
+            <AgentProgressIndicator sessionId={currentSessionId} />
+            <InputBox
+              id={currentSessionId}
+              channelId={channelId}
+              autoFocus={isMobile ? false : autoFocus} // eslint-disable-line jsx-a11y/no-autofocus
+              ref={inputBoxRef}
+              key={`inputBox-${channelId}-${conversationId}`}
+              mentionItems={mentionResults}
+              onMentionSearch={handleMentionSearch}
+              channelItems={channelItems}
+              onChannelSearch={handleChannelSearch}
+              onSendMessage={handleSendMessage}
+              onContentChange={handleContentChange}
+              onTyping={handleTyping}
+              placeholder={placeholderText}
+              typingUsers={typingUsers}
+              showTypingIndicator={showTypingIndicator}
+              {...(editorValue !== undefined && { value: editorValue })}
+              {...(messageId && onCancel && { onCancel: handleCancelEdit })}
+              {...(conversationId && { conversationId })}
+              className={className}
+              features={{
+                richText: true,
+                commands: true,
+                mentions: true,
+                fileAttachments: true,
+                emojiPicker: true,
+              }}
+              allowedFileTypes={[...ALLOWED_FILE_TYPES]}
+              {...(conversationId &&
+                !messageId && {
+                  onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
+                  alsoSendToChannelChecked: alsoSendToChannel,
+                })}
+              {...(channel?.scopeType === ChannelScopeType.DEFAULT &&
+                canCreateTicket &&
+                !conversationId && {
+                  onCreateTicket: (description: string | undefined) => {
+                    void (async () => {
+                      if (isSupportChannel && user) {
+                        const messageContent = description || 'Support request';
+                        try {
+                          // Backend handles everything: ticket creation, bot message, workflow trigger
+                          const ticketPayload: CreateTicketRequest = {
+                            title: messageContent,
+                            description: messageContent,
+                            channelId: channelId,
+                            projectId: (channel.projectId as string | null) || '',
+                            createdBy: user.id,
+                            updatedBy: user.id,
+                            ticketType: BaseTicketType.Support,
+                            ...(conversationId && { sourceConversationId: conversationId }),
+                          };
 
-                        await createTicket(ticketPayload);
+                          await createTicket(ticketPayload);
 
-                        inputBoxRef.current?.clearContent();
-                        toast.success('Support Ticket Created', {
-                          description:
-                            'Your support request has been submitted and picked up by AI.',
-                        });
-                      } catch (error) {
-                        console.error('Failed to create support ticket:', error);
-                        toast.error('Failed to create ticket', {
-                          description: 'Please try again or contact support.',
-                        });
+                          inputBoxRef.current?.clearContent();
+                          toast.success('Support Ticket Created', {
+                            description:
+                              'Your support request has been submitted and picked up by AI.',
+                          });
+                        } catch (error) {
+                          console.error('Failed to create support ticket:', error);
+                          toast.error('Failed to create ticket', {
+                            description: 'Please try again or contact support.',
+                          });
+                        }
+                      } else {
+                        setTicketDescription(description || '');
+                        setIsCreateTicketModalOpen(true);
                       }
-                    } else {
-                      setTicketDescription(description || '');
-                      setIsCreateTicketModalOpen(true);
-                    }
-                  })();
-                },
-              })}
-            onTranscriptSelect={(content: string) => {
-              inputBoxRef.current?.insertContent(content);
-            }}
-            hasTicket={hasTicket}
-          />
+                    })();
+                  },
+                })}
+              onTranscriptSelect={(content: string) => {
+                inputBoxRef.current?.insertContent(content);
+              }}
+              hasTicket={hasTicket}
+            />
+          </>
         )}
         {channel && isCreateTicketModalOpen ? (
           <CreateTicketModal

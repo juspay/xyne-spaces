@@ -1,0 +1,16 @@
+api:
+  dashboard: false
+
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: sandbox-net
+    watch: true
+
+log:
+  level: WARN
