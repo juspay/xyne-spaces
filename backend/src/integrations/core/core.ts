@@ -406,7 +406,7 @@ export class ExternalSourceCore {
         uploadedFiles: uploadedFiles,
         sourceName: source.name, // Pass sourceName for Superposition context
       });
-      if ((createResult as any)?.blocked) {
+      if ((createResult as any)?.blocked || (createResult as any)?.isDuplicate) {
         return { conversation: undefined, message: undefined, email: undefined, isNew: false, blocked: true };
       }
       const { conversation, email } = createResult as any;

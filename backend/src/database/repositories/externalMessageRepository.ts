@@ -4,7 +4,7 @@
  */
 
 import { DatabaseClient } from '../client';
-import { MessageDirection, ExternalEntityType } from '@prisma/client';
+import { MessageDirection, ExternalEntityType, Prisma } from '@prisma/client';
 
 export class ExternalMessageRepository {
   private db = DatabaseClient.getInstance();
@@ -63,17 +63,25 @@ export class ExternalMessageRepository {
       throw new Error('entityId is required when entityType is provided');
     }
 
-    return await this.db.externalMessage.create({
-      data: {
-        externalSourceId: data.externalSourceId,
-        externalId: data.externalId,
-        externalThreadId: data.externalThreadId,
-        messageId: data.entityId,
-        direction: data.direction,
-        entityId: data.entityId,
-        ...(data.entityType && { entityType: data.entityType }),
+    try {
+      return await this.db.externalMessage.create({
+        data: {
+          externalSourceId: data.externalSourceId,
+          externalId: data.externalId,
+          externalThreadId: data.externalThreadId,
+          messageId: data.entityId,
+          direction: data.direction,
+          entityId: data.entityId,
+          ...(data.entityType && { entityType: data.entityType }),
+        }
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const existing = await this.findByExternalId(data.externalSourceId, data.externalId);
+        if (existing) return existing;
       }
-    });
+      throw error;
+    }
   }
 
   /**

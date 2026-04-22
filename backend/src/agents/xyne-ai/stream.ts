@@ -256,7 +256,7 @@ const {
   const source: 'thread' | 'channel' = conversationId ? 'thread' : 'channel';
 
   const agentName = request.agentName;
-  const sessionContext: SessionContext = { channelIds, userId, agentName };
+  const sessionContext: SessionContext = {  channelIds, conversationId, userId, agentName };
   const { session, isNewSession } = await getOrCreateSession(sessionId, sessionContext);
 
   logger.info(`[XyneAI] [${session.sessionId}] Starting query. isNew: ${isNewSession}, source: ${source}, attachments: ${attachments?.length || 0}, messageAttachmentIds: ${messageAttachmentIds?.length || 0}`);

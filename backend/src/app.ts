@@ -29,6 +29,7 @@ import analyticsRoutes from '@/routes/analytics';
 import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
 import channelRoutes from '@/routes/channels';
+import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
 import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
@@ -44,6 +45,7 @@ import { superpositionClient } from '@/services/superpositionClient';
 import { metricsMiddleware } from '@/middleware/metricsMiddleware';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
 import { externalSourceSyncRoutes } from '@/integrations';
+import googleAuthRoutes from '@/integrations/routes/google-auth';
 import migrationRoutes from '@/migration';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
 import publicUserRoutes from '@/routes/publicUserRoutes';
@@ -199,6 +201,9 @@ export class App {
     //Don't add any middleware here, add in api/external-source-sync.ts file otherwise API will not work.
     this.app.use('/api/external-source-sync', externalSourceSyncRoutes);
 
+    // Google OAuth routes (public - no auth required)
+    this.app.use('/api/integrations/google', googleAuthRoutes);
+
     // Migration routes (body parsing handled in route file)
     this.app.use('/api/migration', migrationRoutes);
 
@@ -321,6 +326,7 @@ export class App {
     // Chat routes (auth only, no ACL for now)
 
     // New chat schema routes
+    this.app.use('/api/integrations/microsoft', microsoftDeskAuthRoutes); // Microsoft email channel OAuth (auth handled per-route)
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);

@@ -1,4 +1,4 @@
-import { ChannelScopeType, ChannelUserStatus } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, ChannelUserStatus } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
 
 // Optimized function to group channels by scope type (single pass)
@@ -14,6 +14,13 @@ export const groupChannelsByScope = (
   const channels: VisibleChannel[] = [];
   const directMessages: VisibleChannel[] = [];
   for (const channel of channelData) {
+    // EMAIL channels live in Xyne Desk, not in the chat directory.
+    // TODO: filter this out at the source by excluding EMAIL-type channels in the
+    // `visibleChannels` query itself, so the client never receives them here.
+    if (channel.type === ChannelType.EMAIL) {
+      continue;
+    }
+
     const currentUserParticipation = allChannelsUserStatus.find(p => p.channelId === channel.id);
 
     // Skip closed DMs (soft-deleted by user)

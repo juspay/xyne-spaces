@@ -154,6 +154,16 @@ class CallRecordingService {
       }
       const workspaceId = callCreator.workspaceId;
 
+      if (!call.channelId) {
+        logger.warn(`[CallRecording] Call ${callExternalId} has no channelId, skipping attachment creation`);
+        return;
+      }
+      const channel = await repositories.channels.findById(call.channelId);
+      if (!channel) {
+        logger.warn(`[CallRecording] Channel ${call.channelId} not found for call ${callExternalId}, skipping attachment creation`);
+        return;
+      }
+
       const filename = recordingPath.split('/').pop() ?? `recording-${callExternalId}.mp4`;
 
       // Fetch real file size from storage so the attachment doesn't show "0 B" in the UI.

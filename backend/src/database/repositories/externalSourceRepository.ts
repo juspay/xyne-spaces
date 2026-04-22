@@ -62,6 +62,7 @@ export class ExternalSourceRepository {
     channelId?: string;
     boardId?: string;
     isActive?: boolean;
+    credentials?: string;
   }) {
     return await this.db.externalSource.update({
       where: { id },

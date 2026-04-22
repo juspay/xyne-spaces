@@ -61,4 +61,12 @@ export abstract class BaseFlow {
   isTestPayload?(_payload: any): TestPayloadResult {
     return { isTest: false }; // Default: not a test payload
   }
+
+  /**
+   * Optional: Handle webhook verification via query params
+   * Runs before source DB lookup — source may not exist yet during subscription setup.
+   */
+  isTestQueryParam?(_query: Record<string, string | undefined>): TestPayloadResult {
+    return { isTest: false };
+  }
 }

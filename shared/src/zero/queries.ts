@@ -512,6 +512,72 @@ export const queries = defineQueries({
         .related('conversation', c => c.related('channel'));
     },
   ),
+  // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).
+  supportTicketRow: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) => {
+    return zql.tickets
+      .where('id', id)
+      .related('project')
+      .related('tags')
+      .related('entity')
+      .related('emails')
+      .related('conversation')
+      .one();
+  }),
+  supportTicketByXyneId: defineQuery(
+    z.object({ xyneId: z.string() }),
+    ({ args: { xyneId } }) => {
+      return zql.tickets
+        .where('xyneId', xyneId)
+        .related('project')
+        .related('tags')
+        .related('entity')
+        .related('emails')
+        .related('conversation')
+        .one();
+    },
+  ),
+  // Paginated variant of supportTicketsFiltered for use with @rocicorp/zero-virtual.
+  // Cursor = (createdAt, id) matching the orderBy.
+  supportTicketsPage: defineQuery(
+    z.object({
+      channelId: z.string().optional(),
+      assignedTo: z.string().optional(),
+      limit: z.number(),
+      start: z.object({ id: z.string(), createdAt: z.number() }).nullable(),
+      dir: z.literal('forward').or(z.literal('backward')),
+    }),
+    ({ args: { channelId, assignedTo, limit, start, dir } }) => {
+      let query = zql.tickets;
+
+      if (channelId) {
+        query = query.where('channelId', channelId);
+      } else {
+        query = query.whereExists('channel', channel => channel.where('type', ChannelType.EMAIL));
+      }
+
+      if (assignedTo) {
+        query = query.where('assignedTo', assignedTo);
+      }
+
+      const orderDirection = dir === 'forward' ? 'desc' : 'asc';
+      query = query.orderBy('createdAt', orderDirection);
+
+      if (start) {
+        query = query.start(
+          { createdAt: start.createdAt, id: start.id },
+          { inclusive: false },
+        );
+      }
+
+      return query
+        .limit(limit)
+        .related('project')
+        .related('tags')
+        .related('entity')
+        .related('emails')
+        .related('conversation');
+    },
+  ),
   // Get all merchants for Xyne Desk dropdown (simple indexed query on small Merchant table)
   getAllMerchants: defineQuery(() => {
     return zql.merchants.orderBy('mid', 'asc');

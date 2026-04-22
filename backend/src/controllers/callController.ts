@@ -1686,9 +1686,10 @@ export class CallController {
    */
   saveRecordingAttachment = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
     const { callId } = req.params;
 
-    if (!userId) {
+    if (!userId || !workspaceId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }

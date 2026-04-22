@@ -324,6 +324,7 @@ export class XyneAIController {
     }
   };
 
+
   /**
    * GET /api/xyne-ai/list-products
    * 

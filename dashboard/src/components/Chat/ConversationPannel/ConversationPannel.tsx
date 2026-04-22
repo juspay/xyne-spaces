@@ -194,8 +194,20 @@ const ConversationPannel = ({
   const zero = useZero();
   const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(channelId);
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const skipInputAutoFocus = searchParams.get('nofocus') === '1';
+
+  // Strip the `nofocus` param from the URL after mount so subsequent interactions
+  // (composing, tab switches) don't keep carrying it.
+  useEffect(() => {
+    if (searchParams.get('nofocus') !== '1') return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('nofocus');
+    setSearchParams(next, { replace: true });
+    // Only run once when the param is present — we immediately remove it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Get dynamic tabs based on permissions and channel scope type
   const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(channel?.scopeType);
@@ -387,7 +399,8 @@ const ConversationPannel = ({
               ) : (
                 <div className='px-4 pt-4 pb-4 bg-background'>
                   <ChatInput
-                    autoFocus='end' // eslint-disable-line jsx-a11y/no-autofocus
+                    // eslint-disable-next-line jsx-a11y/no-autofocus
+                    autoFocus={skipInputAutoFocus ? null : 'end'}
                     ref={inputRef}
                     channelId={channelId || ''}
                   />

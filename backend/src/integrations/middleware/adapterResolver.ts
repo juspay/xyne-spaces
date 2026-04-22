@@ -35,6 +35,17 @@ export function adapterResolver(
     // Resolve adapter from registry
     const adapter = adapterRegistry.getAdapter(sourceName);
 
+    // Check for webhook verification via query params (e.g., Microsoft's ?validationToken)
+    // This runs before source DB lookup since the source may not exist yet during subscription setup
+    if (adapter.isTestQueryParam) {
+      const result = adapter.isTestQueryParam(req.query as Record<string, string | undefined>);
+      if (result.isTest && result.response) {
+        res.set('Content-Type', 'text/plain');
+        res.status(result.response.status).send(result.response.body);
+        return;
+      }
+    }
+
     // Attach to request
     req.adapter = adapter;
     req.sourceName = sourceName;

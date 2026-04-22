@@ -17,15 +17,22 @@ import RadioGroup, { Radio } from '../../ui/RadioGroup';
 import { Badge } from '../../ui/Badge';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { cn } from '../../../utils/classNames';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
+type ConnectorType = 'google' | 'microsoft' | null;
 
 interface AddChannelFormProps {
   mode?: ChannelFormMode;
-  onSubmit: (data: ChannelFormData) => void;
+  onSubmit: (
+    data: ChannelFormData & { connector?: ConnectorType; channelType?: 'EMAIL' | undefined },
+  ) => void;
   onCancel: () => void;
   loading?: boolean;
+  title?: string;
+  hideVisibility?: boolean;
+  requireConnector?: boolean;
 }
 
 export const AddChannelForm: React.FC<AddChannelFormProps> = ({
@@ -33,10 +40,14 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   onSubmit,
   loading,
   onCancel,
+  title,
+  hideVisibility = false,
+  requireConnector = false,
 }) => {
   const [debouncedChannelName, setDebouncedChannelName] = useState('');
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
+  const [selectedConnector, setSelectedConnector] = useState<ConnectorType>(null);
 
   // Fetch all projects for selection
   const [projects] = useCachedQuery(queries.getAllProjects());
@@ -75,6 +86,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       if (duplicateCheck?.isDuplicate) {
         return;
       }
+      // Prevent submission if connector is required but not selected
+      if (requireConnector && !selectedConnector) {
+        return;
+      }
       if (mode === 'promote') {
         const promoteData: PromoteGroupDmRequest = {
           name: value.name,
@@ -87,7 +102,13 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         }
         onSubmit?.(promoteData);
       } else {
-        onSubmit?.(value);
+        // When requireConnector is true, pass connector as channel type
+        const channelType = requireConnector && selectedConnector ? 'EMAIL' : undefined;
+        if (channelType) {
+          onSubmit?.({ ...value, connector: selectedConnector, channelType });
+        } else {
+          onSubmit?.({ ...value, connector: selectedConnector });
+        }
       }
     },
   });
@@ -164,10 +185,66 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   };
 
   const renderFormComponent = (): ReactElement => (
-    <div className='space-y-6 max-w-md mx-auto'>
-      <div className='text-xl font-medium text-foreground mb-1'>
-        {mode === 'promote' ? 'Promote to Channel' : 'Create a channel'}
-      </div>
+    <div className='space-y-6 w-full'>
+      {title ? (
+        <div className='text-xl font-medium text-foreground mb-1'>{title}</div>
+      ) : (
+        <div className='text-xl font-medium text-foreground mb-1'>
+          {mode === 'promote' ? 'Promote to Channel' : 'Create a channel'}
+        </div>
+      )}
+
+      {/* Connector Selection (for email channels) */}
+      {requireConnector && (
+        <div className='space-y-2'>
+          <div className='text-sm font-medium text-foreground'>
+            Email Provider <span className='text-red-500'>*</span>
+          </div>
+          <div className='flex gap-3'>
+            <button
+              type='button'
+              onClick={() => setSelectedConnector('google')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all',
+                selectedConnector === 'google'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-border hover:border-muted-foreground/50',
+              )}
+              data-track-category='ADD_CHANNEL_FORM'
+              data-track-name='SELECT_GOOGLE_PROVIDER'
+            >
+              <svg className='w-5 h-5' viewBox='0 0 24 24' fill='currentColor'>
+                <path d='M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z' />
+                <path d='M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z' />
+                <path d='M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z' />
+                <path d='M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z' />
+              </svg>
+              <span className='font-medium'>Google</span>
+            </button>
+            <button
+              type='button'
+              onClick={() => setSelectedConnector('microsoft')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all',
+                selectedConnector === 'microsoft'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-border hover:border-muted-foreground/50',
+              )}
+              data-track-category='ADD_CHANNEL_FORM'
+              data-track-name='SELECT_MICROSOFT_PROVIDER'
+            >
+              <svg className='w-5 h-5' viewBox='0 0 21 21' fill='currentColor'>
+                <path d='M10 0H0v10h10V0zM21 0H11v10h10V0zM10 11H0v10h10V11zM21 11H11v10h10V11z' />
+              </svg>
+              <span className='font-medium'>Microsoft</span>
+            </button>
+          </div>
+          {!selectedConnector && (
+            <p className='text-sm text-red-500'>Please select an email provider</p>
+          )}
+        </div>
+      )}
+
       {/* Channel Name */}
       <form.Field
         name='name'
@@ -188,7 +265,13 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             </label>
             <div className='relative'>
               <div className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground'>
-                {visibility === 'private' ? <Lock size={14} /> : <Hash size={14} />}
+                {hideVisibility ? (
+                  <Hash size={14} />
+                ) : visibility === 'private' ? (
+                  <Lock size={14} />
+                ) : (
+                  <Hash size={14} />
+                )}
               </div>
               <Input
                 id='channel-name'
@@ -282,25 +365,27 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       </form.Field>
 
       {/* Channel Visibility */}
-      <form.Field name='visibility'>
-        {field => (
-          <div>
-            <RadioGroup
-              name='visibility'
-              label='Channel Visibility'
-              value={field.state.value}
-              onChange={value => field.handleChange(value as 'public' | 'private')}
-            >
-              <Radio value='public' subtext='Anyone in the organization can view and join'>
-                Public
-              </Radio>
-              <Radio value='private' subtext='Only invited members can view and join'>
-                Private
-              </Radio>
-            </RadioGroup>
-          </div>
-        )}
-      </form.Field>
+      {!hideVisibility && (
+        <form.Field name='visibility'>
+          {field => (
+            <div>
+              <RadioGroup
+                name='visibility'
+                label='Channel Visibility'
+                value={field.state.value}
+                onChange={value => field.handleChange(value as 'public' | 'private')}
+              >
+                <Radio value='public' subtext='Anyone in the organization can view and join'>
+                  Public
+                </Radio>
+                <Radio value='private' subtext='Only invited members can view and join'>
+                  Private
+                </Radio>
+              </RadioGroup>
+            </div>
+          )}
+        </form.Field>
+      )}
 
       {/* Topic Tags */}
       <form.Field name='topicTags'>
@@ -366,7 +451,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           size='default'
           loading={loading || false}
           type='submit'
-          className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
+          disabled={requireConnector && !selectedConnector}
+          className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed'
           data-testid='create-channel-button'
           data-track-category='ADD_CHANNEL_FORM'
           data-track-name='CREATE_CHANNEL_SUBMIT'

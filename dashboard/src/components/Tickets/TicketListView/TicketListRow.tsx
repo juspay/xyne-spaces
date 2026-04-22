@@ -1,10 +1,12 @@
 import { ReactElement, useMemo, useRef } from 'react';
-import { Sparkles, CircleDashed, Circle, Clock, XCircle, CheckCircle2 } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import useMeasure from '../../../hooks/useMeasure';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import { TicketStatus } from '@xyne/shared';
 import type { TicketListItem } from './TicketListView.types';
+import { AssigneePicker } from './AssigneePicker';
+import { StagePicker } from './StagePicker';
+import { PriorityPicker } from './PriorityPicker';
 
 interface TicketListRowProps {
   ticket: TicketListItem;
@@ -12,18 +14,6 @@ interface TicketListRowProps {
   isActive?: boolean;
   showExtraFields?: boolean;
 }
-
-const ticketStatusConfig: Record<TicketStatus, ReactElement> = {
-  [TicketStatus.NEW]: <CircleDashed size={14} className='text-status-new' />,
-  [TicketStatus.IN_PROGRESS]: (
-    <Circle size={14} className='text-status-pending' fill='currentColor' fillOpacity={0.2} />
-  ),
-  [TicketStatus.WAIT_FOR_APPROVAL]: <Clock size={14} className='text-status-scheduled' />,
-  [TicketStatus.REJECTED]: <XCircle size={14} className='text-status-failure' />,
-  [TicketStatus.RESOLVED]: (
-    <CheckCircle2 size={14} className='text-status-success' fill='currentColor' fillOpacity={0.2} />
-  ),
-};
 
 const formatStatusText = (status: string): string => {
   return status
@@ -50,23 +40,12 @@ const formatDate = (date: Date): string => {
   return `${months[date.getMonth()]} ${date.getDate()}`;
 };
 
-const extractNameFromEmail = (fromEmailAddress: string | null | undefined): string | null => {
+const extractSenderEmail = (fromEmailAddress: string | null | undefined): string | null => {
   if (!fromEmailAddress) return null;
-  const nameMatch = fromEmailAddress.match(/^"?(.+?)"?\s*</);
-  if (nameMatch && nameMatch[1]) return nameMatch[1].trim();
-  const emailMatch = fromEmailAddress.match(/<(.+?)>/);
-  if (emailMatch && emailMatch[1]) return emailMatch[1].split('@')[0] || null;
-  return null;
-};
-
-const extractDomainFromEmail = (fromEmailAddress: string | null | undefined): string | null => {
-  if (!fromEmailAddress) return null;
-  const emailMatch = fromEmailAddress.match(/<(.+?)>/);
-  if (emailMatch && emailMatch[1]) return emailMatch[1].split('@')[1] || null;
-  const directEmailMatch = fromEmailAddress.match(
-    /([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/,
-  );
-  if (directEmailMatch && directEmailMatch[1]) return directEmailMatch[1].split('@')[1] || null;
+  const bracketMatch = fromEmailAddress.match(/<([^>]+)>/);
+  if (bracketMatch && bracketMatch[1]) return bracketMatch[1].trim();
+  const plainMatch = fromEmailAddress.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  if (plainMatch && plainMatch[1]) return plainMatch[1];
   return null;
 };
 
@@ -84,23 +63,17 @@ export const TicketListRow = ({
 
   const metadata = ticket.metadata as { fromEmailAddress?: string | null } | null | undefined;
   const fromEmailAddress = metadata?.fromEmailAddress;
-  const createdBy = useMemo(() => extractNameFromEmail(fromEmailAddress), [fromEmailAddress]);
-  const company = useMemo(() => extractDomainFromEmail(fromEmailAddress), [fromEmailAddress]);
+  const senderEmail = useMemo(() => extractSenderEmail(fromEmailAddress), [fromEmailAddress]);
 
   const dueDate = useMemo(() => {
     return ticket.createdAt ? new Date(ticket.createdAt) : new Date();
   }, [ticket.createdAt]);
 
-  let statusIcon =
-    ticketStatusConfig[ticket.status as TicketStatus] ?? ticketStatusConfig[TicketStatus.NEW];
-  if (isHumanInterventionTicket) {
-    statusIcon = (
-      <Sparkles size={14} className='text-status-paused' fill='currentColor' fillOpacity={0.3} />
-    );
-  }
-
-  const displayName = createdBy || (showExtraFields ? 'Unknown' : null);
-  const displayCompany = company || (showExtraFields ? 'unknown.com' : null);
+  const displayEmail = senderEmail || (showExtraFields ? 'unknown@email' : null);
+  const statusLabel = isHumanInterventionTicket
+    ? 'Human Intervention'
+    : (ticket.stageName ?? formatStatusText(ticket.status));
+  const emailCount = ticket.emails?.length ?? 0;
 
   return (
     <div
@@ -123,44 +96,46 @@ export const TicketListRow = ({
       )}
     >
       <div className='flex items-center gap-2 min-w-0 flex-1'>
-        <Tooltip
-          delayDuration={500}
-          content={
-            isHumanInterventionTicket ? 'Human Intervention' : formatStatusText(ticket.status)
-          }
-        >
-          <span className='h-full rounded-sm text-xs whitespace-nowrap flex items-center justify-center cursor-pointer'>
-            {statusIcon}
-          </span>
-        </Tooltip>
+        {isHumanInterventionTicket ? (
+          <Tooltip delayDuration={500} content='Human Intervention'>
+            <span className='h-full rounded-sm text-xs whitespace-nowrap flex items-center justify-center'>
+              <Sparkles
+                size={14}
+                className='text-status-paused'
+                fill='currentColor'
+                fillOpacity={0.3}
+              />
+            </span>
+          </Tooltip>
+        ) : (
+          <PriorityPicker ticketId={ticket.id} priority={ticket.priority} compact />
+        )}
         <span className='text-xs text-muted-foreground font-mono flex-shrink-0 font-medium'>
           {ticketIdValue}
         </span>
         <span className='text-sm font-medium text-foreground min-w-0 overflow-hidden text-ellipsis whitespace-nowrap'>
           {ticket.title}
         </span>
-        {!shouldHideDetails && (
+        {emailCount > 0 && (
+          <span
+            className='inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-sm bg-muted text-[10px] font-medium text-muted-foreground flex-shrink-0'
+            title={`${emailCount} email${emailCount === 1 ? '' : 's'}`}
+          >
+            {emailCount}
+          </span>
+        )}
+        {!shouldHideDetails && displayEmail && (
           <>
-            {displayName && (
-              <>
-                <span className='size-1 rounded-full bg-muted flex-shrink-0' />
-                <span className='text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap'>
-                  {displayName}
-                </span>
-              </>
-            )}
-            {displayCompany && (
-              <>
-                <span className='size-1 rounded-full bg-muted flex-shrink-0' />
-                <span className='text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap'>
-                  {displayCompany}
-                </span>
-              </>
-            )}
+            <span className='size-1 rounded-full bg-muted flex-shrink-0' />
+            <span className='text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap'>
+              {displayEmail}
+            </span>
           </>
         )}
       </div>
-      <div className='flex items-center justify-center gap-2 flex-shrink-0'>
+      <div className='flex items-center justify-center gap-3 flex-shrink-0'>
+        <StagePicker ticketId={ticket.id} stageName={ticket.stageName} stageLabel={statusLabel} />
+        <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} />
         <span className='text-xs text-foreground whitespace-nowrap'>{formatDate(dueDate)}</span>
       </div>
     </div>

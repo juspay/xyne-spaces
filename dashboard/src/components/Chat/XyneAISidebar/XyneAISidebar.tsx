@@ -538,13 +538,16 @@ const XyneAISidebar = ({
   // Save session metadata (branchSelections, feedbackMap) to backend when they change
   // Messages are already persisted by the backend during streaming, so we only save metadata
   useEffect(() => {
-    if (!conversationId || messages.length === 0) return;
+    const saveChannelId = conversationChannelId || channelId;
+    if (messages.length === 0 || !conversationId || !saveChannelId) {
+      return;
+    }
 
-    // Don't save if there are streaming messages
     const hasStreamingMessages = messages.some(m => m.isStreaming);
-    if (hasStreamingMessages) return;
+    if (hasStreamingMessages) {
+      return;
+    }
 
-    // Build feedbackMap from current messages
     const currentFeedbackMap: Record<string, number> = {};
     messages.forEach(msg => {
       if (msg.feedback !== undefined && msg.feedback !== 0) {
@@ -562,7 +565,14 @@ const XyneAISidebar = ({
       metadata.feedbackMap = currentFeedbackMap;
     }
     void saveSessionMetadata(conversationId, metadata);
-  }, [branchSelections, conversationId, messages]);
+  }, [
+    messages,
+    channelId,
+    conversationChannelId,
+    conversationId,
+    activeThreadInfo?.conversationId,
+    branchSelections,
+  ]);
 
   const handleSuggestionClick = (query: string): void => {
     setInputValue(query);

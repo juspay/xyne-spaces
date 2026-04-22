@@ -13,6 +13,7 @@ export interface CreateChannelInput {
   createdBy: string;
   projectId: string;
   workspaceId: string;
+  type?: ChannelType;
 }
 
 export interface UpdateChannelInput {
@@ -60,6 +61,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         createdBy: data.createdBy,
         projectId: data.projectId,
         workspaceId: data.workspaceId,
+        ...(data.type && { type: data.type }),
       }
     });
 

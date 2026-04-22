@@ -81,6 +81,7 @@ export interface XyneAIMemoryProvider {
   createSession(sessionId: string, userId: string, metadata?: SessionMetadata, agentName?: string): Promise<SessionData>;
   getSession(sessionId: string): Promise<SessionData | null>;
   updateSessionMetadata(sessionId: string, metadata: Partial<SessionMetadata>): Promise<boolean>;
+  getSessionsByUser(userId: string, conversationId?: string): Promise<SessionData[]>;
   deleteSession(sessionId: string): Promise<boolean>;
   getUserSessions(userId: string, agentName?: string): Promise<SessionListItem[]>;
   addMessage(sessionId: string, role: XyneAIMessageRole, content: unknown, traceId?: string, attachmentMetadata?: AttachmentMetadata[], previousStepId?: string): Promise<MessageData>;
@@ -230,6 +231,8 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
         select: { context: true },
       });
 
+      if (!execution) return false;
+
       const existingMetadata = parseSessionMetadata(execution?.context ?? null);
       const mergedMetadata = { ...existingMetadata, ...metadata };
 
@@ -248,6 +251,59 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
   const generateTitleFromQuery = (query: string): string => {
     const trimmed = query.trim();
     return trimmed.length > 50 ? trimmed.substring(0, 50) + '...' : trimmed;
+  };
+
+  const getSessionsByUser = async (userId: string, conversationId?: string): Promise<SessionData[]> => {
+    try {
+      const workflowId = await getOrCreateAskAIWorkflow();
+
+      const userMappings = await db.workflowExecutionUsers.findMany({
+        where: { userId },
+        select: { workflowExecutionId: true },
+      });
+
+      if (userMappings.length === 0) return [];
+
+      const executionIds = userMappings.map(m => m.workflowExecutionId);
+
+      const executions = await db.workflowExecution.findMany({
+        where: {
+          id: { in: executionIds },
+          workflowId,
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      const sessions: SessionData[] = executions.map(execution => {
+        let metadata: Record<string, unknown> = {};
+        if (execution.context) {
+          try {
+            const parsed = JSON.parse(execution.context);
+            if (parsed && typeof parsed === 'object') {
+              metadata = parsed;
+            }
+          } catch {
+            // ignore parse errors
+          }
+        }
+        return {
+          sessionId: execution.id,
+          userId,
+          metadata,
+          createdAt: execution.createdAt,
+          updatedAt: execution.updatedAt,
+        };
+      });
+
+      if (conversationId) {
+        return sessions.filter(s => s.metadata?.conversationId === conversationId);
+      }
+
+      return sessions;
+    } catch (error) {
+      logger.error(`[XyneAIMemoryProvider] Failed to get sessions for user ${userId}:`, error);
+      return [];
+    }
   };
 
   const getUserSessions = async (userId: string): Promise<SessionListItem[]> => {
@@ -531,6 +587,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
     createSession,
     getSession,
     updateSessionMetadata,
+    getSessionsByUser,
     deleteSession,
     getUserSessions,
     addMessage,

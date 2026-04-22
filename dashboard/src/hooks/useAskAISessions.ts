@@ -18,6 +18,8 @@ import {
   updateSessionMetadataApi,
   sessionDetailToConversationHistory,
   type SessionMetadataPayload,
+  fetchSessionsByConversationId,
+  type SessionListItem,
 } from '../services/XyneAI/XyneAISessionsService';
 
 // ============================================================================
@@ -129,4 +131,17 @@ export async function saveSessionMetadata(
   } catch (error) {
     console.error('[useAskAISessions] Failed to save session metadata:', error);
   }
+}
+
+export function useSessionForConversation(conversationId: string | undefined | null) {
+  return useQuery<SessionListItem | null>({
+    queryKey: ['xyne-ai-session', conversationId],
+    queryFn: async (): Promise<SessionListItem | null> => {
+      if (!conversationId) return null;
+      const sessions = await fetchSessionsByConversationId(conversationId);
+      return sessions.length > 0 ? sessions[0]! : null;
+    },
+    enabled: !!conversationId,
+    staleTime: 30_000,
+  });
 }

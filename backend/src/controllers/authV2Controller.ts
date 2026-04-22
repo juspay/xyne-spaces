@@ -145,7 +145,7 @@ export class AuthV2Controller {
 
       await pkceServiceV2.storeVerifier(state, codeVerifier);
 
-      const redirectUri = `${this.getBackendUrl(req)}/api/auth/exchange`;
+      const redirectUri = process.env.GOOGLE_AUTH_REDIRECT_URI ?? `${this.getBackendUrl(req)}/api/auth/exchange`;
 
       logger.info('[X-Original-Host] : Redirect URI:', redirectUri);
 
@@ -240,7 +240,7 @@ export class AuthV2Controller {
 
       await oauthStateServiceV2.markCodeAsUsed(code as string);
 
-      const redirectUri = `${this.getBackendUrl(req)}/api/auth/exchange`;
+      const redirectUri = process.env.GOOGLE_AUTH_REDIRECT_URI ?? `${this.getBackendUrl(req)}/api/auth/exchange`;
 
       logger.info('[X-Original-Host] : Redirect URI:', redirectUri);
 
@@ -499,7 +499,7 @@ export class AuthV2Controller {
 
       await oauthStateServiceV2.markCodeAsUsed(code);
 
-      const redirectUri = `${this.getBackendUrl(req)}/api/auth/exchange`;
+      const redirectUri = process.env.GOOGLE_AUTH_REDIRECT_URI ?? `${this.getBackendUrl(req)}/api/auth/exchange`;
 
       logger.info('[X-Original-Host] : Redirect URI:', redirectUri);
 

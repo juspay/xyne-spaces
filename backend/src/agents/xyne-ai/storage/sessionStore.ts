@@ -259,10 +259,14 @@ class XyneAISessionStore {
   // Utility Methods
   // ============================================================================
 
-  async getUserSessions(userId: string): Promise<SessionListItem[]> {
+  async getUserSessions(userId: string, conversationId?: string): Promise<SessionListItem[]> {
     try {
       const provider = await this.ensureInitialized();
-      return await provider.getUserSessions(userId);
+      const sessions = await provider.getUserSessions(userId);
+      if (conversationId) {
+        return sessions.filter(s => s.threadConversationId === conversationId);
+      }
+      return sessions;
     } catch (error) {
       logger.error(`[SessionStore] Error getting sessions for user ${userId}:`, error);
       return [];
@@ -404,6 +408,18 @@ export async function getOrCreateSession(
           return { session: updatedSession, isNewSession: false };
         }
         
+        return { session: existing, isNewSession: false };
+      }
+    }
+  }
+
+  // Before creating a new session, check if one already exists for this (userId, conversationId)
+  if (context.conversationId) {
+    const existingSessions = await sessionStore.getUserSessions(context.userId, context.conversationId);
+    if (existingSessions.length > 0 && existingSessions[0]) {
+      const existing = await sessionStore.get(existingSessions[0].sessionId);
+      if (existing) {
+        logger.info(`[XyneAI SessionStore] Found existing session ${existing.sessionId} for conversationId: ${context.conversationId}`);
         return { session: existing, isNewSession: false };
       }
     }
