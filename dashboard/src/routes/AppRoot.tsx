@@ -23,6 +23,7 @@ import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
 import MyTicketsScreen from './FilteredTicketsScreen/FilteredTicketsScreen.tsx';
 import SupportScreen from './SupportScreen/SupportScreen.tsx';
+import SaveRoute from '../components/SaveRoute/SaveRoute';
 import CanvasScreen from '../components/Canvas/CanvasScreen';
 import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
 import CallPage from './CallScreen/CallPage';
@@ -921,7 +922,9 @@ export const router = createBrowserRouter([
                 path: 'support',
                 element: (
                   <ResourceProtectedRoute resourceName='SUPPORT'>
-                    <SupportScreen />
+                    <SaveRoute keyword='support' stripSearchParams={['settings', 'openSettings']}>
+                      <SupportScreen />
+                    </SaveRoute>
                   </ResourceProtectedRoute>
                 ),
                 children: [

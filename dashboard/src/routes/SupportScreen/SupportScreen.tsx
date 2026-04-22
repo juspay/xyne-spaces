@@ -17,13 +17,17 @@ import {
   Split,
   Paperclip,
   Settings,
-  PenLine,
+  Signature,
   Minimize2,
   Trash2,
   Plus,
-  Sparkles,
   Wand2,
+  Users2,
+  Lock,
+  Hash,
 } from 'lucide-react';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
+import Tooltip from '../../components/ui/Tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,19 +35,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
-import { EmailType } from '@xyne/shared';
+import { EmailType, ChannelVisibility } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
-import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '../../utils/classNames';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
-import { RenderMessageWithHTML } from '../../components/Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import ThreadList from '../../components/Chat/ThreadList/ThreadList';
 import { ChatInput } from '../../components/Chat/ChatInput/ChatInput';
 import { useChannel, useGetChannelUserStatus, useEmailChannels } from '../../hooks/useChannels';
+import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useUsers } from '../../hooks/useUsers';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
@@ -86,13 +90,16 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { AssigneePicker } from '../../components/Tickets/TicketListView/AssigneePicker';
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
 import { PriorityPicker } from '../../components/Tickets/TicketListView/PriorityPicker';
-import ChannelsSidebar from '../../components/ChannelsSidebar/ChannelsSidebar';
 import { EmailTagWithAvatar } from '../../components/xyne-desk/EmailTagWithAvatar/EmailTagWithAvatar';
+import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
+import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { useEmailDraft, useEmailDraftOperations } from '../../hooks/useEmailDraft';
 import { AttachmentPreview } from '../../components/ui/files/AttachmentPreview';
 import { MediaViewer } from '../../components/ui/files';
 import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
+import Info, { ChannelTab } from '../../components/Chat/Info/Info';
+import { useVisibleChannel } from '../../hooks/useChannels';
 import { API_BASE_URL } from '../../config';
 import Dialog from '../../components/ui/Dialog';
 import { useMutation } from '@tanstack/react-query';
@@ -102,9 +109,36 @@ import { DraftCard } from '../../components/xyne-desk/DraftCard/DraftCard';
 import { RefineInput } from '../../components/xyne-desk/RefineInput/RefineInput';
 import { useDeskAIDraft } from '../../hooks/useDeskAIDraft';
 import { channelService, CreateChannelFormData } from '../../services/Chat/channelService';
+import { markdownToHtml } from '../../utils/clipboardUtils';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFiltered>[number];
+
+const ChannelInfoModal = ({
+  channelId,
+  isOpen,
+  defaultTab,
+  onClose,
+}: {
+  channelId: string;
+  isOpen: boolean;
+  defaultTab: ChannelTab;
+  onClose: () => void;
+}): ReactElement | null => {
+  const channel = useVisibleChannel(channelId);
+  if (!channel) return null;
+  return (
+    <Dialog
+      className='max-w-[496px] rounded-2xl overflow-hidden'
+      open={isOpen}
+      onOpenChange={open => {
+        if (!open) onClose();
+      }}
+    >
+      <Info channel={channel} defaultTab={defaultTab} onClose={onClose} />
+    </Dialog>
+  );
+};
 
 const ALL_CHANNELS_ID = 'all';
 
@@ -162,50 +196,21 @@ const SupportScreen = (): ReactElement => {
   });
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('support-view-mode');
-    return (saved as ViewMode) || 'kanban';
+    return (saved as ViewMode) || 'list';
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () =>
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
   );
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
 
-  // Handle email channel connection results from OAuth redirect
   useEffect(() => {
     const emailError = searchParams.get('emailError');
     const emailConnected = searchParams.get('emailConnected');
 
     if (emailConnected === 'true') {
-      const channelId = searchParams.get('channelId');
-      if (channelId) {
-        setSelectedChannelId(channelId);
-      }
-      toast.success('Email channel connected successfully');
-      searchParams.delete('emailConnected');
-      searchParams.delete('channelId');
-      searchParams.delete('provider');
-      setSearchParams(searchParams, { replace: true });
-    } else if (emailError) {
-      toast.error(emailError);
-      searchParams.delete('emailError');
-      setSearchParams(searchParams, { replace: true });
-    }
-  }, []);
-
-  // Sync panel open/close with the URL so back button works correctly
-  useEffect(() => {
-    const isOpen =
-      searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures';
-    setIsSettingsOpen(isOpen);
-    // Clean up the openSettings param (used by "Add signature" deep-link)
-    if (searchParams.get('openSettings') === 'signatures') {
-      void navigate('/support?settings=open', { replace: true });
-    }
-  }, [searchParams, navigate]);
-
-  // Handle OAuth redirect back from Google/Microsoft with emailConnected flag
-  useEffect(() => {
-    if (searchParams.get('emailConnected') === 'true') {
       const provider = searchParams.get('provider') ?? 'Email';
       toast.success(
         `${provider.charAt(0).toUpperCase() + provider.slice(1)} channel connected successfully`,
@@ -219,8 +224,29 @@ const SupportScreen = (): ReactElement => {
         },
         { replace: true },
       );
+    } else if (emailError) {
+      toast.error(emailError);
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('emailError');
+          return p;
+        },
+        { replace: true },
+      );
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync panel open/close with the URL so back button works correctly
+  useEffect(() => {
+    const isOpen =
+      searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures';
+    setIsSettingsOpen(isOpen);
+    // Clean up the openSettings param (used by "Add signature" deep-link)
+    if (searchParams.get('openSettings') === 'signatures') {
+      void navigate('/support?settings=open', { replace: true });
+    }
+  }, [searchParams, navigate]);
 
   useEffect(() => {
     localStorage.setItem('support-view-mode', viewMode);
@@ -255,6 +281,18 @@ const SupportScreen = (): ReactElement => {
   const sortedEmailChannels = emailChannels;
   const selectedChannelName =
     sortedEmailChannels.find(c => c.id === selectedChannelId)?.name?.trim() || 'Xyne Desk';
+
+  // Manual refetch — shown when a specific email channel is selected.
+  // SupportScreen already filters to EMAIL channels; the hook owns its own
+  // toasts and the 400 / 403 / generic-error branches.
+  const refetchChannelId =
+    selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : undefined;
+  const { refetch: handleRefetch, isPending: isRefetching } =
+    useRefetchExternalSource(refetchChannelId);
+  const canRefetch = !!refetchChannelId;
+
+  // Get full selected channel for member count and other stats
+  const selectedChannelFull = useVisibleChannel(selectedChannelId ?? '');
 
   // Auto-select first channel when channels load and none is selected
   useEffect(() => {
@@ -409,24 +447,92 @@ const SupportScreen = (): ReactElement => {
         {isSidebarOpen && !isSettingsOpen && !ticketId && (
           <>
             <Panel defaultSize={16} minSize={12} maxSize={25} id='sidebar' order={1}>
-              <ChannelsSidebar
-                channels={sortedEmailChannels}
-                selectedChannelId={selectedChannelId}
-                onSelectChannel={setSelectedChannelId}
-                onCollapse={() => setIsSidebarOpen(false)}
-                headerAction={
-                  <button
-                    onClick={() => setShowCreateChannelModal(true)}
-                    className='p-2 hover:bg-muted rounded-md transition-colors'
-                    aria-label='Create channel'
-                    title='Create channel'
-                    data-track-category='Support'
-                    data-track-name='CreateChannelOpen'
-                  >
-                    <Plus className='size-4 text-muted-foreground' />
-                  </button>
-                }
-              />
+              <div className='h-full flex flex-col bg-sidebar outline-none'>
+                {/* Header */}
+                <div className='flex-shrink-0 h-14 sticky top-0 z-50 bg-sidebar border-b border-border flex items-center'>
+                  <div className='px-4 flex items-center justify-between w-full'>
+                    <h2 className='text-foreground font-inter text-base font-semibold leading-normal'>
+                      Desks
+                    </h2>
+                    <div className='flex items-center gap-1'>
+                      <button
+                        onClick={() => setShowCreateChannelModal(true)}
+                        className='p-2 hover:bg-muted rounded-md transition-colors'
+                        aria-label='Create channel'
+                        title='Create channel'
+                        data-track-category='Support'
+                        data-track-name='CreateChannelOpen'
+                      >
+                        <Plus className='size-4 text-muted-foreground' />
+                      </button>
+                      <button
+                        onClick={() => setIsSidebarOpen(false)}
+                        className='p-2 hover:bg-muted rounded-md transition-colors'
+                        aria-label='Collapse sidebar'
+                        title='Collapse sidebar'
+                        data-track-category='Support'
+                        data-track-name='CollapseChannelsSidebar'
+                      >
+                        <ChevronDown className='size-4 text-muted-foreground' />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {/* Scrollable channel list */}
+                <div className='flex-1 overflow-y-auto px-3 py-4'>
+                  {sortedEmailChannels.length === 0 ? (
+                    <div className='flex flex-col items-center justify-center h-32 text-muted-foreground text-sm px-4 text-center'>
+                      No channels available
+                    </div>
+                  ) : (
+                    <div className='space-y-0.5'>
+                      {sortedEmailChannels.map(c => {
+                        const isActive = selectedChannelId === c.id;
+                        const isPrivate = c.visibility === ChannelVisibility.PRIVATE;
+                        return (
+                          <div
+                            key={c.id}
+                            role='button'
+                            tabIndex={0}
+                            className={cn(
+                              'flex items-center gap-1.5 h-8 rounded-md px-1.5 cursor-pointer transition-colors',
+                              isActive
+                                ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
+                                : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
+                            )}
+                            onClick={() => setSelectedChannelId(c.id)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setSelectedChannelId(c.id);
+                              }
+                            }}
+                            data-track-category='Support'
+                            data-track-name='SelectEmailChannel'
+                          >
+                            <span className='flex items-center flex-shrink-0'>
+                              {isPrivate ? (
+                                <Lock
+                                  size={12}
+                                  className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'}
+                                />
+                              ) : (
+                                <Hash
+                                  size={12}
+                                  className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'}
+                                />
+                              )}
+                            </span>
+                            <span className='text-sm flex-1 truncate min-w-0'>
+                              {c.name?.trim() || 'Unnamed Channel'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             </Panel>
             <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
               <div className='w-[1px] h-full bg-border'></div>
@@ -449,7 +555,21 @@ const SupportScreen = (): ReactElement => {
                       <ChevronRight size={16} />
                     </button>
                   )}
-                  <span className='truncate'>{selectedChannelName}</span>
+                  {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? (
+                    <button
+                      onClick={() => {
+                        setInfoDefaultTab('about');
+                        setIsInfoOpen(true);
+                      }}
+                      className='text-base font-semibold hover:underline tracking-[-0.17px] flex items-center gap-1 truncate'
+                      data-track-category='Support'
+                      data-track-name='OpenChannelInfo'
+                    >
+                      {selectedChannelName}
+                    </button>
+                  ) : (
+                    <span className='truncate'>{selectedChannelName}</span>
+                  )}
                 </div>
                 <div className='flex items-center gap-2'>
                   <button
@@ -466,6 +586,24 @@ const SupportScreen = (): ReactElement => {
                   >
                     My Tickets
                   </button>
+                  {selectedChannelId &&
+                    selectedChannelId !== ALL_CHANNELS_ID &&
+                    selectedChannelFull && (
+                      <button
+                        onClick={() => {
+                          setInfoDefaultTab('members');
+                          setIsInfoOpen(true);
+                        }}
+                        className='flex items-center gap-1 text-sm font-medium transition-colors px-2 py-1 rounded whitespace-nowrap text-muted-foreground hover:text-foreground bg-transparent'
+                        data-track-category='Support'
+                        data-track-name='ViewMembers'
+                        data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                        title='View members'
+                      >
+                        <Users2 size={16} />
+                        <span>{selectedChannelFull.channelStats?.participantCount ?? 0}</span>
+                      </button>
+                    )}
                   {/* View Toggle */}
                   <div className='flex items-center border border-border rounded-lg overflow-hidden'>
                     <button
@@ -497,6 +635,26 @@ const SupportScreen = (): ReactElement => {
                       <List size={16} />
                     </button>
                   </div>
+                  {canRefetch && (
+                    <Tooltip
+                      content={isRefetching ? 'Fetching latest…' : 'Fetch latest emails'}
+                      side='bottom'
+                    >
+                      <button
+                        onClick={handleRefetch}
+                        disabled={isRefetching}
+                        className={cn(
+                          'p-1.5 rounded transition-colors text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+                          isRefetching && 'opacity-60 cursor-not-allowed',
+                        )}
+                        data-track-category='Support'
+                        data-track-name='RefetchExternalSource'
+                        data-track-metadata={JSON.stringify({ channelId: refetchChannelId })}
+                      >
+                        <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
+                      </button>
+                    </Tooltip>
+                  )}
                   <button
                     onClick={() => {
                       if (isSettingsOpen) {
@@ -611,6 +769,16 @@ const SupportScreen = (): ReactElement => {
         )}
       </PanelGroup>
 
+      {/* Channel Info Modal */}
+      {selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID && (
+        <ChannelInfoModal
+          channelId={selectedChannelId}
+          isOpen={isInfoOpen}
+          defaultTab={infoDefaultTab}
+          onClose={() => setIsInfoOpen(false)}
+        />
+      )}
+
       {/* Create Channel Modal */}
       <Dialog
         open={showCreateChannelModal}
@@ -655,7 +823,7 @@ const TicketMetaRow = ({
       : '…'
     : 'Unassigned';
   return (
-    <div className='flex items-center gap-2 flex-wrap min-h-[24px]'>
+    <div className='flex items-center gap-1.5 flex-wrap min-h-[24px]'>
       <PriorityPicker ticketId={ticket.id} priority={ticket.priority} />
       <StagePicker ticketId={ticket.id} stageName={ticket.stageName} stageLabel={stage} />
       <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} label={assigneeName} />
@@ -872,86 +1040,129 @@ const SupportTicketDetail = (): ReactElement => {
       >
         <Panel defaultSize={50} minSize={30} maxSize={70}>
           <div className='h-full flex flex-col overflow-hidden relative'>
-            <div className='w-full px-6 py-5 flex items-start justify-between flex-shrink-0 gap-4'>
-              <div className='flex items-start gap-2 min-w-0 flex-1'>
+            <div className='w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
+              <div className='flex items-center gap-2 min-w-0'>
                 <button
                   type='button'
                   onClick={() => void navigate('/support')}
-                  className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 mt-0.5'
+                  className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
                   aria-label='Back to ticket list'
                   data-track-category='Support'
                   data-track-name='BackToList'
                 >
                   <ArrowLeft size={18} />
                 </button>
-                <div className='flex flex-col min-w-0 flex-1 gap-3'>
-                  <div className='flex items-center gap-2 min-w-0'>
-                    <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
-                      {ticketIdParam}
-                    </span>
-                    <span className='font-semibold text-foreground min-w-0 whitespace-nowrap overflow-hidden text-ellipsis'>
-                      {title || 'Untitled Ticket'}
-                    </span>
+                <span className='bg-border py-[3px] px-3 flex items-center justify-center text-xs text-foreground rounded-md font-mono shrink-0 whitespace-nowrap'>
+                  {ticketIdParam}
+                </span>
+                <span
+                  className='font-medium text-foreground min-w-0 flex-1 truncate'
+                  title={title || 'Untitled Ticket'}
+                >
+                  {title || 'Untitled Ticket'}
+                </span>
+                <div className='flex items-center gap-2 flex-shrink-0'>
+                  <div className='flex items-center gap-1'>
+                    <Tooltip
+                      side='bottom'
+                      delayDuration={300}
+                      content={
+                        <span className='flex items-center gap-2'>
+                          Previous ticket
+                          <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                            K
+                          </kbd>
+                        </span>
+                      }
+                    >
+                      <button
+                        type='button'
+                        onClick={() => prevTicket && goToTicket(prevTicket)}
+                        disabled={!prevTicket}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                        data-track-category='Support'
+                        data-track-name='PrevTicket'
+                      >
+                        <ChevronUp size={16} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip
+                      side='bottom'
+                      delayDuration={300}
+                      content={
+                        <span className='flex items-center gap-2'>
+                          Next ticket
+                          <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                            J
+                          </kbd>
+                        </span>
+                      }
+                    >
+                      <button
+                        type='button'
+                        onClick={() => nextTicket && goToTicket(nextTicket)}
+                        disabled={!nextTicket}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                        data-track-category='Support'
+                        data-track-name='NextTicket'
+                      >
+                        <ChevronDown size={16} />
+                      </button>
+                    </Tooltip>
                   </div>
-                  <TicketMetaRow ticket={ticket} />
+                  {emailCollapseState.canToggleAll && (
+                    <>
+                      <div className='w-px h-4 bg-border' />
+                      <Tooltip
+                        side='bottom'
+                        delayDuration={300}
+                        content={
+                          <span className='flex items-center gap-2'>
+                            {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
+                            <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                              E
+                            </kbd>
+                          </span>
+                        }
+                      >
+                        <button
+                          type='button'
+                          onClick={emailCollapseState.toggleAll}
+                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          data-track-category='Support'
+                          data-track-name={
+                            emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
+                          }
+                        >
+                          {emailCollapseState.anyExpanded ? (
+                            <ChevronsDownUp size={16} />
+                          ) : (
+                            <ChevronsUpDown size={16} />
+                          )}
+                        </button>
+                      </Tooltip>
+                    </>
+                  )}
+                  {!isRightPanelOpen && (
+                    <>
+                      <div className='w-px h-4 bg-border' />
+                      <Button
+                        size='sm'
+                        variant='ghost'
+                        onClick={() => setIsRightPanelOpen(true)}
+                        data-track-category='Support'
+                        data-track-name='OpenThreadPanel'
+                      >
+                        Open Thread
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
               <div className='flex items-center gap-2 flex-shrink-0'>
-                <div className='flex items-center gap-1'>
-                  <button
-                    type='button'
-                    onClick={() => prevTicket && goToTicket(prevTicket)}
-                    disabled={!prevTicket}
-                    title='Previous ticket'
-                    className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-                    data-track-category='Support'
-                    data-track-name='PrevTicket'
-                  >
-                    <ChevronUp size={16} />
-                  </button>
-                  <button
-                    type='button'
-                    onClick={() => nextTicket && goToTicket(nextTicket)}
-                    disabled={!nextTicket}
-                    title='Next ticket'
-                    className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-                    data-track-category='Support'
-                    data-track-name='NextTicket'
-                  >
-                    <ChevronDown size={16} />
-                  </button>
+                <div className='pl-9'>
+                  <TicketMetaRow ticket={ticket} />
                 </div>
-                {emailCollapseState.canToggleAll && (
-                  <button
-                    type='button'
-                    onClick={emailCollapseState.toggleAll}
-                    title={emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
-                    className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                    data-track-category='Support'
-                    data-track-name={
-                      emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
-                    }
-                  >
-                    {emailCollapseState.anyExpanded ? (
-                      <ChevronsDownUp size={16} />
-                    ) : (
-                      <ChevronsUpDown size={16} />
-                    )}
-                  </button>
-                )}
-                {!isRightPanelOpen && (
-                  <div className='text-sm '>
-                    <Button
-                      size='sm'
-                      variant='ghost'
-                      onClick={() => setIsRightPanelOpen(true)}
-                      data-track-category='Support'
-                      data-track-name='OpenThreadPanel'
-                    >
-                      Open Thread
-                    </Button>
-                  </div>
-                )}
               </div>
             </div>
             <div className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'>
@@ -961,7 +1172,7 @@ const SupportTicketDetail = (): ReactElement => {
                 </div>
               )}
             </div>
-            <div className='sticky bottom-0 w-full flex-shrink-0 bg-background border-t border-border'>
+            <div className='sticky bottom-0 w-full flex-shrink-0 bg-background'>
               {composerOpen ? (
                 <EmailComposer
                   conversationId={conversationId}
@@ -969,29 +1180,56 @@ const SupportTicketDetail = (): ReactElement => {
                   isAIPanelOpen={isAIPanelOpen}
                   onToggleAIPanel={() => setIsAIPanelOpen(prev => !prev)}
                   channelId={channelId}
+                  ticketId={ticketId}
                 />
               ) : (
                 <div className='px-6 py-3 flex items-center gap-2'>
-                  <Button
-                    size='sm'
-                    variant='outline'
-                    onClick={() => setComposerOpen(true)}
-                    data-track-category='Support'
-                    data-track-name='OpenReplyComposer'
+                  <Tooltip
+                    side='top'
+                    delayDuration={300}
+                    content={
+                      <span className='flex items-center gap-2'>
+                        Reply
+                        <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                          R
+                        </kbd>
+                      </span>
+                    }
                   >
-                    <ArrowUp size={14} className='rotate-[-90deg] mr-1' />
-                    Reply
-                  </Button>
-                  <Button
-                    size='sm'
-                    variant='outline'
-                    onClick={() => setComposerOpen(true)}
-                    data-track-category='Support'
-                    data-track-name='OpenReplyAllComposer'
+                    <button
+                      type='button'
+                      onClick={() => setComposerOpen(true)}
+                      data-track-category='Support'
+                      data-track-name='OpenReplyComposer'
+                      className='inline-flex items-center justify-center h-9 min-w-[104px] pl-3 pr-4 rounded-full border border-border bg-transparent text-sm font-medium text-muted-foreground hover:bg-muted active:bg-accent transition-colors cursor-pointer select-none'
+                    >
+                      <ArrowUp size={16} className='rotate-[-90deg] mr-2' />
+                      Reply
+                    </button>
+                  </Tooltip>
+                  <Tooltip
+                    side='top'
+                    delayDuration={300}
+                    content={
+                      <span className='flex items-center gap-2'>
+                        Reply all
+                        <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                          A
+                        </kbd>
+                      </span>
+                    }
                   >
-                    <ReplyAll size={14} className='mr-1' />
-                    Reply all
-                  </Button>
+                    <button
+                      type='button'
+                      onClick={() => setComposerOpen(true)}
+                      data-track-category='Support'
+                      data-track-name='OpenReplyAllComposer'
+                      className='inline-flex items-center justify-center h-9 min-w-[104px] pl-3 pr-4 rounded-full border border-border bg-transparent text-sm font-medium text-muted-foreground hover:bg-muted active:bg-accent transition-colors cursor-pointer select-none'
+                    >
+                      <ReplyAll size={16} className='mr-2' />
+                      Reply all
+                    </button>
+                  </Tooltip>
                 </div>
               )}
             </div>
@@ -1160,49 +1398,6 @@ const SupportTicketDetail = (): ReactElement => {
   );
 };
 
-const formatEmailDate = (timestamp: number | null | undefined): string => {
-  if (!timestamp) return 'Unknown date';
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffHours = diffMs / (1000 * 60 * 60);
-
-  // If less than 24 hours, show relative time
-  if (diffHours < 24) {
-    const diffMinutes = Math.floor(diffMs / (1000 * 60));
-    if (diffMinutes < 1) {
-      return 'Just now';
-    }
-    if (diffMinutes < 60) {
-      return `${diffMinutes} ${diffMinutes === 1 ? 'min' : 'mins'} ago`;
-    }
-    const hours = Math.floor(diffHours);
-    return `${hours} ${hours === 1 ? 'hr' : 'hrs'} ago`;
-  }
-
-  // For times more than 24 hours, show date and time
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  const hours = date.getHours();
-  const minutes = date.getMinutes();
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  const displayHours = hours % 12 || 12;
-  const displayMinutes = minutes.toString().padStart(2, '0');
-  return `${months[date.getMonth()]} ${date.getDate()}, ${displayHours}:${displayMinutes} ${ampm}`;
-};
-
 interface EmailCollapseState {
   collapsedIds: Set<string>;
   toggleOne: (id: string) => void;
@@ -1319,7 +1514,7 @@ const EmailThreadItem = ({
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
   const toList = email.to || [];
   const ccList = email.cc || [];
-  const avatarChar = fromName.charAt(0).toUpperCase();
+  const bccList = email.bcc || [];
   const navigate = useNavigate();
   const [isDemerging, setIsDemerging] = useState(false);
 
@@ -1365,114 +1560,102 @@ const EmailThreadItem = ({
   };
 
   const headerClickable = canCollapse && !!onToggleCollapse;
-  const preview = (email.body || '')
-    .replace(/<[^>]*>/g, ' ')
+  const preview = stripHtml(email.body || '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 120);
+    .slice(0, 140);
+
+  const demergeButton =
+    email.type === EmailType.DEFAULT &&
+    email.externalThreadId === email.externalMessageId &&
+    email.id !== firstEmail.id ? (
+      <button
+        onClick={e => {
+          e.stopPropagation();
+          void handleDemerge();
+        }}
+        disabled={isDemerging}
+        className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
+        title='Demerge this email to a new ticket'
+        data-track-category='SUPPORT'
+        data-track-name='DemergeEmail'
+        data-track-metadata={JSON.stringify({
+          emailId: email.id,
+          conversationId: email.conversationId,
+        })}
+      >
+        <Split size={12} />
+        {isDemerging ? 'Demerging...' : 'Demerge'}
+      </button>
+    ) : null;
 
   return (
-    <div className='w-full flex items-start justify-start gap-4 py-3'>
-      <div className=''>
-        <div className='size-7 flex items-center justify-center rounded-sm bg-indigo-600 text-white mt-1'>
-          {avatarChar}
-        </div>
-      </div>
-      <div className='flex-1 min-w-0'>
-        <div
-          className={cn(
-            'flex items-start justify-between',
-            !isCollapsed && 'mb-2',
-            headerClickable && 'cursor-pointer',
-          )}
-          data-track-category='Support'
-          data-track-name={isCollapsed ? 'ExpandEmail' : 'CollapseEmail'}
-          onClick={headerClickable ? onToggleCollapse : undefined}
-          role={headerClickable ? 'button' : undefined}
-          tabIndex={headerClickable ? 0 : undefined}
-          onKeyDown={
-            headerClickable
-              ? e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onToggleCollapse?.();
-                  }
+    <div
+      id={`mail-${email.id}`}
+      data-external-message-id={email.externalMessageId || undefined}
+      className={cn('w-full scroll-mt-20 transition-colors', isCollapsed ? 'py-3' : 'py-6')}
+    >
+      <div
+        className={cn(headerClickable && 'cursor-pointer')}
+        data-track-category='Support'
+        data-track-name={isCollapsed ? 'ExpandEmail' : 'CollapseEmail'}
+        onClick={headerClickable ? onToggleCollapse : undefined}
+        role={headerClickable ? 'button' : undefined}
+        tabIndex={headerClickable ? 0 : undefined}
+        onKeyDown={
+          headerClickable
+            ? e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onToggleCollapse?.();
                 }
-              : undefined
-          }
-        >
+              }
+            : undefined
+        }
+      >
+        <EmailThreadHeader
+          fromName={fromName}
+          fromEmail={fromEmail}
+          to={toList}
+          cc={ccList}
+          bcc={bccList}
+          createdAt={email.createdAt}
+          isCollapsed={isCollapsed}
+          previewText={preview}
+          extras={demergeButton}
+        />
+      </div>
+      {!isCollapsed && (
+        <div className='flex items-start gap-3 mt-4'>
+          <div className='size-8 shrink-0' aria-hidden='true' />
           <div className='flex-1 min-w-0'>
-            <div className='flex items-center gap-2 mb-1 flex-wrap'>
-              <span className='text-sm font-semibold text-foreground'>{fromName}</span>
-              {fromEmail && (
-                <span className='text-xs text-muted-foreground truncate'>&lt;{fromEmail}&gt;</span>
+            <div className='text-sm text-foreground leading-relaxed'>
+              {email.body ? (
+                <EmailBodyRenderer body={email.body} emailId={email.id} />
+              ) : (
+                <span className='text-muted-foreground italic'>No content</span>
               )}
-              {email.type === EmailType.DEFAULT &&
-                email.externalThreadId === email.externalMessageId &&
-                email.id !== firstEmail.id && (
-                  <button
-                    onClick={e => {
-                      e.stopPropagation();
-                      void handleDemerge();
-                    }}
-                    disabled={isDemerging}
-                    className='flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 rounded-full transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
-                    title='Demerge this email to a new ticket'
-                    data-track-category='SUPPORT'
-                    data-track-name='DemergeEmail'
-                    data-track-metadata={JSON.stringify({
-                      emailId: email.id,
-                      conversationId: email.conversationId,
-                    })}
-                  >
-                    <Split size={12} />
-                    {isDemerging ? 'Demerging...' : 'Demerge'}
-                  </button>
-                )}
             </div>
-            {isCollapsed ? (
-              <div className='text-xs text-muted-foreground truncate'>{preview}</div>
-            ) : (
-              <div className='text-xs text-muted-foreground mb-2'>
-                <div>To: {toList.join(', ')}</div>
-                {ccList.length > 0 && <div>CC: {ccList.join(', ')}</div>}
+            {email.attachments && email.attachments.length > 0 && (
+              <div className='mt-3 flex flex-wrap gap-2'>
+                {email.attachments.map((attachment, idx) => (
+                  <a
+                    key={idx}
+                    href={attachment.url}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-border rounded-lg text-xs text-foreground transition-colors'
+                    title={attachment.originalFilename}
+                  >
+                    <Paperclip size={14} className='text-muted-foreground' />
+                    <span className='max-w-[150px] truncate'>{attachment.originalFilename}</span>
+                  </a>
+                ))}
               </div>
             )}
-          </div>
-          <div className='text-xs text-muted-foreground flex-shrink-0 ml-4 whitespace-nowrap'>
-            {formatEmailDate(email.createdAt)}
           </div>
         </div>
-        {!isCollapsed && (
-          <div className='text-sm text-foreground leading-relaxed'>
-            {email.body ? (
-              <div className='jp-message-html'>
-                <RenderMessageWithHTML message={email.body} />
-              </div>
-            ) : (
-              <span className='text-muted-foreground italic'>No content</span>
-            )}
-          </div>
-        )}
-        {/* Attachments */}
-        {!isCollapsed && email.attachments && email.attachments.length > 0 && (
-          <div className='mt-3 flex flex-wrap gap-2'>
-            {email.attachments.map((attachment, idx) => (
-              <a
-                key={idx}
-                href={attachment.url}
-                target='_blank'
-                rel='noopener noreferrer'
-                className='flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-border rounded-lg text-xs text-foreground transition-colors'
-                title={attachment.originalFilename}
-              >
-                <Paperclip size={14} className='text-muted-foreground' />
-                <span className='max-w-[150px] truncate'>{attachment.originalFilename}</span>
-              </a>
-            ))}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 };
@@ -1492,12 +1675,14 @@ const EmailComposer = ({
   isAIPanelOpen,
   onToggleAIPanel,
   channelId,
+  ticketId,
 }: {
   conversationId?: string | null | undefined;
   onClose?: () => void;
   isAIPanelOpen?: boolean;
   onToggleAIPanel?: () => void;
   channelId?: string;
+  ticketId?: string | null | undefined;
 }): ReactElement => {
   const [emails] = useCachedQuery(
     queries.getEmailsForTicket({ conversationId: conversationId || '' }),
@@ -1506,10 +1691,10 @@ const EmailComposer = ({
   const draftContent = useEmailDraft(conversationId);
   const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId);
 
-  // AI draft hook
   const aiDraft = useDeskAIDraft({
     channelId: channelId || '',
     conversationId: conversationId || '',
+    ticketId: ticketId ?? null,
   });
   const [emailContent, setEmailContent] = useState<string>('');
 
@@ -1672,9 +1857,8 @@ const EmailComposer = ({
       const activeSig = selectedSignatureId
         ? signatures?.find(s => s.id === selectedSignatureId)
         : null;
-      const bodyHtml = activeSig
-        ? `<p>${emailContent.trim().replace(/\n/g, '<br>')}</p><br>--<br>${activeSig.content}`
-        : emailContent;
+      const bodyContent = await markdownToHtml(emailContent.trim());
+      const bodyHtml = activeSig ? `${bodyContent}<br>--<br>${activeSig.content}` : bodyContent;
       await apiInstance.post(`/email/${conversationId}/reply`, {
         body: bodyHtml,
         type: 'REPLY_ALL',
@@ -1824,16 +2008,31 @@ const EmailComposer = ({
               })}
             >
               <ReplyAll size={16} className='text-foreground flex-shrink-0' />
-              <span className='text-sm text-foreground font-medium'>Reply to</span>
-              <div className='flex items-center gap-1.5 flex-wrap flex-1'>
-                {collapsedDisplay.visibleEmails.map(email => (
-                  <span key={email} className='text-sm text-foreground'>
-                    &lt;{email}&gt;
-                  </span>
-                ))}
+              <span className='text-sm text-foreground font-medium flex-shrink-0'>Reply to</span>
+              <div className='flex items-center gap-1.5 flex-wrap flex-1 min-w-0'>
+                {collapsedDisplay.visibleEmails.map(raw => {
+                  const parsed = parseFromField(raw);
+                  const displayName = parsed.email ? parsed.name : raw;
+                  const initial = (displayName.charAt(0) || '?').toUpperCase();
+                  const tooltip = parsed.email ? `${parsed.name} <${parsed.email}>` : raw;
+                  return (
+                    <span
+                      key={raw}
+                      className='inline-flex items-center gap-1.5 bg-muted/60 rounded-md px-1.5 py-0.5 max-w-full'
+                      title={tooltip}
+                    >
+                      <span className='w-4 h-4 rounded-[3px] bg-border flex items-center justify-center flex-shrink-0'>
+                        <span className='text-[9px] font-medium text-muted-foreground'>
+                          {initial}
+                        </span>
+                      </span>
+                      <span className='text-sm text-foreground truncate'>{displayName}</span>
+                    </span>
+                  );
+                })}
                 {collapsedDisplay.remainingCount > 0 && (
                   <span className='text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded hover:bg-border'>
-                    {collapsedDisplay.remainingCount} more
+                    +{collapsedDisplay.remainingCount}
                   </span>
                 )}
               </div>
@@ -2083,6 +2282,7 @@ const EmailComposer = ({
             onAccept={() => {
               const content = aiDraft.acceptDraft();
               setEmailContent(content);
+              if (content) saveDraft(content);
               setHasAcceptedDraft(true);
             }}
             onReject={() => {
@@ -2100,6 +2300,19 @@ const EmailComposer = ({
             value={emailContent}
             onChange={e => setEmailContent(e.target.value)}
             onBlur={() => saveDraft(emailContent)}
+            onKeyDown={e => {
+              if (
+                e.key === 'Enter' &&
+                (e.metaKey || e.ctrlKey) &&
+                emailContent.trim() &&
+                conversationId &&
+                !isSending &&
+                toEmails.length > 0
+              ) {
+                e.preventDefault();
+                void handleSendEmail();
+              }
+            }}
             className='w-full px-4 py-3 focus:outline-none text-sm resize-none'
             disabled={isSending}
           />
@@ -2136,8 +2349,8 @@ const EmailComposer = ({
           </div>
         )}
 
-        <div className='px-4 py-3 flex items-center justify-between border-t border-border'>
-          <div className='flex items-center gap-2'>
+        <div className='px-3 py-1.5 flex items-center justify-between'>
+          <div className='flex items-center gap-0.5'>
             {/* Attachment button */}
             <div>
               <input
@@ -2148,22 +2361,23 @@ const EmailComposer = ({
                 onChange={handleFileSelect}
                 disabled={isSending || isUploadingAttachments}
               />
-              <button
-                type='button'
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isSending || isUploadingAttachments}
-                className='p-2 hover:bg-muted rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-                title='Attach files'
-                aria-label='Attach files'
-                data-track-category='SUPPORT'
-                data-track-name='AddEmailAttachment'
-                data-track-metadata={JSON.stringify({
-                  conversationId,
-                  attachmentCount: attachments.length,
-                })}
-              >
-                <Paperclip size={18} className='text-muted-foreground' />
-              </button>
+              <Tooltip content='Attach files' side='bottom' delayDuration={300}>
+                <button
+                  type='button'
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isSending || isUploadingAttachments}
+                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  aria-label='Attach files'
+                  data-track-category='SUPPORT'
+                  data-track-name='AddEmailAttachment'
+                  data-track-metadata={JSON.stringify({
+                    conversationId,
+                    attachmentCount: attachments.length,
+                  })}
+                >
+                  <Paperclip size={14} />
+                </button>
+              </Tooltip>
             </div>
 
             {/* Signature selector */}
@@ -2172,7 +2386,7 @@ const EmailComposer = ({
                 <DropdownMenuTrigger asChild>
                   <button
                     type='button'
-                    className='flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors'
+                    className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
                     title={
                       selectedSignatureId
                         ? (signatures.find(s => s.id === selectedSignatureId)?.name ?? 'Signature')
@@ -2181,7 +2395,7 @@ const EmailComposer = ({
                     data-track-category='email-compose'
                     data-track-name='select-signature'
                   >
-                    <PenLine size={14} />
+                    <Signature size={14} />
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align='start' side='top'>
@@ -2210,54 +2424,58 @@ const EmailComposer = ({
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <button
-                type='button'
-                onClick={() => void composerNavigate('/support?openSettings=signatures')}
-                className='flex items-center gap-1 text-xs text-[#6276be] hover:text-[#4f62a8] transition-colors'
-                data-track-category='email-compose'
-                data-track-name='add-signature'
-              >
-                + Add signature
-              </button>
+              <Tooltip content='Add signature' side='bottom' delayDuration={300}>
+                <button
+                  type='button'
+                  onClick={() => void composerNavigate('/support?openSettings=signatures')}
+                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
+                  aria-label='Add signature'
+                  data-track-category='email-compose'
+                  data-track-name='add-signature'
+                >
+                  <Signature size={14} />
+                </button>
+              </Tooltip>
             )}
           </div>
-          <div className='flex items-center gap-2'>
+          <div className='flex items-center gap-0.5'>
             {/* Ask AI button */}
             {onToggleAIPanel && (
-              <button
-                type='button'
-                onClick={onToggleAIPanel}
-                className={cn(
-                  'size-8 flex items-center justify-center rounded-full transition-colors',
-                  isAIPanelOpen
-                    ? 'bg-violet-100 text-violet-600'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                )}
-                title='Ask AI'
-                aria-label='Toggle Ask AI panel'
-                data-track-category='Support'
-                data-track-name='ToggleAIPanel'
-              >
-                <Sparkles size={16} />
-              </button>
+              <Tooltip content='Ask AI' side='bottom' delayDuration={300}>
+                <button
+                  type='button'
+                  onClick={onToggleAIPanel}
+                  className={cn(
+                    'size-7 flex items-center justify-center rounded-full transition-colors',
+                    isAIPanelOpen ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
+                  )}
+                  aria-label='Toggle Ask AI panel'
+                  data-track-category='Support'
+                  data-track-name='ToggleAIPanel'
+                >
+                  <span className='inline-flex animate-ai-pop'>
+                    <XyneAIStar size={14} />
+                  </span>
+                </button>
+              </Tooltip>
             )}
 
             {/* Draft button */}
-            <button
-              type='button'
-              onClick={() => {
-                aiDraft.triggerDraft(emails as Email[]);
-              }}
-              disabled={aiDraft.isStreaming || !emails?.length}
-              className='flex items-center gap-1 px-2.5 h-8 rounded-full text-sm text-muted-foreground hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-              title='Generate AI draft reply'
-              aria-label='Draft reply with AI'
-              data-track-category='Support'
-              data-track-name='TriggerAIDraft'
-            >
-              <Wand2 size={14} />
-              <span className='text-xs font-medium'>Draft</span>
-            </button>
+            <Tooltip content='Generate AI draft reply' side='bottom' delayDuration={300}>
+              <button
+                type='button'
+                onClick={() => {
+                  aiDraft.triggerDraft();
+                }}
+                disabled={aiDraft.isStreaming || !emails?.length}
+                className='size-7 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+                aria-label='Draft reply with AI'
+                data-track-category='Support'
+                data-track-name='TriggerAIDraft'
+              >
+                <Wand2 size={14} />
+              </button>
+            </Tooltip>
 
             {/* Inline refine after draft accepted */}
             {hasAcceptedDraft && emailContent && (
@@ -2275,8 +2493,9 @@ const EmailComposer = ({
 
             {onClose && (
               <>
+                <div className='w-px h-4 bg-border mx-1' />
                 <button
-                  className='size-8 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
+                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
                   onClick={() => {
                     if (emailContent) saveDraft(emailContent);
                     onClose();
@@ -2287,10 +2506,10 @@ const EmailComposer = ({
                   data-track-category='Support'
                   data-track-name='MinimizeReplyComposer'
                 >
-                  <Minimize2 size={16} />
+                  <Minimize2 size={14} />
                 </button>
                 <button
-                  className='size-8 flex items-center justify-center rounded-full text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors'
+                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors'
                   onClick={() => {
                     deleteDraft();
                     setEmailContent('');
@@ -2303,17 +2522,23 @@ const EmailComposer = ({
                   data-track-category='Support'
                   data-track-name='DiscardReplyComposer'
                 >
-                  <Trash2 size={16} />
+                  <Trash2 size={14} />
                 </button>
               </>
             )}
+            <div className='w-px h-4 bg-border mx-1' />
             <button
-              className='size-8 flex items-center justify-center rounded-full bg-muted-foreground text-background hover:bg-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+              className='size-7 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
               onClick={() => void handleSendEmail()}
               disabled={
-                !emailContent.trim() || !conversationId || isSending || toEmails.length === 0
+                !emailContent.trim() ||
+                !conversationId ||
+                isSending ||
+                toEmails.length === 0 ||
+                aiDraft.isDraftActive
               }
               aria-label='Send email'
+              title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send (⌘↵)'}
               data-track-category='Support'
               data-track-name='SendEmailReply'
               data-track-metadata={JSON.stringify({
@@ -2321,11 +2546,7 @@ const EmailComposer = ({
                 attachmentCount: attachments.length,
               })}
             >
-              {isSending ? (
-                <RefreshCw size={16} className='text-white animate-spin' />
-              ) : (
-                <ArrowUp size={16} className='text-white' />
-              )}
+              {isSending ? <RefreshCw size={14} className='animate-spin' /> : <ArrowUp size={14} />}
             </button>
           </div>
         </div>

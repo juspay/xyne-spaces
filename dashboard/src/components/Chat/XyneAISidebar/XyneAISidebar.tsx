@@ -145,8 +145,17 @@ const XyneAISidebar = ({
   const hasLoadedInitialConversationRef = useRef(startFreshChat);
 
   // Update activeThreadInfo when threadInfo prop changes
+  const prevThreadConversationIdRef = useRef(threadInfo?.conversationId);
   useEffect(() => {
     setActiveThreadInfo(threadInfo ?? null);
+    if (prevThreadConversationIdRef.current !== threadInfo?.conversationId) {
+      prevThreadConversationIdRef.current = threadInfo?.conversationId;
+      hasLoadedInitialConversationRef.current = false;
+      setMessages([]);
+      setConversationId('');
+      setBranchSelections({});
+      setFeedbackMap({});
+    }
   }, [threadInfo]);
 
   // Track processed selection keys to avoid duplicates

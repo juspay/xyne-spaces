@@ -40,6 +40,7 @@ export class ExternalSourceRepository {
     channelId: string;
     boardId?: string; // Target board for ticket creation
     credentials: string; // Encrypted credentials
+    ownerUserId?: string; // Channel creator — author for auto-created tickets
   }) {
     return await this.db.externalSource.create({
       data: {
@@ -49,6 +50,7 @@ export class ExternalSourceRepository {
         channelId: data.channelId,
         boardId: data.boardId,
         credentials: data.credentials,
+        ownerUserId: data.ownerUserId,
         isActive: true,
       }
     });
@@ -63,6 +65,8 @@ export class ExternalSourceRepository {
     boardId?: string;
     isActive?: boolean;
     credentials?: string;
+    lastSyncCursor?: string | null;
+    ownerUserId?: string;
   }) {
     return await this.db.externalSource.update({
       where: { id },

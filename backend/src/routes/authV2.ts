@@ -7,6 +7,13 @@ const router = express.Router();
 const authV2Controller = new AuthV2Controller();
 const microsoftAuthController = new MicrosoftAuthController();
 
+router.get('/providers', (_req, res) => {
+  return res.json({
+    google: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    microsoft: Boolean(process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET),
+  });
+});
+
 router.get('/login', authV2Controller.initiateLogin);
 
 router.get('/callback', authV2Controller.handleCallback);

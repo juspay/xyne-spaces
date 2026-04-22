@@ -596,8 +596,13 @@ export const getDraftResponse = async (sessionId: string): Promise<DraftResponse
 
 export const createTicketMessage = async (
   ticketId: string,
-  markdown: string
+  markdown: string,
+  userId?: string,
 ): Promise<{ success: boolean; draftId: string }> => {
+  if (!userId) {
+    throw new Error('userId is required to create an email draft');
+  }
+
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
     select: { conversationId: true },
@@ -612,6 +617,7 @@ export const createTicketMessage = async (
   const emailDraft = await repositories.emailDrafts.create({
     conversationId: ticket.conversationId,
     draftContent: htmlContent,
+    userId,
   });
 
   return {

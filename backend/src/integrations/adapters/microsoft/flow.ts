@@ -11,7 +11,8 @@
 import { ExternalSource } from '@prisma/client';
 import { BaseFlow } from '../../core/baseFlow';
 import { TestPayloadResult } from '../../core/types';
-import { decrypt } from '@/services/encryptionService';
+import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
+import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { GraphChangeNotification, GraphMailMessage } from './types';
@@ -22,6 +23,8 @@ const GRAPH_MESSAGE_FIELDS = [
   'conversationId', 'internetMessageId', 'receivedDateTime',
   'hasAttachments', 'parentFolderId',
 ].join(',');
+
+const externalMessageRepo = new ExternalMessageRepository();
 
 export class MicrosoftFlow extends BaseFlow {
   /**
@@ -82,9 +85,8 @@ export class MicrosoftFlow extends BaseFlow {
       throw new Error('No notification items');
     }
 
-    // Get access token from stored credentials
-    const credentials = JSON.parse(decrypt(source.credentials));
-    const accessToken = credentials.accessToken;
+    // Get a valid (auto-refreshed) access token
+    const accessToken = await MicrosoftDeskService.getValidAccessToken(source.credentials, source.id);
     if (!accessToken) {
       throw new Error('No access token in stored credentials');
     }
@@ -112,6 +114,21 @@ export class MicrosoftFlow extends BaseFlow {
     }
 
     const email = (await response.json()) as GraphMailMessage;
+    const credentials = source.credentials as { email?: string };
+    const mailboxEmail = typeof credentials.email === 'string' ? credentials.email.toLowerCase() : undefined;
+    const fromAddress = email.from?.emailAddress?.address?.toLowerCase();
+    const isOutbound = !!mailboxEmail && !!fromAddress && fromAddress === mailboxEmail;
+
+    if (isOutbound && email.conversationId) {
+      const existingThread = await externalMessageRepo.findByThreadId(source.id, email.conversationId);
+      if (!existingThread) {
+        logger.info(
+          `Microsoft flow: skipping outbound email with no existing thread (conversationId: ${email.conversationId})`
+        );
+        return { __skipIngestion: true, __skipReason: 'outbound-no-thread' };
+      }
+    }
+
     return { notification, emails: [email] };
   }
 }

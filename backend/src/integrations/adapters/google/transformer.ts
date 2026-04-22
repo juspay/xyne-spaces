@@ -15,6 +15,13 @@ export class GoogleTransformer extends BaseTransformer<any, NormalizedData> {
         return { success: false, error: 'Invalid payload: missing parsedEmail data' };
       }
 
+      // Webhook path carries mailbox historyId in pubsubData; refetch path omits it.
+      // Postprocessor reads this to advance ExternalSource.lastSyncCursor.
+      const historyId = rawPayload?.pubsubData?.historyId;
+      const syncCursor = typeof historyId === 'string' && /^\d+$/.test(historyId)
+        ? historyId
+        : undefined;
+
       const normalized: NormalizedData = {
         externalId: email.messageId,
         externalThreadId: email.threadId,
@@ -38,6 +45,9 @@ export class GoogleTransformer extends BaseTransformer<any, NormalizedData> {
         metadata: {
           eventType: 'email.received',
           timestamp: email.date ? new Date(email.date) : new Date(),
+          fromEmailAddress: email.from,
+          hasAttachments: (email.attachments?.length ?? 0) > 0,
+          ...(syncCursor && { syncCursor }),
         },
       };
 

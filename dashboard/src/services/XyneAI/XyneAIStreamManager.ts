@@ -40,6 +40,7 @@ export interface StreamState {
   messages: Message[];
   traceId?: string;
   error?: string;
+  suppressCompletionToast?: boolean;
 }
 
 export interface StreamRequest {
@@ -60,6 +61,8 @@ export interface StreamRequest {
   parentMessageId?: string | undefined;
   isRegenerate?: boolean | undefined;
   localUserMessageId?: string | undefined;
+  suppressCompletionToast?: boolean | undefined;
+  draftMode?: boolean | undefined;
 }
 
 type StreamSubscriber = (state: StreamState) => void;
@@ -680,6 +683,7 @@ class XyneAIStreamManager {
       sessionId: request.conversationId,
       status: 'streaming',
       messages: initialMessages,
+      ...(request.suppressCompletionToast && { suppressCompletionToast: true }),
     };
 
     this.activeStreams.set(threadId, streamState);
@@ -755,6 +759,7 @@ class XyneAIStreamManager {
           }),
           ...(request.parentMessageId && { parentMessageId: request.parentMessageId }),
           ...(request.isRegenerate && { isRegenerate: request.isRegenerate }),
+          ...(request.draftMode && { draftMode: true }),
         },
       },
     };
@@ -882,7 +887,7 @@ class XyneAIStreamManager {
                   return {
                     ...msg,
                     id: serverBotMsgId,
-                    ...(serverUserMsgId && { parentId: serverUserMsgId }),
+                    ...(serverUserMsgId && msg.parentId && { parentId: serverUserMsgId }),
                   };
                 }
                 if (serverUserMsgId && localUserMessageId && msg.parentId === localUserMessageId) {
@@ -1165,7 +1170,7 @@ class XyneAIStreamManager {
     void xyneAIStreamStorage.completeStream(streamId, finalResponse);
 
     // Show toast notification if sidebar is closed
-    if (!this.isSidebarOpen) {
+    if (!this.isSidebarOpen && !currentState.suppressCompletionToast) {
       this.pendingCompletionNotifications.add(threadId);
       this.showCompletionToast(threadId, finalResponse);
     }

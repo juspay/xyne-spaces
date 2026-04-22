@@ -7290,12 +7290,24 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           draftContent: z.string(),
           updatedAt: z.number(),
         }),
-        async ({ tx, args: { id, conversationId, draftContent, updatedAt } }) => {
-          const existing = await tx.run(zql.email_drafts.where('conversationId', conversationId).one());
+        async ({ tx, ctx, args: { id, conversationId, draftContent, updatedAt } }) => {
+          const existing = await tx.run(
+            zql.email_drafts
+              .where('conversationId', conversationId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
           if (existing) {
             await tx.mutate.email_drafts.update({ id: existing.id, draftContent, updatedAt });
           } else {
-            await tx.mutate.email_drafts.insert({ id, conversationId, draftContent, createdAt: updatedAt, updatedAt });
+            await tx.mutate.email_drafts.insert({
+              id,
+              conversationId,
+              userId: ctx.userID,
+              draftContent,
+              createdAt: updatedAt,
+              updatedAt,
+            });
           }
         },
       ),
@@ -7303,8 +7315,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         z.object({
           conversationId: z.string(),
         }),
-        async ({ tx, args: { conversationId } }) => {
-          const existing = await tx.run(zql.email_drafts.where('conversationId', conversationId).one());
+        async ({ tx, ctx, args: { conversationId } }) => {
+          const existing = await tx.run(
+            zql.email_drafts
+              .where('conversationId', conversationId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
           if (existing) {
             await tx.mutate.email_drafts.delete({ id: existing.id });
           }

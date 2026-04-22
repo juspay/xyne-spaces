@@ -114,7 +114,11 @@ export class MicrosoftDeskService {
 
   // ─── Webhook ───
 
-  async registerGraphWebhook(accessToken: string, webhookUrl: string): Promise<void> {
+  private async createMailSubscription(
+    accessToken: string,
+    webhookUrl: string,
+    resource: string,
+  ): Promise<GraphSubscriptionResponse> {
     const expirationDateTime = new Date();
     expirationDateTime.setMinutes(expirationDateTime.getMinutes() + GRAPH_SUBSCRIPTION_MAX_MINUTES);
 
@@ -129,7 +133,7 @@ export class MicrosoftDeskService {
       body: JSON.stringify({
         changeType: 'created',
         notificationUrl: webhookUrl,
-        resource: 'me/mailFolders/inbox/messages',
+        resource,
         expirationDateTime: expirationDateTime.toISOString(),
         clientState,
       }),
@@ -137,12 +141,18 @@ export class MicrosoftDeskService {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      logger.error(`Failed to create Graph subscription: ${response.status} ${errorBody}`);
-      throw new Error(`Graph subscription failed: ${response.status}`);
+      logger.error(`Failed to create Graph subscription (${resource}): ${response.status} ${errorBody}`);
+      throw new Error(`Graph subscription failed for ${resource}: ${response.status}`);
     }
 
     const result = (await response.json()) as GraphSubscriptionResponse;
-    logger.info(`Graph webhook subscription created: ${result.id}, expires: ${result.expirationDateTime}`);
+    logger.info(`Graph subscription created for ${resource}: ${result.id}, expires: ${result.expirationDateTime}`);
+    return result;
+  }
+
+  async registerGraphWebhook(accessToken: string, webhookUrl: string): Promise<void> {
+    await this.createMailSubscription(accessToken, webhookUrl, 'me/mailFolders/inbox/messages');
+    await this.createMailSubscription(accessToken, webhookUrl, 'me/mailFolders/sentitems/messages');
   }
 
   // ─── Channel Setup ───
@@ -164,7 +174,11 @@ export class MicrosoftDeskService {
         ? await db.channel.findUnique({ where: { id: existing.channelId }, select: { name: true } })
         : null;
       const channelName = existingChannel?.name || 'unknown';
-      throw new Error(`Microsoft account ${credentials.email} is already connected to channel "${channelName}"`);
+      const err = new Error(
+        `Microsoft account ${credentials.email} is already connected to channel "${channelName}"`,
+      ) as Error & { existingChannelId?: string };
+      if (existing.channelId) err.existingChannelId = existing.channelId;
+      throw err;
     }
 
     // New connection — create everything in a transaction
@@ -182,6 +196,8 @@ export class MicrosoftDeskService {
         },
       });
 
+      const now = new Date();
+
       await tx.channelParticipant.create({
         data: {
           channelId: channel.id,
@@ -190,21 +206,28 @@ export class MicrosoftDeskService {
         },
       });
 
-      const board = await tx.board.create({
+      await tx.channelUserStatus.create({
         data: {
-          name: channelData.name,
-          projectId: channelData.projectId,
-          workspaceId: channelData.workspaceId,
-          createdBy: channelData.userId,
+          channelId: channel.id,
+          userId: channelData.userId,
+          lastViewedAt: now,
+          updatedAt: now,
         },
       });
 
-      await tx.stage.createMany({
-        data: [
-          { name: 'Open', sequenceNumber: 1, defaultTicketStatusV2: 'TODO' as const, boardId: board.id, createdBy: channelData.userId },
-          { name: 'In Progress', sequenceNumber: 2, defaultTicketStatusV2: 'STARTED' as const, boardId: board.id, createdBy: channelData.userId },
-          { name: 'Completed', sequenceNumber: 3, defaultTicketStatusV2: 'COMPLETED' as const, boardId: board.id, createdBy: channelData.userId },
-        ],
+      await tx.channelStats.create({
+        data: {
+          channelId: channel.id,
+          lastActivityAt: now,
+          participantCount: 1,
+        },
+      });
+
+      // Reuse the project's default board (same pattern as Google) — no per-connection
+      // board/stages creation. If the project has no boards yet, boardId stays null.
+      const board = await tx.board.findFirst({
+        where: { projectId: channelData.projectId },
+        orderBy: { createdAt: 'asc' },
       });
 
       await tx.externalSource.create({
@@ -213,15 +236,24 @@ export class MicrosoftDeskService {
           sourceType: 'microsoft',
           displayName: `Microsoft (${credentials.email})`,
           channelId: channel.id,
-          boardId: board.id,
+          boardId: board?.id,
           credentials: encryptedCredentials,
           isActive: true,
+          // Author for auto-created tickets & postprocess actions — same user who's
+          // creating the channel (matches the other `createdBy` rows above).
+          ownerUserId: channelData.userId,
+          // Cursor intentionally left null — the caller triggers an initial refetch
+          // which takes the no-cursor fallback path and writes the cursor via nextCursor,
+          // so the latest messages are auto-imported on first connect.
         },
       });
 
       await this.registerGraphWebhook(credentials.accessToken, webhookUrl);
 
       return channel.id;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
 
     return { channelId };
@@ -230,82 +262,88 @@ export class MicrosoftDeskService {
   // ─── Email Send/Reply ───
 
   /**
-   * Create an email sender from encrypted credentials stored in ExternalSource.
-   * Returns an object with send/reply methods and auto token refresh.
+   * Get a valid access token, refreshing if expired (5-min buffer).
+   * Used by webhook preprocessing, email sending, and manual reload.
    */
-  static createEmailSender(encryptedCredentials: string, sourceId: string) {
+  static async getValidAccessToken(encryptedCredentials: string, sourceId: string): Promise<string> {
     const credentials = JSON.parse(decrypt(encryptedCredentials)) as MicrosoftCredentials;
     const externalSourceRepo = new ExternalSourceRepository();
+
+    // Check if token is still valid (with 5 min buffer)
+    if (credentials.expiresAt) {
+      const expiresAt = new Date(credentials.expiresAt);
+      const now = new Date();
+      now.setMinutes(now.getMinutes() + 5);
+      if (expiresAt > now) return credentials.accessToken;
+    }
+
+    if (!credentials.refreshToken) {
+      logger.warn('Microsoft token expired and no refresh token available');
+      return credentials.accessToken;
+    }
+
+    logger.info('Microsoft access token expired, refreshing...');
+
+    const clientId = process.env.MICROSOFT_CLIENT_ID;
+    const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+    const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+
+    if (!clientId || !clientSecret) {
+      throw new Error('MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET required for token refresh');
+    }
+
+    const response = await fetch(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: credentials.refreshToken,
+          grant_type: 'refresh_token',
+          scope: 'openid email offline_access Mail.Read Mail.Send Mail.ReadWrite',
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      logger.error(`Token refresh failed: ${response.status} ${errorBody}`);
+      throw new Error(`Token refresh failed: ${response.status}`);
+    }
+
+    const tokenData = (await response.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in: number;
+    };
+
+    credentials.accessToken = tokenData.access_token;
+    if (tokenData.refresh_token) credentials.refreshToken = tokenData.refresh_token;
+    credentials.expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
+
+    // Persist updated tokens to DB
+    try {
+      await externalSourceRepo.update(sourceId, {
+        credentials: encrypt(JSON.stringify(credentials)),
+      });
+      logger.info('Microsoft tokens refreshed and persisted');
+    } catch (error) {
+      logger.warn('Failed to persist refreshed tokens:', error);
+    }
+
+    return credentials.accessToken;
+  }
+
+  static createEmailSender(encryptedCredentials: string, sourceId: string) {
+    // const externalSourceRepo = new ExternalSourceRepository();
 
     const formatRecipients = (emails: string[]) =>
       emails.map(email => ({ emailAddress: { address: email } }));
 
     const getAccessToken = async (): Promise<string> => {
-      // Check if token is still valid (with 5 min buffer)
-      if (credentials.expiresAt) {
-        const expiresAt = new Date(credentials.expiresAt);
-        const now = new Date();
-        now.setMinutes(now.getMinutes() + 5);
-        if (expiresAt > now) return credentials.accessToken;
-      }
-
-      if (!credentials.refreshToken) {
-        logger.warn('Microsoft token expired and no refresh token available');
-        return credentials.accessToken;
-      }
-
-      logger.info('Microsoft access token expired, refreshing...');
-
-      const clientId = process.env.MICROSOFT_CLIENT_ID;
-      const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-      const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
-
-      if (!clientId || !clientSecret) {
-        throw new Error('MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET required for token refresh');
-      }
-
-      const response = await fetch(
-        `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            client_id: clientId,
-            client_secret: clientSecret,
-            refresh_token: credentials.refreshToken,
-            grant_type: 'refresh_token',
-            scope: 'openid email offline_access Mail.Read Mail.Send Mail.ReadWrite',
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        logger.error(`Token refresh failed: ${response.status} ${errorBody}`);
-        throw new Error(`Token refresh failed: ${response.status}`);
-      }
-
-      const tokenData = (await response.json()) as {
-        access_token: string;
-        refresh_token?: string;
-        expires_in: number;
-      };
-
-      credentials.accessToken = tokenData.access_token;
-      if (tokenData.refresh_token) credentials.refreshToken = tokenData.refresh_token;
-      credentials.expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
-
-      // Persist updated tokens to DB
-      try {
-        await externalSourceRepo.update(sourceId, {
-          credentials: encrypt(JSON.stringify(credentials)),
-        });
-        logger.info('Microsoft tokens refreshed and persisted');
-      } catch (error) {
-        logger.warn('Failed to persist refreshed tokens:', error);
-      }
-
-      return credentials.accessToken;
+      return MicrosoftDeskService.getValidAccessToken(encryptedCredentials, sourceId);
     };
 
     return {
@@ -319,57 +357,103 @@ export class MicrosoftDeskService {
         cc?: string[];
         bcc?: string[];
         latestExternalMessageId: string;
-      }): Promise<{ threadId: string }> {
-        const { content, subject, to, cc, bcc, latestExternalMessageId } = params;
+        threadId: string;
+      }): Promise<{ threadId: string; messageId: string }> {
+        const { content, subject, to, cc, bcc, latestExternalMessageId, threadId } = params;
         const accessToken = await getAccessToken();
 
-        // Find Graph message ID by internetMessageId
+        let graphMessageId: string | null = null;
+
+        // 1. Primary: lookup by internetMessageId.
         const searchResponse = await fetch(
           `${config.microsoftGraph.baseUrl}/me/messages?$filter=internetMessageId eq '${encodeURIComponent(latestExternalMessageId)}'&$select=id`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
-
-        let graphMessageId: string | null = null;
         if (searchResponse.ok) {
           const result = (await searchResponse.json()) as { value: Array<{ id: string }> };
           graphMessageId = result.value?.[0]?.id || null;
         }
 
-        if (graphMessageId) {
-          // Reply to existing thread
-          const payload = {
-            message: {
-              toRecipients: formatRecipients(to),
-              ...(cc && cc.length > 0 && { ccRecipients: formatRecipients(cc) }),
-              ...(bcc && bcc.length > 0 && { bccRecipients: formatRecipients(bcc) }),
-            },
-            comment: content,
-          };
+        // 2. Fallback: look up any message in the conversation.
+        if (!graphMessageId && threadId) {
+          const conversationResponse = await fetch(
+            `${config.microsoftGraph.baseUrl}/me/messages?$filter=conversationId eq '${encodeURIComponent(threadId)}'&$orderby=receivedDateTime desc&$top=1&$select=id`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (conversationResponse.ok) {
+            const result = (await conversationResponse.json()) as { value: Array<{ id: string }> };
+            graphMessageId = result.value?.[0]?.id || null;
+            if (graphMessageId) {
+              logger.info(
+                `Microsoft reply: resolved parent via conversationId fallback (latest internetMessageId not findable — likely the +-bug)`,
+              );
+            }
+          }
+        }
 
-          const response = await fetch(
-            `${config.microsoftGraph.baseUrl}/me/messages/${graphMessageId}/reply`,
+        if (!graphMessageId) {
+          logger.warn(
+            `Microsoft reply: could not resolve parent Graph message by internetMessageId or conversationId; sending as new email. latestExternalMessageId=${latestExternalMessageId} threadId=${threadId}`,
+          );
+        }
+
+        if (graphMessageId) {
+          // 1. Create a reply draft — draft.internetMessageId is stable
+          //    from this point through send and into Sent Items.
+          const createReplyResponse = await fetch(
+            `${config.microsoftGraph.baseUrl}/me/messages/${graphMessageId}/createReply`,
             {
               method: 'POST',
               headers: {
                 Authorization: `Bearer ${accessToken}`,
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify(payload),
+              body: JSON.stringify({
+                message: {
+                  toRecipients: formatRecipients(to),
+                  ...(cc && cc.length > 0 && { ccRecipients: formatRecipients(cc) }),
+                  ...(bcc && bcc.length > 0 && { bccRecipients: formatRecipients(bcc) }),
+                },
+                comment: content,
+              }),
             }
           );
 
-          if (!response.ok) {
-            const errorBody = await response.text();
-            logger.error(`Microsoft reply failed: ${response.status} ${errorBody}`);
-            throw new Error(`Failed to send reply: ${response.status}`);
+          if (!createReplyResponse.ok) {
+            const errorBody = await createReplyResponse.text();
+            logger.error(`Microsoft createReply failed: ${createReplyResponse.status} ${errorBody}`);
+            throw new Error(`Failed to create reply draft: ${createReplyResponse.status}`);
           }
 
-          logger.info(`Microsoft reply sent to message ${graphMessageId}`);
-          return { threadId: `reply-${Date.now()}` };
+          const draft = (await createReplyResponse.json()) as {
+            id: string;
+            internetMessageId: string;
+            conversationId: string;
+          };
+
+          // 2. Send the draft.
+          const sendResponse = await fetch(
+            `${config.microsoftGraph.baseUrl}/me/messages/${draft.id}/send`,
+            {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}` },
+            }
+          );
+
+          if (!sendResponse.ok) {
+            const errorBody = await sendResponse.text();
+            logger.error(`Microsoft send draft failed: ${sendResponse.status} ${errorBody}`);
+            throw new Error(`Failed to send reply: ${sendResponse.status}`);
+          }
+
+          logger.info(`Microsoft reply sent: ${draft.internetMessageId}`);
+          return { threadId: draft.conversationId, messageId: draft.internetMessageId };
         }
 
-        // Fallback: send as new email
-        const payload = {
+        // Fallback: send as a new message. sendMail doesn't return the sent
+        // message, so we look it up from Sent Items after sending to get the
+        // real internetMessageId/conversationId for dedup.
+        const sendMailPayload = {
           message: {
             subject: `Re: ${subject}`,
             body: { contentType: 'html', content },
@@ -380,23 +464,39 @@ export class MicrosoftDeskService {
           saveToSentItems: true,
         };
 
-        const response = await fetch(`${config.microsoftGraph.baseUrl}/me/sendMail`, {
+        const sendMailResponse = await fetch(`${config.microsoftGraph.baseUrl}/me/sendMail`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(sendMailPayload),
         });
 
-        if (!response.ok) {
-          const errorBody = await response.text();
-          logger.error(`Microsoft sendMail failed: ${response.status} ${errorBody}`);
-          throw new Error(`Failed to send email: ${response.status}`);
+        if (!sendMailResponse.ok) {
+          const errorBody = await sendMailResponse.text();
+          logger.error(`Microsoft sendMail failed: ${sendMailResponse.status} ${errorBody}`);
+          throw new Error(`Failed to send email: ${sendMailResponse.status}`);
         }
 
-        logger.info('Microsoft email sent successfully');
-        return { threadId: `sent-${Date.now()}` };
+        const sentItemsResponse = await fetch(
+          `${config.microsoftGraph.baseUrl}/me/mailFolders/sentitems/messages?$top=1&$orderby=sentDateTime desc&$select=internetMessageId,conversationId`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+
+        if (sentItemsResponse.ok) {
+          const result = (await sentItemsResponse.json()) as {
+            value: Array<{ internetMessageId: string; conversationId: string }>;
+          };
+          const sent = result.value?.[0];
+          if (sent?.internetMessageId && sent?.conversationId) {
+            logger.info(`Microsoft email sent successfully: ${sent.internetMessageId}`);
+            return { threadId: sent.conversationId, messageId: sent.internetMessageId };
+          }
+        }
+
+        logger.warn('Microsoft email sent but unable to resolve internetMessageId from sent items');
+        throw new Error('Sent email but could not resolve message ID');
       },
     };
   }

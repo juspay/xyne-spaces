@@ -5524,9 +5524,12 @@ export const mutators = defineMutators({
         draftContent: z.string(),
         updatedAt: z.number(),
       }),
-      async ({ tx, args: { id, conversationId, draftContent, updatedAt } }) => {
+      async ({ tx, ctx, args: { id, conversationId, draftContent, updatedAt } }) => {
         const existing = await tx.run(
-          zql.email_drafts.where('conversationId', conversationId).one(),
+          zql.email_drafts
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
         );
         if (existing) {
           await tx.mutate.email_drafts.update({ id: existing.id, draftContent, updatedAt });
@@ -5534,6 +5537,7 @@ export const mutators = defineMutators({
           await tx.mutate.email_drafts.insert({
             id,
             conversationId,
+            userId: ctx.userID,
             draftContent,
             createdAt: updatedAt,
             updatedAt,
@@ -5545,9 +5549,12 @@ export const mutators = defineMutators({
       z.object({
         conversationId: z.string(),
       }),
-      async ({ tx, args: { conversationId } }) => {
+      async ({ tx, ctx, args: { conversationId } }) => {
         const existing = await tx.run(
-          zql.email_drafts.where('conversationId', conversationId).one(),
+          zql.email_drafts
+            .where('conversationId', conversationId)
+            .where('userId', ctx.userID)
+            .one(),
         );
         if (existing) {
           await tx.mutate.email_drafts.delete({ id: existing.id });

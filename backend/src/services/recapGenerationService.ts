@@ -19,7 +19,7 @@ interface RecapSummary {
     conversationId?: string; // Resolved conversation ID for navigation
     citationIndex?: number; // The source entity index returned by the agent (for display)
     // Entity-specific IDs for navigation (matches summariser Citation type)
-    entityType?: 'message' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search';
+    entityType?: 'message' | 'email' | 'attachment' | 'call' | 'recording' | 'canvas' | 'ticket' | 'web_search';
     canvasId?: string;
     callId?: string;
     ticketId?: string;

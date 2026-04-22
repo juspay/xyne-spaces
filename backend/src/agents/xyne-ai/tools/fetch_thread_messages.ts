@@ -1,13 +1,14 @@
 /**
  * Fetch Thread Messages Tool
  *
- * Retrieves multiple entity types (messages, attachments, tickets)
+ * Retrieves multiple entity types (messages, attachments, tickets, emails)
  * for a specific conversation/thread using AIContextService with citation tracking.
  *
  * NOTE: Only fetches entities that have conversationId:
  * - Messages (by conversationId)
  * - Attachments (by conversationId) - METADATA ONLY, no base64 data
  * - Tickets (by conversationId)
+ * - Emails (desk/support mails, by conversationId)
  *
  * Skipped entities (no conversationId support):
  * - Calls (channel-level)
@@ -36,6 +37,7 @@ import {
   transformMessageToEntity,
   transformAttachmentToEntity,
   transformTicketToEntity,
+  transformEmailToEntity,
   toIST,
 } from './helpers.js';
 
@@ -83,7 +85,8 @@ async function fetchThreadMessagesImpl(
     const [
       messagesResult,
       attachmentsResult,
-      ticketsRaw
+      ticketsRaw,
+      emailsRaw
     ] = await Promise.all([
       // Fetch messages for the specific conversation
       aiContextService.getMessagesByConversation(conversationId, {}),
@@ -93,6 +96,12 @@ async function fetchThreadMessagesImpl(
       db.ticket.findMany({
         where: { conversationId },
         orderBy: { createdAt: 'desc' },
+        take: 100
+      }),
+      // Fetch desk/support emails for the specific conversation
+      db.email.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
         take: 100
       })
     ]);
@@ -105,6 +114,9 @@ async function fetchThreadMessagesImpl(
 
     // Tickets are already filtered by conversationId
     const allTickets = ticketsRaw;
+
+    // Emails are already filtered by conversationId
+    const allEmails = emailsRaw;
 
     // ============================================================================
     // Collect all unique user IDs
@@ -155,6 +167,10 @@ async function fetchThreadMessagesImpl(
         channelName,
         userMap
       )
+    );
+
+    const emailEntities: ToolEntity[] = allEmails.map((email, idx) =>
+      transformEmailToEntity(email, idx, channelId, channelName)
     );
 
     // ============================================================================
@@ -223,6 +239,7 @@ async function fetchThreadMessagesImpl(
       ...attachmentEntities,
       ...ticketEntities,
       ...canvasEntities,
+      ...emailEntities,
     ];
 
     // Sort chronologically by timestamp (newest first)
@@ -241,7 +258,8 @@ async function fetchThreadMessagesImpl(
     logger.info(
       `[Tool] [${sessionId}] fetch_thread_messages: Found ${limitedEntities.length} total entities ` +
       `(${messageEntities.length} messages, ${attachmentEntities.length} attachments, ` +
-      `${ticketEntities.length} tickets, ${canvasEntities.length} canvases) for conversation ${conversationId}`
+      `${ticketEntities.length} tickets, ${canvasEntities.length} canvases, ` +
+      `${emailEntities.length} emails) for conversation ${conversationId}`
     );
 
     return {
@@ -254,6 +272,7 @@ async function fetchThreadMessagesImpl(
         callCount: 0,  // Calls are channel-level, not thread-level
         canvasCount: canvasEntities.length,
         ticketCount: ticketEntities.length,
+        emailCount: emailEntities.length,
       },
     };
   } catch (error) {

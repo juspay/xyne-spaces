@@ -9,6 +9,7 @@ import { GoogleService } from '@/services/googleService';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ExternalSourcePlatform } from '../core/types';
+import { adapterRegistry } from '../core/adapterRegistry';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 
@@ -190,6 +191,27 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     if (!emailAddress) throw new Error('Failed to get email address from Gmail profile');
     logger.info(`${TAG} Gmail profile fetched`, { emailAddress });
 
+    // If this Google account is already connected to another channel, block before
+    // creating anything new (mirrors microsoftDeskService.createChannelAndSource)
+    const username = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9-_]/g, '-');
+    const sourceName = `google-${username}`;
+    const existingSource = await db.externalSource.findUnique({ where: { name: sourceName } });
+    if (existingSource) {
+      const isConnectFlow = !!stateData.channelData;
+      const isDifferentChannel =
+        !!stateData.channelId && !!existingSource.channelId && existingSource.channelId !== stateData.channelId;
+      if (isConnectFlow || isDifferentChannel) {
+        const existingChannel = existingSource.channelId
+          ? await db.channel.findUnique({ where: { id: existingSource.channelId }, select: { name: true } })
+          : null;
+        const channelName = existingChannel?.name || 'unknown';
+        const message = `Google account ${emailAddress} is already connected to channel "${channelName}"`;
+        logger.warn(`${TAG} ${message}`, { sourceName, existingChannelId: existingSource.channelId });
+        res.redirect(`${frontendUrl}/support?emailError=${encodeURIComponent(message)}`);
+        return;
+      }
+    }
+
     // Resolve or create the channel
     logger.info(`${TAG} Creating channel / resolving board`);
     let channelId: string;
@@ -210,9 +232,28 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             type: 'EMAIL',
           },
         });
+        const now = new Date();
         await tx.channelParticipant.create({
           data: { channelId: ch.id, userId: cd.userId, role: 'ADMIN' },
         });
+
+        await tx.channelUserStatus.create({
+          data: {
+            channelId: ch.id,
+            userId: cd.userId,
+            lastViewedAt: now,
+            updatedAt: now,
+          },
+        });
+        
+        await tx.channelStats.create({
+          data: {
+            channelId: ch.id,
+            lastActivityAt: now,
+            participantCount: 1,
+          },
+        });
+
         const board = await tx.board.findFirst({
           where: { projectId: cd.projectId },
           orderBy: { createdAt: 'asc' },
@@ -247,6 +288,16 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     });
 
     logger.info(`${TAG} Gmail integration setup complete`, { sourceName: result.sourceName });
+
+    // First-time backfill: latest N messages + initial cursor seed.
+    try {
+      const source = await new ExternalSourceRepository().findByName(result.sourceName);
+      if (source) await adapterRegistry.getAdapter(source.name).refetch?.(source);
+    } catch (err) {
+      logger.warn(`${TAG} Initial backfill failed — user can refetch manually`, {
+        error: err instanceof Error ? err.message : err,
+      });
+    }
 
     if (stateData.channelData) {
       // /connect flow: redirect to frontend like Microsoft

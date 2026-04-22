@@ -4,6 +4,8 @@
  */
 
 import { ExternalSource } from '@prisma/client';
+import { RefetchResult } from './baseRefetch';
+export type { RefetchResult };
 
 /**
  * Supported external source platforms
@@ -128,7 +130,7 @@ export interface IngestionResult {
   success: boolean;
   conversationId: string;
   entityId: string;
-  action: 'created' | 'updated' | 'duplicate';
+  action: 'created' | 'updated' | 'duplicate' | 'skipped';
 }
 
 /**
@@ -177,4 +179,10 @@ export interface ExternalSourceAdapter {
 
   /** Optional: Postprocess after conversation/message creation (e.g., create tickets, trigger workflows) */
   postprocess?(context: PostprocessContext): Promise<void>;
+
+  /**
+   * Optional: manual refetch handler. Implemented in the adapter's refetch.ts.
+   * Present ⇒ adapter supports the /refetch endpoint. Absent ⇒ 400 "not supported".
+   */
+  refetch?(source: ExternalSource): Promise<RefetchResult>;
 }

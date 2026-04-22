@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { xyneAIStream, type XyneAIStreamRequest, type UserInfo, AgentsConfig } from '@/agents/xyne-ai';
+import { buildDraftEmailSystemPrompt } from '@/agents/xyne-ai/prompts/draft';
 import { getOtelTraceId } from '@juspay-jaf/jaf';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -71,6 +72,7 @@ const XyneAIRequestSchema = z.object({
   ticket_ids: z.array(z.string().min(1)).optional(), // Ticket IDs to fetch and inject as context
   call_ids: z.array(z.string().min(1)).optional(), // Call IDs to fetch and inject as context (includes recordings)
   display_query: z.string().optional(), // Original user query without canvas/selection enhancements — stored in DB
+  draft_mode: z.boolean().optional().default(false), // When true, swap in the draft-email system prompt
 });
 
 // Feedback request validation schema
@@ -122,6 +124,7 @@ export class XyneAIController {
       ticket_ids,
       call_ids,
       display_query,
+      draft_mode,
     } = parseResult.data;
 
     const userId = (req as any).user?.id;
@@ -205,6 +208,7 @@ export class XyneAIController {
         isRegenerate: is_regenerate,
         agentName: 'ask-ai',
         displayQuery: display_query,
+        ...(draft_mode && { systemPrompt: buildDraftEmailSystemPrompt(userInfo) }),
       };
 
       // Track metrics: context channels count

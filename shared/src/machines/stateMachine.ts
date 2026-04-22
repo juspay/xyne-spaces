@@ -123,6 +123,8 @@ interface StateMachineContext {
   permissions: UserPermission[];
   userChannelStatuses: UserChannelStatus[];
   lastVisitedChannelId: string | null;
+  /** Per-route-keyword saved paths, populated by the SaveRoute HOC. */
+  savedRoutes: Record<string, string>;
   drafts: DraftMessages; // Draft messages per channel/conversation
   draftMessages: DraftMessageDB[];
   allUserGroups: UserGroup[];
@@ -146,6 +148,7 @@ type StateMachineEvent =
   | { type: 'ADD_USER_CHANNEL_STATUSES'; userChannelStatuses: UserChannelStatus[] }
   | { type: 'UPDATE_USER_CHANNEL_STATUS'; channelId: string; updates: Partial<UserChannelStatus> }
   | { type: 'SET_LAST_VISITED_CHANNEL'; channelId: string | null }
+  | { type: 'SET_SAVED_ROUTE'; keyword: string; path: string | null }
   | { type: 'SAVE_DRAFT'; lookupId: string; html: string; text: string }
   | { type: 'REMOVE_DRAFT'; lookupId: string }
   | { type: 'ADD_ALL_USER_GROUPS'; userGroups: UserGroup[] }
@@ -310,6 +313,23 @@ export const stateMachine = setup({
           return event.channelId;
         }
         return context.lastVisitedChannelId;
+      },
+    }),
+    setSavedRoute: assign({
+      savedRoutes: ({ context, event }) => {
+        if (event.type !== 'SET_SAVED_ROUTE') return context.savedRoutes;
+        const next = { ...context.savedRoutes };
+        if (event.path) {
+          next[event.keyword] = event.path;
+        } else {
+          delete next[event.keyword];
+        }
+        try {
+          safeSetItem('savedRoutes', JSON.stringify(next));
+        } catch {
+          // storage unavailable — fall through
+        }
+        return next;
       },
     }),
     saveDraft: assign({
@@ -477,6 +497,19 @@ export const stateMachine = setup({
     permissions: [],
     userChannelStatuses: [],
     lastVisitedChannelId: safeGetItem('lastVisitedChannelId'),
+    savedRoutes: (() => {
+      try {
+        const raw = safeGetItem('savedRoutes');
+        if (!raw) return {};
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, string>;
+        }
+      } catch {
+        // ignore
+      }
+      return {};
+    })(),
     drafts: JSON.parse(safeGetItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
     draftMessages: [],
     allUserGroups: [],
@@ -518,6 +551,9 @@ export const stateMachine = setup({
         },
         SET_LAST_VISITED_CHANNEL: {
           actions: 'setLastVisitedChannel',
+        },
+        SET_SAVED_ROUTE: {
+          actions: 'setSavedRoute',
         },
         SAVE_DRAFT: {
           actions: 'saveDraft',

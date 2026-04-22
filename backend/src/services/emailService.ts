@@ -50,6 +50,7 @@ import { processMeetLinksFromEmail } from './meetLinkService';
 import { repositories } from '@/database/repositories';
 import { TicketIdService } from './ticketIdService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
+import { generateDescription } from './agents/description-generator';
 
 interface UserInfo {
   id: string;
@@ -193,6 +194,44 @@ export class EmailService {
         logger.error('[EmailService] Failed to log Vespa insertion error to database:', dbError);
       }
     });
+  }
+
+  /**
+   * Fire-and-forget: run the description-generator on the email body and update
+   * the ticket's description column when it resolves. Never throws. Ticket row
+   * stays with the raw body if the AI call fails or times out, so webhook
+   * ingestion is never blocked by AI availability.
+   */
+  private async enrichTicketDescription(params: {
+    ticketId: string;
+    emailBody: string;
+    emailSubject: string;
+    userId: string;
+    channelId: string;
+  }): Promise<void> {
+    const { ticketId, emailBody, emailSubject, userId, channelId } = params;
+    try {
+      const result = await generateDescription(
+        { rawContext: emailBody, title: emailSubject },
+        { userId, channelId },
+      );
+
+      if (!result.description || result.description.trim().length === 0) return;
+
+      await this.prisma.ticket.update({
+        where: { id: ticketId },
+        data: { description: result.description, updatedBy: userId },
+      });
+
+      // Re-index so search reflects the cleaned description.
+      this.pushVespaJobForTicket(ticketId, userId).catch(() => {});
+      logger.info(`[EmailService] Ticket description enriched`, { ticketId });
+    } catch (error) {
+      logger.warn('[EmailService] Ticket description enrichment failed — keeping raw body', {
+        ticketId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
   }
 
   /**
@@ -425,6 +464,16 @@ export class EmailService {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
 
+    // Fire-and-forget: enrich the ticket description via the AI agent. Never
+    // blocks ingestion; ticket keeps the raw email body if this fails or times out.
+    void this.enrichTicketDescription({
+      ticketId: ticket.id,
+      emailBody,
+      emailSubject,
+      userId,
+      channelId,
+    });
+
     // Auto-assign ticket based on group and board
     if (groupId && boardId) {
       try {
@@ -489,12 +538,11 @@ export class EmailService {
       logger.info(`[EmailService] Skipping auto-workflow for ticket ${ticket.id} (ZOHO_AUTO_WORKFLOW_ENABLED=false)`);
     }
 
-    // Create BOT message with ticket
+    // Create message with ticket
     const messageData: CreateMessageInput = {
       conversationId: conversation.conversationId,
       senderId: userId,
       content: '',
-      msgType: MessageType.BOT,
       hasAttachment: true,
       metadata: {
         ticketId: ticket.id,
@@ -768,6 +816,15 @@ export class EmailService {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
 
+    // Fire-and-forget enrichment — same pattern as createConversationWithEmail.
+    void this.enrichTicketDescription({
+      ticketId: ticket.id,
+      emailBody,
+      emailSubject,
+      userId,
+      channelId,
+    });
+
     // Auto-assign ticket if userGroupId is provided
     if (userGroupId && boardId) {
       try {
@@ -811,12 +868,11 @@ export class EmailService {
       }
     }
 
-    // Step 3: Create BOT message with ticket
+    // Step 3: Create message with ticket
     const messageData: CreateMessageInput = {
       conversationId: conversation.conversationId,
       senderId: userId,
       content: '',
-      msgType: MessageType.BOT,
       hasAttachment: true,
       metadata: {
         ticketId: ticket.id,
