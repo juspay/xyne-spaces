@@ -1751,10 +1751,13 @@ model Email {
 model EmailDraft {
   id String @id @default(cuid())
   conversationId String
+  userId String?
   draftContent String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([userId, conversationId])
+  @@index([userId, conversationId, id])
   @@index([conversationId])
   @@map("email_drafts")
   @@schema("public")
@@ -1971,11 +1974,13 @@ model ExternalSource {
   ownerUserId     String?                   // Owner for user-scoped integrations like Gmail search
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
   isActive        Boolean  @default(true)
+  lastSyncCursor  String?                   // Per-adapter resume cursor. Google: Gmail historyId. Microsoft: ISO timestamp of last synced receivedDateTime.
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([boardId])
   @@index([ownerUserId])
+  @@index([channelId])
   @@map("external_sources")
   @@schema("workflow")
 }

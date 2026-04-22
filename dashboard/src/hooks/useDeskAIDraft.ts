@@ -1,211 +1,204 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { BASE_URL } from '../services/clients/apiClient';
-import { fetchSessionsByConversationId } from '../services/XyneAI/XyneAISessionsService';
-
-interface Email {
-  from?: string | null;
-  to?: string[] | null;
-  subject?: string | null;
-  body?: string | null;
-  createdAt?: string | Date | number | null;
-}
+import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
+import {
+  fetchSessionsByConversationId,
+  fetchSessionDetail,
+} from '../services/XyneAI/XyneAISessionsService';
+import type { Message } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
 interface UseDeskAIDraftOptions {
   channelId: string;
   conversationId: string;
-  sessionId?: string | null;
+  ticketId?: string | null;
 }
 
 export interface UseDeskAIDraftReturn {
   draftContent: string;
   isStreaming: boolean;
   isDraftActive: boolean;
-  triggerDraft: (emails: Email[]) => void;
+  triggerDraft: () => void;
   refineDraft: (instruction: string) => void;
   acceptDraft: () => string;
   rejectDraft: () => void;
-  currentSessionId: string | null;
 }
 
-function serializeEmails(emails: Email[]): string {
-  return emails
-    .map((email, i) => {
-      const from = email.from || 'Unknown';
-      const to = (email.to || []).join(', ');
-      const subject = email.subject || '(no subject)';
-      const body = email.body || '';
-      const plainBody = body.replace(/<[^>]*>/g, '').trim();
-      return `--- Email ${i + 1} ---\nFrom: ${from}\nTo: ${to}\nSubject: ${subject}\n\n${plainBody}`;
-    })
-    .join('\n\n');
-}
+const latestBotContent = (messages: Message[]): string | null => {
+  const bot = [...messages].reverse().find(m => m.type === 'bot');
+  if (!bot) return null;
+  if (bot.parsedContent?.summary) return bot.parsedContent.summary;
+  const stream = bot.streamingContent || bot.content || '';
+  const head = stream.trimStart();
+  if (head.startsWith('{') || head.startsWith('[')) return null;
+  return stream || null;
+};
+
+// Prior messages are chained via parentId — without a chain, every parentless
+// draft turn becomes a sibling at BRANCH_ROOT_KEY and the sidebar renders
+// branch arrows the next time any turn is added.
+const loadPriorMessages = async (
+  threadId: string,
+  sessionId: string | null,
+): Promise<Message[]> => {
+  const active = xyneAIStreamManager.getActiveStream(threadId);
+  if (active?.messages.length) return active.messages;
+  if (!sessionId) return [];
+  try {
+    const detail = await fetchSessionDetail(sessionId);
+    const chain: Message[] = [];
+    for (const m of detail.messages) {
+      const prev = chain[chain.length - 1];
+      chain.push({
+        id: m.id,
+        type: m.type,
+        content: m.content,
+        timestamp: new Date(m.timestamp),
+        isStreaming: false,
+        ...(prev && { parentId: prev.id }),
+      });
+    }
+    return chain;
+  } catch {
+    return [];
+  }
+};
 
 export function useDeskAIDraft({
   channelId,
   conversationId,
-  sessionId,
+  ticketId,
 }: UseDeskAIDraftOptions): UseDeskAIDraftReturn {
   const [draftContent, setDraftContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isDraftActive, setIsDraftActive] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionId || null);
-  const sessionIdRef = useRef<string | null>(sessionId || null);
-  const abortRef = useRef<AbortController | null>(null);
-  const sessionLookedUpRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
+  const ourStreamIdRef = useRef<string | null>(null);
 
-  // Reset all draft state and look up session when conversationId changes (ticket switch)
+  const threadId = channelId && conversationId ? `${channelId}_${conversationId}` : '';
+
   useEffect(() => {
-    // Abort any in-flight stream
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
-    // Reset draft UI state
     setDraftContent('');
     setIsStreaming(false);
     setIsDraftActive(false);
-    // Reset session tracking
     sessionIdRef.current = null;
-    setCurrentSessionId(null);
-    sessionLookedUpRef.current = false;
+    ourStreamIdRef.current = null;
 
-    // Look up existing session for this conversationId
     if (!conversationId) return;
-    sessionLookedUpRef.current = true;
-    void fetchSessionsByConversationId(conversationId)
+    let cancelled = false;
+    fetchSessionsByConversationId(conversationId)
       .then(sessions => {
-        if (sessions.length > 0 && sessions[0] && !sessionIdRef.current) {
-          sessionIdRef.current = sessions[0].sessionId;
-          setCurrentSessionId(sessions[0].sessionId);
+        if (cancelled) return;
+        const first = sessions[0];
+        if (first && !sessionIdRef.current) {
+          sessionIdRef.current = first.sessionId;
         }
       })
-      .catch(() => {
-        /* ignore */
-      });
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId]);
 
-  const streamQuery = useCallback(
-    async (query: string) => {
-      if (abortRef.current) {
-        abortRef.current.abort();
+  // Only mirror content/status for streams we started — sidebar streams share
+  // the threadId but their output belongs in the sidebar, not the draft card.
+  useEffect(() => {
+    if (!threadId) return;
+    return xyneAIStreamManager.subscribe((state: StreamState) => {
+      if (state.threadId !== threadId) return;
+      if (state.sessionId && state.sessionId !== sessionIdRef.current) {
+        sessionIdRef.current = state.sessionId;
       }
+      if (state.streamId !== ourStreamIdRef.current) return;
+      const content = latestBotContent(state.messages);
+      if (content !== null) setDraftContent(content);
+      setIsStreaming(state.status === 'streaming');
+    });
+  }, [threadId]);
 
-      const controller = new AbortController();
-      abortRef.current = controller;
+  const submit = useCallback(
+    async (query: string, displayContent: string) => {
+      if (!threadId || !channelId || !conversationId) return;
 
+      setIsDraftActive(true);
       setIsStreaming(true);
       setDraftContent('');
-      setIsDraftActive(true);
+
+      const userMessageId = `user-${Date.now()}`;
+      const prior = await loadPriorMessages(threadId, sessionIdRef.current);
+      const lastPriorId = prior[prior.length - 1]?.id;
 
       try {
-        // Using fetch instead of axios for SSE streaming (ReadableStream support)
-        // eslint-disable-next-line local-rules/no-fetch-use-axios
-        const response = await fetch(`${BASE_URL}/xyne-ai`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'text/event-stream',
-          },
-          credentials: 'include',
-          body: JSON.stringify({
+        ourStreamIdRef.current = await xyneAIStreamManager.startStream(
+          threadId,
+          {
             query,
-            session_id: sessionIdRef.current || undefined,
-            channel_ids: [channelId],
-            conversation_id: conversationId,
-          }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok || !response.body) {
-          throw new Error(`Stream failed: ${response.status}`);
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let accumulated = '';
-        let buffer = '';
-        let done = false;
-
-        while (!done) {
-          const result = await reader.read();
-          done = result.done;
-          if (done) break;
-
-          buffer += decoder.decode(result.value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const data = JSON.parse(line.slice(6)) as {
-                type: string;
-                sessionId?: string;
-                content?: string;
-                output?: { summary?: string };
-                error?: string;
-              };
-
-              if (data.type === 'start' && data.sessionId) {
-                sessionIdRef.current = data.sessionId;
-                setCurrentSessionId(data.sessionId);
-              } else if (data.type === 'delta' && data.content) {
-                accumulated += data.content;
-                setDraftContent(accumulated);
-              } else if (data.type === 'complete' && data.output?.summary) {
-                accumulated = data.output.summary;
-                setDraftContent(accumulated);
-              } else if (data.type === 'error') {
-                console.error('[DeskAIDraft] Stream error:', data.error);
-              }
-            } catch {
-              // Skip malformed JSON
-            }
-          }
-        }
+            channelIds: [],
+            conversationId: sessionIdRef.current || '',
+            threadConversationId: conversationId,
+            webSearchEnabled: true,
+            deepResearchEnabled: false,
+            researchContext: null,
+            attachments: [],
+            ...(ticketId && { ticketIds: [ticketId] }),
+            localUserMessageId: userMessageId,
+            suppressCompletionToast: true,
+            draftMode: true,
+          },
+          [
+            ...prior,
+            {
+              id: userMessageId,
+              type: 'user',
+              content: displayContent,
+              timestamp: new Date(),
+              ...(lastPriorId && { parentId: lastPriorId }),
+            },
+            {
+              id: `bot-${Date.now()}`,
+              type: 'bot',
+              content: '',
+              timestamp: new Date(),
+              isStreaming: true,
+              parentId: userMessageId,
+            },
+          ],
+        );
       } catch (error) {
-        if ((error as Error).name !== 'AbortError') {
-          console.error('[DeskAIDraft] Stream failed:', error);
-        }
-      } finally {
+        console.error('[useDeskAIDraft] startStream failed:', error);
         setIsStreaming(false);
-        abortRef.current = null;
       }
     },
-    [channelId, conversationId],
+    [threadId, channelId, conversationId, ticketId],
   );
 
-  const triggerDraft = useCallback(
-    (emails: Email[]) => {
-      const emailContext = serializeEmails(emails);
-      const query = `Based on the following email thread, draft a professional reply to the most recent email. Consider the full context of the conversation.\n\n${emailContext}\n\nDraft a concise, professional reply. Output ONLY the email body text, no subject line or headers.`;
-      void streamQuery(query);
-    },
-    [streamQuery],
-  );
+  const triggerDraft = useCallback(() => {
+    void submit('Draft a reply for this ticket.', 'Draft a reply');
+  }, [submit]);
 
   const refineDraft = useCallback(
     (instruction: string) => {
-      const query = `Refine the previous draft reply with this instruction: ${instruction}\n\nOutput ONLY the refined email body text, no subject line or headers.`;
-      void streamQuery(query);
+      const query = draftContent
+        ? `Refine this draft: ${instruction}\n\nCurrent draft:\n\n${draftContent}`
+        : instruction;
+      void submit(query, instruction);
     },
-    [streamQuery],
+    [submit, draftContent],
   );
 
   const acceptDraft = useCallback(() => {
     setIsDraftActive(false);
-    const content = draftContent;
-    return content;
+    ourStreamIdRef.current = null;
+    return draftContent;
   }, [draftContent]);
 
   const rejectDraft = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
+    if (threadId && ourStreamIdRef.current) {
+      xyneAIStreamManager.abortStreamByThread(threadId);
     }
+    ourStreamIdRef.current = null;
     setIsDraftActive(false);
     setDraftContent('');
     setIsStreaming(false);
-  }, []);
+  }, [threadId]);
 
   return {
     draftContent,
@@ -215,6 +208,5 @@ export function useDeskAIDraft({
     refineDraft,
     acceptDraft,
     rejectDraft,
-    currentSessionId,
   };
 }

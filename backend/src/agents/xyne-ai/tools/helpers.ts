@@ -946,3 +946,43 @@ export function transformTicketToEntity(
     ticketStatus: ticket.statusV2,
   };
 }
+
+/**
+ * Transform Email (desk/support mail) to ToolEntity format
+ */
+export function transformEmailToEntity(
+  email: {
+    id: string;
+    subject: string;
+    body: string;
+    from: string;
+    to: string[];
+    cc: string[];
+    conversationId: string;
+    createdAt: Date;
+  },
+  index: number,
+  channelId: string,
+  channelName: string,
+): ToolEntity {
+  const header = [
+    `Subject: ${email.subject || '(no subject)'}`,
+    `To: ${email.to.join(', ')}`,
+    email.cc.length > 0 ? `CC: ${email.cc.join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    entityType: 'email',
+    entityId: email.id,
+    entityIndex: index,
+    content: `${header}\n\n${stripHtml(email.body)}`,
+    authorName: email.from || 'Unknown',
+    authorId: '',
+    timestamp: toIST(email.createdAt),
+    channelId,
+    channelName,
+    conversationId: email.conversationId,
+  };
+}

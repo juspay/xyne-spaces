@@ -18,6 +18,7 @@ import { Badge } from '../../ui/Badge';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { cn } from '../../../utils/classNames';
+import { useOAuthProviders } from '../../../hooks/useOAuthProviders';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
@@ -48,6 +49,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
   const [selectedConnector, setSelectedConnector] = useState<ConnectorType>(null);
+  const { data: oauthProviders } = useOAuthProviders();
 
   // Fetch all projects for selection
   const [projects] = useCachedQuery(queries.getAllProjects());
@@ -198,7 +200,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       {requireConnector && (
         <div className='space-y-2'>
           <div className='text-sm font-medium text-foreground'>
-            Email Provider <span className='text-red-500'>*</span>
+            Email Provider <span className='text-muted-foreground'>*</span>
           </div>
           <div className='flex gap-3'>
             <button
@@ -221,27 +223,26 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               </svg>
               <span className='font-medium'>Google</span>
             </button>
-            <button
-              type='button'
-              onClick={() => setSelectedConnector('microsoft')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all',
-                selectedConnector === 'microsoft'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-border hover:border-muted-foreground/50',
-              )}
-              data-track-category='ADD_CHANNEL_FORM'
-              data-track-name='SELECT_MICROSOFT_PROVIDER'
-            >
-              <svg className='w-5 h-5' viewBox='0 0 21 21' fill='currentColor'>
-                <path d='M10 0H0v10h10V0zM21 0H11v10h10V0zM10 11H0v10h10V11zM21 11H11v10h10V11z' />
-              </svg>
-              <span className='font-medium'>Microsoft</span>
-            </button>
+            {oauthProviders?.microsoft && (
+              <button
+                type='button'
+                onClick={() => setSelectedConnector('microsoft')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all',
+                  selectedConnector === 'microsoft'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-border hover:border-muted-foreground/50',
+                )}
+                data-track-category='ADD_CHANNEL_FORM'
+                data-track-name='SELECT_MICROSOFT_PROVIDER'
+              >
+                <svg className='w-5 h-5' viewBox='0 0 21 21' fill='currentColor'>
+                  <path d='M10 0H0v10h10V0zM21 0H11v10h10V0zM10 11H0v10h10V11zM21 11H11v10h10V11z' />
+                </svg>
+                <span className='font-medium'>Microsoft</span>
+              </button>
+            )}
           </div>
-          {!selectedConnector && (
-            <p className='text-sm text-red-500'>Please select an email provider</p>
-          )}
         </div>
       )}
 
@@ -261,7 +262,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         {field => (
           <div className='space-y-1.5'>
             <label htmlFor='channel-name' className='text-sm font-medium text-foreground'>
-              Channel Name
+              Channel Name <span className='text-muted-foreground'>*</span>
             </label>
             <div className='relative'>
               <div className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground'>

@@ -1,6 +1,7 @@
 import { ReactElement, useEffect, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { useOAuthProviders } from '../../hooks/useOAuthProviders';
 import { ElectronEnrollmentSteps } from '../../components/Auth/ElectronEnrollmentSteps';
 import { indexedDBService } from '../../services/indexedDBService';
 import GoogleLogo from '../../assets/icons/GoogleLogo';
@@ -43,6 +44,7 @@ const AuthScreen = (): ReactElement => {
     userExistsButRemoved,
     signInWithMicrosoft,
   } = useAuth();
+  const { data: providers } = useOAuthProviders();
   const [searchParams] = useSearchParams();
   const [isEnrollmentFlow, setIsEnrollmentFlow] = useState(false);
   const [orgName, setOrgName] = useState('');
@@ -353,25 +355,27 @@ const AuthScreen = (): ReactElement => {
                         </button>
                       </div>
                       {/* Microsoft Sign In Button */}
-                      <div className='w-full max-w-[280px] md:max-w-[320px] mt-3'>
-                        <button
-                          disabled={isLoading}
-                          onClick={handleMicrosoftSignIn}
-                          className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white rounded-[10px] overflow-hidden h-12'
-                          data-track-category='Auth'
-                          data-track-name='MicrosoftSignIn'
-                        >
-                          <span
-                            data-button-left-slot='true'
-                            className='flex items-center justify-center'
+                      {providers?.microsoft && (
+                        <div className='w-full max-w-[280px] md:max-w-[320px] mt-3'>
+                          <button
+                            disabled={isLoading}
+                            onClick={handleMicrosoftSignIn}
+                            className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white rounded-[10px] overflow-hidden h-12'
+                            data-track-category='Auth'
+                            data-track-name='MicrosoftSignIn'
                           >
-                            <MicrosoftLogo />
-                          </span>
-                          <span className='text-sm font-semibold text-center text-white'>
-                            Sign in with Microsoft
-                          </span>
-                        </button>
-                      </div>
+                            <span
+                              data-button-left-slot='true'
+                              className='flex items-center justify-center'
+                            >
+                              <MicrosoftLogo />
+                            </span>
+                            <span className='text-sm font-semibold text-center text-white'>
+                              Sign in with Microsoft
+                            </span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )
                 : /* Loading State */

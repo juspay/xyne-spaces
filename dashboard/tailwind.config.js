@@ -188,6 +188,11 @@ export default {
             'background-position': '0% 0%',
           },
         },
+        'ai-pop': {
+          '0%': { transform: 'scale(1) rotate(0deg)' },
+          '50%': { transform: 'scale(1.15) rotate(180deg)' },
+          '100%': { transform: 'scale(1) rotate(360deg)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -196,6 +201,7 @@ export default {
         'slide-in-from-right': 'slide-in-from-right 0.3s ease-out forwards',
         'slide-in-from-left': 'slide-in-from-left 0.3s ease-out forwards',
         shine: 'shine var(--duration) infinite linear',
+        'ai-pop': 'ai-pop 700ms ease-in-out',
       },
     },
   },

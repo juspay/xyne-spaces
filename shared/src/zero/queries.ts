@@ -590,8 +590,10 @@ export const queries = defineQueries({
   ),
   getDraftForConversation: defineQuery(
     z.object({ conversationId: z.string() }),
-    ({ args: { conversationId } }) => {
-      return zql.email_drafts.where('conversationId', conversationId);
+    ({ ctx, args: { conversationId } }) => {
+      return zql.email_drafts
+        .where('conversationId', conversationId)
+        .where('userId', ctx.userID);
     },
   ),
   ticketById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {

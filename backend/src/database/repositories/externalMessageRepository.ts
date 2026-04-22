@@ -38,6 +38,21 @@ export class ExternalMessageRepository {
   }
 
   /**
+   * Batch lookup: return any existing external messages for the given external IDs.
+   * Used by manual reload to skip already-ingested messages without a provider API call.
+   */
+  async findByExternalIds(externalSourceId: string, externalIds: string[]) {
+    if (externalIds.length === 0) return [];
+    return await this.db.externalMessage.findMany({
+      where: {
+        externalSourceId,
+        externalId: { in: externalIds },
+      },
+      select: { externalId: true },
+    });
+  }
+
+  /**
    * Find external message by message ID
    */
   async findByMessageId(messageId: string) {

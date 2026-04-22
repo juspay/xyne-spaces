@@ -30,6 +30,7 @@ export interface WorkerStartStreamMessage {
       }>;
       parentMessageId?: string;
       isRegenerate?: boolean;
+      draftMode?: boolean;
     };
   };
 }
@@ -132,6 +133,7 @@ async function executeStream(
           parent_message_id: requestBody.parentMessageId,
         }),
         ...(requestBody.isRegenerate && { is_regenerate: requestBody.isRegenerate }),
+        ...(requestBody.draftMode && { draft_mode: true }),
         /* eslint-enable @typescript-eslint/naming-convention */
       }),
       signal: abortController.signal,

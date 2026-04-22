@@ -57,6 +57,8 @@ export class MicrosoftTransformer extends BaseTransformer<any, NormalizedData> {
             ? `"${email.from.emailAddress.name}" <${email.from.emailAddress.address}>`
             : email.from?.emailAddress?.address,
           graphMessageId: email.id, // Graph API message ID — needed for reply threading
+          // Postprocessor reads this to advance ExternalSource.lastSyncCursor.
+          ...(email.receivedDateTime && { syncCursor: email.receivedDateTime }),
         },
       };
 

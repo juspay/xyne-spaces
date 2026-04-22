@@ -15,6 +15,7 @@ import { logger } from '@/utils/logger';
 import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType } from '@prisma/client';
 import { ZohoService } from '@/services/zohoService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
+import { GoogleService } from '@/services/googleService';
 
 interface ReplyEmailRequest {
   body: string;
@@ -103,7 +104,10 @@ export class EmailController {
       logger.info(`[EmailController] Sending ${type} via ${externalSource.sourceType} for conversation ${conversationId}`);
 
       // 5. Send reply via the appropriate provider
-      let result: { threadId: string };
+      // messageId (optional) is the per-message unique id from the provider —
+      // used for the email row's externalMessageId + webhook dedup. Falls back
+      // to threadId for providers (Zoho/Microsoft) that don't expose one.
+      let result: { threadId: string; messageId?: string };
 
       if (externalSource.sourceType === 'microsoft') {
         const sender = MicrosoftDeskService.createEmailSender(
@@ -116,6 +120,21 @@ export class EmailController {
           to: toRecipients,
           cc: ccRecipients,
           bcc: bccRecipients,
+          latestExternalMessageId: latestEmail.externalMessageId,
+          threadId: latestEmail.externalThreadId,
+        });
+      } else if (externalSource.sourceType === 'google') {
+        const sender = GoogleService.createEmailSender(
+          externalSource.credentials,
+          externalSource.id
+        );
+        result = await sender.replyToConversation({
+          content: body,
+          subject: initialEmail.subject,
+          to: toRecipients,
+          cc: ccRecipients,
+          bcc: bccRecipients,
+          threadId: initialEmail.externalThreadId,
           latestExternalMessageId: latestEmail.externalMessageId,
         });
       } else {
@@ -145,6 +164,7 @@ export class EmailController {
       }
 
       // 6. Save reply in database
+      const externalMessageId = result.messageId || result.threadId;
       const emailType = type === 'REPLY' ? EmailType.REPLY : EmailType.REPLY_ALL;
       const newEmail = await this.emailRepo.create({
         type: emailType,
@@ -156,7 +176,7 @@ export class EmailController {
         bcc: bccRecipients,
         conversationId,
         externalThreadId: result.threadId,
-        externalMessageId: result.threadId,
+        externalMessageId,
       });
 
       // 7. Create ExternalMessage tracking record for deduplication
@@ -164,7 +184,7 @@ export class EmailController {
       try {
         await this.externalMessageRepo.create({
           externalSourceId: externalSource.id,
-          externalId: result.threadId,
+          externalId: externalMessageId,
           externalThreadId: initialEmail.externalThreadId,
           entityId: newEmail.id,
           direction: MessageDirection.OUTGOING,

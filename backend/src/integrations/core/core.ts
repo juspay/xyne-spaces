@@ -55,6 +55,12 @@ export class ExternalSourceCore {
     // 1. Preprocess (optional - fetch extra data if needed)
     const enrichedPayload = adapter.preprocess ? await adapter.preprocess(rawPayload, source) : rawPayload;
 
+    if (enrichedPayload && typeof enrichedPayload === 'object' && (enrichedPayload as any).__skipIngestion) {
+      const reason = (enrichedPayload as any).__skipReason || 'unspecified';
+      logger.info(`Skipping ingestion for ${sourceName}: ${reason}`);
+      return { success: true, conversationId: '', entityId: '', action: 'skipped' };
+    }
+
     // 2. Transform to normalized format
     const parseResult = await adapter.transform(enrichedPayload);
 
@@ -69,10 +75,11 @@ export class ExternalSourceCore {
   }
 
   /**
-   * Sync normalized data to database
-   * EXACT SAME LOGIC as ExternalSourceSyncService.ingest()
+   * Sync normalized data to database.
+   * Public so the refetch handlers can reuse this exact pipeline
+   * without re-implementing dedup / conversation / attachment logic.
    */
-  private async sync(
+  async sync(
     adapter: ExternalSourceAdapter,
     sourceName: string,
     normalizedData: NormalizedData
@@ -393,7 +400,7 @@ export class ExternalSourceCore {
       const createResult = await emailService.createConversationWithEmail({
         channelId: source.channelId,
         boardId: source.boardId || undefined, // Pass boardId from ExternalSource for ticket creation
-        userId: source.displayName,
+        userId: source.ownerUserId || source.displayName,
         emailSubject: normalizedData.emailData.subject || "",
         emailBody: normalizedData.content,
         emailTo: normalizedData.emailData.to,

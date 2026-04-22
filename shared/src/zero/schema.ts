@@ -1659,6 +1659,7 @@ export const emailDraftTable = table('email_drafts')
   .columns({
     id: string(),
     conversationId: string(),
+    userId: string().optional(),
     draftContent: string(),
     createdAt: number(),
     updatedAt: number(),

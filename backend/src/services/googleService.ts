@@ -1,6 +1,7 @@
 /**
  * Google Gmail Service
- * Handles Gmail API interactions: message fetching, parsing, watch setup, and Pub/Sub config.
+ * Gmail API interactions: message fetching/parsing, watch setup, Pub/Sub config,
+ * ExternalSource provisioning, and email sending with auto token refresh.
  */
 
 import { google, gmail_v1 } from 'googleapis';
@@ -8,46 +9,101 @@ import { OAuth2Client } from 'google-auth-library';
 import { PubSub } from '@google-cloud/pubsub';
 import { decrypt, encrypt } from './encryptionService';
 import { logger } from '@/utils/logger';
-import { GmailMessageData, GmailAttachment, ParsedEmailData, GoogleCredentials } from '../integrations/adapters/google/types';
+import {
+  GmailMessageData,
+  GmailAttachment,
+  ParsedEmailData,
+  GoogleCredentials,
+} from '../integrations/adapters/google/types';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 
+// ─── Constants ──────────────────────────────────────────────────────────────
+
 const TAG = '[GoogleService]';
+const SOURCE_NAME_PREFIX = 'google-';
+const DEFAULT_PUBSUB_TOPIC = 'gmail-notifications';
+const PUBSUB_ACK_DEADLINE_SECONDS = 600;
+const DEFAULT_BACKEND_URL = 'http://localhost:3000';
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+interface ServiceAccountCredentials {
+  client_email: string;
+  private_key: string;
+}
+
+interface WatchResult {
+  historyId: string;
+  expiration: string;
+}
+
+interface SetupExternalSourceParams {
+  channelId: string;
+  emailAddress: string;
+  accessToken: string;
+  refreshToken: string;
+  boardId?: string;
+}
+
+interface SetupExternalSourceResult {
+  sourceName: string;
+  webhookUrl: string;
+  historyId: string;
+  expiration: string;
+  subscriptionName: string;
+}
+
+interface ReplyParams {
+  content: string;
+  subject: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  threadId: string;
+  latestExternalMessageId: string;
+}
+
+interface ReplyResult {
+  threadId: string;
+  messageId: string;
+}
+
+interface MimeOptions {
+  from: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
+  inReplyTo?: string;
+  references?: string;
+}
+
+// ─── Service ────────────────────────────────────────────────────────────────
 
 export class GoogleService {
-  private oauth2Client: OAuth2Client;
-  private gmail: gmail_v1.Gmail;
-  private credentials: GoogleCredentials;
+  private readonly oauth2Client: OAuth2Client;
+  private readonly gmail: gmail_v1.Gmail;
+  private readonly credentials: GoogleCredentials;
 
-  constructor(credentials: GoogleCredentials, _sourceId: string) {
+  constructor(credentials: GoogleCredentials) {
     this.credentials = credentials;
-
-    this.oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    ) as unknown as OAuth2Client;
-
-    this.oauth2Client.setCredentials({
-      access_token: credentials.accessToken,
-      refresh_token: credentials.refreshToken,
-    });
-
+    this.oauth2Client = GoogleService.createOAuth2Client(credentials);
     this.gmail = google.gmail({ version: 'v1', auth: this.oauth2Client as any });
   }
 
-  static fromEncryptedCredentials(encryptedCredentials: string, sourceId: string): GoogleService {
+  static fromEncryptedCredentials(encryptedCredentials: string, _sourceId: string): GoogleService {
     const credentials = JSON.parse(decrypt(encryptedCredentials)) as GoogleCredentials;
-    return new GoogleService(credentials, sourceId);
+    return new GoogleService(credentials);
   }
 
   getUserEmail(): string {
     return this.credentials.email;
   }
 
-  // ---------------------------------------------------------------------------
-  // Gmail API — Messages
-  // ---------------------------------------------------------------------------
+  // ─── Gmail API — Messages ────────────────────────────────────────────────
 
   async getMessageById(messageId: string): Promise<GmailMessageData | null> {
     try {
@@ -57,9 +113,9 @@ export class GoogleService {
         format: 'full',
       });
       return response.data as GmailMessageData;
-    } catch (error: any) {
-      logger.error(`${TAG} Failed to fetch message ${messageId}:`, error);
-      throw new Error(`Failed to fetch Gmail message: ${error.message}`);
+    } catch (error) {
+      logger.error(`${TAG} Failed to fetch message ${messageId}`, error);
+      throw new Error(`Failed to fetch Gmail message: ${getErrorMessage(error)}`);
     }
   }
 
@@ -71,13 +127,25 @@ export class GoogleService {
         id: attachmentId,
       });
       return response.data.data || null;
-    } catch (error: any) {
-      logger.error(`${TAG} Failed to fetch attachment ${attachmentId}:`, error);
+    } catch (error) {
+      logger.error(`${TAG} Failed to fetch attachment ${attachmentId}`, error);
       return null;
     }
   }
 
   async listMessagesFromHistory(startHistoryId: string): Promise<string[]> {
+    const { messageIds } = await this.listMessagesFromHistoryWithCursor(startHistoryId);
+    return messageIds;
+  }
+
+  /**
+   * Same as listMessagesFromHistory but also returns the latest historyId
+   * reported by Gmail. Callers that persist a sync cursor (manual reload)
+   * need this value to advance the watermark.
+   */
+  async listMessagesFromHistoryWithCursor(
+    startHistoryId: string,
+  ): Promise<{ messageIds: string[]; historyId: string | null }> {
     try {
       const response = await this.gmail.users.history.list({
         userId: 'me',
@@ -85,16 +153,31 @@ export class GoogleService {
         historyTypes: ['messageAdded'],
       });
 
-      const ids: string[] = [];
+      const messageIds: string[] = [];
       for (const record of response.data.history || []) {
         for (const msg of record.messagesAdded || []) {
-          if (msg.message?.id) ids.push(msg.message.id);
+          if (msg.message?.id) messageIds.push(msg.message.id);
         }
       }
-      return ids;
-    } catch (error: any) {
-      logger.error(`${TAG} Failed to fetch history:`, error);
-      throw new Error(`Failed to fetch Gmail history: ${error.message}`);
+
+      return {
+        messageIds,
+        historyId: response.data.historyId ?? null,
+      };
+    } catch (error) {
+      logger.error(`${TAG} Failed to fetch history`, error);
+      throw new Error(`Failed to fetch Gmail history: ${getErrorMessage(error)}`);
+    }
+  }
+
+  /** Current mailbox historyId — used to seed the cursor when history is unavailable. */
+  async getCurrentHistoryId(): Promise<string | null> {
+    try {
+      const response = await this.gmail.users.getProfile({ userId: 'me' });
+      return response.data.historyId ?? null;
+    } catch (error) {
+      logger.warn(`${TAG} Failed to fetch current historyId`, error);
+      return null;
     }
   }
 
@@ -109,21 +192,19 @@ export class GoogleService {
       return (response.data.messages || [])
         .map(msg => msg.id)
         .filter((id): id is string => !!id);
-    } catch (error: any) {
-      logger.error(`${TAG} Failed to fetch recent messages:`, error);
-      throw new Error(`Failed to fetch recent messages: ${error.message}`);
+    } catch (error) {
+      logger.error(`${TAG} Failed to fetch recent messages`, error);
+      throw new Error(`Failed to fetch recent messages: ${getErrorMessage(error)}`);
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Gmail API — Watch
-  // ---------------------------------------------------------------------------
+  // ─── Gmail API — Watch ───────────────────────────────────────────────────
 
-  async setupGmailWatch(): Promise<{ historyId: string; expiration: string }> {
+  async setupGmailWatch(): Promise<WatchResult> {
+    const topicName = process.env.GOOGLE_PUBSUB_TOPIC;
+    if (!topicName) throw new Error('GOOGLE_PUBSUB_TOPIC env variable is not set');
+
     try {
-      const topicName = process.env.GOOGLE_PUBSUB_TOPIC;
-      if (!topicName) throw new Error('GOOGLE_PUBSUB_TOPIC env variable is not set');
-
       const response = await this.gmail.users.watch({
         userId: 'me',
         requestBody: { topicName, labelIds: ['INBOX'] },
@@ -134,28 +215,21 @@ export class GoogleService {
         throw new Error('Missing historyId or expiration in watch response');
       }
 
-      logger.info(`${TAG} Gmail watch setup`, {
-        historyId,
-        expiration: new Date(parseInt(expiration)).toISOString(),
-      });
+      const expirationIso = new Date(parseInt(expiration)).toISOString();
+      logger.info(`${TAG} Gmail watch setup`, { historyId, expiration: expirationIso });
 
-      return {
-        historyId,
-        expiration: new Date(parseInt(expiration)).toISOString(),
-      };
-    } catch (error: any) {
-      logger.error(`${TAG} Failed to setup Gmail watch:`, error);
-      throw new Error(`Failed to setup Gmail watch: ${error.message}`);
+      return { historyId, expiration: expirationIso };
+    } catch (error) {
+      logger.error(`${TAG} Failed to setup Gmail watch`, error);
+      throw new Error(`Failed to setup Gmail watch: ${getErrorMessage(error)}`);
     }
   }
 
-  async renewGmailWatch(): Promise<{ historyId: string; expiration: string }> {
+  async renewGmailWatch(): Promise<WatchResult> {
     return this.setupGmailWatch();
   }
 
-  // ---------------------------------------------------------------------------
-  // Email Parsing
-  // ---------------------------------------------------------------------------
+  // ─── Email Parsing ───────────────────────────────────────────────────────
 
   parseEmailData(messageData: GmailMessageData): ParsedEmailData {
     const headers = messageData.payload?.headers || [];
@@ -163,18 +237,7 @@ export class GoogleService {
     const getHeader = (name: string): string | undefined =>
       headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value;
 
-    const parseEmailList = (value: string | undefined): string[] => {
-      if (!value) return [];
-      return value
-        .split(',')
-        .map(entry => {
-          const match = entry.match(/<(.+?)>/) || entry.match(/([^\s<>]+@[^\s<>]+)/);
-          return match ? match[1].trim() : entry.trim();
-        })
-        .filter(e => e.includes('@'));
-    };
-
-    const { textBody, htmlBody } = this.extractBody(messageData.payload);
+    const { textBody, htmlBody } = GoogleService.extractBody(messageData.payload);
 
     return {
       messageId: messageData.id,
@@ -189,35 +252,33 @@ export class GoogleService {
       textBody,
       htmlBody,
       body: htmlBody || textBody,
-      attachments: this.extractAttachments(messageData.payload),
+      attachments: GoogleService.extractAttachments(messageData.payload),
       inReplyTo: getHeader('In-Reply-To'),
       references: getHeader('References')?.split(/\s+/) || [],
     };
   }
 
-  private extractBody(payload: any): { textBody?: string; htmlBody?: string } {
+  private static extractBody(payload: any): { textBody?: string; htmlBody?: string } {
     let textBody: string | undefined;
     let htmlBody: string | undefined;
 
     const walk = (part: any): void => {
       if (part.mimeType === 'text/plain' && part.body?.data) {
-        textBody = this.decodeBase64Url(part.body.data);
+        textBody = decodeBase64Url(part.body.data);
       } else if (part.mimeType === 'text/html' && part.body?.data) {
-        htmlBody = this.decodeBase64Url(part.body.data);
+        htmlBody = decodeBase64Url(part.body.data);
       }
       part.parts?.forEach(walk);
     };
 
     // Body may live directly on the payload or nested in parts
-    if (payload?.body?.data) {
-      walk(payload);
-    }
+    if (payload?.body?.data) walk(payload);
     payload?.parts?.forEach(walk);
 
     return { textBody, htmlBody };
   }
 
-  private extractAttachments(payload: any): GmailAttachment[] {
+  private static extractAttachments(payload: any): GmailAttachment[] {
     const attachments: GmailAttachment[] = [];
 
     const walk = (part: any): void => {
@@ -236,59 +297,31 @@ export class GoogleService {
     return attachments;
   }
 
-  private decodeBase64Url(data: string): string {
-    try {
-      const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
-      const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
-      return Buffer.from(padded, 'base64').toString('utf-8');
-    } catch {
-      logger.error(`${TAG} Failed to decode base64url data`);
-      return '';
-    }
-  }
+  // ─── ExternalSource + Pub/Sub provisioning ───────────────────────────────
 
-  // ---------------------------------------------------------------------------
-  // Static — ExternalSource & Pub/Sub Setup
-  // ---------------------------------------------------------------------------
-
-  static async setupExternalSource(params: {
-    channelId: string;
-    emailAddress: string;
-    accessToken: string;
-    refreshToken: string;
-    boardId?: string;
-  }): Promise<{
-    sourceName: string;
-    webhookUrl: string;
-    historyId: string;
-    expiration: string;
-    subscriptionName: string;
-  }> {
+  static async setupExternalSource(params: SetupExternalSourceParams): Promise<SetupExternalSourceResult> {
     const { channelId, emailAddress, accessToken, refreshToken, boardId } = params;
 
-    const username = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9-_]/g, '-');
-    const sourceName = `google-${username}`;
-
+    const sourceName = GoogleService.getSourceName(emailAddress);
+    const channel = await new ChannelRepository().findById(channelId);
     const credentials: GoogleCredentials = { accessToken, refreshToken, email: emailAddress };
     const encryptedCredentials = encrypt(JSON.stringify(credentials));
 
-    // Setup Gmail watch
-    const tempService = new GoogleService(credentials, 'temp');
-    const watchResult = await tempService.setupGmailWatch();
+    const watchResult = await new GoogleService(credentials).setupGmailWatch();
 
-    // Setup Pub/Sub subscription
-    const repo = new ExternalSourceRepository();
-    const existing = await repo.findByName(sourceName);
     const webhookUrl = GoogleService.generateWebhookUrl(sourceName);
     const subscriptionName = await GoogleService.setupPubSubSubscription(sourceName, webhookUrl);
 
-    // Upsert ExternalSource
+    const repo = new ExternalSourceRepository();
+    const existing = await repo.findByName(sourceName);
+
     if (existing) {
       await repo.update(existing.id, {
         credentials: encryptedCredentials,
         channelId,
         boardId: boardId || (existing.boardId ?? undefined),
         displayName: emailAddress,
+        ownerUserId: channel?.createdBy ?? undefined,
       });
     } else {
       await repo.create({
@@ -298,8 +331,12 @@ export class GoogleService {
         channelId,
         boardId: boardId ?? undefined,
         displayName: emailAddress,
+        ownerUserId: channel?.createdBy ?? undefined,
       });
     }
+    // Cursor intentionally left null — the caller triggers an initial core.reload()
+    // which takes the no-cursor fallback (listRecentMessages) and writes the cursor
+    // via nextCursor, so the first N messages are auto-imported.
 
     logger.info(`${TAG} ExternalSource setup complete`, { sourceName, webhookUrl });
 
@@ -313,12 +350,13 @@ export class GoogleService {
   }
 
   static async setupPubSubSubscription(sourceName: string, webhookUrl: string): Promise<string> {
+    const credentials = GoogleService.loadPubSubServiceAccount();
     const pubsub = new PubSub({
       projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
-      keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      credentials,
     });
 
-    const topicName = process.env.GOOGLE_PUBSUB_TOPIC || 'gmail-notifications';
+    const topicName = process.env.GOOGLE_PUBSUB_TOPIC || DEFAULT_PUBSUB_TOPIC;
     const subscriptionName = `gmail-${sourceName}-push`;
 
     const topic = pubsub.topic(topicName);
@@ -328,7 +366,7 @@ export class GoogleService {
     const pushConfig = {
       pushEndpoint: webhookUrl,
       oidcToken: {
-        serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '',
+        serviceAccountEmail: credentials.client_email,
         audience: webhookUrl,
       },
     };
@@ -337,7 +375,10 @@ export class GoogleService {
       await subscription.modifyPushConfig(pushConfig);
       logger.info(`${TAG} Pub/Sub subscription updated`, { subscriptionName });
     } else {
-      await topic.createSubscription(subscriptionName, { pushConfig, ackDeadlineSeconds: 600 });
+      await topic.createSubscription(subscriptionName, {
+        pushConfig,
+        ackDeadlineSeconds: PUBSUB_ACK_DEADLINE_SECONDS,
+      });
       logger.info(`${TAG} Pub/Sub subscription created`, { subscriptionName });
     }
 
@@ -345,7 +386,186 @@ export class GoogleService {
   }
 
   static generateWebhookUrl(sourceName: string): string {
-    const baseUrl = process.env.BACKEND_URL || 'http://localhost:3000';
+    const baseUrl = process.env.BACKEND_URL || DEFAULT_BACKEND_URL;
     return `${baseUrl}/api/external-source-sync/${sourceName}/ingest`;
   }
+
+  static getSourceName(emailAddress: string): string {
+    const username = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '-');
+    return `${SOURCE_NAME_PREFIX}${username}`;
+  }
+
+  // ─── Email sender (reply) ────────────────────────────────────────────────
+
+  /**
+   * Create a Gmail email sender from encrypted credentials.
+   * The googleapis OAuth2 client auto-refreshes expired access tokens via the
+   * refresh token; the 'tokens' listener persists new tokens back to ExternalSource.
+   */
+  static createEmailSender(encryptedCredentials: string, sourceId: string) {
+    const credentials = JSON.parse(decrypt(encryptedCredentials)) as GoogleCredentials;
+    const externalSourceRepo = new ExternalSourceRepository();
+
+    const oauth2Client = GoogleService.createOAuth2Client(credentials);
+    oauth2Client.on('tokens', async tokens => {
+      try {
+        if (tokens.access_token) credentials.accessToken = tokens.access_token;
+        if (tokens.refresh_token) credentials.refreshToken = tokens.refresh_token;
+        await externalSourceRepo.update(sourceId, {
+          credentials: encrypt(JSON.stringify(credentials)),
+        });
+        logger.info(`${TAG} Google tokens refreshed and persisted`, { sourceId });
+      } catch (error) {
+        logger.warn(`${TAG} Failed to persist refreshed Google tokens`, error);
+      }
+    });
+
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client as any });
+
+    return {
+      async replyToConversation(params: ReplyParams): Promise<ReplyResult> {
+        const { inReplyTo, references } = await fetchThreadingHeaders(gmail, params.latestExternalMessageId);
+
+        const mime = buildMimeMessage({
+          from: credentials.email,
+          to: params.to,
+          cc: params.cc,
+          bcc: params.bcc,
+          subject: ensureReplyPrefix(params.subject),
+          body: params.content,
+          inReplyTo,
+          references,
+        });
+
+        const response = await gmail.users.messages.send({
+          userId: 'me',
+          requestBody: { raw: base64UrlEncode(mime), threadId: params.threadId },
+        });
+
+        const messageId = response.data.id || '';
+        const threadId = response.data.threadId || params.threadId;
+
+        logger.info(`${TAG} Gmail reply sent`, { messageId, threadId });
+        return { messageId, threadId };
+      },
+    };
+  }
+
+  // ─── Private helpers ─────────────────────────────────────────────────────
+
+  private static createOAuth2Client(credentials: GoogleCredentials): OAuth2Client {
+    const client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI,
+    ) as unknown as OAuth2Client;
+
+    client.setCredentials({
+      access_token: credentials.accessToken,
+      refresh_token: credentials.refreshToken,
+    });
+
+    return client;
+  }
+
+  private static loadPubSubServiceAccount(): ServiceAccountCredentials {
+    const base64Json = process.env.GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64;
+    if (!base64Json) {
+      throw new Error('GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64 is not set');
+    }
+
+    try {
+      const decoded = Buffer.from(base64Json, 'base64').toString('utf8');
+      const parsed = JSON.parse(decoded) as Partial<ServiceAccountCredentials>;
+      if (!parsed.client_email || !parsed.private_key) {
+        throw new Error('missing client_email or private_key');
+      }
+      return { client_email: parsed.client_email, private_key: parsed.private_key };
+    } catch (error) {
+      throw new Error(`Invalid GOOGLE_PUBSUB_SERVICE_ACCOUNT_BASE64: ${getErrorMessage(error)}`);
+    }
+  }
+}
+
+// ─── Module-private helpers ─────────────────────────────────────────────────
+
+function parseEmailList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map(entry => {
+      const match = entry.match(/<(.+?)>/) || entry.match(/([^\s<>]+@[^\s<>]+)/);
+      return match ? match[1].trim() : entry.trim();
+    })
+    .filter(e => e.includes('@'));
+}
+
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function decodeBase64Url(data: string): string {
+  try {
+    const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    return Buffer.from(padded, 'base64').toString('utf-8');
+  } catch {
+    logger.error(`${TAG} Failed to decode base64url data`);
+    return '';
+  }
+}
+
+function ensureReplyPrefix(subject: string): string {
+  return subject.toLowerCase().startsWith('re:') ? subject : `Re: ${subject}`;
+}
+
+function buildMimeMessage(opts: MimeOptions): string {
+  const lines: string[] = [`From: ${opts.from}`, `To: ${opts.to.join(', ')}`];
+  if (opts.cc?.length) lines.push(`Cc: ${opts.cc.join(', ')}`);
+  if (opts.bcc?.length) lines.push(`Bcc: ${opts.bcc.join(', ')}`);
+  lines.push(`Subject: ${opts.subject}`);
+  if (opts.inReplyTo) lines.push(`In-Reply-To: ${opts.inReplyTo}`);
+  if (opts.references) lines.push(`References: ${opts.references}`);
+  lines.push('MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8', '', opts.body);
+  return lines.join('\r\n');
+}
+
+async function fetchThreadingHeaders(
+  gmail: gmail_v1.Gmail,
+  latestMessageId: string,
+): Promise<{ inReplyTo?: string; references?: string }> {
+  try {
+    const meta = await gmail.users.messages.get({
+      userId: 'me',
+      id: latestMessageId,
+      format: 'metadata',
+      metadataHeaders: ['Message-Id', 'References'],
+    });
+
+    const headers = meta.data.payload?.headers || [];
+    const getHeader = (name: string) =>
+      headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || undefined;
+
+    const inReplyTo = getHeader('Message-Id');
+    const prevRefs = getHeader('References');
+    const references = prevRefs ? `${prevRefs} ${inReplyTo ?? ''}`.trim() : inReplyTo;
+
+    return { inReplyTo, references };
+  } catch (error) {
+    logger.warn(`${TAG} Could not fetch threading headers, sending without In-Reply-To`, {
+      latestMessageId,
+      error: getErrorMessage(error),
+    });
+    return {};
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'Unknown error';
 }

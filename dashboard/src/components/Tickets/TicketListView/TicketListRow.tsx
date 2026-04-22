@@ -69,7 +69,7 @@ export const TicketListRow = ({
     return ticket.createdAt ? new Date(ticket.createdAt) : new Date();
   }, [ticket.createdAt]);
 
-  const displayEmail = senderEmail || (showExtraFields ? 'unknown@email' : null);
+  const displayEmail = senderEmail || (showExtraFields ? fromEmailAddress?.trim() || null : null);
   const statusLabel = isHumanInterventionTicket
     ? 'Human Intervention'
     : (ticket.stageName ?? formatStatusText(ticket.status));

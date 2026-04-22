@@ -1,6 +1,5 @@
 /**
- * Microsoft adapter
- * Auto-registered on import
+ * Microsoft adapter — auto-registered on import.
  */
 
 import { AdapterFactory } from '../../core/adapterFactory';
@@ -8,22 +7,21 @@ import { ExternalSourcePlatform } from '../../core/types';
 import { MicrosoftAuthenticator } from './authenticator';
 import { MicrosoftTransformer } from './transformer';
 import { MicrosoftFlow } from './flow';
+import { MicrosoftPostprocessor } from './postprocessor';
+import { MicrosoftRefetch } from './refetch';
 
-/**
- * Create and register Microsoft adapter
- * Registration happens automatically when this file is imported
- *
- * Flow handles preprocessing to fetch actual email content from Graph API
- * (Graph webhooks only send notification IDs, not email content)
- */
 export const microsoftAdapter = AdapterFactory.create(
   ExternalSourcePlatform.MICROSOFT,
   new MicrosoftAuthenticator(),
   new MicrosoftTransformer(),
-  new MicrosoftFlow()
+  new MicrosoftFlow(),
+  new MicrosoftPostprocessor(),
+  new MicrosoftRefetch(),
 );
 
 export { MicrosoftAuthenticator } from './authenticator';
 export { MicrosoftTransformer } from './transformer';
 export { MicrosoftFlow } from './flow';
+export { MicrosoftPostprocessor } from './postprocessor';
+export { MicrosoftRefetch } from './refetch';
 export * from './types';

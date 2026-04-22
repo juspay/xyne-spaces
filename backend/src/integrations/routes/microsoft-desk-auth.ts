@@ -7,6 +7,8 @@ import { Router, Request, Response } from 'express';
 import { authV2Middleware } from '../../middleware/authV2Middleware';
 import { microsoftDeskService } from '../../services/microsoftDeskService';
 import { logger } from '../../utils/logger';
+import { adapterRegistry } from '../core/adapterRegistry';
+import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 
 const router = Router();
 
@@ -148,11 +150,29 @@ router.get('/callback', async (req: Request, res: Response) => {
     }, getPublicUrl(req));
 
     logger.info(`[${requestId}] Microsoft email channel created: ${channelId}`);
-    res.redirect(`${frontendUrl}/support?emailConnected=true&channelId=${channelId}&provider=microsoft`);
+
+    // First-time backfill: latest N messages + initial cursor seed.
+    try {
+      const source = await new ExternalSourceRepository().findByChannelId(channelId);
+      if (source) await adapterRegistry.getAdapter(source.name).refetch?.(source);
+    } catch (err) {
+      logger.warn(`[${requestId}] Initial backfill failed — user can refetch manually`, {
+        error: err instanceof Error ? err.message : err,
+      });
+    }
+
+    res.redirect(
+      `${frontendUrl}/support?emailConnected=true&channel=${channelId}&provider=microsoft`,
+    );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error(`[${requestId}] Microsoft email callback error: ${errorMessage}`, error);
-    res.redirect(`${frontendUrl}/support?error=microsoft_callback_failed&message=${encodeURIComponent(errorMessage)}`);
+
+    const params = new URLSearchParams({ emailError: errorMessage });
+    const existingChannelId = (error as Error & { existingChannelId?: string })?.existingChannelId;
+    if (existingChannelId) params.set('channel', existingChannelId);
+
+    res.redirect(`${frontendUrl}/support?${params.toString()}`);
   }
 });
 

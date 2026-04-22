@@ -3,13 +3,16 @@
  * Public endpoints for syncing data from external sources
  */
 
-import express, { Router, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import { authenticate } from '../core/authenticate';
 import { adapterResolver } from '../middleware/adapterResolver';
 import { externalSourceCore } from '../core/core';
+import { adapterRegistry } from '../core/adapterRegistry';
 import { logger } from '../../utils/logger';
 import { RawBodyRequest } from '@/types/express';
 import { webhookLimiter } from '@/middleware/rateLimiters';
+import { authMiddleware } from '@/middleware/auth';
+import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 
 const router = Router();
 
@@ -95,6 +98,44 @@ router.post(
       });
     }
   }
+);
+
+/**
+ * Manual refetch for the external source bound to a channel.
+ * POST /api/external-source-sync/:channelId/refetch
+ */
+router.post(
+  '/:channelId/refetch',
+  authMiddleware.authenticate,
+  async (req: Request, res: Response) => {
+    const { channelId } = req.params;
+    try {
+      const source = await new ExternalSourceRepository().findByChannelId(channelId);
+      if (!source || !source.isActive) {
+        return res.status(404).json({ success: false, error: 'No active external source for this channel' });
+      }
+
+      const adapter = adapterRegistry.getAdapter(source.name);
+      if (!adapter.refetch) {
+        return res.status(400).json({ success: false, error: `Refetch not supported for ${source.sourceType}` });
+      }
+
+      const result = await adapter.refetch(source);
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      const needsReauth = /invalid_grant|unauthorized_client|invalid_token/i.test(raw);
+      const status = needsReauth ? 403 : 500;
+      logger.error('Refetch failed', { error: raw });
+      return res.status(status).json({
+        success: false,
+        error: needsReauth
+          ? 'Account requires re-authorization. Please reconnect the source.'
+          : raw,
+        ...(needsReauth && { needsReauth: true }),
+      });
+    }
+  },
 );
 
 export default router;
