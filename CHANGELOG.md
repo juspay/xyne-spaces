@@ -1,3 +1,26 @@
+## [1.126.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.125.1...v1.126.0) (2026-04-22)
+
+
+### Features
+
+* Added zoom to mobile attachment groups ([38a9301](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/38a9301132fecad0eef13702f3806f20910c858b)), closes [#5336](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5336)
+* call message and bubble redesign ([d0eb27e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/d0eb27e531ad9e500364f43d6f068098848ab7ca)), closes [#5104](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5104)
+* changes for Image Preview ([5ba0f30](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5ba0f30f297b9a3c99dff3f9d90c9b52234752bb)), closes [#5061](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5061)
+* new-table-for-channel-recaps ([48c4080](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/48c40803d54fbdc2622fdb4090a7a63cbc85f8dd)), closes [#5334](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5334)
+* profile clickMenu ([6d5bfdb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6d5bfdb676b5ac1797d7fb3cf867822e7c3245d1)), closes [#5126](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5126)
+
+
+### Bug Fixes
+
+* close action tray when clicking outside after dropdown closes ([f142953](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f142953c04d7d89e31e3450e80d09593b352de7c))
+* combined fixes for claw ([c0481af](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c0481aff46c31b97ad24da679c2b4692512abea1))
+* editing description for channels ([307bd95](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/307bd950579fc04660d6d7dfdba1a71b0eb03849)), closes [#4726](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4726)
+* Feature/xyne desk ([1f9aad3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1f9aad384ebd20d1903932ff7b513cd05dbd8464)), closes [#5343](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5343) [#5299](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5299) [#5295](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5295) [#5047](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5047) [#5229](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5229)
+* fix CMD+K search breaking after @ backspace ([f329f6b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f329f6be652a4dd5d89026ef3f5dd3dcde9f9ceb))
+* fixed refresh token issue in native app ([c9409ef](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c9409ef0fd8a389fe00c1816c0528c805cfc946a))
+* internal link fail issue ([f8f616e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f8f616ea338a4140cb3266ead460b3e9742d1d05)), closes [#5342](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5342)
+* Recording name when stopping from other place ([8dc2a72](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8dc2a723ddd1b341f4cb1b1580145e64e9b6e7fc)), closes [#5280](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5280)
+
 ## [1.125.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.125.0...v1.125.1) (2026-04-22)
 
 
