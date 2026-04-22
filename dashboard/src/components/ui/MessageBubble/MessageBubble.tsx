@@ -340,9 +340,12 @@ const getMessageBubbleClassName = (
   isShowInChannel?: boolean,
   context?: 'channel' | 'thread',
   isFirstInThread?: boolean,
+  isCallNoTranscript?: boolean,
 ): string => {
   const classes = [
-    'group flex items-start justify-start gap-2 px-4 py-1 relative',
+    isCallNoTranscript
+      ? 'group flex items-center justify-start gap-2 px-4 py-1 relative'
+      : 'group flex items-start justify-start gap-2 px-4 py-1 relative',
     variant !== 'pinned' &&
       !isActiveCall &&
       !isPrivateSystemNotice &&
@@ -451,6 +454,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     (isBotMessage && metadata?.xyneId && metadata?.ticketId);
   const isCallMessage = metadata?.isCallMessage === true;
   const isActiveCall = useIsCallActive(metadata?.callId);
+  const isCallNoTranscript =
+    isCallMessage && !isActiveCall && !isForwardedMessage && attachments.length === 0;
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
@@ -557,6 +562,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     isShowInChannelHighlight,
     context,
     isFirstInThread,
+    isCallNoTranscript,
   );
 
   return (
@@ -621,11 +627,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               />
             ) : showAvatar && isCallMessage && !isForwardedMessage ? (
               <div
-                className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : 'bg-muted'}`}
+                className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : ''}`}
+                style={
+                  !isActiveCall
+                    ? { background: 'linear-gradient(135deg, #FF4F4F, #D77F7F)' }
+                    : undefined
+                }
               >
-                <HuddleIcon
-                  color={isActiveCall ? 'var(--status-success)' : 'hsl(var(--muted-foreground))'}
-                />
+                <HuddleIcon color={isActiveCall ? 'var(--status-success)' : 'white'} />
               </div>
             ) : showAvatar && isXyneBot ? (
               <div className='flex items-center justify-center'>
@@ -757,7 +766,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div className='w-full flex items-baseline gap-2 min-h-4 '>
               {isCallMessage && !isForwardedMessage ? (
                 <h3 className='text-sm font-medium text-foreground'>
-                  {isActiveCall ? 'A call is going on' : 'A call happened'}
+                  {isActiveCall ? (
+                    'A call is going on'
+                  ) : metadata?.['detailedSummaryCanvasUrl'] ? (
+                    <a
+                      href={String(metadata['detailedSummaryCanvasUrl'])}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      className='hover:underline'
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {(metadata?.['callEndedText'] as string) ||
+                        message.content ||
+                        'A call happened'}
+                    </a>
+                  ) : (
+                    (metadata?.['callEndedText'] as string) || message.content || 'A call happened'
+                  )}
                 </h3>
               ) : isXyneBot ? (
                 <h3 className='text-sm font-medium text-foreground'>

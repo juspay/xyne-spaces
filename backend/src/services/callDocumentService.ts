@@ -211,7 +211,20 @@ Analyze the transcript and divide it into distinct phases/segments based on topi
 
 MARKDOWN TEMPLATE:
 
-## 📊 Detailed Call Summary
+
+### 💡 Key Takeaways
+1. [Most important outcome]
+2. [Second most important]
+3. [Third if applicable]
+
+---
+
+### 📋 Action Items
+| # | Task | Assignee | Due | Priority |
+|---|------|----------|-----|----------|
+| 1 | [Task] | [Person] | [Date] | [H/M/L] |
+
+---
 
 ### Call Overview
 **Estimated Duration**: [Short/Medium/Long based on transcript length]
@@ -261,11 +274,6 @@ MARKDOWN TEMPLATE:
 |---|----------|-------|---------|
 | 1 | [Decision] | [Person] | [Why/Context] |
 
-#### Action Items
-| # | Task | Assignee | Due | Priority |
-|---|------|----------|-----|----------|
-| 1 | [Task] | [Person] | [Date] | [H/M/L] |
-
 #### Open Items
 - [ ] [Unresolved question or parked topic]
 
@@ -274,13 +282,6 @@ MARKDOWN TEMPLATE:
 ### 🔗 Follow-up
 - **Next Meeting**: [If mentioned]
 - **Blockers**: [Any blockers identified]
-
----
-
-### 💡 Key Takeaways
-1. [Most important outcome]
-2. [Second most important]
-3. [Third if applicable]
 
 **CALL PARTICIPANTS (Correct Names):**
 {participants}

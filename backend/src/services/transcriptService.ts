@@ -64,25 +64,17 @@ TRANSCRIPT:
 {transcript}
 `;
 
-// AI Title prompt for call transcripts - Concise, 50 char max
+// AI Title prompt for call transcripts - Two lines, descriptive
 const CALL_TITLE_PROMPT = `
-You are generating a concise title for a call based on its transcript.
+You are summarizing the topic of a call in exactly 1 line.
 
 CRITICAL RULES:
-- Output ONLY the title text (no quotes, no explanations)
-- Maximum 50 characters
-- Use title case (capitalize first letter of main words)
-- Be specific and descriptive
-- Focus on the main topic or outcome
+- Output EXACTLY 1 line
+- One sentence summarizing the main topic (max 100 characters)
+- No quotes, no labels, no bullet points, no explanations
+- Write in plain, natural language
 
-Examples:
-- "Project Roadmap Discussion"
-- "Q1 Sales Review"
-- "Bug Fix Planning"
-- "Client Onboarding Call"
-- "Sprint Planning Session"
-
-Generate a title for this call:
+Generate a 1-line description for this call:
 {transcript}
 `;
 
@@ -1543,22 +1535,20 @@ Output ONLY the processed transcript, nothing else.`;
               });
 
               if (message) {
-                const currentContent = message.content || '';
-                const updatedContent = `${title} • ${currentContent}`;
-
-                // Update message with title
+                // Swap storage: message.content = AI description, metadata.callEndedText = original call text
                 await tx.message.update({
                   where: { messageId },
                   data: {
-                    content: updatedContent,
+                    content: title,
                     metadata: {
                       ...(message.metadata as any),
                       callTitle: title,
+                      callEndedText: message.content,
                     },
                   },
                 });
 
-                logger.info(`Updated call message ${messageId} with title: ${title}`);
+                logger.info(`Updated call message ${messageId} with AI description as content, original text stored in metadata`);
               } else {
                 logger.warn(`Call message ${messageId} not found for title update`);
               }
