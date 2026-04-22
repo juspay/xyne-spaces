@@ -2120,6 +2120,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
 
 
   // Recap Queries
+  /** @deprecated Use channelRecaps instead */
   channelDailyRecaps: defineQuery(
     z.object({
       channelIds: z.array(z.string()),
@@ -2131,6 +2132,31 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       }
 
       return zql.channel_daily_recaps
+        .where('recapDate', recapDate)
+        .where((helpers) =>
+          helpers.or(...channelIds.map((id) => helpers.cmp('channelId', id)))
+        )
+        // Fetch both base recaps (userId IS NULL) and this user's custom recaps
+        .where((helpers) =>
+          helpers.or(
+            helpers.cmp('userId', 'IS', null),
+            helpers.cmp('userId', '=', ctx.userID)
+          )
+        );
+    },
+  ),
+
+  channelRecaps: defineQuery(
+    z.object({
+      channelIds: z.array(z.string()),
+      recapDate: z.number(),
+    }),
+    ({ ctx, args: { channelIds, recapDate } }) => {
+      if (channelIds.length === 0) {
+        return zql.channel_recaps.limit(0);
+      }
+
+      return zql.channel_recaps
         .where('recapDate', recapDate)
         .where((helpers) =>
           helpers.or(...channelIds.map((id) => helpers.cmp('channelId', id)))

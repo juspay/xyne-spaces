@@ -447,17 +447,17 @@ export class RecapGenerationService {
     logger.info(`Persisted ${recapType} for channel ${channelId} on ${istDisplayDate} (IST)`);
 
     // Find existing record and update, or create new one
-    const existing = await db.channelDailyRecap.findFirst({
+    const existing = await db.channelRecap.findFirst({
       where: { channelId, recapDate: normalizedDate, userId },
     });
 
     if (existing) {
-      await db.channelDailyRecap.update({
+      await db.channelRecap.update({
         where: { id: existing.id },
         data: { summary: summaryData },
       });
     } else {
-      await db.channelDailyRecap.create({
+      await db.channelRecap.create({
         data: { channelId, recapDate: normalizedDate, summary: summaryData, userId },
       });
     }

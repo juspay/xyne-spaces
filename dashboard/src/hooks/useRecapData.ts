@@ -4,7 +4,7 @@ import { useCachedQuery } from './useCachedQuery';
 import { queries } from '../zero/queries';
 import { useAllChannels, useUserChannelStatuses } from './useChannels';
 import { useAuth } from './useAuth';
-import { ChannelUserStatus, ChannelDailyRecap } from '@xyne/shared';
+import { ChannelUserStatus, ChannelRecap } from '@xyne/shared';
 
 // Type definitions for recap summary data structure
 // New format: per-point citation data embedded directly (like ask AI)
@@ -167,7 +167,7 @@ const parseSummaryData = (
 
 // Process raw recap data into cards, merging base and custom recaps per channel
 const processRecapCards = (
-  recaps: ChannelDailyRecap[],
+  recaps: ChannelRecap[],
   channelMap: Map<string, string>,
   currentUserId: string,
 ): { cards: RecapCard[]; totalMessages: number; totalRecapWords: number } => {
@@ -176,7 +176,7 @@ const processRecapCards = (
 
   // Separate base recaps (userId IS NULL) from custom recaps (userId = currentUserId)
   const baseRecaps = recaps.filter(r => r.userId === null || r.userId === undefined);
-  const customRecapMap = new Map<string, ChannelDailyRecap>(
+  const customRecapMap = new Map<string, ChannelRecap>(
     recaps.filter(r => r.userId === currentUserId).map(r => [r.channelId, r]),
   );
 
@@ -284,7 +284,7 @@ export const useRecapData = () => {
   );
 
   // Fetch daily recaps for subscribed channels via Zero (cached)
-  const [dailyRecapsData] = useCachedQuery(queries.channelDailyRecaps(recapQueryArgs), {
+  const [dailyRecapsData] = useCachedQuery(queries.channelRecaps(recapQueryArgs), {
     enabled: hasSubscriptions,
   });
 
@@ -307,7 +307,7 @@ export const useRecapData = () => {
     if (!dailyRecapsData || dailyRecapsData.length === 0) {
       return { cards: [], totalMessages: 0, totalRecapWords: 0 };
     }
-    return processRecapCards(dailyRecapsData as ChannelDailyRecap[], channelMap, currentUserId);
+    return processRecapCards(dailyRecapsData as ChannelRecap[], channelMap, currentUserId);
   }, [dailyRecapsData, channelMap, currentUserId]);
 
   // Calculate time saved
@@ -335,7 +335,7 @@ export const useRecapData = () => {
 
     // Get channel IDs that have recaps for yesterday
     const recapChannelIds = new Set(
-      (dailyRecapsData as ChannelDailyRecap[]).map(recap => recap.channelId),
+      (dailyRecapsData as ChannelRecap[]).map(recap => recap.channelId),
     );
 
     // Count subscriptions where:

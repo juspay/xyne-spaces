@@ -3070,6 +3070,7 @@ model ReleaseAttribution {
 // RECAP FEATURE MODELS
 // ============================================================================
 
+// @deprecated Use ChannelRecap instead. This table is kept for backward compatibility.
 // Stores daily AI-generated summaries for each channel
 // userId = "" for base recaps, userId = actual user ID for custom recaps
 model ChannelDailyRecap {
@@ -3082,6 +3083,20 @@ model ChannelDailyRecap {
   @@index([recapDate])
   @@index([userId])
   @@map("channel_daily_recaps")
+  @@schema("public")
+}
+
+// Stores AI-generated summaries for each channel (replacement for ChannelDailyRecap)
+model ChannelRecap {
+  id        String   @id @default(cuid())
+  channelId String
+  recapDate DateTime @db.Date
+  summary   String // Final bullet summary text for the day
+  userId    String? // null for base recap, user ID for custom recap
+
+  @@index([recapDate])
+  @@index([userId])
+  @@map("channel_recaps")
   @@schema("public")
 }
 
