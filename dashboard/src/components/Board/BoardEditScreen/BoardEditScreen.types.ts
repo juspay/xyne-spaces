@@ -104,7 +104,7 @@ export const DEFAULT_TICKET_FIELDS: TicketField[] = [
     label: 'Status',
     required: false,
     order: 1,
-    visibleInCreate: false,
+    visibleInCreate: true,
   },
   {
     id: '7',

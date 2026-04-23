@@ -1,6 +1,7 @@
-import { PrismaClient, PRStatusEvent, BoardType } from '@prisma/client';
+import {Prisma, PrismaClient, PRStatusEvent, BoardType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { Board, Stage } from '@prisma/client';
+
 
 export interface CreateStageInput {
   name: string;
@@ -16,6 +17,7 @@ export interface CreateBoardInput {
   createdBy: string;
   workspaceId: string;
   boardType?: BoardType;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CreateBoardWithStagesInput extends CreateBoardInput {
@@ -78,6 +80,7 @@ export class BoardRepository {
           workspaceId: data.workspaceId,
           createdBy: data.createdBy,
           boardType: data.boardType || BoardType.DEFAULT,
+          ...(data.metadata !== undefined && { metadata: data.metadata  as Prisma.InputJsonValue}),
         },
       });
 
