@@ -424,6 +424,10 @@ model Ticket {
   @@index([isArchived])
   @@index([isArchived, projectId])
   @@index([isArchived, ticketType])
+
+  @@index([isArchived, createdAt(sort: Desc), id])
+  @@index([projectId, createdAt(sort: Desc), id])
+  @@index([workspaceId, createdAt(sort: Desc), id])
   @@map("tickets")
   @@schema("public")
 }
@@ -470,6 +474,8 @@ model TicketSubTicketMapping {
 
   @@index([ticketId])
   @@index([subTicketId])
+
+  @@index([ticketId, id])
   @@map("ticket_sub_ticket_mappings")
   @@schema("public")
 }
@@ -488,6 +494,8 @@ model TicketAssignment {
   @@unique([ticketId, userId, userResponsibility]) // Prevent duplicate assignments
   @@index([ticketId])
   @@index([userId])
+
+  @@index([ticketId, id])
   @@map("ticket_assignments")
   @@schema("public")
 }
@@ -598,6 +606,9 @@ model Workflow {
   ticket             Ticket?             @relation(fields: [ticketId], references: [id])
 
   @@index([ticketId])
+
+  @@index([ticketId, createdAt, id])
+  @@index([createdAt(sort: Desc), id])
   @@map("workflows")
   @@schema("public")
 }
@@ -872,6 +883,9 @@ model UserGroup {
   workspace            Workspace            @relation(fields: [workspaceId], references: [id])
 
   @@unique([workspaceId, name])
+
+  @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([workspaceId, name, id])
   @@map("user_groups")
   @@schema("public")
 }
@@ -983,6 +997,8 @@ model User {
   @@unique([email, workspaceId])
   @@index([email])
   @@index([providerUserId])
+
+  @@index([workspaceId, id])
   @@map("users")
   @@schema("public")
 }
@@ -1222,6 +1238,8 @@ model Resource {
   // Relations
   resourceAccess ResourceAccess[]
 
+
+  @@index([name, id])
   @@map("resources")
   @@schema("public")
 }
@@ -1246,6 +1264,8 @@ model ResourceAccess {
   @@index([groupId])
   @@index([userId])
   @@index([resourceId])
+
+  @@index([userId, id])
   @@map("resource_access")
   @@schema("public")
 }
@@ -1476,6 +1496,8 @@ model Project {
 
   @@unique([name, workspaceId])
   @@unique([code, workspaceId])
+
+  @@index([workspaceId, createdAt(sort: Desc), id])
   @@map("projects")
   @@schema("public")
 }
@@ -1504,6 +1526,9 @@ model Board {
 
   @@unique([name, projectId])
   @@index([projectId])
+
+  @@index([workspaceId, createdAt(sort: Desc), id])
+  @@index([projectId, createdAt, id])
   @@map("boards")
   @@schema("public")
 }
@@ -1577,6 +1602,9 @@ model Channel {
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
   @@index([createdBy])
   @@index([isArchived])
+
+  @@index([workspaceId, id])
+  @@index([workspaceId, name, id])
   @@map("channels")
   @@schema("public")
 }
@@ -1620,6 +1648,8 @@ model ChannelParticipant {
   @@index([userId, isClosed]) // Fast closed DMs lookup
   @@index([channelId, userId, id])
   @@index([userId, role, id])
+
+  @@index([channelId, id])
   @@map("channel_participants")
   @@schema("public")
 }
@@ -1656,6 +1686,8 @@ model ChannelUserStatus {
   @@index([userId, isStarred]) // Fast Starred Channels Lookup
   @@index([userId, isClosed]) // Fast closed DMs lookup
   @@index([userId, isRecapSubscribed]) // Fast recap subscriptions lookup
+
+  @@index([userId, isDeleted, id])
   @@map("channel_user_status")
   @@schema("public")
 }
@@ -1715,6 +1747,8 @@ model ConversationParticipant {
   @@index([conversationId]) // Fast conversation participant lookup
   @@index ([conversationId,participationType,joinedAt,id])
   @@index([userId]) // Fast user conversation lookup
+
+  @@index([userId, id])
   @@map("conversation_participants")
   @@schema("public")
 }
@@ -1744,6 +1778,8 @@ model Email {
   @@unique([externalMessageId])
   @@index([conversationId])
   @@index([externalThreadId])
+
+  @@index([conversationId, id])
   @@map("emails")
   @@schema("public")
 }
@@ -1811,6 +1847,8 @@ model Message {
   @@index([conversationId, visibleTo]) // Composite index for visibility queries
   @@index([senderId])
   @@index([msgType, createdAt])
+
+  @@index([conversationId, createdAt, messageId])
   @@map("messages")
   @@schema("public")
 }
@@ -1906,6 +1944,8 @@ model CustomEmoji {
   createdAt DateTime @default(now())
 
   @@unique([name])
+
+  @@index([createdAt(sort: Desc), id])
   @@map("custom_emojis")
   @@schema("public")
 }
@@ -1958,7 +1998,9 @@ model Activity {
   @@index([channelId]) // Fast lookup by channel
   @@index([conversationId, userId]) // Fast lookup for reply batching
   @@index([actorId])
-  
+
+  @@index([userId, updatedAt(sort: Desc), id])
+  @@index([userId, actorAction, isRead, id])
   @@map("activities")
   @@schema("public")
 }
@@ -2299,6 +2341,9 @@ model Call {
   @@index([isRecurring]) // Fast lookup of recurring calls
   @@index([instanceDate]) // Fast lookup by instance date
   @@index([orgName]) // Fast org call lookup
+
+  @@index([status, startedAt(sort: Desc), externalId])
+  @@index([status, startsAt, externalId])
   @@map("calls")
   @@schema("public")
 }
@@ -2417,6 +2462,9 @@ model Canvas {
   @@index([viewAccessId])
   @@index([editAccessId])
   @@index([docType])
+
+  @@index([createdBy, updatedAt(sort: Desc), id])
+  @@index([docType, updatedAt(sort: Desc), id])
   @@map("canvases")
   @@schema("public")
 }
@@ -2461,6 +2509,8 @@ model Bookmark {
   @@unique([userId, entityId, entityType]) // User can only bookmark an entity once
   @@index([userId, entityType]) // Fast lookup of user's bookmarks by type
   @@index([userId, createdAt]) // Fast lookup of user's bookmarks sorted by time
+
+  @@index([userId, createdAt(sort: Desc), id])
   @@map("bookmarks")
   @@schema("public")
 }
@@ -2642,6 +2692,8 @@ model Form {
 
   @@index([createdBy])
   @@index([entityType, contextType])
+
+  @@index([workspaceId, createdAt(sort: Desc), id])
   @@map("forms")
   @@schema("public")
 }
@@ -2737,6 +2789,8 @@ model Merchant {
   id        String   @id @default(cuid())
   mid       String   @unique // Merchant identifier (matches TicketEntityMapping.entityName)
 
+
+  @@index([mid, id])
   @@map("merchants")
   @@schema("public")
 }
