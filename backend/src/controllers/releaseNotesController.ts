@@ -83,6 +83,15 @@ export class ReleaseNotesController {
         return;
       }
 
+      const existingMetadata = ticket.metadata as Record<string, any> | null;
+      if (existingMetadata?.releaseNotesCanvasUrl) {
+        res.status(400).json({
+          success: false,
+          error: 'Release notes have already been generated for this ticket',
+        });
+        return;
+      }
+
       // Set generating status to true
       await this.ticketRepository.updateTicketMetadata(ticketId, {
         isGeneratingReleaseNotes: true,
@@ -153,6 +162,13 @@ Release notes have been generated for **${ticket.title}**
 
         logger.info(`[ReleaseNotesController] Posted release notes message to conversation ${ticket.conversationId}`);
       }
+
+      // Notify all linked ticket conversations about the release
+      await this.releaseNotesService.notifyLinkedTickets(
+        context,
+        canvasUrl,
+        xyneReleaseBot.id
+      );
 
       res.status(200).json({
         success: true,

@@ -2,6 +2,7 @@ import { CommitAnalysisService } from '@/services/commitAnalysisService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { FormsRepository } from '@/database/repositories/formsRepository';
 import { MessageRepository } from '@/database/repositories/messageRepository';
+import { ConversationService } from '@/services/conversationService';
 import { logger } from '@/utils/logger';
 import { generateReleaseNotesContent, ReleaseNotesGeneratorInput } from '@/services/agents/release-notes/release-notes-agent';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
@@ -21,6 +22,7 @@ type LinkedPrTicket = {
     xyneId: string;
     title: string;
     description: string | null;
+    conversationId: string | null;
   } | null;
 }
 
@@ -47,6 +49,7 @@ export class ReleaseNotesService {
   private ticketRepository: TicketRepository | null = null;
   private formsRepository: FormsRepository | null = null;
   private messageRepository: MessageRepository | null = null;
+  private conversationService: ConversationService | null = null;
 
   constructor() {
     this.initialize();
@@ -57,6 +60,7 @@ export class ReleaseNotesService {
       this.ticketRepository = new TicketRepository();
       this.formsRepository = new FormsRepository();
       this.messageRepository = new MessageRepository();
+      this.conversationService = new ConversationService();
 
       const bitbucketConfig = config.bitbucket;
       const hasToken = Boolean(bitbucketConfig.apiToken);
@@ -216,7 +220,7 @@ export class ReleaseNotesService {
     return null;
   }
 
-  private async fetchTicketByXyneId(xyneId: string): Promise<{ id: string; xyneId: string; title: string; description: string | null } | null> {
+  private async fetchTicketByXyneId(xyneId: string): Promise<LinkedPrTicket['ticket'] | null> {
     if (!this.ticketRepository) {
       return null;
     }
@@ -231,6 +235,7 @@ export class ReleaseNotesService {
         xyneId: ticket.xyneId,
         title: ticket.title,
         description: ticket.description,
+        conversationId: ticket.conversationId,
       };
     } catch (error) {
       logger.error(`[ReleaseNotesService] Error fetching ticket ${xyneId}:`, error);
@@ -539,6 +544,67 @@ export class ReleaseNotesService {
     } catch (error) {
       logger.error(`[ReleaseNotesService] Error gathering hotfix PRs:`, error);
       return [];
+    }
+  }
+
+  async notifyLinkedTickets(
+    context: ReleaseNotesContext,
+    canvasUrl: string,
+    releaseBotId: string
+  ): Promise<void> {
+    if (!this.ticketRepository || !this.conversationService) {
+      logger.warn('[ReleaseNotesService] Cannot notify linked tickets: missing dependencies');
+      return;
+    }
+
+    const linkedTickets = new Map<string, LinkedPrTicket['ticket']>();
+    for (const pr of context.prs) {
+      if (pr.ticket && pr.ticket.id !== context.release.ticketId) {
+        linkedTickets.set(pr.ticket.id, pr.ticket);
+      }
+    }
+
+    for (const pr of context.hotfixPRs) {
+      if (pr.ticket && pr.ticket.id !== context.release.ticketId) {
+        linkedTickets.set(pr.ticket.id, pr.ticket);
+      }
+    }
+
+    if (linkedTickets.size === 0) {
+      logger.info('[ReleaseNotesService] No linked tickets to notify');
+      return;
+    }
+
+    logger.info(`[ReleaseNotesService] Notifying ${linkedTickets.size} linked ticket(s) about release ${context.release.xyneId}`);
+
+    for (const [ticketId, ticket] of linkedTickets) {
+      try {
+        if (!ticket?.conversationId) {
+          logger.warn(`[ReleaseNotesService] Ticket ${ticketId} has no conversation, skipping notification`);
+          continue;
+        }
+
+        const messageContent = `🚀 This ticket has been deployed as part of **${context.release.xyneId}**.`;
+
+        // Post message to ticket's conversation
+        await this.conversationService.addMessageToConversation({
+          conversationId: ticket.conversationId,
+          userId: releaseBotId,
+          content: messageContent,
+          msgType: 'SYSTEM',
+          metadata: {
+            messageSubtype: 'ticket_deployed_with_release',
+            canvasUrl,
+            releaseTicketId: context.release.ticketId,
+            releaseTicketXyneId: context.release.xyneId,
+            contentFormat: 'markdown'
+          },
+        });
+
+        logger.info(`[ReleaseNotesService] Notified ticket ${ticket.xyneId} (conversation: ${ticket.conversationId})`);
+      } catch (error) {
+        logger.error(`[ReleaseNotesService] Failed to notify ticket ${ticketId}:`, error);
+      }
     }
   }
 
