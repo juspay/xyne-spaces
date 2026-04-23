@@ -1,3 +1,10 @@
+## [1.127.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.126.0...v1.127.0) (2026-04-23)
+
+
+### Features
+
+* ask ai tools ([a0c5de7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a0c5de7b4e5b7e479696933260f58f4b1afebcd1)), closes [#5294](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5294)
+
 ## [1.126.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.125.1...v1.126.0) (2026-04-22)
 
 
