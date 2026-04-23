@@ -36,6 +36,7 @@ const ESSENTIAL_RESOURCES = [
   { name: 'CANVASES', description: 'Canvases creation access' },
   { name: 'WORKSPACE', description: 'Workspace management access' },
   { name: 'ORGANIZATIONS', description: 'Organization management access' },
+  { name: 'INSPECTOR', description: 'Inspector panel access (/inspector)' },
 ];
 
 // Default user groups with their permissions
