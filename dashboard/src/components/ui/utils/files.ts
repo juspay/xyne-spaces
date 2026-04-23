@@ -4,7 +4,7 @@
 // Shared utilities for file type detection, formatting, and validation
 // ============================================================================
 
-import { ALLOWED_FILE_TYPES as SHARED_ALLOWED_FILE_TYPES } from '@xyne/shared';
+import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 
 /**
  * File type categories for UI rendering
@@ -20,12 +20,10 @@ export type FileCategory =
   | 'archive';
 
 /**
- * Allowed file types for upload (matches backend validation)
- * Uses shared constants from @xyne/shared to ensure consistency
- * SECURITY NOTE: Certificate files (.pem) can contain sensitive private keys.
- * Ensure upload handling includes appropriate security measures.
+ * Dangerous file extensions that should be blocked from upload.
+ * This is the security boundary — executable/script files are rejected.
  */
-export const ALLOWED_FILE_TYPES = SHARED_ALLOWED_FILE_TYPES;
+export const BLOCKED_EXTENSIONS: readonly string[] = DANGEROUS_EXTENSIONS;
 
 /**
  * Extension to color mapping for file badges
@@ -304,10 +302,10 @@ export const validateFile = (
   file: File,
   options: {
     maxSize?: number; // in bytes
-    allowedTypes?: string[];
+    blockedExtensions?: readonly string[];
   } = {},
 ): FileValidation => {
-  const { maxSize, allowedTypes } = options;
+  const { maxSize, blockedExtensions } = options;
 
   // Check file size
   if (maxSize && file.size > maxSize) {
@@ -317,22 +315,13 @@ export const validateFile = (
     };
   }
 
-  // Check file type
-  if (allowedTypes && allowedTypes.length > 0) {
+  // Check blocked extensions (blocklist approach)
+  if (blockedExtensions && blockedExtensions.length > 0) {
     const fileExt = file.name.split('.').pop()?.toLowerCase();
-    const mimeType = file.type;
-
-    const isAllowed = allowedTypes.some(
-      type =>
-        mimeType === type ||
-        mimeType.startsWith(type.replace('*', '')) ||
-        (fileExt && type === `.${fileExt}`),
-    );
-
-    if (!isAllowed) {
+    if (fileExt && blockedExtensions.some(ext => ext.toLowerCase() === `.${fileExt}`)) {
       return {
         isValid: false,
-        error: 'File type not allowed',
+        error: `File type '.${fileExt}' is not allowed for security reasons`,
       };
     }
   }

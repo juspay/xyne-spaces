@@ -1,22 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react';
 
-export const validateFileSize = (file: File, maxSize: number): boolean => {
-  return file.size <= maxSize;
-};
-
-export const validateFileType = (file: File, allowedTypes: string[]): boolean => {
-  return allowedTypes.some(type => {
-    if (type.endsWith('/*')) {
-      const category = type.split('/')[0];
-      return file.type.startsWith(category + '/');
-    }
-    if (type.startsWith('.')) {
-      return file.name.toLowerCase().endsWith(type.toLowerCase());
-    }
-    return file.type === type;
-  });
-};
-
 export const TIMING_CONSTANTS = {
   SEARCH_DEBOUNCE_MS: 300,
   TYPING_DEBOUNCE_MS: 1000,

@@ -47,7 +47,7 @@ export interface InputBoxProps {
   disabled?: boolean;
   className?: string;
   features?: InputBoxFeatures;
-  allowedFileTypes?: string[];
+  blockedExtensions?: readonly string[];
   maxFiles?: number;
   onAlsoSendToChannelChange?: (checked: boolean) => void;
   alsoSendToChannelChecked?: boolean;

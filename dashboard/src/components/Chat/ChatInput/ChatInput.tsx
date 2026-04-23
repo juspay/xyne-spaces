@@ -19,7 +19,7 @@ import {
   ChannelType,
   BaseTicketType,
 } from '@xyne/shared';
-import { ALLOWED_FILE_TYPES } from '../../ui/utils/files';
+import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { queries } from '../../../zero/queries';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
 import { v4 as uuidv4 } from 'uuid';
@@ -567,7 +567,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 fileAttachments: true,
                 emojiPicker: true,
               }}
-              allowedFileTypes={[...ALLOWED_FILE_TYPES]}
+              blockedExtensions={[...BLOCKED_EXTENSIONS]}
               {...(conversationId &&
                 !messageId && {
                   onAlsoSendToChannelChange: handleAlsoSendToChannelChange,
