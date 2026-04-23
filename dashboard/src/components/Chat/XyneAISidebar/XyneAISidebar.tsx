@@ -27,7 +27,10 @@ import {
   trackAttachmentsAdded,
 } from '../../../services/otel/xyneAIMetrics';
 import { XyneAISuggestions } from './components/XyneAISuggestions';
-import { XyneAIInputBox, type Attachment } from './components/XyneAIInputBox';
+import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
+import { cn } from '../../../utils/classNames';
+import { type Attachment } from './components/XyneAIInputBox';
+import { XyneAIInputSection } from './components/XyneAIInputSection';
 import {
   type SelectedChannel,
   type SelectedTicket,
@@ -35,7 +38,6 @@ import {
   type SelectedTranscript,
   type SelectedRecording,
   type ContextSelections,
-  ContextPickerPanel,
 } from './components/ContextPickerPanel';
 import { MessageItem } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
@@ -68,6 +70,10 @@ interface XyneAISidebarProps {
   threadInfo?: ThreadInfo | null;
   startFreshChat?: boolean;
   canvasInfo?: CanvasInfo | null;
+  variant?: 'sidebar' | 'fullscreen';
+  onClose?: () => void;
+  initialConversationId?: string;
+  onConversationChange?: (conversationId: string) => void;
 }
 
 const XyneAISidebar = ({
@@ -75,7 +81,12 @@ const XyneAISidebar = ({
   threadInfo,
   canvasInfo,
   startFreshChat = false,
+  variant = 'sidebar',
+  onClose,
+  initialConversationId,
+  onConversationChange,
 }: XyneAISidebarProps): ReactElement => {
+  const isFullscreen = variant === 'fullscreen';
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
@@ -85,7 +96,9 @@ const XyneAISidebar = ({
   const [showMemoriesPanel, setShowMemoriesPanel] = useState(false);
   const [conversations, setConversations] = useState<ConversationHistoryType[]>([]);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, 'LIKE' | 'DISLIKE' | null>>({});
-  const [isLoadingConversation, setIsLoadingConversation] = useState(!startFreshChat);
+  const [isLoadingConversation, setIsLoadingConversation] = useState(
+    !startFreshChat && !isFullscreen,
+  );
   const [selectedChannels, setSelectedChannels] = useState<SelectedChannel[]>([]);
   const [showContextModal, setShowContextModal] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
@@ -143,7 +156,7 @@ const XyneAISidebar = ({
   } = useDragAndDropAreaRef(channelId ?? undefined);
   const { isMobile } = usePlatform();
   // If startFreshChat is true on mount, mark as loaded immediately to prevent loading old data
-  const hasLoadedInitialConversationRef = useRef(startFreshChat);
+  const hasLoadedInitialConversationRef = useRef(startFreshChat || isFullscreen);
 
   // Update activeThreadInfo when threadInfo prop changes
   const prevThreadConversationIdRef = useRef(threadInfo?.conversationId);
@@ -341,16 +354,18 @@ const XyneAISidebar = ({
       // Abort any existing streams for this thread
       abortCurrentRequest();
 
-      // Reset the flag in the machine after handling it, preserving canvasInfo
-      xyneAIActor.send({
-        type: 'OPEN',
-        ...(channelId && { channelId }),
-        ...(threadInfo && { threadInfo }),
-        ...(canvasInfo && { canvasInfo }),
-        startFreshChat: false,
-      });
+      // Only update the xstate machine in sidebar mode (fullscreen manages its own lifecycle)
+      if (!isFullscreen) {
+        xyneAIActor.send({
+          type: 'OPEN',
+          ...(channelId && { channelId }),
+          ...(threadInfo && { threadInfo }),
+          ...(canvasInfo && { canvasInfo }),
+          startFreshChat: false,
+        });
+      }
     }
-  }, [startFreshChat, channelId, threadInfo, canvasInfo, abortCurrentRequest]);
+  }, [startFreshChat, channelId, threadInfo, canvasInfo, abortCurrentRequest, isFullscreen]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback((): void => {
@@ -644,6 +659,28 @@ const XyneAISidebar = ({
       console.error('[XyneAISidebar] Failed to load conversation:', error);
     }
   };
+
+  // Fullscreen: load a specific conversation on mount when initialConversationId is provided.
+  // We use a ref so the effect truly only runs once (chatKey re-mount provides the fresh prop value).
+  const initialConversationIdRef = useRef(initialConversationId);
+  useEffect(() => {
+    if (!isFullscreen || !initialConversationIdRef.current) return;
+    void loadSessionDetail(initialConversationIdRef.current).then(conv => {
+      if (conv) void handleLoadConversation(conv);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fullscreen: notify parent whenever the active session ID changes.
+  const onConversationChangeRef = useRef(onConversationChange);
+  useEffect(() => {
+    onConversationChangeRef.current = onConversationChange;
+  });
+  useEffect(() => {
+    if (conversationId && isFullscreen) {
+      onConversationChangeRef.current?.(conversationId);
+    }
+  }, [conversationId, isFullscreen]);
 
   const handleToggleStar = async (conversation: ConversationHistoryType): Promise<void> => {
     try {
@@ -1120,10 +1157,75 @@ const XyneAISidebar = ({
     isLegacyConversation,
   ]);
 
+  // Shared props for XyneAIInputSection
+  const contextSelections: ContextSelections = {
+    channels: selectedChannels,
+    tickets: selectedTickets,
+    canvases: selectedCanvases,
+    transcripts: selectedTranscripts,
+    recordings: selectedRecordings,
+  };
+
+  const sharedInputSectionProps = {
+    showContextModal,
+    onCloseContextModal: handleCloseContextModal,
+    onConfirmContext: handleConfirmContext,
+    contextSelections,
+    channelId,
+    channelName,
+    channelDescription,
+    scopeType,
+    threadInfo: activeThreadInfo,
+    canvasInfo,
+    selectionInfos: activeSelectionInfos,
+    inputValue,
+    onInputChange: setInputValue,
+    onSubmit: () => void handleSubmit(),
+    onResearchContextChange: setSelectedResearchContext,
+    onThreadInfoChange: setActiveThreadInfo,
+    onSelectionInfosChange: setActiveSelectionInfos,
+    onAttachmentsChange: setAttachments,
+    onBrowserContextChange: setBrowserContext,
+    selectedChannels,
+    onRemoveChannel: handleRemoveChannel,
+    onAddChannel: handleAddChannel,
+    nonDMChannels,
+    onOpenContextModal: handleOpenContextModal,
+    selectedTickets,
+    onRemoveTicket: handleRemoveTicket,
+    selectedCanvases,
+    onRemoveCanvas: handleRemoveCanvas,
+    selectedTranscripts,
+    onRemoveTranscript: handleRemoveTranscript,
+    selectedRecordings,
+    onRemoveRecording: handleRemoveRecording,
+    selectedActivities,
+    onActivitiesChange: setSelectedActivities,
+    onAbort: abortCurrentRequest,
+    webSearchEnabled,
+    webSearchAccessible,
+    onWebSearchToggle: () => setWebSearchEnabled(!webSearchEnabled),
+    deepResearchEnabled,
+    deepResearchAccessible,
+    onDeepResearchToggle: () => setDeepResearchEnabled(!deepResearchEnabled),
+    createCanvasEnabled,
+    onCreateCanvasToggle: () => setCreateCanvasEnabled(!createCanvasEnabled),
+    onUserTagsChange: setCurrentUserTags,
+  };
+
   return (
     <div
       ref={dragAndDropAreaRef}
-      className={`w-full ${isMobile ? 'h-[95vh] pb-4' : 'h-full rounded-xl'} bg-background flex flex-col min-h-0 relative`}
+      className={cn(
+        'w-full bg-background flex flex-col min-h-0 relative',
+        isFullscreen
+          ? isMobile
+            ? 'min-h-full pb-[calc(6rem+env(safe-area-inset-bottom))]'
+            : 'h-full'
+          : isMobile
+            ? 'h-[95vh] pb-4'
+            : 'h-full rounded-xl',
+      )}
     >
       {/* Drag and Drop Overlay */}
       {isDragging && (
@@ -1164,16 +1266,32 @@ const XyneAISidebar = ({
         <MemoriesPanel onClose={() => setShowMemoriesPanel(false)} />
       ) : (
         <>
-          {/* Header - Fixed at Top */}
+          {/* Header */}
           {aiOnboarding.isActive ? (
             <XyneAIOnboardingHeader onClose={completeOnboarding} />
-          ) : (
+          ) : isFullscreen && messages.length === 0 ? null : (
             <XyneAIHeader
               onNewChat={handleNewChat}
               onShowHistory={() => setShowHistorySidebar(true)}
               onShowUserActivity={() => setShowUserActivityPanel(true)}
               onShowMemories={() => setShowMemoriesPanel(true)}
               isMobile={isMobile}
+              {...(isFullscreen
+                ? {
+                    title: 'Xyne AI',
+                    hideMemoriesAndActivity: true,
+                    hideTitle: true,
+                    hideHistory: true,
+                  }
+                : {})}
+              {...(onClose !== undefined
+                ? {
+                    onClose: () => {
+                      abortCurrentRequest();
+                      onClose();
+                    },
+                  }
+                : {})}
             />
           )}
 
@@ -1198,7 +1316,22 @@ const XyneAISidebar = ({
                 </div>
               </div>
             ) : messages.length === 0 ? (
-              aiOnboarding.isActive ? (
+              isFullscreen ? (
+                <AILandingHeroErrorBoundary>
+                  <AILandingHero
+                    renderInput={
+                      <XyneAIInputSection
+                        ref={xyneAIInputRef}
+                        isOnboarding={false}
+                        showChannelTag={false}
+                        isStreaming={false}
+                        contextPanelPosition='top'
+                        {...sharedInputSectionProps}
+                      />
+                    }
+                  />
+                </AILandingHeroErrorBoundary>
+              ) : aiOnboarding.isActive ? (
                 <div className='flex flex-col h-full px-4 py-6'>
                   <div className='flex items-start gap-2'>
                     <div className='mt-0.5 flex-shrink-0'>
@@ -1232,119 +1365,127 @@ const XyneAISidebar = ({
                 />
               )
             ) : (
-              <div className={`px-4 py-4 ${aiOnboarding.isActive ? 'bot-markdown-content' : ''}`}>
-                <div className='space-y-4 max-w-full'>
-                  {/* Onboarding welcome message — persists at top of messages list */}
-                  {aiOnboarding.isActive && (
-                    <div className='flex items-start gap-2 mb-2'>
-                      <div className='mt-0.5 flex-shrink-0'>
-                        <XyneAIStar size={18} />
+              <div className={cn(isFullscreen ? 'flex justify-center' : '')}>
+                <div
+                  className={cn(
+                    'py-4',
+                    aiOnboarding.isActive && 'bot-markdown-content',
+                    isFullscreen ? 'w-full max-w-2xl px-4' : 'px-4',
+                  )}
+                >
+                  <div className='space-y-4 max-w-full'>
+                    {/* Onboarding welcome message — persists at top of messages list */}
+                    {aiOnboarding.isActive && (
+                      <div className='flex items-start gap-2 mb-2'>
+                        <div className='mt-0.5 flex-shrink-0'>
+                          <XyneAIStar size={18} />
+                        </div>
+                        <p className='text-foreground text-sm leading-relaxed'>
+                          Hi! I&apos;m your AI assistant. I can help you learn about everything Xyne
+                          Spaces has to offer. Try asking me one of the questions below, or ask
+                          anything you&apos;d like!
+                        </p>
                       </div>
-                      <p className='text-foreground text-sm leading-relaxed'>
-                        Hi! I&apos;m your AI assistant. I can help you learn about everything Xyne
-                        Spaces has to offer. Try asking me one of the questions below, or ask
-                        anything you&apos;d like!
+                    )}
+                    {(() => {
+                      let lastBotIndex = -1;
+                      let lastUserIndex = -1;
+                      for (let i = displayMessages.length - 1; i >= 0; i--) {
+                        if (lastBotIndex === -1 && displayMessages[i]?.type === 'bot') {
+                          lastBotIndex = i;
+                        }
+                        if (lastUserIndex === -1 && displayMessages[i]?.type === 'user') {
+                          lastUserIndex = i;
+                        }
+                        if (lastBotIndex !== -1 && lastUserIndex !== -1) break;
+                      }
+                      // Build sibling info in one O(n) pass over all messages
+                      // so per-message getSiblings calls aren't O(n²) in the render loop
+                      const siblingIndexById = new Map<string, number>();
+                      const parentGroups = new Map<string, string[]>();
+                      for (const m of messages) {
+                        const key = m.parentId ?? BRANCH_ROOT_KEY;
+                        const group = parentGroups.get(key);
+                        if (group) {
+                          group.push(m.id);
+                        } else {
+                          parentGroups.set(key, [m.id]);
+                        }
+                      }
+                      for (const [, group] of parentGroups) {
+                        group.forEach((id, i) => siblingIndexById.set(id, i));
+                      }
+                      return displayMessages.map((message: Message, index: number) => {
+                        const isLatestBotMessage = message.type === 'bot' && index === lastBotIndex;
+                        const isLatestUserMessage =
+                          message.type === 'user' && index === lastUserIndex;
+                        const parentKey = message.parentId ?? BRANCH_ROOT_KEY;
+                        const groupIds = parentGroups.get(parentKey) ?? [];
+                        const siblingCount = groupIds.length;
+                        const siblingIndex = siblingIndexById.get(message.id) ?? 0;
+                        const hasBranches = siblingCount > 1;
+                        return (
+                          <MessageItem
+                            key={message.id}
+                            message={message}
+                            onFeedback={(id, type) => void handleFeedback(id, type)}
+                            onCitationClick={handleCitationClick}
+                            onSummarizerCitationClick={handleSummarizerCitationClick}
+                            feedbackValue={feedbackMap[message.id] || null}
+                            onRegenerate={
+                              !isLegacyConversation && isLatestBotMessage
+                                ? () => void handleRegenerate()
+                                : undefined
+                            }
+                            onEditSubmit={
+                              !isLegacyConversation && isLatestUserMessage
+                                ? (newContent: string) =>
+                                    void handleEditMessage(message.id, newContent)
+                                : undefined
+                            }
+                            onEditMobile={
+                              !isLegacyConversation && isLatestUserMessage && isMobile
+                                ? () => handleEditMobile(message.id)
+                                : undefined
+                            }
+                            isLatestBotMessage={isLatestBotMessage}
+                            branchInfo={
+                              !isLegacyConversation && hasBranches
+                                ? { index: siblingIndex, total: siblingCount }
+                                : undefined
+                            }
+                            onBranchNavigate={
+                              !isLegacyConversation && hasBranches
+                                ? (dir: 'prev' | 'next') => handleBranchNavigate(message.id, dir)
+                                : undefined
+                            }
+                          />
+                        );
+                      });
+                    })()}
+                    {/* Onboarding suggestion chips after messages */}
+                    {aiOnboarding.isActive && visibleSuggestions.length > 0 && (
+                      <div className='flex flex-wrap gap-2 mt-4'>
+                        {visibleSuggestions.map(suggestion => (
+                          <button
+                            key={suggestion}
+                            onClick={() => handleSuggestionClick(suggestion)}
+                            className="px-3 py-1.5 rounded-full border border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-xs leading-5 font-['Inter']"
+                            data-track-category='AIOnboarding'
+                            data-track-name='SuggestionChip'
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {aiOnboarding.isActive && visibleSuggestions.length === 0 && (
+                      <p className='text-muted-foreground text-sm mt-4'>
+                        You can also ask me anything else!
                       </p>
-                    </div>
-                  )}
-                  {(() => {
-                    let lastBotIndex = -1;
-                    let lastUserIndex = -1;
-                    for (let i = displayMessages.length - 1; i >= 0; i--) {
-                      if (lastBotIndex === -1 && displayMessages[i]?.type === 'bot') {
-                        lastBotIndex = i;
-                      }
-                      if (lastUserIndex === -1 && displayMessages[i]?.type === 'user') {
-                        lastUserIndex = i;
-                      }
-                      if (lastBotIndex !== -1 && lastUserIndex !== -1) break;
-                    }
-                    // Build sibling info in one O(n) pass over all messages
-                    // so per-message getSiblings calls aren't O(n²) in the render loop
-                    const siblingIndexById = new Map<string, number>();
-                    const parentGroups = new Map<string, string[]>();
-                    for (const m of messages) {
-                      const key = m.parentId ?? BRANCH_ROOT_KEY;
-                      const group = parentGroups.get(key);
-                      if (group) {
-                        group.push(m.id);
-                      } else {
-                        parentGroups.set(key, [m.id]);
-                      }
-                    }
-                    for (const [, group] of parentGroups) {
-                      group.forEach((id, i) => siblingIndexById.set(id, i));
-                    }
-                    return displayMessages.map((message: Message, index: number) => {
-                      const isLatestBotMessage = message.type === 'bot' && index === lastBotIndex;
-                      const isLatestUserMessage =
-                        message.type === 'user' && index === lastUserIndex;
-                      const parentKey = message.parentId ?? BRANCH_ROOT_KEY;
-                      const groupIds = parentGroups.get(parentKey) ?? [];
-                      const siblingCount = groupIds.length;
-                      const siblingIndex = siblingIndexById.get(message.id) ?? 0;
-                      const hasBranches = siblingCount > 1;
-                      return (
-                        <MessageItem
-                          key={message.id}
-                          message={message}
-                          onFeedback={(id, type) => void handleFeedback(id, type)}
-                          onCitationClick={handleCitationClick}
-                          onSummarizerCitationClick={handleSummarizerCitationClick}
-                          feedbackValue={feedbackMap[message.id] || null}
-                          onRegenerate={
-                            !isLegacyConversation && isLatestBotMessage
-                              ? () => void handleRegenerate()
-                              : undefined
-                          }
-                          onEditSubmit={
-                            !isLegacyConversation && isLatestUserMessage
-                              ? (newContent: string) =>
-                                  void handleEditMessage(message.id, newContent)
-                              : undefined
-                          }
-                          onEditMobile={
-                            !isLegacyConversation && isLatestUserMessage && isMobile
-                              ? () => handleEditMobile(message.id)
-                              : undefined
-                          }
-                          isLatestBotMessage={isLatestBotMessage}
-                          branchInfo={
-                            !isLegacyConversation && hasBranches
-                              ? { index: siblingIndex, total: siblingCount }
-                              : undefined
-                          }
-                          onBranchNavigate={
-                            !isLegacyConversation && hasBranches
-                              ? (dir: 'prev' | 'next') => handleBranchNavigate(message.id, dir)
-                              : undefined
-                          }
-                        />
-                      );
-                    });
-                  })()}
-                  {/* Onboarding suggestion chips after messages */}
-                  {aiOnboarding.isActive && visibleSuggestions.length > 0 && (
-                    <div className='flex flex-wrap gap-2 mt-4'>
-                      {visibleSuggestions.map(suggestion => (
-                        <button
-                          key={suggestion}
-                          onClick={() => handleSuggestionClick(suggestion)}
-                          className="px-3 py-1.5 rounded-full border border-border hover:bg-accent bg-card transition-colors text-muted-foreground font-medium text-xs leading-5 font-['Inter']"
-                          data-track-category='AIOnboarding'
-                          data-track-name='SuggestionChip'
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {aiOnboarding.isActive && visibleSuggestions.length === 0 && (
-                    <p className='text-muted-foreground text-sm mt-4'>
-                      You can also ask me anything else!
-                    </p>
-                  )}
-                  <div ref={messagesEndRef} />
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
                 </div>
               </div>
             )}
@@ -1364,84 +1505,21 @@ const XyneAISidebar = ({
             </div>
           )}
 
-          {/* Input Box - Fixed at Bottom */}
-          <div className='relative'>
-            {showContextModal && (
-              <>
-                <div
-                  role='button'
-                  tabIndex={-1}
-                  className='fixed inset-0 z-10'
-                  onClick={handleCloseContextModal}
-                  onKeyDown={e => {
-                    if (e.key === 'Escape') handleCloseContextModal();
-                  }}
-                  aria-label='Close context modal'
-                  data-track-category='XyneAI'
-                  data-track-name='CLOSE_CONTEXT_MODAL_BACKDROP'
+          {/* Input Box — hidden in fullscreen landing mode (input is rendered inside AILandingHero) */}
+          {!(isFullscreen && messages.length === 0) && (
+            <div className={cn(isFullscreen && 'flex justify-center px-4 pb-6')}>
+              <div className={cn(isFullscreen && 'w-full max-w-2xl')}>
+                <XyneAIInputSection
+                  ref={xyneAIInputRef}
+                  isOnboarding={aiOnboarding.isActive}
+                  showChannelTag={true}
+                  isStreaming={messages.some(m => m.isStreaming)}
+                  contextPanelPosition='bottom'
+                  {...sharedInputSectionProps}
                 />
-                <div className='absolute bottom-full left-0 right-0 z-20 px-4 pb-2'>
-                  <ContextPickerPanel
-                    onClose={handleCloseContextModal}
-                    onConfirm={handleConfirmContext}
-                    initialSelections={{
-                      channels: selectedChannels,
-                      tickets: selectedTickets,
-                      canvases: selectedCanvases,
-                      transcripts: selectedTranscripts,
-                      recordings: selectedRecordings,
-                    }}
-                  />
-                </div>
-              </>
-            )}
-            <XyneAIInputBox
-              ref={xyneAIInputRef}
-              channelId={channelId}
-              channelName={channelName}
-              channelDescription={channelDescription}
-              scopeType={scopeType}
-              isOnboarding={aiOnboarding.isActive}
-              showChannelTag={true}
-              threadInfo={activeThreadInfo}
-              canvasInfo={canvasInfo}
-              selectionInfos={activeSelectionInfos}
-              inputValue={inputValue}
-              onInputChange={setInputValue}
-              onSubmit={() => void handleSubmit()}
-              onResearchContextChange={setSelectedResearchContext}
-              onThreadInfoChange={setActiveThreadInfo}
-              onSelectionInfosChange={setActiveSelectionInfos}
-              onAttachmentsChange={setAttachments}
-              onBrowserContextChange={setBrowserContext}
-              selectedChannels={selectedChannels}
-              onRemoveChannel={handleRemoveChannel}
-              onAddChannel={handleAddChannel}
-              nonDMChannels={nonDMChannels}
-              onOpenContextModal={handleOpenContextModal}
-              selectedTickets={selectedTickets}
-              onRemoveTicket={handleRemoveTicket}
-              selectedCanvases={selectedCanvases}
-              onRemoveCanvas={handleRemoveCanvas}
-              selectedTranscripts={selectedTranscripts}
-              onRemoveTranscript={handleRemoveTranscript}
-              selectedRecordings={selectedRecordings}
-              onRemoveRecording={handleRemoveRecording}
-              selectedActivities={selectedActivities}
-              onActivitiesChange={setSelectedActivities}
-              isStreaming={messages.some(m => m.isStreaming)}
-              onAbort={abortCurrentRequest}
-              webSearchEnabled={webSearchEnabled}
-              webSearchAccessible={webSearchAccessible}
-              onWebSearchToggle={() => setWebSearchEnabled(!webSearchEnabled)}
-              deepResearchEnabled={deepResearchEnabled}
-              deepResearchAccessible={deepResearchAccessible}
-              onDeepResearchToggle={() => setDeepResearchEnabled(!deepResearchEnabled)}
-              createCanvasEnabled={createCanvasEnabled}
-              onCreateCanvasToggle={() => setCreateCanvasEnabled(!createCanvasEnabled)}
-              onUserTagsChange={setCurrentUserTags}
-            />
-          </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

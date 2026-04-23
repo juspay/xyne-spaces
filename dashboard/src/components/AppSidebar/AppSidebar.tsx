@@ -60,6 +60,9 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { PATH_TO_RESOURCE } from './utils/resourceMapping';
 import { useKeyboard } from '../../contexts/KeyboardContext';
+import { useAILandingDefault } from '../../hooks/useAILandingDefault';
+import XyneAISidebarIcon from '../icons/xyne-ai/XyneAISidebarIcon';
+import { cn } from '../../utils/classNames';
 
 const navigationItems: { path: string; label: string; icon: LucideIcon; iconSize?: number }[] = [
   { path: '/chat/dir', label: 'Chat', icon: Inbox },
@@ -147,6 +150,7 @@ const AppSidebar = (): ReactElement => {
   const location = useLocation();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const { user } = useAuth();
+  const { aiLandingDefault } = useAILandingDefault();
   const currentUser = useSelf();
   const permissions = usePermissions();
   const missedCallCount = useMissedCallCount();
@@ -271,7 +275,7 @@ const AppSidebar = (): ReactElement => {
 
   return (
     <aside className='h-full px-3 pt-5 pb-6 flex flex-col items-center justify-between'>
-      <div className='space-y-8'>
+      <div className='space-y-8 overflow-y-auto scrollbar-none min-h-0'>
         <nav>
           <ul ref={navListRef} className='relative flex flex-col gap-4'>
             {activeMarkerY !== null && (
@@ -281,6 +285,36 @@ const AppSidebar = (): ReactElement => {
                 style={{ transform: `translate3d(0px, ${activeMarkerY}px, 0)` }}
               />
             )}
+            {/* Xyne AI nav item — only visible when "Open AI on launch" is enabled */}
+            {aiLandingDefault && (
+              <li
+                key='/ai'
+                ref={el => {
+                  navItemRefs.current['/ai'] = el;
+                }}
+                className='relative z-10'
+              >
+                <Tooltip content='Xyne AI' side='right' delayDuration={0}>
+                  <Link
+                    to='/ai'
+                    onClick={() => handleNavigationClick('Xyne AI')}
+                    data-testid='nav-xyne-ai'
+                    data-track-category='App_Sidebar'
+                    data-track-name='Sidebar_Nav_Item'
+                    data-track-metadata={JSON.stringify({ path: '/ai', label: 'Xyne AI' })}
+                    className={cn(
+                      'size-8 flex items-center justify-center rounded-lg cursor-pointer transition-colors',
+                      activeRoute === '/ai'
+                        ? 'text-appSidebar-activeIcon'
+                        : 'bg-transparent text-appSidebar-activeForeground',
+                    )}
+                  >
+                    <XyneAISidebarIcon size={16} />
+                  </Link>
+                </Tooltip>
+              </li>
+            )}
+
             {filteredNavigationItems.map(item => {
               const isActive = activeRoute === item.path;
               const showMissedCallBadge = item.path === '/calls' && missedCallCount > 0;

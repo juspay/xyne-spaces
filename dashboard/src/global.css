@@ -2607,3 +2607,8 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 [data-theme="midnight"] div[class*="sc-"] span:first-child {
   color: #d1d5db !important;
 }
+
+/* Hide the decorative sky background on the AI landing page in midnight (dark) mode */
+[data-theme="midnight"] .ai-landing-bg {
+  display: none;
+}
