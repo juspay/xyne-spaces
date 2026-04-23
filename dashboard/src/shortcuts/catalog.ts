@@ -15,7 +15,7 @@ export interface ShortcutDefinition {
 export const shortcuts = {
   // ===== GLOBAL NAVIGATION =====
   'global.search': {
-    keys: 'mod+k',
+    keys: ['mod+k', 'mod+g'],
     scope: 'global',
     allowInInputs: true,
     priority: 100,
