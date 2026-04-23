@@ -295,6 +295,18 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
           resetTimerRef.current = null;
         }
 
+        // On mobile, the OS can kill the WebView's IDB storage process during backgrounding.
+        // When this happens, all IDB handles (including newly opened ones) are broken within
+        // the current page context. Only a full page reload reinitializes the storage process.
+        if (String(state.reason).includes('Connection to Indexed Database server lost')) {
+          logger.info(LoggerEvent.ZERO_ERROR_RELOAD_INITIATED, {
+            trigger: 'IDB_CONNECTION_LOST',
+            reason: state.reason,
+          });
+          window.location.reload();
+          return;
+        }
+
         // Only attempt reconnect if we haven't exceeded max retries
         if (retryCountRef.current < MAX_RETRIES) {
           retryCountRef.current += 1;
