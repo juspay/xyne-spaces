@@ -3,6 +3,7 @@ import { Check, Copy } from 'lucide-react';
 import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
+import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
 
 // ─── Code Block ──────────────────────────────────────────────────────────────
 
@@ -33,6 +34,16 @@ const CodeBlock = ({
   if (language === 'mermaid') {
     return (
       <MermaidBlock chart={codeString} messageId={(props as { messageId: string }).messageId} />
+    );
+  }
+
+  // ── Filesystem interactive graph ──
+  if (language === 'filesystem') {
+    return (
+      <FilesystemBlock
+        jsonSource={codeString}
+        messageId={(props as { messageId: string }).messageId}
+      />
     );
   }
 
