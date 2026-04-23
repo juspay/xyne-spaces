@@ -7,8 +7,6 @@ import { Router, Request, Response } from 'express';
 import { authV2Middleware } from '../../middleware/authV2Middleware';
 import { microsoftDeskService } from '../../services/microsoftDeskService';
 import { logger } from '../../utils/logger';
-import { adapterRegistry } from '../core/adapterRegistry';
-import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 
 const router = Router();
 
@@ -150,16 +148,6 @@ router.get('/callback', async (req: Request, res: Response) => {
     }, getPublicUrl(req));
 
     logger.info(`[${requestId}] Microsoft email channel created: ${channelId}`);
-
-    // First-time backfill: latest N messages + initial cursor seed.
-    try {
-      const source = await new ExternalSourceRepository().findByChannelId(channelId);
-      if (source) await adapterRegistry.getAdapter(source.name).refetch?.(source);
-    } catch (err) {
-      logger.warn(`[${requestId}] Initial backfill failed — user can refetch manually`, {
-        error: err instanceof Error ? err.message : err,
-      });
-    }
 
     res.redirect(
       `${frontendUrl}/support?emailConnected=true&channel=${channelId}&provider=microsoft`,

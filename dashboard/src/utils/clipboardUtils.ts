@@ -6,6 +6,7 @@ import type { Element, Root } from 'hast';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import remarkRehype from 'remark-rehype';
 import rehypeStringify from 'rehype-stringify';
 
@@ -62,6 +63,10 @@ export const markdownToHtml = async (markdown: string): Promise<string> => {
     const file = await unified()
       .use(remarkParse)
       .use(remarkGfm)
+      // remarkBreaks turns a single newline inside a paragraph into a hard <br>.
+      // Without it, CommonMark collapses "Best,\nNikunj Gupta" to "Best, Nikunj
+      // Gupta" in one line — signatures need to be preserved as typed.
+      .use(remarkBreaks)
       .use(remarkRehype)
       .use(rehypeHeadingsToBold)
       .use(rehypeStringify)

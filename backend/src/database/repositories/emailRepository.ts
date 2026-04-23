@@ -13,6 +13,7 @@ export class EmailRepository {
     cc?: string[];
     bcc?: string[];
     conversationId: string;
+    channelId: string;
     externalThreadId: string;
     externalMessageId: string;
   }): Promise<Email> {
@@ -30,6 +31,7 @@ export class EmailRepository {
         cc: data.cc || [],
         bcc: data.bcc || [],
         conversationId: data.conversationId,
+        channelId: data.channelId,
         externalThreadId: data.externalThreadId,
         externalMessageId: data.externalMessageId,
       },

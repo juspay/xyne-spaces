@@ -8,6 +8,8 @@ export {
   BoardsACL,
   BookmarksACL,
   EmailSignaturesACL,
+  EmailsACL,
+  EmailDraftsACL,
   CallParticipantsACL,
   CallsACL,
   CanvasParticipantsACL,

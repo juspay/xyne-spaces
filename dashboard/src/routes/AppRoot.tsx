@@ -954,8 +954,14 @@ export const router = createBrowserRouter([
                 ),
                 children: [
                   {
-                    path: ':ticketId',
+                    path: ':channelId',
                     element: <Outlet />,
+                    children: [
+                      {
+                        path: ':ticketId',
+                        element: <Outlet />,
+                      },
+                    ],
                   },
                 ],
               },

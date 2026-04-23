@@ -480,28 +480,19 @@ export const queries = defineQueries({
       .related('entity')
       .related('conversation');
   }),
-  // Unified query for Xyne Desk: filters by EMAIL channels with optional channel and merchant filters
+  // Unified query for Xyne Desk: tickets scoped to a single channel.
+  // channelId + isMember are required and forwarded to TicketsACL for membership gating.
   supportTicketsFiltered: defineQuery(
-    z
-      .object({
-        channelId: z.string().optional(),
-        merchantMid: z.string().optional(),
-      })
-      .optional(),
-    ({ args }) => {
-      let query = zql.tickets;
+    z.object({
+      channelId: z.string(),
+      isMember: z.boolean(),
+      merchantMid: z.string().optional(),
+    }),
+    ({ args: { channelId, merchantMid } }) => {
+      let query = zql.tickets.where('channelId', channelId);
 
-      // If specific channelId provided (from email channels dropdown), use direct filter
-      // Otherwise, filter by EMAIL channel type to get all email support tickets
-      if (args?.channelId) {
-        query = query.where('channelId', args.channelId);
-      } else {
-        query = query.whereExists('channel', channel => channel.where('type', ChannelType.EMAIL));
-      }
-
-      // Apply merchant filter using direct merchantId field
-      if (args?.merchantMid) {
-        query = query.where('merchantId', args.merchantMid);
+      if (merchantMid) {
+        query = query.where('merchantId', merchantMid);
       }
 
       return query
@@ -513,47 +504,50 @@ export const queries = defineQueries({
     },
   ),
   // Single-row variant matching supportTicketsPage row shape (for @rocicorp/zero-virtual permalinks).
-  supportTicketRow: defineQuery(z.object({ id: z.string() }), ({ args: { id } }) => {
-    return zql.tickets
-      .where('id', id)
-      .related('project')
-      .related('tags')
-      .related('entity')
-      .related('emails')
-      .related('conversation')
-      .one();
-  }),
+  // channelId + isMember are forwarded to TicketsACL for membership gating.
+  // emailDrafts is scoped to the current user (drafts are per-user private).
+  supportTicketRow: defineQuery(
+    z.object({ id: z.string(), channelId: z.string(), isMember: z.boolean() }),
+    ({ ctx, args: { id } }) => {
+      return zql.tickets
+        .where('id', id)
+        .related('project')
+        .related('tags')
+        .related('entity')
+        .related('emails')
+        .related('emailDrafts', q => q.where('userId', ctx.userID))
+        .related('conversation')
+        .one();
+    },
+  ),
   supportTicketByXyneId: defineQuery(
-    z.object({ xyneId: z.string() }),
-    ({ args: { xyneId } }) => {
+    z.object({ xyneId: z.string(), channelId: z.string(), isMember: z.boolean() }),
+    ({ ctx, args: { xyneId } }) => {
       return zql.tickets
         .where('xyneId', xyneId)
         .related('project')
         .related('tags')
         .related('entity')
         .related('emails')
+        .related('emailDrafts', q => q.where('userId', ctx.userID))
         .related('conversation')
         .one();
     },
   ),
   // Paginated variant of supportTicketsFiltered for use with @rocicorp/zero-virtual.
   // Cursor = (createdAt, id) matching the orderBy.
+  // channelId + isMember are forwarded to TicketsACL for membership gating.
   supportTicketsPage: defineQuery(
     z.object({
-      channelId: z.string().optional(),
+      channelId: z.string(),
+      isMember: z.boolean(),
       assignedTo: z.string().optional(),
       limit: z.number(),
       start: z.object({ id: z.string(), createdAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ args: { channelId, assignedTo, limit, start, dir } }) => {
-      let query = zql.tickets;
-
-      if (channelId) {
-        query = query.where('channelId', channelId);
-      } else {
-        query = query.whereExists('channel', channel => channel.where('type', ChannelType.EMAIL));
-      }
+    ({ ctx, args: { channelId, assignedTo, limit, start, dir } }) => {
+      let query = zql.tickets.where('channelId', channelId);
 
       if (assignedTo) {
         query = query.where('assignedTo', assignedTo);
@@ -575,6 +569,7 @@ export const queries = defineQueries({
         .related('tags')
         .related('entity')
         .related('emails')
+        .related('emailDrafts', q => q.where('userId', ctx.userID))
         .related('conversation');
     },
   ),

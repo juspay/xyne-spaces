@@ -9,7 +9,7 @@ import { parseTicketMd } from '@xyne/shared';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate } from '../../../utils/electronApp';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 interface BotBubbleProps {
   messageId?: string;
@@ -47,6 +47,7 @@ const TicketDisplayModeV2: React.FC<{
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
+  const location = useLocation();
 
   const resolvedChannelId = ticket.channelId || channelId;
   const resolvedConversationId = ticket.conversationId || conversationId;
@@ -55,7 +56,14 @@ const TicketDisplayModeV2: React.FC<{
     return null;
   }
 
+  // In the Desk/email ticket-detail view the user is already looking at the
+  // ticket whose card is being rendered in the right-panel thread — clicking
+  // it should be a no-op, not bounce them into the Chat ticket URL.
+  const isDeskView = location.pathname.startsWith('/support');
+
   const handleClick = (e: React.MouseEvent | KeyboardEvent): void => {
+    if (isDeskView) return;
+
     const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
     const ticketUrl = `/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
 

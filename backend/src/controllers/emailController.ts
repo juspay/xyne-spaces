@@ -8,6 +8,7 @@ import { EmailRepository } from '@/database/repositories/emailRepository';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { EmailDraftRepository } from '@/database/repositories/emailDraftRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -31,6 +32,7 @@ export class EmailController {
   private conversationRepo = new ConversationRepository();
   private externalSourceRepo = new ExternalSourceRepository();
   private channelRepo = new ChannelRepository();
+  private channelParticipantRepo = new ChannelParticipantRepository();
   private emailDraftRepo = new EmailDraftRepository();
   private externalMessageRepo = new ExternalMessageRepository();
   private messageAttachmentRepo = new MessageAttachmentRepository();
@@ -57,6 +59,26 @@ export class EmailController {
       const conversation = await this.conversationRepo.findById(conversationId);
       if (!conversation) {
         return res.status(404).json({ error: 'Conversation not found' });
+      }
+
+      // 1a. Channel membership gate: only participants of the conversation's
+      // channel may send replies. Mirrors the Zero ACL enforcement on the read
+      // side so the write path can't be used to bypass channel ACLs.
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthenticated' });
+      }
+      const isMember = await this.channelParticipantRepo.isParticipant(
+        conversation.channelId,
+        userId,
+      );
+      if (!isMember) {
+        logger.warn('[EmailController] Reply blocked: user is not a channel member', {
+          userId,
+          channelId: conversation.channelId,
+          conversationId,
+        });
+        return res.status(403).json({ error: 'Not a member of this channel' });
       }
 
       // 2. Fetch initial email (first email in conversation by createdAt)
@@ -175,6 +197,7 @@ export class EmailController {
         cc: ccRecipients,
         bcc: bccRecipients,
         conversationId,
+        channelId: conversation.channelId,
         externalThreadId: result.threadId,
         externalMessageId,
       });

@@ -1,5 +1,5 @@
 import { ReactElement, useMemo, useRef } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Pencil } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import useMeasure from '../../../hooks/useMeasure';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
@@ -74,6 +74,9 @@ export const TicketListRow = ({
     ? 'Human Intervention'
     : (ticket.stageName ?? formatStatusText(ticket.status));
   const emailCount = ticket.emails?.length ?? 0;
+  // EmailDraftsACL already scopes to ctx.userID, so this is the current
+  // user's unsent draft count for the ticket's conversation.
+  const hasDraft = (ticket.emailDrafts?.length ?? 0) > 0;
 
   return (
     <div
@@ -123,6 +126,17 @@ export const TicketListRow = ({
           >
             {emailCount}
           </span>
+        )}
+        {hasDraft && (
+          <Tooltip delayDuration={500} content='Unsent draft'>
+            <span
+              className='inline-flex items-center gap-1 h-[18px] px-1.5 rounded-sm bg-amber-100 text-[10px] font-medium text-amber-700 flex-shrink-0'
+              aria-label='Unsent draft'
+            >
+              <Pencil size={10} />
+              Draft
+            </span>
+          </Tooltip>
         )}
         {!shouldHideDetails && displayEmail && (
           <>

@@ -5,6 +5,7 @@ import { Skeleton } from '../../ui/Skeleton';
 import { TicketListRow } from './TicketListRow';
 import { queries } from '../../../zero/queries';
 import { useShortcut } from '../../../shortcuts';
+import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { TicketListItem } from './TicketListView.types';
 
@@ -18,7 +19,7 @@ type TicketStart = { id: string; createdAt: number };
 
 interface TicketListViewProps {
   filter: {
-    channelId?: string | undefined;
+    channelId: string;
     assignedTo?: string | undefined;
   };
   onTicketClick: (ticket: SupportTicketRow) => void;
@@ -48,6 +49,10 @@ export function TicketListView({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { channelId, assignedTo } = filter;
+  // Feeds TicketsACL fast-path (scalar EXISTS on channel_participants) instead
+  // of the per-row OR(PUBLIC, EXISTS) fallback.
+  const channelUserStatus = useGetChannelUserStatus(channelId);
+  const isMember = !!channelUserStatus;
 
   const getPageQuery = useCallback(
     ({
@@ -61,20 +66,21 @@ export function TicketListView({
     }) => ({
       query: queries.supportTicketsPage({
         channelId,
+        isMember,
         assignedTo,
         limit,
         start,
         dir,
       }),
     }),
-    [channelId, assignedTo],
+    [channelId, isMember, assignedTo],
   );
 
   const getSingleQuery = useCallback(
     ({ id }: { id: string }) => ({
-      query: queries.supportTicketRow({ id }),
+      query: queries.supportTicketRow({ id, channelId, isMember }),
     }),
-    [],
+    [channelId, isMember],
   );
 
   const getScrollElement = useCallback(() => scrollRef.current, []);

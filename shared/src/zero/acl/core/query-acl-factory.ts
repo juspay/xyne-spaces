@@ -55,6 +55,8 @@ import {
   FormContextMappingsACL,
   FormFieldsACL,
   FormEntityValuesACL,
+  EmailsACL,
+  EmailDraftsACL,
 } from '../tables';
 export class QueryACLFactory {
   static getACL<TTable extends TableName>(
@@ -173,9 +175,9 @@ export class QueryACLFactory {
       default:
         return new BaseQueryACL(ctx, table);
       case 'emails':
-        return new BaseQueryACL(ctx, table);
+        return new EmailsACL(ctx) as BaseQueryACL<TTable>;
       case 'email_drafts':
-        return new BaseQueryACL(ctx, table);
+        return new EmailDraftsACL(ctx) as BaseQueryACL<TTable>;
       case 'forms':
         return new FormsACL(ctx) as BaseQueryACL<TTable>;
       case 'form_entity_values':

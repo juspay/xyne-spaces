@@ -605,7 +605,7 @@ export const createTicketMessage = async (
 
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
-    select: { conversationId: true },
+    select: { conversationId: true, channelId: true },
   });
 
   if (!ticket || !ticket.conversationId) {
@@ -616,6 +616,7 @@ export const createTicketMessage = async (
 
   const emailDraft = await repositories.emailDrafts.create({
     conversationId: ticket.conversationId,
+    channelId: ticket.channelId,
     draftContent: htmlContent,
     userId,
   });

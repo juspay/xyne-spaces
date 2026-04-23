@@ -1648,6 +1648,7 @@ export const emailTable = table('emails')
     cc: json<string[]>().optional(),
     bcc: json<string[]>().optional(),
     conversationId: string(),
+    channelId: string(),
     externalThreadId: string(),
     externalMessageId: string(),
     createdAt: number(),
@@ -1660,6 +1661,7 @@ export const emailDraftTable = table('email_drafts')
     id: string(),
     conversationId: string(),
     userId: string().optional(),
+    channelId: string(),
     draftContent: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -2150,6 +2152,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ['conversationId'],
     destField: ['conversationId'],
     destSchema: emailTable,
+  }),
+  emailDrafts: many({
+    sourceField: ['conversationId'],
+    destField: ['conversationId'],
+    destSchema: emailDraftTable,
   }),
   referencesOut: many({
     sourceField: ['id'],
@@ -3356,6 +3363,11 @@ export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
     destField: ['conversationId'],
     destSchema: conversationTable,
   }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const emailDraftTableRelationships = relationships(emailDraftTable, ({ one }) => ({
@@ -3363,6 +3375,11 @@ export const emailDraftTableRelationships = relationships(emailDraftTable, ({ on
     sourceField: ['conversationId'],
     destField: ['conversationId'],
     destSchema: conversationTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
   }),
 }));
 
