@@ -441,7 +441,7 @@ export const MessageItem = React.memo(
         className={`group/message flex gap-3 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
       >
         {message.type === 'bot' && (
-          <div className='flex-shrink-0 mt-1'>
+          <div className='flex-shrink-0 mt-2.5'>
             <img src='/svgs/icons/ai-bot-gradient-star.svg' alt='AI' width='16' height='16' />
           </div>
         )}

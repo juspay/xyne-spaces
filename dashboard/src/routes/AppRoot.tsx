@@ -154,6 +154,7 @@ import { buildGrafanaLogsExploreUrl } from '../components/Inspector/grafanaUrl';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
+import AIScreen from './AIScreen/AIScreen';
 import { ExternalLobbyPage } from './ExternalLobby/ExternalLobbyPage';
 
 /** Auth-aware call route: authenticated users join via CallPage, others see external lobby */
@@ -624,6 +625,10 @@ export const router = createBrowserRouter([
               {
                 index: true,
                 element: <HomeScreen />,
+              },
+              {
+                path: 'ai',
+                element: <AIScreen />,
               },
               {
                 path: 'onboarding',

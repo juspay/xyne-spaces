@@ -74,7 +74,7 @@ interface BrowserContext {
   timestamp: number;
 }
 
-interface XyneAIInputBoxProps {
+export interface XyneAIInputBoxProps {
   channelId?: string | null;
   channelName?: string;
   channelDescription?: string;

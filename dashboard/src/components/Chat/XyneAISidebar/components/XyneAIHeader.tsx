@@ -10,6 +10,11 @@ interface XyneAIHeaderProps {
   onShowUserActivity: () => void;
   onShowMemories: () => void;
   isMobile?: boolean;
+  onClose?: () => void;
+  title?: string;
+  hideMemoriesAndActivity?: boolean;
+  hideTitle?: boolean;
+  hideHistory?: boolean;
 }
 
 export const XyneAIHeader = ({
@@ -18,14 +23,22 @@ export const XyneAIHeader = ({
   onShowUserActivity,
   onShowMemories,
   isMobile = false,
+  onClose,
+  title = 'Ask AI',
+  hideMemoriesAndActivity = false,
+  hideTitle = false,
+  hideHistory = false,
 }: XyneAIHeaderProps): ReactElement => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const mobileActionButtonClass =
     'flex p-4 justify-center items-center gap-2 rounded-full border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent aspect-square';
 
   const handleClose = (): void => {
-    // Send close event to xstate machine
-    xyneAIActor.send({ type: 'CLOSE' });
+    if (onClose) {
+      onClose();
+    } else {
+      xyneAIActor.send({ type: 'CLOSE' });
+    }
   };
 
   if (isMobile) {
@@ -43,7 +56,9 @@ export const XyneAIHeader = ({
             >
               <SquarePen size={16} className='w-4 h-4 text-current' />
             </button>
-            <div className='text-muted-foreground text-base font-medium'>New chat</div>
+            <div className='text-muted-foreground text-base font-medium'>
+              {!hideTitle && (hideMemoriesAndActivity ? title : 'New chat')}
+            </div>
           </div>
 
           {/* Right: Settings, User Activity, Chat History, and Close Icons */}
@@ -57,33 +72,39 @@ export const XyneAIHeader = ({
             >
               <Settings size={16} className='w-4 h-4' />
             </button>
-            <button
-              onClick={onShowMemories}
-              className={mobileActionButtonClass}
-              title='Memories'
-              data-track-category='XyneAI'
-              data-track-name='SHOW_MEMORIES_MOBILE'
-            >
-              <Brain size={16} className='w-4 h-4' />
-            </button>
-            <button
-              onClick={onShowUserActivity}
-              className={mobileActionButtonClass}
-              title='Your activity'
-              data-track-category='XyneAI'
-              data-track-name='SHOW_USER_ACTIVITY_MOBILE'
-            >
-              <Activity size={16} className='w-4 h-4' />
-            </button>
-            <button
-              onClick={onShowHistory}
-              className={mobileActionButtonClass}
-              title='Chat history'
-              data-track-category='XyneAI'
-              data-track-name='SHOW_HISTORY_MOBILE'
-            >
-              <ChatHistory color='currentColor' />
-            </button>
+            {!hideMemoriesAndActivity && (
+              <button
+                onClick={onShowMemories}
+                className={mobileActionButtonClass}
+                title='Memories'
+                data-track-category='XyneAI'
+                data-track-name='SHOW_MEMORIES_MOBILE'
+              >
+                <Brain size={16} className='w-4 h-4' />
+              </button>
+            )}
+            {!hideMemoriesAndActivity && (
+              <button
+                onClick={onShowUserActivity}
+                className={mobileActionButtonClass}
+                title='Your activity'
+                data-track-category='XyneAI'
+                data-track-name='SHOW_USER_ACTIVITY_MOBILE'
+              >
+                <Activity size={16} className='w-4 h-4' />
+              </button>
+            )}
+            {!hideHistory && (
+              <button
+                onClick={onShowHistory}
+                className={mobileActionButtonClass}
+                title='Chat history'
+                data-track-category='XyneAI'
+                data-track-name='SHOW_HISTORY_MOBILE'
+              >
+                <ChatHistory color='currentColor' />
+              </button>
+            )}
             <button
               onClick={handleClose}
               className={mobileActionButtonClass}
@@ -105,7 +126,9 @@ export const XyneAIHeader = ({
   return (
     <>
       <div className='h-14 p-4 flex items-center justify-between gap-2 self-stretch border-border'>
-        <div className="text-foreground text-base font-semibold font-['Inter']">Ask AI</div>
+        <div className="text-foreground text-base font-semibold font-['Inter']">
+          {!hideTitle && title}
+        </div>
         <div className='flex items-center gap-2'>
           {/* New Chat Icon */}
           <button
@@ -118,35 +141,41 @@ export const XyneAIHeader = ({
             <SquarePen size={16} className='text-current' />
           </button>
           {/* Chat History Icon */}
-          <button
-            onClick={onShowHistory}
-            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
-            title='Chat history'
-            data-track-category='XyneAI'
-            data-track-name='SHOW_HISTORY_DESKTOP'
-          >
-            <ChatHistory color='currentColor' />
-          </button>
+          {!hideHistory && (
+            <button
+              onClick={onShowHistory}
+              className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+              title='Chat history'
+              data-track-category='XyneAI'
+              data-track-name='SHOW_HISTORY_DESKTOP'
+            >
+              <ChatHistory color='currentColor' />
+            </button>
+          )}
           {/* Memories Icon */}
-          <button
-            onClick={onShowMemories}
-            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
-            title='Memories'
-            data-track-category='XyneAI'
-            data-track-name='SHOW_MEMORIES_DESKTOP'
-          >
-            <Brain size={16} />
-          </button>
+          {!hideMemoriesAndActivity && (
+            <button
+              onClick={onShowMemories}
+              className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
+              title='Memories'
+              data-track-category='XyneAI'
+              data-track-name='SHOW_MEMORIES_DESKTOP'
+            >
+              <Brain size={16} />
+            </button>
+          )}
           {/* User Activity Icon */}
-          <button
-            onClick={onShowUserActivity}
-            className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
-            title='Your activity'
-            data-track-category='XyneAI'
-            data-track-name='SHOW_USER_ACTIVITY_DESKTOP'
-          >
-            <Activity size={16} />
-          </button>
+          {!hideMemoriesAndActivity && (
+            <button
+              onClick={onShowUserActivity}
+              className='p-2 rounded-lg border border-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors text-foreground'
+              title='Your activity'
+              data-track-category='XyneAI'
+              data-track-name='SHOW_USER_ACTIVITY_DESKTOP'
+            >
+              <Activity size={16} />
+            </button>
+          )}
           {/* Settings Icon */}
           <button
             onClick={() => setIsSettingsModalOpen(true)}

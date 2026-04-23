@@ -22,6 +22,7 @@ import { UpdateAssignmentStatusModal } from '../AppSidebar/UpdateAssignmentStatu
 import { Button } from '../ui/Button/Button';
 import { useCurrentUserAssignmentState } from '../../hooks/useAssignmentState';
 import { useTheme } from '../../hooks/useTheme';
+import { useAILandingDefault } from '../../hooks/useAILandingDefault';
 import { useDebugSettings } from '../../hooks/useDebugSettings';
 import { MeetingDetectionToggle } from './MeetingDetectionToggle';
 import { isElectronApp } from '../../utils/electronApp';
@@ -44,6 +45,7 @@ const Settings = (): ReactElement => {
   const { logout } = useAuth();
   const user = useSelf();
   const { theme, changeTheme } = useTheme();
+  const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
@@ -558,6 +560,25 @@ const Settings = (): ReactElement => {
               </div>
             </button>
           ))}
+        </div>
+      </div>
+
+      <hr className='border-border w-full' />
+      {/* AI Launch preference — desktop only */}
+      <div className='space-y-3'>
+        <p className='text-sm font-medium text-foreground'>Launch</p>
+        <div className='flex items-center justify-between gap-3'>
+          <div className='flex-1 min-w-0'>
+            <p className='text-sm text-foreground'>Open AI on launch</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Start with the Xyne AI landing page instead of chat
+            </p>
+          </div>
+          <Switch
+            id='ai-landing-default'
+            checked={aiLandingDefault}
+            onCheckedChange={setAiLandingDefault}
+          />
         </div>
       </div>
 
