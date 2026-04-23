@@ -5,7 +5,7 @@ import type { Conversation, VisibleChannel } from '../machines/stateMachine.js';
 import { queryCacheActor } from '../machines/queryCacheMachine.js';
 import { searchChannels as _searchChannels } from '../utils/search.js';
 import type { Channel, ChannelUserStatus } from '../zero/schema.js';
-import { ChannelScopeType, ChannelType } from '../zero/schema.js';
+import { ChannelScopeType, ChannelType, ChannelVisibility } from '../zero/schema.js';
 import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
 
@@ -173,14 +173,34 @@ export const useMigratedChannels = (): Channel[] => {
   }, [channels]);
 };
 
-export const useEmailChannels = (): Channel[] => {
-  const channels = useAllChannels();
+export const useEmailChannels = (): VisibleChannel[] => {
+  const channels = useAllVisibleChannels();
+  const allPublicChannels = useAllChannels();
   return useMemo(() => {
-    if (!channels?.length) return [];
-    return channels
-      .filter(channel => channel.type === ChannelType.EMAIL)
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [channels]);
+    // Merge visible channels (participant-scoped) with allPublicChannels
+    // (public channels the user may not yet be a participant of) and dedupe
+    // by id. Visible wins on conflict so we keep the richer channelStats
+    // payload when the same channel appears in both lists; public-only rows
+    // are widened to VisibleChannel (channelStats will simply be absent).
+    const byId = new Map<string, VisibleChannel>();
+    for (const channel of channels) {
+      if (channel.type === ChannelType.EMAIL) {
+        byId.set(channel.id, channel);
+      }
+    }
+    for (const channel of allPublicChannels) {
+      // Visible list already includes the user's private channels; here we
+      // only want to surface additional PUBLIC email channels the user hasn't
+      // joined yet. Skip PRIVATE ones so we don't leak ones the user isn't in.
+      if (channel.visibility === ChannelVisibility.PRIVATE) continue;
+      if (channel.type === ChannelType.EMAIL && !byId.has(channel.id)) {
+        byId.set(channel.id, channel as unknown as VisibleChannel);
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) =>
+      (a.name || '').localeCompare(b.name || ''),
+    );
+  }, [channels, allPublicChannels]);
 };
 
 export const useChannelsByProjectId = (projectId: string | undefined): Channel[] => {

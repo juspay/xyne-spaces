@@ -3,6 +3,8 @@ export { BoardComplexityScoresACL } from './board-complexity-scores-acl';
 export { BoardsACL } from './boards-acl';
 export { BookmarksACL } from './bookmarks-acl';
 export { EmailSignaturesACL } from './email-signatures-acl';
+export { EmailsACL } from './emails-acl';
+export { EmailDraftsACL } from './email-drafts-acl';
 export { CallParticipantsACL } from './call-participants-acl';
 export { CallsACL } from './calls-acl';
 export { CanvasParticipantsACL } from './canvas-participants-acl';

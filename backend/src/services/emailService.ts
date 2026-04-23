@@ -210,6 +210,7 @@ export class EmailService {
     channelId: string;
   }): Promise<void> {
     const { ticketId, emailBody, emailSubject, userId, channelId } = params;
+    let updatedTicket;
     try {
       const result = await generateDescription(
         { rawContext: emailBody, title: emailSubject },
@@ -218,7 +219,7 @@ export class EmailService {
 
       if (!result.description || result.description.trim().length === 0) return;
 
-      await this.prisma.ticket.update({
+      updatedTicket = await this.prisma.ticket.update({
         where: { id: ticketId },
         data: { description: result.description, updatedBy: userId },
       });
@@ -228,6 +229,23 @@ export class EmailService {
       logger.info(`[EmailService] Ticket description enriched`, { ticketId });
     } catch (error) {
       logger.warn('[EmailService] Ticket description enrichment failed — keeping raw body', {
+        ticketId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return;
+    }
+
+    // Description is now persisted. Refresh the denormalised markdown
+    // projections so the UI / AI consumers see the enriched version instead of
+    // the raw email body. Failures here don't roll back the description — they
+    // just leave the md stale, which will self-heal on the next ticket update.
+    try {
+      await syncConversationTicketMdFromPrismaTicket(this.prisma, updatedTicket);
+      if (updatedTicket.conversationId) {
+        await messageMetadataService.syncInitialMessageMd(updatedTicket.conversationId);
+      }
+    } catch (error) {
+      logger.warn('[EmailService] Ticket description enriched but md sync failed', {
         ticketId,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
@@ -420,6 +438,7 @@ export class EmailService {
           cc: emailCc || [],
           bcc: emailBcc || [],
           conversationId: conv.conversationId,
+          channelId,
           externalThreadId,
           externalMessageId,
         },
@@ -692,6 +711,7 @@ export class EmailService {
         cc: emailCc,
         bcc: emailBcc,
         conversationId: conversationId,
+        channelId: conversation.channelId,
         externalThreadId: externalThreadId,
         externalMessageId: externalMessageId,
       };

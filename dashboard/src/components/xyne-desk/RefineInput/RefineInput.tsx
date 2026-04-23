@@ -22,7 +22,7 @@ export const RefineInput = ({
   };
 
   return (
-    <div className='flex items-center gap-2 border border-border rounded-lg px-3 py-2 bg-muted/30'>
+    <div className='relative'>
       <input
         type='text'
         value={value}
@@ -35,7 +35,7 @@ export const RefineInput = ({
         }}
         disabled={disabled}
         placeholder={placeholder}
-        className='flex-1 text-sm bg-transparent outline-none placeholder:text-muted-foreground/60 disabled:opacity-50'
+        className='w-full text-sm border border-border rounded-lg bg-muted/30 pl-3 pr-9 py-2 outline-none placeholder:text-muted-foreground/60 disabled:opacity-50'
         data-track-category='AIDraft'
         data-track-name='RefineInput'
       />
@@ -43,7 +43,7 @@ export const RefineInput = ({
         type='button'
         onClick={handleSubmit}
         disabled={disabled || !value.trim()}
-        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+        className='absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
         aria-label='Send refinement'
         data-track-category='AIDraft'
         data-track-name='SubmitRefinement'

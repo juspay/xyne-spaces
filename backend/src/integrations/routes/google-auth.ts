@@ -9,7 +9,6 @@ import { GoogleService } from '@/services/googleService';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ExternalSourcePlatform } from '../core/types';
-import { adapterRegistry } from '../core/adapterRegistry';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 
@@ -288,16 +287,6 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
     });
 
     logger.info(`${TAG} Gmail integration setup complete`, { sourceName: result.sourceName });
-
-    // First-time backfill: latest N messages + initial cursor seed.
-    try {
-      const source = await new ExternalSourceRepository().findByName(result.sourceName);
-      if (source) await adapterRegistry.getAdapter(source.name).refetch?.(source);
-    } catch (err) {
-      logger.warn(`${TAG} Initial backfill failed — user can refetch manually`, {
-        error: err instanceof Error ? err.message : err,
-      });
-    }
 
     if (stateData.channelData) {
       // /connect flow: redirect to frontend like Microsoft

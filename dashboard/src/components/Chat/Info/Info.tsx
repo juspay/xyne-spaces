@@ -49,7 +49,7 @@ import { Virtuoso } from 'react-virtuoso';
 import { isStatusExpired } from '../../../utils/statusUtils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import Popover from '../../ui/Popover';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import HuddleIcon from '../../icons/HuddleIcon';
 import { useCallActions } from '../../../hooks/useCallActions';
 import Tooltip from '../../ui/Tooltip';
@@ -106,6 +106,7 @@ const Info = ({
 
   const zero = useZero();
   const navigate = useNavigate();
+  const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
   const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId }));
   const [boards] = useCachedQuery(queries.boardsListByProject({ projectId: channel.projectId }));
@@ -193,17 +194,19 @@ const Info = ({
   const handleLeaveChannel = (): void => {
     onClose?.();
 
-    // Decide where to go
-    let targetPath = '/chat/dir';
+    // On Desk, stay on the current URL — the list body auto-flips to the
+    // JoinChannel CTA once the leave mutation lands. Only Chat falls back
+    // to the previous-channel / directory redirect.
+    const onSupport = location.pathname.startsWith('/support');
 
-    if (previousChannelId && previousChannelId !== channel.id) {
-      targetPath = `/chat/dir/${previousChannelId}`;
+    if (!onSupport) {
+      const targetPath =
+        previousChannelId && previousChannelId !== channel.id
+          ? `/chat/dir/${previousChannelId}`
+          : '/chat/dir';
+      void navigate(targetPath, { replace: true });
     }
 
-    // Navigate first
-    void navigate(targetPath, { replace: true });
-
-    // Then leave channel
     zero.mutate(mutators.channel.leaveChannel({ channelId: channel.id, updatedAt: Date.now() }));
   };
 

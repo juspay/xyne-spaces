@@ -6,11 +6,15 @@ export class EmailDraftRepository {
 
   async create(data: {
     conversationId: string;
+    channelId: string;
     draftContent: string;
     userId: string;
   }): Promise<EmailDraft> {
     if (!data.conversationId) {
       throw new Error('conversationId is required');
+    }
+    if (!data.channelId) {
+      throw new Error('channelId is required');
     }
     if (!data.draftContent) {
       throw new Error('draftContent is required');
@@ -22,6 +26,7 @@ export class EmailDraftRepository {
     return await this.db.emailDraft.create({
       data: {
         conversationId: data.conversationId,
+        channelId: data.channelId,
         draftContent: data.draftContent,
         userId: data.userId,
       },

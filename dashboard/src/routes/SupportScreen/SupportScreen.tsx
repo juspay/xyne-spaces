@@ -14,7 +14,7 @@ import {
   ChevronsUpDown,
   LayoutGrid,
   List,
-  Split,
+  // Split,  // DISABLED: used by commented-out demerge-email button
   Paperclip,
   Settings,
   Signature,
@@ -25,6 +25,7 @@ import {
   Users2,
   Lock,
   Hash,
+  Inbox,
 } from 'lucide-react';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import Tooltip from '../../components/ui/Tooltip';
@@ -35,7 +36,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
-import { EmailType, ChannelVisibility } from '@xyne/shared';
+import { ChannelVisibility } from '@xyne/shared';
 import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -46,7 +47,12 @@ import { queries } from '../../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
 import ThreadList from '../../components/Chat/ThreadList/ThreadList';
 import { ChatInput } from '../../components/Chat/ChatInput/ChatInput';
-import { useChannel, useGetChannelUserStatus, useEmailChannels } from '../../hooks/useChannels';
+import {
+  useChannel,
+  useGetChannelUserStatus,
+  useEmailChannels,
+  useUserChannelStatuses,
+} from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useUsers } from '../../hooks/useUsers';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
@@ -153,42 +159,42 @@ type Email = QueryResultType<typeof queries.getEmailsForTicket>[number] & {
 };
 
 // API response type for email demerge endpoint
-interface DemergeEmailResponse {
-  success: boolean;
-  newTicket: {
-    ticketId: string;
-    xyneId: string;
-    conversationId: string;
-  };
-}
+// DISABLED: demerge-email feature commented out — kept for easy re-enable.
+
+// interface DemergeEmailResponse {
+//   success: boolean;
+//   newTicket: {
+//     ticketId: string;
+//     xyneId: string;
+//     conversationId: string;
+//   };
+// }
 type TabType = 'messages' | 'details';
 
 type ViewMode = 'kanban' | 'list';
 
 const SupportScreen = (): ReactElement => {
-  const { ticketId } = useParams<{ ticketId?: string }>();
+  const { channelId: channelIdParam, ticketId } = useParams<{
+    channelId?: string;
+    ticketId?: string;
+  }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const zero = useZero();
   const { userID } = useAuthContextValues();
   const { isMobile } = usePlatform();
   const [showMyTicketsOnly, setShowMyTicketsOnly] = useState(false);
-  // Channel selection is sourced from URL (?channel=...) with localStorage fallback for restore.
-  const selectedChannelId =
-    searchParams.get('channel') ?? localStorage.getItem('support-selected-channel');
+  // Channel selection is sourced strictly from the URL path (/support/:channelId).
+  // A bare /support visit renders the empty state prompting the user to pick one.
+  const selectedChannelId = channelIdParam ?? null;
   const setSelectedChannelId = useCallback(
     (next: string | null): void => {
-      setSearchParams(
-        prev => {
-          const p = new URLSearchParams(prev);
-          if (next) p.set('channel', next);
-          else p.delete('channel');
-          return p;
-        },
-        { replace: true },
-      );
+      // Preserve non-routing query params (settings, openSettings, etc.).
+      const qs = searchParams.toString();
+      const path = next ? `/support/${next}` : '/support';
+      void navigate(qs ? `${path}?${qs}` : path, { replace: true });
     },
-    [setSearchParams],
+    [navigate, searchParams],
   );
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('support-sidebar-open');
@@ -244,9 +250,10 @@ const SupportScreen = (): ReactElement => {
     setIsSettingsOpen(isOpen);
     // Clean up the openSettings param (used by "Add signature" deep-link)
     if (searchParams.get('openSettings') === 'signatures') {
-      void navigate('/support?settings=open', { replace: true });
+      const base = selectedChannelId ? `/support/${selectedChannelId}` : '/support';
+      void navigate(`${base}?settings=open`, { replace: true });
     }
-  }, [searchParams, navigate]);
+  }, [searchParams, navigate, selectedChannelId]);
 
   useEffect(() => {
     localStorage.setItem('support-view-mode', viewMode);
@@ -256,29 +263,61 @@ const SupportScreen = (): ReactElement => {
     localStorage.setItem('support-sidebar-open', isSidebarOpen.toString());
   }, [isSidebarOpen]);
 
-  useEffect(() => {
-    if (selectedChannelId) {
-      localStorage.setItem('support-selected-channel', selectedChannelId);
-    } else {
-      localStorage.removeItem('support-selected-channel');
-    }
-  }, [selectedChannelId]);
-
   // Fetch EMAIL channels using hook (from state machine, already loaded)
   const emailChannels = useEmailChannels();
 
-  // Unified query: filters by EMAIL channels, optional channelId, and optional merchant.
-  // Only needed for Kanban view; list view uses paginated supportTicketsPage via TicketListView.
+  // Unified query: channel-scoped tickets. Only needed for Kanban view; list
+  // view uses paginated supportTicketsPage via TicketListView.
+  const kanbanChannelUserStatus = useGetChannelUserStatus(selectedChannelId ?? '');
+  const kanbanIsMember = !!kanbanChannelUserStatus;
   const [supportTickets] = useCachedQuery(
     queries.supportTicketsFiltered({
-      channelId:
-        selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID ? selectedChannelId : undefined,
+      channelId: selectedChannelId ?? '',
+      isMember: kanbanIsMember,
     }),
-    { enabled: viewMode === 'kanban' },
+    { enabled: viewMode === 'kanban' && !!selectedChannelId },
   );
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
+  const userChannelStatuses = useUserChannelStatuses();
+  // Both star and joined state live on channel_user_status (per-user). A row
+  // in that list for a given channelId means the user has joined the channel;
+  // isStarred narrows that further.
+  const { starredChannelIds, joinedChannelIds } = useMemo(() => {
+    const starred = new Set<string>();
+    const joined = new Set<string>();
+    for (const status of userChannelStatuses) {
+      joined.add(status.channelId);
+      if (status.isStarred) starred.add(status.channelId);
+    }
+    return { starredChannelIds: starred, joinedChannelIds: joined };
+  }, [userChannelStatuses]);
+  const { starredEmailChannels, joinedEmailChannels, notJoinedEmailChannels } = useMemo(() => {
+    const starred: typeof sortedEmailChannels = [];
+    const joined: typeof sortedEmailChannels = [];
+    const notJoined: typeof sortedEmailChannels = [];
+    for (const c of sortedEmailChannels) {
+      if (starredChannelIds.has(c.id)) starred.push(c);
+      else if (joinedChannelIds.has(c.id)) joined.push(c);
+      else notJoined.push(c);
+    }
+    return {
+      starredEmailChannels: starred,
+      joinedEmailChannels: joined,
+      notJoinedEmailChannels: notJoined,
+    };
+  }, [sortedEmailChannels, starredChannelIds, joinedChannelIds]);
+  // Used to gate member-only affordances (My Tickets toggle, refetch, settings)
+  // and to flip the body to a Join-channel CTA when the user is on a public
+  // channel they haven't joined yet.
+  const isSelectedChannelJoined = !!selectedChannelId && joinedChannelIds.has(selectedChannelId);
+  // A selected channelId that doesn't appear in useEmailChannels() means the
+  // channel either doesn't exist or is a private channel the user isn't in —
+  // in both cases we show a "Channel not found" message instead of the Join
+  // CTA (there is nothing to join).
+  const isSelectedChannelKnown =
+    !!selectedChannelId && sortedEmailChannels.some(c => c.id === selectedChannelId);
   const selectedChannelName =
     sortedEmailChannels.find(c => c.id === selectedChannelId)?.name?.trim() || 'Xyne Desk';
 
@@ -293,13 +332,6 @@ const SupportScreen = (): ReactElement => {
 
   // Get full selected channel for member count and other stats
   const selectedChannelFull = useVisibleChannel(selectedChannelId ?? '');
-
-  // Auto-select first channel when channels load and none is selected
-  useEffect(() => {
-    if (sortedEmailChannels.length > 0 && !selectedChannelId) {
-      setSelectedChannelId(sortedEmailChannels[0]!.id);
-    }
-  }, [sortedEmailChannels, selectedChannelId]);
 
   // The unified query already handles filtering, just apply user filter
   const displayedTickets = useMemo(() => {
@@ -417,25 +449,64 @@ const SupportScreen = (): ReactElement => {
     (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => {
       const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
       const ticketData = ticket as SupportTicket;
-      const ticketUrl = `/support/${ticketData.xyneId}`;
+      const ticketUrl = `/support/${ticketData.channelId}/${ticketData.xyneId}`;
 
       // Only open in new tab on desktop when Cmd/Ctrl+Click is pressed
       if (!isMobile && isCmdClick) {
-        const urlWithParams = `${ticketUrl}?conversationId=${ticketData.conversationId ?? ''}&title=${encodeURIComponent(ticketData.title ?? '')}&ticketId=${ticketData.id ?? ''}`;
-        window.open(urlWithParams, '_blank');
+        window.open(ticketUrl, '_blank');
         return;
       }
 
+      // Pass ticket details via router state for an instant first paint;
+      // SupportTicketDetail also falls back to a fetch by xyneId when state
+      // is absent (direct URL load / refresh).
       void navigate(ticketUrl, {
         state: {
           conversationId: ticketData.conversationId,
-          title: ticketData.title,
           ticketId: ticketData.id,
         },
       });
     },
     [navigate, isMobile],
   );
+
+  const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
+    const isActive = selectedChannelId === c.id;
+    const isPrivate = c.visibility === ChannelVisibility.PRIVATE;
+    return (
+      <div
+        key={c.id}
+        role='button'
+        tabIndex={0}
+        className={cn(
+          'flex items-center gap-1.5 h-8 rounded-md px-1.5 cursor-pointer transition-colors',
+          isActive
+            ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
+            : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
+        )}
+        onClick={() => setSelectedChannelId(c.id)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setSelectedChannelId(c.id);
+          }
+        }}
+        data-track-category='Support'
+        data-track-name='SelectEmailChannel'
+      >
+        <span className='flex items-center flex-shrink-0'>
+          {isPrivate ? (
+            <Lock size={12} className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'} />
+          ) : (
+            <Hash size={12} className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'} />
+          )}
+        </span>
+        <span className='text-sm flex-1 truncate min-w-0'>
+          {c.name?.trim() || 'Unnamed Channel'}
+        </span>
+      </div>
+    );
+  };
 
   return (
     <div className='h-full flex flex-col relative bg-background md:rounded-2xl overflow-hidden shadow-md'>
@@ -485,50 +556,37 @@ const SupportScreen = (): ReactElement => {
                       No channels available
                     </div>
                   ) : (
-                    <div className='space-y-0.5'>
-                      {sortedEmailChannels.map(c => {
-                        const isActive = selectedChannelId === c.id;
-                        const isPrivate = c.visibility === ChannelVisibility.PRIVATE;
-                        return (
-                          <div
-                            key={c.id}
-                            role='button'
-                            tabIndex={0}
-                            className={cn(
-                              'flex items-center gap-1.5 h-8 rounded-md px-1.5 cursor-pointer transition-colors',
-                              isActive
-                                ? 'text-sidebar-primary-foreground font-medium bg-sidebar-item-active'
-                                : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover',
-                            )}
-                            onClick={() => setSelectedChannelId(c.id)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                setSelectedChannelId(c.id);
-                              }
-                            }}
-                            data-track-category='Support'
-                            data-track-name='SelectEmailChannel'
-                          >
-                            <span className='flex items-center flex-shrink-0'>
-                              {isPrivate ? (
-                                <Lock
-                                  size={12}
-                                  className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'}
-                                />
-                              ) : (
-                                <Hash
-                                  size={12}
-                                  className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'}
-                                />
-                              )}
-                            </span>
-                            <span className='text-sm flex-1 truncate min-w-0'>
-                              {c.name?.trim() || 'Unnamed Channel'}
-                            </span>
+                    <div className='flex flex-col gap-4'>
+                      {starredEmailChannels.length > 0 && (
+                        <div>
+                          <div className='px-1.5 mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                            Starred
                           </div>
-                        );
-                      })}
+                          <div className='space-y-0.5'>
+                            {starredEmailChannels.map(c => renderChannelRow(c))}
+                          </div>
+                        </div>
+                      )}
+                      {joinedEmailChannels.length > 0 && (
+                        <div>
+                          <div className='px-1.5 mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                            Joined
+                          </div>
+                          <div className='space-y-0.5'>
+                            {joinedEmailChannels.map(c => renderChannelRow(c))}
+                          </div>
+                        </div>
+                      )}
+                      {notJoinedEmailChannels.length > 0 && (
+                        <div>
+                          <div className='px-1.5 mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                            Not joined
+                          </div>
+                          <div className='space-y-0.5'>
+                            {notJoinedEmailChannels.map(c => renderChannelRow(c))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -572,20 +630,24 @@ const SupportScreen = (): ReactElement => {
                   )}
                 </div>
                 <div className='flex items-center gap-2'>
-                  <button
-                    onClick={() => setShowMyTicketsOnly(!showMyTicketsOnly)}
-                    className={cn(
-                      'text-sm font-medium transition-colors px-2 py-1 rounded whitespace-nowrap',
-                      showMyTicketsOnly
-                        ? 'text-primary  bg-border'
-                        : 'text-muted-foreground hover:text-foreground',
-                    )}
-                    data-track-category='Support'
-                    data-track-name='ToggleMyTickets'
-                    data-track-metadata={JSON.stringify({ showMyTicketsOnly: !showMyTicketsOnly })}
-                  >
-                    My Tickets
-                  </button>
+                  {isSelectedChannelJoined && (
+                    <button
+                      onClick={() => setShowMyTicketsOnly(!showMyTicketsOnly)}
+                      className={cn(
+                        'text-sm font-medium transition-colors px-2 py-1 rounded whitespace-nowrap',
+                        showMyTicketsOnly
+                          ? 'text-primary  bg-border'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                      data-track-category='Support'
+                      data-track-name='ToggleMyTickets'
+                      data-track-metadata={JSON.stringify({
+                        showMyTicketsOnly: !showMyTicketsOnly,
+                      })}
+                    >
+                      My Tickets
+                    </button>
+                  )}
                   {selectedChannelId &&
                     selectedChannelId !== ALL_CHANNELS_ID &&
                     selectedChannelFull && (
@@ -635,7 +697,7 @@ const SupportScreen = (): ReactElement => {
                       <List size={16} />
                     </button>
                   </div>
-                  {canRefetch && (
+                  {canRefetch && isSelectedChannelJoined && (
                     <Tooltip
                       content={isRefetching ? 'Fetching latest…' : 'Fetch latest emails'}
                       side='bottom'
@@ -655,31 +717,41 @@ const SupportScreen = (): ReactElement => {
                       </button>
                     </Tooltip>
                   )}
-                  <button
-                    onClick={() => {
-                      if (isSettingsOpen) {
-                        void navigate(-1);
-                      } else {
-                        void navigate('/support?settings=open');
-                      }
-                    }}
-                    className={cn(
-                      'p-1.5 rounded transition-colors',
-                      isSettingsOpen
-                        ? 'bg-muted text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                    )}
-                    title='Inbox settings'
-                    data-track-category='Support'
-                    data-track-name='ToggleInboxSettings'
-                  >
-                    <Settings size={16} />
-                  </button>
+                  {isSelectedChannelJoined && (
+                    <button
+                      onClick={() => {
+                        if (isSettingsOpen) {
+                          void navigate(-1);
+                        } else {
+                          const base = selectedChannelId
+                            ? `/support/${selectedChannelId}`
+                            : '/support';
+                          void navigate(`${base}?settings=open`);
+                        }
+                      }}
+                      className={cn(
+                        'p-1.5 rounded transition-colors',
+                        isSettingsOpen
+                          ? 'bg-muted text-foreground'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                      )}
+                      title='Inbox settings'
+                      data-track-category='Support'
+                      data-track-name='ToggleInboxSettings'
+                    >
+                      <Settings size={16} />
+                    </button>
+                  )}
                   {ticketId && (
                     <Button
                       size='sm'
                       variant='ghost'
-                      onClick={() => void navigate(`/support`)}
+                      onClick={() => {
+                        const back = selectedChannelId
+                          ? `/support/${selectedChannelId}`
+                          : '/support';
+                        void navigate(back);
+                      }}
                       data-track-category='Support'
                       data-track-name='CloseTicketPanel'
                     >
@@ -707,7 +779,35 @@ const SupportScreen = (): ReactElement => {
                 </div>
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
-                {viewMode === 'kanban' ? (
+                {!selectedChannelId ? (
+                  <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
+                    <Inbox size={28} className='text-muted-foreground/70' />
+                    <p className='text-sm font-medium text-foreground'>
+                      Select a channel to preview tickets
+                    </p>
+                    <p className='text-xs text-muted-foreground max-w-sm'>
+                      Pick a Desk channel from the sidebar to see its tickets here.
+                    </p>
+                  </div>
+                ) : !isSelectedChannelKnown ? (
+                  <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
+                    <Inbox size={28} className='text-muted-foreground/70' />
+                    <p className='text-sm font-medium text-foreground'>Channel not found</p>
+                    <p className='text-xs text-muted-foreground max-w-sm'>
+                      This channel either doesn&apos;t exist or is private and you don&apos;t have
+                      access. Pick a different channel from the sidebar.
+                    </p>
+                  </div>
+                ) : !isSelectedChannelJoined ? (
+                  <div className='h-full flex items-center justify-center'>
+                    <JoinChannel
+                      channelId={selectedChannelId}
+                      {...(selectedChannelName && selectedChannelName !== 'Xyne Desk'
+                        ? { channelTitle: selectedChannelName }
+                        : {})}
+                    />
+                  </div>
+                ) : viewMode === 'kanban' ? (
                   <DndContext
                     sensors={sensors}
                     collisionDetection={closestCenter}
@@ -737,19 +837,15 @@ const SupportScreen = (): ReactElement => {
                 ) : (
                   <TicketListView
                     filter={{
-                      channelId:
-                        selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
-                          ? selectedChannelId
-                          : undefined,
+                      channelId: selectedChannelId,
                       assignedTo: showMyTicketsOnly ? userID : undefined,
                     }}
                     showExtraFields={true}
                     activeTicketId={ticketId}
                     onTicketClick={ticket => {
-                      void navigate(`/support/${ticket.xyneId}`, {
+                      void navigate(`/support/${ticket.channelId}/${ticket.xyneId}`, {
                         state: {
                           conversationId: ticket.conversationId,
-                          title: ticket.title,
                           ticketId: ticket.id,
                         },
                       });
@@ -832,7 +928,10 @@ const TicketMetaRow = ({
 };
 
 const SupportTicketDetail = (): ReactElement => {
-  const { ticketId: ticketIdParam } = useParams<{ ticketId?: string }>();
+  const { channelId: channelIdParam, ticketId: ticketIdParam } = useParams<{
+    channelId?: string;
+    ticketId?: string;
+  }>();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
   const [isAIPanelOpen, setIsAIPanelOpen] = useState<boolean>(false);
 
@@ -847,35 +946,50 @@ const SupportTicketDetail = (): ReactElement => {
   }, [isAIPanelOpen]);
   const [composerOpen, setComposerOpen] = useState<boolean>(false);
   const location = useLocation();
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const routerState = location.state as {
     conversationId?: string | null;
-    title?: string | null;
     ticketId?: string | null;
   };
-  // Fall back to query params when state is not available (e.g., Cmd+Click new tab)
-  const stateConversationId = routerState?.conversationId ?? searchParams.get('conversationId');
-  const stateTitle = routerState?.title ?? searchParams.get('title');
-  const ticketId = routerState?.ticketId ?? searchParams.get('ticketId');
+  // Router state is a perf hint from list navigation (instant paint); direct
+  // URL loads and new-tab openings fall back to the supportTicketByXyneId fetch
+  // below using the :ticketId path param. Title is NOT carried in state so that
+  // it always reflects the current ticket row (and disappears when ACL hides it).
+  const stateConversationId = routerState?.conversationId ?? null;
+  const ticketId = routerState?.ticketId ?? null;
+
+  // channelId for ACL + query gating — comes from the URL path. Both ticket
+  // fetches below require it; without it we don't run the queries at all.
+  const routeChannelId = channelIdParam ?? '';
+  const channelUserStatus = useGetChannelUserStatus(routeChannelId);
+  const isMember = !!channelUserStatus;
 
   // Single consolidated fetch: the ticket row with `.related('emails')` gives us emails,
   // channelId (scalar on ticket), conversationId, and everything else we need — replaces
   // getEmailsForTicket + getConversationById. Use id when we have it (from list navigation
   // state), otherwise fall back to xyneId lookup (direct URL loads).
-  const [ticketById] = useCachedQuery(queries.supportTicketRow({ id: ticketId || '' }), {
-    enabled: !!ticketId,
-  });
+  const [ticketById] = useCachedQuery(
+    queries.supportTicketRow({
+      id: ticketId || '',
+      channelId: routeChannelId,
+      isMember,
+    }),
+    { enabled: !!ticketId && !!routeChannelId },
+  );
   const [ticketByXyneId] = useCachedQuery(
-    queries.supportTicketByXyneId({ xyneId: ticketIdParam || '' }),
-    { enabled: !ticketId && !!ticketIdParam },
+    queries.supportTicketByXyneId({
+      xyneId: ticketIdParam || '',
+      channelId: routeChannelId,
+      isMember,
+    }),
+    { enabled: !ticketId && !!ticketIdParam && !!routeChannelId },
   );
   const ticket = ticketById ?? ticketByXyneId;
   const emails = useMemo(() => (ticket?.emails as Email[] | undefined) ?? [], [ticket?.emails]);
   const emailCollapseState = useEmailCollapseState(emails);
   const channelId = ticket?.channelId || '';
   const conversationId = ticket?.conversationId ?? stateConversationId;
-  const title = ticket?.title ?? stateTitle;
+  const title = ticket?.title ?? null;
   const conversation = ticket?.conversation;
 
   // Prev / next cursor queries — each returns at most 1 adjacent ticket in the
@@ -888,20 +1002,22 @@ const SupportTicketDetail = (): ReactElement => {
   const [nextPage] = useCachedQuery(
     queries.supportTicketsPage({
       channelId,
+      isMember,
       limit: 1,
       start: cursorStart,
       dir: 'forward',
     }),
-    { enabled: !!cursorStart },
+    { enabled: !!cursorStart && !!channelId },
   );
   const [prevPage] = useCachedQuery(
     queries.supportTicketsPage({
       channelId,
+      isMember,
       limit: 1,
       start: cursorStart,
       dir: 'backward',
     }),
-    { enabled: !!cursorStart },
+    { enabled: !!cursorStart && !!channelId },
   );
   const nextTicket = nextPage?.[0];
   const prevTicket = prevPage?.[0];
@@ -909,14 +1025,16 @@ const SupportTicketDetail = (): ReactElement => {
   const goToTicket = (t: {
     id: string;
     xyneId?: string | null;
+    channelId?: string | null;
     conversationId: string;
     title: string;
   }): void => {
     if (!t.xyneId) return;
-    void navigate(`/support/${t.xyneId}`, {
+    const nextChannelId = t.channelId || channelIdParam;
+    if (!nextChannelId) return;
+    void navigate(`/support/${nextChannelId}/${t.xyneId}`, {
       state: {
         conversationId: t.conversationId,
-        title: t.title,
         ticketId: t.id,
       },
     });
@@ -1044,7 +1162,10 @@ const SupportTicketDetail = (): ReactElement => {
               <div className='flex items-center gap-2 min-w-0'>
                 <button
                   type='button'
-                  onClick={() => void navigate('/support')}
+                  onClick={() => {
+                    const back = channelIdParam ? `/support/${channelIdParam}` : '/support';
+                    void navigate(back);
+                  }}
                   className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
                   aria-label='Back to ticket list'
                   data-track-category='Support'
@@ -1061,103 +1182,104 @@ const SupportTicketDetail = (): ReactElement => {
                 >
                   {title || 'Untitled Ticket'}
                 </span>
-                <div className='flex items-center gap-2 flex-shrink-0'>
-                  <div className='flex items-center gap-1'>
+
+                {emailCollapseState.canToggleAll && (
+                  <>
                     <Tooltip
                       side='bottom'
                       delayDuration={300}
                       content={
                         <span className='flex items-center gap-2'>
-                          Previous ticket
+                          {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
                           <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                            K
+                            E
                           </kbd>
                         </span>
                       }
                     >
                       <button
                         type='button'
-                        onClick={() => prevTicket && goToTicket(prevTicket)}
-                        disabled={!prevTicket}
-                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                        onClick={emailCollapseState.toggleAll}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
                         data-track-category='Support'
-                        data-track-name='PrevTicket'
-                      >
-                        <ChevronUp size={16} />
-                      </button>
-                    </Tooltip>
-                    <Tooltip
-                      side='bottom'
-                      delayDuration={300}
-                      content={
-                        <span className='flex items-center gap-2'>
-                          Next ticket
-                          <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                            J
-                          </kbd>
-                        </span>
-                      }
-                    >
-                      <button
-                        type='button'
-                        onClick={() => nextTicket && goToTicket(nextTicket)}
-                        disabled={!nextTicket}
-                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-                        data-track-category='Support'
-                        data-track-name='NextTicket'
-                      >
-                        <ChevronDown size={16} />
-                      </button>
-                    </Tooltip>
-                  </div>
-                  {emailCollapseState.canToggleAll && (
-                    <>
-                      <div className='w-px h-4 bg-border' />
-                      <Tooltip
-                        side='bottom'
-                        delayDuration={300}
-                        content={
-                          <span className='flex items-center gap-2'>
-                            {emailCollapseState.anyExpanded ? 'Collapse all' : 'Expand all'}
-                            <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
-                              E
-                            </kbd>
-                          </span>
+                        data-track-name={
+                          emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
                         }
                       >
-                        <button
-                          type='button'
-                          onClick={emailCollapseState.toggleAll}
-                          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                          data-track-category='Support'
-                          data-track-name={
-                            emailCollapseState.anyExpanded ? 'CollapseAllEmails' : 'ExpandAllEmails'
-                          }
-                        >
-                          {emailCollapseState.anyExpanded ? (
-                            <ChevronsDownUp size={16} />
-                          ) : (
-                            <ChevronsUpDown size={16} />
-                          )}
-                        </button>
-                      </Tooltip>
-                    </>
-                  )}
-                  {!isRightPanelOpen && (
-                    <>
-                      <div className='w-px h-4 bg-border' />
-                      <Button
-                        size='sm'
-                        variant='ghost'
-                        onClick={() => setIsRightPanelOpen(true)}
-                        data-track-category='Support'
-                        data-track-name='OpenThreadPanel'
-                      >
-                        Open Thread
-                      </Button>
-                    </>
-                  )}
+                        {emailCollapseState.anyExpanded ? (
+                          <ChevronsDownUp size={16} />
+                        ) : (
+                          <ChevronsUpDown size={16} />
+                        )}
+                      </button>
+                    </Tooltip>
+
+                    <div className='w-px h-4 bg-border' />
+                  </>
+                )}
+
+                <div className='flex items-center gap-1'>
+                  <Tooltip
+                    side='bottom'
+                    delayDuration={300}
+                    content={
+                      <span className='flex items-center gap-2'>
+                        Previous ticket
+                        <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                          K
+                        </kbd>
+                      </span>
+                    }
+                  >
+                    <button
+                      type='button'
+                      onClick={() => prevTicket && goToTicket(prevTicket)}
+                      disabled={!prevTicket}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                      data-track-category='Support'
+                      data-track-name='PrevTicket'
+                    >
+                      <ChevronUp size={16} />
+                    </button>
+                  </Tooltip>
+                  <Tooltip
+                    side='bottom'
+                    delayDuration={300}
+                    content={
+                      <span className='flex items-center gap-2'>
+                        Next ticket
+                        <kbd className='px-1 py-px rounded bg-background/15 border border-background/20 text-[10px] font-mono uppercase'>
+                          J
+                        </kbd>
+                      </span>
+                    }
+                  >
+                    <button
+                      type='button'
+                      onClick={() => nextTicket && goToTicket(nextTicket)}
+                      disabled={!nextTicket}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                      data-track-category='Support'
+                      data-track-name='NextTicket'
+                    >
+                      <ChevronDown size={16} />
+                    </button>
+                  </Tooltip>
                 </div>
+                {!isRightPanelOpen && (
+                  <>
+                    <div className='w-px h-4 bg-border' />
+                    <Button
+                      size='sm'
+                      variant='ghost'
+                      onClick={() => setIsRightPanelOpen(true)}
+                      data-track-category='Support'
+                      data-track-name='OpenThreadPanel'
+                    >
+                      Open Thread
+                    </Button>
+                  </>
+                )}
               </div>
               <div className='flex items-center gap-2 flex-shrink-0'>
                 <div className='pl-9'>
@@ -1350,8 +1472,8 @@ const SupportTicketDetail = (): ReactElement => {
                       value='details'
                       className='flex-1 overflow-auto data-[state=inactive]:hidden'
                     >
-                      {ticketId ? (
-                        <TicketDetails ticketId={ticketId} />
+                      {ticket?.id ? (
+                        <TicketDetails ticketId={ticket.id} />
                       ) : (
                         <div className='flex flex-col items-center justify-center h-full text-muted-foreground p-4'>
                           <FileText size={48} className='mb-2 text-muted-foreground' />
@@ -1474,7 +1596,6 @@ const EmailThread = ({ collapseState }: { collapseState: EmailCollapseState }): 
         <EmailThreadItem
           key={email.id}
           email={email}
-          firstEmail={sortedEmails[0]!}
           isCollapsed={collapsedIds.has(email.id)}
           canCollapse={email.id !== lastEmailId}
           onToggleCollapse={() => toggleOne(email.id)}
@@ -1500,13 +1621,11 @@ const parseFromField = (raw: string): { name: string; email: string | null } => 
 
 const EmailThreadItem = ({
   email,
-  firstEmail,
   isCollapsed = false,
   canCollapse = true,
   onToggleCollapse,
 }: {
   email: Email;
-  firstEmail: Email;
   isCollapsed?: boolean;
   canCollapse?: boolean;
   onToggleCollapse?: () => void;
@@ -1515,7 +1634,10 @@ const EmailThreadItem = ({
   const toList = email.to || [];
   const ccList = email.cc || [];
   const bccList = email.bcc || [];
-  const navigate = useNavigate();
+
+  // DISABLED: demerge-email feature commented out. Re-enable by uncommenting
+  // the block below and the `extras={demergeButton}` prop on EmailThreadHeader.
+  /*
   const [isDemerging, setIsDemerging] = useState(false);
 
   const handleDemerge = async (): Promise<void> => {
@@ -1540,13 +1662,20 @@ const EmailThreadItem = ({
         });
 
         // Navigate to the new ticket
-        void navigate(`/support/${response.data.newTicket.xyneId}`, {
-          state: {
-            conversationId: response.data.newTicket.conversationId,
-            title: email.subject,
-            ticketId: response.data.newTicket.ticketId,
-          },
-        });
+        const nextChannelId =
+          response.data.newTicket.channelId || channelIdParam;
+        if (nextChannelId) {
+          void navigate(
+            `/support/${nextChannelId}/${response.data.newTicket.xyneId}`,
+            {
+              state: {
+                conversationId: response.data.newTicket.conversationId,
+                title: email.subject,
+                ticketId: response.data.newTicket.ticketId,
+              },
+            },
+          );
+        }
       }
     } catch {
       // Error handling without console
@@ -1558,12 +1687,6 @@ const EmailThreadItem = ({
       setIsDemerging(false);
     }
   };
-
-  const headerClickable = canCollapse && !!onToggleCollapse;
-  const preview = stripHtml(email.body || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 140);
 
   const demergeButton =
     email.type === EmailType.DEFAULT &&
@@ -1588,6 +1711,13 @@ const EmailThreadItem = ({
         {isDemerging ? 'Demerging...' : 'Demerge'}
       </button>
     ) : null;
+  */
+
+  const headerClickable = canCollapse && !!onToggleCollapse;
+  const preview = stripHtml(email.body || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 140);
 
   return (
     <div
@@ -1622,7 +1752,7 @@ const EmailThreadItem = ({
           createdAt={email.createdAt}
           isCollapsed={isCollapsed}
           previewText={preview}
-          extras={demergeButton}
+          // extras={demergeButton}  // DISABLED: see commented handleDemerge block above
         />
       </div>
       {!isCollapsed && (
@@ -1689,7 +1819,7 @@ const EmailComposer = ({
   );
   // Use email draft hooks
   const draftContent = useEmailDraft(conversationId);
-  const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId);
+  const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId, channelId);
 
   const aiDraft = useDeskAIDraft({
     channelId: channelId || '',
@@ -2400,7 +2530,10 @@ const EmailComposer = ({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align='start' side='top'>
                   <DropdownMenuItem
-                    onClick={() => void composerNavigate('/support?openSettings=signatures')}
+                    onClick={() => {
+                      const base = channelId ? `/support/${channelId}` : '/support';
+                      void composerNavigate(`${base}?openSettings=signatures`);
+                    }}
                     className='text-xs text-muted-foreground'
                   >
                     Manage signatures
@@ -2427,7 +2560,10 @@ const EmailComposer = ({
               <Tooltip content='Add signature' side='bottom' delayDuration={300}>
                 <button
                   type='button'
-                  onClick={() => void composerNavigate('/support?openSettings=signatures')}
+                  onClick={() => {
+                    const base = channelId ? `/support/${channelId}` : '/support';
+                    void composerNavigate(`${base}?openSettings=signatures`);
+                  }}
                   className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
                   aria-label='Add signature'
                   data-track-category='email-compose'

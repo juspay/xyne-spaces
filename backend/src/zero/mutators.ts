@@ -7288,10 +7288,11 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         z.object({
           id: z.string(),
           conversationId: z.string(),
+          channelId: z.string(),
           draftContent: z.string(),
           updatedAt: z.number(),
         }),
-        async ({ tx, ctx, args: { id, conversationId, draftContent, updatedAt } }) => {
+        async ({ tx, ctx, args: { id, conversationId, channelId, draftContent, updatedAt } }) => {
           const existing = await tx.run(
             zql.email_drafts
               .where('conversationId', conversationId)
@@ -7304,6 +7305,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             await tx.mutate.email_drafts.insert({
               id,
               conversationId,
+              channelId,
               userId: ctx.userID,
               draftContent,
               createdAt: updatedAt,
