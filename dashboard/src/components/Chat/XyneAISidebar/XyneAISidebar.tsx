@@ -18,6 +18,7 @@ import {
 } from '../../../hooks/useAskAISessions';
 import type { Message, SummarizerCitation, MessageAttachment, UserTag } from './utils/XyneAITypes';
 import { buildCitationUrl } from './utils/citationUrlBuilder';
+import { attachmentCitationPreviewStore } from '../../FileViewer/AttachmentCitationPreview';
 import {
   trackCitationClicked,
   trackWebSearchQuery,
@@ -860,7 +861,22 @@ const XyneAISidebar = ({
   // Handle Summarizer citation clicks
   const handleSummarizerCitationClick = useCallback(
     (citation: SummarizerCitation): void => {
-      // Build URL from citation metadata
+      // Attachment citations: open the file directly in the viewer modal
+      if (citation.entityType === 'attachment' && citation.entityId) {
+        attachmentCitationPreviewStore.open({
+          attachmentId: citation.entityId,
+          fileName: citation.fileName ?? citation.entityId,
+          mimeType: citation.mimeType ?? 'application/octet-stream',
+          ...(citation.chunkPos !== undefined && { initialPage: citation.chunkPos }),
+          ...(citation.chunkText && { chunkText: citation.chunkText }),
+          ...(citation.chunkIndex !== undefined && { chunkIndex: citation.chunkIndex }),
+        });
+        trackCitationClicked('summarizer_attachment');
+        if (isMobile) xyneAIActor.send({ type: 'CLOSE' });
+        return;
+      }
+
+      // Build URL from citation metadata for all other entity types
       const url = buildCitationUrl(citation);
 
       if (!url) {

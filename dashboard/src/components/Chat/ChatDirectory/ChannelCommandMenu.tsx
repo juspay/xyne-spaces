@@ -2398,7 +2398,7 @@ const ChannelCommandMenu = ({
         'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
         isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
         contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
-        'md:w-full md:h-auto bg-background md:rounded-2xl shadow-lg border border-border z-50',
+        'md:w-full md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-gray-200 z-[9999]',
       )}
       onKeyDownCapture={handleCommandKeyDown}
     >

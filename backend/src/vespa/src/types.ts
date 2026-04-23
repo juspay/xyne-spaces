@@ -293,13 +293,21 @@ export interface VespaUserDocument extends VespaDocument {
   personalizationLastUpdated?: number;
 }
 
+export interface VespaChunkMeta {
+  chunk_index: number;
+  page_numbers: number[];
+  block_labels: string[];
+}
+
 export interface VespaFileDocument extends VespaDocument {
   fileName: string;
   description: string;
   chunks: string[];
   chunks_pos: string[];
+  chunks_map?: VespaChunkMeta[];
   image_chunks: string[];
   image_chunks_pos: string[];
+  image_chunks_map?: VespaChunkMeta[];
   metadata: string;
   createdBy: string;
   createdAt: number;
@@ -317,6 +325,7 @@ export interface VespaFileDocument extends VespaDocument {
   messageId?: string;
   ticketId?: string;
   callType?: string;
+  documentOutline?: string;
 }
 
 export interface PullRequestReference {
@@ -348,6 +357,40 @@ export interface VespaMemoryDocument extends VespaDocument {
   reviewStatus: string;
   relevanceScore?: number;
   pullRequests?: PullRequestReference[];
+}
+
+export interface ScoredChunk {
+  chunk: string;
+  score: number;
+  index: number;
+}
+
+export interface ChunkScores {
+  cells: Record<string, number>;
+}
+
+export interface FileMatchFeatures {
+  "bm25(title)"?: number;
+  "bm25(chunks)"?: number;
+  "closeness(field, chunk_embeddings)"?: number;
+  chunk_scores: ChunkScores;
+  image_chunk_scores?: ChunkScores;
+}
+
+export interface VespaFileSearchDocument extends VespaFileDocument {
+  sddocname: typeof fileSchema;
+  matchfeatures: FileMatchFeatures;
+  rankfeatures?: any;
+  // default vespa fields
+  relevance: number;
+  source: string;
+  documentid: string;
+  // summary fields
+  chunks_summary?: (string | ScoredChunk)[];
+  image_chunks_summary?: (string | ScoredChunk)[];
+  chunks_pos_summary?: number[];
+  image_chunks_pos_summary?: number[];
+  chunks_map_summary?: VespaChunkMeta[];
 }
 
 export interface VespaSamTranscriptDocument extends VespaDocument {

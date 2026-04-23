@@ -209,6 +209,11 @@ export interface ToolEntity {
   hasTranscript?: boolean;  // For calls
   base64Data?: string;  // For image attachments (data URI)
   canvasViewIds?: string[];  // Array of canvas viewAccessIds found in message content
+  fileName?: string;
+  mimeType?: string;
+  chunkIndex?: number;
+  chunkText?: string;
+  chunkPos?: number;  // 1-indexed page number (PDFs) or sheet index from chunks_pos_summary
 }
 
 /**
@@ -247,6 +252,11 @@ export interface EnhancedCitationMappings {
   channelIdMapping: Record<number, string>;  // index -> channelId
   externalUrlMapping: Record<number, string | undefined>;  // index -> external URL (for web search)
   isExternalMapping: Record<number, boolean>;  // index -> whether citation is external (web search)
+  chunkIndexMapping: Record<number, number | undefined>;
+  chunkTextMapping: Record<number, string | undefined>;
+  chunkPosMapping: Record<number, number | undefined>;  // page/sheet position from chunks_pos_summary
+  fileNameMapping: Record<number, string | undefined>;
+  mimeTypeMapping: Record<number, string | undefined>;
 }
 
 // ============================================================================
@@ -284,12 +294,15 @@ export interface ToolDescriptions {
   read_canvas: string;
   edit_canvas: string;
   fetch_link_content: string;
+  search_files: string;
   create_ppt: string;
   fetch_skill_instructions: string;
   get_memories: string;
   update_memory: string;
   user_activity: string;
   list_user_channels: string;
+  get_page_content: string;
+  get_document_outline: string;
 }
 
 // ============================================================================

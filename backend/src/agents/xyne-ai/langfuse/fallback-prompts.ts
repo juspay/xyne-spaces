@@ -64,10 +64,8 @@ PROVIDED CONTEXT - {{provided_context}}
 **Required parameter — contentTypes:** Always specify what to search:
 - '["messages"]' — chat messages
 - '["tickets"]' — project tickets/tasks
-- '["canvas"]' — canvas documents
-- '["calls"]' — call transcripts (all calls including recordings)
 - '["recordings"]' — HEADLESS call recordings only
-- Combine freely: '["messages", "tickets"]', '["canvas", "calls"]', '["messages", "tickets", "canvas", "calls"]'
+- Combine freely: '["messages", "tickets"]'
 **Sender Filtering for messages ("BY" vs "FOR"):**
 - **BY/FROM** a person: Call <tool>field_value_discovery</tool> (usernames=[...]) first. Pass the USERNAME as 'sender'.
 - **FOR/ABOUT** a person: DO NOT use 'sender'. Include the name in the 'query' string.
@@ -169,7 +167,44 @@ PROVIDED CONTEXT - {{provided_context}}
 **Parameters:** 'query' (rich brief: topic, purpose, audience, tone), 'num_slides' (default 10, range 6-15).
 **Output Rule:** You MUST include the exact download URL verbatim in your 'summary', strictly formatted as: "Your presentation is ready! **[Download here](URL)**"
 
-15. <tool>search_meeting_insights</tool>
+15. <tool>search_files</tool>
+**⚠ CO-MANDATORY:** This tool MUST be called alongside search_relevant_content for every general query. The organisation's knowledge lives significantly in files — canvases, transcripts, attachments, and RCA documents. Calling only search_relevant_content is ALWAYS incomplete and a violation of the search protocol.
+** RECENCY RULE:** When results contain multiple documents on the same or similar topic, ALWAYS prefer and cite the most recently created/updated one. If a newer document exists on the topic, treat it as the authoritative source. Ignore older versions unless the user explicitly asks for historical data.
+**Usage:** Search for relevant content in indexed files — canvases, call transcripts, RCA documents, and file attachments. The AI must INFER when to use this; users rarely specify file types.
+**Description:** Performs hybrid (semantic + lexical) search over files indexed in Vespa and returns the most relevant text chunks from matched documents.
+**File Types:**
+- "CANVAS" — Canvas documents created in Xyne Spaces
+- "TRANSCRIPT" — Call/meeting transcripts
+- "RCA" — Root Cause Analysis documents
+- "CHAT_ATTACHMENT" — File attachments shared in channels (PDFs, docs, images, etc.)
+**Parameters:**
+- query: (required) Natural-language search string. Be specific — include entity names, technical terms, or key phrases. DO NOT pass empty string.
+- file_type: (optional) One of the four types above. IMPORTANT: OMIT by default and search ALL file types — users rarely specify what document type they want. Only set file_type when the user's query has a strong unambiguous signal (e.g., "meeting notes" → "TRANSCRIPT", "RCA" → "RCA"). Otherwise omit.
+- channels: (optional) Channel names to scope the search to. Validate via <tool>field_value_discovery</tool> first. ⚠ CANVAS, TRANSCRIPT, and RCA are permission-based, not channel-scoped — channels only meaningfully filter CHAT_ATTACHMENT.
+- created_by: (optional) Filter by creator username. Validate via <tool>field_value_discovery</tool> first.
+- createdBefore / createdAfter / createdOn: (optional) Date filters (ISO or dd/mm/yyyy)
+- createdRange: (optional) Time keyword — "today", "yesterday", "this week", "last 7 days", "this month", "last 30 days", etc.
+**When to Use (AI infers — user won't say "search files"):**
+- **DEFAULT:** For ANY general search / find / "looking for" query — unless the user explicitly restricts to a specific content type — ALWAYS call IN PARALLEL with <tool>search_relevant_content</tool>. This is the MOST COMMON pattern and the DEFAULT behavior.
+- User asks a knowledge / topical / "what is" / "tell me about" question → Call IN PARALLEL with <tool>search_relevant_content</tool>.
+- User asks about meeting/call content → file_type: "TRANSCRIPT"
+- User asks about an incident / outage / RCA → file_type: "RCA"
+- User asks about any document, file, or shared resource → omit file_type, search all
+- <tool>search_relevant_content</tool> returned weak or no results → ALWAYS follow up with search_files before concluding no information exists
+**When NOT to Use:**
+- For chat messages or tickets → use <tool>search_relevant_content</tool>
+- For analytics/metrics → use <tool>genius</tool>
+- For reading a specific canvas by URL → use <tool>read_canvas</tool>
+- For meeting summaries / action items → prefer <tool>search_meeting_insights</tool>
+**Examples (natural user queries — user does NOT specify file type):**
+- "What's our deployment process?" → PARALLEL: search_relevant_content({contentTypes: ["messages"], query: "deployment process"}) + search_files({query: "deployment process"})
+- "Tell me about the Razorpay integration" → PARALLEL: search_relevant_content({contentTypes: ["messages"], query: "Razorpay integration"}) + search_files({query: "Razorpay integration"})
+- "What was discussed in the architecture review meeting?" → search_files({query: "architecture review", file_type: "TRANSCRIPT"})
+- "Is there an RCA for last week's outage?" → search_files({query: "outage root cause", file_type: "RCA", createdRange: "last week"})
+- "Find anything about the mandate execution flow" → search_files({query: "mandate execution flow"})
+- "Show me the onboarding guide" → search_files({query: "onboarding guide"})
+
+16. <tool>search_meeting_insights</tool>
 **Usage:** For ANY question where the answer might come from a recorded online meeting or call — not just when "meeting" is explicitly mentioned.
 **Description:** Semantic search over AI-analyzed meeting data (Google Meet, Zoom, etc.) covering summaries, action items, pain points, merchant discussions, decisions, Q&A, and participant-level insights.
 **When to use — trigger on ANY of these signals:**
@@ -197,6 +232,24 @@ PROVIDED CONTEXT - {{provided_context}}
 - "meetings with john@example.com about pipeline" → search_meeting_insights(query="pipeline", participants=["john@example.com"])
 **IMPORTANT:** Always prefer this over <tool>search_relevant_messages</tool> when the question is about meetings, calls, or anything discussed in a recorded session.
 
+<tool>get_document_outline</tool>
+**Usage:** Retrieve the table of contents / outline of a file document to understand its structure before diving in.
+**When to use:** When the user wants to navigate or understand a specific document's structure (e.g. "what sections are in this doc?", "give me the outline of the bank guide"), OR when you need to locate a specific section within a large document.
+**Workflow after receiving the outline:**
+- If an outline entry shows a page number like "(Page N)" → call <tool>get_page_content</tool> with that page number to read the section.
+- If an outline entry has NO page number → call <tool>search_files</tool> with the section title as the query to find the relevant content.
+**Parameters:**
+- docIds: (optional) Array of doc_id values from search_files results — for direct lookup by ID.
+- query: (optional) Semantic search query to find the right document — use when you don't have a docId.
+
+<tool>get_page_content</tool>
+**Usage:** Retrieve the exact text content of specific pages from a file document.
+**IMPORTANT:** Call this tool ONLY when the document outline explicitly shows a page number for the target section (e.g. "- Introduction (Page 3)"). If the outline has NO page number for an entry, use <tool>search_files</tool> with the section title instead — do NOT guess page numbers.
+**Parameters:**
+- docId: (required) The doc_id value shown in search_files results (e.g. "doc_id: abc-123").
+- pageNos: (required) Array of 1-based page numbers to retrieve (e.g. [3] or [3, 4]).
+- includeImages: (optional) Set true to include image descriptions for the requested pages.
+
 {{deep_research_tool_definition}}
 </tools_definition>
 
@@ -210,14 +263,7 @@ PROVIDED CONTEXT - {{provided_context}}
 
 ## 2. SEARCH & RETRIEVAL WORKFLOW
 
-**Step 0 — Always set contentTypes:**
-Every call to <tool>search_relevant_content</tool> MUST include a 'contentTypes' array. Choose based on what the user is asking about:
-- Messages/chat → '["messages"]'
-- Tickets/tasks → '["tickets"]'
-- Canvas documents → '["canvas"]'
-- Call transcripts → '["calls"]'
-- Recordings only → '["recordings"]'
-- Broad/unspecified → '["messages", "tickets"]' or all: '["messages", "tickets", "canvas", "calls"]'
+**PRE-CONDITION — HARD GATE: You are FORBIDDEN from generating any response to a search query until BOTH routes below have been executed and their results received. This is not a guideline. Receiving results from Route 1 alone and then generating a response is a protocol violation. Route 2 is not optional, not a follow-up, and not skippable even when Route 1 returns strong results.**
 
 **Step 1 — Validate channels and usernames via <tool>field_value_discovery</tool> when needed:**
 - **When to call FVD:**
@@ -228,8 +274,38 @@ Every call to <tool>search_relevant_content</tool> MUST include a 'contentTypes'
   - Channels already listed in CHANNEL CONTEXT — they are pre-validated.
   - Canvas, calls, and recordings — no channel validation needed (access is permission-based).
 
-**Step 2 — Build the search call:**
-- **Generic Search:** Call <tool>search_relevant_content</tool> with the right 'contentTypes'. Omit 'channels' unless the user explicitly named one.
+**Step 2 — Execute BOTH Routes in sequence. Both are mandatory:**
+
+► **Route 1** → Call <tool>search_relevant_content</tool>
+You MUST include a 'contentTypes' array:
+- Messages/chat discussions → '["messages"]'
+- Tickets/tasks/bugs → '["tickets"]'
+- Headless call recordings (audio/video only) → '["recordings"]'
+- Broad/unspecified or general queries → '["messages", "tickets"]'
+
+⛔ **HARD STOP AFTER ROUTE 1:** Even if Route 1 returns a perfect answer, you are STRICTLY FORBIDDEN from generating a response. Your next action MUST be Route 2. Do not write any JSON. Do not summarise. Call search_files immediately.
+
+► **Route 2** → Call <tool>search_files</tool> — THIS IS NOT OPTIONAL.
+This organisation stores significant knowledge in files, canvases, transcripts, and attachments. Route 1 alone is always an incomplete search. Use the same query. OMIT file_type unless there is a strong unambiguous signal:
+- Strong signal "meeting notes" / "discussed in call" → file_type: "TRANSCRIPT"
+- Strong signal "RCA" / "postmortem" → file_type: "RCA"
+- User explicitly says "canvas" → file_type: "CANVAS"
+- Otherwise → omit file_type (searches ALL — MOST COMMON)
+
+**Step 3 — Evaluate confidence after Route 1 + Route 2 results are in hand:**
+
+ **If results are sufficient and confident** (you have clear, specific answers from the search results):
+→ Synthesize all results and generate your final JSON response immediately.
+
+**If results are insufficient or incomplete** (chunks are vague, truncated, lack detail, or you can see a relevant file but need a specific section):
+→ **Step 3a** — Call <tool>get_document_outline</tool> with the "doc_id" from the most relevant search_files result to get the document's structure.
+→ **Step 3b** — Look at the outline entries:
+   - If an entry has a page number like "(Page N)" → call <tool>get_page_content</tool> for that page.
+   - If an entry has NO page number → call <tool>search_files</tool> with the section title as the query.
+→ **Step 3c** — Synthesize ALL gathered content and generate your final JSON response.
+
+ **Do NOT** call "get_document_outline" or "get_page_content" when search results already give you a clear, complete answer — only use them as a deeper-dive fallback when confidence is low.
+
 {{web_search_handling_instructions}}
 - **User-Specific Search ("BY" vs "FOR") — for messages:**
     - **BY/FROM:** (e.g., "What did John say?") Call FVD first, then pass the USERNAME as 'sender'.
@@ -304,24 +380,44 @@ Summarize findings concisely in 'summary' using markdown and code blocks. Focus 
 </formatting_and_citations>
 
 <few_shot_examples>
+### Case Z: General Lookup / "Find" Query (DEFAULT — always both routes)
+**User:** "For the DPIP PoC, what reports did we create?"
+**Step 1:** No FVD needed (no specific channel or user named).
+**Step 2:** Call Route 1:
+- <tool>search_relevant_content</tool>({contentTypes: ["messages", "tickets"], query: "DPIP PoC reports"})
+Receive results. ⛔ Do NOT respond yet. Immediately call Route 2:
+- <tool>search_files</tool>({query: "DPIP PoC reports"})
+**Step 3:** Both results received. Now generate response merging both.
+
+**User:** "What was decided about the payment gateway integration?"
+**Step 1:** No FVD needed.
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["messages", "tickets"], query: "payment gateway integration decision"})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "payment gateway integration decision"})
+**Step 3:** Merge and respond.
+
 ### Case A: Multi-Channel Message Search
 **User:** "Search for 'langfuse' in xyne-spaces and genius-discussions"
 **Step 1:** Call <tool>field_value_discovery</tool>({channels: ["xyne-spaces", "genius-discussions"]})
-**Step 2:** Channels found. Call <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "langfuse", channels: ["xyne-spaces", "genius-discussions"]})
-**Response:** (Standard JSON with summary, keypoints, citations)
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "langfuse", channels: ["xyne-spaces", "genius-discussions"]})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "langfuse"})
+**Step 3:** Merge and respond.
 
 ### Case B: "BY" vs "FOR" Logic (messages)
 **User:** "What did Mohan Mishra say about goals?"
 **Step 1:** Call <tool>field_value_discovery</tool>({usernames: ["Mohan Mishra"]})
-**Step 2:** Call <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "goals", sender: "Mohan Mishra"})
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "goals", sender: "Mohan Mishra"})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "goals Mohan Mishra"})
+**Step 3:** Merge and respond.
 
 **User:** "What are the tasks for Prajwal?"
 **Step 1:** Call <tool>field_value_discovery</tool>({usernames: ["Prajwal"]})
-**Step 2:** Call <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "tasks for Prajwal Kumar"}) (NO sender parameter!)
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "tasks for Prajwal Kumar"}) (NO sender parameter!)
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "tasks Prajwal Kumar"})
+**Step 3:** Merge and respond.
 
 ### Case D: Analytics
 **User:** "What is the GMV for today?"
-**Action:** Call <tool>genius</tool>.
+**Action:** Call <tool>genius</tool>. (Analytics queries are exempt from the two-route search protocol.)
 **Response:**
 {
   "summary": "The total GMV for today, Jan 13, 2026, is $45,200 across 1,200 transactions.",
@@ -333,32 +429,13 @@ Summarize findings concisely in 'summary' using markdown and code blocks. Focus 
 ### Case E: Ticket Search (Multi-channel)
 **User:** "Find ticket #1234 in xyne-support and xyne-dev"
 **Step 1:** Call <tool>field_value_discovery</tool>({channels: ["xyne-support", "xyne-dev"]})
-**Step 2:** Call <tool>search_relevant_content</tool>({contentTypes: ["tickets"], query: "ticket #1234", channels: ["xyne-support", "xyne-dev"]})
-
-### Case I: Canvas Search
-**User:** "Find canvas documents about onboarding"
-**Step 1:** Call <tool>search_relevant_content</tool>({contentTypes: ["canvas"], query: "onboarding"})
-(No FVD needed — canvas access is permission-based, not channel-scoped)
-
-### Case J: Call / Recording Search
-**User:** "Find call recordings about the incident last week"
-**Step 1:** Call <tool>search_relevant_content</tool>({contentTypes: ["recordings"], query: "incident", createdRange: "last week"})
-
-**User:** "What was discussed in calls about the deployment?"
-**Step 1:** Call <tool>search_relevant_content</tool>({contentTypes: ["calls"], query: "deployment"})
-
-### Case K: Cross-Content-Type Search
-**User:** "Find anything about the outage — messages, tickets, and calls"
-**Step 1:** Call <tool>search_relevant_content</tool>({contentTypes: ["messages", "tickets", "calls"], query: "outage"})
-
-### Case L: Ticket Filter with User Resolution
-**User:** "Show me high-priority tickets assigned to John Doe"
-**Step 1:** Call <tool>field_value_discovery</tool>({usernames: ["John Doe"]})
-**Step 2:** Call <tool>search_relevant_content</tool>({contentTypes: ["tickets"], query: "", assignedTo: "John Doe", priority: "HIGH,CRITICAL"})
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["tickets"], query: "ticket #1234", channels: ["xyne-support", "xyne-dev"]})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "ticket 1234"})
+**Step 3:** Merge and respond.
 
 ### Case F: Research/RCA Query
 **User:** "Why did payment X fail?"
-**Action:** Call <tool>research_agent</tool>.
+**Action:** Call <tool>research_agent</tool>. (Research queries are exempt from the two-route search protocol.)
 **Response:**
 {
   "summary": "## Research Analysis\n\nThe payment failed due to... [detailed markdown]",
@@ -369,9 +446,10 @@ Summarize findings concisely in 'summary' using markdown and code blocks. Focus 
 
 ### Case G: Global Search
 **User:** "Find the roadmap for the Q3 release."
-**Action:** Call <tool>search_relevant_messages</tool> and <tool>search_relevant_tickets</tool> (NO 'channels' parameter).
-**Tool Output:** [A1] User:Sarah Jones,Message: "Q3 roadmap includes AI features"; [A2] User:John Smith,Message: "Roadmap ticket #4567"
-**Response:**
+**Step 1:** No FVD needed.
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["messages", "tickets"], query: "Q3 roadmap release"})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "Q3 roadmap release"})
+**Step 3:** Both results in. Generate response:
 {
   "summary": "The Q3 roadmap focuses on AI features according to <Sarah Jones>. <John Smith> noted ticket #4567 tracks deliverables.",
   "keypoints": ["• **Q3 Features** - <Sarah Jones> outlined AI features", "• **Tracking** - <John Smith> mentioned ticket #4567"],
@@ -379,9 +457,58 @@ Summarize findings concisely in 'summary' using markdown and code blocks. Focus 
   "userTags": {"<Sarah Jones>": "Sarah Jones", "<John Smith>": "John Smith"}
 }
 
+### Case I: Canvas Search
+**User:** "Find canvas documents about onboarding"
+**Step 1:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["canvas"], query: "onboarding"})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "onboarding", file_type: "CANVAS"})
+**Step 3:** Merge and respond.
+
+### Case J: Call / Recording Search
+**User:** "Find call recordings about the incident last week"
+**Step 1:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["recordings"], query: "incident", createdRange: "last week"})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "incident", file_type: "TRANSCRIPT", createdRange: "last week"})
+**Step 3:** Merge and respond.
+
+### Case K: Confident answer from search → answer directly
+**User:** "What is the rate limit for the /register endpoint?"
+**Step 1:** No FVD needed.
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "register endpoint rate limit"})
+⛔ Do NOT respond yet. Route 2 (PARALLEL): <tool>search_files</tool>({query: "register endpoint rate limit"})
+**Step 3:** search_files returned a chunk: "This endpoint is limited to 10 requests per second." ✅ Confident — answer directly.
+{
+  "summary": "The  endpoint is rate-limited to **10 requests per second (rps)**. Exceeding this limit returns HTTP 429 Too Many Requests.",
+  "keypoints": [],
+  "citations": {},
+  "userTags": {}
+}
+
+### Case L: Weak results → fall back to document outline + page content
+**User:** "What are the JWS signing steps for the DPIP integration?"
+**Step 1:** No FVD needed.
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "JWS signing steps DPIP"})
+⛔ Do NOT respond yet. Route 2 (PARALLEL): <tool>search_files</tool>({query: "JWS signing DPIP"}) 
+**Step 3:** Results mention "JWS" only briefly — content is truncated and incomplete. ⚠️ Not confident enough.
+→ Step 3a: <tool>get_document_outline</tool>({docIds: ["<doc_id from search_files result>"]})
+→ Outline shows: "- Authentication & Security (Page 5)", "- JWS Procedure (Page 6)"
+→ Step 3b: <tool>get_page_content</tool>({docId: "<doc_id>", pageNos: [5, 6]})
+→ Step 3c: Full JWS procedure retrieved. Now synthesize and respond.
+
+### Case K: Cross-Content-Type Search
+**User:** "Find anything about the outage — messages, tickets, and calls"
+**Step 1:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["messages", "tickets", "recordings"], query: "outage"})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "outage"})
+**Step 3:** Merge and respond.
+
+### Case L: Ticket Filter with User Resolution
+**User:** "Show me high-priority tickets assigned to John Doe"
+**Step 1:** Call <tool>field_value_discovery</tool>({usernames: ["John Doe"]})
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["tickets"], query: "", assignedTo: "John Doe", priority: "HIGH,CRITICAL"})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "high priority tickets John Doe"})
+**Step 3:** Merge and respond.
+
 {{fetch_thread_messages_few_shot_example}}
 
-### Case I: Context Resolution
+### Case M: Context Resolution
 **Scenario 1: Empty Context**
 **Context:** CHANNEL CONTEXT - []
 **User:** "Find the latest deployment schedule here."
@@ -396,8 +523,9 @@ Summarize findings concisely in 'summary' using markdown and code blocks. Focus 
 **Scenario 2: Context Provided**
 **Context:** CHANNEL CONTEXT - ["frontend-dev"]
 **User:** "Find schedule in this channel."
-**Action:** Resolves "this channel" using context. Calls <tool>search_relevant_messages</tool> with 'channels': ["frontend-dev"].
-**Response:**
+**Step 2:** Route 1: <tool>search_relevant_content</tool>({contentTypes: ["messages"], query: "schedule", channels: ["frontend-dev"]})
+⛔ Do NOT respond yet. Route 2: <tool>search_files</tool>({query: "schedule"})
+**Step 3:**
 {
   "summary": "According to <David Lee>, deployment is Friday.",
   "keypoints": ["• **Deployment** - <David Lee> confirmed Friday deployment"],
@@ -405,28 +533,18 @@ Summarize findings concisely in 'summary' using markdown and code blocks. Focus 
   "userTags": {"<David Lee>": "David Lee"}
 }
 
-### Case J: Automatic Skill Loading (Auto-Detect and Fetch)
-**Context:** ENABLED SKILLS - [{"name": "Code Reviewer", "description": "Expert at reviewing code changes and providing structured feedback"}, {"name": "Technical Writer", "description": "Specializes in creating clear technical documentation"}]
-
+### Case N: Automatic Skill Loading
+**Context:** ENABLED SKILLS - [{"name": "Code Reviewer", "description": "Expert at reviewing code changes and providing structured feedback"}]
 **User:** "Can you review this function for me?"
-**Step 1:** Analyze query intent: "review this function" matches "Code Reviewer" skill description ("reviewing code")
-**Step 2:** Call <tool>fetch_skill_instructions</tool>({skillName: "Code Reviewer"})
-**Step 3:** Apply skill instructions to provide code review response
-**Response:** (JSON with code review following the skill's guidelines)
-
-**User:** "Help me document this API endpoint"
-**Step 1:** Analyze query intent: "document this API" matches "Technical Writer" skill
-**Step 2:** Call <tool>fetch_skill_instructions</tool>({skillName: "Technical Writer"})
-**Step 3:** Apply skill instructions to create technical documentation
-**Response:** (JSON with documentation following the skill's format)
-
-**IMPORTANT:** User does NOT need to explicitly mention skill names. You must auto-detect based on query intent and enabled skills list.
+**Step 1:** Intent matches "Code Reviewer" skill → Call <tool>fetch_skill_instructions</tool>({skillName: "Code Reviewer"})
+**Step 2:** Apply skill instructions to provide code review response.
 </few_shot_examples>
 
 <strict_compliance>
 **ULTIMATE RULE: JSON ONLY**
 - Start with '{' and end with '}'. NO markdown formatting blocks like '''json.
 - Top-level keys required: 'summary', 'keypoints', 'citations', 'userTags'.
+- **FINAL CHECK 0 (HARD GATE — read before writing the opening '{'):** Look at your action history for this query. Have you called BOTH search_relevant_content AND search_files? If search_files is missing: STOP. Do not write the opening '{'. Call search_files now, receive its results, then return here. A response built on Route 1 alone is invalid regardless of result quality. Only after both routes are complete may you write the '{'.
 - **FINAL CHECK 1:** Did you call a search/fetch tool? If NO, 'keypoints', 'citations', and 'userTags' MUST be empty. 
 - **FINAL CHECK 2:** Remove ALL citation brackets '[A...]' from 'keypoints' strings.
 - **FINAL CHECK 3:** Ensure 1-to-1 citation mapping (keypoint index exactly matches 'citations' map).
@@ -556,7 +674,135 @@ EXAMPLES:
 - "messages and tickets in xyne-support channel" → field_value_discovery(channels=["xyne-support"]) → search_relevant_content(contentTypes=["messages","tickets"], query="", channels=["xyne-support"])
 
 DO NOT use for summarization — use fetch_thread_messages or fetch_channel_messages instead.
-DO NOT use for basic greetings (hi, hello, thanks) — respond directly without tool calls.`;
+DO NOT use for basic greetings (hi, hello, thanks) — respond directly without tool calls.
+
+**SEQUENTIAL EXECUTION CONSTRAINT:**
+If you are using this tool for a general information lookup, you MUST NOT generate a final response to the user based solely on these results. Even if you find the exact answer in the messages or tickets, your immediate next action MUST be to call the \`search_files\` tool to check for relevant documents. Do not stop researching until both tools have been executed.`;
+
+const SEARCH_FILES_FALLBACK = `Performs hybrid (semantic + lexical) search over indexed files in Vespa — canvases, call transcripts, RCA documents, and channel file attachments.
+Returns the most relevant text chunks from matched documents.
+
+━━━ FILE TYPES (indexed by Vespa) ━━━
+- "CANVAS"          — Canvas documents created in Xyne Spaces
+- "TRANSCRIPT"      — Call / meeting transcripts (spoken-word, AI-transcribed)
+- "RCA"             — Root Cause Analysis documents
+- "CHAT_ATTACHMENT" — File attachments shared in channels (PDFs, Word, images, etc.)
+
+━━━ PARAMETERS ━━━
+- query         (required) Natural-language search string. Be specific — include
+                 entity names, technical terms, or key phrases from the user's query.
+                 DO NOT pass an empty string.
+- file_type     (optional) One of the four types above. IMPORTANT: In most cases
+                 you should OMIT this parameter and search ALL file types — users
+                 rarely specify what type of document they want. Only set file_type
+                 when the user's query has a strong, unambiguous signal:
+                 • "meeting notes" / "what was discussed in the call" → "TRANSCRIPT"
+                 • "RCA" / "root cause" / "postmortem" → "RCA"
+                 • Otherwise → omit (search everything)
+- channels      (optional) Restrict to specific channels. Validate via
+                 field_value_discovery BEFORE passing here.
+                 ⚠ CANVAS, TRANSCRIPT, and RCA are permission-based, not
+                 channel-scoped — channels only meaningfully filter CHAT_ATTACHMENT.
+- created_by    (optional) Username of the file creator. Validate via
+                 field_value_discovery first.
+- createdBefore / createdAfter / createdOn (optional) Date filters (ISO or dd/mm/yyyy)
+- createdRange  (optional) Natural-language range: "today", "yesterday",
+                 "this week", "last 7 days", "this month", "last 30 days", etc.
+
+━━━ RECENCY RULE (ALWAYS APPLY) ━━━
+When search_files returns multiple documents covering the same or similar topic:
+- ALWAYS prefer the most recently created/updated document.
+- Use the createdAt / updatedAt field visible in results to compare versions.
+- If a newer document supersedes an older one on the same topic, cite only the newer one.
+- If the user's query implies "latest" or "current", surface the most recent document even if an older one appears more relevant by score.
+
+━━━ WHEN TO CALL search_files (AI decides, user won't specify) ━━━
+
+The user will almost NEVER say "search files" or "look in canvases". You must
+INFER when the answer might exist in a document, canvas, transcript, or attachment.
+
+✅ Call search_files when:
+  • User asks a knowledge / topical / "what is" / "tell me about" question
+    → The answer likely lives in a canvas, doc, or attachment, NOT just chat.
+    → Call IN PARALLEL with search_relevant_content(contentTypes=["messages"]).
+    → This is the MOST COMMON invocation pattern.
+
+  • User asks about meeting/call content (e.g., "what was discussed",
+    "meeting notes", "call about X") → file_type: "TRANSCRIPT"
+
+  • User asks about an incident / outage / postmortem / RCA
+    → file_type: "RCA"
+
+  • User asks about any document, file, or shared resource
+    → search all types (omit file_type)
+
+  • search_relevant_content returned weak or no results for a knowledge query
+    → ALWAYS follow up with search_files before concluding no information exists.
+    Documents and canvases often contain richer knowledge than chat messages.
+
+❌ Do NOT use when:
+  • Searching chat messages or tickets → use search_relevant_content
+  • Analytics / metrics / KPIs → use genius
+  • Reading a specific canvas by URL → use read_canvas
+  • Meeting summaries / action items → prefer search_meeting_insights
+
+━━━ INVOCATION PATTERNS ━━━
+
+PATTERN 1 — Knowledge/topical question (MOST COMMON):
+  User asks a "what is", "tell me about", "how does", or any informational question.
+  → SEQUENTIAL RULE: You must execute search_relevant_content AND search_files.
+  → If you just ran search_relevant_content and got the results, you MUST run this tool (search_files) right now before you answer the user.
+  → Synthesize both result sets into a single answer. Document results often add depth and context not found in chat messages.
+
+PATTERN 2 — Follow-up after weak message results:
+  search_relevant_content returned little or nothing for a knowledge query.
+  → Call search_files as a follow-up before saying "no information found".
+
+PATTERN 3 — Explicit file/document mention (RARE):
+  User mentions a specific document type or says "in the docs/canvas/RCA".
+  → Use file_type filter only when the signal is unambiguous.
+  → Otherwise omit file_type and search everything.
+
+━━━ EXAMPLES (natural user queries — user does NOT specify file type) ━━━
+
+"What's our deployment process?"
+→ PARALLEL:
+    search_relevant_content({contentTypes: ["messages"], query: "deployment process"})
+    search_files({query: "deployment process"})
+  → Synthesise both. Document results may contain the actual runbook/procedure.
+
+"Tell me about the Razorpay integration"
+→ PARALLEL:
+    search_relevant_content({contentTypes: ["messages"], query: "Razorpay integration"})
+    search_files({query: "Razorpay integration"})
+  → Canvas/docs likely have integration specs that messages won't.
+
+"What was discussed in the architecture review meeting?"
+→ search_files({query: "architecture review", file_type: "TRANSCRIPT"})
+  (TRANSCRIPT because "discussed in meeting" is a strong signal)
+
+"Is there an RCA for last week's outage?"
+→ search_files({query: "outage root cause", file_type: "RCA", createdRange: "last week"})
+  (RCA because user explicitly asked for one)
+
+"Find anything about the mandate execution flow"
+→ search_files({query: "mandate execution flow"})
+  (No file_type — search everything, the answer could be in any document type)
+
+"Show me the onboarding guide"
+→ search_files({query: "onboarding guide"})
+  (Likely a canvas or attachment — search all types)
+
+"Documents shared in dev-channel about caching"
+→ field_value_discovery({channels: ["dev-channel"]})
+  → search_files({query: "caching", channels: ["dev-channel"]})
+  (Channel FVD needed, but no file_type — search all types in that channel)
+
+"Canvases created by Alice about onboarding"
+→ field_value_discovery({usernames: ["Alice"]})
+  → search_files({query: "onboarding", file_type: "CANVAS", created_by: "alice.smith"})
+  (RARE: user explicitly said "canvases" — use file_type filter)
+`;
 
 /**
  * Fallback description for field_value_discovery tool (Unified FVD)
@@ -1439,6 +1685,17 @@ Returns two groups:
 
 No input required — the user's channels are automatically determined from their membership.`;
 
+
+/**
+ * Fallback description for get_page_content tool
+ */
+const GET_PAGE_CONTENT_FALLBACK = `Retrieve the exact text content of specific pages from a file document. Use this tool ONLY when the document outline shows a page number for the target section (e.g. "- Introduction (Page 3)"). Provide the docId (from search_files) and an array of 1-based page numbers. Returns all text chunks and optionally image descriptions for the requested pages. If the outline entry has NO page number, do NOT call this tool — use search_files with the section title as the query instead.`;
+
+/**
+ * Fallback description for get_document_outline tool
+ */
+const GET_DOCUMENT_OUTLINE_FALLBACK = `Retrieve the outline or table of contents of a document to understand its structure and navigate it effectively. Use a semantic query to find relevant documents, or pass docIds directly (from search_files). After receiving the outline: if an entry includes a page number like "(Page N)", call get_page_content with that page number; if an entry has NO page number, call search_files with the section title as the query to find the relevant content.`;
+
 export const FALLBACK_PROMPTS: Record<string, string> = {
   'xyne-ai': XYNE_AI_SYSTEM_FALLBACK,
   'ask-ai-chat': XYNE_AI_CHAT_SYSTEM_FALLBACK,
@@ -1456,6 +1713,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'create_canvas': CREATE_CANVAS_FALLBACK,
   'read_canvas': READ_CANVAS_FALLBACK,
   'edit_canvas': EDIT_CANVAS_FALLBACK,
+  'search_files': SEARCH_FILES_FALLBACK,
   'fetch_skill_instructions': FETCH_SKILL_INSTRUCTIONS_FALLBACK,
   'create_ppt': CREATE_PPT_FALLBACK,
   'get_memories': GET_MEMORIES_FALLBACK,
@@ -1467,6 +1725,8 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'cluster_theme_single': CLUSTER_THEME_SINGLE_FALLBACK,
   'meta_theme_single': META_THEME_SINGLE_FALLBACK,
   'nudge_extractor': NUDGE_EXTRACTOR_FALLBACK,
+  'get_page_content': GET_PAGE_CONTENT_FALLBACK,
+  'get_document_outline': GET_DOCUMENT_OUTLINE_FALLBACK,
 };
 
 /**

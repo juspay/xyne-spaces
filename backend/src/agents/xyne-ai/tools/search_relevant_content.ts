@@ -86,6 +86,11 @@ function buildSearchContentMappings(result: ToolResult): EnhancedCitationMapping
     channelIdMapping,
     externalUrlMapping,
     isExternalMapping,
+    chunkIndexMapping: {},
+    chunkTextMapping: {},
+    chunkPosMapping: {},
+    fileNameMapping: {},
+    mimeTypeMapping: {},
   };
 }
 

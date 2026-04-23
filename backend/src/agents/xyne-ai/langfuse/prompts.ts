@@ -161,6 +161,7 @@ export const PROMPT_NAMES = {
   GENIUS: 'genius_as_tool',
   XYNE_RCA: 'xyne_rca',
   FIELD_VALUE_DISCOVERY: 'field_value_discovery',
+  SEARCH_FILES: 'search_files',
   WEB_SEARCH: 'web_search',
   DEEP_RESEARCH: 'deep_research',
   RESEARCH_AGENT: 'research_agent',
@@ -177,6 +178,8 @@ export const PROMPT_NAMES = {
   META_THEME_SINGLE: 'meta_theme_single',
   NUDGE_EXTRACTOR: 'nudge_extractor',
   LIST_USER_CHANNELS: 'list_user_channels',
+  GET_PAGE_CONTENT: 'get_page_content',
+  GET_DOCUMENT_OUTLINE: 'get_document_outline',
 } as const;
 
 export type PromptName = typeof PROMPT_NAMES[keyof typeof PROMPT_NAMES];

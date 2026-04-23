@@ -51,6 +51,8 @@ export interface FileFilters {
   createdAfter?: string;
   createdOn?: string;
   createdRange?: string;
+  channelId?: string[];
+  ownerId?: string[];
 }
 
 export interface MeetingFilters {
@@ -195,6 +197,17 @@ private buildUserConditions(): string {
       ? filters.subApp.map(s => s.trim())
       : ['CANVAS', 'TRANSCRIPT', 'CHAT_ATTACHMENT', 'TICKET_ATTACHMENT', 'RCA'];
 
+    if (filters.channelId && filters.channelId.length > 0) {
+      const channelIds = filters.channelId.map(c => `channelId contains "${c.trim()}"`).join(' or ');
+      conditions.push(`(${channelIds})`);
+    }
+
+    // Owner filter (created_by)
+    if (filters.ownerId && filters.ownerId.length > 0) {
+      const ownerIds = filters.ownerId.map(id => `ownerId contains "${id.trim()}"`).join(' or ');
+      conditions.push(`(${ownerIds})`);
+    }
+    
     // Canvas: require owner/permissions/isPrivate check
     if (subApps.some(s => s === 'CANVAS')) {
       subAppConditions.push(`((subApp contains "CANVAS") and (ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false"))`);

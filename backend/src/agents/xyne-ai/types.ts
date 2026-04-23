@@ -71,6 +71,11 @@ export interface Citation {
   canvasId?: string;
   externalUrl?: string;
   isExternal?: boolean;
+  fileName?: string;
+  mimeType?: string;
+  chunkIndex?: number;
+  chunkText?: string;
+  chunkPos?: number;  // 1-indexed page number for PDFs, sheet index for Excel
 }
 
 export interface KeyPointWithCitation {

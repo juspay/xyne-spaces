@@ -66,6 +66,12 @@ export interface SummarizerCitation {
   ticketId?: string;
   externalUrl?: string;
   isExternal?: boolean;
+  // File attachment chunk data
+  chunkIndex?: number;
+  chunkText?: string;
+  chunkPos?: number; // 1-indexed page number (PDFs) or sheet index (Excel)
+  fileName?: string;
+  mimeType?: string;
 }
 
 export interface SummarizerKeyPoint {

@@ -34,7 +34,7 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, fetchThread, searchContent, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, deepResearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, fetchSkillInstructions, createPpt, searchMeetingInsights, getMemories, updateMemory, userActivity, listUserChannels] = await Promise.all([
+  const [fetchChannel, fetchThread, searchContent, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, deepResearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, fetchSkillInstructions, createPpt, searchMeetingInsights, getMemories, updateMemory, userActivity, listUserChannels, searchFiles, getPageContent, getDocumentOutline] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_CONTENT),
@@ -55,6 +55,9 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     getPromptFromLangfuse(PROMPT_NAMES.UPDATE_MEMORY),
     getPromptFromLangfuse(PROMPT_NAMES.USER_ACTIVITY),
     getPromptFromLangfuse(PROMPT_NAMES.LIST_USER_CHANNELS),
+    getPromptFromLangfuse(PROMPT_NAMES.SEARCH_FILES),
+    getPromptFromLangfuse(PROMPT_NAMES.GET_PAGE_CONTENT),
+    getPromptFromLangfuse(PROMPT_NAMES.GET_DOCUMENT_OUTLINE),
   ]);
 
   const descriptions = {
@@ -78,6 +81,9 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     update_memory: updateMemory || 'Store a new memory for the user. Fire-and-forget — returns immediately.',
     user_activity: userActivity || 'Fetch the current user\'s activity events within a specific time range.',
     list_user_channels: listUserChannels || 'List all channels the current user is a member of, grouped into public and private.',
+    search_files: searchFiles || 'Search for relevant content in files, canvases, call transcripts, and RCA documents using semantic and lexical search. Returns the most relevant chunks from matched documents.',
+    get_page_content: getPageContent || getFallbackPrompt('get_page_content')!,
+    get_document_outline: getDocumentOutline || getFallbackPrompt('get_document_outline')!,
   };
 
   return descriptions;
@@ -501,6 +507,11 @@ export function buildEnhancedCitationMappings(result: EnhancedToolResult): Enhan
   const channelIdMapping: Record<number, string> = {};
   const externalUrlMapping: Record<number, string | undefined> = {};
   const isExternalMapping: Record<number, boolean> = {};
+  const chunkIndexMapping: Record<number, number | undefined> = {};
+  const chunkTextMapping: Record<number, string | undefined> = {};
+  const chunkPosMapping: Record<number, number | undefined> = {};
+  const fileNameMapping: Record<number, string | undefined> = {};
+  const mimeTypeMapping: Record<number, string | undefined> = {};
 
   for (const entity of result.entities) {
     const idx = entity.entityIndex;
@@ -513,6 +524,11 @@ export function buildEnhancedCitationMappings(result: EnhancedToolResult): Enhan
     channelIdMapping[idx] = entity.channelId;
     externalUrlMapping[idx] = entity.externalUrl;
     isExternalMapping[idx] = entity.entityType === 'web_search';
+    chunkIndexMapping[idx] = entity.chunkIndex;
+    chunkTextMapping[idx] = entity.chunkText;
+    chunkPosMapping[idx] = entity.chunkPos;
+    fileNameMapping[idx] = entity.fileName;
+    mimeTypeMapping[idx] = entity.attachmentMimetype;
   }
 
   return {
@@ -524,6 +540,11 @@ export function buildEnhancedCitationMappings(result: EnhancedToolResult): Enhan
     channelIdMapping,
     externalUrlMapping,
     isExternalMapping,
+    chunkIndexMapping,
+    chunkTextMapping,
+    chunkPosMapping,
+    fileNameMapping,
+    mimeTypeMapping,
   };
 }
 
@@ -597,7 +618,12 @@ export async function appendEnhancedSessionMappings(
           canvasIdMapping: {},
           channelIdMapping: {},
           externalUrlMapping: {},
-          isExternalMapping: {}
+          isExternalMapping: {},
+          chunkIndexMapping: {},
+          chunkTextMapping: {},
+          chunkPosMapping: {},
+          fileNameMapping: {},
+          mimeTypeMapping: {},
         };
 
     // Add new mappings with prefix
@@ -639,6 +665,37 @@ export async function appendEnhancedSessionMappings(
     for (const [index, isExternal] of Object.entries(mappings.isExternalMapping)) {
       const prefixedKey = `${prefix}${index}`;
       existing.isExternalMapping[prefixedKey as unknown as number] = isExternal;
+    }
+
+    for (const [index, chunkIndex] of Object.entries(mappings.chunkIndexMapping ?? {})) {
+      if (chunkIndex !== undefined) {
+        const prefixedKey = `${prefix}${index}`;
+        existing.chunkIndexMapping[prefixedKey as unknown as number] = chunkIndex;
+      }
+    }
+
+    for (const [index, chunkText] of Object.entries(mappings.chunkTextMapping ?? {})) {
+      if (chunkText !== undefined) {
+        const prefixedKey = `${prefix}${index}`;
+        existing.chunkTextMapping[prefixedKey as unknown as number] = chunkText;
+      }
+    }
+
+    for (const [index, chunkPos] of Object.entries(mappings.chunkPosMapping ?? {})) {
+      if (chunkPos !== undefined) {
+        const prefixedKey = `${prefix}${index}`;
+        existing.chunkPosMapping[prefixedKey as unknown as number] = chunkPos;
+      }
+    }
+
+    for (const [index, val] of Object.entries(mappings.fileNameMapping || {})) {
+      const prefixedKey = `${prefix}${index}`;
+      existing.fileNameMapping[prefixedKey as unknown as number] = val;
+    }
+
+    for (const [index, val] of Object.entries(mappings.mimeTypeMapping || {})) {
+      const prefixedKey = `${prefix}${index}`;
+      existing.mimeTypeMapping[prefixedKey as unknown as number] = val;
     }
 
     await redis.setex(key, CITATION_TTL_SECONDS, JSON.stringify(existing));

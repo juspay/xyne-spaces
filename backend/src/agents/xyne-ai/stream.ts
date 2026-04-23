@@ -142,6 +142,11 @@ async function convertRawToOutput(
     const canvasId = (mappings?.canvasIdMapping as Record<string, string | undefined>)?.[citationRef];
     const externalUrl = (mappings?.externalUrlMapping as Record<string, string | undefined>)?.[citationRef];
     const isExternal = (mappings?.isExternalMapping as Record<string, boolean>)?.[citationRef] || false;
+    const chunkIndex = (mappings?.chunkIndexMapping as Record<string, number | undefined>)?.[citationRef];
+    const chunkText = (mappings?.chunkTextMapping as Record<string, string | undefined>)?.[citationRef];
+    const chunkPos = (mappings?.chunkPosMapping as Record<string, number | undefined>)?.[citationRef];
+    const fileName = (mappings?.fileNameMapping as Record<string, string | undefined>)?.[citationRef];
+    const mimeType = (mappings?.mimeTypeMapping as Record<string, string | undefined>)?.[citationRef];
 
     return {
       point,
@@ -159,6 +164,11 @@ async function convertRawToOutput(
         canvasId,
         externalUrl,
         isExternal,
+        chunkIndex,
+        chunkText,
+        chunkPos,
+        fileName,
+        mimeType,
       },
     };
   });
@@ -324,6 +334,11 @@ const {
               channelIdMapping: {},
               externalUrlMapping: {},
               isExternalMapping: {},
+              chunkIndexMapping: {},
+              chunkTextMapping: {},
+              chunkPosMapping: {},
+              fileNameMapping: {},
+              mimeTypeMapping: {},
             };
 
             for (const ref of citationRefs) {
