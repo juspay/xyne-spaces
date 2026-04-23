@@ -12,6 +12,7 @@ import { createContext, useContext } from 'react';
 import type { Logger, MetricsRecorder } from '../logger/index.js';
 import { noopLogger, noopMetrics } from '../logger/index.js';
 import { Event } from '../logger/events.js';
+import { wasInterrupted } from './metricValidity.js';
 
 /**
  * Instrumentation context — inject logger + metrics at the app root.
@@ -63,6 +64,7 @@ export function useZero(): Zero {
           Promise.all([result.client, result.server])
             .then(([_clientResult, serverResult]) => {
               const duration = performance.now() - startTime;
+              const skewed = wasInterrupted(startTime);
               let hasError = false;
               let errorMessage = '';
 
@@ -81,19 +83,28 @@ export function useZero(): Zero {
                   mutation: mutationName,
                   error: errorMessage,
                   duration,
+                  skewed,
                 });
-                metrics.recordLatency('zero.mutation.latency', duration, {
-                  mutation: mutationName,
-                });
+                if (!skewed) {
+                  metrics.recordLatency('zero.mutation.latency', duration, {
+                    mutation: mutationName,
+                  });
+                }
                 metrics.incrementCounter('zero.mutation.operations', {
                   mutation: mutationName,
                   stage: 'error',
                 });
               } else {
-                logger.info(Event.ZERO_MUTATION_COMPLETE, { mutation: mutationName, duration });
-                metrics.recordLatency('zero.mutation.latency', duration, {
+                logger.info(Event.ZERO_MUTATION_COMPLETE, {
                   mutation: mutationName,
+                  duration,
+                  skewed,
                 });
+                if (!skewed) {
+                  metrics.recordLatency('zero.mutation.latency', duration, {
+                    mutation: mutationName,
+                  });
+                }
                 metrics.incrementCounter('zero.mutation.operations', {
                   mutation: mutationName,
                   stage: 'success',
@@ -102,14 +113,18 @@ export function useZero(): Zero {
             })
             .catch(error => {
               const duration = performance.now() - startTime;
+              const skewed = wasInterrupted(startTime);
               const errorMessage = error instanceof Error ? error.message : String(error);
               logger.error(Event.ZERO_MUTATION_ERROR, {
                 mutation: mutationName,
                 error: errorMessage,
+                skewed,
               });
-              metrics.recordLatency('zero.mutation.latency', duration, {
-                mutation: mutationName,
-              });
+              if (!skewed) {
+                metrics.recordLatency('zero.mutation.latency', duration, {
+                  mutation: mutationName,
+                });
+              }
               metrics.incrementCounter('zero.mutation.operations', {
                 mutation: mutationName,
                 stage: 'error',
@@ -154,12 +169,16 @@ export function useZero(): Zero {
             )) as Promise<HumanReadable<TReturn>>;
 
             const duration = performance.now() - startTime;
+            const skewed = wasInterrupted(startTime);
             logger.info(Event.ZERO_RUN_COMPLETE, {
               query: queryName,
               duration,
               args: queryArgs,
+              skewed,
             });
-            metrics.recordLatency('zero.run.latency', duration, { query: queryName });
+            if (!skewed) {
+              metrics.recordLatency('zero.run.latency', duration, { query: queryName });
+            }
             metrics.incrementCounter('zero.run.operations', {
               query: queryName,
               stage: 'success',
@@ -168,13 +187,17 @@ export function useZero(): Zero {
             return result;
           } catch (error) {
             const duration = performance.now() - startTime;
+            const skewed = wasInterrupted(startTime);
             const errorMessage = error instanceof Error ? error.message : String(error);
             logger.error(Event.ZERO_RUN_ERROR, {
               query: queryName,
               error: errorMessage,
               args: queryArgs,
+              skewed,
             });
-            metrics.recordLatency('zero.run.latency', duration, { query: queryName });
+            if (!skewed) {
+              metrics.recordLatency('zero.run.latency', duration, { query: queryName });
+            }
             metrics.incrementCounter('zero.run.operations', {
               query: queryName,
               stage: 'error',

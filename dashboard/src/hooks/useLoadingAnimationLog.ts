@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { logger, type EventType } from '../utils/logger';
 import { loadingAnimationDuration, safeRecordMetric } from '../services/otel';
+import { wasInterrupted } from '@xyne/shared/hooks';
 
 interface UseLoadingAnimationLogParams {
   event: EventType;
@@ -16,26 +17,30 @@ export const useLoadingAnimationLog = ({
   url,
 }: UseLoadingAnimationLogParams): void => {
   useEffect(() => {
-    const startTime = Date.now();
+    const startTime = performance.now();
 
     return () => {
-      const endTime = Date.now();
+      const endTime = performance.now();
       const duration = endTime - startTime;
+      const skewed = wasInterrupted(startTime, endTime);
 
       logger.info(event, {
         source,
         message,
         durationMs: duration,
         url,
+        skewed,
       });
 
-      safeRecordMetric(() => {
-        loadingAnimationDuration.record(duration, {
-          source,
-          event,
-          platform: logger.platformName,
+      if (!skewed) {
+        safeRecordMetric(() => {
+          loadingAnimationDuration.record(duration, {
+            source,
+            event,
+            platform: logger.platformName,
+          });
         });
-      });
+      }
     };
   }, [event, source, message, url]);
 };

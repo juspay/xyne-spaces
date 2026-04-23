@@ -2,8 +2,7 @@ import { ChannelScopeType, MessageType } from '@xyne/shared';
 import { Conversation } from '../../../machines/stateMachine';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGetChannelUserStatus, useVisibleChannel } from '../../../hooks/useChannels';
-//eslint-disable-next-line local-rules/no-rocicorp-use-zero
-import { useZero } from '@rocicorp/zero/react';
+import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 import { ChatListItem } from '../ChatListItem/ChatListItem';
