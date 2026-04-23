@@ -101,7 +101,7 @@ export const SurfaceNudgeList: React.FC<SurfaceNudgeListProps> = ({
     queries.surfaceNudgesByCountRowIds({
       countRowIds: effectiveCountRowIds,
     }),
-    indexedNudgesEnabled ? { enabled: indexedNudgesEnabled } : false,
+    { enabled: indexedNudgesEnabled },
   );
 
   const isLoading =
