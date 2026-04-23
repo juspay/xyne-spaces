@@ -864,6 +864,7 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Prom
   // Parse file content into chunks using FileProcessor
   let chunks: string[] = [];
   let fileSize = args.size || 0;
+  let processingResult: any;
   try {
     if (args.url) {
       // Extract GCS path from URL
@@ -891,6 +892,7 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Prom
       const processor = FileProcessor.fromMimeType(args.mimetype);
       const result = await processor.processBuffer(buffer, args.id);
       chunks = result.chunks;
+      processingResult = result;
 
       logger.info(`[Mapper] Extracted ${chunks.length} chunks from file ${args.id} (${args.originalFilename}) using ${result.processingMethod}`);
     }
@@ -905,9 +907,13 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Prom
     fileName: args.originalFilename || 'Untitled File',
     description: `File uploaded in ${channel?.name || 'Unknown Channel'}`,
     chunks: chunks,
-    chunks_pos: chunks.map((_, index) => String(index)),
+    chunks_pos: processingResult?.chunks_pos
+      ? processingResult.chunks_pos.map(String)
+      : chunks.map((_, index) => String(index)),
+    chunks_map: processingResult?.chunks_map,
     image_chunks: [],
     image_chunks_pos: [],
+    documentOutline: processingResult?.documentOutline,
     metadata: JSON.stringify({
       entityType: args.entityType,
       entityId: args.entityId,

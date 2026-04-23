@@ -1,5 +1,5 @@
 import { BaseStrategy } from "./BaseStrategy"
-import type { ProcessingResult } from "../types"
+import type { ProcessingResult, ChunkMetadata } from "../types"
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs"
 
 /**
@@ -24,6 +24,7 @@ export class PdfPerPageStrategy extends BaseStrategy {
             const numPages = doc.numPages
             const chunks: string[] = []
             const chunks_pos: number[] = []
+            const chunks_map: ChunkMetadata[] = []
 
             for (let i = 1; i <= numPages; i++) {
                 const page = await doc.getPage(i)
@@ -92,8 +93,14 @@ export class PdfPerPageStrategy extends BaseStrategy {
                     .join("\n")
 
                 if (pageText.length > 0) {
-                    chunks.push(pageText)
-                    chunks_pos.push(i) // 1-indexed page number
+                    const chunkIndex = chunks.length
+                    chunks.push(`[Page ${i}]\n${pageText}`)
+                    chunks_pos.push(i)   // 1-indexed page number
+                    chunks_map.push({
+                        chunk_index: chunkIndex,
+                        page_numbers: [i],
+                        block_labels: [],
+                    })
                 }
 
                 page.cleanup()
@@ -101,9 +108,13 @@ export class PdfPerPageStrategy extends BaseStrategy {
 
             if (doc.destroy) await doc.destroy()
 
+            const documentOutline = await this.buildDocumentOutline(chunks, chunks_map)
+
             return {
                 chunks,
                 chunks_pos,
+                chunks_map,
+                documentOutline,
                 processingMethod: this.getName(),
             }
 

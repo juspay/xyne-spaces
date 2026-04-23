@@ -95,3 +95,17 @@ export function getAskAIToolUsedTotal(): Counter {
   }
   return _askAIToolUsedTotal;
 }
+
+// Ask AI File Search Used Total Counter
+let _askAIFileSearchUsedTotal: Counter | null = null;
+export const askAIFileSearchUsedTotal: Counter = new Proxy({} as Counter, {
+  get(_target, prop) {
+    if (!_askAIFileSearchUsedTotal) {
+      _askAIFileSearchUsedTotal = getMeter().createCounter('ask_ai_file_search_used_total', {
+        description: 'Total number of times File Search was used in Ask AI',
+        unit: '1',
+      });
+    }
+    return _askAIFileSearchUsedTotal[prop as keyof Counter];
+  },
+});

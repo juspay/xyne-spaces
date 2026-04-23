@@ -29,9 +29,18 @@ export class TextStrategy extends BaseStrategy {
 
             // Chunk by paragraphs
             const chunks = this.chunkByParagraphs(paragraphs)
+            const chunks_map = chunks.map((_, i) => ({
+                chunk_index: i,
+                page_numbers: [] as number[],
+                block_labels: [] as string[],
+            }))
+
+            const documentOutline = await this.buildDocumentOutline(chunks, chunks_map)
 
             return {
                 chunks,
+                chunks_map,
+                documentOutline,
                 processingMethod: this.getName(),
             }
         } catch (error) {

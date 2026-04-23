@@ -37,6 +37,13 @@ export interface ProcessingResult {
 
     /** Name of the strategy used for processing (optional) */
     processingMethod?: string
+
+    /**
+     * Document outline / Table of Contents string.
+     * Format: comma-separated entries, each "{topic} Page {n}"
+     * e.g. "Introduction Page 1, Methodology Page 3, Results Page 7"
+     */
+    documentOutline?: string
 }
 
 /**

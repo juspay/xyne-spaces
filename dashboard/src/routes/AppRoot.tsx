@@ -135,6 +135,7 @@ import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOver
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
+import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { sharedChatRoutes } from './SharedChatRoutes';
 import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
@@ -568,6 +569,7 @@ const AppRoot = (): ReactElement => {
                 <CallFromRecentsHandler />
                 <BrowserPanelHandler />
                 <AttachmentGalleryModal />
+                <AttachmentCitationPreview />
                 <GlobalCommandMenu />
                 <ShortcutsHelpModal
                   isOpen={isShortcutsModalOpen}
@@ -1033,6 +1035,7 @@ export const router = createBrowserRouter([
                   <Outlet />
                 </div>
                 <AttachmentGalleryModal />
+                <AttachmentCitationPreview />
               </EditProvider>
             </InitialStateLoader>
           </ZeroProvider>

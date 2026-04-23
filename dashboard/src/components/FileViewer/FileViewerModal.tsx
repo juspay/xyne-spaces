@@ -724,9 +724,9 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
   return (
     <Dialog.Root open={isOpen} onOpenChange={() => attachmentViewerActor.send({ type: 'CLOSE' })}>
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50' />
+        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[56]' />
         <Dialog.Content
-          className={`fixed z-50 bg-black focus:outline-none
+          className={`fixed z-[56] bg-black focus:outline-none
           data-[state=closed]:fade-out transition-all ease-in-out duration-300
           data-[state=open]:fade-in overflow-hidden
           ${
@@ -1372,11 +1372,11 @@ export const AttachmentGalleryModal: React.FC = () => {
   return (
     <Dialog.Root open={isOpen} onOpenChange={() => attachmentViewerActor.send({ type: 'CLOSE' })}>
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-50' />
+        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[56]' />
         <Dialog.Content
           data-prevent-drawer='true'
           className={cn(
-            'fixed z-50 bg-black focus:outline-none data-[state=closed]:fade-out transition-all ease-in-out duration-300 data-[state=open]:fade-in overflow-hidden',
+            'fixed z-[56] bg-black focus:outline-none data-[state=closed]:fade-out transition-all ease-in-out duration-300 data-[state=open]:fade-in overflow-hidden',
             isMobile
               ? 'inset-0 w-screen h-screen'
               : 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[95vw] h-[95vh] rounded-2xl',

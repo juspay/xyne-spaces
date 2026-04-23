@@ -1080,97 +1080,138 @@ const SummarizerContent = ({
         <div className='space-y-2'>
           <h3 className='text-sm font-semibold text-muted-foreground'>Key Points</h3>
           <ul className='space-y-1.5'>
-            {message.summarizerOutput.keyPoints.map(
-              (keyPoint: SummarizerKeyPoint, index: number) => (
-                <li key={index} className='flex items-start'>
-                  <span className='text-foreground text-sm inline prose prose-sm max-w-none'>
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        p: ({ children }) => {
-                          const processed = processNodeForUserTags(children, message.userTags);
-                          return <span>{processed}</span>;
-                        },
-                        a: ({ href, children, ...props }) => {
-                          // Check if URL is external
-                          const isExternal = (() => {
-                            if (!href) return false;
-                            try {
-                              const urlObj = new URL(href, window.location.origin);
-                              return urlObj.origin !== window.location.origin;
-                            } catch {
-                              return true;
-                            }
-                          })();
+            {(() => {
+              // Count how many keypoints reference each entityId
+              const entityKeyPointCount = new Map<string, number>();
+              for (const kp of message.summarizerOutput.keyPoints) {
+                const id = kp.citation?.entityId;
+                if (id) entityKeyPointCount.set(id, (entityKeyPointCount.get(id) ?? 0) + 1);
+              }
 
-                          const isApiPath = href?.startsWith('/api/');
+              // Pre-compute display labels:
+              // - Single-referenced entity → plain docNum (e.g. "3")
+              // - Multi-referenced entity → docNum.subIdx  (e.g. "1.0", "1.1")
+              // docNum is assigned in first-appearance order across all keypoints
+              const entityDocNumMap = new Map<string, number>();
+              const entitySubCountMap = new Map<string, number>();
+              let docCounter = 0;
+              const displayLabels: string[] = [];
 
-                          if (isExternal) {
-                            return (
-                              <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
-                                {children}
-                              </a>
-                            );
-                          }
+              for (const kp of message.summarizerOutput.keyPoints) {
+                const c = kp.citation;
+                if (!c?.entityId) {
+                  displayLabels.push(String(c?.messageIndex ?? ''));
+                  continue;
+                }
+                if (!entityDocNumMap.has(c.entityId)) {
+                  docCounter++;
+                  entityDocNumMap.set(c.entityId, docCounter);
+                  entitySubCountMap.set(c.entityId, 0);
+                }
+                const docNum = entityDocNumMap.get(c.entityId)!;
+                const count = entityKeyPointCount.get(c.entityId) ?? 0;
+                if (count > 1) {
+                  const subIdx = entitySubCountMap.get(c.entityId)!;
+                  entitySubCountMap.set(c.entityId, subIdx + 1);
+                  displayLabels.push(`${docNum}.${subIdx}`);
+                } else {
+                  displayLabels.push(String(docNum));
+                }
+              }
 
-                          if (isApiPath) {
-                            return (
-                              <a
-                                href={href}
-                                data-track-category='xyne-ai'
-                                data-track-name='api-download'
-                                onClick={e => {
-                                  e.preventDefault();
-                                  window.location.href = href!;
-                                }}
-                                {...props}
-                              >
-                                {children}
-                              </a>
-                            );
-                          }
-
-                          return (
-                            <a href={href} {...props}>
-                              {children}
-                            </a>
-                          );
-                        },
-                      }}
-                    >
-                      {keyPoint.point}
-                    </ReactMarkdown>
-                    {keyPoint.citation &&
-                      (keyPoint.citation.conversationId ||
-                        keyPoint.citation.externalUrl ||
-                        keyPoint.citation.canvasId ||
-                        keyPoint.citation.entityType === 'recording') &&
-                      !message.isStreaming && (
-                        <>
-                          {' '}
-                          <button
-                            type='button'
-                            onClick={(): void => {
-                              if (keyPoint.citation) {
-                                onSummarizerCitationClick(keyPoint.citation);
+              return message.summarizerOutput.keyPoints.map(
+                (keyPoint: SummarizerKeyPoint, index: number) => (
+                  <li key={index} className='flex items-start'>
+                    <span className='text-foreground text-sm inline prose prose-sm max-w-none'>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({ children }) => {
+                            const processed = processNodeForUserTags(children, message.userTags);
+                            return <span>{processed}</span>;
+                          },
+                          a: ({ href, children, ...props }) => {
+                            // Check if URL is external
+                            const isExternal = (() => {
+                              if (!href) return false;
+                              try {
+                                const urlObj = new URL(href, window.location.origin);
+                                return urlObj.origin !== window.location.origin;
+                              } catch {
+                                return true;
                               }
-                            }}
-                            className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-muted text-muted-foreground font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-accent transition-colors cursor-pointer align-middle"
-                            title={`Jump to ${keyPoint.citation.entityType || 'message'} ${keyPoint.citation.messageIndex}`}
-                            data-track-category='XyneAI'
-                            data-track-name='SUMMARIZER_CITATION_CLICK'
-                            data-track-metadata={JSON.stringify({
-                              messageIndex: keyPoint.citation.messageIndex,
-                            })}
-                          >
-                            {keyPoint.citation.messageIndex}
-                          </button>
-                        </>
-                      )}
-                  </span>
-                </li>
-              ),
-            )}
+                            })();
+
+                            const isApiPath = href?.startsWith('/api/');
+
+                            if (isExternal) {
+                              return (
+                                <a href={href} target='_blank' rel='noopener noreferrer' {...props}>
+                                  {children}
+                                </a>
+                              );
+                            }
+
+                            if (isApiPath) {
+                              return (
+                                <a
+                                  href={href}
+                                  data-track-category='xyne-ai'
+                                  data-track-name='api-download'
+                                  onClick={e => {
+                                    e.preventDefault();
+                                    window.location.href = href!;
+                                  }}
+                                  {...props}
+                                >
+                                  {children}
+                                </a>
+                              );
+                            }
+
+                            return (
+                              <a href={href} {...props}>
+                                {children}
+                              </a>
+                            );
+                          },
+                        }}
+                      >
+                        {keyPoint.point}
+                      </ReactMarkdown>
+                      {keyPoint.citation &&
+                        (keyPoint.citation.conversationId ||
+                          keyPoint.citation.externalUrl ||
+                          keyPoint.citation.canvasId ||
+                          keyPoint.citation.entityType === 'recording' ||
+                          keyPoint.citation.entityType === 'attachment') &&
+                        !message.isStreaming && (
+                          <>
+                            {' '}
+                            <button
+                              type='button'
+                              onClick={(): void => {
+                                if (keyPoint.citation) {
+                                  onSummarizerCitationClick(keyPoint.citation);
+                                }
+                              }}
+                              className="inline-flex h-[17px] px-1 justify-center items-center rounded-[3px] bg-muted text-muted-foreground font-['Inter'] text-[10px] font-normal leading-[18px] hover:bg-accent transition-colors cursor-pointer align-middle"
+                              title={`Jump to ${keyPoint.citation.entityType || 'message'} ${keyPoint.citation.messageIndex}`}
+                              data-track-category='XyneAI'
+                              data-track-name='SUMMARIZER_CITATION_CLICK'
+                              data-track-metadata={JSON.stringify({
+                                messageIndex: keyPoint.citation.messageIndex,
+                              })}
+                            >
+                              {displayLabels[index]}
+                            </button>
+                          </>
+                        )}
+                    </span>
+                  </li>
+                ),
+              );
+            })()}
           </ul>
         </div>
       )}

@@ -1,5 +1,5 @@
 import { BaseStrategy } from "./BaseStrategy"
-import type { ProcessingResult, StrategyConfig } from "../types"
+import type { ProcessingResult, StrategyConfig, ChunkMetadata } from "../types"
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs"
 
 export class PdfJsStrategy extends BaseStrategy {
@@ -38,7 +38,9 @@ export class PdfJsStrategy extends BaseStrategy {
 
             const doc = await loadingTask.promise
             const numPages = doc.numPages
-            let allParagraphs: string[] = []
+            // Track which pages each paragraph came from
+            const allParagraphs: string[] = []
+            const paragraphPages: number[] = []  // parallel: page number for each paragraph
 
             // Extract text from each page using spatial logic
             for (let i = 1; i <= numPages; i++) {
@@ -111,7 +113,10 @@ export class PdfJsStrategy extends BaseStrategy {
                     .map((l) => this.cleanLine(l))
                     .filter(l => l.length > 0)
 
-                allParagraphs.push(...pageParagraphs)
+                for (const para of pageParagraphs) {
+                    allParagraphs.push(para)
+                    paragraphPages.push(i)  // record the 1-indexed page for this paragraph
+                }
 
                 // Clean up page resources
                 page.cleanup()
@@ -120,11 +125,16 @@ export class PdfJsStrategy extends BaseStrategy {
             // In older pdfjs-dist versions doc.destroy() might not exist
             if (doc.destroy) await doc.destroy()
 
-            // Chunk based on paragraphs
-            const chunks = this.chunkByParagraphs(allParagraphs)
+            // Chunk based on paragraphs, tracking which pages each chunk covers
+            const { chunks, chunks_map } = this.chunkByParagraphsWithMeta(allParagraphs, paragraphPages)
+
+            const documentOutline = await this.buildDocumentOutline(chunks, chunks_map)
 
             return {
                 chunks,
+                chunks_map,
+                chunks_pos: chunks_map.map(m => m.page_numbers[0] ?? 1),
+                documentOutline,
                 processingMethod: this.getName(),
             }
 
@@ -135,6 +145,56 @@ export class PdfJsStrategy extends BaseStrategy {
     }
 
     /**
+     * Chunk paragraphs while tracking page metadata for each resulting chunk
+     */
+    private chunkByParagraphsWithMeta(
+        paragraphs: string[],
+        paragraphPages: number[],
+    ): { chunks: string[]; chunks_map: ChunkMetadata[] } {
+        const chunks: string[] = []
+        const chunks_map: ChunkMetadata[] = []
+        let currentChunk = ""
+        let currentPages: Set<number> = new Set()
+        let chunkIndex = 0
+        const { chunkSize } = this.config
+
+        for (let idx = 0; idx < paragraphs.length; idx++) {
+            const para = paragraphs[idx]
+            const page = paragraphPages[idx] ?? 1
+
+            if (currentChunk.length + para.length + 2 > chunkSize && currentChunk.length > 0) {
+                const pages = Array.from(currentPages).sort((a, b) => a - b)
+                const pageLabel = pages.length === 1 ? `[Page ${pages[0]}]` : `[Pages ${pages.join(', ')}]`
+                chunks.push(`${pageLabel}\n${currentChunk.trim()}`)
+                chunks_map.push({
+                    chunk_index: chunkIndex,
+                    page_numbers: pages,
+                    block_labels: [],
+                })
+                chunkIndex++
+                currentChunk = ""
+                currentPages = new Set()
+            }
+
+            currentChunk += (currentChunk ? "\n\n" : "") + para
+            currentPages.add(page)
+        }
+
+            if (currentChunk.trim().length > 0) {
+                const pages = Array.from(currentPages).sort((a, b) => a - b)
+                const pageLabel = pages.length === 1 ? `[Page ${pages[0]}]` : `[Pages ${pages.join(', ')}]`
+                chunks.push(`${pageLabel}\n${currentChunk.trim()}`)
+                chunks_map.push({
+                    chunk_index: chunkIndex,
+                    page_numbers: pages,
+                    block_labels: [],
+                })
+            }
+
+        return { chunks, chunks_map }
+    }
+
+    /**
      * Clean text: normalize Unicode, remove control chars, fix spacing
      */
     private cleanLine(line: string): string {
@@ -142,30 +202,6 @@ export class PdfJsStrategy extends BaseStrategy {
         s = s.replace(/[^\P{C}\n\t]/gu, "")
         s = s.replace(/\s+/g, " ").trim()
         return s
-    }
-
-    /**
-     * Chunk text by filling chunks with whole paragraphs
-     */
-    private chunkByParagraphs(paragraphs: string[]): string[] {
-        const chunks: string[] = []
-        let currentChunk = ""
-        const { chunkSize } = this.config
-
-        for (const para of paragraphs) {
-            if (currentChunk.length + para.length + 2 > chunkSize && currentChunk.length > 0) {
-                chunks.push(currentChunk.trim())
-                currentChunk = ""
-            }
-
-            currentChunk += (currentChunk ? "\n\n" : "") + para
-        }
-
-        if (currentChunk.trim().length > 0) {
-            chunks.push(currentChunk.trim())
-        }
-
-        return chunks
     }
 
     getName(): string {
