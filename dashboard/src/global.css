@@ -415,9 +415,12 @@
     list-style-type: circle;
   }
 
-  /* Nested Ordered List Styles - repeating cycle: decimal → lower-alpha → lower-roman */
+  /* Nested Ordered List Styles - repeating cycle: decimal → lower-alpha → lower-roman.
+     `list-style-position: inside` keeps the marker within the content box so it takes
+     its natural width at any digit count and can't be clipped by a scroll container. */
   .chat-input-field ol {
     list-style-type: decimal;
+    list-style-position: inside;
   }
 
   .chat-input-field ol ol {
@@ -434,6 +437,19 @@
 
   .chat-input-field ol ol ol ol ol {
     list-style-type: lower-alpha;
+  }
+
+  /* Nested <ol> still needs an indent so nesting is visually apparent
+     (top-level indent is dropped so the marker aligns with paragraph text). */
+  .chat-input-field li ol {
+    @apply pl-6;
+  }
+
+  /* TipTap wraps li content in <p>. Inline the first <p> so the marker and text
+     share a line instead of the marker sitting alone above the paragraph. */
+  .chat-input-field ol li > p:first-child,
+  .chat-input-field ul li > p:first-child {
+    display: inline;
   }
 
   /* Inline Code */
@@ -1254,9 +1270,18 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   list-style-type: circle;
 }
 
+/* `list-style-position: inside` keeps the marker within the content box so it takes
+   its natural width at any digit count and can't be clipped by a scroll container.
+   No left padding at the top level so the marker aligns with adjacent paragraph text;
+   nested lists get their indent via the `li ol` rule below. */
 .jp-message-html ol {
-  @apply pl-6 my-2;
+  @apply my-2;
   list-style-type: decimal;
+  list-style-position: inside;
+}
+
+.jp-message-html li ol {
+  @apply pl-6;
 }
 
 .jp-message-html ol ol {
@@ -1277,6 +1302,13 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 .jp-message-html li {
   @apply my-1;
+}
+
+/* Inline the first <p> inside an <li> so the marker shares a line with the text
+   instead of sitting alone above it. */
+.jp-message-html ol li > p:first-child,
+.jp-message-html ul li > p:first-child {
+  display: inline;
 }
 
 /* ----------------------------

@@ -411,7 +411,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           },
           orderedList: {
             HTMLAttributes: {
-              class: 'pl-6 my-2',
+              class: 'my-2',
             },
           },
           listItem: {
