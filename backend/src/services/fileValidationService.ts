@@ -1,7 +1,6 @@
 import { config } from '../config/env';
 import { logger } from '../utils/logger';
 import {
-  ALLOWED_MIME_TYPES,
   DANGEROUS_EXTENSIONS,
 } from '@xyne/shared';
 
@@ -22,16 +21,15 @@ export interface FileValidationResult {
 export class FileValidationService {
   private static instance: FileValidationService;
 
-  // Allowed file types and their MIME types
-  // Uses shared constants from @xyne/shared to ensure consistency with frontend
+  // File validation uses a blocklist approach — all file types are allowed
+  // except for dangerous extensions that could execute code.
   // SECURITY NOTE: Certificate files (.pem) can contain sensitive private keys.
   // Ensure upload handling includes appropriate security measures such as:
   // - Encryption at rest
   // - Access logging
   // - Clear retention policies
-  private readonly allowedMimeTypes: Set<string> = new Set(ALLOWED_MIME_TYPES);
 
-  // File extensions that are potentially dangerous
+  // File extensions that are potentially dangerous and should be blocked
   private readonly dangerousExtensions: Set<string> = new Set(DANGEROUS_EXTENSIONS);
 
   private readonly maxFileSizeBytes: number;
@@ -40,7 +38,7 @@ export class FileValidationService {
     this.maxFileSizeBytes = config.gcs.maxFileSizeMB * 1024 * 1024; // Convert MB to bytes
     logger.info('File validation service initialized', {
       maxFileSizeMB: config.gcs.maxFileSizeMB,
-      allowedMimeTypesCount: this.allowedMimeTypes.size,
+      dangerousExtensionsCount: this.dangerousExtensions.size,
     });
   }
 
@@ -92,14 +90,7 @@ export class FileValidationService {
         errors.push(`File size mismatch: expected ${input.size} bytes, got ${input.buffer.length} bytes`);
       }
 
-      // MIME type validation
-      const normalizedMimeType = input.mimeType.toLowerCase();
-      const isTextLikeMime = normalizedMimeType.startsWith('text/');
-      if (!isTextLikeMime && !this.allowedMimeTypes.has(normalizedMimeType)) {
-        errors.push(`File type '${input.mimeType}' is not allowed`);
-      }
-
-      // Filename validation
+      // Dangerous extension validation (blocklist approach — all types allowed except dangerous ones)
       const fileExtension = this.getFileExtension(input.originalName);
       if (this.dangerousExtensions.has(fileExtension.toLowerCase())) {
         errors.push(`File extension '${fileExtension}' is not allowed for security reasons`);
@@ -257,17 +248,23 @@ export class FileValidationService {
   }
 
   /**
-   * Check if file type is allowed
+   * Check if file type is allowed (blocklist approach — checks extension is not dangerous)
    */
-  isFileTypeAllowed(mimeType: string): boolean {
-    return this.allowedMimeTypes.has(mimeType.toLowerCase());
+  isFileTypeAllowed(_mimeType: string, filename?: string): boolean {
+    if (filename) {
+      const ext = this.getFileExtension(filename);
+      if (this.dangerousExtensions.has(ext.toLowerCase())) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
-   * Get allowed file types for client-side validation
+   * Get dangerous file extensions that are blocked
    */
-  getAllowedMimeTypes(): string[] {
-    return Array.from(this.allowedMimeTypes);
+  getDangerousExtensions(): string[] {
+    return Array.from(this.dangerousExtensions);
   }
 
   /**

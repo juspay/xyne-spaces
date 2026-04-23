@@ -155,7 +155,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         fileAttachments: true,
         emojiPicker: true,
       },
-      allowedFileTypes,
+      blockedExtensions,
       maxFiles = 10,
       onAlsoSendToChannelChange,
       alsoSendToChannelChecked = false,
@@ -303,12 +303,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
 
         // Validate each file
         filesToValidate.forEach(file => {
-          const validationOptions: { maxSize?: number; allowedTypes?: string[] } = {
+          const validationOptions: { maxSize?: number; blockedExtensions?: readonly string[] } = {
             maxSize: 1024 * 1024 * 1024, // 1GB
           };
 
-          if (allowedFileTypes && allowedFileTypes.length > 0) {
-            validationOptions.allowedTypes = allowedFileTypes;
+          if (blockedExtensions && blockedExtensions.length > 0) {
+            validationOptions.blockedExtensions = blockedExtensions;
           }
 
           const validation = validateFile(file, validationOptions);
@@ -361,7 +361,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           }
         }
       },
-      [maxFiles, allAttachments.length, addDraftAttachments, allowedFileTypes],
+      [maxFiles, allAttachments.length, addDraftAttachments, blockedExtensions],
     );
 
     const updateEmojiSizeClass = useCallback((editor: ReturnType<typeof useEditor>): void => {
@@ -1168,7 +1168,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               multiple
               onChange={handleFileSelect}
               className='hidden'
-              accept={allowedFileTypes?.join(',')}
               aria-label='File attachment input'
             />
           )}

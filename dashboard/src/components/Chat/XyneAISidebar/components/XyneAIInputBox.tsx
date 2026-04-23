@@ -46,7 +46,7 @@ import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines
 import type { VisibleChannel } from '../../../../machines/stateMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
-import { CERTIFICATE_MIME_TYPES } from '@xyne/shared';
+import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 
 // Hash icon component
 const HashIcon = ({ className = '' }: { className?: string }): ReactElement => (
@@ -634,31 +634,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     const MAX_INDIVIDUAL_FILE_SIZE = 100 * 1024 * 1024; // 100MB in bytes
     const MAX_TOTAL_SIZE = 200 * 1024 * 1024; // 200MB in bytes
 
-    // Allowed file types
-    const allowedFileTypes = [
-      // Images
-      'image/png',
-      'image/jpeg',
-      'image/gif',
-      'image/webp',
-      // Documents
-      'application/pdf',
-      'text/plain',
-      'text/csv',
-      'text/markdown',
-      // Office
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
-      'application/msword', // .doc
-      'application/vnd.ms-excel', // .xls
-      // Data
-      'application/json',
-      'application/xml',
-      // Certificate files
-      // SECURITY NOTE: PEM files can contain sensitive private keys alongside certificates.
-      // Ensure upload handling includes appropriate security measures.
-      ...CERTIFICATE_MIME_TYPES,
-    ];
+    // Blocked file extensions (security blocklist approach — all types allowed except dangerous ones)
+    const blockedExtensions = new Set(DANGEROUS_EXTENSIONS.map(ext => ext.toLowerCase()));
 
     // Validate base64 string
     const isValidBase64 = (str: string): boolean => {
@@ -676,16 +653,16 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       const files = event.target.files;
       if (!files || files.length === 0) return;
 
-      // Filter files to only include allowed types
+      // Filter out dangerous file types (blocklist approach)
       const validFiles = Array.from(files).filter(file => {
-        return allowedFileTypes.includes(file.type);
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        return !ext || !blockedExtensions.has(`.${ext}`);
       });
 
       if (validFiles.length === 0) {
-        toast.error(
-          'Please select valid file types (images, PDF, text, office documents, or data files).',
-          { duration: 3000 },
-        );
+        toast.error('The selected file type is not allowed for security reasons.', {
+          duration: 3000,
+        });
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
@@ -806,14 +783,16 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     // Helper function to process and add files (shared by file input and drag/drop)
     const handleFilesAdded = useCallback(
       async (files: File[]): Promise<void> => {
-        // Filter files to only include allowed types
-        const validFiles = files.filter(file => allowedFileTypes.includes(file.type));
+        // Filter out dangerous file types (blocklist approach)
+        const validFiles = files.filter(file => {
+          const ext = file.name.split('.').pop()?.toLowerCase();
+          return !ext || !blockedExtensions.has(`.${ext}`);
+        });
 
         if (validFiles.length === 0) {
-          toast.error(
-            'Please select valid file types (images, PDF, text, office documents, or data files).',
-            { duration: 3000 },
-          );
+          toast.error('The selected file type is not allowed for security reasons.', {
+            duration: 3000,
+          });
           return;
         }
 
@@ -1530,7 +1509,6 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   ref={fileInputRef}
                   type='file'
                   multiple
-                  accept='image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/csv,text/markdown,.docx,.xlsx,.doc,.xls,application/json,application/xml,.pem,.crt,.key,.cer,application/x-pem-file,application/x-x509-ca-cert,application/pkix-cert,application/pkcs8'
                   onChange={e => void handleFileChange(e)}
                   className='hidden'
                   aria-label='Upload files'
