@@ -648,7 +648,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     showLinkPreview &&
     !!previewResult &&
     !canvasId &&
-    !(isMobile && message.senderId === user?.id);
+    !(isMobile && message.senderId === user?.id) &&
+    !isMessageDeleted;
 
   const shouldShowSendToChannel =
     context === 'thread' &&
