@@ -1,6 +1,6 @@
 import { ipcMain, shell, app, BrowserView, BrowserWindow } from 'electron';
 import * as path from 'path';
-import { clearAllCookies, clearBrowserTabsData } from '../services/cookies';
+import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
@@ -32,6 +32,14 @@ export function setupIpcHandlers(): void {
     // Return absolute path to webview preload script
     const preloadPath = path.join(__dirname, 'webview-preload.js');
     event.returnValue = preloadPath;
+  });
+
+  // Copy Xyne auth cookies from defaultSession to the persist:xyne-spaces
+  // partition before opening a Xyne URL in the browser panel. Called by the
+  // renderer (CMD+click / open-in-panel flow) right before dispatching the
+  // browserPanelActor OPEN event.
+  ipcMain.handle('sync-xyne-cookies-to-browser-panel', async (_event, url: string) => {
+    await syncXyneCookiesToBrowserPanel(url);
   });
 
   // Code Server IPC handlers

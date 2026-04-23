@@ -232,7 +232,10 @@ const ConversationPanelV2 = ({
         />
         <div className='flex-1 flex flex-col overflow-hidden pt-16 [@media(min-width:500px)]:pt-0'>
           {tab === 'messages' && (
-            <div ref={dragAndDropAreaRef} className='flex-1 flex flex-col overflow-hidden relative'>
+            <div
+              ref={dragAndDropAreaRef}
+              className='flex-1 flex flex-col overflow-hidden relative bg-background'
+            >
               <DragAndDropOverlay isVisible={isDragging} />
               {urlConversationId && !urlCreatedAt ? (
                 <div className='absolute inset-0 flex items-center justify-center bg-background z-50'>

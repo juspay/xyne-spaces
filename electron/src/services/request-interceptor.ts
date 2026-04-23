@@ -42,6 +42,62 @@ function setupDownloadHandler(): void {
 }
 
 /**
+ * Sets up a User-Agent rewrite on the `persist:xyne-spaces` partition — the
+ * session used by Xyne-internal tabs inside the browser panel.
+ *
+ * Why: `authV2Controller.detectPlatform` classifies a request as `electron`
+ * when the UA contains "electron". If auth ever has to run inside this
+ * partition (cookie sync missed a refresh, manual logout, etc.), stripping
+ * the "Electron/x.y.z" token flips the backend to the web branch so
+ * Set-Cookie + redirect completes inside the panel instead of bouncing
+ * through `/launch` → `xyne-spaces://` and hijacking the main window.
+ *
+ * External sites live in `persist:browser-tabs` — they are untouched.
+ *
+ * Contract: do NOT attach an `X-Platform: electron` header to this
+ * session — that would bypass the UA strip and reintroduce the hijack.
+ */
+export function setupXyneSpacesInterceptor(): void {
+  const xyneSpacesSession = session.fromPartition('persist:xyne-spaces');
+
+  const xyneOriginUrls = [
+    config.BACKEND_URL,
+    config.FRONTEND_URL,
+    config.MTLS_BACKEND_URL,
+    config.MTLS_FRONTEND_URL,
+  ]
+    .filter((url): url is string => typeof url === 'string' && url.length > 0)
+    .map((url) => `${url}/*`);
+
+  if (xyneOriginUrls.length === 0) {
+    return;
+  }
+
+  xyneSpacesSession.webRequest.onBeforeSendHeaders(
+    { urls: xyneOriginUrls },
+    (details, callback) => {
+      const ua = (details.requestHeaders['User-Agent'] as string | undefined) ?? '';
+      const cleanedUa = ua
+        .replace(/\s?Electron\/\S+/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (cleanedUa === ua) {
+        callback({ requestHeaders: details.requestHeaders });
+        return;
+      }
+
+      callback({
+        requestHeaders: {
+          ...details.requestHeaders,
+          'User-Agent': cleanedUa,
+        },
+      });
+    }
+  );
+}
+
+/**
  * Sets up request and response interception
  */
 export function setupRequestInterceptor(): void {

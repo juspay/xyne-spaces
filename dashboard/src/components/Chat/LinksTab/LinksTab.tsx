@@ -224,7 +224,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
   };
 
   return (
-    <div className='flex flex-col h-full'>
+    <div className='flex flex-col h-full bg-background'>
       {/* Header */}
       <div className='flex items-center justify-between p-4 border-b border-border bg-card'>
         <div>

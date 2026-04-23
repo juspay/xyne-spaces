@@ -9,7 +9,13 @@ export interface ScreenSource {
 export interface ElectronAPI {
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
+  // Only exposed by the webview preload (`electron/src/webview-preload.js`),
+  // not by the main preload. Presence of this function is used to detect
+  // "we're rendering inside the browser-panel webview" — see
+  // `dashboard/src/hooks/useIsInPanelWebview.ts`.
+  sendToHost?: (channel: string, data?: unknown) => void;
   clearAllCookies: () => void;
+  syncXyneCookiesToBrowserPanel?: (url: string) => Promise<void>;
   setBadgeCount: (count: number) => void;
   showNotification: (data: { title: string; body: string; actionUrl?: string }) => void;
   showCallNotification: (data: {

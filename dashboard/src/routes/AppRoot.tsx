@@ -39,6 +39,7 @@ import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCall
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
 import { CallFromRecentsHandler } from '../components/CallFromRecentsHandler/CallFromRecentsHandler';
 import { usePlatform } from '../hooks/usePlatform';
+import { useIsInPanelWebview } from '../hooks/useIsInPanelWebview';
 import { roomActor } from '../machines/roomMachine';
 import ChatView from '../components/Chat/ChatView/ChatView';
 import {
@@ -268,6 +269,7 @@ const AppRoot = (): ReactElement => {
   const xyneAIThreadInfo = useSelector(xyneAIActor, state => state.context.threadInfo);
   const xyneAIStartFreshChat = useSelector(xyneAIActor, state => state.context.startFreshChat);
   const { isMobile } = usePlatform();
+  const isInPanelWebview = useIsInPanelWebview();
 
   // Get current location to check if we're on onboarding or vscode
   const location = useLocation();
@@ -419,7 +421,15 @@ const AppRoot = (): ReactElement => {
                     onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
                   />
                 )}
-                {isOnboarding ? (
+                {isInPanelWebview ? (
+                  // Inside the browser-panel webview — render only the route
+                  // content. No GlobalTopBar / AppSidebar / right panels /
+                  // ChatDirectory; see useIsInPanelWebview and the doc there.
+                  <main className='flex-1 h-screen'>
+                    <EditWarningModal />
+                    <Outlet />
+                  </main>
+                ) : isOnboarding ? (
                   // Onboarding screen - full width without sidebar
                   <main className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}>
                     <EditWarningModal />
@@ -563,21 +573,29 @@ const AppRoot = (): ReactElement => {
                     </PanelGroup>
                   </div>
                 )}
-                <IncomingCallModal />
-                <GlobalCallOverlay />
-                <RecordingOverlay />
-                <NotificationHandler />
-                <CallFromRecentsHandler />
-                <BrowserPanelHandler />
+                {/* Global overlays and IPC handlers — skipped in the panel
+                    webview (we don't want nested CMDK, nested browser panel,
+                    duplicated call UIs, etc. inside the embedded view).
+                    AttachmentGalleryModal stays because it's triggered by
+                    attachments inside the conversation itself. */}
+                {!isInPanelWebview && (
+                  <>
+                    <IncomingCallModal />
+                    <GlobalCallOverlay />
+                    <RecordingOverlay />
+                    <NotificationHandler />
+                    <CallFromRecentsHandler />
+                    <BrowserPanelHandler />
+                    <GlobalCommandMenu />
+                    <ShortcutsHelpModal
+                      isOpen={isShortcutsModalOpen}
+                      onClose={() => setIsShortcutsModalOpen(false)}
+                    />
+                  </>
+                )}
                 <AttachmentGalleryModal />
-                <AttachmentCitationPreview />
-                <GlobalCommandMenu />
-                <ShortcutsHelpModal
-                  isOpen={isShortcutsModalOpen}
-                  onClose={() => setIsShortcutsModalOpen(false)}
-                />
                 {/* XyneAI Mobile Drawer */}
-                {isMobile && (
+                {isMobile && !isInPanelWebview && (
                   <Drawer
                     open={xyneAIState.matches('open')}
                     onOpenChange={open => {

@@ -99,3 +99,65 @@ export async function clearBrowserTabsData(): Promise<void> {
     console.error('Failed to clear browser tabs data:', error);
   }
 }
+
+/**
+ * Partition used exclusively for tabs loading Xyne-internal URLs inside the
+ * browser panel. Keeping it separate from `persist:browser-tabs` (used for
+ * arbitrary external sites) ensures our auth cookies are never present in the
+ * same jar as untrusted third-party sites.
+ */
+const XYNE_SPACES_PARTITION = 'persist:xyne-spaces';
+
+/**
+ * Copies the main-app auth cookies for a given Xyne origin from the default
+ * session into the `persist:xyne-spaces` partition. This is what lets a Xyne
+ * URL opened in the browser panel inherit the main window's sign-in state
+ * without forcing the user to log in again.
+ *
+ * Contract: only called with URLs we control (Xyne origins). The cookie copy
+ * preserves the original attributes (domain, path, secure, httpOnly, sameSite,
+ * expirationDate), so Chromium still enforces domain/sameSite scoping — these
+ * cookies cannot leak to any non-Xyne requests.
+ */
+export async function syncXyneCookiesToBrowserPanel(xyneUrl: string): Promise<void> {
+  let origin: string;
+  try {
+    origin = new URL(xyneUrl).origin;
+  } catch (error) {
+    console.warn('[syncXyneCookiesToBrowserPanel] Invalid URL:', xyneUrl, error);
+    return;
+  }
+
+  try {
+    const src = session.defaultSession;
+    const dst = session.fromPartition(XYNE_SPACES_PARTITION);
+    const cookies = await src.cookies.get({ url: origin });
+    await Promise.all(
+      cookies.map((cookie) =>
+        dst.cookies
+          .set({
+            url: origin,
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            secure: cookie.secure,
+            httpOnly: cookie.httpOnly,
+            sameSite: cookie.sameSite,
+            ...(cookie.expirationDate !== undefined && {
+              expirationDate: cookie.expirationDate,
+            }),
+          })
+          .catch((error) => {
+            console.error(
+              '[syncXyneCookiesToBrowserPanel] Failed to set cookie:',
+              cookie.name,
+              error,
+            );
+          }),
+      ),
+    );
+  } catch (error) {
+    console.error('[syncXyneCookiesToBrowserPanel] Failed:', error);
+  }
+}

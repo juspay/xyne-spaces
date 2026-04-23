@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import {
   ArrowLeft,
@@ -13,10 +13,13 @@ import {
   Minimize2,
   ChevronUp,
   ChevronDown,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { isElectronApp } from '../../utils/electronApp';
 import { browserPanelActor, type BrowserTab } from '../../machines/browserPanelMachine';
+import { pickWebviewPartition } from '../../utils/browserPanelPartition';
 import { useActivityTracking } from '../../hooks/useActivityTracking';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { BrowserSettingsMenu } from '../../components/BrowserPanel/BrowserSettingsMenu';
@@ -104,15 +107,20 @@ function WebviewTab({
     if (!wv) return;
     webviewRefs.current[tab.id] = wv;
 
+    // Electron's webview tag puts event payload directly on the event
+    // object (not in `.detail`). Accept both shapes for safety.
     const onTitle = (e: Event) => {
-      const detail = (e as CustomEvent<{ title: string }>).detail;
-      if (detail?.title) {
-        onUpdate(tab.id, { title: detail.title });
+      const direct = (e as Event & { title?: string }).title;
+      const detailTitle = (e as CustomEvent<{ title?: string }>).detail?.title;
+      const title = direct || detailTitle;
+      if (title) {
+        onUpdate(tab.id, { title });
       }
     };
     const onFavicon = (e: Event) => {
-      const detail = (e as CustomEvent<{ favicons: string[] }>).detail;
-      const favicon = detail?.favicons?.[0];
+      const direct = (e as Event & { favicons?: string[] }).favicons?.[0];
+      const detailFavicon = (e as CustomEvent<{ favicons?: string[] }>).detail?.favicons?.[0];
+      const favicon = direct ?? detailFavicon;
       if (favicon !== undefined) {
         onUpdate(tab.id, { favicon: favicon || undefined });
       }
@@ -216,10 +224,17 @@ function WebviewTab({
     };
   }, [tab.id]);
 
+  // Partition is chosen from the tab's initial URL: Xyne origins load in the
+  // dedicated `persist:xyne-spaces` partition (where auth cookies are synced
+  // from the main session) so the panel inherits the user's sign-in.
+  // Everything else stays in `persist:browser-tabs` — Xyne cookies never
+  // enter that jar, so external sites cannot see them.
+  const partitionRef = useRef(pickWebviewPartition(tab.url));
+
   const webviewProps: Record<string, unknown> = {
     ref,
     src: initialUrlRef.current,
-    partition: 'persist:browser-tabs',
+    partition: partitionRef.current,
     // Always allow popups so we can intercept them via new-window event
     // Popup blocking is handled in the new-window event handler
     allowpopups: '',
@@ -252,6 +267,7 @@ export function BrowserTabsScreen({
   const browserSettings = useSelector(browserPanelActor, state => state.context.browserSettings);
   const [urlInput, setUrlInput] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [areControlsVisible, setAreControlsVisible] = useState(false);
   const [isFindBarOpen, setIsFindBarOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
   const [findResults, setFindResults] = useState({ activeMatch: 0, matches: 0 });
@@ -543,129 +559,153 @@ export function BrowserTabsScreen({
 
   return (
     <div className='flex flex-col h-full bg-background md:rounded-2xl overflow-hidden shadow-md'>
-      {/* Header with close button (panel mode only) */}
-      {isPanel ? (
-        <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>
-          <div className='flex items-center gap-2'>
-            <Globe size={16} className='text-muted-foreground' />
-            <span className='text-sm font-medium text-foreground'>Browser</span>
-          </div>
-          <div className='flex items-center gap-1'>
-            <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
-            <button
-              onClick={handleOpenFullscreen}
-              className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-              title='Open in fullscreen browser'
-              data-track-category='BROWSER'
-              data-track-name='OpenFullscreenBrowser'
-              data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
-            >
-              <Maximize2 size={14} />
-            </button>
-            {activeTab && (
+      {/* Header with close button (panel mode only) — gated by the Eye toggle
+          next to the + button so the user can collapse the chrome down to just
+          the tab strip. */}
+      {areControlsVisible &&
+        (isPanel ? (
+          <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>
+            <div className='flex items-center gap-2'>
+              <Globe size={16} className='text-muted-foreground' />
+              <span className='text-sm font-medium text-foreground'>Browser</span>
+            </div>
+            <div className='flex items-center gap-1'>
+              <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
               <button
-                onClick={handleOpenExternal}
+                onClick={handleOpenFullscreen}
                 className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-                title='Open in system browser'
+                title='Open in fullscreen browser'
                 data-track-category='BROWSER'
-                data-track-name='OpenInSystemBrowser'
-                data-track-metadata={JSON.stringify({ url: activeTab.url })}
+                data-track-name='OpenFullscreenBrowser'
+                data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
               >
-                <ExternalLink size={14} />
+                <Maximize2 size={14} />
               </button>
-            )}
-            <button
-              onClick={handleClosePanel}
-              className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-              title='Close browser panel'
-              data-track-category='BROWSER'
-              data-track-name='CloseBrowserPanel'
-              data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>
-          <div className='flex items-center gap-2'>
-            <Globe size={18} className='text-muted-foreground' />
-            <span className='text-base font-medium text-foreground'>Browser</span>
-          </div>
-          <div className='flex items-center gap-1'>
-            <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
-            <button
-              onClick={handleMinimizeToPanel}
-              className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-              title='Minimize to docked panel'
-              data-track-category='BROWSER'
-              data-track-name='MinimizeToDocked'
-              data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
-            >
-              <Minimize2 size={16} />
-            </button>
-            {activeTab && (
+              {activeTab && (
+                <button
+                  onClick={handleOpenExternal}
+                  className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
+                  title='Open in system browser'
+                  data-track-category='BROWSER'
+                  data-track-name='OpenInSystemBrowser'
+                  data-track-metadata={JSON.stringify({ url: activeTab.url })}
+                >
+                  <ExternalLink size={14} />
+                </button>
+              )}
               <button
-                onClick={handleOpenExternal}
+                onClick={handleClosePanel}
                 className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
-                title='Open in system browser'
+                title='Close browser panel'
                 data-track-category='BROWSER'
-                data-track-name='OpenInSystemBrowser'
-                data-track-metadata={JSON.stringify({ url: activeTab.url })}
+                data-track-name='CloseBrowserPanel'
+                data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
               >
-                <ExternalLink size={16} />
+                <X size={16} />
               </button>
-            )}
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className='flex items-center justify-between px-3 py-2 bg-muted border-b border-border'>
+            <div className='flex items-center gap-2'>
+              <Globe size={18} className='text-muted-foreground' />
+              <span className='text-base font-medium text-foreground'>Browser</span>
+            </div>
+            <div className='flex items-center gap-1'>
+              <BrowserSettingsMenu isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
+              <button
+                onClick={handleMinimizeToPanel}
+                className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
+                title='Minimize to docked panel'
+                data-track-category='BROWSER'
+                data-track-name='MinimizeToDocked'
+                data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
+              >
+                <Minimize2 size={16} />
+              </button>
+              {activeTab && (
+                <button
+                  onClick={handleOpenExternal}
+                  className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
+                  title='Open in system browser'
+                  data-track-category='BROWSER'
+                  data-track-name='OpenInSystemBrowser'
+                  data-track-metadata={JSON.stringify({ url: activeTab.url })}
+                >
+                  <ExternalLink size={16} />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
 
       {/* Tab Bar */}
-      <div className='flex items-center bg-muted border-b border-border px-2 py-1 gap-1'>
-        <div className='flex-1 flex items-center gap-1 overflow-x-auto no-scrollbar'>
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => handleSwitchTab(tab.id)}
-              className={`flex items-center gap-2 rounded-md group transition-colors ${
-                isPanel
-                  ? 'px-2 py-1 text-xs max-w-[160px] min-w-[80px]'
-                  : 'px-3 py-1.5 text-sm max-w-[200px] min-w-[120px]'
-              } ${
-                tab.id === activeTabId
-                  ? 'bg-background shadow-sm text-foreground'
-                  : 'text-muted-foreground hover:bg-border'
-              }`}
-              data-track-category='BROWSER'
-              data-track-name='SwitchTab'
-              data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
-            >
-              {tab.isLoading ? (
-                <Loader2 size={isPanel ? 12 : 14} className='animate-spin flex-shrink-0' />
-              ) : tab.favicon ? (
-                <img
-                  src={tab.favicon}
-                  alt=''
-                  className={isPanel ? 'w-3 h-3 flex-shrink-0' : 'w-4 h-4 flex-shrink-0'}
-                  onError={e => {
-                    (e.target as HTMLImageElement).style.display = 'none';
-                  }}
-                />
-              ) : (
-                <Globe size={isPanel ? 12 : 14} className='flex-shrink-0 text-muted-foreground' />
-              )}
-              <span className='truncate flex-1 text-left'>{tab.title}</span>
-              <button
-                onClick={e => handleCloseTab(tab.id, e)}
-                className='opacity-0 group-hover:opacity-100 p-0.5 hover:bg-muted-foreground/50 rounded transition-opacity'
-                data-track-category='BROWSER'
-                data-track-name='CloseTab'
-                data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
-              >
-                <X size={isPanel ? 10 : 12} />
-              </button>
-            </button>
-          ))}
+      <div className='flex items-center bg-muted border-b border-border px-2 py-0.5 gap-2'>
+        <div className='flex-1 flex items-center gap-0.5 overflow-x-auto no-scrollbar'>
+          {tabs.map((tab, index) => {
+            const isActive = tab.id === activeTabId;
+            const prevTab = tabs[index - 1];
+            const isPrevActive = !!prevTab && prevTab.id === activeTabId;
+            // Browser-style vertical divider between adjacent non-active
+            // tabs; suppressed when either side is the active pill.
+            const showDivider = index > 0 && !isActive && !isPrevActive;
+            return (
+              <Fragment key={tab.id}>
+                {showDivider && (
+                  <div
+                    aria-hidden='true'
+                    className='w-px h-4 bg-border/70 self-center flex-shrink-0'
+                  />
+                )}
+                <button
+                  onClick={() => handleSwitchTab(tab.id)}
+                  className={`flex items-center gap-2 rounded-sm group transition-colors ${
+                    isPanel
+                      ? 'px-3 py-2 text-xs max-w-[200px] min-w-[120px]'
+                      : 'px-4 py-2.5 text-sm max-w-[240px] min-w-[160px]'
+                  } ${
+                    isActive
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground hover:bg-background/50'
+                  }`}
+                  data-track-category='BROWSER'
+                  data-track-name='SwitchTab'
+                  data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
+                >
+                  {tab.isLoading ? (
+                    <Loader2
+                      size={isPanel ? 14 : 16}
+                      className='animate-spin flex-shrink-0 text-muted-foreground'
+                    />
+                  ) : tab.favicon ? (
+                    <img
+                      src={tab.favicon}
+                      alt=''
+                      className={isPanel ? 'w-4 h-4 flex-shrink-0' : 'w-5 h-5 flex-shrink-0'}
+                      onError={e => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <Globe
+                      size={isPanel ? 14 : 16}
+                      className='flex-shrink-0 text-muted-foreground'
+                    />
+                  )}
+                  <span className='truncate flex-1 text-left font-medium'>{tab.title}</span>
+                  <button
+                    onClick={e => handleCloseTab(tab.id, e)}
+                    className='p-0.5 hover:bg-muted-foreground/20 rounded transition-colors flex-shrink-0'
+                    data-track-category='BROWSER'
+                    data-track-name='CloseTab'
+                    data-track-metadata={JSON.stringify({ tabId: tab.id, url: tab.url })}
+                  >
+                    <X size={isPanel ? 12 : 14} />
+                  </button>
+                </button>
+              </Fragment>
+            );
+          })}
         </div>
         <button
           onClick={() => handleCreateTab('https://www.google.com')}
@@ -677,68 +717,101 @@ export function BrowserTabsScreen({
         >
           <Plus size={isPanel ? 14 : 16} />
         </button>
+        <button
+          onClick={() => setAreControlsVisible(v => !v)}
+          className={`p-1.5 rounded-md hover:bg-border ${
+            areControlsVisible ? 'text-foreground' : 'text-muted-foreground'
+          }`}
+          title={areControlsVisible ? 'Hide browser controls' : 'Show browser controls'}
+          aria-pressed={areControlsVisible}
+          data-track-category='BROWSER'
+          data-track-name='ToggleBrowserControls'
+        >
+          {areControlsVisible ? (
+            <EyeOff size={isPanel ? 14 : 16} />
+          ) : (
+            <Eye size={isPanel ? 14 : 16} />
+          )}
+        </button>
+        {/* Keep the close button reachable when the header is collapsed so
+            the user can still dismiss the browser panel. In the expanded
+            state the header already has its own close button. */}
+        {isPanel && !areControlsVisible && (
+          <button
+            onClick={handleClosePanel}
+            className='p-1.5 rounded-md hover:bg-border text-muted-foreground'
+            title='Close browser panel'
+            data-track-category='BROWSER'
+            data-track-name='CloseBrowserPanel'
+            data-track-metadata={JSON.stringify({ urls: tabs.map(t => t.url) })}
+          >
+            <X size={isPanel ? 14 : 16} />
+          </button>
+        )}
       </div>
 
       {/* URL Bar */}
-      <div
-        className={`flex items-center bg-muted border-b border-border ${
-          isPanel ? 'gap-1.5 px-2 py-1.5' : 'gap-2 px-3 py-2'
-        }`}
-      >
-        <button
-          onClick={handleGoBack}
-          disabled={!activeTab?.canGoBack}
-          className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
-          title='Go back'
-          data-track-category='BROWSER'
-          data-track-name='GoBack'
-          data-track-metadata={JSON.stringify({ url: activeTab?.url })}
+      {areControlsVisible && (
+        <div
+          className={`flex items-center bg-muted border-b border-border ${
+            isPanel ? 'gap-1.5 px-2 py-1.5' : 'gap-2 px-3 py-2'
+          }`}
         >
-          <ArrowLeft size={isPanel ? 14 : 16} />
-        </button>
-        <button
-          onClick={handleGoForward}
-          disabled={!activeTab?.canGoForward}
-          className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
-          title='Go forward'
-          data-track-category='BROWSER'
-          data-track-name='GoForward'
-          data-track-metadata={JSON.stringify({ url: activeTab?.url })}
-        >
-          <ArrowRight size={isPanel ? 14 : 16} />
-        </button>
-        <button
-          onClick={handleReload}
-          disabled={!activeTabId}
-          className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
-          title='Reload'
-          data-track-category='BROWSER'
-          data-track-name='ReloadPage'
-          data-track-metadata={JSON.stringify({ url: activeTab?.url })}
-        >
-          {activeTab?.isLoading ? (
-            <Loader2 size={isPanel ? 14 : 16} className='animate-spin' />
-          ) : (
-            <RotateCw size={isPanel ? 14 : 16} />
-          )}
-        </button>
-
-        <form onSubmit={handleNavigate} className='flex-1'>
-          <input
-            type='text'
-            value={urlInput}
-            onChange={e => setUrlInput(e.target.value)}
-            placeholder='Enter a URL or search...'
-            className={`w-full bg-background border border-input rounded-md focus:outline-none focus:border-transparent ${
-              isPanel
-                ? 'px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500'
-                : 'px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500'
-            }`}
+          <button
+            onClick={handleGoBack}
+            disabled={!activeTab?.canGoBack}
+            className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
+            title='Go back'
             data-track-category='BROWSER'
-            data-track-name='EditUrlBar'
-          />
-        </form>
-      </div>
+            data-track-name='GoBack'
+            data-track-metadata={JSON.stringify({ url: activeTab?.url })}
+          >
+            <ArrowLeft size={isPanel ? 14 : 16} />
+          </button>
+          <button
+            onClick={handleGoForward}
+            disabled={!activeTab?.canGoForward}
+            className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
+            title='Go forward'
+            data-track-category='BROWSER'
+            data-track-name='GoForward'
+            data-track-metadata={JSON.stringify({ url: activeTab?.url })}
+          >
+            <ArrowRight size={isPanel ? 14 : 16} />
+          </button>
+          <button
+            onClick={handleReload}
+            disabled={!activeTabId}
+            className='p-1 rounded-md hover:bg-border disabled:opacity-30 disabled:cursor-not-allowed'
+            title='Reload'
+            data-track-category='BROWSER'
+            data-track-name='ReloadPage'
+            data-track-metadata={JSON.stringify({ url: activeTab?.url })}
+          >
+            {activeTab?.isLoading ? (
+              <Loader2 size={isPanel ? 14 : 16} className='animate-spin' />
+            ) : (
+              <RotateCw size={isPanel ? 14 : 16} />
+            )}
+          </button>
+
+          <form onSubmit={handleNavigate} className='flex-1'>
+            <input
+              type='text'
+              value={urlInput}
+              onChange={e => setUrlInput(e.target.value)}
+              placeholder='Enter a URL or search...'
+              className={`w-full bg-background border border-input rounded-md focus:outline-none focus:border-transparent ${
+                isPanel
+                  ? 'px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500'
+                  : 'px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500'
+              }`}
+              data-track-category='BROWSER'
+              data-track-name='EditUrlBar'
+            />
+          </form>
+        </div>
+      )}
 
       {/* Browser Content Area - webview elements render as real DOM */}
       <div className='flex-1 bg-muted relative overflow-hidden'>
