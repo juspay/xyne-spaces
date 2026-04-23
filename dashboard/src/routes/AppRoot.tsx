@@ -982,7 +982,11 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'inspector',
-                element: <Inspector />,
+                element: (
+                  <ResourceProtectedRoute resourceName='INSPECTOR'>
+                    <Inspector />
+                  </ResourceProtectedRoute>
+                ),
               },
               {
                 path: 'resource-access',
