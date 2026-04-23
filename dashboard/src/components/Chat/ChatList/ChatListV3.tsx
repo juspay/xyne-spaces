@@ -196,7 +196,24 @@ const ChatListV3: React.FC<ChatListProps> = ({
     useState<NewConversationBoundary | null>(null);
 
   const [initialTopMostItemIndex, setInitialTopMostItemIndex] = useState<VirtuosoIndex | null>(
-    !linkedItemCreatedAt && cachedConversations.length > 0 ? { index: 'LAST', align: 'end' } : null,
+    () => {
+      if (cachedConversations.length === 0) return null;
+
+      if (linkedItemCreatedAt && linkedConversationId) {
+        // Activity/deep link: skip loader if conversation exists in cache
+        const idx = cachedConversations.findIndex(c => c.conversationId === linkedConversationId);
+        if (idx !== -1) {
+          const isLast = idx === cachedConversations.length - 1;
+          return {
+            index: isLast ? firstItemIndex + idx : idx,
+            align: isLast ? ('end' as const) : ('center' as const),
+          };
+        }
+        return null;
+      }
+
+      return { index: 'LAST' as const, align: 'end' as const };
+    },
   );
   const initialLinkedIdRef = useRef(linkedConversationId);
 
