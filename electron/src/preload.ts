@@ -14,6 +14,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.send('clear-all-cookies');
   },
 
+  // Mirrors the main session's Xyne cookies into the `persist:xyne-spaces`
+  // partition (used only by Xyne-origin tabs inside the browser panel) so the
+  // panel inherits the main-app sign-in. Safe to call with any Xyne URL —
+  // cookie domain/sameSite attributes are preserved and enforced by Chromium.
+  syncXyneCookiesToBrowserPanel: (url: string): Promise<void> => {
+    return ipcRenderer.invoke('sync-xyne-cookies-to-browser-panel', url);
+  },
+
   setBadgeCount: (count: number) => {
     ipcRenderer.send('set-badge-count', count);
   },

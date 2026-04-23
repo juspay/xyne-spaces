@@ -118,7 +118,10 @@ const FileListV2: React.FC<FileListProps> = ({ channelId }) => {
   }, [scrollRange, attachements]);
 
   return (
-    <div data-component='FileListV2' className='flex-1 relative no-scrollbar min-h-0 px-4'>
+    <div
+      data-component='FileListV2'
+      className='flex-1 relative no-scrollbar min-h-0 px-4 bg-background'
+    >
       <Virtuoso
         data={attachements}
         style={{ height: '100%' }}

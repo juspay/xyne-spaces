@@ -52,7 +52,8 @@ import {
   buildContextItemFromChannel,
 } from '../ThreadContextPanel/contextItem.utils';
 import { ChannelCategory } from './ChatDirectory.types';
-import { navigateToSearchResult } from '../../../utils/searchNavigation';
+import { navigateToSearchResult, openSearchResult } from '../../../utils/searchNavigation';
+import { isElectronApp } from '../../../utils/electronApp';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { useUsers, useUserSearch } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
@@ -106,6 +107,7 @@ const ChannelCommandItem = ({
   currentUserID,
   unreadCount,
   onSelect,
+  onItemMouseDown,
   getChannelIcon,
   isSelected = false,
 }: {
@@ -113,6 +115,7 @@ const ChannelCommandItem = ({
   currentUserID: string;
   unreadCount: number;
   onSelect: (displayName: string) => void;
+  onItemMouseDown?: (e: React.MouseEvent) => void;
   getChannelIcon: (channel: Channel) => ReactElement;
   isSelected?: boolean;
 }): ReactElement | null => {
@@ -127,6 +130,7 @@ const ChannelCommandItem = ({
       key={channel.id}
       value={`channel-${channel.id}-${displayName}`}
       onSelect={() => onSelect(displayName)}
+      onMouseDownCapture={onItemMouseDown}
       className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer mt-1 ${!isMobile && 'aria-selected:bg-muted'}`}
       style={{ WebkitTapHighlightColor: 'transparent' }}
     >
@@ -179,6 +183,11 @@ const ChannelCommandMenu = ({
   const navigate = useNavigate();
   const channelData = useAllChannels();
   const commandRef = useRef<HTMLDivElement>(null);
+  // Tracks whether the most recent activation gesture (mouse or keyboard)
+  // carried a Cmd/Ctrl modifier. cmdk's onSelect strips the event and a
+  // synthetic .click() strips modifier flags, so we prime this ref from
+  // onMouseDownCapture and from the Enter branch of handleCommandKeyDown.
+  const lastModifierRef = useRef<boolean>(false);
 
   useScope('command', open);
 
@@ -863,6 +872,7 @@ const ChannelCommandMenu = ({
 
       // Reset the previous search text refs
       prevSearchTextRef.current = '';
+      lastModifierRef.current = false;
 
       if (searchSessionId) {
         onClose();
@@ -882,11 +892,17 @@ const ChannelCommandMenu = ({
     });
   };
 
-  const handleChannelSelect = (
+  const consumeModifier = (): boolean => {
+    const modifier = lastModifierRef.current;
+    lastModifierRef.current = false;
+    return modifier && !isMobile;
+  };
+
+  const handleChannelSelect = async (
     channel: Channel,
     displayName: string,
     rankPosition?: number,
-  ): void => {
+  ): Promise<void> => {
     if (contextSelectionMode && onContextItemToggle) {
       onContextItemToggle(buildContextItemFromChannel(channel, displayName));
       return;
@@ -901,6 +917,18 @@ const ChannelCommandMenu = ({
       channel.id,
       route,
     );
+
+    if (consumeModifier()) {
+      const channelResult = { id: channel.id, type: 'channel' } as DisplaySearchResult;
+      await openSearchResult(
+        channelResult,
+        { modifier: true, isElectron: isElectronApp(), isMobile },
+        navigate,
+        channelData || [],
+      );
+      onOpenChange(false);
+      return;
+    }
 
     void navigate(route);
     onOpenChange(false);
@@ -920,12 +948,27 @@ const ChannelCommandMenu = ({
       onResultClick(result, rankPosition, result.searchContext?.channelId);
     }
 
+    const useModifier = consumeModifier();
+
     try {
-      await navigateToSearchResult(result, navigate, channelData || []);
+      if (useModifier) {
+        await openSearchResult(
+          result,
+          { modifier: true, isElectron: isElectronApp(), isMobile },
+          navigate,
+          channelData || [],
+        );
+      } else {
+        await navigateToSearchResult(result, navigate, channelData || []);
+      }
       onOpenChange(false);
     } catch (err) {
       console.error('Navigation failed:', err);
     }
+  };
+
+  const handleItemMouseDown = (e: React.MouseEvent): void => {
+    lastModifierRef.current = e.metaKey || e.ctrlKey;
   };
 
   const handleFilePreview = useCallback((result: DisplaySearchResult): void => {
@@ -1151,6 +1194,7 @@ const ChannelCommandMenu = ({
                     result={result}
                     onSelect={res => handleBackendResultSelect(res, index + 1)}
                     onPreview={handleFilePreview}
+                    onItemMouseDown={handleItemMouseDown}
                     isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
                   />
                 ))}
@@ -1221,6 +1265,7 @@ const ChannelCommandMenu = ({
                     result={result}
                     onSelect={res => handleBackendResultSelect(res, index + 1)}
                     onPreview={handleFilePreview}
+                    onItemMouseDown={handleItemMouseDown}
                     isSelected={contextItems.some(c => c.id === `${result.type}-${result.id}`)}
                   />
                 ))}
@@ -1291,9 +1336,10 @@ const ChannelCommandMenu = ({
                         channel={channel}
                         currentUserID={currentUserID}
                         unreadCount={unreadCount}
-                        onSelect={displayName =>
-                          handleChannelSelect(channel, displayName, index + 1)
-                        }
+                        onSelect={displayName => {
+                          void handleChannelSelect(channel, displayName, index + 1);
+                        }}
+                        onItemMouseDown={handleItemMouseDown}
                         getChannelIcon={getChannelIcon}
                         isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                       />
@@ -1361,6 +1407,7 @@ const ChannelCommandMenu = ({
                       key={item.id}
                       result={item}
                       onSelect={res => handleBackendResultSelect(res, index + 1)}
+                      onItemMouseDown={handleItemMouseDown}
                       isSelected={contextItems.some(c => c.id === `${item.type}-${item.id}`)}
                     />
                   ))}
@@ -1411,7 +1458,10 @@ const ChannelCommandMenu = ({
                       channel={channel}
                       currentUserID={currentUserID}
                       unreadCount={unreadCount}
-                      onSelect={displayName => handleChannelSelect(channel, displayName, index + 1)}
+                      onSelect={displayName => {
+                        void handleChannelSelect(channel, displayName, index + 1);
+                      }}
+                      onItemMouseDown={handleItemMouseDown}
                       getChannelIcon={getChannelIcon}
                       isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                     />
@@ -1450,9 +1500,10 @@ const ChannelCommandMenu = ({
                         channel={channel}
                         currentUserID={currentUserID}
                         unreadCount={unreadCount}
-                        onSelect={displayName =>
-                          handleChannelSelect(channel, displayName, index + 1)
-                        }
+                        onSelect={displayName => {
+                          void handleChannelSelect(channel, displayName, index + 1);
+                        }}
+                        onItemMouseDown={handleItemMouseDown}
                         getChannelIcon={getChannelIcon}
                         isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                       />
@@ -1513,9 +1564,10 @@ const ChannelCommandMenu = ({
                           channel={channel}
                           currentUserID={currentUserID}
                           unreadCount={unreadCount}
-                          onSelect={displayName =>
-                            handleChannelSelect(channel, displayName, index + 1)
-                          }
+                          onSelect={displayName => {
+                            void handleChannelSelect(channel, displayName, index + 1);
+                          }}
+                          onItemMouseDown={handleItemMouseDown}
                           getChannelIcon={getChannelIcon}
                           isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
                         />
@@ -1693,6 +1745,10 @@ const ChannelCommandMenu = ({
       '[cmdk-item][aria-selected="true"]',
     ) as HTMLElement | null;
 
+    // Prime modifier ref before the synthetic .click() — a synthetic click
+    // loses modifier state, so downstream selection handlers read this ref
+    // instead of checking event.metaKey.
+    lastModifierRef.current = e.metaKey || e.ctrlKey;
     activeItem?.click();
   };
 

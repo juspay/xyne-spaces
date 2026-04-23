@@ -4,6 +4,7 @@ import ChatDirectory from '../../components/Chat/ChatDirectory/ChatDirectory';
 import ConversationPrefetcher from '../../components/Chat/ConversationPrefetcher';
 import MobileChatDirectory from '../../components/Chat/ChatDirectory/MobileChatDirectory';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
 import { useResizablePanel } from '../../hooks/useResizablePanel';
 import { useAllVisibleChannels } from '../../hooks/useChannels';
 import {
@@ -22,6 +23,7 @@ interface ChatScreenProps {
 
 const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElement => {
   const { isMobile } = usePlatform();
+  const isInPanelWebview = useIsInPanelWebview();
   const channelData = useAllVisibleChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
   const location = useLocation();
@@ -59,10 +61,19 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
     };
   }, [handleResizeEvent]);
 
-  // For full-screen pages, we don't need the directory sidebar
-  if (isFullScreenPage) {
+  // For full-screen pages — and when rendered inside the browser-panel
+  // webview, where we skip the ChatDirectory column for the same reason the
+  // outer AppRoot chrome is skipped — render only the conversation view.
+  // Drop the rounded corners + shadow in the panel so content stretches
+  // edge-to-edge.
+  if (isFullScreenPage || isInPanelWebview) {
     return (
-      <main className={cn('h-full relative md:rounded-2xl overflow-hidden shadow-md')}>
+      <main
+        className={cn(
+          'h-full relative overflow-hidden',
+          !isInPanelWebview && 'md:rounded-2xl shadow-md',
+        )}
+      >
         <Outlet />
       </main>
     );

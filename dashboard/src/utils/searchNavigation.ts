@@ -9,6 +9,9 @@ import { DisplaySearchResult } from '../types/search';
 import { channelService } from '../services/Chat/channelService';
 import { ChannelScopeType } from '@xyne/shared';
 import { toast } from 'sonner';
+import { browserPanelActor } from '../machines/browserPanelMachine';
+import { xyneAIActor } from '../machines/xyneAIMachine';
+import { isXyneOrigin } from './browserPanelPartition';
 
 /**
  * Channel data interface for navigation
@@ -272,4 +275,227 @@ export const navigateToTicketAttachment = (
   } else {
     navigateToAttachment(result, navigate);
   }
+};
+
+/**
+ * Pure resolution of a search result to its target URL without performing navigation.
+ *
+ * Used by the CMD+click / CMD+Enter flow in CMDK so we can open the result in
+ * the Electron in-app browser panel (or a new web tab) instead of navigating
+ * in place. Kept in sync with the per-type `navigateToX` helpers above.
+ *
+ * - `internal`: a React-Router path within our SPA. Callers prefix
+ *   `window.location.origin` when they need an absolute URL for a webview.
+ * - `external`: an external URL (e.g. Drive/Notion link from an attachment).
+ * - `async-user`: the target is a user DM that does not yet exist and would
+ *   need an async creation call. Callers should fall back to default behavior.
+ */
+type SearchResultTarget =
+  | { kind: 'internal'; path: string; state?: unknown }
+  | { kind: 'external'; url: string }
+  | { kind: 'async-user'; userId: string };
+
+export const computeSearchResultPath = (
+  result: DisplaySearchResult,
+  channelData?: Channel[],
+): SearchResultTarget | null => {
+  switch (result.type) {
+    case 'user': {
+      if (!channelData) return null;
+      const existingDmChannel = channelData.find(
+        channel =>
+          channel.scopeType === ChannelScopeType.DM &&
+          channel.participants?.length === 2 &&
+          channel.participants?.some(p => p.userId === result.id),
+      );
+      if (existingDmChannel) {
+        return { kind: 'internal', path: `/chat/dir/${existingDmChannel.id}` };
+      }
+      return { kind: 'async-user', userId: result.id };
+    }
+    case 'channel':
+      return { kind: 'internal', path: `/chat/dir/${result.id}` };
+    case 'conversation': {
+      const { channelId, messageId, conversationId, replyCount } = result.searchContext || {};
+      if (!channelId) return null;
+      if (replyCount && replyCount > 0) {
+        if (messageId) {
+          return {
+            kind: 'internal',
+            path: `/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
+          };
+        }
+        return {
+          kind: 'internal',
+          path: `/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`,
+        };
+      }
+      return { kind: 'internal', path: `/chat/dir/${channelId}#origin=${conversationId}` };
+    }
+    case 'ticket': {
+      const ticketId = result.searchContext?.ticketId || result.id;
+      const channelId = result.searchContext?.channelId;
+      const conversationId = result.searchContext?.conversationId;
+      if (!channelId || !conversationId) return null;
+      return {
+        kind: 'internal',
+        path: `/chat/dir/${channelId}/${conversationId}/${ticketId}?selectedTab=details`,
+      };
+    }
+    case 'attachment': {
+      const subApp = result.searchContext?.subApp;
+      if (subApp === 'CANVAS') {
+        return { kind: 'internal', path: `/chat/canvas/${result.id}` };
+      }
+      if (subApp === 'TRANSCRIPT') {
+        const { channelId, conversationId } = result.searchContext || {};
+        if (channelId && conversationId) {
+          return { kind: 'internal', path: `/chat/dir/${channelId}/${conversationId}` };
+        }
+        if (channelId) {
+          return { kind: 'internal', path: `/chat/dir/${channelId}` };
+        }
+        if (result.searchContext?.originalUrl) {
+          return { kind: 'external', url: result.searchContext.originalUrl };
+        }
+        return null;
+      }
+      if (subApp === 'CHAT_ATTACHMENT') {
+        const { channelId, conversationId, messageId } = result.searchContext || {};
+        if (!channelId || !conversationId) return null;
+        if (messageId) {
+          return {
+            kind: 'internal',
+            path: `/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
+          };
+        }
+        return {
+          kind: 'internal',
+          path: `/chat/dir/${channelId}/${conversationId}#origin=${conversationId}`,
+        };
+      }
+      if (subApp === 'TICKET_ATTACHMENT') {
+        const { channelId, conversationId, ticketId } = result.searchContext || {};
+        if (channelId && conversationId && ticketId) {
+          return {
+            kind: 'internal',
+            path: `/chat/dir/${channelId}/${conversationId}/${ticketId}?selectedTab=files`,
+          };
+        }
+        if (channelId && conversationId) {
+          return { kind: 'internal', path: `/chat/dir/${channelId}/${conversationId}` };
+        }
+        if (channelId) {
+          return { kind: 'internal', path: `/chat/dir/${channelId}` };
+        }
+        if (result.searchContext?.originalUrl) {
+          return { kind: 'external', url: result.searchContext.originalUrl };
+        }
+        return null;
+      }
+      // Generic attachment
+      if (result.searchContext?.originalUrl) {
+        return { kind: 'external', url: result.searchContext.originalUrl };
+      }
+      if (result.searchContext?.channelId) {
+        const attachmentId = result.searchContext?.attachmentId || result.id;
+        return {
+          kind: 'internal',
+          path: `/chat/dir/${result.searchContext.channelId}`,
+          state: { attachmentId, openAttachment: true },
+        };
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+};
+
+/**
+ * CMDK open-in-browser helper.
+ *
+ * On Electron + modifier: routes the result to the in-app browser panel
+ * (`browserPanelActor`). External attachment URLs go straight in; internal
+ * routes are prefixed with `window.location.origin` so the webview loads the
+ * SPA at that route.
+ *
+ * On web + modifier: opens the resolved URL in a new browser tab.
+ *
+ * Without modifier (or on mobile where the modifier is unreliable): delegates
+ * to `navigateToSearchResult` — no behavior change.
+ *
+ * `user` results whose DM does not yet exist cannot be resolved synchronously,
+ * so they always take the default path (DM created, navigated in place).
+ */
+export const openSearchResult = async (
+  result: DisplaySearchResult,
+  options: { modifier: boolean; isElectron: boolean; isMobile: boolean },
+  navigate: NavigateFunction,
+  channelData?: Channel[],
+): Promise<void> => {
+  const { modifier, isElectron, isMobile } = options;
+
+  if (!modifier || isMobile) {
+    await navigateToSearchResult(result, navigate, channelData);
+    return;
+  }
+
+  const target = computeSearchResultPath(result, channelData);
+  if (!target || target.kind === 'async-user') {
+    await navigateToSearchResult(result, navigate, channelData);
+    return;
+  }
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const url = target.kind === 'external' ? target.url : `${origin}${target.path}`;
+
+  if (isElectron) {
+    // For Xyne URLs, carry the current theme into the panel via a query
+    // param. The panel webview has its own localStorage (separate partition),
+    // so without this the theme would reset to the default on first load.
+    // `useTheme` reads `?theme=` on init and strips it from the URL.
+    let panelUrl = url;
+    if (isXyneOrigin(url)) {
+      try {
+        const currentTheme =
+          typeof localStorage !== 'undefined' ? localStorage.getItem('xyne-theme') : null;
+        if (currentTheme) {
+          const withTheme = new URL(url);
+          withTheme.searchParams.set('theme', currentTheme);
+          panelUrl = withTheme.toString();
+        }
+      } catch (error) {
+        console.warn('[openSearchResult] failed to attach theme param:', error);
+      }
+    }
+
+    // Mirror the main session's auth cookies into the `persist:xyne-spaces`
+    // partition before the panel tab mounts, so Xyne URLs pick up the user's
+    // existing sign-in instead of bouncing through OAuth. We only sync for
+    // Xyne-origin URLs; external URLs never receive our cookies.
+    if (isXyneOrigin(panelUrl)) {
+      try {
+        await window.electronAPI?.syncXyneCookiesToBrowserPanel?.(panelUrl);
+      } catch (error) {
+        console.warn('[openSearchResult] cookie sync failed:', error);
+      }
+    }
+
+    // Chromeless rendering inside the panel is handled by the SPA itself
+    // via `useIsInPanelWebview` (see AppRoot.tsx, ChatScreen.tsx) — not by
+    // routing through `/newWindow/*`. So we send the regular URL here.
+    xyneAIActor.send({ type: 'CLOSE' });
+    const panelState = browserPanelActor.getSnapshot().context.browserPanelState;
+    if (panelState === 'open') {
+      browserPanelActor.send({ type: 'OPEN_URLS', urls: [panelUrl] });
+    } else {
+      browserPanelActor.send({ type: 'OPEN', urls: [panelUrl] });
+    }
+    return;
+  }
+
+  // Web: open the regular route in a new browser tab (full app chrome).
+  // No theme param needed — same origin = same localStorage = same theme.
+  window.open(url, '_blank', 'noopener,noreferrer');
 };

@@ -5,7 +5,10 @@ import { config } from './config';
 import { setupDeepLinks } from '../services/deep-links';
 import { setupIpcHandlers } from '../ipc/handlers';
 import { createMainWindow, getMainWindow, setWindowReferences } from '../window/manager';
-import { setupRequestInterceptor } from '../services/request-interceptor';
+import {
+  setupRequestInterceptor,
+  setupXyneSpacesInterceptor,
+} from '../services/request-interceptor';
 import { setupMTLS } from '../services/mtls';
 import { codeServerService } from '../services/code-server';
 import { docsPublishService } from '../services/docs-publish';
@@ -135,6 +138,7 @@ async function initializeApp(): Promise<void> {
   initializeTelemetry();
   setupMTLS();
   setupRequestInterceptor();
+  setupXyneSpacesInterceptor();
   setupIpcHandlers();
 
   // Clear network cache on app start to ensure fresh assets

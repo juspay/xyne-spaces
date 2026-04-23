@@ -1557,7 +1557,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   return (
-    <div className='mx-auto px-[24px] py-[20px] h-full overflow-scroll'>
+    <div className='mx-auto px-[24px] py-[20px] h-full overflow-scroll bg-background'>
       {expandedView && (
         <div className='flex items-center justify-between mb-6'>
           <div className='flex items-center gap-x-1/2'>

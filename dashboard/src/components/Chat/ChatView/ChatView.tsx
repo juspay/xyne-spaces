@@ -27,6 +27,8 @@ import { useChannel, useGetChannelUserStatus } from '../../../hooks/useChannels'
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useIsInPanelWebview } from '../../../hooks/useIsInPanelWebview';
+import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 
 interface ChatScreenContext {
   shouldStackThread?: boolean;
@@ -60,7 +62,27 @@ const ChatView = (): ReactElement => {
   const channelUserStatus = useGetChannelUserStatus(channelId || '');
   const { baseRoute } = useRouteContext();
   const { isMobile } = usePlatform();
+  const isInPanelWebview = useIsInPanelWebview();
+  const { displayName: channelDisplayName } = useChannelDisplayName(
+    channel ?? null,
+    context.userID,
+  );
   const bounds = useMeasure({ ref: chatViewContainerRef, observeResize: true });
+
+  // When rendered inside the browser-panel webview, reflect the current
+  // channel/DM name in `document.title`. The webview's host listens for
+  // `page-title-updated` (see BrowserTabsScreen.tsx:196) and uses it as the
+  // tab label. Scoped to the webview so the main Electron window's title
+  // isn't touched.
+  useEffect(() => {
+    if (!isInPanelWebview) return;
+    if (!channelDisplayName) return;
+    const previous = document.title;
+    document.title = channelDisplayName;
+    return () => {
+      document.title = previous;
+    };
+  }, [isInPanelWebview, channelDisplayName]);
 
   // Check for group panel from URL params
   const { groupId } = useParams<{ groupId?: string }>();
@@ -213,7 +235,7 @@ const ChatView = (): ReactElement => {
     <div
       ref={chatViewContainerRef}
       data-component='ChatView'
-      className='w-full h-full rounded-lg overflow-hidden relative'
+      className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-lg'}`}
     >
       {shouldStack ? (
         <>

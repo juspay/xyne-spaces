@@ -13,6 +13,7 @@ import { mutators } from '../../zero/mutators';
 import { useChannel, useGetChannelUserStatus } from '../../hooks/useChannels';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
 import {
   X,
   FileText,
@@ -109,6 +110,7 @@ export const ThreadMessages = ({
   }>();
 
   const { isMobile } = usePlatform();
+  const isInPanelWebview = useIsInPanelWebview();
   const { baseRoute, buildChannelRoute } = useRouteContext();
 
   const currentUser = useSelf();
@@ -675,7 +677,9 @@ export const ThreadMessages = ({
   if (underTicketView) {
     return (
       <div
-        className='flex-1 h-full flex flex-col bg-background rounded-lg overflow-hidden relative'
+        className={`flex-1 h-full flex flex-col bg-background overflow-hidden relative ${
+          isInPanelWebview ? '' : 'rounded-lg'
+        }`}
         ref={dragAndDropAreaRef}
       >
         {/* Drag and Drop Overlay */}
@@ -1006,7 +1010,9 @@ export const ThreadMessages = ({
 
   return (
     <div
-      className='flex-1 h-full flex flex-col bg-background rounded-lg overflow-hidden relative'
+      className={`flex-1 h-full flex flex-col bg-background overflow-hidden relative ${
+        isInPanelWebview ? '' : 'rounded-lg'
+      }`}
       ref={dragAndDropAreaRef}
     >
       {/* Drag and Drop Overlay */}

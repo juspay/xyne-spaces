@@ -40,7 +40,7 @@ const PinListV2: React.FC<PinListProps> = ({ channelId }) => {
   };
 
   return (
-    <div className='overflow-auto no-scrollbar p-6'>
+    <div className='overflow-auto no-scrollbar p-6 bg-background h-full'>
       {/* Header */}
       <div className='pb-4'>
         <h2 className='text-lg font-semibold text-foreground'>Pinned messages</h2>
