@@ -854,6 +854,132 @@ Group the Yesterday section by date when range > 1 day. Show each day separately
 7. No canvas. No memory update. This is pure output — copy and say it in standup.
 `;
 
+const FILESYSTEM_DIAGRAM_SKILL_CONTENT = `---
+name: filesystem-diagram
+description: Generate interactive filesystem/architecture diagrams the user can drill into. Load when user asks to make an interactive diagram, d2 diagram, visualize folder structure, repo layout, module hierarchy, component tree, system architecture as a drillable diagram, or "show me the structure of X".
+---
+
+# Filesystem Diagram
+
+You generate interactive, multi-level filesystem diagrams that the user can click through. Each node in the diagram is drillable — clicking a folder reveals its children.
+
+**Always output a \`\`\`filesystem code block.** Never use plain text or mermaid for this skill.
+
+---
+
+## Output Format
+
+Emit a single \`\`\`filesystem code block containing a nested JSON object with this exact schema:
+
+\`\`\`filesystem
+{
+  "name": "<root name>",
+  "type": "folder",
+  "children": [
+    { "name": "<file>", "type": "file", "size": "<optional size>" },
+    {
+      "name": "<subfolder>",
+      "type": "folder",
+      "children": [
+        { "name": "<nested file>", "type": "file" },
+        { "name": "<nested folder>", "type": "folder", "children": [...] }
+      ]
+    }
+  ]
+}
+\`\`\`
+
+---
+
+## Rules
+
+1. **type** must be exactly \`"file"\` or \`"folder"\` — nothing else.
+2. Only folders have a \`"children"\` array. Files never have children.
+3. \`"size"\` is optional on files (e.g. \`"8KB"\`, \`"2.1MB"\`). Omit if unknown.
+4. \`"meta"\` is optional on any node for a short descriptor (e.g. \`"entry point"\`, \`"auth middleware"\`).
+5. Generate **at least 2–3 levels of nesting** for architecture requests. Shallow trees are unhelpful.
+6. Keep names realistic and human-readable. Match the actual naming conventions of the language/framework.
+7. For real repos: fetch channel messages or search relevant content to find actual file structure before generating. Do not invent structure if real data is available.
+8. After the code block, add 1–2 sentences describing what the diagram shows and how to navigate it (click folders to drill in, Previous button to go back).
+9. **CRITICAL: Full JSON in final output.** The complete JSON must appear inside your final output summary. Never summarize, truncate, or move it to a canvas. The user needs the raw JSON to render the drillable diagram.
+
+---
+
+## When to Use This Skill
+
+- "Show me the folder structure of our backend"
+- "Visualize the src directory"
+- "What does the module layout look like?"
+- "Draw the component hierarchy"
+- "Map out the architecture of X as a diagram I can explore"
+- Any request where the result is a tree/hierarchy of named components or files
+
+---
+
+## Example
+
+For "show the structure of a Next.js app":
+
+\`\`\`filesystem
+{
+  "name": "nextjs-app",
+  "type": "folder",
+  "children": [
+    { "name": "package.json", "type": "file", "size": "1.2KB", "meta": "dependencies" },
+    { "name": "next.config.js", "type": "file", "size": "0.5KB" },
+    {
+      "name": "src",
+      "type": "folder",
+      "children": [
+        {
+          "name": "app",
+          "type": "folder",
+          "children": [
+            { "name": "layout.tsx", "type": "file", "meta": "root layout" },
+            { "name": "page.tsx", "type": "file", "meta": "home page" },
+            {
+              "name": "dashboard",
+              "type": "folder",
+              "children": [
+                { "name": "page.tsx", "type": "file" },
+                { "name": "loading.tsx", "type": "file" }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "components",
+          "type": "folder",
+          "children": [
+            { "name": "Header.tsx", "type": "file", "size": "3KB" },
+            { "name": "Sidebar.tsx", "type": "file", "size": "5KB" }
+          ]
+        },
+        {
+          "name": "lib",
+          "type": "folder",
+          "children": [
+            { "name": "api.ts", "type": "file", "meta": "API client" },
+            { "name": "utils.ts", "type": "file" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public",
+      "type": "folder",
+      "children": [
+        { "name": "favicon.ico", "type": "file" },
+        { "name": "logo.svg", "type": "file", "size": "4KB" }
+      ]
+    }
+  ]
+}
+\`\`\`
+
+Click any folder node to explore its contents. Use the Previous button to go back up.
+`;
+
 /**
  * Map of Langfuse prompt names to their raw fallback content (frontmatter + instructions).
  */
@@ -863,6 +989,7 @@ export const FALLBACK_SYSTEM_SKILLS: Record<string, string> = {
   'skill-prd-generator': PRD_GENERATOR_SKILL_CONTENT,
   'skill-how-was-my-day': HOW_WAS_MY_DAY_SKILL_CONTENT,
   'skill-standup-brief': STANDUP_BRIEF_SKILL_CONTENT,
+  'skill-filesystem-diagram': FILESYSTEM_DIAGRAM_SKILL_CONTENT,
 };
 
 /**
@@ -878,6 +1005,7 @@ export const SYSTEM_SKILL_PROMPT_NAMES: readonly string[] = [
   'skill-prd-generator',
   'skill-how-was-my-day',
   'skill-standup-brief',
+  'skill-filesystem-diagram',
 ];
 
 export type SystemSkillPromptName = (typeof SYSTEM_SKILL_PROMPT_NAMES)[number];
