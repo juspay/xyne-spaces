@@ -4,7 +4,7 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { logger } from '../utils/logger';
-import { AttachmentEntityType } from '@prisma/client';
+import { AttachmentEntityType, Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 
 export class DraftAttachmentController {
@@ -118,20 +118,28 @@ export class DraftAttachmentController {
       const finalDraftMessageId = existingDraft?.id || draftMessageId;
       if (!existingDraft) {
         const now = new Date();
-        await this.db.draftMessage.upsert({
-          where: { id: draftMessageId },
-          update: {}, // already exists — leave all fields alone
-          create: {
-            id: draftMessageId,
-            channelId,
-            conversationId: conversationId || null,
-            userId,
-            content: '',
-            hasAttachment: true,
-            createdAt: now,
-            updatedAt: now,
-          },
-        });
+        try {
+          await this.db.draftMessage.upsert({
+            where: { id: draftMessageId },
+            update: {}, // already exists — leave all fields alone
+            create: {
+              id: draftMessageId,
+              channelId,
+              conversationId: conversationId || null,
+              userId,
+              content: '',
+              hasAttachment: true,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+        } catch (error) {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            // Race condition: another request already created this draft — safe to ignore
+          } else {
+            throw error;
+          }
+        }
       }
 
       logger.info(`Uploading ${files.length} draft attachments using fileUploadService`);
