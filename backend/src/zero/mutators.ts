@@ -3220,6 +3220,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               content: '',
               hasAttachment: false,
               edited: false,
+              link_preview_md: '',
             });
           } else {
             // SCENARIO 2: Hard Delete (Reply OR Root with no replies)

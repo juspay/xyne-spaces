@@ -2260,11 +2260,12 @@ export const mutators = defineMutators({
             content: '',
             hasAttachment: false,
             edited: false,
+            link_preview_md: '',
           });
           await updateInitialMessageMdField(
             tx,
             { messageId },
-            { isDeleted: true, content: '', hasAttachment: false, edited: false },
+            { isDeleted: true, content: '', hasAttachment: false, edited: false, link_preview_md: '' },
           );
         } else {
           // SCENARIO 2: Hard Delete (Reply OR Root with no replies)
