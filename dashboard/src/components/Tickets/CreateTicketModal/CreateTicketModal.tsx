@@ -386,6 +386,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Determine which fields to show based on board configuration
   const showUserGroupsOnly = ticketFormConfig?.userGroupsOnly?.enabled ?? false;
+  const showAssignee = ticketFormConfig?.assignedTo?.enabled ?? true;
   const showDueDate = ticketFormConfig?.dueDate?.enabled ?? true;
   const showTodo = ticketFormConfig?.todo?.enabled ?? true;
   const showWorkflows = ticketFormConfig?.workflows?.enabled ?? true;
@@ -394,6 +395,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Determine which fields are mandatory
   const mandatoryUserGroupsOnly = ticketFormConfig?.userGroupsOnly?.mandatory ?? false;
+  const mandatoryAssignee = ticketFormConfig?.assignedTo?.mandatory ?? false;
   const mandatoryDueDate = ticketFormConfig?.dueDate?.mandatory ?? false;
   const mandatoryTodo = ticketFormConfig?.todo?.mandatory ?? false;
   const mandatoryWorkflows = ticketFormConfig?.workflows?.mandatory ?? false;
@@ -804,11 +806,26 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       if (hasEmptyRequiredFields) return false;
     }
 
+    // Check assignee mandatory
+    if (!showUserGroupsOnly && showAssignee && mandatoryAssignee && !formValues?.assignee?.value)
+      return false;
+    if (showUserGroupsOnly && mandatoryUserGroupsOnly && !formValues?.assignee?.value) return false;
+
     // Check if any dynamic fields error
     if (Object.keys(dynamicFieldErrors).length > 0) return false;
 
     return true;
-  }, [form.state.isValid, form.state.isDirty, formMapping, formValues, dynamicFieldErrors]);
+  }, [
+    form.state.isValid,
+    form.state.isDirty,
+    formMapping,
+    formValues,
+    dynamicFieldErrors,
+    showUserGroupsOnly,
+    showAssignee,
+    mandatoryAssignee,
+    mandatoryUserGroupsOnly,
+  ]);
 
   const handleCreateTicket = async (formData: CreateTicketFormData) => {
     if (!user) return;
@@ -818,6 +835,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
       if (showUserGroupsOnly && mandatoryUserGroupsOnly && !formData.assignee?.value) {
         mandatoryFieldErrors.push('User Group is required');
+      }
+      if (!showUserGroupsOnly && showAssignee && mandatoryAssignee && !formData.assignee?.value) {
+        mandatoryFieldErrors.push('Assignee is required');
       }
       if (showDueDate && mandatoryDueDate && !formData.eta) {
         mandatoryFieldErrors.push('Due Date is required');
@@ -2055,12 +2075,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   searchPlaceholder={
                     showUserGroupsOnly
                       ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
-                      : `Assignee${mandatoryUserGroupsOnly ? ' *' : ''}`
+                      : `Assignee${mandatoryAssignee ? ' *' : ''}`
                   }
                   placeholder={
                     showUserGroupsOnly
                       ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
-                      : `Assignee${mandatoryUserGroupsOnly ? ' *' : ''}`
+                      : `Assignee${mandatoryAssignee ? ' *' : ''}`
                   }
                   inputIcon={
                     showUserGroupsOnly ? (

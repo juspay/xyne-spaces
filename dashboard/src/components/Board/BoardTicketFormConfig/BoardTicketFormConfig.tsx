@@ -15,6 +15,7 @@ interface BoardTicketFormConfigProps {
 export const DEFAULT_CONFIG: Required<TicketFormConfig> = {
   userGroupsOnly: { enabled: false, mandatory: false },
   dueDate: { enabled: true, mandatory: false },
+  assignedTo: { enabled: true, mandatory: false },
   todo: { enabled: true, mandatory: false },
   workflows: { enabled: true, mandatory: false },
   labels: { enabled: true, mandatory: false },

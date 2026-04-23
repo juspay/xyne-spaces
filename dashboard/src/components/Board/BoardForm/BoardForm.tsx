@@ -108,6 +108,7 @@ export const BoardForm = ({
     userGroupsOnly:
       boardMetadata?.ticketFormConfig?.userGroupsOnly || DEFAULT_CONFIG.userGroupsOnly,
     dueDate: boardMetadata?.ticketFormConfig?.dueDate || DEFAULT_CONFIG.dueDate,
+    assignedTo: boardMetadata?.ticketFormConfig?.assignedTo || DEFAULT_CONFIG.assignedTo,
     todo: boardMetadata?.ticketFormConfig?.todo || DEFAULT_CONFIG.todo,
     workflows: boardMetadata?.ticketFormConfig?.workflows || DEFAULT_CONFIG.workflows,
     labels: boardMetadata?.ticketFormConfig?.labels || DEFAULT_CONFIG.labels,

@@ -224,11 +224,16 @@ const BoardEditScreen = ({
 
           // For core fields, get required from ticketFormConfig
           let required = field.required; // Keep default
+          let visibleInCreate = field.visibleInCreate;
+
           if (isCore && ticketFormConfig) {
             const configKey = getFieldConfigKey(field.name);
             const config = ticketFormConfig[configKey as keyof TicketFormConfig];
             if (config && 'mandatory' in config && typeof config.mandatory === 'boolean') {
               required = config.mandatory;
+            }
+            if (config && 'enabled' in config && typeof config.enabled === 'boolean') {
+              visibleInCreate = config.enabled;
             }
           }
           // For custom fields, required is already set from activeFormMapping (line 173: required: !field.isOptional)
@@ -237,6 +242,7 @@ const BoardEditScreen = ({
             ...field,
             ...(order !== undefined && { order }),
             required,
+            visibleInCreate,
           };
         });
       });
@@ -434,21 +440,11 @@ const BoardEditScreen = ({
           toast.error('Board name is required');
           return;
         }
-
-        const response = await apiInstance.post<{
-          board: { id: string; name?: string; [key: string]: unknown };
-        }>('/boards', {
-          name: boardName.trim(),
-          projectId: projectId,
-        });
-
-        const newBoardId = response.data.board.id;
-
         // Create custom fields form if there are any custom fields
         const customFields = fields.filter(f => !DEFAULT_TICKET_FIELDS.some(df => df.id === f.id));
+        let customFieldsFormId: string | undefined;
 
         if (customFields.length > 0) {
-          // Create new form via API
           const formResponse = await formService.createForm({
             formName: `${boardName.trim()} Custom Fields`,
             formDescription: `Custom fields for ${boardName.trim()}`,
@@ -461,9 +457,67 @@ const BoardEditScreen = ({
               isOptional: !f.required,
             })),
           });
+          customFieldsFormId = formResponse.id;
+        }
 
-          const customFieldsFormId = formResponse.id;
+        // Update board metadata with custom fields form ID
+        const sortedFields = [...fields].sort((a, b) => a.order - b.order);
+        const fieldOrder: FieldOrderItem[] = sortedFields.map(field => {
+          const isCore = DEFAULT_TICKET_FIELDS.some(f => f.id === field.id);
+          return {
+            fieldId: isCore ? field.name : field.id,
+            fieldType: isCore ? 'core' : 'custom',
+          };
+        });
 
+        // Build ticketFormConfig for core fields only
+        const coreFields = fields.filter(f => DEFAULT_TICKET_FIELDS.some(df => df.id === f.id));
+        const ticketFormConfig: Partial<TicketFormConfig> = {};
+
+        coreFields.forEach(field => {
+          // Map field names to config keys (use legacy names for backward compatibility)
+          let configKey: keyof TicketFormConfig;
+          switch (field.name) {
+            case 'assignedTo':
+              configKey = 'assignedTo';
+              break;
+            case 'status':
+              configKey = 'todo';
+              break;
+            case 'workflowType':
+              configKey = 'workflows';
+              break;
+            case 'tags':
+              configKey = 'labels';
+              break;
+            default:
+              configKey = field.name as keyof TicketFormConfig;
+          }
+
+          ticketFormConfig[configKey] = {
+            enabled:
+              configKey === 'userGroupsOnly' ? assigneeType === 'userGroup' : field.visibleInCreate, // userGroupsOnly based on selection, others based on visibleInCreate
+            mandatory: field.required,
+          };
+        });
+
+        const initialMetadata: BoardMetadata = {
+          fieldOrder,
+          ticketFormConfig,
+          ...(customFieldsFormId && { customFieldsFormId }),
+        };
+
+        const response = await apiInstance.post<{
+          board: { id: string; name?: string; [key: string]: unknown };
+        }>('/boards', {
+          name: boardName.trim(),
+          projectId: projectId,
+          metadata: initialMetadata,
+        });
+
+        const newBoardId = response.data.board.id;
+
+        if (customFieldsFormId) {
           // Create form context mapping
           zero.mutate(
             mutators.formContextMapping.upsert({
@@ -472,63 +526,6 @@ const BoardEditScreen = ({
               entityType: FormEntityType.TICKET,
               formId: customFieldsFormId,
               mappingId: uuidv4(),
-            }),
-          );
-
-          // Update board metadata with custom fields form ID
-          const sortedFields = [...fields].sort((a, b) => a.order - b.order);
-          const fieldOrder: FieldOrderItem[] = sortedFields.map(field => {
-            const isCore = DEFAULT_TICKET_FIELDS.some(f => f.id === field.id);
-            return {
-              fieldId: isCore ? field.name : field.id,
-              fieldType: isCore ? 'core' : 'custom',
-            };
-          });
-
-          // Build ticketFormConfig for core fields only
-          const coreFields = fields.filter(f => DEFAULT_TICKET_FIELDS.some(df => df.id === f.id));
-          const ticketFormConfig: Partial<TicketFormConfig> = {};
-
-          coreFields.forEach(field => {
-            // Map field names to config keys (use legacy names for backward compatibility)
-            let configKey: keyof TicketFormConfig;
-            switch (field.name) {
-              case 'assignedTo':
-                configKey = 'userGroupsOnly';
-                break;
-              case 'status':
-                configKey = 'todo';
-                break;
-              case 'workflowType':
-                configKey = 'workflows';
-                break;
-              case 'tags':
-                configKey = 'labels';
-                break;
-              default:
-                configKey = field.name as keyof TicketFormConfig;
-            }
-
-            ticketFormConfig[configKey] = {
-              enabled: configKey === 'userGroupsOnly' ? assigneeType === 'userGroup' : true, // userGroupsOnly based on selection, others always true
-              mandatory: field.required,
-            };
-          });
-
-          const newMetadata: BoardMetadata = {
-            fieldOrder,
-            ticketFormConfig,
-            customFieldsFormId,
-          };
-
-          // Update board with metadata using zero mutator
-          zero.mutate(
-            mutators.board.update({
-              boardId: newBoardId,
-              name: boardName.trim(),
-              metadata: newMetadata,
-              timestamp: Date.now(),
-              stageIds: {},
             }),
           );
         }
@@ -581,7 +578,7 @@ const BoardEditScreen = ({
         let configKey: keyof TicketFormConfig;
         switch (field.name) {
           case 'assignedTo':
-            configKey = 'userGroupsOnly';
+            configKey = 'assignedTo';
             break;
           case 'status':
             configKey = 'todo';
@@ -597,7 +594,8 @@ const BoardEditScreen = ({
         }
 
         ticketFormConfig[configKey] = {
-          enabled: configKey === 'userGroupsOnly' ? assigneeType === 'userGroup' : true, // userGroupsOnly based on selection, others always true
+          enabled:
+            configKey === 'userGroupsOnly' ? assigneeType === 'userGroup' : field.visibleInCreate, // userGroupsOnly based on selection, others based on visibleInCreate
           mandatory: field.required,
         };
       });
@@ -1027,9 +1025,18 @@ const BoardEditScreen = ({
                                     onClick={e => {
                                       e.stopPropagation();
                                       setFields(prev =>
-                                        prev.map(f =>
-                                          f.id === field.id ? { ...f, required: !f.required } : f,
-                                        ),
+                                        prev.map(f => {
+                                          if (f.id === field.id) {
+                                            return {
+                                              ...f,
+                                              required: !f.required,
+                                              visibleInCreate: !f.required
+                                                ? true
+                                                : f.visibleInCreate,
+                                            };
+                                          }
+                                          return f;
+                                        }),
                                       );
                                     }}
                                     className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
@@ -1041,6 +1048,49 @@ const BoardEditScreen = ({
                                     <span
                                       className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
                                         field.required ? 'translate-x-[10px]' : 'translate-x-0'
+                                      }`}
+                                    />
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Show in Create toggle - for fields that can be hidden in create modal */}
+                              {['dueDate', 'assignedTo', 'workflowType', 'merchantId'].includes(
+                                field.name,
+                              ) && (
+                                <div className='flex items-center gap-2'>
+                                  <span className='text-[13px] text-[#505b62] leading-[18px] tracking-[-0.2px]'>
+                                    Show in Create
+                                  </span>
+                                  <button
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      setFields(prev =>
+                                        prev.map(f => {
+                                          if (f.id === field.id) {
+                                            const newVisibleInCreate = !f.visibleInCreate;
+                                            // If hiding the field, it cannot be required
+                                            return {
+                                              ...f,
+                                              visibleInCreate: newVisibleInCreate,
+                                              required: newVisibleInCreate ? f.required : false,
+                                            };
+                                          }
+                                          return f;
+                                        }),
+                                      );
+                                    }}
+                                    className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+                                      field.visibleInCreate ? 'bg-[#6276BE]' : 'bg-gray-600'
+                                    }`}
+                                    data-track-category='form'
+                                    data-track-name='show-in-create-toggle'
+                                  >
+                                    <span
+                                      className={`absolute top-[3px] left-[3px] w-[12px] h-[12px] bg-background rounded-full transition-transform ${
+                                        field.visibleInCreate
+                                          ? 'translate-x-[10px]'
+                                          : 'translate-x-0'
                                       }`}
                                     />
                                   </button>

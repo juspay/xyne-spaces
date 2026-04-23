@@ -110,7 +110,7 @@ export const mapToCreateModalFields = (
 export const getFieldConfigKey = (fieldName: string): string => {
   switch (fieldName) {
     case 'assignedTo':
-      return 'userGroupsOnly';
+      return 'assignedTo';
     case 'status':
       return 'todo';
     case 'workflowType':

@@ -7,6 +7,10 @@ export interface TicketFormConfig {
     enabled: boolean;
     mandatory?: boolean;
   };
+  assignedTo?:{
+    enabled: boolean;
+    mandatory?: boolean;
+  }
   dueDate?: {
     enabled: boolean;
     mandatory?: boolean;

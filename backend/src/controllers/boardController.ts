@@ -15,7 +15,7 @@ export class BoardController {
 
   createBoard = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, description, projectId, stages, boardType } = req.body;
+      const { name, description, projectId, stages, boardType, metadata } = req.body;
       const userId = req.user?.id;
 
       if (!userId) {
@@ -76,6 +76,7 @@ export class BoardController {
         createdBy: userId,
         stages: stages && stages.length > 0 ? stages : undefined,
         boardType: boardType || BoardType.DEFAULT,
+        ...(metadata !== undefined && { metadata }),
       });
 
       res.status(201).json({
@@ -89,6 +90,7 @@ export class BoardController {
           projectId: board.projectId,
           createdBy: board.createdBy,
           createdAt: board.createdAt,
+          metadata: board.metadata,
           stages: board.stages?.map((stage) => ({
             id: stage.id,
             name: stage.name,
