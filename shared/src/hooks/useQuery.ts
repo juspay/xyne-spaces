@@ -15,6 +15,7 @@ import { Event } from '../logger/events.js';
 import { useInstrumentation } from './useZero.js';
 import { useZeroFallbackConfig } from './ZeroFallbackContext.js';
 import { useFallbackQuery } from './useFallbackQuery.js';
+import { wasInterrupted } from './metricValidity.js';
 
 /**
  * Internal: routes query through Zero or fallback based on config.
@@ -89,9 +90,12 @@ export function useQuery<
     if (details.type === 'complete' && !hasLoggedCompleteRef.current) {
       hasLoggedCompleteRef.current = true;
       const latency = performance.now() - startTime;
-      metrics.recordLatency('zero.query.latency', latency, { query: queryName });
+      const skewed = wasInterrupted(startTime);
+      if (!skewed) {
+        metrics.recordLatency('zero.query.latency', latency, { query: queryName });
+      }
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'success' });
-      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency, args });
+      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency, args, skewed });
     } else if (details.type === 'error') {
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'error' });
       logger.error(Event.ZERO_QUERY_FAILED, { query: queryName, error: details.error });
@@ -129,9 +133,12 @@ export function useRawQuery<
   useEffect(() => {
     if (details.type === 'complete') {
       const latency = performance.now() - startTime;
-      metrics.recordLatency('zero.query.latency', latency, { query: queryName });
+      const skewed = wasInterrupted(startTime);
+      if (!skewed) {
+        metrics.recordLatency('zero.query.latency', latency, { query: queryName });
+      }
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'success' });
-      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency });
+      logger.info(Event.ZERO_QUERY_COMPLETE, { query: queryName, latency, skewed });
     } else if (details.type === 'error') {
       metrics.incrementCounter('zero.query.operations', { query: queryName, stage: 'error' });
       logger.error(Event.ZERO_QUERY_FAILED, { query: queryName, error: details.error });

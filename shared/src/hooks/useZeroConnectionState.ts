@@ -1,8 +1,9 @@
 import { useConnectionState } from '@rocicorp/zero/react';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { stateMachineActor } from '../machines/stateMachine.js';
 import { useInstrumentation } from './useZero.js';
 import { Event } from '../logger/events.js';
+import { recordConnectionChange, recordConnectionConnected } from './metricValidity.js';
 
 export interface ZeroConnectionInfo {
   /** Connection state name: 'connected' | 'connecting' | 'disconnected' | 'error' | etc */
@@ -27,6 +28,18 @@ export interface ZeroConnectionInfo {
 export function useZeroConnectionInfo(): ZeroConnectionInfo {
   const connectionState = useConnectionState();
   const { logger } = useInstrumentation();
+  const prevStateRef = useRef(connectionState.name);
+
+  useEffect(() => {
+    if (prevStateRef.current !== connectionState.name) {
+      if (connectionState.name === 'connected') {
+        recordConnectionConnected();
+      } else {
+        recordConnectionChange();
+      }
+      prevStateRef.current = connectionState.name;
+    }
+  }, [connectionState.name]);
 
   const refreshConnection = useCallback(() => {
     logger.info(Event.ZERO_ERROR_RECONNECT_INITIATED, {
