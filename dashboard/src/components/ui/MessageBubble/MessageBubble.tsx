@@ -306,20 +306,15 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
         </div>
       )}
 
-      {/* Deleted attachment tombstones — always visible, like Slack's "This file was deleted." */}
-      {deletedAttachments.length > 0 && (
-        <div className='flex flex-col gap-2 mt-2'>
-          {deletedAttachments.map(attachment => (
-            <div
-              key={attachment.id}
-              className='flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2 w-fit'
-            >
-              <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted'>
-                <Trash2 className='h-4 w-4 text-muted-foreground' />
-              </div>
-              <span className='text-sm text-muted-foreground'>This file was deleted.</span>
+      {/* Single deleted attachment tombstone — shown only when ALL attachments in the message are deleted */}
+      {deletedAttachments.length > 0 && activeAttachments.length === 0 && (
+        <div className='mt-2'>
+          <div className='flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2 w-fit'>
+            <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted'>
+              <Trash2 className='h-4 w-4 text-muted-foreground' />
             </div>
-          ))}
+            <span className='text-sm text-muted-foreground'>This file was deleted.</span>
+          </div>
         </div>
       )}
     </div>
