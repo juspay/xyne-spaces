@@ -21,7 +21,7 @@ import { AuthProvider } from '@prisma/client';
 import { storeMsCalEventsAsCallsForUser, type MSCalEvent, type MSCalListResponse } from '@/services/microsoftCalendarCallStore';
 
 const MICROSOFT_CALENDAR_SYNC_CRON =
-  process.env.MICROSOFT_CALENDAR_SYNC_CRON || '*/1 * * * *';
+  process.env.MICROSOFT_CALENDAR_SYNC_CRON || '*/5 * * * *';
 
 const LOOKAHEAD_DAYS = 30;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;

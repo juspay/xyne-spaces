@@ -18,7 +18,7 @@ import { storeGCalEventsAsCallsForUser, type GCalEvent, type GCalListResponse } 
 const prisma = DatabaseClient.getInstance();
 
 const GOOGLE_CALENDAR_SYNC_CRON =
-  process.env.GOOGLE_CALENDAR_SYNC_CRON || '*/1 * * * *';
+  process.env.GOOGLE_CALENDAR_SYNC_CRON || '*/5 * * * *';
 
 const LOOKAHEAD_DAYS = 30;
 

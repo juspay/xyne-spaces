@@ -118,8 +118,8 @@ export async function storeMsCalEventAsCall(
 
   const organizer: CalendarOrganizer | null = event.organizer?.emailAddress
     ? {
-        email: event.organizer.emailAddress.address,
-        displayName: event.organizer.emailAddress.name,
+        ...(event.organizer.emailAddress.address !== undefined && { email: event.organizer.emailAddress.address }),
+        ...(event.organizer.emailAddress.name !== undefined && { displayName: event.organizer.emailAddress.name }),
       }
     : null;
 
