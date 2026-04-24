@@ -110,6 +110,7 @@ import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
 import samRoutes from '@/routes/sam';
 import memoryRoutes from '@/routes/memory';
+import queueManagementRoutes from '@/routes/clearqueueManagement';
 import { initializeBotRegistry } from '@/bots/registry';
 import { unifiedBotUserService, botCatalog } from '@/bots/unified/index.js';
 import { metricsSyncQueue } from '@/queues/metricsSyncQueue';
@@ -330,6 +331,7 @@ export class App {
     );
     this.app.use('/api/external-step-response', externalStepResponseRoutes);
     this.app.use('/api/analytics', authMiddleware.authenticate, analyticsRoutes);
+    this.app.use('/api/queues', authMiddleware.authenticate, queueManagementRoutes);
 
     // Chat routes (auth only, no ACL for now)
 

@@ -23,7 +23,9 @@ import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
 import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
-import { recoveryService } from './workflows/services/recovery-service' 
+import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
+import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
+import { recoveryService } from './workflows/services/recovery-service'
 config()
 
 class WorkerService {
@@ -156,6 +158,16 @@ class WorkerService {
         await scheduledMessageWorker.start();
       }
 
+      if (appConfig.enableStageEtaDeadlineWorker) {
+        logger.info('Starting stage ETA deadline worker...');
+        await stageEtaDeadlineWorker.start();
+      }
+
+      if (appConfig.enableEtaDeadlineWorker) {
+        logger.info('Starting ETA deadline worker...');
+        await etaDeadlineWorker.start();
+      }
+
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {
         logger.info('Starting document ingestion worker...');
@@ -249,6 +261,14 @@ class WorkerService {
 
       if (appConfig.enableScheduledMessageWorker) {
         await scheduledMessageWorker.shutdown();
+      }
+
+      if (appConfig.enableStageEtaDeadlineWorker) {
+        await stageEtaDeadlineWorker.shutdown();
+      }
+
+      if (appConfig.enableEtaDeadlineWorker) {
+        await etaDeadlineWorker.shutdown();
       }
 
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
