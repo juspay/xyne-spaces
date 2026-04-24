@@ -12,7 +12,10 @@ export const useUserBookmarks = () => {
 
   const isEntityBookmarked = (entityId: string, entityType: BookmarkEntityType) => {
     return bookmarks.some(
-      bookmark => bookmark.entityId === entityId && bookmark.entityType === entityType,
+      bookmark =>
+        bookmark.entityId === entityId &&
+        bookmark.entityType === entityType &&
+        !bookmark.isCompleted,
     );
   };
 
@@ -21,7 +24,10 @@ export const useUserBookmarks = () => {
     entityType: BookmarkEntityType,
   ): Bookmark | undefined => {
     return bookmarks.find(
-      bookmark => bookmark.entityId === entityId && bookmark.entityType === entityType,
+      bookmark =>
+        bookmark.entityId === entityId &&
+        bookmark.entityType === entityType &&
+        !bookmark.isCompleted,
     );
   };
 

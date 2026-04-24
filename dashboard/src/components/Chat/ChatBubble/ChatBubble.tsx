@@ -75,6 +75,19 @@ import {
   getInitialMessageFromConversation,
   getParentMessageFromConversation,
 } from '../../../utils/conversationMessageHelpers';
+import {
+  MESSAGE_REMINDER_MENU_OPTIONS,
+  REMINDER_TIME_OPTIONS,
+  calculateCustomReminderTime,
+  calculateReminderTime,
+  createReminderMessagePreview,
+  formatReminderDueIn,
+  getReminderFromMetadata,
+  upsertReminderMetadataWithContext,
+} from '../utils/bookmarkUtils';
+import type { ReminderMenuOption, ReminderTimeOption } from '../utils/bookmarkUtils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
+import { DatePicker } from '../../ui/DatePicker/DatePicker';
 
 export interface ThreadData {
   replyCount: number;
@@ -125,6 +138,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
   const [isActionsDrawerOpen, setIsActionsDrawerOpen] = useState(false);
+  const [isReminderOptionsOpen, setIsReminderOptionsOpen] = useState(false);
+  const [isCustomReminderModalOpen, setIsCustomReminderModalOpen] = useState(false);
+  const [customReminderDate, setCustomReminderDate] = useState<Date | null>(new Date());
+  const [customReminderTime, setCustomReminderTime] = useState<ReminderTimeOption>('09:00');
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
   const zero = useZero();
   const { onMessageChange } = useSummaryCache();
@@ -197,11 +214,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     setIsEditing(editingMessageId === message.messageId);
   }, [editingMessageId, message.messageId]);
 
-  const { isEntityBookmarked } = useUserBookmarks();
+  const { isEntityBookmarked, getBookmarkByEntity } = useUserBookmarks();
 
-  // Check if message is bookmarked
-  const bookmarkData = isEntityBookmarked(message.messageId, BookmarkEntityType.MESSAGE);
-  const isBookmarked = !!bookmarkData;
+  const messageBookmark = getBookmarkByEntity(message.messageId, BookmarkEntityType.MESSAGE);
+  const isBookmarked =
+    messageBookmark !== undefined ||
+    isEntityBookmarked(message.messageId, BookmarkEntityType.MESSAGE);
+  const activeReminder = getReminderFromMetadata(messageBookmark?.metadata);
+  const isReminderSet = !!activeReminder;
+  const reminderDueInLabel = activeReminder?.remindAt
+    ? formatReminderDueIn(activeReminder.remindAt)
+    : undefined;
 
   const metadata = message?.metadata as Record<string, unknown> | null;
 
@@ -394,37 +417,170 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     setShowParticipantsModal(true);
   };
 
-  const handleToggleBookmark = (): void => {
+  const handleAddBookmark = (): void => {
     try {
-      if (isBookmarked) {
+      const addResult = zero.mutate(
+        mutators.bookmark.add({
+          entityId: message.messageId,
+          entityType: BookmarkEntityType.MESSAGE,
+          bookmarkId: uuidv4(),
+          metadata: null,
+          timestamp: Date.now(),
+        }),
+      );
+
+      // Keep "Add bookmark" bookmark-only by force-clearing reminder metadata
+      // after add/restore (handles stale runtimes and racey restore flows).
+      void addResult.server
+        .then(() => {
+          void zero.mutate(
+            mutators.bookmark.updateMetadata({
+              entityId: message.messageId,
+              entityType: BookmarkEntityType.MESSAGE,
+              metadata: null,
+              timestamp: Date.now(),
+            }),
+          );
+        })
+        .catch(() => undefined);
+
+      mixpanelService.track(EVENTS.INITIATE_ACTION, {
+        type: 'addBookmark',
+      });
+    } catch {
+      toast.error('Action failed', {
+        description: 'Could not add bookmark',
+        duration: 3000,
+      });
+    }
+  };
+
+  const handleToggleBookmark = (): void => {
+    if (isBookmarked) {
+      try {
         void zero.mutate(
           mutators.bookmark.remove({
             entityId: message.messageId,
             entityType: BookmarkEntityType.MESSAGE,
             timestamp: Date.now(),
+            markAsDone: false,
           }),
         );
-      } else {
+        mixpanelService.track(EVENTS.INITIATE_ACTION, {
+          type: 'removeBookmark',
+        });
+      } catch {
+        toast.error('Action failed', {
+          description: 'Could not remove bookmark',
+          duration: 3000,
+        });
+      }
+      return;
+    }
+
+    handleAddBookmark();
+  };
+
+  const applyReminderAt = (remindAt: Date): void => {
+    const remindAtISO = remindAt.toISOString();
+    const existingBookmark = getBookmarkByEntity(message.messageId, BookmarkEntityType.MESSAGE);
+    const reminderMetadata = upsertReminderMetadataWithContext(
+      existingBookmark?.metadata,
+      remindAtISO,
+      {
+        messagePreview: createReminderMessagePreview(message.content),
+        conversationId: message.conversationId,
+        initialMessageId: conversation?.initialMessageId,
+        ...(channel?.id && { channelId: channel.id }),
+        ...(channel?.name && { channelName: channel.name }),
+        ...(channel?.scopeType && { channelScopeType: String(channel.scopeType) }),
+        ...(sender?.name && { senderName: sender.name }),
+      },
+    );
+
+    if (existingBookmark) {
+      void zero.mutate(
+        mutators.bookmark.updateMetadata({
+          entityId: message.messageId,
+          entityType: BookmarkEntityType.MESSAGE,
+          metadata: reminderMetadata,
+          timestamp: Date.now(),
+        }),
+      );
+      return;
+    }
+
+    const addResult = zero.mutate(
+      mutators.bookmark.add({
+        entityId: message.messageId,
+        entityType: BookmarkEntityType.MESSAGE,
+        bookmarkId: uuidv4(),
+        metadata: reminderMetadata,
+        timestamp: Date.now(),
+      }),
+    );
+
+    // Keep reminder metadata consistent when bookmark creation and reminder updates happen quickly.
+    void addResult.server
+      .then(() => {
         void zero.mutate(
-          mutators.bookmark.add({
+          mutators.bookmark.updateMetadata({
             entityId: message.messageId,
             entityType: BookmarkEntityType.MESSAGE,
-            bookmarkId: uuidv4(),
+            metadata: reminderMetadata,
             timestamp: Date.now(),
           }),
         );
-      }
-      // Track bookmark action (using existing action types for now)
-      mixpanelService.track(EVENTS.INITIATE_ACTION, {
-        type: isBookmarked ? 'removeBookmark' : 'addBookmark',
-      });
-    } catch {
-      toast.error('Action failed', {
-        description: `Could not ${isBookmarked ? 'remove' : 'add'} bookmark`,
-        duration: 3000,
-      });
-    }
+      })
+      .catch(() => undefined);
   };
+
+  const ensureMessageBookmarked = (): void => {
+    const existingBookmark = getBookmarkByEntity(message.messageId, BookmarkEntityType.MESSAGE);
+    if (existingBookmark) {
+      return;
+    }
+
+    handleAddBookmark();
+  };
+
+  const handleOpenReminderOptions = (): void => {
+    ensureMessageBookmarked();
+    setIsReminderOptionsOpen(true);
+  };
+
+  const handleReminderPresetSelect = (option: ReminderMenuOption, e?: React.MouseEvent): void => {
+    e?.stopPropagation();
+
+    if (option === 'custom') {
+      setIsReminderOptionsOpen(false);
+      setIsCustomReminderModalOpen(true);
+      return;
+    }
+
+    const remindAt = calculateReminderTime(option);
+    if (!remindAt) return;
+
+    applyReminderAt(remindAt);
+    setIsReminderOptionsOpen(false);
+  };
+
+  const handleSaveCustomReminder = (): void => {
+    if (!customReminderDate) {
+      return;
+    }
+
+    const remindAt = calculateCustomReminderTime(customReminderDate, customReminderTime);
+    if (remindAt.getTime() <= Date.now()) {
+      toast.error('Please choose a future time for reminder');
+      return;
+    }
+    applyReminderAt(remindAt);
+    setIsCustomReminderModalOpen(false);
+  };
+
+  const customReminderDatePickerId = `message-reminder-date-${message.messageId}`;
+  const customReminderTimeSelectId = `message-reminder-time-${message.messageId}`;
 
   const onCopyLink = (): void => {
     // Get conversation ID from conversation object or fallback to message
@@ -851,6 +1007,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             showAvatar={showAvatar}
             isPinned={conversation?.pinned || false}
             isBookmarked={isBookmarked}
+            isReminderSet={isReminderSet}
+            reminderDueInLabel={reminderDueInLabel}
             variant={variant}
             isHighlighted={isHighlighted}
             channelId={channelId}
@@ -907,10 +1065,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   onCreateSubTicket: handleCreateSubTicket,
                 })}
               {...((!isSystemMessage || isTicketCreationMessage) &&
-                !isMessageDeleted && { onBookmark: handleToggleBookmark })}
+                !isMessageDeleted && {
+                  onBookmark: handleToggleBookmark,
+                  isBookmarked,
+                })}
+              {...((!isSystemMessage || isTicketCreationMessage) &&
+                !isMessageDeleted && {
+                  onRemindMeOption: handleReminderPresetSelect,
+                })}
               {...(!isMessageDeleted &&
                 (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage })}
-              isBookmarked={isBookmarked}
               isPinned={conversation?.pinned || false}
               {...(shouldShowSendToChannel &&
                 !isMessageDeleted && { onSendToChannel: handleSendToChannel })}
@@ -953,7 +1117,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
               {...(conversation && { conversation })}
               reactionsMd={message.reactions_md}
               showEditAction={canEditMessage}
-              isBookmarked={isBookmarked}
               isPinned={conversation?.pinned || false}
               onCopyLink={onCopyLink}
               {...(!isMessageDeleted &&
@@ -966,7 +1129,12 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   onCreateTicket: handleCreateTicket,
                 })}
               {...((!isSystemMessage || isTicketCreationMessage) &&
-                !isMessageDeleted && { onBookmark: handleToggleBookmark })}
+                !isMessageDeleted && {
+                  onBookmark: handleToggleBookmark,
+                  isBookmarked,
+                })}
+              {...((!isSystemMessage || isTicketCreationMessage) &&
+                !isMessageDeleted && { onRemindMe: handleOpenReminderOptions })}
               {...(!isMessageDeleted &&
                 (isCallMessage || !isSystemMessage) && { onForwardMessage: handleForwardMessage })}
               {...(shouldShowSendToChannel &&
@@ -1095,6 +1263,101 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           conversationId={conversation.conversationId}
         />
       )}
+
+      <Dialog
+        open={isReminderOptionsOpen}
+        onOpenChange={setIsReminderOptionsOpen}
+        title='Remind me'
+        description='Choose when to be reminded about this message'
+      >
+        <div className='p-6 space-y-2'>
+          <h2 className='text-lg font-semibold text-foreground mb-3'>Remind me</h2>
+          {MESSAGE_REMINDER_MENU_OPTIONS.map(option => (
+            <Button
+              key={option.option}
+              variant='ghost'
+              className='w-full justify-start'
+              onClick={e => handleReminderPresetSelect(option.option, e)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={isCustomReminderModalOpen}
+        onOpenChange={setIsCustomReminderModalOpen}
+        title='Reminder'
+        description='Set a reminder for this message'
+      >
+        <div className='p-6 space-y-4'>
+          <div className='flex items-center justify-between'>
+            <h3 className='text-lg font-semibold text-foreground'>Reminder</h3>
+            <button
+              type='button'
+              className='rounded-sm opacity-70 transition-opacity hover:opacity-100'
+              onClick={() => setIsCustomReminderModalOpen(false)}
+              data-track-category='CHAT_BUBBLE'
+              data-track-name='Close_Custom_Reminder_Modal'
+              data-track-metadata={JSON.stringify({ messageId: message.messageId })}
+            >
+              <X className='h-4 w-4' />
+              <span className='sr-only'>Close</span>
+            </button>
+          </div>
+          <div className='space-y-2'>
+            <label
+              htmlFor={customReminderDatePickerId}
+              className='text-sm font-medium text-foreground'
+            >
+              When
+            </label>
+            <DatePicker
+              id={customReminderDatePickerId}
+              selectedDate={customReminderDate}
+              onSelect={setCustomReminderDate}
+              placeholder='Select date'
+              minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+              inputClassName='w-full !h-9'
+              showClearButton={false}
+            />
+          </div>
+
+          <div className='space-y-2'>
+            <label
+              htmlFor={customReminderTimeSelectId}
+              className='text-sm font-medium text-foreground'
+            >
+              Time
+            </label>
+            <Select
+              value={customReminderTime}
+              onValueChange={value => setCustomReminderTime(value)}
+            >
+              <SelectTrigger id={customReminderTimeSelectId} className='w-full'>
+                <SelectValue placeholder='Select time' />
+              </SelectTrigger>
+              <SelectContent showScrollButtons={false}>
+                {REMINDER_TIME_OPTIONS.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className='flex justify-end gap-2 pt-2'>
+            <Button variant='outline' onClick={() => setIsCustomReminderModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       <Dialog
         open={showDeleteConfirm}

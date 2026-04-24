@@ -1598,6 +1598,7 @@ export const bookmarkTable = table('bookmarks')
     createdAt: number(),
     updatedAt: number(),
     isDeleted: boolean(),
+    isCompleted: boolean(),
     metadata: json().optional(),
   })
   .primaryKey('id');

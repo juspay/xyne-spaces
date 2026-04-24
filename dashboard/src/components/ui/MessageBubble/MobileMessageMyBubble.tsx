@@ -29,6 +29,8 @@ export interface MobileMessageMyBubbleProps {
   showAvatar?: boolean | undefined;
   isPinned?: boolean | undefined;
   isBookmarked?: boolean | undefined;
+  isReminderSet?: boolean | undefined;
+  reminderDueInLabel?: string | undefined;
   isHighlighted?: boolean | undefined;
   channelId?: string | undefined;
   conversation?: ConversationWithTicket;
@@ -59,6 +61,8 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   message,
   isPinned,
   isBookmarked,
+  isReminderSet,
+  reminderDueInLabel,
   isHighlighted,
   channelId,
   conversation,
@@ -116,13 +120,6 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
         </div>
       )}
 
-      {isBookmarked && (
-        <div className='flex items-center gap-1 text-[11px] text-primary font-normal mb-1 justify-end pr-2'>
-          <Bookmark className='w-3 h-3 fill-current' />
-          <span>Reminder Set</span>
-        </div>
-      )}
-
       {/* ================== THREAD INFO (replied to a thread) ================== */}
       {threadInfo && channelId && (
         <div className='flex justify-end mb-1'>
@@ -157,6 +154,17 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
       >
         {/* ================== CONTENT ================== */}
         <div className='flex flex-col min-w-0 max-w-[85%] items-end'>
+          {isBookmarked && (
+            <div className='inline-flex items-center gap-1 text-blue-700 dark:text-blue-200 text-[11px] font-medium mb-1'>
+              <Bookmark className='w-3 h-3 fill-current' />
+              <span>
+                {isReminderSet
+                  ? `Reminder Set${reminderDueInLabel ? ` • ${reminderDueInLabel}` : ''}`
+                  : 'Bookmark'}
+              </span>
+            </div>
+          )}
+
           {/* Bubble / Message Content */}
           <div
             className={cn(

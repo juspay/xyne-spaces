@@ -1,10 +1,16 @@
-import { ReactElement, useRef } from 'react';
+import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useParams } from 'react-router-dom';
+import { BookmarkEntityType, type Bookmark as BookmarkRow } from '@xyne/shared';
 import { Bookmark, ArrowLeft } from 'lucide-react';
-import { useBookmarkGrouping } from '../../../hooks/useBookmarkGrouping';
 import { BookmarkItem } from '../BookmarkItem/BookmarkItem';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
+import {
+  getReminderFromMetadata,
+  isBookmarkMarkedDone,
+  upsertBookmarkCompletionMetadata,
+} from '../utils/bookmarkUtils';
+import { cn } from '../../../utils/classNames';
 import {
   PanelGroup,
   Panel,
@@ -12,6 +18,69 @@ import {
   type ImperativePanelHandle,
 } from 'react-resizable-panels';
 import { usePlatform } from '../../../hooks/usePlatform';
+
+type BookmarksTab = 'all' | 'reminder' | 'complete';
+
+const TAB_CONFIG: Array<{
+  id: BookmarksTab;
+  label: string;
+  testId: string;
+  trackName: string;
+}> = [
+  { id: 'all', label: 'All', testId: 'bookmarks-tab-all', trackName: 'Switch_Bookmarks_Tab_All' },
+  {
+    id: 'reminder',
+    label: 'Reminder',
+    testId: 'bookmarks-tab-reminder',
+    trackName: 'Switch_Bookmarks_Tab_Reminder',
+  },
+  {
+    id: 'complete',
+    label: 'Complete',
+    testId: 'bookmarks-tab-complete',
+    trackName: 'Switch_Bookmarks_Tab_Complete',
+  },
+];
+
+const EMPTY_STATE_TEXT: Record<BookmarksTab, { title: string; description: string }> = {
+  all: {
+    title: 'No bookmarks yet',
+    description:
+      'Save messages for later by clicking the bookmark icon when you hover over a message',
+  },
+  reminder: {
+    title: 'No reminders yet',
+    description:
+      'Save messages for later by clicking the bookmark icon when you hover over a message',
+  },
+  complete: {
+    title: 'No completed bookmarks yet',
+    description: 'Marked-done bookmarks will appear here',
+  },
+};
+
+const isMessageBookmark = (bookmark: BookmarkRow): boolean =>
+  bookmark.entityType === BookmarkEntityType.MESSAGE;
+
+const getReminderSortKey = (
+  metadata: unknown,
+  now: number,
+): { bucket: number; remindAtTs: number } => {
+  const reminder = getReminderFromMetadata(metadata);
+  if (!reminder?.remindAt) {
+    return { bucket: 2, remindAtTs: Number.POSITIVE_INFINITY };
+  }
+
+  const remindAtTs = new Date(reminder.remindAt).getTime();
+  if (!Number.isFinite(remindAtTs)) {
+    return { bucket: 2, remindAtTs: Number.POSITIVE_INFINITY };
+  }
+
+  return {
+    bucket: remindAtTs <= now ? 0 : 1,
+    remindAtTs,
+  };
+};
 
 const BookmarksPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
@@ -29,16 +98,126 @@ const BookmarksPanel = (): ReactElement => {
   const bookmarksPanelRef = useRef<ImperativePanelHandle>(null);
 
   const { bookmarks } = useUserBookmarks();
+  const [optimisticCompletedBookmarks, setOptimisticCompletedBookmarks] = useState<BookmarkRow[]>(
+    [],
+  );
+  const [activeTab, setActiveTab] = useState<BookmarksTab>('all');
+  const [isCompleteTabFlashing, setIsCompleteTabFlashing] = useState(false);
+  const completeTabFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Use shared hook for grouping and sorting
-  const { groupedBookmarks, sortedDateKeys } = useBookmarkGrouping(bookmarks || []);
+  const triggerCompleteTabFlash = (): void => {
+    if (activeTab === 'complete') {
+      return;
+    }
+
+    setIsCompleteTabFlashing(true);
+
+    if (completeTabFlashTimeoutRef.current) {
+      clearTimeout(completeTabFlashTimeoutRef.current);
+    }
+
+    completeTabFlashTimeoutRef.current = setTimeout(() => {
+      setIsCompleteTabFlashing(false);
+      completeTabFlashTimeoutRef.current = null;
+    }, 800);
+  };
+
+  useEffect(() => {
+    return (): void => {
+      if (completeTabFlashTimeoutRef.current) {
+        clearTimeout(completeTabFlashTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const prioritizedBookmarks = useMemo(() => {
+    const now = Date.now();
+    const clonedBookmarks = bookmarks.filter(
+      bookmark =>
+        isMessageBookmark(bookmark) &&
+        !bookmark.isCompleted &&
+        !isBookmarkMarkedDone(bookmark.metadata),
+    );
+
+    clonedBookmarks.sort((a, b) => {
+      const aPriority = getReminderSortKey(a.metadata, now);
+      const bPriority = getReminderSortKey(b.metadata, now);
+
+      if (aPriority.bucket !== bPriority.bucket) {
+        return aPriority.bucket - bPriority.bucket;
+      }
+
+      if (aPriority.bucket < 2 && aPriority.remindAtTs !== bPriority.remindAtTs) {
+        return aPriority.remindAtTs - bPriority.remindAtTs;
+      }
+
+      return b.createdAt - a.createdAt;
+    });
+
+    return clonedBookmarks;
+  }, [bookmarks]);
+
+  const reminderBookmarks = useMemo(() => {
+    return prioritizedBookmarks.filter(bookmark => {
+      return !!getReminderFromMetadata(bookmark.metadata);
+    });
+  }, [prioritizedBookmarks]);
+
+  const completedBookmarks = useMemo(() => {
+    const activeBookmarkEntityKeys = new Set(
+      bookmarks
+        .filter(bookmark => !bookmark.isCompleted && !isBookmarkMarkedDone(bookmark.metadata))
+        .map(bookmark => `${bookmark.entityType}:${bookmark.entityId}`),
+    );
+
+    const mergedById = new Map<string, BookmarkRow>();
+
+    bookmarks.filter(isMessageBookmark).forEach(bookmark => {
+      if (!bookmark.isCompleted && !isBookmarkMarkedDone(bookmark.metadata)) {
+        return;
+      }
+
+      mergedById.set(bookmark.id, bookmark);
+    });
+
+    optimisticCompletedBookmarks.forEach(bookmark => {
+      if (!isMessageBookmark(bookmark)) {
+        return;
+      }
+
+      const bookmarkEntityKey = `${bookmark.entityType}:${bookmark.entityId}`;
+      if (activeBookmarkEntityKeys.has(bookmarkEntityKey)) {
+        return;
+      }
+
+      if (!bookmark.isCompleted && !isBookmarkMarkedDone(bookmark.metadata)) {
+        return;
+      }
+
+      if (!mergedById.has(bookmark.id)) {
+        mergedById.set(bookmark.id, bookmark);
+      }
+    });
+
+    return Array.from(mergedById.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [bookmarks, optimisticCompletedBookmarks]);
+
+  const visibleBookmarks = useMemo(() => {
+    if (activeTab === 'reminder') {
+      return reminderBookmarks;
+    }
+    if (activeTab === 'complete') {
+      return completedBookmarks;
+    }
+    return prioritizedBookmarks;
+  }, [activeTab, completedBookmarks, prioritizedBookmarks, reminderBookmarks]);
 
   // Render the left panel content (exact same UI)
   const renderLeftPanel = (): ReactElement => (
     <div className='flex-1 h-full flex flex-col overflow-hidden bg-background'>
       {/* Header */}
       <div className='relative p-4 bg-background'>
-        <div className='flex items-center gap-2'>
+        <div className='flex items-center gap-2 mb-3'>
           {/* Back Button */}
           {!isMobile && (
             <Link
@@ -53,39 +232,85 @@ const BookmarksPanel = (): ReactElement => {
 
           <h3 className='font-semibold text-foreground'>Bookmarks</h3>
         </div>
+
+        <div className='overflow-x-auto border-b border-border no-scrollbar -mx-4 px-4'>
+          <div className='flex items-center sm:justify-start min-w-max'>
+            {TAB_CONFIG.map(tab => {
+              const isCompleteFlashing =
+                tab.id === 'complete' && isCompleteTabFlashing && activeTab !== 'complete';
+
+              return (
+                <button
+                  key={tab.id}
+                  type='button'
+                  onClick={(): void => setActiveTab(tab.id)}
+                  className={cn(
+                    'relative overflow-hidden px-1 py-2 flex items-center transition-colors duration-250 cursor-pointer sm:px-4 justify-start border-b-2 text-muted-foreground',
+                    isCompleteFlashing
+                      ? 'border-transparent bg-blue-200/70 dark:bg-blue-500/25 rounded-md'
+                      : activeTab === tab.id
+                        ? 'text-primary border-primary'
+                        : 'text-muted-foreground border-transparent hover:text-foreground',
+                  )}
+                  data-testid={tab.testId}
+                  data-track-category='CHAT_BOOKMARK'
+                  data-track-name={tab.trackName}
+                >
+                  <span className='relative z-10 text-xs sm:text-sm font-medium truncate'>
+                    {tab.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Bookmarks List */}
       <div className='flex-1 overflow-y-auto'>
-        {!bookmarks || bookmarks.length === 0 ? (
+        {visibleBookmarks.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
             <Bookmark className='text-muted-foreground mb-4' size={48} />
-            <p className='text-muted-foreground text-lg font-medium mb-2'>No bookmarks yet</p>
+            <p className='text-muted-foreground text-lg font-medium mb-2'>
+              {EMPTY_STATE_TEXT[activeTab].title}
+            </p>
             <p className='text-muted-foreground text-sm max-w-md'>
-              Save messages for later by clicking the bookmark icon when you hover over a message
+              {EMPTY_STATE_TEXT[activeTab].description}
             </p>
           </div>
         ) : (
           <div>
-            {sortedDateKeys.map(dateKey => (
-              <div key={dateKey}>
-                {/* Bookmarks for this date */}
-                <div>
-                  {groupedBookmarks[dateKey]?.map(bookmark => (
-                    <BookmarkItem
-                      key={bookmark.id}
-                      bookmarkId={bookmark.id}
-                      entityId={bookmark.entityId}
-                      entityType={bookmark.entityType}
-                      createdAt={bookmark.createdAt}
-                      bookmarkMetadata={bookmark.metadata}
-                      showChannelName={true}
-                      enableSnooze={!isMobile}
-                      isMobile={isMobile}
-                    />
-                  ))}
-                </div>
-              </div>
+            {visibleBookmarks.map(bookmark => (
+              <BookmarkItem
+                key={bookmark.id}
+                entityId={bookmark.entityId}
+                entityType={bookmark.entityType}
+                bookmarkMetadata={bookmark.metadata}
+                showChannelName={true}
+                enableReminder={!isMobile && activeTab !== 'complete'}
+                isMobile={isMobile}
+                showActions={activeTab !== 'complete'}
+                {...(activeTab === 'complete'
+                  ? {}
+                  : {
+                      onMarkedDone: (): void => {
+                        setOptimisticCompletedBookmarks(prev => {
+                          const completedBookmark: BookmarkRow = {
+                            ...bookmark,
+                            isDeleted: false,
+                            isCompleted: true,
+                            updatedAt: Date.now(),
+                            metadata: upsertBookmarkCompletionMetadata(
+                              bookmark.metadata,
+                            ) as BookmarkRow['metadata'],
+                          };
+                          const withoutDuplicate = prev.filter(item => item.id !== bookmark.id);
+                          return [completedBookmark, ...withoutDuplicate];
+                        });
+                        triggerCompleteTabFlash();
+                      },
+                    })}
+              />
             ))}
           </div>
         )}

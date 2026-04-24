@@ -51,8 +51,9 @@ function SelectContent({
   className,
   children,
   position = 'popper',
+  showScrollButtons = true,
   ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+}: React.ComponentProps<typeof SelectPrimitive.Content> & { showScrollButtons?: boolean }) {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -69,7 +70,7 @@ function SelectContent({
         position={position}
         {...props}
       >
-        <SelectScrollUpButton />
+        {showScrollButtons && <SelectScrollUpButton />}
         <SelectPrimitive.Viewport
           className={cn(
             'p-1',
@@ -79,7 +80,7 @@ function SelectContent({
         >
           {children}
         </SelectPrimitive.Viewport>
-        <SelectScrollDownButton />
+        {showScrollButtons && <SelectScrollDownButton />}
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   );

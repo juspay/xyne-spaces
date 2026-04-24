@@ -6,7 +6,6 @@ import {
   SmilePlus,
   Ticket,
   Bookmark,
-  BookmarkMinus,
   Forward,
   MoreVertical,
   Trash2,
@@ -16,6 +15,8 @@ import {
   Pin,
   CornerUpLeft,
   SquareAsterisk,
+  Clock3,
+  ChevronRight,
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
@@ -34,9 +35,22 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
+import { MESSAGE_REMINDER_MENU_OPTIONS, type ReminderMenuOption } from '../utils/bookmarkUtils';
+
+const REMINDER_TRACK_NAME_BY_OPTION: Record<ReminderMenuOption, string> = {
+  '20mins': 'REMINDER_20_MINS',
+  '1hour': 'REMINDER_1_HOUR',
+  '3hours': 'REMINDER_3_HOURS',
+  tomorrow: 'REMINDER_TOMORROW',
+  nextWeek: 'REMINDER_NEXT_WEEK',
+  custom: 'REMINDER_CUSTOM',
+};
 
 interface HoverActionsToolbarProps {
   isVisible: boolean;
@@ -59,8 +73,9 @@ interface HoverActionsToolbarProps {
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   onDropdownOpenChange?: (isOpen: boolean) => void;
   onBookmark?: () => void;
-  onAskAI?: () => void;
   isBookmarked?: boolean;
+  onRemindMeOption?: (option: ReminderMenuOption) => void;
+  onAskAI?: () => void;
   isPinned?: boolean;
   onMarkAsUnread?: () => void;
   onInitiateCall?: () => void;
@@ -89,8 +104,9 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   onEmojiPickerOpenChange,
   onDropdownOpenChange,
   onBookmark,
-  onAskAI,
   isBookmarked = false,
+  onRemindMeOption,
+  onAskAI,
   isPinned = false,
   onMarkAsUnread,
   onInitiateCall,
@@ -127,6 +143,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
     onMarkAsUnread ||
     showEditAction ||
     onBookmark ||
+    onRemindMeOption ||
     onForwardMessage ||
     (onReplyInThread && conversationId);
 
@@ -295,7 +312,11 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             {(() => {
               const hasEditSection = (showEditAction && onEditMessage) || onSendToChannel;
               const hasSubscriptionSection =
-                (onReplyInThread && conversationId) || onMarkAsUnread || onBookmark || onPinMessage;
+                (onReplyInThread && conversationId) ||
+                onMarkAsUnread ||
+                onBookmark ||
+                onRemindMeOption ||
+                onPinMessage;
               const hasCopySection = onCopyLink || onCopyMessage || onForwardMessage;
               const hasDelete = showEditAction && onDeleteMessage;
 
@@ -370,18 +391,45 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
                         isBookmarked ? 'hover-action-remove-bookmark' : 'hover-action-add-bookmark'
                       }
                       data-track-category='HOVER_ACTIONS_TOOLBAR'
-                      data-track-name='TOGGLE_BOOKMARK'
-                      data-track-metadata={JSON.stringify({ isBookmarked, messageId })}
+                      data-track-name={isBookmarked ? 'REMOVE_BOOKMARK' : 'ADD_BOOKMARK'}
+                      data-track-metadata={JSON.stringify({ messageId })}
                     >
                       <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
-                        {isBookmarked ? (
-                          <BookmarkMinus className='w-4 h-4' />
-                        ) : (
-                          <Bookmark className='w-4 h-4' />
-                        )}
+                        <Bookmark className='w-4 h-4' />
                       </span>
                       {isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
                     </DropdownMenuItem>
+                  )}
+
+                  {/* Remind Me */}
+                  {onRemindMeOption && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger
+                        data-testid='hover-action-remind-me'
+                        data-track-category='HOVER_ACTIONS_TOOLBAR'
+                        data-track-name='OPEN_REMINDER_MENU'
+                        data-track-metadata={JSON.stringify({ messageId })}
+                      >
+                        <span className='w-4 h-4 mr-2 flex items-center justify-center text-muted-foreground'>
+                          <Clock3 className='w-4 h-4' />
+                        </span>
+                        Remind me
+                        <ChevronRight className='w-4 h-4 ml-auto text-muted-foreground' />
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className='w-[200px]'>
+                        {MESSAGE_REMINDER_MENU_OPTIONS.map(option => (
+                          <DropdownMenuItem
+                            key={option.option}
+                            onClick={(): void => onRemindMeOption(option.option)}
+                            data-track-category='HOVER_ACTIONS_TOOLBAR'
+                            data-track-name={REMINDER_TRACK_NAME_BY_OPTION[option.option]}
+                            data-track-metadata={JSON.stringify({ messageId })}
+                          >
+                            {option.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   )}
 
                   {/* Pin Message */}
