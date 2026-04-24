@@ -851,7 +851,7 @@ export class TranscriptService {
       return transcript;
     }
 
-    const systemInstructions = `You are processing a call transcript. Your task is to translate any non-English text to English.
+    const systemInstructions = `You are processing a call transcript. Your task is to translate any non-English text to English, and to fix one specific brand name spelling.
 
 IMPORTANT:
 - Keep ALL timestamps exactly as they are: [MM:SS] format
@@ -863,6 +863,11 @@ IMPORTANT:
 - Do not use placeholders like "[...]" or "[content continues]"
 - Preserve the exact line-by-line structure: [MM:SS] Speaker Name: text
 - Translate EVERY line completely, do not skip or truncate any content
+
+BRAND NAME CORRECTION:
+- The word "Xyne" (a product/brand name, pronounced like "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
+- When any of word that phonetically sounds like XYNE appear as a standalone word or as part of a compound like "Zain Spaces", "Zine Calls", etc., replace it with "Xyne"
+- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls"), not when it is part of an unrelated proper noun or personal name
 
 Output ONLY the processed transcript, nothing else.`;
 
