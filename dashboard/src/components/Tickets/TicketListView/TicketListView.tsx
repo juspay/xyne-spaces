@@ -12,7 +12,7 @@ import type { TicketListItem } from './TicketListView.types';
 const ROW_HEIGHT = 45;
 
 export type SupportTicketRow = NonNullable<
-  QueryResultType<typeof queries.supportTicketsPage>[number]
+  QueryResultType<typeof queries.supportTicketsPageV2>[number]
 >;
 
 type TicketStart = { id: string; createdAt: number };
@@ -64,7 +64,7 @@ export function TicketListView({
       start: TicketStart | null;
       dir: 'forward' | 'backward';
     }) => ({
-      query: queries.supportTicketsPage({
+      query: queries.supportTicketsPageV2({
         channelId,
         isMember,
         assignedTo,
@@ -78,7 +78,7 @@ export function TicketListView({
 
   const getSingleQuery = useCallback(
     ({ id }: { id: string }) => ({
-      query: queries.supportTicketRow({ id, channelId, isMember }),
+      query: queries.supportTicketRowV2({ id, channelId, isMember }),
     }),
     [channelId, isMember],
   );
