@@ -1,3 +1,10 @@
+## [1.128.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.128.0...v1.128.1) (2026-04-24)
+
+
+### Bug Fixes
+
+* Support-screen-queries ([f3eb183](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f3eb18380aa53b9ea00e3f1070384dd2b1f127c8)), closes [#5488](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5488)
+
 ## [1.128.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.127.0...v1.128.0) (2026-04-24)
 
 
