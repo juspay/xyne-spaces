@@ -1903,7 +1903,11 @@ const EmailComposer = ({
   const [showCc, setShowCc] = useState<boolean>(false);
   const [showBcc, setShowBcc] = useState<boolean>(false);
 
-  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const [isExpanded, setIsExpanded] = useState<boolean>(true);
+  const [composerHeight, setComposerHeight] = useState<number>(320);
+  const [isResizingComposer, setIsResizingComposer] = useState<boolean>(false);
+  const resizeStartYRef = useRef<number>(0);
+  const resizeStartHeightRef = useRef<number>(320);
 
   // Initialize recipients from latest email
   useEffect(() => {
@@ -1938,7 +1942,6 @@ const EmailComposer = ({
         setCcEmails(latestEmail.cc || []);
         setBccEmails(latestEmail.bcc || []);
 
-        setIsExpanded(false);
         setShowCc(false);
         setShowBcc(false);
       }
@@ -2100,6 +2103,71 @@ const EmailComposer = ({
   };
 
   const composerRef = useRef<HTMLDivElement>(null);
+
+  const startComposerResize = (clientY: number): void => {
+    if (!isExpanded || isSending) return;
+    resizeStartYRef.current = clientY;
+    resizeStartHeightRef.current = composerHeight;
+    setIsResizingComposer(true);
+  };
+
+  const handleComposerResizeTouchStart = (event: React.TouchEvent<HTMLDivElement>): void => {
+    const touch = event.touches[0];
+    if (!touch) return;
+    event.preventDefault();
+    startComposerResize(touch.clientY);
+  };
+
+  useEffect(() => {
+    if (!isResizingComposer) return undefined;
+
+    const MIN_HEIGHT = 260;
+    const MAX_HEIGHT = 760;
+
+    const handlePointerMove = (clientY: number): void => {
+      const deltaY = resizeStartYRef.current - clientY;
+      const nextHeight = Math.min(
+        MAX_HEIGHT,
+        Math.max(MIN_HEIGHT, resizeStartHeightRef.current + deltaY),
+      );
+      setComposerHeight(nextHeight);
+    };
+
+    const handleMouseMove = (event: MouseEvent): void => {
+      handlePointerMove(event.clientY);
+    };
+
+    const handleTouchMove = (event: TouchEvent): void => {
+      const touch = event.touches[0];
+      if (!touch) return;
+      event.preventDefault();
+      handlePointerMove(touch.clientY);
+    };
+
+    const stopResizing = (): void => {
+      setIsResizingComposer(false);
+    };
+
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', stopResizing);
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', stopResizing);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', stopResizing);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', stopResizing);
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+    };
+  }, [isResizingComposer]);
+
   useEffect(() => {
     if (!onClose) return undefined;
     const handler = (e: KeyboardEvent): void => {
@@ -2119,8 +2187,25 @@ const EmailComposer = ({
   return (
     <div className='w-full p-4' ref={composerRef}>
       <div
-        className={`border border-border rounded-xl relative ${isSending ? 'opacity-60 pointer-events-none' : ''}`}
+        className={`border border-border rounded-xl relative flex flex-col overflow-hidden ${isSending ? 'opacity-60 pointer-events-none' : ''}`}
+        style={isExpanded ? { height: `${composerHeight}px` } : undefined}
       >
+        {isExpanded && (
+          <div
+            className='h-4 flex-shrink-0 flex items-center justify-center cursor-row-resize touch-none'
+            onMouseDown={e => {
+              e.preventDefault();
+              startComposerResize(e.clientY);
+            }}
+            onTouchStart={handleComposerResizeTouchStart}
+            onKeyDown={() => {}}
+            role='button'
+            tabIndex={0}
+            aria-label='Resize composer'
+          >
+            <div className='h-1 w-14 rounded-full bg-muted-foreground/30' />
+          </div>
+        )}
         <div className='px-4 pt-3'>
           {!isExpanded ? (
             <button
@@ -2405,79 +2490,81 @@ const EmailComposer = ({
           )}
         </div>
 
-        {aiDraft.isDraftActive ? (
-          <DraftCard
-            draftContent={aiDraft.draftContent}
-            isStreaming={aiDraft.isStreaming}
-            onAccept={() => {
-              const content = aiDraft.acceptDraft();
-              setEmailContent(content);
-              if (content) saveDraft(content);
-              setHasAcceptedDraft(true);
-            }}
-            onReject={() => {
-              aiDraft.rejectDraft();
-              setEmailContent('');
-              deleteDraft();
-            }}
-            onRefine={(instruction: string) => aiDraft.refineDraft(instruction)}
-          />
-        ) : (
-          <TextareaAutosize
-            minRows={5}
-            maxRows={20}
-            placeholder='Compose email...'
-            value={emailContent}
-            onChange={e => setEmailContent(e.target.value)}
-            onBlur={() => saveDraft(emailContent)}
-            onKeyDown={e => {
-              if (
-                e.key === 'Enter' &&
-                (e.metaKey || e.ctrlKey) &&
-                emailContent.trim() &&
-                conversationId &&
-                !isSending &&
-                toEmails.length > 0
-              ) {
-                e.preventDefault();
-                void handleSendEmail();
-              }
-            }}
-            className='w-full px-4 py-3 focus:outline-none text-sm resize-none'
-            disabled={isSending}
-          />
-        )}
+        <div className='flex-1 min-h-0 overflow-y-auto'>
+          {aiDraft.isDraftActive ? (
+            <DraftCard
+              draftContent={aiDraft.draftContent}
+              isStreaming={aiDraft.isStreaming}
+              onAccept={() => {
+                const content = aiDraft.acceptDraft();
+                setEmailContent(content);
+                if (content) saveDraft(content);
+                setHasAcceptedDraft(true);
+              }}
+              onReject={() => {
+                aiDraft.rejectDraft();
+                setEmailContent('');
+                deleteDraft();
+              }}
+              onRefine={(instruction: string) => aiDraft.refineDraft(instruction)}
+            />
+          ) : (
+            <TextareaAutosize
+              minRows={5}
+              maxRows={20}
+              placeholder='Compose email...'
+              value={emailContent}
+              onChange={e => setEmailContent(e.target.value)}
+              onBlur={() => saveDraft(emailContent)}
+              onKeyDown={e => {
+                if (
+                  e.key === 'Enter' &&
+                  (e.metaKey || e.ctrlKey) &&
+                  emailContent.trim() &&
+                  conversationId &&
+                  !isSending &&
+                  toEmails.length > 0
+                ) {
+                  e.preventDefault();
+                  void handleSendEmail();
+                }
+              }}
+              className='w-full px-4 py-3 focus:outline-none text-sm resize-none'
+              disabled={isSending}
+            />
+          )}
 
-        {/* Attachments section */}
-        {attachments.length > 0 && (
-          <div className='px-4 pb-3'>
-            <div className='flex flex-wrap gap-2'>
-              {attachments.map((file, index) => (
-                <AttachmentPreview
-                  key={`${file.name}-${file.size}-${index}`}
-                  file={file}
-                  onRemove={() => handleRemoveAttachment(index)}
-                  onPreview={() => handlePreviewAttachment(file)}
-                  isUploading={isUploadingAttachments && index === attachments.length - 1}
+          {/* Attachments section */}
+          {attachments.length > 0 && (
+            <div className='px-4 pb-3'>
+              <div className='flex flex-wrap gap-2'>
+                {attachments.map((file, index) => (
+                  <AttachmentPreview
+                    key={`${file.name}-${file.size}-${index}`}
+                    file={file}
+                    onRemove={() => handleRemoveAttachment(index)}
+                    onPreview={() => handlePreviewAttachment(file)}
+                    isUploading={isUploadingAttachments && index === attachments.length - 1}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedSignatureId && (
+            <div className='px-4 pb-3'>
+              <div className='border-t border-border pt-2'>
+                <p className='text-xs text-muted-foreground mb-1'>--</p>
+                <div
+                  className='text-sm text-muted-foreground prose prose-sm max-w-none'
+                  dangerouslySetInnerHTML={{
+                    __html: signatures?.find(s => s.id === selectedSignatureId)?.content ?? '',
+                  }}
                 />
-              ))}
+              </div>
             </div>
-          </div>
-        )}
-
-        {selectedSignatureId && (
-          <div className='px-4 pb-3'>
-            <div className='border-t border-border pt-2'>
-              <p className='text-xs text-muted-foreground mb-1'>--</p>
-              <div
-                className='text-sm text-muted-foreground prose prose-sm max-w-none'
-                dangerouslySetInnerHTML={{
-                  __html: signatures?.find(s => s.id === selectedSignatureId)?.content ?? '',
-                }}
-              />
-            </div>
-          </div>
-        )}
+          )}
+        </div>
 
         <div className='px-3 py-1.5 flex items-center justify-between'>
           <div className='flex items-center gap-0.5'>
