@@ -13,6 +13,44 @@ import { db } from '@/database/client';
 
 const prisma = DatabaseClient.getInstance();
 
+
+function parseEnvChanges(
+  envChanges: Array<{ filePath: string; fileName: string; newValue: string }> | undefined
+): Array<{ name: string; status: string }> {
+  if (!envChanges || envChanges.length === 0) {
+    return [];
+  }
+
+  const envVarRegex = /^([+-])\s*([A-Z][A-Z0-9_]*)(?:\s*=|\s*:)/gm;
+  const envVarStatusMap = new Map<string, { added: boolean; removed: boolean }>();
+
+  for (const change of envChanges) {
+    if (change.newValue) {
+      let match;
+      envVarRegex.lastIndex = 0;
+      while ((match = envVarRegex.exec(change.newValue)) !== null) {
+        const sign = match[1];
+        const varName = match[2];
+        if (!envVarStatusMap.has(varName)) {
+          envVarStatusMap.set(varName, { added: false, removed: false });
+        }
+        const status = envVarStatusMap.get(varName)!;
+        if (sign === '+') status.added = true;
+        if (sign === '-') status.removed = true;
+      }
+    }
+  }
+
+  return Array.from(envVarStatusMap.entries())
+    .map(([name, flags]) => {
+      let status = 'MODIFIED';
+      if (flags.added && !flags.removed) status = 'ADDED';
+      else if (!flags.added && flags.removed) status = 'DELETED';
+      return { name, status };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export interface CommitAnalysisCanvasMetadata {
   projectId?: string | null;
   conversationId?: string;
@@ -215,6 +253,10 @@ async function formatCommitAnalysisToBlockNote(
     userLookupCache.set(email, null);
     return null;
   };
+
+  const envVarList = parseEnvChanges(envChanges);
+  const envVariableCount = envVarList.length;
+
   const totalCommits = results.length;
   const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
   const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
@@ -312,52 +354,17 @@ async function formatCommitAnalysisToBlockNote(
     type: 'paragraph',
     content: [
       { type: 'text', text: 'Environment Changes: ', styles: { bold: true } },
-      { type: 'text', text: metadata.envChangeCount > 0 ? `Yes (${metadata.envChangeCount} files)` : 'No', styles: {} },
+      { type: 'text', text: envVariableCount > 0 ? `Yes (${envVariableCount} variables)` : 'No', styles: {} },
     ],
   });
 
-  // Environment changes section
-  if (envChanges && envChanges.length > 0) {
+  if (envVarList.length > 0) {
     blocks.push({
       id: uuidv4(),
       type: 'heading',
       props: { level: 3 },
       content: [{ type: 'text', text: '🔧 Environment Variables', styles: {} }],
     });
-
-    const envChangesByPath = new Map<string, { fileName: string; newValue: string }>();
-    for (const change of envChanges) {
-      if (change.filePath && change.fileName && change.newValue) {
-        envChangesByPath.set(change.filePath, { fileName: change.fileName, newValue: change.newValue });
-      }
-    }
-
-    const envVarRegex = /^([+-])\s*([A-Z][A-Z0-9_]*)(?:\s*=|\s*:)/gm;
-    const envVarStatusMap = new Map<string, { added: boolean; removed: boolean }>();
-
-    for (const [, change] of envChangesByPath) {
-      let match;
-      envVarRegex.lastIndex = 0;
-      while ((match = envVarRegex.exec(change.newValue)) !== null) {
-        const sign = match[1];
-        const varName = match[2];
-        if (!envVarStatusMap.has(varName)) {
-          envVarStatusMap.set(varName, { added: false, removed: false });
-        }
-        const status = envVarStatusMap.get(varName)!;
-        if (sign === '+') status.added = true;
-        if (sign === '-') status.removed = true;
-      }
-    }
-
-    const envVarList = Array.from(envVarStatusMap.entries())
-      .map(([name, flags]) => {
-        let status = 'MODIFIED';
-        if (flags.added && !flags.removed) status = 'ADDED';
-        else if (!flags.added && flags.removed) status = 'DELETED';
-        return { name, status };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
 
     for (const item of envVarList) {
       blocks.push({
@@ -389,7 +396,6 @@ async function formatCommitAnalysisToBlockNote(
     }
   }
 
-  // Create maps for env and migration changes by filePath
   const envChangesByPath = new Map<string, { fileName: string; newValue: string }>();
   if (envChanges) {
     for (const change of envChanges) {
@@ -399,10 +405,20 @@ async function formatCommitAnalysisToBlockNote(
     }
   }
 
-  const migrationLinksByPath = new Map<string, string>();
+  // Group migration links by PR (commit) to avoid cross-contamination
+  // A file like schema.prisma can appear in multiple PRs, each with different commit IDs
+  const migrationLinksByCommit = new Map<string, Map<string, string>>();
   if (migrationLinks) {
     for (const link of migrationLinks) {
-      migrationLinksByPath.set(link.filePath, link.diffUrl);
+      // Extract commit ID from the diffUrl
+      const commitMatch = link.diffUrl.match(/commits\/([a-f0-9]+)/);
+      if (commitMatch) {
+        const commitId = commitMatch[1];
+        if (!migrationLinksByCommit.has(commitId)) {
+          migrationLinksByCommit.set(commitId, new Map());
+        }
+        migrationLinksByCommit.get(commitId)!.set(link.filePath, link.diffUrl);
+      }
     }
   }
 
@@ -432,7 +448,7 @@ async function formatCommitAnalysisToBlockNote(
     });
 
     // Author - with mention if user found
-    const authorUser = metadata.workspaceId 
+    const authorUser = metadata.workspaceId
       ? await lookupUserByEmail(pr.author.emailAddress, metadata.workspaceId)
       : null;
     const authorContent: BlockNoteInlineContent[] = [
@@ -527,8 +543,12 @@ async function formatCommitAnalysisToBlockNote(
       }
     }
 
-    // Display migration changes for this PR
-    const prMigrationChanges = result.filePaths.filter(fp => migrationLinksByPath.has(fp));
+    // Look up migration links specific to this PR's commit
+    const prMigrationLinks = migrationLinksByCommit.get(result.commitId);
+    const prMigrationChanges = prMigrationLinks
+      ? result.filePaths.filter(fp => prMigrationLinks.has(fp))
+      : [];
+
     if (prMigrationChanges.length > 0) {
       blocks.push({
         id: uuidv4(),
@@ -538,7 +558,7 @@ async function formatCommitAnalysisToBlockNote(
 
       for (const filePath of prMigrationChanges) {
         const fileName = filePath.split('/').pop() || filePath;
-        const diffUrl = migrationLinksByPath.get(filePath);
+        const diffUrl = prMigrationLinks!.get(filePath);
         blocks.push({
           id: uuidv4(),
           type: 'bulletListItem',
