@@ -148,17 +148,20 @@ export class CallRepository {
   }
 
   /**
-   * Find the most recently scheduled call instance for a recurring series.
+   * Find the next upcoming SCHEDULED call instance for a recurring series.
+   * Returns the first SCHEDULED instance whose startsAt is >= now, ordered ascending.
    * Used as a fallback when there is no active call — gives the participant
-   * credentials for the latest/upcoming occurrence.
+   * credentials for the next occurrence they should join.
    */
   async findLatestCallByRecurringSeriesId(recurringSeriesId: string): Promise<Call | null> {
     return await DatabaseClient.getInstance().call.findFirst({
       where: {
         recurringSeriesId,
+        status: CallStatus.SCHEDULED,
+        startsAt: { gte: new Date() },
       },
       orderBy: {
-        startsAt: 'desc',
+        startsAt: 'asc',
       },
     });
   }
@@ -615,8 +618,9 @@ export class CallRepository {
 
       // End call if no active participants and not already ended
       if (activeCount === 0 && call.status !== CallStatus.ENDED) {
-        // If endsAt is in the future this is a scheduled call - revert to SCHEDULED so it can be rejoined
-        // Otherwise mark as permanently ENDED
+        // If endsAt is in the future this is a scheduled call - revert to SCHEDULED so it can be rejoined.
+        // Only signal shouldEndCall=true when the call is truly ENDED so that missed-call
+        // notifications and metrics are NOT fired for calls that are merely reverting to SCHEDULED.
         const finalStatus =
           call.endsAt && leftAt < call.endsAt ? CallStatus.SCHEDULED : CallStatus.ENDED;
 
@@ -624,7 +628,7 @@ export class CallRepository {
           where: { id: call.id },
           data: { status: finalStatus, endedAt: leftAt },
         });
-        shouldEndCall = true;
+        shouldEndCall = finalStatus === CallStatus.ENDED;
 
         // Update system message whether the call is fully ended or just rescheduled
         messageUpdated = await updateCallSystemMessageIfNeeded({
@@ -666,8 +670,9 @@ export class CallRepository {
 
       // Check and update call status if not already ended
       if (call.status !== CallStatus.ENDED) {
-        // If endsAt is in the future this is a scheduled call - revert to SCHEDULED so it can be rejoined
-        // Otherwise mark as permanently ENDED
+        // If endsAt is in the future this is a scheduled call - revert to SCHEDULED so it can be rejoined.
+        // Only signal shouldEndCall=true when the call is truly ENDED so that metrics are NOT fired
+        // for calls that are merely reverting to SCHEDULED.
         const finalStatus =
           call.endsAt && endedAt < call.endsAt ? CallStatus.SCHEDULED : CallStatus.ENDED;
 
@@ -675,7 +680,7 @@ export class CallRepository {
           where: { id: call.id },
           data: { status: finalStatus, endedAt },
         });
-        shouldEndCall = true;
+        shouldEndCall = finalStatus === CallStatus.ENDED;
 
         // Update system message whether the call is fully ended or just rescheduled
         messageUpdated = await updateCallSystemMessageIfNeeded({

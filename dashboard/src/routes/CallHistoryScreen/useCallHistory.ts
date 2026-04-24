@@ -44,6 +44,7 @@ interface UseCallHistoryReturn {
   handleRemoveUser: (userId: string) => void;
   closeParticipantsModal: () => void;
   handleGotoTranscript: (call: Call) => void;
+  getGotoTranscriptHandler: (call: Call) => (() => void) | undefined;
   handleDownloadTranscript: (call: Call) => void;
   showConfirmModal: boolean;
   confirmModalConfig: {
@@ -575,6 +576,11 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     closeDeleteModal();
   };
 
+  const getGotoTranscriptHandler = (call: Call): (() => void) | undefined => {
+    const metadata = call.metadata as { conversationId?: string } | null;
+    return metadata?.conversationId ? () => handleGotoTranscript(call) : undefined;
+  };
+
   const handleGotoTranscript = (call: Call): void => {
     const metadata = call.metadata as { conversationId?: string } | null;
     const conversationId = metadata?.conversationId;
@@ -696,6 +702,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     handleRemoveUser,
     closeParticipantsModal,
     handleGotoTranscript,
+    getGotoTranscriptHandler,
     handleDownloadTranscript,
     showConfirmModal,
     confirmModalConfig,

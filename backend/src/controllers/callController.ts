@@ -75,6 +75,10 @@ export class CallController {
         isSeries: !!isSeries,
         recurringSeriesId: call.recurringSeriesId ?? undefined,
         userId,
+        organizerId: call.createdByUserId,
+        callId: call.id,
+        callExternalId: call.externalId,
+        channelId: call.channelId ?? undefined,
       });
 
       if (call.createdByUserId !== userId) {
@@ -411,7 +415,8 @@ export class CallController {
       // --- Recurring series link resolution ---
       // If the requested call belongs to a recurring series, try to redirect the
       // participant to the currently active instance (someone shared an old link).
-      // Fallback: use the latest scheduled instance if nothing is live yet.
+      // Fallback: use the next upcoming SCHEDULED instance so we don't land on
+      // a past or far-future occurrence.
       if (call?.recurringSeriesId) {
         const activeSeriesCall = await repositories.calls.findActiveCallByRecurringSeriesId(call.recurringSeriesId);
         if (activeSeriesCall) {
@@ -419,11 +424,11 @@ export class CallController {
           call = activeSeriesCall;
           callId = activeSeriesCall.externalId;
         } else {
-          const latestSeriesCall = await repositories.calls.findLatestCallByRecurringSeriesId(call.recurringSeriesId);
-          if (latestSeriesCall) {
-            logger.info(`[joinCall] Recurring series redirect: old call ${callId} → latest call ${latestSeriesCall.externalId}`);
-            call = latestSeriesCall;
-            callId = latestSeriesCall.externalId;
+          const nextSeriesCall = await repositories.calls.findLatestCallByRecurringSeriesId(call.recurringSeriesId);
+          if (nextSeriesCall) {
+            logger.info(`[joinCall] Recurring series redirect: old call ${callId} → next scheduled call ${nextSeriesCall.externalId}`);
+            call = nextSeriesCall;
+            callId = nextSeriesCall.externalId;
           }
         }
       }

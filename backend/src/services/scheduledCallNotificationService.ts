@@ -618,8 +618,9 @@ class ScheduledCallNotificationService {
    }
 
    /**
-    * Update meeting status (RSVP) for a participant, with optional series update
-    * Executes both single call and series updates atomically inside a transaction
+    * Update meeting status (RSVP) for a participant, with optional series update.
+    * Also creates a meeting_accepted/meeting_declined activity for the organizer
+    * when the responder is not the organizer themselves.
     */
    async updateParticipantMeetingStatus(params: {
      participantId: string;
@@ -628,8 +629,14 @@ class ScheduledCallNotificationService {
      isSeries: boolean;
      recurringSeriesId?: string;
      userId: string;
+     // For activity creation
+     organizerId: string;
+     callId: string;
+     callExternalId: string;
+     channelId?: string;
    }): Promise<number> {
-     const { participantId, meetingStatus, respondedAt, isSeries, recurringSeriesId, userId } = params;
+     const { participantId, meetingStatus, respondedAt, isSeries, recurringSeriesId, userId,
+             organizerId, callId, callExternalId, channelId } = params;
      let updatedCount = 1;
 
      await db.$transaction(async (tx) => {
@@ -645,6 +652,25 @@ class ScheduledCallNotificationService {
          });
        }
      });
+
+     // Create activity for the organizer when a participant accepts or declines
+     if (userId !== organizerId &&
+         (meetingStatus === MeetingStatus.ACCEPTED || meetingStatus === MeetingStatus.DECLINED)) {
+       try {
+         await activityService.createActivity({
+           userId: organizerId,
+           actorId: userId,
+           actorAction: meetingStatus === MeetingStatus.ACCEPTED ? 'meeting_accepted' : 'meeting_declined',
+           actionSource: 'call',
+           actionSourceId: callExternalId,
+           callId,
+           channelId,
+           classification: ActivityClassification.FYI,
+         });
+       } catch (activityErr) {
+         logger.error(`Failed to create meeting_${meetingStatus === MeetingStatus.ACCEPTED ? 'accepted' : 'declined'} activity:`, activityErr);
+       }
+     }
 
      return updatedCount;
    }

@@ -42,6 +42,41 @@ function deriveEndsOnFromRRule(recurrenceRule: string, startsOn: Date): Date | n
 }
 
 export class ScheduleCallController {
+  /**
+   * Compute the participant add/remove delta for a call.
+   * - If `targetUserIds` is provided, use it as the desired final set.
+   * - Otherwise fetch the members of `newChannelId` as the desired final set.
+   * The organizer (`organizerId`) is always kept in the set.
+   * Returns { addUserIds, removeUserIds } relative to the call's current participants.
+   */
+  private async resolveParticipantDelta(
+    callId: string,
+    organizerId: string,
+    targetUserIds: string[] | undefined,
+    newChannelId: string,
+    logPrefix: string,
+  ): Promise<{ addUserIds: string[]; removeUserIds: string[] }> {
+    let effectiveTargetUserIds: string[];
+    if (targetUserIds !== undefined) {
+      effectiveTargetUserIds = targetUserIds;
+    } else {
+      const newChannelParticipants = await repositories.channelParticipants.getChannelParticipants(newChannelId);
+      effectiveTargetUserIds = newChannelParticipants.map((p) => p.userId);
+      logger.info(`${logPrefix} channel changed — using ${effectiveTargetUserIds.length} participants from channel ${newChannelId}`);
+    }
+
+    const currentParticipants = await repositories.calls.findParticipants(callId);
+    const currentUserIds = new Set(currentParticipants.map((p) => p.userId));
+    // Always keep the organizer in the participant set
+    const newUserIds = new Set([...effectiveTargetUserIds, organizerId]);
+
+    const addUserIds = [...newUserIds].filter((id) => !currentUserIds.has(id));
+    const removeUserIds = [...currentUserIds].filter((id) => !newUserIds.has(id));
+    logger.info(`${logPrefix} participant delta | add=${JSON.stringify(addUserIds)} remove=${JSON.stringify(removeUserIds)}`);
+
+    return { addUserIds, removeUserIds };
+  }
+
   // POST /api/calls/series - Create a recurring call series
   createRecurringSeries = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -329,19 +364,21 @@ export class ScheduleCallController {
         logger.info(`[updateScheduledCall] no channelId change requested — keeping existing channelId=${call.channelId}`);
       }
 
-      // Compute participant delta when targetUserIds is provided
+      // Compute participant delta when targetUserIds is provided, OR when the channel changes
+      // without an explicit targetUserIds (in that case we use the new channel's members).
       let addUserIds: string[] | undefined;
       let removeUserIds: string[] | undefined;
 
-      if (targetUserIds !== undefined) {
-        const currentParticipants = await repositories.calls.findParticipants(call.id);
-        const currentUserIds = new Set(currentParticipants.map((p) => p.userId));
-        // Always keep the organizer in the participant set regardless of what the frontend sends
-        const newUserIds = new Set([...targetUserIds, userId]);
+      const channelChanged = resolvedChannelId !== undefined && resolvedChannelId !== call.channelId;
 
-        addUserIds = [...newUserIds].filter((id) => !currentUserIds.has(id));
-        removeUserIds = [...currentUserIds].filter((id) => !newUserIds.has(id));
-        logger.info(`[updateScheduledCall] participant delta | add=${JSON.stringify(addUserIds)} remove=${JSON.stringify(removeUserIds)}`);
+      if (targetUserIds !== undefined || channelChanged) {
+        ({ addUserIds, removeUserIds } = await this.resolveParticipantDelta(
+          call.id,
+          userId,
+          targetUserIds,
+          resolvedChannelId ?? call.channelId ?? '',
+          '[updateScheduledCall]',
+        ));
       }
 
       logger.info(`[updateScheduledCall] calling updateScheduledCall repo | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
@@ -617,19 +654,21 @@ export class ScheduleCallController {
           }
         }
 
-        // Update participants on ALL scheduled instances if targetUserIds provided
-        if (targetUserIds !== undefined) {
+        // Update participants on ALL scheduled instances if targetUserIds provided, OR if the
+        // channel changed without explicit targetUserIds (use the new channel's members).
+        const seriesChannelChanged = resolvedChannelId !== undefined && resolvedChannelId !== series.channelId;
+
+        if (targetUserIds !== undefined || seriesChannelChanged) {
+          const effectiveChannelIdForDelta = resolvedChannelId ?? series.channelId;
           for (const instance of allScheduledInstances) {
-            const currentParticipants = await repositories.calls.findParticipants(instance.id);
-            const currentUserIds = new Set(currentParticipants.map((p) => p.userId));
-            // Always keep the series organizer in the participant set
-            const newUserIds = new Set([...targetUserIds, userId]);
-
-            const addUserIds = [...newUserIds].filter((id) => !currentUserIds.has(id));
-            const removeUserIds = [...currentUserIds].filter((id) => !newUserIds.has(id));
-
+            const { addUserIds, removeUserIds } = await this.resolveParticipantDelta(
+              instance.id,
+              userId,
+              targetUserIds,
+              effectiveChannelIdForDelta,
+              `[updateRecurringSeries] instance=${instance.id}`,
+            );
             if (addUserIds.length > 0 || removeUserIds.length > 0) {
-              logger.info(`[updateRecurringSeries] updating participants for instance ${instance.id} | add=${JSON.stringify(addUserIds)} remove=${JSON.stringify(removeUserIds)}`);
               await repositories.calls.updateScheduledCall({
                 callId: instance.id,
                 addUserIds: addUserIds.length > 0 ? addUserIds : undefined,

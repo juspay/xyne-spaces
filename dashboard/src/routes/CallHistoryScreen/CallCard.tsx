@@ -520,16 +520,22 @@ export const CallCard = ({
                   content={
                     !isUserChannelMember
                       ? 'You are not a member of this channel'
-                      : 'Go to Call message'
+                      : !handleGotoTranscript
+                        ? 'No conversation exists for this call'
+                        : 'Go to Call message'
                   }
                   delayDuration={300}
                 >
-                  <span className={!isUserChannelMember ? 'cursor-not-allowed' : ''}>
+                  <span
+                    className={
+                      !isUserChannelMember || !handleGotoTranscript ? 'cursor-not-allowed' : ''
+                    }
+                  >
                     <Button
                       onClick={handleGotoTranscript}
                       variant='outline'
                       size='icon'
-                      disabled={!isUserChannelMember}
+                      disabled={!isUserChannelMember || !handleGotoTranscript}
                       className='size-7'
                     >
                       <ScrollText className='size-3.5 text-muted-foreground' />

@@ -358,12 +358,13 @@ class LiveKitWebhookController {
           });
           logger.info(`[LiveKit Webhook] Updated participant ${participant.identity} to ACCEPTED for call ${roomName}`);
 
-          // Trigger side effects for participant response (dismiss notification, cleanup timeout)
-          // Skip if this is a scheduled call being joined before its scheduled startTime —
-          // no incoming-call notification was sent yet, so there is nothing to dismiss.
-          const startedBeforeScheduledTime = call.startsAt !== null && now < call.startsAt;
-          if (startedBeforeScheduledTime) {
-            logger.info(`[LiveKit Webhook] Skipping participant response side effects for ${participant.identity} — call started before scheduled startTime`);
+          // Trigger side effects for participant response (dismiss notification, cleanup timeout).
+          // Skip for scheduled calls entirely — they never go through handleParticipantInvited,
+          // so no INCOMING_CALL notification or timeout job was created for them. Sending
+          // CALL_DISMISS here would be a spurious push with no corresponding incoming-call UI.
+          const isScheduledCall = call.startsAt !== null;
+          if (isScheduledCall) {
+            logger.info(`[LiveKit Webhook] Skipping participant response side effects for ${participant.identity} — scheduled call has no pending INCOMING_CALL notification`);
           } else {
             try {
               await callSideEffectService.handleParticipantResponse(
