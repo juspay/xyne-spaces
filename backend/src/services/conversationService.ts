@@ -392,6 +392,7 @@ export class ConversationService {
         conversationId: conversation.conversationId,
         workspaceId: channel?.workspaceId ?? '',
         metadata: file.metadata || {},
+        ...(createdAt && { createdAt }),
       }));
       await this.messageAttachmentRepository.createMany(attachmentData);
 
@@ -588,6 +589,7 @@ export class ConversationService {
         conversationId: conversationId,
         workspaceId: channel?.workspaceId ?? '',
         metadata: file.metadata || {},
+        ...(createdAt && { createdAt }),
       }));
 
       await this.messageAttachmentRepository.createMany(attachmentData);
