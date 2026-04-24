@@ -3,6 +3,7 @@ import {
   CalendarClock,
   CalendarDays,
   ChevronDown,
+  Info,
   LayoutList,
   LucideIcon,
   Megaphone,
@@ -34,6 +35,7 @@ import {
 } from '../../components/ui/dropdown-menu';
 import Input from '../../components/ui/Input';
 import { Switch } from '../../components/ui/Switch';
+import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
 import { useAllChannels } from '../../hooks/useChannels';
 import { useUsers } from '../../hooks/useUsers';
 import { useZero } from '../../hooks/useZero';
@@ -600,11 +602,16 @@ const CallHistoryScreen = (): ReactElement => {
                     <MicrosoftIcon size={14} />
                   )}
                   <span>
-                    {syncMessage
-                      ? syncMessage.text
-                      : isSyncing
-                        ? 'Syncing…'
-                        : `Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}
+                    {syncMessage ? (
+                      syncMessage.text
+                    ) : isSyncing ? (
+                      'Syncing…'
+                    ) : (
+                      <>
+                        <span className='md:hidden'>Sync</span>
+                        <span className='hidden md:inline'>{`Sync ${calendarProvider === 'GOOGLE' ? 'Google' : 'Microsoft'} Calendar`}</span>
+                      </>
+                    )}
                   </span>
                 </button>
               )}
@@ -782,7 +789,7 @@ const CallHistoryScreen = (): ReactElement => {
                   <div className='flex items-center gap-3 shrink-0'>
                     <label
                       htmlFor='channel-calls-toggle'
-                      className='text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
+                      className='hidden md:block text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none'
                     >
                       Show all calls in my channels
                     </label>
@@ -791,6 +798,11 @@ const CallHistoryScreen = (): ReactElement => {
                       checked={showChannelCalls}
                       onCheckedChange={setShowChannelCalls}
                     />
+                    <Tooltip content='Show all calls in my channels' side='bottom'>
+                      <button className='md:hidden text-muted-foreground flex items-center'>
+                        <Info className='size-4' />
+                      </button>
+                    </Tooltip>
                   </div>
                 )}
                 {activeTab === 'upcoming' && (
