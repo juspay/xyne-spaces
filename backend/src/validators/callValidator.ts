@@ -20,6 +20,7 @@ export const ScheduleCallSchema = z.object({
   endsAt: z.number(),
   channelId: z.string().optional(),
   targetUserIds: z.array(z.string()).optional(),
+  conversationId: z.string().optional(), // Optional: for thread-initiated scheduled calls
 }).refine(
   (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
   'Either channelId or targetUserIds is required'

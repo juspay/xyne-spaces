@@ -116,6 +116,9 @@ import { RefineInput } from '../../components/xyne-desk/RefineInput/RefineInput'
 import { useDeskAIDraft } from '../../hooks/useDeskAIDraft';
 import { channelService, CreateChannelFormData } from '../../services/Chat/channelService';
 import { markdownToHtml } from '../../utils/clipboardUtils';
+import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
+import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
+import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadCallButton';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFiltered>[number];
@@ -1140,6 +1143,9 @@ const SupportTicketDetail = (): ReactElement => {
 
   // Tab state
   const [activeTab, setActiveTab] = useState<TabType>('messages');
+  const [showParticipantsModal, setShowParticipantsModal] = useState(false);
+  const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
+  const hasActiveCallForConversation = !!conversation?.callId;
 
   if (!ticketIdParam) {
     return (
@@ -1422,16 +1428,27 @@ const SupportTicketDetail = (): ReactElement => {
                             </button>
                           </Tabs.Trigger>
                         </Tabs.List>
-                        <button
-                          onClick={() => setIsRightPanelOpen(false)}
-                          className='p-1.5 hover:bg-muted rounded transition-colors flex items-center justify-center'
-                          aria-label='Close panel'
-                          title='Close panel'
-                          data-track-category='Support'
-                          data-track-name='CloseRightPanel'
-                        >
-                          <X size={16} className='text-muted-foreground' />
-                        </button>
+                        <div className='flex items-center gap-1'>
+                          {/* Initiate Call Button */}
+                          {conversationId && (
+                            <ThreadCallButton
+                              onStartCall={() => setShowParticipantsModal(true)}
+                              onScheduleCall={() => setIsScheduleCallModalOpen(true)}
+                              hasActiveCall={hasActiveCallForConversation}
+                              testId='support-initiate-call-button'
+                            />
+                          )}
+                          <button
+                            onClick={() => setIsRightPanelOpen(false)}
+                            className='p-1.5 hover:bg-muted rounded transition-colors flex items-center justify-center'
+                            aria-label='Close panel'
+                            title='Close panel'
+                            data-track-category='Support'
+                            data-track-name='CloseRightPanel'
+                          >
+                            <X size={16} className='text-muted-foreground' />
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -1489,6 +1506,22 @@ const SupportTicketDetail = (): ReactElement => {
                     </div>
                   </div>
                 )}
+                {/* Call Participants Selection Modal */}
+                {conversationId && (
+                  <CallParticipantsSelectionModal
+                    isOpen={showParticipantsModal}
+                    onClose={() => setShowParticipantsModal(false)}
+                    channelId={channelId}
+                    conversationId={conversationId}
+                  />
+                )}
+                {/* Schedule Call Modal */}
+                <ScheduleCallModal
+                  isOpen={isScheduleCallModalOpen}
+                  onClose={() => setIsScheduleCallModalOpen(false)}
+                  {...(channelId ? { channelId } : {})}
+                  {...(conversationId ? { conversationId } : {})}
+                />
               </div>
             </Panel>
           </>

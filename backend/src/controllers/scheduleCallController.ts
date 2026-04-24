@@ -197,7 +197,7 @@ export class ScheduleCallController {
       }
 
       // Validate request body with Zod
-      const { title, startsAt, endsAt, channelId, targetUserIds } = ScheduleCallSchema.parse(req.body);
+      const { title, startsAt, endsAt, channelId, targetUserIds, conversationId } = ScheduleCallSchema.parse(req.body);
 
       // update-channel mode: channelId is the broadcast channel, targetUserIds are the actual participants
       const isUpdateChannelMode = !!(channelId && targetUserIds?.length);
@@ -234,13 +234,14 @@ export class ScheduleCallController {
         createdByUserId: userId,
         channelId: finalChannelId!,
         callType: CallType.AUDIO,
-        callOrigin: CallOrigin.CHANNEL,
+        callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
         roomLink,
         timezone: 'UTC',
         isRecurring: false,
         startsAt: new Date(startsAt),
         endsAt: new Date(endsAt),
         ...(finalTargetUserIds && { targetUserIds: finalTargetUserIds }),
+        ...(conversationId && { metadata: { conversationId } }),
       }, tx));
 
       // Send immediate notifications + create activities for all participants (excluding organizer)
