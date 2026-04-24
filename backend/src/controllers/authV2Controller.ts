@@ -676,6 +676,7 @@ export class AuthV2Controller {
       logger.info(`[${requestId}] Google auth success for: ${googleUserData.email}`);
 
       const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
+      const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
       const isProduction = process.env.NODE_ENV === 'production';
       const cookieOptions = {
@@ -703,6 +704,7 @@ export class AuthV2Controller {
           name: googleUserData.name,
           picture: googleUserData.picture,
           workspaces,
+          userExistsButRemoved,
         });
         return;
       }

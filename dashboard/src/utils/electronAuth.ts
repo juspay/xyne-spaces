@@ -1,9 +1,17 @@
+export interface ElectronAuthData {
+  workspaces: { id: string; name: string; role: string }[];
+  email: string;
+  name: string;
+  picture?: string;
+  userExistsButRemoved: boolean;
+}
+
 export const isElectron = (): boolean => {
   return typeof window !== 'undefined' && window.electronAPI !== undefined;
 };
 
 export const setupElectronAuthListeners = (
-  onSuccess: () => void,
+  onSuccess: (data?: ElectronAuthData) => void,
   onTokenExpired: () => void,
 ): (() => void) => {
   if (!isElectron() || !window.electronAPI) {

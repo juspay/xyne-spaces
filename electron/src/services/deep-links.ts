@@ -1,4 +1,4 @@
-import { app, net, session, BrowserWindow } from 'electron';
+import { app, net, session, BrowserWindow, IncomingMessage } from 'electron';
 import path from 'path';
 import { config } from '../app/config';
 import { setCookiesFromHeaders } from './cookies';
@@ -7,6 +7,22 @@ import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 
 let mainWindow: BrowserWindow | null = null;
+
+/** Parse JSON body from an Electron IncomingMessage stream */
+function parseResponseBody(response: IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    response.on('data', (chunk: Buffer) => chunks.push(chunk));
+    response.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString()));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    response.on('error', reject);
+  });
+}
 
 export function setMainWindow(window: BrowserWindow | null): void {
   mainWindow = window;
@@ -235,14 +251,31 @@ function exchangeAuthCode(code: string, state: string): Promise<void> {
         log.info('Auth exchange response status:', response.statusCode);
 
         if (response.statusCode === 200) {
-          Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS);
-          
-          log.info('[excahngeAuthCode] Auth exchange successful, notifying main window.');
-          setTimeout(() => {
-            mainWindow?.webContents.send('auth:success');
-            mainWindow?.show();
-            resolve();
-          }, 500);
+          try {
+            const responseBody = await parseResponseBody(response);
+            Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS);
+
+            log.info('[exchangeAuthCode] Auth exchange successful, notifying main window with workspace data.');
+            setTimeout(() => {
+              mainWindow?.webContents.send('auth:success', {
+                workspaces: responseBody.workspaces || [],
+                email: responseBody.email,
+                name: responseBody.name,
+                picture: responseBody.picture,
+                userExistsButRemoved: responseBody.userExistsButRemoved || false,
+              });
+              mainWindow?.show();
+              resolve();
+            }, 500);
+          } catch (parseError) {
+            log.error('[exchangeAuthCode] Failed to parse exchange response:', parseError);
+            Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS);
+            setTimeout(() => {
+              mainWindow?.webContents.send('auth:success');
+              mainWindow?.show();
+              resolve();
+            }, 500);
+          }
         } else {
           Logger.error(EnrollmentEvent.AUTH_EXCHANGE_FAILED, {
             statusCode: response.statusCode,
@@ -295,15 +328,34 @@ function exchangeMTLSAuthCode(code: string, state: string): Promise<void> {
       log.info('MTLS exchange response status:', response.statusCode);
 
       if (response.statusCode === 200) {
-        Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS, {
-          type: 'mtls',
-        });
-        
-        setTimeout(() => {
-          mainWindow?.webContents.send('auth:mtls-success');
-          mainWindow?.show();
-          resolve();
-        }, 500);
+        try {
+          const responseBody = await parseResponseBody(response);
+          Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS, {
+            type: 'mtls',
+          });
+
+          setTimeout(() => {
+            mainWindow?.webContents.send('auth:mtls-success', {
+              workspaces: responseBody.workspaces || [],
+              email: responseBody.email,
+              name: responseBody.name,
+              picture: responseBody.picture,
+              userExistsButRemoved: responseBody.userExistsButRemoved || false,
+            });
+            mainWindow?.show();
+            resolve();
+          }, 500);
+        } catch (parseError) {
+          log.error('[exchangeMTLSAuthCode] Failed to parse exchange response:', parseError);
+          Logger.info(EnrollmentEvent.AUTH_EXCHANGE_SUCCESS, {
+            type: 'mtls',
+          });
+          setTimeout(() => {
+            mainWindow?.webContents.send('auth:mtls-success');
+            mainWindow?.show();
+            resolve();
+          }, 500);
+        }
       } else {
         Logger.error(EnrollmentEvent.AUTH_EXCHANGE_FAILED, {
           statusCode: response.statusCode,
