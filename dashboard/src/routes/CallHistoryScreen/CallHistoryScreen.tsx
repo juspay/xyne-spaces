@@ -130,6 +130,7 @@ const CallHistoryScreen = (): ReactElement => {
     handleRemoveUser,
     closeParticipantsModal,
     handleGotoTranscript,
+    getGotoTranscriptHandler,
     handleDownloadTranscript,
     showConfirmModal,
     confirmModalConfig,
@@ -931,7 +932,7 @@ const CallHistoryScreen = (): ReactElement => {
                           isLastItem={i === filteredRecentCalls.length - 1}
                           onCallClick={() => handleCallRowClick(call)}
                           onParticipantsClick={() => handleParticipantsClick(call)}
-                          handleGotoTranscript={() => handleGotoTranscript(call)}
+                          handleGotoTranscript={getGotoTranscriptHandler(call)}
                           handleDownloadTranscript={() => handleDownloadTranscript(call)}
                         />
                       ))
@@ -956,7 +957,7 @@ const CallHistoryScreen = (): ReactElement => {
                             isLastItem={i === filteredRecentCalls.length - 1}
                             onCallClick={() => handleCallRowClick(call)}
                             onParticipantsClick={() => handleParticipantsClick(call)}
-                            handleGotoTranscript={() => handleGotoTranscript(call)}
+                            handleGotoTranscript={getGotoTranscriptHandler(call)}
                             handleDownloadTranscript={() => handleDownloadTranscript(call)}
                           />
                         )}
@@ -1075,7 +1076,7 @@ const CallHistoryScreen = (): ReactElement => {
                       isLastItem={i === tabContent.length - 1}
                       onCallClick={() => handleCallRowClick(call)}
                       onParticipantsClick={() => handleParticipantsClick(call)}
-                      handleGotoTranscript={() => handleGotoTranscript(call)}
+                      handleGotoTranscript={getGotoTranscriptHandler(call)}
                       handleDownloadTranscript={() => handleDownloadTranscript(call)}
                     />
                   ))}
