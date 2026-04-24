@@ -784,30 +784,6 @@ export function CallControls({
           </button>
         )}
 
-        {/* Thread Chat Button — hidden for external users */}
-        {!hideThreadChat && (
-          <button
-            onClick={onToggleChat}
-            className={cn(
-              buttonClasses,
-              'text-white relative',
-              isChatOpen ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600',
-            )}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            data-track-category='CALLS'
-            data-track-name='TOGGLE_CHAT'
-            data-track-metadata={JSON.stringify({ callId: callId, isOpen: isChatOpen })}
-            title='Thread chat'
-          >
-            <MessageSquare
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          </button>
-        )}
-
         {iconSize >= 16 && (
           <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
         )}
