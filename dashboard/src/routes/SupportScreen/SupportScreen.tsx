@@ -121,7 +121,7 @@ import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/Sched
 import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadCallButton';
 
 // Unified type for tickets from the supportTicketsFiltered query
-type SupportTicket = QueryResultType<typeof queries.supportTicketsFiltered>[number];
+type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV2>[number];
 
 const ChannelInfoModal = ({
   channelId,
@@ -274,7 +274,7 @@ const SupportScreen = (): ReactElement => {
   const kanbanChannelUserStatus = useGetChannelUserStatus(selectedChannelId ?? '');
   const kanbanIsMember = !!kanbanChannelUserStatus;
   const [supportTickets] = useCachedQuery(
-    queries.supportTicketsFiltered({
+    queries.supportTicketsFilteredV2({
       channelId: selectedChannelId ?? '',
       isMember: kanbanIsMember,
     }),
@@ -972,7 +972,7 @@ const SupportTicketDetail = (): ReactElement => {
   // getEmailsForTicket + getConversationById. Use id when we have it (from list navigation
   // state), otherwise fall back to xyneId lookup (direct URL loads).
   const [ticketById] = useCachedQuery(
-    queries.supportTicketRow({
+    queries.supportTicketRowV2({
       id: ticketId || '',
       channelId: routeChannelId,
       isMember,
@@ -980,7 +980,7 @@ const SupportTicketDetail = (): ReactElement => {
     { enabled: !!ticketId && !!routeChannelId },
   );
   const [ticketByXyneId] = useCachedQuery(
-    queries.supportTicketByXyneId({
+    queries.supportTicketByXyneIdV2({
       xyneId: ticketIdParam || '',
       channelId: routeChannelId,
       isMember,
@@ -1003,7 +1003,7 @@ const SupportTicketDetail = (): ReactElement => {
       ? { id: ticket.id, createdAt: ticket.createdAt }
       : null;
   const [nextPage] = useCachedQuery(
-    queries.supportTicketsPage({
+    queries.supportTicketsPageV2({
       channelId,
       isMember,
       limit: 1,
@@ -1013,7 +1013,7 @@ const SupportTicketDetail = (): ReactElement => {
     { enabled: !!cursorStart && !!channelId },
   );
   const [prevPage] = useCachedQuery(
-    queries.supportTicketsPage({
+    queries.supportTicketsPageV2({
       channelId,
       isMember,
       limit: 1,
