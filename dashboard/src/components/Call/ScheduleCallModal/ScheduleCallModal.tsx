@@ -383,12 +383,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const callStart = new Date(initialCall.startsAt);
       const callEnd = new Date(initialCall.endsAt);
 
-      // Always pre-fill from the individual participants list.
-      // The channelId is an internal routing detail; users expect to see the
-      // people they invited, regardless of what channel backs the call.
-      const participantValues: string[] = initialCall.participants
-        .filter(p => p.userId !== user?.id)
-        .map(p => `user:${p.userId}`);
+      // If the call was created for a channel, show the channel as a single entry.
+      // Otherwise expand individual participants.
+      const participantValues: string[] = initialCall.channelId
+        ? [`channel:${initialCall.channelId}`]
+        : initialCall.participants.filter(p => p.userId !== user?.id).map(p => `user:${p.userId}`);
 
       reset({
         title: initialCall.title,
