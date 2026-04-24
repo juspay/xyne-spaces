@@ -58,6 +58,7 @@ export interface CreateCallWithParticipantsInput {
   startsAt: Date;
   endsAt: Date;
   targetUserIds?: string[];
+  metadata?: Record<string, unknown>; // Optional: e.g. { conversationId } for thread-linked calls
 }
 
 export class CallRepository {
@@ -310,6 +311,7 @@ export class CallRepository {
         createdAt: new Date(),
         updatedAt: new Date(),
         lastActivityAt: new Date(),
+        ...(params.metadata && { metadata: params.metadata as Prisma.InputJsonValue }),
       },
     });
 
@@ -827,6 +829,47 @@ export class CallRepository {
             metadata: { systemMessageId: messageId, conversationId },
           },
         });
+      } else if (!callMetadata?.systemMessageId) {
+        // Thread-linked scheduled call first join: thread conversation already exists,
+        // just post a system message into it and activate.
+        const messageId = uuidv4();
+        const conversationId = callMetadata.conversationId;
+
+        await tx.message.create({
+          data: {
+            messageId,
+            conversationId,
+            senderId: 'system',
+            content: `${initiatorName} started a call`,
+            msgType: 'SYSTEM',
+            showInChannel: false,
+            metadata: {
+              isCallMessage: true,
+              callId: call.externalId,
+              operation: 'call_active',
+            },
+          },
+        });
+
+        // Link the call to the existing conversation so the active-call pill renders
+        await tx.conversation.update({
+          where: { conversationId },
+          data: {
+            callId: call.externalId,
+            lastActivityAt: now,
+          },
+        });
+
+        await tx.call.update({
+          where: { id: call.id },
+          data: {
+            status: CallStatus.ACTIVE,
+            startedAt: now,
+            lastActivityAt: now,
+            updatedAt: now,
+            metadata: { systemMessageId: messageId, conversationId },
+          },
+        });
       } else {
         // Rejoin within the scheduled window — conversation already exists, just flip to ACTIVE
         await tx.call.update({
@@ -838,6 +881,17 @@ export class CallRepository {
             updatedAt: now,
           },
         });
+
+        // Re-link callId on the conversation so the active-call pill renders again
+        if (callMetadata?.conversationId) {
+          await tx.conversation.update({
+            where: { conversationId: callMetadata.conversationId },
+            data: {
+              callId: call.externalId,
+              lastActivityAt: now,
+            },
+          });
+        }
 
         // Also properly reset the system message back to ACTIVE
         if (callMetadata?.systemMessageId) {

@@ -29,7 +29,6 @@ import {
   ArrowLeft,
   ClipboardCheck,
   Link2,
-  Headphones,
 } from 'lucide-react';
 import CompactActionsMenu, { ActionMenuItem } from '../ui/CompactActionsMenu';
 import { ChatInput } from './ChatInput';
@@ -71,6 +70,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
 import { useSelf, useUser } from '../../hooks/useUsers';
 import { CallParticipantsSelectionModal } from '../Call/CallParticipantsSelectionModal';
+import { ScheduleCallModal } from '../Call/ScheduleCallModal/ScheduleCallModal';
+import { ThreadCallButton } from '../Call/ThreadCallButton/ThreadCallButton';
 
 type TabType = 'thread' | 'details' | 'files' | 'workflows' | 'rca';
 type UnderTicketTabType = 'replies' | 'workflows' | 'rca';
@@ -219,6 +220,7 @@ export const ThreadMessages = ({
   const messages = propThreadMessages ?? queriedMessages;
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
+  const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
 
   // Tab state - default to 'details' when opening from a ticket card
@@ -800,37 +802,17 @@ export const ThreadMessages = ({
                   )}
                   {/* Initiate Call Button */}
                   {derivedConversationId && (
-                    <Tooltip
-                      content={
-                        hasActiveCallForConversation
-                          ? 'Call already in progress'
-                          : 'Start thread call'
-                      }
-                    >
-                      <span className='inline-flex cursor-pointer'>
-                        <Button
-                          variant='ghost'
-                          className='p-2 border border-border rounded-lg h-8 w-8'
-                          size='sm'
-                          onClick={handleInitiateCall}
-                          disabled={hasActiveCallForConversation}
-                          title={
-                            hasActiveCallForConversation
-                              ? 'Call already in progress'
-                              : 'Start thread call'
-                          }
-                          data-testid='thread-initiate-call-button'
-                          data-track-category='THREAD_PANEL'
-                          data-track-name='INITIATE_CALL_FROM_THREAD'
-                          data-track-metadata={JSON.stringify({
-                            channelId: channel?.id,
-                            conversationId: derivedConversationId,
-                          })}
-                        >
-                          <Headphones size={20} />
-                        </Button>
-                      </span>
-                    </Tooltip>
+                    <ThreadCallButton
+                      onStartCall={handleInitiateCall}
+                      onScheduleCall={() => setIsScheduleCallModalOpen(true)}
+                      hasActiveCall={hasActiveCallForConversation}
+                      trackCategory='THREAD_PANEL'
+                      trackName='INITIATE_CALL_FROM_THREAD'
+                      trackMetadata={{
+                        channelId: channel?.id,
+                        conversationId: derivedConversationId,
+                      }}
+                    />
                   )}
                 </div>
               </Tabs.List>
@@ -1157,35 +1139,14 @@ export const ThreadMessages = ({
             {isHeaderCompact && <CompactActionsMenu items={ticketCompactMenuItems} />}
             {/* Initiate Call Button */}
             {derivedConversationId && (
-              <Tooltip
-                content={
-                  hasActiveCallForConversation ? 'Call already in progress' : 'Start thread call'
-                }
-              >
-                <span className='inline-flex cursor-pointer'>
-                  <Button
-                    variant='ghost'
-                    className='p-2 border border-border rounded-lg h-8 w-8'
-                    size='sm'
-                    onClick={handleInitiateCall}
-                    disabled={hasActiveCallForConversation}
-                    title={
-                      hasActiveCallForConversation
-                        ? 'Call already in progress'
-                        : 'Start thread call'
-                    }
-                    data-testid='thread-initiate-call-button'
-                    data-track-category='THREAD_PANEL'
-                    data-track-name='INITIATE_CALL_FROM_THREAD'
-                    data-track-metadata={JSON.stringify({
-                      channelId: channel?.id,
-                      conversationId: derivedConversationId,
-                    })}
-                  >
-                    <Headphones size={20} />
-                  </Button>
-                </span>
-              </Tooltip>
+              <ThreadCallButton
+                onStartCall={handleInitiateCall}
+                onScheduleCall={() => setIsScheduleCallModalOpen(true)}
+                hasActiveCall={hasActiveCallForConversation}
+                trackCategory='THREAD_PANEL'
+                trackName='INITIATE_CALL_FROM_THREAD'
+                trackMetadata={{ channelId: channel?.id, conversationId: derivedConversationId }}
+              />
             )}
             <Tooltip content='Close'>
               <Button
@@ -1497,35 +1458,18 @@ export const ThreadMessages = ({
 
                       {/* Initiate Call Button */}
                       {derivedConversationId && !channel?.isArchived && (
-                        <Tooltip
-                          content={
-                            hasActiveCallForConversation ? 'Call already in progress' : 'Start call'
-                          }
-                        >
-                          <span className='inline-flex cursor-pointer'>
-                            <Button
-                              variant='ghost'
-                              className='p-2 border border-border rounded-lg h-8 w-8'
-                              size='sm'
-                              onClick={handleInitiateCall}
-                              disabled={hasActiveCallForConversation}
-                              title={
-                                hasActiveCallForConversation
-                                  ? 'Call already in progress'
-                                  : 'Start call'
-                              }
-                              data-testid='thread-initiate-call-button'
-                              data-track-category='THREAD_PANEL'
-                              data-track-name='INITIATE_CALL_FROM_THREAD'
-                              data-track-metadata={JSON.stringify({
-                                channelId: channel?.id,
-                                conversationId: derivedConversationId,
-                              })}
-                            >
-                              <Headphones size={20} />
-                            </Button>
-                          </span>
-                        </Tooltip>
+                        <ThreadCallButton
+                          onStartCall={handleInitiateCall}
+                          onScheduleCall={() => setIsScheduleCallModalOpen(true)}
+                          hasActiveCall={hasActiveCallForConversation}
+                          callTooltip='Start call'
+                          trackCategory='THREAD_PANEL'
+                          trackName='INITIATE_CALL_FROM_THREAD'
+                          trackMetadata={{
+                            channelId: channel?.id,
+                            conversationId: derivedConversationId,
+                          }}
+                        />
                       )}
 
                       {/* Create Ticket Button */}
@@ -1659,37 +1603,17 @@ export const ThreadMessages = ({
 
                           {/* Initiate Call Button */}
                           {derivedConversationId && !channel?.isArchived && (
-                            <Tooltip
-                              content={
-                                hasActiveCallForConversation
-                                  ? 'Call already in progress'
-                                  : 'Start call'
-                              }
-                            >
-                              <span className='inline-flex cursor-pointer'>
-                                <Button
-                                  variant='ghost'
-                                  className='p-2 border border-[border] rounded-lg h-8 w-8'
-                                  size='sm'
-                                  onClick={handleInitiateCall}
-                                  disabled={hasActiveCallForConversation}
-                                  title={
-                                    hasActiveCallForConversation
-                                      ? 'Call already in progress'
-                                      : 'Start call'
-                                  }
-                                  data-testid='thread-initiate-call-button'
-                                  data-track-category='THREAD_PANEL'
-                                  data-track-name='INITIATE_CALL_FROM_THREAD'
-                                  data-track-metadata={JSON.stringify({
-                                    channelId: channel?.id,
-                                    conversationId: derivedConversationId,
-                                  })}
-                                >
-                                  <Headphones size={20} />
-                                </Button>
-                              </span>
-                            </Tooltip>
+                            <ThreadCallButton
+                              onStartCall={handleInitiateCall}
+                              onScheduleCall={() => setIsScheduleCallModalOpen(true)}
+                              hasActiveCall={hasActiveCallForConversation}
+                              trackCategory='THREAD_PANEL'
+                              trackName='INITIATE_CALL_FROM_THREAD'
+                              trackMetadata={{
+                                channelId: channel?.id,
+                                conversationId: derivedConversationId,
+                              }}
+                            />
                           )}
 
                           {/* Create Ticket Button */}
@@ -1799,6 +1723,13 @@ export const ThreadMessages = ({
           ticketId={derivedTicketId}
         />
       )}
+      {/* Schedule Call Modal */}
+      <ScheduleCallModal
+        isOpen={isScheduleCallModalOpen}
+        onClose={() => setIsScheduleCallModalOpen(false)}
+        {...(derivedChannelId ? { channelId: derivedChannelId } : {})}
+        {...(derivedConversationId ? { conversationId: derivedConversationId } : {})}
+      />
       {/* BotBubble for ticket creation - only show if channel has projectId */}
       {channel?.projectId && messages && messages.length > 0 && messages[0] && conversation && (
         <BotBubble

@@ -47,6 +47,7 @@ export interface ScheduleCallRequest {
   endsAt: number;
   channelId?: string;
   targetUserIds?: string[];
+  conversationId?: string; // Optional: for thread-initiated scheduled calls
 }
 
 export interface ScheduleCallResponse {
@@ -344,6 +345,7 @@ export class CallService {
         endsAt: data.endsAt,
         channelId: data.channelId,
         targetUserIds: data.targetUserIds,
+        ...(data.conversationId && { conversationId: data.conversationId }),
       });
 
       return response.data;

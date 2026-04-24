@@ -54,6 +54,10 @@ interface ScheduleCallModalProps {
   /** Pre-fill start/end when opening in create mode from a calendar click. */
   initialStartsAt?: Date | null;
   initialEndsAt?: Date | null;
+  /** When set, restricts participants to channel members and hides the recurring option. */
+  channelId?: string;
+  /** When set, links the scheduled call to this thread conversation. */
+  conversationId?: string;
 }
 
 interface ScheduleCallFormData {
@@ -139,10 +143,22 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   onSuccess,
   initialStartsAt,
   initialEndsAt,
+  channelId: threadChannelId,
+  conversationId: threadConversationId,
 }) => {
   const user = useSelf();
   const allUsers = useUsers();
   const allVisibleChannels = useAllVisibleChannels();
+
+  // When opened from a thread, fetch channel participants to restrict the picker
+  const [channelParticipants] = useCachedQuery(
+    queries.channelParticipants({ channelId: threadChannelId ?? '' }),
+    { enabled: isOpen && !!threadChannelId },
+  );
+  const channelParticipantUserIds = useMemo(() => {
+    if (!threadChannelId || !channelParticipants) return null;
+    return new Set(channelParticipants.map((p: { userId: string }) => p.userId));
+  }, [threadChannelId, channelParticipants]);
   const isEditMode = mode === 'edit' && !!initialCall;
   const [showCustomPanel, setShowCustomPanel] = React.useState(false);
 
@@ -525,6 +541,28 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Build participant options
   const inviteUserOrChannelOptions = useMemo(() => {
+    // When opened from a thread, only show channel members (no channels)
+    if (channelParticipantUserIds) {
+      const channelUserOptions = allUsers
+        .filter(u => u.id !== user?.id && channelParticipantUserIds.has(u.id))
+        .map(buildUserOption);
+
+      // In edit mode, inject pre-filled participants from the call in case they're missing
+      if (isEditMode && initialCall?.participants) {
+        initialCall.participants
+          .filter(p => p.userId !== user?.id)
+          .forEach(p => {
+            const alreadyIncluded = channelUserOptions.some(u => u.value === `user:${p.userId}`);
+            if (!alreadyIncluded) {
+              const fullUser = allUsers.find(u => u.id === p.userId);
+              if (fullUser) channelUserOptions.push(buildUserOption(fullUser));
+            }
+          });
+      }
+
+      return channelUserOptions.sort((a, b) => a.label.localeCompare(b.label));
+    }
+
     const userOptions = users.filter(u => u.id !== user?.id).map(buildUserOption);
 
     const channelOptions = channels.map(channel => ({
@@ -580,7 +618,16 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     }
 
     return [...userOptions, ...channelOptions].sort((a, b) => a.label.localeCompare(b.label));
-  }, [users, channels, user?.id, isEditMode, initialCall, allVisibleChannels, allUsers]);
+  }, [
+    users,
+    channels,
+    user?.id,
+    isEditMode,
+    initialCall,
+    allVisibleChannels,
+    allUsers,
+    channelParticipantUserIds,
+  ]);
 
   const parseTimeAndUpdateDate = useCallback(
     (timeString?: string, currentDate?: Date | null): Date | null => {
@@ -968,12 +1015,18 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           endsAt: number;
           channelId?: string;
           targetUserIds?: string[];
+          conversationId?: string;
         } = {
           title: data.title,
           startsAt: data.startsAt.getTime(),
           endsAt: data.endsAt.getTime(),
         };
-        if (postCallUpdates && updateChannelId) {
+        if (threadConversationId) {
+          // Thread-linked: always use the thread's channel and pass conversationId
+          if (threadChannelId) requestData.channelId = threadChannelId;
+          requestData.conversationId = threadConversationId;
+          if (userIds.length > 0) requestData.targetUserIds = userIds;
+        } else if (postCallUpdates && updateChannelId) {
           requestData.channelId = updateChannelId;
           if (userIds.length > 0) requestData.targetUserIds = userIds;
         } else {
@@ -1287,7 +1340,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
               </>
             )}
             {/* Repeat Toggle + Recurrence Options */}
-            {!(isEditMode && !initialCall?.recurringSeriesId) && (
+            {!(isEditMode && !initialCall?.recurringSeriesId) && !threadConversationId && (
               <div className='flex flex-col gap-3'>
                 <div className='flex items-center'>
                   <DropdownMenu
