@@ -116,6 +116,28 @@ class CallRecordingService {
     }
   }
 
+  /**
+   * Retry fileExists with exponential backoff to handle the race between the
+   * egress_ended webhook arriving and GCS propagation completing.
+   * Attempts: 1s → 4s → 16s → 64s → 256s (341s total max wait)
+   */
+  private async waitForFileExists(path: string, maxAttempts = 5, initialDelayMs = 1000): Promise<boolean> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const exists = await this.storageService.fileExists(path);
+        if (exists) return true;
+      } catch (err) {
+        logger.warn(`[CallRecording] fileExists check threw on attempt ${attempt} for ${path}: ${err}`);
+      }
+      if (attempt < maxAttempts) {
+        const delay = initialDelayMs * Math.pow(4, attempt - 1);
+        logger.info(`[CallRecording] File not yet available at ${path}, retrying in ${delay}ms (attempt ${attempt}/${maxAttempts})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    return false;
+  }
+
   /** Handle egress_ended webhook — save recordingUrl and create MessageAttachment */
   async handleEgressCompleted(callExternalId: string): Promise<void> {
     // Clean up tracking entry in case stopRecording wasn't called (e.g. EGRESS_COMPLETE from natural end)
@@ -127,6 +149,18 @@ class CallRecordingService {
     }
 
     const recordingPath = this.buildRecordingPath(call.externalId, call.createdAt);
+
+    // Verify the file actually landed in GCS before committing anything to the DB.
+    // The egress_ended webhook can arrive before GCS propagation completes.
+    const fileReady = await this.waitForFileExists(recordingPath);
+    if (!fileReady) {
+      logger.error(
+        `[CallRecording] Recording file not found in storage after retries for call ${callExternalId}, ` +
+        `path=${recordingPath}. Skipping recordingUrl save and attachment creation.`
+      );
+      return;
+    }
+
     await repositories.calls.setRecordingUrl(call.id, recordingPath);
     logger.info(`[CallRecording] Saved recordingUrl for call ${call.externalId}, path=${recordingPath}`);
 
