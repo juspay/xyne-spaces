@@ -67,7 +67,7 @@ async function fetchServerSchema(): Promise<any> {
   return serverSchemaCache;
 }
 
-export function extractAuthDataFromJWT(encodedJWT?: string): AuthData | undefined {
+export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthData | undefined> {
   if (!encodedJWT) {
     return undefined;
   }
@@ -83,21 +83,52 @@ export function extractAuthDataFromJWT(encodedJWT?: string): AuthData | undefine
       audience: 'xyne-user',
     }) as AuthData;
 
-    return decoded;
+    const [user, orgMember] = await Promise.all([
+      db.user.findUnique({
+        where: { id: decoded.sub },
+        select: { role: true },
+      }),
+      db.orgMember.findUnique({
+        where: { memberId: decoded.memberId },
+        select: { role: true },
+      }),
+    ]);
+  
+    // If JWT is valid but DB records missing, that's a data inconsistency - fail fast
+    if (!user || !orgMember) {
+      logger.error('Auth data inconsistency: JWT valid but DB records missing', {
+        userId: decoded.sub,
+        memberId: decoded.memberId,
+        userExists: !!user,
+        orgMemberExists: !!orgMember,
+      });
+      throw new Error('User authentication data inconsistent');
+    }
+
+    return {
+      sub: decoded.sub,
+      email: decoded.email,
+      name: decoded.name,
+      workspaceId: decoded.workspaceId,
+      memberId: decoded.memberId,
+      role: user.role,
+      orgRole: orgMember.role,
+    } as AuthData;
+    
   } catch (error) {
     logger.error('JWT verification failed:', error);
     return undefined;
   }
 }
 
-export function extractAuthDataFromRequest(request: Request): AuthData | undefined {
+export async function extractAuthDataFromRequest(request: Request): Promise<AuthData | undefined> {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return undefined;
   }
 
   const token = authHeader.substring(7);
-  return extractAuthDataFromJWT(token);
+  return await extractAuthDataFromJWT(token);
 }
 
 export async function handleMutate(request: Request): Promise<unknown> {
@@ -108,7 +139,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
   let sideEffectJobs: SideEffectJobsAccumulator = [];
   let capturedMutatorName: string | null = null;
 
-  const authData = extractAuthDataFromRequest(request);
+  const authData = await extractAuthDataFromRequest(request);
 
   if (!authData) {
     throw new Error("Unauthorized")
@@ -223,7 +254,7 @@ export async function handleQueries(request: Request): Promise<any> {
   const startTime = Date.now();
   let capturedQueryName: string | null = null;
 
-  const authData = extractAuthDataFromRequest(request);
+  const authData = await extractAuthDataFromRequest(request);
   if (!authData) {
     throw new Error("Unauthorized")
   }
@@ -270,7 +301,7 @@ export async function handleQueries(request: Request): Promise<any> {
 }
 
 export async function handleQueriesFallback(request: Request): Promise<any> {
-  const authData = extractAuthDataFromRequest(request);
+  const authData = await extractAuthDataFromRequest(request);
   if (!authData) {
     throw new Error("Unauthorized");
   }
@@ -334,7 +365,7 @@ export async function handleQueriesFallback(request: Request): Promise<any> {
 }
 
 export async function handleQueriesZqlToSql(request: Request): Promise<any> {
-  const authData = extractAuthDataFromRequest(request);
+  const authData = await extractAuthDataFromRequest(request);
   if (!authData) {
     throw new Error("Unauthorized");
   }
@@ -417,7 +448,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
 }
 
 export async function handleMutateFallback(request: Request): Promise<unknown> {
-  const authData = extractAuthDataFromRequest(request);
+  const authData = await extractAuthDataFromRequest(request);
   if (!authData) {
     throw new Error("Unauthorized");
   }

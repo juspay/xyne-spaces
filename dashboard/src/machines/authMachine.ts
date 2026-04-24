@@ -42,6 +42,7 @@ type AuthEvent =
   | { type: 'MICROSOFT_SIGNIN' }
   | { type: 'LOGOUT' }
   | { type: 'SESSION_VALIDATED'; user: User; isNewUser?: boolean }
+  | { type: 'OAUTH_CALLBACK_COMPLETE'; output: OAuthCallbackOutput }
   | { type: 'AUTH_ERROR'; message: string }
   | { type: 'CLEAR_ERROR' }
   | { type: 'COMPLETE_ONBOARDING' }
@@ -514,6 +515,52 @@ export const authMachine = createMachine(
               type: 'setAuthenticatedUser',
             },
           },
+          OAUTH_CALLBACK_COMPLETE: [
+            {
+              guard: 'hasLastActiveWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                const email = output?.pendingUserData?.email;
+                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                return {
+                  ...context,
+                  workspaces: output?.workspaces || [],
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: lastWorkspaceId,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              guard: 'hasWorkspaces',
+              target: 'selectingWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: output?.workspaces || [],
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              target: 'creatingOrg',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: [],
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+          ],
           AUTH_ERROR: {
             actions: {
               type: 'setError',
@@ -539,6 +586,52 @@ export const authMachine = createMachine(
               type: 'setAuthenticatedUser',
             },
           },
+          OAUTH_CALLBACK_COMPLETE: [
+            {
+              guard: 'hasLastActiveWorkspace',
+              target: 'loggingInToWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                const email = output?.pendingUserData?.email;
+                const lastWorkspaceId = email ? getLastActiveWorkspaceId(email) : null;
+                return {
+                  ...context,
+                  workspaces: output?.workspaces || [],
+                  pendingUserData: output?.pendingUserData || null,
+                  selectedWorkspaceId: lastWorkspaceId,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              guard: 'hasWorkspaces',
+              target: 'selectingWorkspace',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: output?.workspaces || [],
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+            {
+              target: 'creatingOrg',
+              actions: assign(({ context, event }) => {
+                const output = (event as XStateEvent).output;
+                return {
+                  ...context,
+                  workspaces: [],
+                  pendingUserData: output?.pendingUserData || null,
+                  userExistsButRemoved: output?.userExistsButRemoved || false,
+                  error: null,
+                };
+              }),
+            },
+          ],
           AUTH_ERROR: {
             target: 'unauthenticated',
             actions: {

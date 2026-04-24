@@ -10,10 +10,32 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
   private async verifyWorkspace(canvasId: string, tx: Transaction<Schema>): Promise<void> {
     const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
     if (!canvas) throw new MutationACLError('Canvas participant not found: canvas does not exist', 'canvas_participants');
-    if (!canvas.channelId) throw new MutationACLError('Canvas participant not found: canvas has no channel', 'canvas_participants');
-    const channel = await tx.run(zql.channels.where('id', canvas.channelId).one());
-    if (!channel || channel.workspaceId !== this.ctx.workspaceId) {
-      throw new MutationACLError('Canvas participant not found in this workspace', 'canvas_participants');
+    
+    // If canvas has channel, verify through channel
+    if (canvas.channelId) {
+      const channel = await tx.run(zql.channels.where('id', canvas.channelId).one());
+      if (!channel || channel.workspaceId !== this.ctx.workspaceId) {
+        throw new MutationACLError('Canvas participant not found in this workspace', 'canvas_participants');
+      }
+      return;
+    }
+    
+    // If no channel, verify through canvas creator's workspace
+    // The ctx.workspaceId is already set from the user's workspace, 
+    // and userId is workspace-scoped, so just verify canvas exists
+    // Canvas without channel can only be accessed by creator initially
+    const isCreator = canvas.createdBy === this.ctx.userID;
+    if (!isCreator) {
+      // For non-creators, check if they're already a participant
+      const isParticipant = await tx.run(
+        zql.canvas_participants
+          .where('canvasId', canvasId)
+          .where('userId', this.ctx.userID)
+          .one()
+      );
+      if (!isParticipant) {
+        throw new MutationACLError('Canvas participant not found in this workspace', 'canvas_participants');
+      }
     }
   }
 

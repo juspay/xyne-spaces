@@ -1,5 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+interface ElectronAuthData {
+  workspaces: { id: string; name: string; role: string }[];
+  email: string;
+  name: string;
+  picture?: string;
+  userExistsButRemoved: boolean;
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url: string) => {
     ipcRenderer.send('open-external', url);
@@ -96,12 +104,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('reload-active-browser-tab', listener);
   },
 
-  onAuthSuccess: (callback: () => void) => {
-    ipcRenderer.on('auth:success', callback);
+  onAuthSuccess: (callback: (data?: ElectronAuthData) => void) => {
+    const listener = (_event: unknown, data?: ElectronAuthData) => callback(data);
+    ipcRenderer.on('auth:success', listener);
   },
 
-  onMTLSAuthSuccess: (callback: () => void) => {
-    ipcRenderer.on('auth:mtls-success', callback);
+  onMTLSAuthSuccess: (callback: (data?: ElectronAuthData) => void) => {
+    const listener = (_event: unknown, data?: ElectronAuthData) => callback(data);
+    ipcRenderer.on('auth:mtls-success', listener);
   },
 
   onTokenExpired: (callback: () => void) => {

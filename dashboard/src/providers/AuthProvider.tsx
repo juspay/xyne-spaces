@@ -1,6 +1,6 @@
 import React, { createContext, useContext, ReactNode, useEffect, useCallback, useRef } from 'react';
 import { useAuth, UseAuthReturn } from '../hooks/useAuth';
-import { authActor, type User } from '../machines/authMachine';
+import { authActor, type User, type Workspace } from '../machines/authMachine';
 import {
   NativeInboundMessageType,
   type NativeGoogleSignInResultPayload,
@@ -102,7 +102,31 @@ const handleNativeSignInResult = (
     return;
   }
 
-  if (!payload.success || !payload.sessionId || !payload.userId) {
+  if (!payload.success) {
+    authActor.send({
+      type: 'AUTH_ERROR',
+      message: payload.errorMessage || payload.error || 'Native sign-in failed. Please try again.',
+    });
+    return;
+  }
+
+  if (payload.workspaces && payload.workspaces.length > 0 && payload.email) {
+    authActor.send({
+      type: 'OAUTH_CALLBACK_COMPLETE',
+      output: {
+        workspaces: payload.workspaces as Workspace[],
+        pendingUserData: {
+          email: payload.email,
+          name: payload.name ?? '',
+          ...(payload.picture ? { picture: payload.picture } : {}),
+        },
+        userExistsButRemoved: payload.userExistsButRemoved || false,
+      },
+    });
+    return;
+  }
+
+  if (!payload.sessionId || !payload.userId) {
     authActor.send({
       type: 'AUTH_ERROR',
       message: payload.errorMessage || payload.error || 'Native sign-in failed. Please try again.',
@@ -237,8 +261,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
 
     const cleanup = setupElectronAuthListeners(
-      () => {
-        void bootstrapElectronSession();
+      data => {
+        if (data?.workspaces && data.email) {
+          authActor.send({
+            type: 'OAUTH_CALLBACK_COMPLETE',
+            output: {
+              workspaces: data.workspaces as Workspace[],
+              pendingUserData: {
+                email: data.email,
+                name: data.name,
+                ...(data.picture ? { picture: data.picture } : {}),
+              },
+              userExistsButRemoved: data.userExistsButRemoved || false,
+            },
+          });
+        } else {
+          void bootstrapElectronSession();
+        }
       },
       () => {
         localStorage.removeItem('user_id');

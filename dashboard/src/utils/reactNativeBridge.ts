@@ -185,6 +185,11 @@ export interface NativeGoogleSignInResultPayload {
   hasRefreshToken?: boolean;
   error?: string;
   errorMessage?: string;
+  workspaces?: { id: string; name: string; role: string }[];
+  email?: string;
+  name?: string;
+  picture?: string;
+  userExistsButRemoved?: boolean;
 }
 
 export interface NativeMicrosoftSignInResultPayload {
@@ -195,6 +200,9 @@ export interface NativeMicrosoftSignInResultPayload {
   name?: string;
   error?: string;
   errorMessage?: string;
+  workspaces?: { id: string; name: string; role: string }[];
+  picture?: string;
+  userExistsButRemoved?: boolean;
 }
 
 export interface NativeFileSaveResultPayload {

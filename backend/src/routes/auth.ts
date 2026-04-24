@@ -28,6 +28,9 @@ router.get('/me', authV2Middleware.authenticate, (req, res) => {
       email: req.user!.email,
       name: req.user!.name,
       workspaceId: req.user!.workspaceId,
+      role: req.user!.role,
+      orgRole: req.user!.orgRole,
+      memberId: req.user!.memberId,
     }
   });
 });
@@ -48,6 +51,9 @@ router.get('/validate', authV2Middleware.authenticate, (req, res) => {
       email: req.user!.email,
       name: req.user!.name,
       workspaceId: req.user!.workspaceId,
+      role: req.user!.role,
+      orgRole: req.user!.orgRole,
+      memberId: req.user!.memberId,
     }
   });
 });
