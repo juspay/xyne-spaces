@@ -1,8 +1,77 @@
-// Type definitions for message metadata
-export interface MessageMetadata {
-  snoozeUntil?: string | null;
+export type ReminderStatus = 'PENDING' | 'SENT' | 'DISMISSED';
+
+export interface ReminderNotificationContext {
+  messagePreview?: string | undefined;
+  conversationId?: string | undefined;
+  initialMessageId?: string | undefined;
+  channelId?: string | undefined;
+  channelName?: string | undefined;
+  channelScopeType?: string | undefined;
+  senderName?: string | undefined;
+}
+
+export interface ReminderMetadata {
+  enabled: boolean;
+  remindAt: string;
+  status: ReminderStatus;
+  context?: ReminderNotificationContext | undefined;
+}
+
+export interface BookmarkCompletionMetadata {
+  done: true;
+  completedAt: string;
+}
+
+export interface BookmarkMetadata {
+  reminder?: ReminderMetadata | null;
+  completion?: BookmarkCompletionMetadata | null;
   [key: string]: unknown;
 }
+
+const LEGACY_REMINDER_AT_METADATA_KEY = 'snoozeUntil';
+const COMPLETION_METADATA_KEY = 'completion';
+
+export type ReminderPresetOption = '20mins' | '1hour' | '3hours' | 'tomorrow' | 'nextWeek';
+export type ReminderMenuOption = ReminderPresetOption | 'custom';
+export type ReminderTimeOption = string;
+export interface ReminderPresetMenuItem {
+  option: ReminderMenuOption;
+  label: string;
+}
+
+export const MESSAGE_REMINDER_MENU_OPTIONS: ReminderPresetMenuItem[] = [
+  { option: '20mins', label: 'In 20 minutes' },
+  { option: '1hour', label: 'In 1 hour' },
+  { option: '3hours', label: 'In 3 hours' },
+  { option: 'tomorrow', label: 'Tomorrow' },
+  { option: 'nextWeek', label: 'Next week' },
+  { option: 'custom', label: 'Custom' },
+];
+
+export const BOOKMARK_REMINDER_MENU_OPTIONS: ReminderPresetMenuItem[] = [
+  { option: '20mins', label: 'In 20 minutes' },
+  { option: '1hour', label: 'In 1 hour' },
+  { option: '3hours', label: 'In 3 hours' },
+  { option: 'tomorrow', label: 'Tomorrow' },
+  { option: 'nextWeek', label: 'Monday' },
+  { option: 'custom', label: 'Custom' },
+];
+
+export const REMINDER_TIME_OPTIONS: Array<{ value: ReminderTimeOption; label: string }> =
+  Array.from({ length: 96 }, (_, index) => {
+    const totalMinutes = index * 15;
+    const hours24 = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    const meridiem = hours24 >= 12 ? 'PM' : 'AM';
+    const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+    const paddedHours = String(hours24).padStart(2, '0');
+    const paddedMinutes = String(minutes).padStart(2, '0');
+
+    return {
+      value: `${paddedHours}:${paddedMinutes}`,
+      label: `${hours12}:${paddedMinutes} ${meridiem}`,
+    };
+  });
 
 // Helper function to format date as "Today", "Yesterday", or "Month Day, Year"
 export const formatDateHeader = (timestamp: number): string => {
@@ -35,20 +104,199 @@ export const getDateKey = (timestamp: number): string => {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString();
 };
 
-// Helper function to format time only (e.g., "2:30 PM")
-export const formatTimeOnly = (timestamp: number): string => {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const pickString = (record: Record<string, unknown>, key: string): string | undefined => {
+  const value = record[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 };
 
-// Helper function to format "due in" time for snooze
-export const formatDueIn = (snoozeUntil: string): string => {
+const parseReminderStatus = (status: unknown): ReminderStatus => {
+  if (status === 'SENT' || status === 'DISMISSED' || status === 'PENDING') {
+    return status;
+  }
+  return 'PENDING';
+};
+
+const parseReminderContext = (contextData: unknown): ReminderNotificationContext | undefined => {
+  if (!isRecord(contextData)) {
+    return undefined;
+  }
+
+  const messagePreview = pickString(contextData, 'messagePreview');
+  const conversationId = pickString(contextData, 'conversationId');
+  const initialMessageId = pickString(contextData, 'initialMessageId');
+  const channelId = pickString(contextData, 'channelId');
+  const channelName = pickString(contextData, 'channelName');
+  const channelScopeType = pickString(contextData, 'channelScopeType');
+  const senderName = pickString(contextData, 'senderName');
+
+  const context: ReminderNotificationContext = {
+    ...(messagePreview && { messagePreview }),
+    ...(conversationId && { conversationId }),
+    ...(initialMessageId && { initialMessageId }),
+    ...(channelId && { channelId }),
+    ...(channelName && { channelName }),
+    ...(channelScopeType && { channelScopeType }),
+    ...(senderName && { senderName }),
+  };
+
+  return Object.keys(context).length > 0 ? context : undefined;
+};
+
+const cloneMetadata = (metadata: unknown): BookmarkMetadata =>
+  isRecord(metadata) ? { ...(metadata as BookmarkMetadata) } : {};
+
+export const getBookmarkCompletionFromMetadata = (
+  metadata: unknown,
+): BookmarkCompletionMetadata | null => {
+  if (!isRecord(metadata)) {
+    return null;
+  }
+
+  const bookmarkMetadata = metadata as BookmarkMetadata;
+  const completionData = bookmarkMetadata[COMPLETION_METADATA_KEY];
+  if (!isRecord(completionData) || completionData.done !== true) {
+    return null;
+  }
+
+  const completedAt = pickString(completionData, 'completedAt');
+  if (!completedAt) {
+    return null;
+  }
+
+  return {
+    done: true,
+    completedAt,
+  };
+};
+
+export const isBookmarkMarkedDone = (metadata: unknown): boolean =>
+  getBookmarkCompletionFromMetadata(metadata) !== null;
+
+export const getReminderFromMetadata = (metadata: unknown): ReminderMetadata | null => {
+  if (!isRecord(metadata)) {
+    return null;
+  }
+
+  const bookmarkMetadata = metadata as BookmarkMetadata;
+  const reminderData = bookmarkMetadata.reminder;
+
+  if (isRecord(reminderData) && reminderData.enabled === true) {
+    const remindAt = pickString(reminderData, 'remindAt');
+    if (remindAt) {
+      return {
+        enabled: true,
+        remindAt,
+        status: parseReminderStatus(reminderData.status),
+        context: parseReminderContext(reminderData.context),
+      };
+    }
+  }
+
+  const legacyReminderAt = bookmarkMetadata[LEGACY_REMINDER_AT_METADATA_KEY];
+  if (typeof legacyReminderAt === 'string' && legacyReminderAt.length > 0) {
+    return {
+      enabled: true,
+      remindAt: legacyReminderAt,
+      status: 'PENDING',
+    };
+  }
+
+  return null;
+};
+
+export const upsertReminderMetadata = (
+  metadata: unknown,
+  remindAtISO: string,
+): BookmarkMetadata => {
+  const nextMetadata = cloneMetadata(metadata);
+  const existingReminder = getReminderFromMetadata(metadata);
+
+  delete (nextMetadata as Record<string, unknown>)[LEGACY_REMINDER_AT_METADATA_KEY];
+  delete nextMetadata[COMPLETION_METADATA_KEY];
+
+  nextMetadata.reminder = {
+    enabled: true,
+    remindAt: remindAtISO,
+    status: 'PENDING',
+    ...(existingReminder?.context && { context: existingReminder.context }),
+  };
+
+  return nextMetadata;
+};
+
+export const upsertReminderMetadataWithContext = (
+  metadata: unknown,
+  remindAtISO: string,
+  context: ReminderNotificationContext,
+): BookmarkMetadata => {
+  const nextMetadata = upsertReminderMetadata(metadata, remindAtISO);
+  const nextReminder = nextMetadata.reminder;
+
+  if (!nextReminder) {
+    return nextMetadata;
+  }
+
+  nextReminder.context = {
+    ...(nextReminder.context || {}),
+    ...context,
+  };
+
+  return nextMetadata;
+};
+
+export const createReminderMessagePreview = (content: string | undefined): string | undefined => {
+  if (!content) {
+    return undefined;
+  }
+
+  if (typeof DOMParser === 'undefined') {
+    return undefined;
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(content, 'text/html');
+  const plainText = doc.body.textContent?.trim().replace(/\s+/g, ' ');
+
+  if (!plainText) {
+    return undefined;
+  }
+
+  const trimmed = plainText.slice(0, 80);
+  return plainText.length > 80 ? `${trimmed}...` : trimmed;
+};
+
+export const removeReminderMetadata = (metadata: unknown): BookmarkMetadata => {
+  const nextMetadata = cloneMetadata(metadata);
+
+  delete (nextMetadata as Record<string, unknown>)[LEGACY_REMINDER_AT_METADATA_KEY];
+  delete nextMetadata.reminder;
+
+  return nextMetadata;
+};
+
+export const upsertBookmarkCompletionMetadata = (
+  metadata: unknown,
+  completedAtISO: string = new Date().toISOString(),
+): BookmarkMetadata => {
+  const nextMetadata = cloneMetadata(metadata);
+
+  delete (nextMetadata as Record<string, unknown>)[LEGACY_REMINDER_AT_METADATA_KEY];
+  delete nextMetadata.reminder;
+
+  nextMetadata[COMPLETION_METADATA_KEY] = {
+    done: true,
+    completedAt: completedAtISO,
+  };
+
+  return nextMetadata;
+};
+
+export const formatReminderDueIn = (remindAt: string): string => {
   const now = Date.now();
-  const targetTime = new Date(snoozeUntil).getTime();
+  const targetTime = new Date(remindAt).getTime();
   const diff = targetTime - now;
 
   if (diff < 0) {
@@ -69,7 +317,7 @@ export const formatDueIn = (snoozeUntil: string): string => {
   if (minutes > 0) {
     return `Due in ${minutes}m`;
   }
-  return `Due in ${seconds}s`;
+  return `In ${seconds}s`;
 };
 
 // Helper function to format full date with time (e.g., "Dec 5, 2024 at 10:30 AM")
@@ -88,44 +336,54 @@ export const formatDateWithTime = (timestamp: number): string => {
   return `${dateStr} at ${timeStr}`;
 };
 
-// Helper function to calculate snooze time based on option
-export const calculateSnoozeTime = (option: string): Date | null => {
+export const calculateReminderTime = (option: ReminderPresetOption): Date | null => {
   const now = new Date();
-  let snoozeUntil: Date;
+  const remindAt = new Date(now);
 
   switch (option) {
-    case '5secs': {
-      snoozeUntil = new Date(now.getTime() + 5 * 1000);
-      break;
-    }
-    case '30mins': {
-      snoozeUntil = new Date(now.getTime() + 30 * 60 * 1000);
+    case '20mins': {
+      remindAt.setTime(now.getTime() + 20 * 60 * 1000);
       break;
     }
     case '1hour': {
-      snoozeUntil = new Date(now.getTime() + 60 * 60 * 1000);
+      remindAt.setTime(now.getTime() + 60 * 60 * 1000);
       break;
     }
     case '3hours': {
-      snoozeUntil = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+      remindAt.setTime(now.getTime() + 3 * 60 * 60 * 1000);
       break;
     }
     case 'tomorrow': {
-      snoozeUntil = new Date(now);
-      snoozeUntil.setDate(snoozeUntil.getDate() + 1);
-      snoozeUntil.setHours(9, 0, 0, 0);
+      remindAt.setDate(remindAt.getDate() + 1);
+      remindAt.setHours(9, 0, 0, 0);
       break;
     }
-    case 'monday': {
-      snoozeUntil = new Date(now);
-      const daysUntilMonday = (8 - snoozeUntil.getDay()) % 7 || 7;
-      snoozeUntil.setDate(snoozeUntil.getDate() + daysUntilMonday);
-      snoozeUntil.setHours(9, 0, 0, 0);
+    case 'nextWeek': {
+      const daysUntilMonday = (8 - remindAt.getDay()) % 7 || 7;
+      remindAt.setDate(remindAt.getDate() + daysUntilMonday);
+      remindAt.setHours(9, 0, 0, 0);
       break;
     }
     default:
       return null;
   }
 
-  return snoozeUntil;
+  return remindAt;
+};
+
+export const calculateCustomReminderTime = (date: Date, time: ReminderTimeOption): Date => {
+  const remindAt = new Date(date);
+
+  const [hoursPart, minutesPart] = time.split(':');
+  const hours = Number(hoursPart);
+  const minutes = Number(minutesPart);
+
+  remindAt.setHours(
+    Number.isFinite(hours) ? hours : 9,
+    Number.isFinite(minutes) ? minutes : 0,
+    0,
+    0,
+  );
+
+  return remindAt;
 };

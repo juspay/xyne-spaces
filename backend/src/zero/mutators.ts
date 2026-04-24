@@ -69,6 +69,7 @@ import { websocketService } from '@/services/websocketService';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { bookmarkReminderService } from '@/services/bookmarkReminderService';
 
 import { nudgeRegistry } from '@/nudges/registry';
 import { initializeRotationForGroup } from '@/utils/rotationEngine';
@@ -489,6 +490,109 @@ async function createNonParticipantSystemMessages(
 
 
 export function createMutators(authData: AuthData, asyncTasks: Array<() => Promise<void>>) {
+  const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
+    zql.bookmarks
+      .where('userId', authData.sub)
+      .where('entityId', entityId)
+      .where('entityType', entityType);
+
+  const getBookmarkIncludingDeleted = async (
+    tx: Transaction<Schema>,
+    entityId: string,
+    entityType: BookmarkEntityType,
+  ) => {
+    return tx.run(
+      // eslint-disable-next-line local-rules/require-is-deleted-filter
+      bookmarkByEntityQuery(entityId, entityType).one(),
+    );
+  };
+
+  const getActiveBookmark = async (
+    tx: Transaction<Schema>,
+    entityId: string,
+    entityType: BookmarkEntityType,
+  ) => {
+    return tx.run(
+      bookmarkByEntityQuery(entityId, entityType)
+        .where('isDeleted', false)
+        .where('isCompleted', false)
+        .one(),
+    );
+  };
+
+  const buildCompletedBookmarkMetadata = (
+    metadata: unknown,
+    completedAt: number,
+  ): ReadonlyJSONValue => {
+    const nextMetadata =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? { ...(metadata as Record<string, unknown>) }
+        : {};
+
+    delete nextMetadata.reminder;
+    delete nextMetadata.snoozeUntil;
+    nextMetadata.completion = {
+      done: true,
+      completedAt: new Date(completedAt).toISOString(),
+    };
+
+    return nextMetadata as ReadonlyJSONValue;
+  };
+
+  const enqueueBookmarkReminderSync = ({
+    entityId,
+    entityType,
+    metadata,
+    source,
+  }: {
+    entityId: string;
+    entityType: BookmarkEntityType;
+    metadata: unknown;
+    source: string;
+  }): void => {
+    asyncTasks.push(async () => {
+      try {
+        await bookmarkReminderService.syncBookmarkReminder({
+          userId: authData.sub,
+          entityId,
+          entityType,
+          metadata,
+        });
+      } catch (error) {
+        logger.error('[Mutator] Failed to sync bookmark reminder job', {
+          source,
+          entityId,
+          entityType,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+  };
+
+  const enqueueBookmarkReminderCancel = ({
+    entityId,
+    entityType,
+  }: {
+    entityId: string;
+    entityType: BookmarkEntityType;
+  }): void => {
+    asyncTasks.push(async () => {
+      try {
+        await bookmarkReminderService.cancelBookmarkReminder({
+          userId: authData.sub,
+          entityId,
+          entityType,
+        });
+      } catch (error) {
+        logger.error('[Mutator] Failed to cancel bookmark reminder job', {
+          entityId,
+          entityType,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+  };
+
   return defineMutators({
     notificationSettings: {
       setChannelNotificationLevel: defineMutator(
@@ -6219,39 +6323,49 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           bookmarkId: z.string(),
         }),
         async ({ tx, args: { entityId, entityType, metadata, timestamp, bookmarkId } }) => {
-          // Check if bookmark already exists (including soft-deleted)
-          const existing = await tx.run(zql.bookmarks
-            .where('userId', authData.sub)
-            .where('entityId', entityId)
-            .where('entityType', entityType)
-            .one());
+          const existing = await getBookmarkIncludingDeleted(tx, entityId, entityType);
 
           if (existing) {
-            if (existing.isDeleted) {
-              // Restore soft-deleted bookmark
+            if (existing.isDeleted || existing.isCompleted) {
               await tx.mutate.bookmarks.update({
                 id: existing.id,
                 isDeleted: false,
+                isCompleted: false,
                 updatedAt: timestamp,
-                metadata: metadata ?? existing.metadata,
+                metadata: metadata ?? null,
               });
-              logger.info('[Mutator] Restored soft-deleted bookmark');
-            } else {
-              logger.info('[Mutator] Bookmark already exists, skipping');
             }
+
+            enqueueBookmarkReminderSync({
+              entityId,
+              entityType,
+              metadata:
+                existing.isDeleted || existing.isCompleted
+                  ? (metadata ?? null)
+                  : existing.metadata,
+              source: 'bookmark.add(existing)',
+            });
+
             return;
           }
 
-          // Insert new bookmark
           await tx.mutate.bookmarks.insert({
             id: bookmarkId,
             userId: authData.sub,
-            entityId: entityId,
-            entityType: entityType,
+            entityId,
+            entityType,
             createdAt: timestamp,
             updatedAt: timestamp,
             isDeleted: false,
-            metadata: metadata,
+            isCompleted: false,
+            metadata,
+          });
+
+          enqueueBookmarkReminderSync({
+            entityId,
+            entityType,
+            metadata,
+            source: 'bookmark.add(insert)',
           });
         },
       ),
@@ -6259,24 +6373,31 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         z.object({
           entityId: z.string(),
           entityType: z.nativeEnum(BookmarkEntityType),
+          timestamp: z.number().optional(),
+          markAsDone: z.boolean().optional(),
         }),
-        async ({ tx, args: { entityId, entityType } }) => {
-          const bookmark = await tx.run(zql.bookmarks
-            .where('userId', authData.sub)
-            .where('entityId', entityId)
-            .where('entityType', entityType)
-            .where('isDeleted', false)
-            .one());
+        async ({ tx, args: { entityId, entityType, timestamp, markAsDone } }) => {
+          const bookmark = await getActiveBookmark(tx, entityId, entityType);
 
           if (!bookmark) {
             throw new Error('Bookmark not found');
           }
 
-          // Soft delete - update isDeleted to true
+          const eventTimestamp = timestamp ?? Date.now();
+
           await tx.mutate.bookmarks.update({
             id: bookmark.id,
-            isDeleted: true,
-            updatedAt: Date.now(),
+            isDeleted: !markAsDone,
+            isCompleted: !!markAsDone,
+            updatedAt: eventTimestamp,
+            metadata: markAsDone
+              ? buildCompletedBookmarkMetadata(bookmark.metadata, eventTimestamp)
+              : null,
+          });
+
+          enqueueBookmarkReminderCancel({
+            entityId,
+            entityType,
           });
         },
       ),
@@ -6287,12 +6408,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           metadata: z.any(),
         }),
         async ({ tx, args: { entityId, entityType, metadata } }) => {
-          const bookmark = await tx.run(zql.bookmarks
-            .where('userId', authData.sub)
-            .where('entityId', entityId)
-            .where('entityType', entityType)
-            .where('isDeleted', false)
-            .one());
+          const bookmark = await getActiveBookmark(tx, entityId, entityType);
 
           if (!bookmark) {
             throw new Error('Bookmark not found');
@@ -6302,6 +6418,13 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             id: bookmark.id,
             metadata: metadata,
             updatedAt: Date.now(),
+          });
+
+          enqueueBookmarkReminderSync({
+            entityId,
+            entityType,
+            metadata,
+            source: 'bookmark.updateMetadata',
           });
         },
       ),

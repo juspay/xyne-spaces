@@ -1,116 +1,63 @@
-import { ReactElement, useState, useEffect, useRef } from 'react';
-import { useNavigate, type NavigateFunction } from 'react-router-dom';
+import { ReactElement, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useChannel } from '../../../hooks/useChannels';
-import { Check, Clock } from 'lucide-react';
-import { BookmarkEntityType, type Message, type Bookmark, Channel } from '@xyne/shared';
+import { Check, Clock, X } from 'lucide-react';
+import { BookmarkEntityType } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
-import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import Tooltip from '../../ui/Tooltip/Tooltip';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import {
-  MessageMetadata,
-  formatDueIn,
-  calculateSnoozeTime,
+  BOOKMARK_REMINDER_MENU_OPTIONS,
+  REMINDER_TIME_OPTIONS,
+  calculateCustomReminderTime,
+  calculateReminderTime,
+  createReminderMessagePreview,
+  formatReminderDueIn,
   formatDateWithTime,
+  getReminderFromMetadata,
+  removeReminderMetadata,
+  upsertReminderMetadataWithContext,
 } from '../utils/bookmarkUtils';
-import { toast } from 'sonner';
+import type { ReminderMenuOption, ReminderTimeOption } from '../utils/bookmarkUtils';
 import { mutators } from '../../../zero/mutators';
 import { useUser } from '../../../hooks/useUsers';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { Dialog } from '../../ui/Dialog/Dialog';
+import { Button } from '../../ui/Button/Button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
+import { DatePicker } from '../../ui/DatePicker/DatePicker';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
+import { toast } from 'sonner';
+
+const REMINDER_TRACK_NAME_BY_OPTION: Record<ReminderMenuOption, string> = {
+  '20mins': 'Reminder_Bookmark_20_Mins',
+  '1hour': 'Reminder_Bookmark_1_Hour',
+  '3hours': 'Reminder_Bookmark_3_Hours',
+  tomorrow: 'Reminder_Bookmark_Tomorrow',
+  nextWeek: 'Reminder_Bookmark_Next_Week',
+  custom: 'Open_Custom_Bookmark_Reminder',
+};
 
 export interface BookmarkItemProps {
-  bookmarkId: string;
   entityId: string;
   entityType: BookmarkEntityType;
-  createdAt: number;
   bookmarkMetadata: unknown;
   channelId?: string; // Optional: if provided, filter to only show messages from this channel
   showChannelName?: boolean; // Optional: show channel/DM name
-  enableSnooze?: boolean; // Optional: enable snooze functionality (default: false)
+  enableReminder?: boolean; // Optional: enable reminder functionality (default: false)
   isMobile?: boolean; // Optional: whether rendering on mobile device
+  showActions?: boolean; // Optional: show hover actions toolbar (default: true)
+  onMarkedDone?: () => void;
 }
-
-// Helper function to schedule snooze notification
-const scheduleSnoozeNotification = (
-  snoozeUntil: Date,
-  message: Message,
-  channel: Channel | null | undefined,
-  getBookmarkByEntity: (entityId: string, entityType: BookmarkEntityType) => Bookmark | undefined,
-  entityId: string,
-  entityType: BookmarkEntityType,
-  navigate: NavigateFunction,
-  senderName?: string,
-): void => {
-  const timeUntilSnooze = snoozeUntil.getTime() - Date.now();
-
-  if (timeUntilSnooze > 0) {
-    setTimeout(() => {
-      // Before showing notification, check if snooze is still active
-      const currentBookmark = getBookmarkByEntity(entityId, entityType);
-      // Only show notification if snooze is still set
-      const bookmarkMetadata = currentBookmark?.metadata as MessageMetadata | undefined;
-      if (currentBookmark?.metadata && bookmarkMetadata?.snoozeUntil) {
-        showSnoozeNotification(message, channel, navigate, senderName);
-      }
-    }, timeUntilSnooze);
-  }
-};
-
-// Helper function to show snooze notification
-// Using a flexible type for the message with relationships
-const showSnoozeNotification = (
-  message: {
-    messageId: string;
-    conversationId: string;
-    senderId?: string;
-    conversation?: {
-      initialMessageId?: string;
-      channelId: string;
-    } | null;
-  },
-  channel: Channel | null | undefined,
-  navigate: NavigateFunction,
-  senderName?: string,
-): void => {
-  const name = senderName || 'Unknown User';
-  const channelName = channel?.name || 'Unknown Channel';
-  const scopeType = channel?.scopeType;
-
-  // Build the navigation link
-  const channelId = channel?.id;
-  const conversationId = message.conversationId;
-  const initialMessageId = message.conversation?.initialMessageId;
-  const isThreadReply = initialMessageId !== message.messageId;
-
-  const basePath = '/chat/bookmarks'; // Notifications always go to bookmarks context
-  const messageLink =
-    channelId && conversationId
-      ? isThreadReply
-        ? `${basePath}/${channelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`
-        : `${basePath}/${channelId}#origin=${conversationId}&messageId=${message.messageId}`
-      : '/chat/bookmarks';
-
-  // Format description based on scope type
-  const description =
-    String(scopeType) === 'DM' || String(scopeType) === 'GROUP_DM'
-      ? `From ${name} in Direct Message`
-      : `From ${name} in #${channelName}`;
-
-  // Show in-app notification that stays until manually dismissed
-  toast.info('Reminder: Bookmarked Message', {
-    description,
-    duration: Infinity, // Persist until manually closed
-    action: {
-      label: 'View',
-      onClick: (): void => {
-        void navigate(messageLink);
-      },
-    },
-  });
-};
 
 export const BookmarkItem = ({
   entityId,
@@ -118,45 +65,25 @@ export const BookmarkItem = ({
   bookmarkMetadata,
   channelId,
   showChannelName = false,
-  enableSnooze = false,
+  enableReminder = false,
   isMobile = false,
+  showActions = true,
+  onMarkedDone,
 }: BookmarkItemProps): ReactElement | null => {
   const navigate = useNavigate();
   const { baseRoute } = useRouteContext();
   const zero = useZero();
-  const { getBookmarkByEntity: getBookmarkByEntityFromHook } = useUserBookmarks();
   const [isHovered, setIsHovered] = useState(false);
-  const [showSnoozeDropdown, setShowSnoozeDropdown] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [isReminderDropdownOpen, setIsReminderDropdownOpen] = useState(false);
+  const [hideActionsUntilMouseLeave, setHideActionsUntilMouseLeave] = useState(false);
+  const [isCustomReminderModalOpen, setIsCustomReminderModalOpen] = useState(false);
+  const [customReminderDate, setCustomReminderDate] = useState<Date | null>(new Date());
+  const [customReminderTime, setCustomReminderTime] = useState<ReminderTimeOption>('09:00');
 
   // Fetch the message data - ALWAYS call hooks unconditionally
   const [message] = useCachedQuery(queries.getMessageForActivityV2({ messageId: entityId }));
   const channel = useChannel(message?.conversation?.channelId || '');
   const sender = useUser(message?.senderId ?? '');
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent): void => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setShowSnoozeDropdown(false);
-      }
-    };
-
-    if (showSnoozeDropdown) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-
-    return (): void => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [showSnoozeDropdown]);
-
-  // Close dropdown when hover is removed
-  useEffect(() => {
-    if (!isHovered) {
-      setShowSnoozeDropdown(false);
-    }
-  }, [isHovered]);
 
   // NOW we can have conditional returns after all hooks are called
   // Currently only supporting MESSAGE type
@@ -197,81 +124,113 @@ export const BookmarkItem = ({
     }
   };
 
-  // Get snooze info from bookmark metadata
-  const metadata = bookmarkMetadata as MessageMetadata | undefined;
-  const snoozeUntil = metadata?.snoozeUntil;
+  const activeReminder = getReminderFromMetadata(bookmarkMetadata);
+  const reminderAt = activeReminder?.remindAt;
 
   const handleRemoveBookmark = (e: React.MouseEvent): void => {
     e.stopPropagation();
+    onMarkedDone?.();
     void zero.mutate(
       mutators.bookmark.remove({
         entityId,
         entityType,
         timestamp: Date.now(),
+        markAsDone: true,
       }),
     );
   };
 
-  const handleSnoozeClick = (e: React.MouseEvent): void => {
+  const handleReminderClick = (e: React.MouseEvent): void => {
     e.stopPropagation();
-    setShowSnoozeDropdown(!showSnoozeDropdown);
   };
 
-  const handleSnoozeOption = (e: React.MouseEvent, option: string): void => {
-    e.stopPropagation();
-    setShowSnoozeDropdown(false);
+  const applyReminderAt = (remindAt: Date): void => {
+    const reminderContext = {
+      messagePreview: createReminderMessagePreview(message.content),
+      conversationId: message.conversationId,
+      initialMessageId: message.conversation?.initialMessageId,
+      ...(channel?.id && { channelId: channel.id }),
+      ...(channel?.name && { channelName: channel.name }),
+      ...(channel?.scopeType && { channelScopeType: String(channel.scopeType) }),
+      ...(sender?.name && { senderName: sender.name }),
+    };
 
-    if (!enableSnooze) {
+    void zero.mutate(
+      mutators.bookmark.updateMetadata({
+        entityId,
+        entityType,
+        metadata: upsertReminderMetadataWithContext(
+          bookmarkMetadata,
+          remindAt.toISOString(),
+          reminderContext,
+        ),
+        timestamp: Date.now(),
+      }),
+    );
+  };
+
+  const handleReminderOption = (
+    e: React.MouseEvent,
+    option: ReminderMenuOption | 'remove',
+  ): void => {
+    e.stopPropagation();
+    setHideActionsUntilMouseLeave(true);
+    setIsHovered(false);
+    setIsReminderDropdownOpen(false);
+
+    if (!enableReminder) {
       return;
     }
 
     if (option === 'remove') {
-      // Remove snooze - update bookmark metadata to remove snoozeUntil
-      const currentMetadata: MessageMetadata = (bookmarkMetadata as MessageMetadata) || {};
       void zero.mutate(
         mutators.bookmark.updateMetadata({
           entityId,
           entityType,
-          metadata: {
-            ...currentMetadata,
-            snoozeUntil: null,
-          },
+          metadata: removeReminderMetadata(bookmarkMetadata),
           timestamp: Date.now(),
         }),
       );
       return;
     }
 
-    // Calculate snooze time based on option
-    const snoozeTime = calculateSnoozeTime(option);
-    if (!snoozeTime) return;
+    if (option === 'custom') {
+      setIsCustomReminderModalOpen(true);
+      return;
+    }
 
-    // Update bookmark metadata with snooze time
-    const currentMetadata: MessageMetadata = (bookmarkMetadata as MessageMetadata) || {};
-    void zero.mutate(
-      mutators.bookmark.updateMetadata({
-        entityId,
-        entityType,
-        metadata: {
-          ...currentMetadata,
-          snoozeUntil: snoozeTime.toISOString(),
-        },
-        timestamp: Date.now(),
-      }),
-    );
-
-    // Schedule notification
-    scheduleSnoozeNotification(
-      snoozeTime,
-      message,
-      channel,
-      getBookmarkByEntityFromHook,
-      entityId,
-      entityType,
-      navigate,
-      sender?.name ?? 'Unknown User',
-    );
+    const remindAt = calculateReminderTime(option);
+    if (!remindAt) return;
+    applyReminderAt(remindAt);
   };
+
+  const handleSaveCustomReminder = (e: React.MouseEvent): void => {
+    e.stopPropagation();
+    if (!customReminderDate) {
+      return;
+    }
+
+    const remindAt = calculateCustomReminderTime(customReminderDate, customReminderTime);
+    if (remindAt.getTime() <= Date.now()) {
+      toast.error('Please choose a future time for reminder');
+      return;
+    }
+    applyReminderAt(remindAt);
+    setIsCustomReminderModalOpen(false);
+  };
+
+  const reminderDatePickerId = `bookmark-reminder-date-${entityId}`;
+  const reminderTimeSelectId = `bookmark-reminder-time-${entityId}`;
+  const reminderDueInLabel = reminderAt ? formatReminderDueIn(reminderAt) : null;
+  const isReminderOverdue = reminderDueInLabel === 'Overdue';
+  const reminderActionLabel = reminderAt ? 'Edit reminder' : 'Set reminder';
+  const isDirectMessageChannel =
+    String(channel?.scopeType) === 'DM' || String(channel?.scopeType) === 'GROUP_DM';
+  const isActionToolbarVisible =
+    showActions &&
+    !isMobile &&
+    !hideActionsUntilMouseLeave &&
+    (isHovered || isReminderDropdownOpen);
 
   return (
     <div
@@ -287,23 +246,35 @@ export const BookmarkItem = ({
         }
       }}
       onMouseEnter={(): void => setIsHovered(true)}
-      onMouseLeave={(): void => setIsHovered(false)}
+      onMouseLeave={(): void => {
+        setIsHovered(false);
+        setHideActionsUntilMouseLeave(false);
+      }}
       className='relative block p-4 hover:bg-accent transition-colors duration-150 cursor-pointer border-b border-border'
       role='button'
       tabIndex={0}
     >
-      {/* Snooze Badge - shown in bottom right if snoozed and not overdue */}
-      {snoozeUntil && new Date(snoozeUntil).getTime() > Date.now() && !isHovered && (
+      {/* Reminder badge - shown in bottom right when reminder is active */}
+      {reminderDueInLabel && !showChannelName && !isActionToolbarVisible && (
         <div className='absolute bottom-2 right-2 z-10'>
-          <span className='text-xs font-medium text-primary'>{formatDueIn(snoozeUntil)}</span>
+          <span
+            className={
+              isReminderOverdue
+                ? 'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold bg-red-600 text-white dark:bg-red-500'
+                : 'text-xs font-medium text-red-600 dark:text-red-300'
+            }
+          >
+            {reminderDueInLabel}
+          </span>
         </div>
       )}
 
       {/* Action Toolbar - shown on hover, hidden on mobile */}
-      {!isMobile && isHovered && (
-        <div className='absolute bottom-2 right-2 z-10 flex items-center gap-1 bg-card border border-border rounded-md shadow-sm p-1'>
+      {isActionToolbarVisible && (
+        <div className='absolute top-2 right-2 z-10 flex items-center gap-1 bg-card border border-border rounded-md shadow-sm p-1'>
           <Tooltip content='Mark as done'>
             <button
+              type='button'
               onClick={handleRemoveBookmark}
               className='p-1.5 rounded hover:bg-accent transition-colors duration-150'
               aria-label='Mark as done'
@@ -315,127 +286,164 @@ export const BookmarkItem = ({
               <Check size={16} className='text-muted-foreground' strokeWidth={1.33} />
             </button>
           </Tooltip>
-          <div className='relative'>
-            <Tooltip content='Snooze'>
-              <button
-                onClick={handleSnoozeClick}
-                className='p-1.5 rounded hover:bg-accent transition-colors duration-150'
-                aria-label='Snooze'
-                data-track-category='CHAT_BOOKMARK'
-                data-track-name='Open_Snooze_Menu'
-                data-track-metadata={JSON.stringify({ entityId })}
-              >
-                <Clock size={16} className='text-muted-foreground' strokeWidth={1.33} />
-              </button>
-            </Tooltip>
+          <Tooltip content={reminderActionLabel}>
+            <div>
+              <DropdownMenu open={isReminderDropdownOpen} onOpenChange={setIsReminderDropdownOpen}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type='button'
+                    onClick={handleReminderClick}
+                    className='p-1.5 rounded hover:bg-accent transition-colors duration-150'
+                    aria-label={reminderActionLabel}
+                    data-track-category='CHAT_BOOKMARK'
+                    data-track-name='Open_Reminder_Menu'
+                    data-track-metadata={JSON.stringify({ entityId })}
+                  >
+                    <Clock size={16} className='text-foreground' strokeWidth={1.33} />
+                  </button>
+                </DropdownMenuTrigger>
 
-            {/* Snooze Dropdown */}
-            {showSnoozeDropdown && (
-              <div
-                ref={dropdownRef}
-                className='absolute top-full right-0 mt-1 bg-popover border border-border rounded-md shadow-md py-1 min-w-[200px] z-20'
-                role='menu'
-                tabIndex={-1}
-                onKeyDown={(e): void => {
-                  if (e.key === 'Escape') {
-                    setShowSnoozeDropdown(false);
-                  }
-                }}
-              >
-                <button
-                  onClick={(e): void => {
-                    handleSnoozeOption(e, '30mins');
-                  }}
-                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
-                  data-track-category='CHAT_BOOKMARK'
-                  data-track-name='Snooze_Bookmark_30_Mins'
-                  data-track-metadata={JSON.stringify({ entityId })}
-                >
-                  30 mins
-                </button>
-                <button
-                  onClick={(e): void => {
-                    handleSnoozeOption(e, '1hour');
-                  }}
-                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
-                  data-track-category='CHAT_BOOKMARK'
-                  data-track-name='Snooze_Bookmark_1_Hour'
-                  data-track-metadata={JSON.stringify({ entityId })}
-                >
-                  1 hour
-                </button>
-                <button
-                  onClick={(e): void => {
-                    handleSnoozeOption(e, '3hours');
-                  }}
-                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
-                  data-track-category='CHAT_BOOKMARK'
-                  data-track-name='Snooze_Bookmark_3_Hours'
-                  data-track-metadata={JSON.stringify({ entityId })}
-                >
-                  3 hours
-                </button>
-                <button
-                  onClick={(e): void => {
-                    handleSnoozeOption(e, 'tomorrow');
-                  }}
-                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
-                  data-track-category='CHAT_BOOKMARK'
-                  data-track-name='Snooze_Bookmark_Tomorrow'
-                  data-track-metadata={JSON.stringify({ entityId })}
-                >
-                  Tomorrow at 9:00 AM
-                </button>
-                <button
-                  onClick={(e): void => {
-                    handleSnoozeOption(e, 'monday');
-                  }}
-                  className='w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors'
-                  data-track-category='CHAT_BOOKMARK'
-                  data-track-name='Snooze_Bookmark_Monday'
-                  data-track-metadata={JSON.stringify({ entityId })}
-                >
-                  Monday at 9:00 AM
-                </button>
-                <div className='border-t border-border my-1'></div>
-                <button
-                  onClick={(e): void => {
-                    handleSnoozeOption(e, 'remove');
-                  }}
-                  className='w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent transition-colors'
-                  data-track-category='CHAT_BOOKMARK'
-                  data-track-name='Remove_Bookmark_Snooze'
-                  data-track-metadata={JSON.stringify({ entityId })}
-                >
-                  Remove Snooze
-                </button>
-              </div>
-            )}
-          </div>
+                <DropdownMenuContent align='end' side='bottom' className='w-[200px]'>
+                  {BOOKMARK_REMINDER_MENU_OPTIONS.map(option => (
+                    <DropdownMenuItem
+                      key={option.option}
+                      onClick={(e): void => {
+                        handleReminderOption(e, option.option);
+                      }}
+                      data-track-category='CHAT_BOOKMARK'
+                      data-track-name={REMINDER_TRACK_NAME_BY_OPTION[option.option]}
+                      data-track-metadata={JSON.stringify({ entityId })}
+                    >
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                  {reminderDueInLabel && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={(e): void => {
+                          handleReminderOption(e, 'remove');
+                        }}
+                        data-track-category='CHAT_BOOKMARK'
+                        data-track-name='Remove_Bookmark_Reminder'
+                        data-track-metadata={JSON.stringify({ entityId })}
+                      >
+                        Remove reminder
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </Tooltip>
         </div>
       )}
+
+      <Dialog
+        open={isCustomReminderModalOpen}
+        onOpenChange={setIsCustomReminderModalOpen}
+        title='Reminder'
+        description='Set a reminder for this bookmarked message'
+      >
+        <div className='p-6 space-y-4'>
+          <div className='flex items-center justify-between'>
+            <h3 className='text-lg font-semibold text-foreground'>Reminder</h3>
+            <button
+              type='button'
+              className='rounded-sm opacity-70 transition-opacity hover:opacity-100'
+              onClick={() => setIsCustomReminderModalOpen(false)}
+              data-track-category='CHAT_BOOKMARK'
+              data-track-name='Close_Custom_Reminder_Modal'
+              data-track-metadata={JSON.stringify({ entityId })}
+            >
+              <X className='h-4 w-4' />
+              <span className='sr-only'>Close</span>
+            </button>
+          </div>
+          <div className='space-y-2'>
+            <label htmlFor={reminderDatePickerId} className='text-sm font-medium text-foreground'>
+              When
+            </label>
+            <DatePicker
+              id={reminderDatePickerId}
+              selectedDate={customReminderDate}
+              onSelect={setCustomReminderDate}
+              placeholder='Select date'
+              minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+              inputClassName='w-full !h-9'
+              showClearButton={false}
+            />
+          </div>
+
+          <div className='space-y-2'>
+            <label htmlFor={reminderTimeSelectId} className='text-sm font-medium text-foreground'>
+              Time
+            </label>
+            <Select
+              value={customReminderTime}
+              onValueChange={value => setCustomReminderTime(value)}
+            >
+              <SelectTrigger id={reminderTimeSelectId} className='w-full'>
+                <SelectValue placeholder='Select time' />
+              </SelectTrigger>
+              <SelectContent showScrollButtons={false}>
+                {REMINDER_TIME_OPTIONS.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className='flex justify-end gap-2 pt-2'>
+            <Button
+              variant='outline'
+              onClick={(e): void => {
+                e.stopPropagation();
+                setIsCustomReminderModalOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveCustomReminder} disabled={!customReminderDate}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       <div className={showChannelName ? 'space-y-2' : 'flex gap-3'}>
         {/* Channel/DM Name with Time - First Line (only if showChannelName is true) */}
         {showChannelName && (
           <div className='flex items-center justify-between gap-2'>
-            <span
-              className={`truncate font-inter ${
-                String(channel?.scopeType) === 'DM' || String(channel?.scopeType) === 'GROUP_DM'
-                  ? 'text-[13px] font-medium text-foreground leading-[100%]'
-                  : 'text-sm text-foreground'
-              }`}
-            >
-              {String(channel?.scopeType) === 'DM' || String(channel?.scopeType) === 'GROUP_DM'
-                ? 'Direct Message'
-                : `#${channel?.name || 'Unknown Channel'}`}
-            </span>
-            <span
-              className='text-[11px] font-normal text-muted-foreground leading-[100%] flex-shrink-0 ml-auto'
-              style={{ fontFamily: 'Geist Mono' }}
-            >
-              {formatDateWithTime(message.createdAt)}
-            </span>
+            <div className='flex items-center gap-1.5 min-w-0'>
+              {reminderDueInLabel && (
+                <>
+                  <span
+                    className={
+                      isReminderOverdue
+                        ? 'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-semibold bg-red-600 text-white dark:bg-red-500 flex-shrink-0'
+                        : 'text-xs font-medium text-red-600 dark:text-red-300 flex-shrink-0'
+                    }
+                  >
+                    {reminderDueInLabel}
+                  </span>
+                  <span className='text-xs text-muted-foreground flex-shrink-0'>&bull;</span>
+                </>
+              )}
+              <span
+                className={`truncate font-inter ${
+                  isDirectMessageChannel
+                    ? 'text-[13px] font-medium text-muted-foreground leading-normal'
+                    : 'text-sm text-muted-foreground'
+                }`}
+              >
+                {isDirectMessageChannel
+                  ? 'Direct Message'
+                  : `#${channel?.name || 'Unknown Channel'}`}
+              </span>
+            </div>
           </div>
         )}
 

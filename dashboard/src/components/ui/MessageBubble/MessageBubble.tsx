@@ -343,17 +343,20 @@ const getMessageBubbleClassName = (
     variant !== 'pinned' &&
       !isActiveCall &&
       !isPrivateSystemNotice &&
+      !isBookmarked &&
       !isShowInChannel &&
       'hover:bg-accent/50',
     variant !== 'pinned' &&
       !isActiveCall &&
       !isPrivateSystemNotice &&
+      !isBookmarked &&
       !isShowInChannel &&
       'active:bg-accent/50 transition-colors',
     variant !== 'pinned' &&
       isHovered &&
       !isActiveCall &&
       !isPrivateSystemNotice &&
+      !isBookmarked &&
       !isShowInChannel &&
       'bg-muted/50',
     isActiveCall && 'bg-stage-completed active-call-highlight rounded-md',
@@ -372,10 +375,7 @@ const getMessageBubbleClassName = (
     isBookmarked &&
       variant !== 'pinned' &&
       !isPinned &&
-      !isShowInChannel && [
-        'bg-accent rounded-sm',
-        'before:content-[""] before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-action-primary',
-      ],
+      !isShowInChannel && ['bg-blue-50/90 dark:bg-blue-500/10 rounded-sm'],
     variant === 'pinned' && 'bg-background border border-border shadow-sm rounded-xl',
     isHighlighted && 'highlight-message',
     isXyneBot && 'pt-5',
@@ -408,6 +408,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   showAvatar = true,
   isPinned,
   isBookmarked,
+  isReminderSet,
+  reminderDueInLabel,
   variant = 'default',
   context,
   isHighlighted,
@@ -533,6 +535,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         showAvatar={showAvatar}
         isPinned={isPinned ?? false}
         isBookmarked={isBookmarked ?? false}
+        isReminderSet={isReminderSet ?? false}
+        reminderDueInLabel={reminderDueInLabel}
         isHighlighted={isHighlighted ?? false}
         channelId={channelId}
         {...(conversation && { conversation })}
@@ -565,7 +569,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     isFirstInThread,
     isCallNoTranscript,
   );
-
   return (
     <>
       {isPinned &&
@@ -576,12 +579,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <span>Pinned</span>
           </div>
         )}
-      {isBookmarked && variant !== 'pinned' && (
-        <div className='flex items-center gap-1 text-[11px] text-action-primary font-normal mb-1 ml-12'>
-          <Bookmark className='w-3 h-3 fill-current' />
-          <span>Reminder Set</span>
-        </div>
-      )}
       {/* eslint-disable jsx-a11y/no-static-element-interactions*/}
 
       {isPrivateSystemNotice && (
@@ -763,6 +760,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         {/* ================== RIGHT SIDE ================== */}
         <div className='flex-1 flex flex-col gap-1 min-w-0'>
+          {isBookmarked && variant !== 'pinned' && (
+            <div className='inline-flex items-center gap-1 text-blue-700 dark:text-blue-200 text-[11px] font-medium'>
+              <Bookmark className='w-3 h-3 fill-current' />
+              <span>
+                {isReminderSet
+                  ? `Reminder Set${reminderDueInLabel ? ` • ${reminderDueInLabel}` : ''}`
+                  : 'Bookmark'}
+              </span>
+            </div>
+          )}
+
           {showAvatar && !isWorkflowMessage && (
             <div className='w-full flex items-baseline gap-2 min-h-4 '>
               {isCallMessage && !isForwardedMessage ? (

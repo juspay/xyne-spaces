@@ -2507,11 +2507,13 @@ model Bookmark {
   createdAt  DateTime           @default(now())
   updatedAt  DateTime?
   isDeleted  Boolean            @default(false)
+  isCompleted Boolean            @default(false)
   metadata   Json?              // Additional metadata
 
   @@unique([userId, entityId, entityType]) // User can only bookmark an entity once
   @@index([userId, entityType]) // Fast lookup of user's bookmarks by type
   @@index([userId, createdAt]) // Fast lookup of user's bookmarks sorted by time
+  @@index([userId, isCompleted, updatedAt])
 
   @@index([userId, createdAt(sort: Desc), id])
   @@map("bookmarks")

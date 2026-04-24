@@ -10,11 +10,11 @@ import {
   Ticket,
   Pin,
   Bookmark,
-  BookmarkMinus,
   Forward,
   Copy,
   Headphones,
   ArrowLeft,
+  Clock3,
 } from 'lucide-react';
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
@@ -52,8 +52,9 @@ export interface MessageActionsDrawerProps {
   onForwardMessage?: () => void;
   onEditInCanvas?: () => void;
   onBookmark?: () => void;
-  onAskAI?: () => void;
   isBookmarked?: boolean;
+  onRemindMe?: () => void;
+  onAskAI?: () => void;
   isPinned?: boolean;
   onMarkAsUnread?: () => void;
   onInitiateCall?: () => void;
@@ -82,8 +83,9 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
   onForwardMessage,
   onEditInCanvas,
   onBookmark,
-  onAskAI,
   isBookmarked = false,
+  onRemindMe,
+  onAskAI,
   isPinned = false,
   onMarkAsUnread,
   onInitiateCall,
@@ -304,15 +306,18 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   {/* Bookmark */}
                   {onBookmark && (
                     <ActionButton
-                      icon={
-                        isBookmarked ? (
-                          <BookmarkMinus className='w-5 h-5' />
-                        ) : (
-                          <Bookmark className='w-5 h-5' />
-                        )
-                      }
-                      label={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
+                      icon={<Bookmark className='w-5 h-5' />}
+                      label={isBookmarked ? 'Remove bookmark' : 'Add bookmark'}
                       onClick={() => handleActionClick(onBookmark)}
+                    />
+                  )}
+
+                  {/* Remind Me */}
+                  {onRemindMe && (
+                    <ActionButton
+                      icon={<Clock3 className='w-5 h-5' />}
+                      label='Remind me'
+                      onClick={() => handleActionClick(onRemindMe)}
                     />
                   )}
 

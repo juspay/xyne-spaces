@@ -54,6 +54,8 @@ export interface MessageBubbleProps {
   showAvatar?: boolean | undefined;
   isPinned?: boolean | undefined;
   isBookmarked?: boolean | undefined;
+  isReminderSet?: boolean | undefined;
+  reminderDueInLabel?: string | undefined;
   variant?: 'default' | 'pinned';
   isHighlighted?: boolean | undefined;
   channelId?: string;

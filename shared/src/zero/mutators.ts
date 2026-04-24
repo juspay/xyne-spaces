@@ -139,6 +139,31 @@ function getNudgeDirection(
   }
 }
 
+const bookmarkByEntityQuery = (userId: string, entityId: string, entityType: BookmarkEntityType) =>
+  zql.bookmarks
+    .where('userId', userId)
+    .where('entityId', entityId)
+    .where('entityType', entityType);
+
+const buildCompletedBookmarkMetadata = (
+  metadata: unknown,
+  completedAt: number,
+): ReadonlyJSONValue => {
+  const nextMetadata =
+    metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? { ...(metadata as Record<string, unknown>) }
+      : {};
+
+  delete nextMetadata.reminder;
+  delete nextMetadata.snoozeUntil;
+  nextMetadata.completion = {
+    done: true,
+    completedAt: new Date(completedAt).toISOString(),
+  };
+
+  return nextMetadata as ReadonlyJSONValue;
+};
+
 export const mutators = defineMutators({
   notificationSettings: {
     setChannelNotificationLevel: defineMutator(
@@ -4230,31 +4255,25 @@ export const mutators = defineMutators({
         metadata: z.any().optional(),
       }),
       async ({ tx, ctx, args: { entityId, entityType, bookmarkId, timestamp, metadata } }) => {
-        // Check if bookmark already exists (including soft-deleted)
         const existing = await tx.run(
           // eslint-disable-next-line local-rules/require-is-deleted-filter
-          zql.bookmarks
-            .where('userId', ctx.userID)
-            .where('entityId', entityId)
-            .where('entityType', entityType)
-            .one(),
+          bookmarkByEntityQuery(ctx.userID, entityId, entityType).one(),
         );
 
         if (existing) {
-          if (existing.isDeleted) {
+          if (existing.isDeleted || existing.isCompleted) {
             await tx.mutate.bookmarks.update({
               id: existing.id,
               isDeleted: false,
+              isCompleted: false,
               updatedAt: timestamp,
               // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-              metadata: metadata ?? existing.metadata,
+              metadata: metadata ?? null,
             });
           }
-          // If not deleted, silently return (do nothing)
           return;
         }
 
-        // Insert new bookmark
         await tx.mutate.bookmarks.insert({
           id: bookmarkId,
           userId: ctx.userID,
@@ -4263,6 +4282,7 @@ export const mutators = defineMutators({
           createdAt: timestamp,
           updatedAt: timestamp,
           isDeleted: false,
+          isCompleted: false,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           metadata,
         });
@@ -4273,14 +4293,13 @@ export const mutators = defineMutators({
         entityId: z.string(),
         entityType: z.nativeEnum(BookmarkEntityType),
         timestamp: z.number(),
+        markAsDone: z.boolean().optional(),
       }),
-      async ({ tx, ctx, args: { entityId, entityType, timestamp } }) => {
+      async ({ tx, ctx, args: { entityId, entityType, timestamp, markAsDone } }) => {
         const bookmark = await tx.run(
-          zql.bookmarks
-            .where('userId', ctx.userID)
-            .where('entityId', entityId)
-            .where('entityType', entityType)
+          bookmarkByEntityQuery(ctx.userID, entityId, entityType)
             .where('isDeleted', false)
+            .where('isCompleted', false)
             .one(),
         );
 
@@ -4288,11 +4307,14 @@ export const mutators = defineMutators({
           throw new Error('Bookmark not found');
         }
 
-        // Soft delete - update isDeleted to true
         await tx.mutate.bookmarks.update({
           id: bookmark.id,
-          isDeleted: true,
+          isDeleted: !markAsDone,
+          isCompleted: !!markAsDone,
           updatedAt: timestamp,
+          metadata: markAsDone
+            ? buildCompletedBookmarkMetadata(bookmark.metadata, timestamp)
+            : null,
         });
       },
     ),
@@ -4305,11 +4327,9 @@ export const mutators = defineMutators({
       }),
       async ({ tx, ctx, args: { entityId, entityType, metadata, timestamp } }) => {
         const bookmark = await tx.run(
-          zql.bookmarks
-            .where('userId', ctx.userID)
-            .where('entityId', entityId)
-            .where('entityType', entityType)
+          bookmarkByEntityQuery(ctx.userID, entityId, entityType)
             .where('isDeleted', false)
+            .where('isCompleted', false)
             .one(),
         );
 

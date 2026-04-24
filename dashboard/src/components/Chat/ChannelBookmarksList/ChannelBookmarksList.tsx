@@ -54,14 +54,12 @@ const ChannelBookmarksList = ({ channelId }: ChannelBookmarksListProps): ReactEl
                   {groupedBookmarks[dateKey]?.map(bookmark => (
                     <BookmarkItem
                       key={bookmark.id}
-                      bookmarkId={bookmark.id}
                       entityId={bookmark.entityId}
                       entityType={bookmark.entityType}
-                      createdAt={bookmark.createdAt}
                       channelId={channelId}
                       bookmarkMetadata={bookmark.metadata}
                       showChannelName={false}
-                      enableSnooze={true}
+                      enableReminder={true}
                     />
                   ))}
                 </div>
