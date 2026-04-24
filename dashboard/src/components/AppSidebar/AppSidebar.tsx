@@ -425,6 +425,8 @@ const AppSidebar = (): ReactElement => {
           side='right'
           sideOffset={8}
           align='end'
+          collisionPadding={12}
+          className='max-h-[calc(100vh-24px)] overflow-y-auto overscroll-contain no-scrollbar'
         >
           <SettingsContent />
         </Popover>
