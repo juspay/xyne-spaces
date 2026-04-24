@@ -2,6 +2,16 @@ import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 
 /**
+ * Ensures a URL string has a protocol prefix.
+ * If the URL starts with a known protocol, returns it as-is.
+ * Otherwise, prepends "https://".
+ */
+function ensureProtocol(url: string): string {
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(url)) return url;
+  return `https://${url}`;
+}
+
+/**
  * LinkSyncPlugin: Keeps link mark href in sync with the visible text.
  *
  * When a user edits an autolinked URL (e.g. backspacing characters),
@@ -34,12 +44,13 @@ export const LinkSyncPlugin = Extension.create({
             const nodeText = node.text || '';
             const currentHref = linkMark.attrs['href'] as string;
 
-            if (nodeText.trim() !== currentHref) {
+            const expectedHref = ensureProtocol(nodeText.trim());
+            if (expectedHref !== currentHref) {
               tr.removeMark(pos, pos + node.nodeSize, linkMarkType);
               tr.addMark(
                 pos,
                 pos + node.nodeSize,
-                linkMarkType.create({ ...linkMark.attrs, href: nodeText.trim() }),
+                linkMarkType.create({ ...linkMark.attrs, href: expectedHref }),
               );
               hasChanges = true;
             }

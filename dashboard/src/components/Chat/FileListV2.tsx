@@ -54,7 +54,7 @@ const FileListV2: React.FC<FileListProps> = ({ channelId }) => {
         anchor.direction === 'backward'
           ? attachementsResponse.reverse()
           : [...attachementsResponse];
-      setAttachments([...a]);
+      setAttachments([...a].filter(att => !att.isDeleted));
     }
   }, [attachementsResponse, attachementsDetails.type]);
 
