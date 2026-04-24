@@ -30,6 +30,7 @@ from livekit.agents import (
 )
 from livekit.plugins import openai, silero, google
 from livekit.plugins import deepgram
+from livekit.agents.types import NOT_GIVEN
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from events import EventBus
@@ -388,8 +389,19 @@ class MultiUserTranscriber:
         credentials_file = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
         if not credentials_file:
             raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set")
-        
-        # Create Google STT with Chirp configuration
+
+        # Define domain-specific hot words to bias the STT engine
+        hot_words = [
+            "Xyne Calls", "Juspay Euler", "Namma Cloud", "Xyne Chats",
+            "Xyne Tickets", "Juspay Hyperswitch", "Xyne Support",
+            "Namma Yatri", "Xyne Spaces", "Juspay", "Xyne Code",
+            "Xyne Training", "Namma Bengaluru", "Xyne Automatic",
+            "Juspay Payments Operating System", "Xyne AI",
+            "Xyne Assistant", "Namma Shuttle", "Xyne Agent",
+            "Xyne Bot", "Juspay Technologies", "Namma Switch",
+        ]
+
+        # Create Google STT with Chirp configuration and speech adaptation
         return google.STT(
             model=self._google_stt_model,
             languages=language_codes,
@@ -400,6 +412,7 @@ class MultiUserTranscriber:
             min_confidence_threshold=0.5,
             sample_rate=16000,
             interim_results=True,
+            keywords=[(word, 10.0) for word in hot_words],
         )
     
     def _create_stt(self, call_type: Optional[str] = None) -> ResilientSTT:
@@ -412,15 +425,32 @@ class MultiUserTranscriber:
         if self._shared_stt is None or call_type == 'HEADLESS':
             # Use Deepgram STT
             if selected_model == "deepgram" and self._deepgram_api_key:
+                # Domain-specific hot words shared with Google STT adaptation
+                hot_words = [
+                    "Xyne Calls", "Juspay Euler", "Namma Cloud", "Xyne Chats",
+                    "Xyne Tickets", "Juspay Hyperswitch", "Xyne Support",
+                    "Namma Yatri", "Xyne Spaces", "Juspay", "Xyne Code",
+                    "Xyne Training", "Namma Bengaluru", "Xyne Automatic",
+                    "Juspay Payments Operating System", "Xyne AI",
+                    "Xyne Assistant", "Namma Shuttle", "Xyne Agent",
+                    "Xyne Bot", "Juspay Technologies", "Namma Switch",
+                ]
+                # Nova-3 uses keyterms (plain strings); older models use keywords (word, boost) tuples.
+                # detect_language=True is incompatible with streaming mode and with keyterms —
+                # always use a fixed language when streaming.
+                is_nova3 = self._deepgram_model.startswith("nova-3")
                 inner_stt = deepgram.STT(
                     model=self._deepgram_model,
-                    detect_language=True,  # Auto-detect language
+                    language=self._deepgram_language,
+                    detect_language=False,
                     interim_results=True,
                     punctuate=True,
                     filler_words=True,
                     sample_rate=16000,
                     endpointing_ms=25,
                     api_key=self._deepgram_api_key,
+                    keyterms=hot_words if is_nova3 else NOT_GIVEN,
+                    keywords=[(w, 10.0) for w in hot_words] if not is_nova3 else NOT_GIVEN,
                 )
                 resilient_stt = ResilientSTT(inner_stt=inner_stt, max_retries=3, base_delay=1.0)
                 # For HEADLESS, return without caching. For regular calls, cache it.
