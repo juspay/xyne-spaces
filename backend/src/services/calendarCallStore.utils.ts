@@ -45,29 +45,100 @@ export interface ExternalCalendarCallData {
 
 // ─── Shared DB helpers ────────────────────────────────────────────────────────
 
+/** Stable JSON stringify — sorts keys recursively and skips undefined values (matching JSON.stringify behaviour) so key-insertion order and absent-vs-undefined differences don't affect equality checks. */
+function stableStringify(val: unknown): string {
+  if (val === undefined) return 'null';
+  if (val === null || typeof val !== 'object') return JSON.stringify(val);
+  if (Array.isArray(val)) return `[${val.map(stableStringify).join(',')}]`;
+  const sorted = Object.keys(val as object)
+    .filter(k => (val as Record<string, unknown>)[k] !== undefined)
+    .sort()
+    .map(k => `${JSON.stringify(k)}:${stableStringify((val as Record<string, unknown>)[k])}`);
+  return `{${sorted.join(',')}}`;
+}
+
+function hasExternalCallChanged(
+  existing: {
+    title: string | null;
+    description: string | null;
+    status: CallStatus;
+    roomLink: string | null;
+    startsAt: Date | null;
+    endsAt: Date | null;
+    timezone: string;
+    metadata: Prisma.JsonValue;
+  },
+  data: ExternalCalendarCallData,
+): boolean {
+  return (
+    existing.title !== (data.title ?? null) ||
+    existing.description !== (data.description ?? null) ||
+    existing.status !== data.status ||
+    existing.roomLink !== (data.roomLink ?? null) ||
+    existing.startsAt?.getTime() !== data.startsAt?.getTime() ||
+    existing.endsAt?.getTime() !== data.endsAt?.getTime() ||
+    existing.timezone !== data.timezone ||
+    stableStringify(existing.metadata) !== stableStringify(data.metadata)
+  );
+}
+
 /**
  * Upsert a single external calendar event as a Call row.
  * Create-vs-update split: new rows get a fresh uuid + createdAt;
- * existing rows only update mutable fields.
+ * existing rows are only written when a mutable field has actually changed,
+ * preventing unnecessary DB writes (and timestamp churn) on unchanged events.
  */
 export async function upsertExternalCalendarCall(
   data: ExternalCalendarCallData,
   now: Date,
 ): Promise<void> {
-  await (prisma.call.upsert as (args: unknown) => Promise<{ id: string }>)({
+  const existing = await (prisma.call.findUnique as (args: unknown) => Promise<{
+    id: string;
+    title: string | null;
+    description: string | null;
+    status: CallStatus;
+    roomLink: string | null;
+    startsAt: Date | null;
+    endsAt: Date | null;
+    timezone: string;
+    metadata: Prisma.JsonValue;
+  } | null>)({
     where: { externalId: data.externalId },
-    create: {
-      id: uuidv4(),
-      ...data,
-      channelId: null,
-      isRecurring: false,
-      recordingEnabled: false,
-      startedAt: now,
-      lastActivityAt: now,
-      createdAt: now,
-      updatedAt: now,
+    select: {
+      id: true,
+      title: true,
+      description: true,
+      status: true,
+      roomLink: true,
+      startsAt: true,
+      endsAt: true,
+      timezone: true,
+      metadata: true,
     },
-    update: {
+  });
+
+  if (!existing) {
+    await (prisma.call.create as (args: unknown) => Promise<{ id: string }>)({
+      data: {
+        id: uuidv4(),
+        ...data,
+        channelId: null,
+        isRecurring: false,
+        recordingEnabled: false,
+        startedAt: now,
+        lastActivityAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    return;
+  }
+
+  if (!hasExternalCallChanged(existing, data)) return;
+
+  await (prisma.call.update as (args: unknown) => Promise<{ id: string }>)({
+    where: { externalId: data.externalId },
+    data: {
       title: data.title,
       description: data.description,
       status: data.status,

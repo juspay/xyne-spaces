@@ -82,7 +82,11 @@ export async function storeGCalEventAsCall(event: GCalEvent, userId: string): Pr
   const organizerEmail = event.organizer?.email;
 
   const organizer: CalendarOrganizer | null = event.organizer
-    ? { email: event.organizer.email, displayName: event.organizer.displayName, self: event.organizer.self }
+    ? {
+        ...(event.organizer.email !== undefined && { email: event.organizer.email }),
+        ...(event.organizer.displayName !== undefined && { displayName: event.organizer.displayName }),
+        ...(event.organizer.self !== undefined && { self: event.organizer.self }),
+      }
     : null;
 
   const attendees = (event.attendees ?? []).filter(
