@@ -1512,13 +1512,16 @@ export class AnalyticsRepository {
       ? dateFilter
       : { gte: dateFilter };
 
-    // Count file attachments in the selected time period
+    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessageIds = validMessages.map(m => m.messageId);
+
+    if (validMessageIds.length === 0) return 0;
+
     const filesSharedCount = await this.prisma.messageAttachment.count({
       where: {
-        createdAt: dateCondition,
-        createdBy: {
-          notIn: ['Unified Alerts', 'system']
-        }
+        entityId: { in: validMessageIds },
+        entityType: 'CHAT',
+        createdBy: { notIn: ['Unified Alerts', 'system'] }
       }
     });
 
@@ -2618,13 +2621,15 @@ export class AnalyticsRepository {
     // Extract start and end dates using centralized helper method
     const { startDate, endDate } = this.getDateRange(dateCondition);
 
-    // Get file attachments
-    const attachments = await this.prisma.messageAttachment.findMany({
-      where: { 
-        createdAt: dateCondition,
-        createdBy: {
-          notIn: ['Unified Alerts', 'system']
-        }
+    const validMessages = await this.getFilteredMessages(dateCondition);
+    const validMessageIds = validMessages.map(m => m.messageId);
+
+    // Get file attachments for valid (non-migrated) messages only
+    const attachments = validMessageIds.length === 0 ? [] : await this.prisma.messageAttachment.findMany({
+      where: {
+        entityId: { in: validMessageIds },
+        entityType: 'CHAT',
+        createdBy: { notIn: ['Unified Alerts', 'system'] }
       },
       select: { createdAt: true },
     });
