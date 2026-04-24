@@ -144,11 +144,11 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const value = e.target.value;
-    // Convert spaces to hyphens, then remove special characters, keep only alphanumeric and hyphens
+    // Convert spaces to hyphens, then remove special characters, keep only alphanumeric, hyphens, and underscores
     const cleanValue = value
       .toLowerCase()
       .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9-]/g, '');
+      .replace(/[^a-z0-9-_]/g, '');
     form.setFieldValue('name', cleanValue);
     setChannelName(cleanValue);
   };
