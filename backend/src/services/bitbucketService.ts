@@ -16,9 +16,25 @@ import {
 
 export class BitbucketService {
   private config: BitbucketConfig;
+  private readonly MAX_RETRIES = 5;
+  private readonly BASE_DELAY_MS = 1000;
+  private readonly MAX_DELAY_MS = 30000;
 
   constructor(config: BitbucketConfig) {
     this.config = config;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private getRetryDelay(attempt: number): number {
+    // Exponential backoff: baseDelay * 2^attempt, capped at maxDelay
+    const exponentialDelay = this.BASE_DELAY_MS * Math.pow(2, attempt);
+    const cappedDelay = Math.min(exponentialDelay, this.MAX_DELAY_MS);
+    // Add jitter (±25%) to avoid thundering herd
+    const jitter = cappedDelay * 0.25 * (Math.random() * 2 - 1);
+    return Math.floor(cappedDelay + jitter);
   }
 
   /**
@@ -37,7 +53,7 @@ export class BitbucketService {
   }
 
   /**
-   * Make authenticated request to Bitbucket API
+   * Make authenticated request to Bitbucket API with exponential backoff retry
    * @param endpoint - API endpoint
    * @param responseType - Response type: 'json' (default) or 'text'
    */
@@ -45,27 +61,68 @@ export class BitbucketService {
     const url = `${this.config.baseUrl}${endpoint}`;
     const acceptHeader = responseType === 'text' ? 'text/plain' : 'application/json;charset=UTF-8';
 
-    try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          Accept: acceptHeader,
-          Authorization: this.getAuthHeader(),
-        },
-      });
+    let lastError: Error | undefined;
 
-      if (!response.ok) {
+    for (let attempt = 0; attempt < this.MAX_RETRIES; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            Accept: acceptHeader,
+            Authorization: this.getAuthHeader(),
+          },
+        });
+
+        if (response.ok) {
+          if (responseType === 'text') {
+            return (await response.text()) as T;
+          }
+          return (await response.json()) as T;
+        }
+
+        // Handle rate limiting (429)
+        if (response.status === 429) {
+          const retryAfter = response.headers.get('Retry-After');
+          const delayMs = retryAfter
+            ? parseInt(retryAfter, 10) * 1000
+            : this.getRetryDelay(attempt);
+
+          logger.warn(
+            `Bitbucket API rate limited (429) on attempt ${attempt + 1}/${this.MAX_RETRIES}. ` +
+            `Retrying after ${delayMs}ms...`
+          );
+
+          await this.sleep(delayMs);
+          lastError = new Error(`Bitbucket API rate limit: 429`);
+          continue; // Retry
+        }
+
+        // For other errors, throw immediately
         throw new Error(`Bitbucket API error: ${response.status} ${response.statusText}`);
-      }
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
 
-      if (responseType === 'text') {
-        return (await response.text()) as T;
+        // Only retry network errors, not API errors (except 429 handled above)
+        if (error instanceof TypeError || (error as Error).message?.includes('fetch')) {
+          if (attempt < this.MAX_RETRIES - 1) {
+            const delayMs = this.getRetryDelay(attempt);
+            logger.warn(
+              `Network error on attempt ${attempt + 1}/${this.MAX_RETRIES}. ` +
+              `Retrying after ${delayMs}ms...`,
+              lastError
+            );
+            await this.sleep(delayMs);
+            continue;
+          }
+        }
+
+        throw error;
       }
-      return (await response.json()) as T;
-    } catch (error) {
-      logger.error('Error making Bitbucket API request:', error as Error);
-      throw error;
     }
+
+    // Exhausted all retries
+    logger.error('Bitbucket API request failed after max retries:', lastError);
+    throw lastError || new Error('Bitbucket API request failed after max retries');
   }
 
   /**
