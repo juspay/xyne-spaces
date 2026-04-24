@@ -512,6 +512,14 @@ class LiveKitWebhookController {
       return;
     }
 
+    if (!callRecordingService.isRecordingEnabled()) {
+      logger.info(
+        `[LiveKit Webhook] Call recording is disabled — ignoring egress_ended for room ${egressInfo.roomName} ` +
+        `(egressId=${egressInfo.egressId}). Set CALL_RECORDING_ENABLED=true to enable.`
+      );
+      return;
+    }
+
     try {
       await callRecordingService.handleEgressCompleted(egressInfo.roomName);
       logger.info(`[LiveKit Webhook] Processed egress completion for room ${egressInfo.roomName}`);
