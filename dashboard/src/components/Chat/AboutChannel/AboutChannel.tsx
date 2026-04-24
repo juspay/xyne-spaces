@@ -136,8 +136,8 @@ const AboutChannel = ({
   const validateName = (value: string): string => {
     if (value.length < 2) return 'Channel name must be at least 2 characters';
     if (value.length > 80) return 'Channel name must be 80 characters or less';
-    if (!/^[a-z0-9-]+$/.test(value))
-      return 'Only lowercase letters, numbers, and hyphens are allowed';
+    if (!/^[a-z0-9-_]+$/.test(value))
+      return 'Only lowercase letters, numbers, hyphens, and underscores are allowed';
     return '';
   };
 
