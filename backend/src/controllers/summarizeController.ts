@@ -8,6 +8,11 @@ import {
 import { AgentsConfig } from '@/agents/config';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { extractPlainTextFromHtml } from '@/utils/contentUtils';
+import { redisService } from '@/services/redisService';
+
+const EMAIL_SUMMARY_CACHE_TTL = 7 * 24 * 60 * 60; // 7 days in seconds
+const EMAIL_SUMMARY_CACHE_PREFIX = 'email-summary';
 
 /**
  * Controller for summarization using JAF agent
@@ -122,6 +127,138 @@ export class SummarizeController {
 
     } catch (error) {
       this.handleError(res, error, 'thread summarization');
+    }
+  };
+
+  /**
+   * GET /api/summarize/email-thread/:conversationId
+   * Summarizes all emails in a conversation thread (Xyne Desk)
+   */
+  summarizeEmailThread = async (req: Request, res: Response): Promise<void> => {
+    const { conversationId } = req.params;
+    const regenerate = req.query.regenerate === 'true';
+
+    if (!conversationId) {
+      res.status(400).json({ error: 'Missing required param: conversationId is required' });
+      return;
+    }
+
+    const userId = (req as any).user?.id || 'anonymous';
+    const agentsConfig = await AgentsConfig.fetch({ email: (req as any).user?.email });
+
+    try {
+      logger.info(`Fetching emails for conversation: ${conversationId}`);
+
+      const conversation = await db.conversation.findUnique({
+        where: { conversationId },
+      });
+
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+
+      const channelMember = await db.channelParticipant.findUnique({
+        where: { channelId_userId: { channelId: conversation.channelId, userId } },
+      });
+
+      if (!channelMember) {
+        res.status(403).json({ error: 'Forbidden: You do not have access to this conversation' });
+        return;
+      }
+
+      const emails = await db.email.findMany({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
+        take: 500,
+      });
+
+      if (emails.length === 0) {
+        res.status(400).json({ error: 'No emails found in this conversation' });
+        return;
+      }
+
+      const emailCount = emails.length;
+      const cacheKey = `${EMAIL_SUMMARY_CACHE_PREFIX}:${conversationId}`;
+      if (!regenerate) {
+        try {
+          const cached = await redisService.get(cacheKey);
+          if (cached) {
+            const cachedData = JSON.parse(cached);
+            if (cachedData.emailCount === emailCount) {
+              logger.info(`Serving cached email summary for conversation: ${conversationId}`);
+              return this.sendCachedSummary(res, cachedData);
+            }
+            logger.info(`Cache stale for conversation ${conversationId}: emailCount ${cachedData.emailCount} → ${emailCount}`);
+          }
+        } catch (cacheErr) {
+          logger.warn(`Failed to read email summary cache for ${conversationId}:`, cacheErr);
+        }
+      }
+
+      // Convert emails to ThreadMessage format
+      const threadMessages = emails.map((email) => {
+        const fromAddress = Array.isArray(email.from) ? email.from[0] : email.from;
+        const toAddresses = Array.isArray(email.to) ? email.to.join(', ') : email.to;
+        const ccAddresses = email.cc && email.cc.length > 0 ? `\nCC: ${email.cc.join(', ')}` : '';
+
+        const emailHeader = `Subject: ${email.subject || '(no subject)'}\nTo: ${toAddresses}${ccAddresses}`;
+        const plainBody = email.body ? extractPlainTextFromHtml(email.body) : '';
+        const content = `${emailHeader}\n\n${plainBody}`;
+
+        return {
+          id: email.id,
+          content,
+          authorName: fromAddress || 'Unknown Sender',
+          createdAt: email.createdAt,
+          hasAttachment: false,
+        };
+      });
+
+      logger.info(`Found ${threadMessages.length} emails in conversation: ${conversationId}`);
+
+      const input: ThreadSummaryInput = { messages: threadMessages };
+      const context: SummarizerContext = {
+        userId,
+        conversationId,
+        channelId: conversation.channelId,
+        summarizationType: 'emailThread',
+        modelName: agentsConfig.summariserModelName,
+      };
+
+      const messageIdMappingObj: { [index: number]: string } = {};
+      const conversationIdMappingObj: { [index: number]: string } = {};
+      const messageIdMapping = new Map<number, string>();
+      threadMessages.forEach((msg, idx) => {
+        messageIdMappingObj[idx + 1] = msg.id;
+        conversationIdMappingObj[idx + 1] = conversationId;
+        messageIdMapping.set(idx + 1, msg.id);
+      });
+
+      const inputWithMapping: ThreadSummaryInput = { ...input, messageIdMapping };
+
+      const getISOString = (createdAt: Date | number | bigint): string => {
+        if (createdAt instanceof Date) return createdAt.toISOString();
+        return new Date(Number(createdAt)).toISOString();
+      };
+
+      const dateFrom = threadMessages.length > 0 ? getISOString(threadMessages[0].createdAt) : undefined;
+      const dateTo = threadMessages.length > 0 ? getISOString(threadMessages[threadMessages.length - 1].createdAt) : undefined;
+
+      await this.streamSummarization(res, inputWithMapping, context, {
+        type: 'emailThread',
+        conversationId,
+        channelId: conversation.channelId,
+        messageCount: threadMessages.length,
+        participants: [...new Set(emails.map(e => Array.isArray(e.from) ? e.from[0] : e.from))].map(email => ({ email })),
+        messageIdMapping: messageIdMappingObj,
+        conversationIdMapping: conversationIdMappingObj,
+        dateFrom,
+        dateTo,
+      }, cacheKey, emailCount);
+
+    } catch (error) {
+      this.handleError(res, error, 'email thread summarization');
     }
   };
 
@@ -426,11 +563,28 @@ summarizeSearchMessage = async (req: Request, res: Response): Promise<void> => {
    * Helper method to stream summarization response
    * Uses appropriate stream function based on type (thread vs channel)
    */
+  private sendCachedSummary(res: Response, cachedData: { output: Record<string, any> }): void {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.setHeader('Content-Encoding', 'none');
+    if (res.socket) res.socket.setNoDelay(true);
+    res.flushHeaders();
+
+    res.write(`data: ${JSON.stringify({ type: 'start' })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'complete', output: cachedData.output })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'end' })}\n\n`);
+    res.end();
+  }
+
   private async streamSummarization(
     res: Response,
     input: ThreadSummaryInput,
     context: SummarizerContext,
-    metadata: Record<string, any>
+    metadata: Record<string, any>,
+    cacheKey?: string,
+    emailCount?: number
   ): Promise<void> {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -473,10 +627,17 @@ summarizeSearchMessage = async (req: Request, res: Response): Promise<void> => {
           };
         }
         eventData = JSON.stringify(completeData);
+
+        if (cacheKey && completeData.output) {
+          const cacheValue = JSON.stringify({ output: completeData.output, emailCount, cachedAt: Date.now() });
+          redisService.set(cacheKey, cacheValue, EMAIL_SUMMARY_CACHE_TTL).catch((err) => {
+            logger.warn(`Failed to cache email summary for ${cacheKey}:`, err);
+          });
+        }
       } else {
         eventData = JSON.stringify(chunk);
       }
-      
+
       res.write(`data: ${eventData}\n\n`);
       if (typeof (res as any).flush === 'function') (res as any).flush();
 

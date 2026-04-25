@@ -54,7 +54,7 @@ export interface SummarizerContext {
   readonly userId: string;
   readonly conversationId: string;
   readonly channelId: string;
-  readonly summarizationType?: 'thread' | 'channel' | 'searchMessage' | 'recap';
+  readonly summarizationType?: 'thread' | 'channel' | 'searchMessage' | 'recap' | 'emailThread';
   readonly searchQuery?: string; // Added for search message context
   readonly modelName?: string; // CAC-resolved model override
   readonly customPrompt?: string; // Optional user-defined focus area appended to the base prompt
@@ -173,6 +173,7 @@ const SUMMARIZATION_TYPE_TO_PROMPT: Record<string, string> = {
   thread: PROMPT_NAMES.FETCH_THREAD_MESSAGES,
   recap: PROMPT_NAMES.FETCH_CHANNEL_MESSAGES_RECAP,
   searchMessage: PROMPT_NAMES.SUMMARIZE_SEARCH_MESSAGES,
+  emailThread: PROMPT_NAMES.SUMMARIZE_EMAIL_THREAD,
 };
 
 /**
@@ -683,7 +684,7 @@ function stripHtml(content: string): string {
  */
 function formatMessagesForAgent(
   messages: readonly ThreadMessage[],
-  summarizationType: 'thread' | 'channel' | 'searchMessage' | 'recap' = 'thread',
+  summarizationType: 'thread' | 'channel' | 'searchMessage' | 'recap' | 'emailThread' = 'thread',
   searchQuery?: string
 ): string {
   const formattedMessages = messages.map((msg, index) => {
@@ -716,6 +717,16 @@ Provide a detailed summary including context and nuances.`;
     introText = `Please summarize the following channel conversation:
 
 Provide a detailed summary including context and nuances.`;
+  } else if (summarizationType === 'emailThread') {
+    contextLabel = 'EMAIL THREAD';
+    endLabel = 'END OF EMAIL THREAD';
+    introText = `Please summarize the following email thread. Focus on:
+- Actions taken and decisions made
+- Current status of the issue or request
+- Any pending items or next steps
+- Who is responsible for what
+
+Ignore email signatures, disclaimers, and quoted reply chains.`;
   } else {
     contextLabel = 'THREAD MESSAGES';
     endLabel = 'END OF THREAD';

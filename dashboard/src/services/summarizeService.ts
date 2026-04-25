@@ -78,6 +78,96 @@ type SSEEvent =
 // Main Service Function
 // ============================================================================
 
+export interface EmailSummaryResult {
+  summary: string;
+  keypoints: string[];
+}
+
+export interface EmailSummaryStreamCallbacks {
+  onComplete?: (data: EmailSummaryResult) => void;
+  onError?: (error: string) => void;
+}
+
+/**
+ * Summarize an email thread via streaming SSE
+ */
+export async function summarizeEmailThread(
+  conversationId: string,
+  callbacks: EmailSummaryStreamCallbacks,
+  signal?: AbortSignal,
+  regenerate = false,
+): Promise<void> {
+  const url = `${BASE_URL}/summarize/email-thread/${conversationId}${regenerate ? '?regenerate=true' : ''}`;
+
+  try {
+    // eslint-disable-next-line local-rules/no-fetch-use-axios
+    const response = await fetch(url, {
+      headers: { Accept: 'text/event-stream' },
+      credentials: 'include',
+      ...(signal && { signal }),
+    });
+
+    if (!response.ok) {
+      const errBody = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(errBody.error || `Request failed (${response.status})`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let hasReceivedComplete = false;
+
+    let streamDone = false;
+
+    while (!streamDone) {
+      if (signal?.aborted) {
+        void reader.cancel();
+        return;
+      }
+
+      const { done, value } = await reader.read();
+      if (done) {
+        streamDone = true;
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const event = JSON.parse(line.slice(6)) as SSEEvent;
+
+          if (event.type === 'complete') {
+            const output = event.output;
+            callbacks.onComplete?.({
+              summary: output?.summary || '',
+              keypoints: output?.keyPoints?.map(kp => kp.point) || [],
+            });
+            hasReceivedComplete = true;
+          } else if (event.type === 'error') {
+            hasReceivedComplete = true; // Prevent fallback onComplete from overriding error state
+            callbacks.onError?.('Failed to generate summary. Please try again.');
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+
+    if (!hasReceivedComplete) {
+      callbacks.onComplete?.({ summary: '', keypoints: [] });
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') return;
+    callbacks.onError?.(err instanceof Error ? err.message : 'Failed to summarize');
+  }
+}
+
 /**
  * Summarize search messages via streaming SSE
  */
