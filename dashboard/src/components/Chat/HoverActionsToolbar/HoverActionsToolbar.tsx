@@ -172,7 +172,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
           sideOffset={8}
           collisionPadding={16}
           avoidCollisions={true}
-          className='z-50 bg-popover rounded-lg shadow-md p-0'
+          className='z-[60] bg-popover rounded-lg shadow-md p-0'
         >
           <EmojiPicker
             style={{

@@ -161,13 +161,13 @@ export const Tooltip = ({
               'data-[side=left]:slide-in-from-right-2',
               'data-[side=right]:slide-in-from-left-2',
               'data-[side=top]:slide-in-from-bottom-2',
-              'z-50 w-fit origin-[--radix-tooltip-content-transform-origin]',
+              'z-[60] w-fit origin-[--radix-tooltip-content-transform-origin]',
               'rounded-md px-3 py-1.5 text-xs text-balance',
               className,
             )}
           >
             {content}
-            <TooltipPrimitive.Arrow className='bg-foreground fill-foreground z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]' />
+            <TooltipPrimitive.Arrow className='bg-foreground fill-foreground z-[60] size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]' />
           </TooltipPrimitive.Content>
         </TooltipPrimitive.Portal>
       </TooltipPrimitive.Root>

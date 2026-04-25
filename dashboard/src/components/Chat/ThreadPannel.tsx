@@ -87,6 +87,7 @@ interface ThreadMessagesProps {
   hideHeader?: boolean;
   onSummaryClick?: () => void;
   threadMessages?: QueryResultType<typeof queries.conversationMessagesV2>;
+  disableAskAI?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -99,6 +100,7 @@ export const ThreadMessages = ({
   simpleView = false,
   hideHeader = false,
   threadMessages: propThreadMessages,
+  disableAskAI,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -833,6 +835,7 @@ export const ThreadMessages = ({
               channelScopeType={channel?.scopeType}
               conversation={conversation}
               workflowNumberMap={workflowNumberMap}
+              {...(disableAskAI !== undefined && { disableAskAI })}
             />
 
             {/* ChatInput at the bottom - only show if user is a member */}
@@ -1258,6 +1261,7 @@ export const ThreadMessages = ({
               channelScopeType={channel?.scopeType}
               conversation={conversation}
               workflowNumberMap={workflowNumberMap}
+              {...(disableAskAI !== undefined && { disableAskAI })}
             />
 
             {/* ChatInput at the bottom - only show if user is a member */}
@@ -1682,6 +1686,7 @@ export const ThreadMessages = ({
             channelScopeType={channel?.scopeType}
             conversation={conversation}
             workflowNumberMap={workflowNumberMap}
+            {...(disableAskAI !== undefined && { disableAskAI })}
           />
 
           {/* ChatInput at the bottom - only show if user is a member */}

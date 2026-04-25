@@ -1364,6 +1364,7 @@ export const AttachmentGalleryModal: React.FC = () => {
           })}
           threadMessages={threadMessages}
           hideHeader={true}
+          disableAskAI={true}
         />
       </div>
     </div>
