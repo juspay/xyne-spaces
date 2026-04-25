@@ -155,7 +155,7 @@ const ChatList = ({
       });
 
       if (targetIndex !== -1) {
-        virtualizer.scrollToIndex(targetIndex, { align: 'center' });
+        virtualizer.scrollToIndex(targetIndex, { align: 'start' });
         return true; // Successfully scrolled
       }
       return false; // Origin not found

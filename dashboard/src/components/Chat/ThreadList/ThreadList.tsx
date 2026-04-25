@@ -153,7 +153,7 @@ const ThreadList = ({
         const elementId = `thread-message-${conversationId}-${targetMessageId}`;
         const targetElement = document.getElementById(elementId);
         if (targetElement) {
-          targetElement.scrollIntoView({ behavior: 'auto', block: 'center' });
+          targetElement.scrollIntoView({ behavior: 'auto', block: 'start' });
           return;
         }
       }
