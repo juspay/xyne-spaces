@@ -512,6 +512,99 @@ const addTokenizedNodes = (
   });
 };
 
+/**
+ * Trims only leading and trailing whitespace text nodes on the root body.
+ * Internal text spacing stays untouched to preserve user intent.
+ */
+function isStructurallyEmptyElement(el: HTMLElement): boolean {
+  // Treat <br> as empty
+  if (el.tagName === 'BR') return true;
+
+  // Elements that are inherently meaningful
+  const nonEmptyTags = new Set([
+    'IMG',
+    'VIDEO',
+    'AUDIO',
+    'IFRAME',
+    'EMBED',
+    'OBJECT',
+    'INPUT',
+    'TEXTAREA',
+    'SELECT',
+    'TABLE',
+    'HR',
+    'CANVAS',
+    'SVG',
+  ]);
+
+  if (nonEmptyTags.has(el.tagName)) return false;
+
+  // Fast path: check direct text only
+  for (const child of el.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      if ((child.textContent ?? '').trim().length > 0) {
+        return false;
+      }
+    }
+
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const childEl = child as HTMLElement;
+
+      // If any child is not empty → this is not empty
+      if (!isStructurallyEmptyElement(childEl)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+type TrimBoundaryEdge = 'leading' | 'trailing';
+
+function trimBoundary(node: Node, edge: TrimBoundaryEdge): boolean {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.textContent ?? '';
+    const trimmed = edge === 'leading' ? text.replace(/^\s+/, '') : text.replace(/\s+$/, '');
+    if (!trimmed) {
+      node.parentNode?.removeChild(node);
+      return true;
+    }
+    node.textContent = trimmed;
+    return false;
+  }
+
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const el = node as HTMLElement;
+
+    if (isStructurallyEmptyElement(el)) {
+      el.parentNode?.removeChild(el);
+      return true;
+    }
+
+    while (edge === 'leading' ? el.firstChild : el.lastChild) {
+      const child = edge === 'leading' ? el.firstChild! : el.lastChild!;
+      if (!trimBoundary(child, edge)) return false;
+    }
+
+    if (isStructurallyEmptyElement(el)) {
+      el.parentNode?.removeChild(el);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function trimBoundaryWhitespace(body: HTMLElement): void {
+  while (body.firstChild && trimBoundary(body.firstChild, 'leading')) {
+    continue;
+  }
+  while (body.lastChild && trimBoundary(body.lastChild, 'trailing')) {
+    continue;
+  }
+}
+
 type TableElementResult = {
   props: Record<string, unknown>;
   wrapper?: JSX.Element;
@@ -1066,11 +1159,13 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     try {
       if (!message || typeof message !== 'string') return [];
 
-      const safe = message.slice(0, MAX_HTML_LENGTH);
+      const safe = message.slice(0, MAX_HTML_LENGTH).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       const parser = new DOMParser();
       const doc = parser.parseFromString(safe, 'text/html');
 
       sanitizeDomTree(doc.body);
+
+      trimBoundaryWhitespace(doc.body);
 
       try {
         const highlightedHTML = highlightCodeBlocks(doc.body.innerHTML);
