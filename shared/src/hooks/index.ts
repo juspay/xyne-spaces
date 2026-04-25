@@ -55,4 +55,6 @@ export type { FallbackQueryExecutor } from './useFallbackQuery.js';
 export { useZeroConnectionInfo } from './useZeroConnectionState.js';
 export type { ZeroConnectionInfo } from './useZeroConnectionState.js';
 
+export { useZeroOfflineState } from './useZeroOfflineState.js';
+
 export { wasInterrupted, recordConnectionChange, recordConnectionConnected } from './metricValidity.js';
