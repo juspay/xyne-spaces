@@ -75,7 +75,7 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
           />
           <Drawer.Content
             asChild
-            className='fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-background text-foreground max-h-[90dvh] overflow-auto'
+            className='fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t border-border bg-background text-foreground max-h-[90dvh]'
           >
             <motion.div
               animate={{
@@ -86,7 +86,10 @@ export const MobileProfileMenu = ({ userId }: MobileProfileMenuProps): ReactElem
                 },
               }}
             >
-              <div ref={elementRef as Ref<HTMLDivElement> | undefined}>
+              <div
+                ref={elementRef as Ref<HTMLDivElement> | undefined}
+                className='overflow-y-auto max-h-[90dvh]'
+              >
                 <AnimatePresence initial={false} mode='popLayout' custom={view}>
                   <motion.div
                     key={view}
