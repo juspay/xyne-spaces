@@ -51,6 +51,8 @@ import { useUser } from '../../../hooks/useUsers';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { isStatusExpired } from '../../../utils/statusUtils';
 import { logger, Event } from '../../../utils/logger';
+import { useZeroOfflineState } from '@xyne/shared/hooks';
+import { WifiOff, Wifi } from 'lucide-react';
 
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
@@ -100,6 +102,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const zero = useZero();
     const { user } = useAuth();
     const canCreateTicket = useCanCreateTicket();
+    const { isOffline, isReconnecting, isReconnected, refreshConnection } = useZeroOfflineState();
 
     // Summary cache invalidation - clear cache when messages change
     const { onMessageChange } = useSummaryCache();
@@ -369,6 +372,15 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
 
     const handleSendMessage = useCallback(
       (_plainText: string, html: string, files: File[]): void => {
+        if (isOffline) {
+          toast.warning("You're offline", {
+            description: messageId
+              ? "Edits can't be saved until you reconnect."
+              : 'Your message has been saved as a draft. It will be ready to send when you reconnect.',
+          });
+          throw new Error('offline');
+        }
+
         const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
         const hasFiles = files && files.length > 0;
         const scopeType =
@@ -376,19 +388,69 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             ? channel.scopeType
             : 'Channel';
 
+        // Handles client mutation rejection: restores draft + editor content on failure
+        const handleMutationResult = (
+          result: ReturnType<typeof zero.mutate>,
+          onReject: () => void,
+          onSuccess?: () => void,
+          logMeta?: Record<string, unknown>,
+        ) => {
+          result.client
+            .then(clientResult => {
+              if (clientResult.type === 'error') {
+                onReject();
+                if (logMeta) {
+                  logger.error(Event.MESSAGE_SEND_FAILED, {
+                    ...logMeta,
+                    error: 'Client mutation rejected',
+                  });
+                }
+                return;
+              }
+              onSuccess?.();
+            })
+            .catch(() => {
+              onReject();
+              if (logMeta) {
+                logger.error(Event.MESSAGE_SEND_FAILED, {
+                  ...logMeta,
+                  error: 'Client mutation promise rejected',
+                });
+              }
+            });
+        };
+
+        // Restores draft content back to both the state machine and the editor
+        const restoreDraft = () => {
+          saveDraft(lookupId, processedHtml, '');
+          inputBoxRef.current?.insertContent(processedHtml);
+          toast.error('Failed to send message', {
+            description: 'Message restored as draft. Please try again.',
+          });
+        };
+
         if (messageId) {
           // When editing a message, ignore alsoSendToChannel state to prevent metadata corruption
-          zero.mutate(
+          const result = zero.mutate(
             mutators.messages.update({
               messageId,
               content: processedHtml,
             }),
           );
-          // Invalidate summary cache when message is edited
-          if (conversationId) {
-            onMessageChange(conversationId, channelId);
-          }
-          onEditComplete?.();
+          handleMutationResult(
+            result,
+            () => {
+              toast.error('Failed to edit message', {
+                description: 'Please try again.',
+              });
+            },
+            () => {
+              if (conversationId) {
+                onMessageChange(conversationId, channelId);
+              }
+              onEditComplete?.();
+            },
+          );
           logger.info(Event.MESSAGE_SENT, {
             channelId,
             conversationId,
@@ -402,7 +464,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
           try {
             const messageCreatedAt = Date.now();
             const newMessageId = uuidv4();
-            zero.mutate(
+            const result = zero.mutate(
               mutators.messages.send({
                 conversationId,
                 content: processedHtml,
@@ -413,6 +475,12 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 ...(alsoSendToChannel && { childConversationId: uuidv4() }),
               }),
             );
+            saveDraft(lookupId, '', '');
+            handleMutationResult(result, restoreDraft, undefined, {
+              channelId,
+              conversationId,
+              isReply: true,
+            });
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,
@@ -444,21 +512,18 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
               error: errorMessage,
             });
 
-            // Track message send failure with categorized error reason
             mixpanelService.track(EVENTS.MESSAGE_SEND_FAILED, {
               errorCode: 'CONVERSATION_SEND_ERROR',
               scopeType,
               errorReason: errorMessage,
             });
           }
-          // Clear draft after sending
-          saveDraft(lookupId, '', '');
         } else {
           try {
             const messageCreatedAt = Date.now();
             const newConversationId = uuidv4();
             const newMessageId = uuidv4();
-            zero.mutate(
+            const result = zero.mutate(
               mutators.conversations.send({
                 channelId,
                 content: processedHtml,
@@ -468,6 +533,12 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 timestamp: messageCreatedAt,
               }),
             );
+
+            saveDraft(lookupId, '', '');
+            handleMutationResult(result, restoreDraft, undefined, {
+              channelId,
+              isNewConversation: true,
+            });
 
             logger.info(Event.MESSAGE_SENT, {
               channelId,
@@ -498,15 +569,12 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
               error: errorMessage,
             });
 
-            // Track message send failure with categorized error reason
             mixpanelService.track(EVENTS.MESSAGE_SEND_FAILED, {
               errorCode: 'CHANNEL_SEND_ERROR',
               scopeType,
               errorReason: errorMessage,
             });
           }
-          // Clear draft after sending
-          saveDraft(lookupId, '', '');
         }
       },
       [
@@ -518,6 +586,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
         alsoSendToChannel,
         allUsersForMentionResolution,
         onMessageChange,
+        isOffline,
       ],
     );
 
@@ -540,6 +609,38 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
         ) : (
           <>
             <AgentProgressIndicator sessionId={currentSessionId} />
+            {isOffline && (
+              <div className='px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between mx-3 mb-1'>
+                <div className='flex items-center gap-1.5'>
+                  <WifiOff className='w-3 h-3 shrink-0' />
+                  <span>
+                    {messageId
+                      ? "You're offline. Edits can't be saved until you reconnect."
+                      : "You're offline. Messages will be saved as drafts until you reconnect."}
+                  </span>
+                </div>
+                <button
+                  type='button'
+                  onClick={refreshConnection}
+                  disabled={isReconnecting}
+                  className={`ml-2 shrink-0 px-2 py-0.5 text-xs font-medium rounded transition-colors ${
+                    isReconnecting
+                      ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 cursor-wait'
+                      : 'text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900 hover:bg-amber-200 dark:hover:bg-amber-800'
+                  }`}
+                  data-track-category='CHAT_INPUT'
+                  data-track-name='RECONNECT_ZERO'
+                >
+                  {isReconnecting ? 'Reconnecting...' : 'Reconnect'}
+                </button>
+              </div>
+            )}
+            {isReconnected && (
+              <div className='px-3 py-1.5 bg-green-50 dark:bg-green-950/50 border border-green-200 dark:border-green-800 rounded text-xs text-green-700 dark:text-green-300 flex items-center gap-1.5 mx-3 mb-1'>
+                <Wifi className='w-3 h-3 shrink-0' />
+                <span>Connected</span>
+              </div>
+            )}
             <InputBox
               id={currentSessionId}
               channelId={channelId}
@@ -617,6 +718,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
                 inputBoxRef.current?.insertContent(content);
               }}
               hasTicket={hasTicket}
+              sendDisabled={isOffline}
             />
           </>
         )}

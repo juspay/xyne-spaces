@@ -164,6 +164,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       hasTicket = false,
       disableEnterToSend = false,
       hideSendButton = false,
+      sendDisabled = false,
     },
 
     ref,
@@ -778,7 +779,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     const handleSend = useCallback(async () => {
-      if (!editor || isSending) return;
+      if (!editor || isSending || sendDisabled) return;
 
       const plainText = editor.getText().trim();
       const htmlContent = editor.getHTML();
@@ -812,7 +813,15 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       } finally {
         setIsSending(false);
       }
-    }, [editor, allAttachments, onSendMessage, isSending, attachedCanvas, hasSendableContent]);
+    }, [
+      editor,
+      allAttachments,
+      onSendMessage,
+      isSending,
+      attachedCanvas,
+      hasSendableContent,
+      sendDisabled,
+    ]);
 
     // Canvas attachment handlers
     const handleCanvasSelect = useCallback((canvas: Canvas) => {
@@ -1309,7 +1318,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     {onCreateTicket ? (
                       <div
                         className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
-                          hasSendableContent || sendMode === 'ticket'
+                          (hasSendableContent || sendMode === 'ticket') && !sendDisabled
                             ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                             : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
                         }`}
@@ -1332,6 +1341,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             }}
                             disabled={
                               disabled ||
+                              sendDisabled ||
                               isSending ||
                               (sendMode === 'message' && !hasSendableContent)
                             }
@@ -1372,7 +1382,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           trigger={
                             <button
                               type='button'
-                              disabled={disabled || isSending}
+                              disabled={disabled || sendDisabled || isSending}
                               className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
                               data-testid='send-options-menu'
                             >
@@ -1420,9 +1430,9 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <button
                           type='button'
                           onClick={() => void handleSend()}
-                          disabled={disabled || isSending || !hasSendableContent}
+                          disabled={disabled || sendDisabled || isSending || !hasSendableContent}
                           className={`p-2 rounded-md transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2 ${
-                            hasSendableContent && !disabled
+                            hasSendableContent && !disabled && !sendDisabled
                               ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                               : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
                           }`}

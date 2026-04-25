@@ -57,4 +57,5 @@ export interface InputBoxProps {
   hasTicket?: boolean;
   disableEnterToSend?: boolean;
   hideSendButton?: boolean;
+  sendDisabled?: boolean;
 }
