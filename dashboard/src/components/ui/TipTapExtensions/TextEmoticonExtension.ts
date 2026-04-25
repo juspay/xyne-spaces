@@ -43,7 +43,7 @@ function buildInputRuleRegex(emoticons: string[]): RegExp {
   // Sort longest-first so more-specific patterns (":-)") match before ":)"
   const sorted = [...emoticons].sort((a, b) => b.length - a.length);
   const alternation = sorted.map(escapeRegex).join('|');
-  return new RegExp(`(${alternation})(\\s)$`);
+  return new RegExp(`(?<!\\w)(${alternation})(\\s)$`);
 }
 
 export const TextEmoticonExtension = Extension.create({
