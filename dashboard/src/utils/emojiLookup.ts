@@ -108,7 +108,7 @@ export const convertTrailingEmoticonsInHtml = (html: string): string => {
 
   const sorted = [...emoticons].sort((a, b) => b.length - a.length);
   const escaped = sorted.map(e => e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const regex = new RegExp(`(${escaped.join('|')})\\s*$`);
+  const regex = new RegExp(`(?<!\\w)(${escaped.join('|')})\\s*$`);
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
