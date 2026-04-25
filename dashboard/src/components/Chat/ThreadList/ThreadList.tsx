@@ -27,6 +27,7 @@ type ThreadListProps = {
   channelScopeType?: ChannelScopeType | undefined;
   conversation?: ConversationWithTicket | undefined;
   workflowNumberMap?: Map<string, number>;
+  disableAskAI?: boolean;
 };
 
 const ThreadList = ({
@@ -40,6 +41,7 @@ const ThreadList = ({
   channelScopeType,
   conversation,
   workflowNumberMap,
+  disableAskAI,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
   const { editingMessageId, requestEdit } = useEditContext();
@@ -279,6 +281,7 @@ const ThreadList = ({
                   channelScopeType={channelScopeType}
                   allThreadAttachments={allThreadAttachments}
                   workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
+                  {...(disableAskAI !== undefined && { disableAskAI })}
                   {...(conversation && { conversation })}
                 />
               </div>
@@ -333,6 +336,7 @@ const ThreadList = ({
                 channelScopeType={channelScopeType}
                 allThreadAttachments={allThreadAttachments}
                 workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
+                {...(disableAskAI !== undefined && { disableAskAI })}
                 {...(conversation && { conversation })}
               />
             </div>

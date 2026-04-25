@@ -113,6 +113,7 @@ interface ChatBubbleProps {
   onEmojiPickerOpenChange?: (isOpen: boolean) => void;
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
+  disableAskAI?: boolean;
 }
 
 export const ChatBubble: React.FC<ChatBubbleProps> = ({
@@ -132,6 +133,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   onEmojiPickerOpenChange,
   allThreadAttachments,
   workflowNumber,
+  disableAskAI = false,
 }) => {
   const { user } = useAuthContext();
   const { copyImage } = useClipboard();
@@ -1097,8 +1099,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
-              {...(((conversation && (context === 'channel' || isFirstInThread)) ||
-                isCallMessage) &&
+              {...(!disableAskAI &&
+                ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
                 (!isSystemMessage || isCallMessage) &&
                 !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}
@@ -1165,8 +1167,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 (context === 'channel' || (context === 'thread' && isFirstInThread)) && {
                   onPinMessage: handlePinMessage,
                 })}
-              {...(((conversation && (context === 'channel' || isFirstInThread)) ||
-                isCallMessage) &&
+              {...(!disableAskAI &&
+                ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
                 (!isSystemMessage || isCallMessage) &&
                 !isMessageDeleted && { onAskAI: handleAskAI })}
               {...(shouldShowMarkAsUnread ? { onMarkAsUnread: handleMarkAsUnread } : {})}

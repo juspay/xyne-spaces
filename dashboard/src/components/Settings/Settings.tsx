@@ -40,6 +40,7 @@ import { Popover } from '../ui/Popover/Popover';
 import { useUserPresence } from '../../hooks/usePresence';
 import { DateTimePicker } from '../ui/DateTimePicker/DateTimePicker';
 import { format } from 'date-fns';
+import { webviewActor } from '../../machines/webviewMachine';
 
 const Settings = (): ReactElement => {
   const { logout } = useAuth();
@@ -212,6 +213,21 @@ const Settings = (): ReactElement => {
         bg: '#0a0a0a',
       },
     ];
+
+  const handleOpenChangelog = (e: React.MouseEvent): void => {
+    const changelogUrl = import.meta.env.VITE_API_URL.replace('/api', '/changelog');
+    if (isElectronApp()) {
+      if (e.metaKey || e.ctrlKey) {
+        window.electronAPI?.openExternal?.(changelogUrl);
+      } else {
+        webviewActor.send({ type: 'ADD_TAB', url: changelogUrl });
+        webviewActor.send({ type: 'OPEN' });
+      }
+    } else {
+      // In browser: open in new tab
+      window.open(changelogUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
 
   return (
     <div className='flex flex-col gap-4 min-w-[280px] max-w-[320px] w-full'>
@@ -580,6 +596,24 @@ const Settings = (): ReactElement => {
             onCheckedChange={setAiLandingDefault}
           />
         </div>
+      </div>
+
+      <hr className='border-border w-full' />
+      {/* Changelog Section */}
+      <div className='space-y-2'>
+        <button
+          onClick={handleOpenChangelog}
+          className='w-full flex items-center gap-2 px-2 py-2 rounded-lg bg-transparent hover:bg-muted transition-colors text-left group'
+          data-track-category='SETTINGS'
+          data-track-name='OpenChangelog'
+        >
+          <div className='flex-1 min-w-0'>
+            <p className='text-sm font-medium text-foreground'>Changelog</p>
+          </div>
+          <span className='inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400'>
+            NEW
+          </span>
+        </button>
       </div>
 
       <hr className='border-border w-full' />
