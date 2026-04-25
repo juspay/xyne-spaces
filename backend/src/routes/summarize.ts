@@ -12,6 +12,9 @@ const summarizeController = new SummarizeController();
 // GET /api/summarize/thread/:conversationId
 router.get('/thread/:conversationId', summarizeController.summarizeThread);
 
+// GET /api/summarize/email-thread/:conversationId
+router.get('/email-thread/:conversationId', summarizeController.summarizeEmailThread);
+
 // GET /api/summarize/channel/:channelId?dateFrom=ISO_DATE&dateTo=ISO_DATE
 router.get('/channel/:channelId', summarizeController.summarizeChannel);
 

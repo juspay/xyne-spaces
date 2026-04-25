@@ -1696,6 +1696,29 @@ const GET_PAGE_CONTENT_FALLBACK = `Retrieve the exact text content of specific p
  */
 const GET_DOCUMENT_OUTLINE_FALLBACK = `Retrieve the outline or table of contents of a document to understand its structure and navigate it effectively. Use a semantic query to find relevant documents, or pass docIds directly (from search_files). After receiving the outline: if an entry includes a page number like "(Page N)", call get_page_content with that page number; if an entry has NO page number, call search_files with the section title as the query to find the relevant content.`;
 
+/**
+ * Fallback prompt for summarizing email threads in Xyne Desk
+ */
+const SUMMARIZE_EMAIL_THREAD_FALLBACK = `Output ONLY valid JSON. No markdown. No code fences. No explanation. Nothing before or after the JSON.
+
+REQUIRED FORMAT (use exactly these keys):
+{"summary":"...","keypoints":"• ...\n• ..."}
+
+summary: 2-3 sentences covering the email thread — what the issue or request is, current status, and who is involved.
+keypoints: newline-separated bullet points starting with •. Focus on:
+- Actions taken by participants
+- Decisions made
+- Pending items or next steps
+- Who is responsible for what
+
+Rules:
+- Do not invent information not present in the emails.
+- Ignore email signatures, legal disclaimers, and quoted reply chains.
+- If the thread is a support ticket, identify: the customer issue, agent responses, and resolution status.
+- Keep each bullet point concise but informative.
+- Do NOT include email numbers, citation references, or index numbers like [1], [2] etc. in the key points. Write plain natural language only.
+- You donot have to create bullet points for every email — only include key actions, decisions, or updates that advance the thread. `;
+
 export const FALLBACK_PROMPTS: Record<string, string> = {
   'xyne-ai': XYNE_AI_SYSTEM_FALLBACK,
   'ask-ai-chat': XYNE_AI_CHAT_SYSTEM_FALLBACK,
@@ -1727,6 +1750,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'nudge_extractor': NUDGE_EXTRACTOR_FALLBACK,
   'get_page_content': GET_PAGE_CONTENT_FALLBACK,
   'get_document_outline': GET_DOCUMENT_OUTLINE_FALLBACK,
+  'summarize_email_thread': SUMMARIZE_EMAIL_THREAD_FALLBACK,
 };
 
 /**

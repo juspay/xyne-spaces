@@ -22,6 +22,8 @@ import {
   Trash2,
   Plus,
   Wand2,
+  Sparkles,
+  Loader2,
   Users2,
   Lock,
   Hash,
@@ -115,6 +117,7 @@ import { DraftCard } from '../../components/xyne-desk/DraftCard/DraftCard';
 import { RefineInput } from '../../components/xyne-desk/RefineInput/RefineInput';
 import { useDeskAIDraft } from '../../hooks/useDeskAIDraft';
 import { channelService, CreateChannelFormData } from '../../services/Chat/channelService';
+import { summarizeEmailThread } from '../../services/summarizeService';
 import { markdownToHtml } from '../../utils/clipboardUtils';
 import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
@@ -1093,6 +1096,59 @@ const SupportTicketDetail = (): ReactElement => {
     enabled: !composerOpen,
   });
 
+  // ── Email thread summary ──
+  const [emailSummaryState, setEmailSummaryState] = useState<'idle' | 'loading' | 'done' | 'error'>(
+    'idle',
+  );
+  const [emailSummaryPoints, setEmailSummaryPoints] = useState<string[]>([]);
+  const [emailSummarySummary, setEmailSummarySummary] = useState('');
+  const [emailSummaryError, setEmailSummaryError] = useState('');
+  const [showEmailSummary, setShowEmailSummary] = useState(false);
+  const emailSummaryAbortRef = useRef<AbortController | null>(null);
+
+  // Reset summary when conversation changes or new emails arrive
+  const emailCount = emails.length;
+  useEffect(() => {
+    emailSummaryAbortRef.current?.abort();
+    setEmailSummaryState('idle');
+    setEmailSummaryPoints([]);
+    setEmailSummarySummary('');
+    setEmailSummaryError('');
+    setShowEmailSummary(false);
+  }, [conversationId, emailCount]);
+
+  const fetchEmailSummary = useCallback(
+    async (regenerate = false) => {
+      if (!conversationId) return;
+      emailSummaryAbortRef.current?.abort();
+      const controller = new AbortController();
+      emailSummaryAbortRef.current = controller;
+
+      setEmailSummaryState('loading');
+      setEmailSummaryPoints([]);
+      setEmailSummarySummary('');
+      setEmailSummaryError('');
+
+      await summarizeEmailThread(
+        conversationId,
+        {
+          onComplete: data => {
+            setEmailSummarySummary(data.summary);
+            setEmailSummaryPoints(data.keypoints);
+            setEmailSummaryState('done');
+          },
+          onError: error => {
+            setEmailSummaryError(error);
+            setEmailSummaryState('error');
+          },
+        },
+        controller.signal,
+        regenerate,
+      );
+    },
+    [conversationId],
+  );
+
   // Fetch messages for the conversation
   const [messages] = useCachedQuery(
     queries.conversationMessagesV2({
@@ -1224,6 +1280,35 @@ const SupportTicketDetail = (): ReactElement => {
                   </>
                 )}
 
+                {emails.length > 0 && (
+                  <>
+                    <Tooltip side='bottom' delayDuration={300} content='Summarize email thread'>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
+                            setShowEmailSummary(true);
+                            void fetchEmailSummary();
+                          } else if (emailSummaryState === 'done') {
+                            setShowEmailSummary(prev => !prev);
+                          }
+                        }}
+                        disabled={emailSummaryState === 'loading'}
+                        className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors'
+                        data-track-category='Support'
+                        data-track-name='SummarizeEmailThread'
+                      >
+                        {emailSummaryState === 'loading' ? (
+                          <Loader2 size={16} className='animate-spin' />
+                        ) : (
+                          <Wand2 size={16} />
+                        )}
+                      </button>
+                    </Tooltip>
+                    <div className='w-px h-4 bg-border' />
+                  </>
+                )}
+
                 <div className='flex items-center gap-1'>
                   <Tooltip
                     side='bottom'
@@ -1293,6 +1378,188 @@ const SupportTicketDetail = (): ReactElement => {
                 </div>
               </div>
             </div>
+            {showEmailSummary &&
+              (emailSummaryState === 'loading' ||
+                emailSummaryState === 'done' ||
+                emailSummaryState === 'error') && (
+                <div
+                  className='flex-shrink-0 mx-6 mt-4 rounded-2xl p-px max-h-[40%] flex flex-col'
+                  style={{
+                    background:
+                      emailSummaryState === 'loading'
+                        ? 'linear-gradient(135deg, #FFB3B3, #FFCECE, #FFC0C0, #FFB3B3)'
+                        : 'linear-gradient(135deg, rgba(255,179,179,0.3), rgba(255,206,206,0.15), rgba(255,179,179,0.3))',
+                    backgroundSize: emailSummaryState === 'loading' ? '300% 300%' : '100% 100%',
+                    animation:
+                      emailSummaryState === 'loading' ? 'gradient-xy 3s ease infinite' : 'none',
+                  }}
+                >
+                  <div className='rounded-[calc(1rem-1px)] bg-background/95 dark:bg-background/90 backdrop-blur-xl overflow-hidden flex flex-col h-full'>
+                    {/* Header */}
+                    <div className='flex items-center justify-between px-4 py-2.5 shrink-0'>
+                      <div className='flex items-center gap-2.5'>
+                        <div className='relative flex items-center justify-center w-6 h-6'>
+                          {emailSummaryState === 'loading' && (
+                            <div
+                              className='absolute inset-0 rounded-lg opacity-30 blur-[3px]'
+                              style={{
+                                background: 'linear-gradient(135deg, #FFB3B3, #FFCECE, #FFC0C0)',
+                                backgroundSize: '200% 200%',
+                                animation: 'gradient-xy 2s ease infinite',
+                              }}
+                            />
+                          )}
+                          <div
+                            className='relative flex items-center justify-center w-6 h-6 rounded-lg'
+                            style={{ background: '#F87171' }}
+                          >
+                            <Sparkles size={12} className='text-white' />
+                          </div>
+                        </div>
+                        <span className='text-sm font-bold' style={{ color: '#1a1a1a' }}>
+                          AI Summary
+                        </span>
+                      </div>
+                      <div className='flex items-center gap-1'>
+                        {(emailSummaryState === 'done' || emailSummaryState === 'error') && (
+                          <Tooltip
+                            side='bottom'
+                            delayDuration={300}
+                            content={emailSummaryState === 'error' ? 'Retry' : 'Regenerate summary'}
+                          >
+                            <button
+                              type='button'
+                              onClick={() => void fetchEmailSummary(true)}
+                              className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                              data-track-category='Support'
+                              data-track-name='RegenerateEmailSummary'
+                            >
+                              <RefreshCw size={13} />
+                            </button>
+                          </Tooltip>
+                        )}
+                        <button
+                          type='button'
+                          onClick={() => setShowEmailSummary(false)}
+                          className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          data-track-category='Support'
+                          data-track-name='DismissEmailSummary'
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className='px-4 pb-3 overflow-y-auto no-scrollbar'>
+                      {/* Loading state */}
+                      {emailSummaryState === 'loading' && (
+                        <div className='space-y-3'>
+                          <div className='space-y-2'>
+                            <div
+                              className='h-3 w-full rounded-full'
+                              style={{
+                                background:
+                                  'linear-gradient(90deg, rgba(255,179,179,0.08), rgba(255,206,206,0.18), rgba(255,179,179,0.08))',
+                                backgroundSize: '200% 100%',
+                                animation: 'gradient-x 2s ease-in-out infinite',
+                              }}
+                            />
+                            <div
+                              className='h-3 w-3/4 rounded-full'
+                              style={{
+                                background:
+                                  'linear-gradient(90deg, rgba(255,179,179,0.08), rgba(255,206,206,0.18), rgba(255,179,179,0.08))',
+                                backgroundSize: '200% 100%',
+                                animation: 'gradient-x 2s ease-in-out infinite 0.15s',
+                              }}
+                            />
+                          </div>
+                          <div className='space-y-2.5 pt-1'>
+                            {[1, 0.83, 0.66].map((width, idx) => (
+                              <div key={idx} className='flex items-center gap-2.5'>
+                                <div
+                                  className='h-[5px] w-[5px] rounded-full shrink-0'
+                                  style={{
+                                    background: '#FFB3B3',
+                                    opacity: 0.6,
+                                    animation: `pulse 1.5s ease-in-out infinite ${idx * 0.2}s`,
+                                  }}
+                                />
+                                <div
+                                  className='h-3 rounded-full'
+                                  style={{
+                                    width: `${width * 100}%`,
+                                    background:
+                                      'linear-gradient(90deg, rgba(255,179,179,0.06), rgba(255,206,206,0.14), rgba(255,179,179,0.06))',
+                                    backgroundSize: '200% 100%',
+                                    animation: `gradient-x 2s ease-in-out infinite ${0.1 + idx * 0.15}s`,
+                                  }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Done state */}
+                      {emailSummaryState === 'done' && (
+                        <div className='space-y-3'>
+                          {emailSummarySummary && (
+                            <p className='text-[13px] text-muted-foreground leading-relaxed'>
+                              {emailSummarySummary}
+                            </p>
+                          )}
+                          {emailSummaryPoints.length > 0 && (
+                            <>
+                              {emailSummarySummary && (
+                                <div
+                                  className='h-px w-full'
+                                  style={{
+                                    background:
+                                      'linear-gradient(to right, transparent, rgba(255,179,179,0.2), transparent)',
+                                  }}
+                                />
+                              )}
+                              <ul className='space-y-2'>
+                                {emailSummaryPoints.map((point, i) => (
+                                  <li
+                                    key={i}
+                                    className='flex items-start gap-2.5 text-[13px] text-foreground leading-relaxed'
+                                  >
+                                    <span
+                                      className='h-[5px] w-[5px] mt-[7px] rounded-full shrink-0'
+                                      style={{ background: '#FF9B9B' }}
+                                    />
+                                    <span>{point}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Error state */}
+                      {emailSummaryState === 'error' && (
+                        <p className='text-sm text-destructive'>{emailSummaryError}</p>
+                      )}
+                    </div>
+
+                    {/* Footer */}
+                    {emailSummaryState === 'done' && (
+                      <div
+                        className='px-4 py-1.5 shrink-0'
+                        style={{ borderTop: '1px solid rgba(255,179,179,0.12)' }}
+                      >
+                        <p className='text-[11px] text-muted-foreground/50'>
+                          AI-generated · may not be fully accurate
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             <div className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'>
               {emails && emails.length > 0 && (
                 <div className='mb-6'>

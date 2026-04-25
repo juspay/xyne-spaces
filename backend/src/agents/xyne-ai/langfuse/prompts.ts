@@ -59,6 +59,11 @@ export async function getPrompt(
   
   try {
     const prompt = await client.prompt.get(promptName, { label, cacheTtlSeconds });
+    // Check for empty prompt response
+    if (!prompt || prompt.prompt === null || prompt.prompt === undefined) {
+      logger.warn(`[Langfuse] Prompt '${promptName}' (label: ${label}) returned empty content`);
+      return null;
+    }
     promptCache.set(cacheKey, { prompt, cachedAt: Date.now(), ttl: cacheTtl });
     logger.info(`[Langfuse] Fetched prompt: ${promptName} (label: ${label})`);
     return prompt;
@@ -180,6 +185,7 @@ export const PROMPT_NAMES = {
   LIST_USER_CHANNELS: 'list_user_channels',
   GET_PAGE_CONTENT: 'get_page_content',
   GET_DOCUMENT_OUTLINE: 'get_document_outline',
+  SUMMARIZE_EMAIL_THREAD: 'summarize_email_thread',
 } as const;
 
 export type PromptName = typeof PROMPT_NAMES[keyof typeof PROMPT_NAMES];
