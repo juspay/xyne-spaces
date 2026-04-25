@@ -446,7 +446,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
         const isLast = idx === combinedMessages.length - 1;
         computed = {
           index: isLast ? firstItemIndex + idx : idx,
-          align: isLast ? 'end' : 'center',
+          align: isLast ? 'end' : 'start',
         };
       }
     }
@@ -484,7 +484,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
       const isLast = idx === combinedMessages.length - 1;
       virtuosoRef.current?.scrollIntoView({
         index: isLast ? firstItemIndex + idx : idx,
-        align: isLast ? 'end' : 'center',
+        align: isLast ? 'end' : 'start',
         behavior: 'smooth',
       });
     } else {
@@ -633,7 +633,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
     const timer = setTimeout(() => {
       virtuosoRef.current?.scrollIntoView({
         index: idx === combinedMessages.length - 1 ? firstItemIndex + idx : idx,
-        align: 'center',
+        align: 'start',
         behavior: 'auto',
       });
     }, 100);
