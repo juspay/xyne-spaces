@@ -31,7 +31,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const hasAutoInitiatedRef = useRef(false);
-  const hasPrePopulatedRef = useRef(false);
+  const hasUserModifiedRef = useRef(false);
 
   const { initiateCall } = useCallJoinOrInitiate();
   const { user: currentUser } = useAuth();
@@ -130,7 +130,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
 
     if (!isOpen) {
       hasAutoInitiatedRef.current = false;
-      hasPrePopulatedRef.current = false;
+      hasUserModifiedRef.current = false;
     }
   }, [
     isOpen,
@@ -140,23 +140,23 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     currentUser?.id,
   ]);
 
-  // Pre-populate selected participants with thread participants when conversationId is provided
+  // Pre-populate selected participants with thread participants when conversationId is provided.
+  // Uses hasUserModifiedRef instead of a one-shot flag so that Zero cache updates (e.g. a
+  // newly-mentioned user being added to participants) are reflected while the modal is open,
+  // as long as the user hasn't manually changed the selection themselves.
   useEffect(() => {
     if (
       isOpen &&
       conversationId &&
       conversation?.participants &&
-      !hasPrePopulatedRef.current &&
+      !hasUserModifiedRef.current &&
       channel?.scopeType !== ChannelScopeType.DM
     ) {
       const threadParticipantIds = conversation.participants
         .map(p => p.userId)
         .filter(userId => userId !== currentUser?.id);
       const preSelected = threadParticipantIds.map(userId => `user:${userId}`);
-      if (preSelected.length > 0) {
-        setSelectedParticipants(preSelected);
-        hasPrePopulatedRef.current = true;
-      }
+      setSelectedParticipants(preSelected);
     }
   }, [isOpen, conversationId, conversation?.participants, currentUser?.id, channel?.scopeType]);
 
@@ -177,7 +177,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const handleClose = () => {
     setSelectedParticipants([]);
     setSearchQuery('');
-    hasPrePopulatedRef.current = false;
+    hasUserModifiedRef.current = false;
     onClose();
   };
 
@@ -223,6 +223,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                     <button
                       type='button'
                       onClick={() => {
+                        hasUserModifiedRef.current = true;
                         const valueToRemove = `user:${user.id}`;
                         setSelectedParticipants(
                           selectedParticipants.filter(p => p !== valueToRemove),
@@ -247,7 +248,10 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               <EntityMultiSelector
                 options={inviteUserOptions.filter(opt => !selectedParticipants.includes(opt.value))}
                 selectedValues={selectedParticipants}
-                onMultiSelect={setSelectedParticipants}
+                onMultiSelect={values => {
+                  hasUserModifiedRef.current = true;
+                  setSelectedParticipants(values);
+                }}
                 placeholder='Select participants'
                 searchPlaceholder='Select participants'
                 onSearchChange={setSearchQuery}
