@@ -38,7 +38,7 @@ const CodeBlock = ({
   }
 
   // ── Filesystem interactive graph ──
-  if (language === 'filesystem') {
+  if (language === 'filesystem' || language === 'd2') {
     return (
       <FilesystemBlock
         jsonSource={codeString}
