@@ -1693,6 +1693,15 @@ export const emailReadTable = table('email_reads') // Prisma model: EmailRead
   })
   .primaryKey('id');
 
+export const emailChannelPreferenceTable = table('email_channel_preferences')
+  .columns({
+    channelId: string(),
+    ownerUserId: string().optional(),
+    assigneeUserGroupId: string().optional(),
+    boardId: string().optional(),
+  })
+  .primaryKey('channelId');
+
 export const formTable = table('forms')
   .columns({
     id: string(),
@@ -3427,6 +3436,24 @@ export const emailSignatureTableRelationships = relationships(emailSignatureTabl
   }),
 }));
 
+export const emailChannelPreferenceTableRelationships = relationships(emailChannelPreferenceTable, ({ one }) => ({
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
+  ownerUser: one({
+    sourceField: ['ownerUserId'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+  assigneeUserGroup: one({
+    sourceField: ['assigneeUserGroupId'],
+    destField: ['id'],
+    destSchema: userGroupTable,
+  }),
+}));
+
 export const formTableRelationships = relationships(formTable, ({ one, many }) => ({
   createdByUser: one({
     sourceField: ['createdBy'],
@@ -3752,6 +3779,7 @@ export const schema = createSchema({
     emailDraftTable,
     emailSignatureTable,
     emailReadTable,
+    emailChannelPreferenceTable,
     formTable,
     formContextMappingTable,
     formFieldsTable,
@@ -3852,6 +3880,7 @@ export const schema = createSchema({
     emailDraftTableRelationships,
     emailSignatureTableRelationships,
     emailReadTableRelationships,
+    emailChannelPreferenceTableRelationships,
     formTableRelationships,
     formContextMappingTableRelationships,
     formFieldsTableRelationships,
@@ -3951,6 +3980,7 @@ export type Repo = Row<typeof schema.tables.repos>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
 export type EmailRead = Row<typeof schema.tables.email_reads>;
+export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
 export type FormFields = Row<typeof schema.tables.form_fields>;

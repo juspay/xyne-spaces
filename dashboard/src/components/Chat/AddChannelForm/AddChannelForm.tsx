@@ -19,6 +19,7 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { cn } from '../../../utils/classNames';
 import { useOAuthProviders } from '../../../hooks/useOAuthProviders';
+import { useUserGroups } from '../../../hooks/useUserGroup';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
@@ -54,6 +55,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   // Fetch all projects for selection
   const [projects] = useCachedQuery(queries.getAllProjects());
 
+  // Fetch all user groups for assignee selection
+  const userGroups = useUserGroups();
+
   // Memoized project options for dropdown
   const projectOptions = useMemo(
     () =>
@@ -62,6 +66,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         value: project.id,
       })) || [],
     [projects],
+  );
+
+  // Memoized user group options for dropdown
+  const userGroupOptions = useMemo(
+    () =>
+      userGroups?.map(group => ({
+        label: group.name,
+        value: group.id,
+      })) || [],
+    [userGroups],
   );
 
   const orgName = 'default';
@@ -82,7 +96,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       visibility: 'public' as 'public' | 'private',
       topicTags: [] as string[],
       projectId: '',
-    } as CreateChannelFormData,
+      assigneeUserGroupId: '',
+    } as CreateChannelFormData & { assigneeUserGroupId?: string },
     onSubmit: ({ value }) => {
       // Prevent submission if channel name is duplicate
       if (duplicateCheck?.isDuplicate) {
@@ -107,7 +122,12 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         // When requireConnector is true, pass connector as channel type
         const channelType = requireConnector && selectedConnector ? 'EMAIL' : undefined;
         if (channelType) {
-          onSubmit?.({ ...value, connector: selectedConnector, channelType });
+          onSubmit?.({
+            ...value,
+            connector: selectedConnector,
+            channelType,
+            assigneeUserGroupId: value.assigneeUserGroupId,
+          });
         } else {
           onSubmit?.({ ...value, connector: selectedConnector });
         }
@@ -353,6 +373,52 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           </div>
         )}
       </form.Field>
+
+      {/* Assignee User Group Selection (for email channels only) */}
+      {requireConnector && (
+        <form.Field name='assigneeUserGroupId'>
+          {field => (
+            <div className='space-y-1.5'>
+              <label
+                htmlFor='assignee-group-select'
+                className='text-sm font-medium text-foreground'
+              >
+                Assignee User Group (optional)
+              </label>
+              <Select
+                value={field.state.value || ''}
+                onValueChange={selected => field.handleChange(selected || undefined)}
+                disabled={userGroupOptions.length === 0}
+              >
+                <SelectTrigger id='assignee-group-select' className='w-full'>
+                  <SelectValue
+                    placeholder={
+                      userGroupOptions.length > 0
+                        ? 'Select a user group'
+                        : 'No user groups available'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {userGroupOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {userGroupOptions.length === 0 && (
+                <p className='text-sm text-muted-foreground mt-1'>
+                  No user groups found. You can create one later.
+                </p>
+              )}
+              <p className='text-sm text-muted-foreground mt-1'>
+                This user group will be assigned to tickets created from emails in this channel.
+              </p>
+            </div>
+          )}
+        </form.Field>
+      )}
 
       {/* Description */}
       <form.Field name='description'>

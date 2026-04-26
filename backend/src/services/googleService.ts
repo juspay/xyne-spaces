@@ -17,6 +17,7 @@ import {
 } from '../integrations/adapters/google/types';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
+import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -417,9 +418,8 @@ export class GoogleService {
       await repo.update(existing.id, {
         credentials: encryptedCredentials,
         channelId,
-        boardId: boardId || (existing.boardId ?? undefined),
+        boardId: boardId || (existing.boardId ?? undefined), // @deprecated - kept for backward compatibility
         displayName: emailAddress,
-        ownerUserId: channel?.createdBy ?? undefined,
       });
     } else {
       await repo.create({
@@ -427,11 +427,18 @@ export class GoogleService {
         sourceType: ExternalSourcePlatform.GOOGLE,
         credentials: encryptedCredentials,
         channelId,
-        boardId: boardId ?? undefined,
+        boardId: boardId ?? undefined, // @deprecated - kept for backward compatibility
         displayName: emailAddress,
-        ownerUserId: channel?.createdBy ?? undefined,
       });
     }
+
+    // Create/update EmailChannelPreference for owner tracking and boardId
+    const preferenceRepo = new EmailChannelPreferenceRepository();
+    await preferenceRepo.upsert({
+      channelId,
+      ownerUserId: channel?.createdBy,
+      boardId: boardId ?? undefined, // Save boardId to EmailChannelPreference (new location)
+    });
     // Cursor intentionally left null — the caller triggers an initial core.reload()
     // which takes the no-cursor fallback (listRecentMessages) and writes the cursor
     // via nextCursor, so the first N messages are auto-imported.

@@ -21,6 +21,7 @@ export interface PendingChannelData {
   projectId: string;
   userId: string;
   workspaceId: string;
+  assigneeUserGroupId?: string;
 }
 
 interface MicrosoftCredentials {
@@ -247,15 +248,26 @@ export class MicrosoftDeskService {
           sourceType: 'microsoft',
           displayName: `Microsoft (${credentials.email})`,
           channelId: channel.id,
-          boardId: board?.id,
+          boardId: board?.id, // @deprecated - kept for backward compatibility
           credentials: encryptedCredentials,
           isActive: true,
-          // Author for auto-created tickets & postprocess actions — same user who's
-          // creating the channel (matches the other `createdBy` rows above).
-          ownerUserId: channelData.userId,
           // Cursor intentionally left null — the caller triggers an initial refetch
           // which takes the no-cursor fallback path and writes the cursor via nextCursor,
           // so the latest messages are auto-imported on first connect.
+        },
+      });
+
+      // Create EmailChannelPreference for owner tracking and boardId
+      // Author for auto-created tickets & postprocess actions — same user who's
+      // creating the channel (matches the other `createdBy` rows above).
+      // Note: We create it directly in the transaction, bypassing repository validation
+      // since we already know this is an EMAIL channel
+      await tx.emailChannelPreference.create({
+        data: {
+          channelId: channel.id,
+          ownerUserId: channelData.userId,
+          ...(channelData.assigneeUserGroupId && { assigneeUserGroupId: channelData.assigneeUserGroupId }),
+          ...(board?.id && { boardId: board.id }), // Save boardId to EmailChannelPreference (new location)
         },
       });
 

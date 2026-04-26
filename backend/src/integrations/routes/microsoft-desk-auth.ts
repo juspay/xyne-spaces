@@ -45,7 +45,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
       return;
     }
 
-    const { name, description, visibility, projectId } = req.query;
+    const { name, description, visibility, projectId, assigneeUserGroupId } = req.query;
     const userId = req.user!.id;
     const workspaceId = req.user!.workspaceId;
 
@@ -63,6 +63,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
       projectId: projectId as string,
       userId,
       workspaceId,
+      assigneeUserGroupId: assigneeUserGroupId as string | undefined,
     });
 
     const redirectUri = `${getPublicUrl(req)}/api/integrations/microsoft/callback`;

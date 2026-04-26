@@ -10,6 +10,7 @@ import { ExternalMessageRepository } from '../../database/repositories/externalM
 import { ConversationRepository } from '../../database/repositories/conversationRepository';
 import { MessageRepository } from '../../database/repositories/messageRepository';
 import { ChannelRepository } from '../../database/repositories/channelRepository';
+import { EmailChannelPreferenceRepository } from '../../database/repositories/emailChannelPreferenceRepository';
 import { ExternalSource, ExternalMessage, ChannelType, ExternalEntityType, EmailType } from '@prisma/client';
 import { logger } from '../../utils/logger';
 import { conversationService } from '../../services/conversationService';
@@ -28,7 +29,8 @@ export class ExternalSourceCore {
   private conversationRepo: ConversationRepository;
   private messageRepo: MessageRepository;
   private channelRepo: ChannelRepository;
-  private emailRepo: EmailRepository
+  private emailRepo: EmailRepository;
+  private emailChannelPreferenceRepo: EmailChannelPreferenceRepository;
 
   constructor() {
     this.externalSourceRepo = new ExternalSourceRepository();
@@ -37,6 +39,7 @@ export class ExternalSourceCore {
     this.messageRepo = new MessageRepository();
     this.channelRepo = new ChannelRepository();
     this.emailRepo = new EmailRepository();
+    this.emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
   }
 
 
@@ -409,10 +412,20 @@ export class ExternalSourceCore {
           'Missing required email fields in normalizedData. Required: subject, body, to, from'
         );
       }
+
+      // Fetch ownerUserId from EmailChannelPreference instead of deprecated ExternalSource.ownerUserId
+      let userId = source.displayName; // Fallback to displayName
+      if (source.channelId) {
+        const preference = await this.emailChannelPreferenceRepo.findByChannelId(source.channelId);
+        if (preference?.ownerUserId) {
+          userId = preference.ownerUserId;
+        }
+      }
+
       const createResult = await emailService.createConversationWithEmail({
         channelId: source.channelId,
-        boardId: source.boardId || undefined, // Pass boardId from ExternalSource for ticket creation
-        userId: source.ownerUserId || source.displayName,
+        boardId: source.boardId || undefined, // @deprecated - boardId now fetched from EmailChannelPreference table. Kept for backward compatibility.
+        userId,
         emailSubject: normalizedData.emailData.subject || "",
         emailBody: normalizedData.content,
         emailTo: normalizedData.emailData.to,

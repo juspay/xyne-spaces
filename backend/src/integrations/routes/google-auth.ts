@@ -24,6 +24,7 @@ type PendingChannelData = {
   projectId: string;
   userId: string;
   workspaceId: string;
+  assigneeUserGroupId?: string;
 };
 
 // Redis-backed CSRF state store. Replaces the previous in-memory Map so OAuth
@@ -101,7 +102,7 @@ function htmlPage(title: string, body: string, status: 'success' | 'error' = 'su
 // Initiates Google OAuth flow for email channel creation (mirrors Microsoft /connect)
 router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, description, visibility, projectId } = req.query;
+    const { name, description, visibility, projectId, assigneeUserGroupId } = req.query;
     const userId = req.user!.id;
     const workspaceId = req.user!.workspaceId;
 
@@ -119,6 +120,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
         projectId: projectId as string,
         userId,
         workspaceId,
+        assigneeUserGroupId: assigneeUserGroupId as string | undefined,
       },
       timestamp: Date.now(),
     });
@@ -274,6 +276,17 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             channelId: ch.id,
             lastActivityAt: now,
             participantCount: 1,
+          },
+        });
+
+        // Create EmailChannelPreference for owner and assignee tracking
+        // Note: We create it directly in the transaction, bypassing repository validation
+        // since we already know this is an EMAIL channel
+        await tx.emailChannelPreference.create({
+          data: {
+            channelId: ch.id,
+            ownerUserId: cd.userId,
+            ...(cd.assigneeUserGroupId && { assigneeUserGroupId: cd.assigneeUserGroupId }),
           },
         });
 

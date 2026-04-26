@@ -17,6 +17,7 @@ import {
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { BoardRepository } from '@/database/repositories/boardRepository';
+import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { DatabaseClient } from '@/database/client';
 import {
   MessageType,
@@ -65,7 +66,7 @@ interface UserInfo {
 
 export interface CreateConversationWithEmailParams {
   channelId: string;
-  boardId?: string; // Target board for ticket creation (from ExternalSource)
+  boardId?: string; // @deprecated - Target board for ticket creation. Now fetched from EmailChannelPreference table. Kept for backward compatibility.
   userId: string;
   emailSubject: string;
   emailBody: string;
@@ -121,6 +122,7 @@ export class EmailService {
   private channelRepository: ChannelRepository;
   private userRepository: UserRepository;
   private boardRepository: BoardRepository;
+  private emailChannelPreferenceRepository: EmailChannelPreferenceRepository;
   private prisma: PrismaClient;
 
   constructor() {
@@ -131,6 +133,7 @@ export class EmailService {
     this.channelRepository = new ChannelRepository();
     this.userRepository = new UserRepository();
     this.boardRepository = new BoardRepository();
+    this.emailChannelPreferenceRepository = new EmailChannelPreferenceRepository();
     this.prisma = DatabaseClient.getInstance();
   }
 
@@ -375,27 +378,33 @@ export class EmailService {
 
     const projectId = channel.projectId;
 
-    // boardId MUST be configured in ExternalSource - no fallback allowed
-    if (!passedBoardId) {
-      logger.error(`[EmailService] ExternalSource missing boardId configuration for channel: ${channelId}`);
-      throw new Error(`ExternalSource must have a boardId configured. Channel: ${channelId}. Please configure boardId in external_sources table.`);
+    // Fetch boardId from EmailChannelPreference table
+    const emailChannelPreference = await this.emailChannelPreferenceRepository.findByChannelId(channelId);
+
+    // boardId MUST be configured in EmailChannelPreference - no fallback allowed
+    // If passed boardId exists (deprecated), prefer the one from EmailChannelPreference
+    const configuredBoardId = emailChannelPreference?.boardId || passedBoardId;
+
+    if (!configuredBoardId) {
+      logger.error(`[EmailService] EmailChannelPreference missing boardId configuration for channel: ${channelId}`);
+      throw new Error(`EmailChannelPreference must have a boardId configured. Channel: ${channelId}. Please configure boardId in email_channel_preferences table.`);
     }
 
-    // Validate that the passed boardId exists
-    const configuredBoard = await this.boardRepository.findById(passedBoardId);
+    // Validate that the configured boardId exists
+    const configuredBoard = await this.boardRepository.findById(configuredBoardId);
     if (!configuredBoard) {
-      logger.error(`[EmailService] Configured boardId ${passedBoardId} not found in database`);
-      throw new Error(`Configured boardId ${passedBoardId} not found in database. Please verify external_sources.boardId points to a valid board.`);
+      logger.error(`[EmailService] Configured boardId ${configuredBoardId} not found in database`);
+      throw new Error(`Configured boardId ${configuredBoardId} not found in database. Please verify email_channel_preferences.boardId points to a valid board.`);
     }
 
     // Validate that the board belongs to the same project as the channel
     if (configuredBoard.projectId !== projectId) {
-      logger.error(`[EmailService] Board project mismatch: boardId ${passedBoardId} belongs to project ${configuredBoard.projectId}, but channel belongs to project ${projectId}`);
-      throw new Error(`Configured boardId ${passedBoardId} belongs to different project (${configuredBoard.projectId} vs ${projectId}). External source, channel, and board must all be in the same project.`);
+      logger.error(`[EmailService] Board project mismatch: boardId ${configuredBoardId} belongs to project ${configuredBoard.projectId}, but channel belongs to project ${projectId}`);
+      throw new Error(`Configured boardId ${configuredBoardId} belongs to different project (${configuredBoard.projectId} vs ${projectId}). Email channel and board must be in the same project.`);
     }
 
-    const boardId = passedBoardId;
-    logger.info(`[EmailService] Using configured boardId ${boardId} from ExternalSource`);
+    const boardId = configuredBoardId;
+    logger.info(`[EmailService] Using configured boardId ${boardId} from EmailChannelPreference table`);
 
     // Validate that board has stages before creating conversation
     const stages = await this.prisma.stage.findMany({
@@ -412,11 +421,17 @@ export class EmailService {
     }
 
     const firstStage = stages[0];
-    const groupId = "cmk4j0ffq003n5ky5ctwjb561"; // Merchant Support Group Id
-    const userGroup = await this.prisma.userGroup.findUnique({
-      where: { id: groupId },
-      select: { id: true },
-    });
+
+    // Get assignee user group from EmailChannelPreference (already fetched above)
+    const groupId = emailChannelPreference?.assigneeUserGroupId;
+
+    let userGroup = null;
+    if (groupId) {
+      userGroup = await this.prisma.userGroup.findUnique({
+        where: { id: groupId },
+        select: { id: true },
+      });
+    }
 
     // Create conversation + email + ticket in a single transaction.
     // Email has @@unique on externalMessageId — if a duplicate notification arrives
