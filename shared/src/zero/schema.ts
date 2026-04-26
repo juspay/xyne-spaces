@@ -3358,7 +3358,7 @@ export const linkAccessTableRelationships = relationships(linkAccessTable, ({ on
   }),
 }));
 
-export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
+export const emailTableRelationships = relationships(emailTable, ({ one, many }) => ({
   conversation: one({
     sourceField: ['conversationId'],
     destField: ['conversationId'],
@@ -3368,6 +3368,11 @@ export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
     sourceField: ['channelId'],
     destField: ['id'],
     destSchema: channelTable,
+  }),
+  attachments: many({
+    sourceField: ['id'],
+    destField: ['entityId'],
+    destSchema: messageAttachmentTable,
   }),
 }));
 

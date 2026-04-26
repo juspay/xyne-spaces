@@ -234,7 +234,7 @@ export async function ingestConversationSlack(
           mimeType: file.mimetype,
           size: file.size,
         }));
-        return await ExternalAttachmentService.downloadForSource(
+        return await new ExternalAttachmentService().downloadAttachmentsForSource(
           externalSourceName,
           externalAttachments,
           {

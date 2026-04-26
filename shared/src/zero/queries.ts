@@ -553,7 +553,7 @@ export const queries = defineQueries({
         .related('project')
         .related('tags')
         .related('entity')
-        .related('emails')
+        .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q => q.where('userId', ctx.userID))
         .related('conversation')
         .one();
@@ -580,7 +580,7 @@ export const queries = defineQueries({
         .related('project')
         .related('tags')
         .related('entity')
-        .related('emails')
+        .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q => q.where('userId', ctx.userID))
         .related('conversation')
         .one();
@@ -660,7 +660,7 @@ export const queries = defineQueries({
         .related('project')
         .related('tags')
         .related('entity')
-        .related('emails')
+        .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q => q.where('userId', ctx.userID))
         .related('conversation');
     },

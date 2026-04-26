@@ -12,7 +12,15 @@ import {
 } from '@/services/externalCallTokenService';
 import type { CallLobbyRequest } from '@/types/express';
 
-const ACTIVE_STATUSES: CallStatus[] = [CallStatus.ACTIVE, CallStatus.IN_PROGRESS];
+// Statuses a call may be in when external users try to enter the lobby.
+// SCHEDULED is included so externals who click the invitation link before the
+// host starts the call land on the pre-join / waiting view instead of being
+// told "call ended".
+const JOINABLE_STATUSES: CallStatus[] = [
+  CallStatus.SCHEDULED,
+  CallStatus.ACTIVE,
+  CallStatus.IN_PROGRESS,
+];
 
 const router = Router();
 
@@ -36,7 +44,7 @@ async function resolveCallSession(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    if (!ACTIVE_STATUSES.includes(call.status)) {
+    if (!JOINABLE_STATUSES.includes(call.status)) {
       clearExtCallCookie(res, externalId);
       res.json({ status: 'ended' });
       return;

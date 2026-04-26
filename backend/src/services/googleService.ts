@@ -63,6 +63,8 @@ interface ReplyParams {
   bcc?: string[];
   threadId: string;
   latestExternalMessageId: string;
+  /** Optional file attachments (e.g. ICS calendar invite or user-uploaded files). */
+  attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
 }
 
 interface ReplyResult {
@@ -79,6 +81,7 @@ interface MimeOptions {
   body: string;
   inReplyTo?: string;
   references?: string;
+  attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
 }
 
 // ─── Service ────────────────────────────────────────────────────────────────
@@ -278,19 +281,64 @@ export class GoogleService {
     return { textBody, htmlBody };
   }
 
+  private static getHeader(part: any, name: string): string | undefined {
+    const h = (part.headers as Array<{ name: string; value: string }> | undefined)?.find(
+      x => x.name?.toLowerCase() === name.toLowerCase(),
+    );
+    return h?.value;
+  }
+
+  /**
+   * Walk the Gmail payload tree once and collect every attachment-like part.
+   * Yields a unified shape — `attachmentId` is set when bytes need a follow-up
+   * Gmail API fetch; `data` is set when bytes are already inline on the part
+   * (small `cid:`-referenced images). Exactly one of the two is set.
+   */
   private static extractAttachments(payload: any): GmailAttachment[] {
     const attachments: GmailAttachment[] = [];
 
     const walk = (part: any): void => {
-      if (part.filename && part.body?.attachmentId) {
-        attachments.push({
-          attachmentId: part.body.attachmentId,
-          filename: part.filename,
-          mimeType: part.mimeType || 'application/octet-stream',
-          size: part.body.size || 0,
-        });
+      const body = part?.body;
+      if (body) {
+        const rawCid = GoogleService.getHeader(part, 'Content-ID');
+        // Strip optional surrounding angle brackets per RFC 2392. Tolerates
+        // missing brackets, repeated brackets, and stray whitespace.
+        const contentId = rawCid ? rawCid.trim().replace(/^<+|>+$/g, '').trim() : undefined;
+        const filename =
+          part.filename && part.filename.length > 0
+            ? part.filename
+            : contentId
+              ? `inline-${contentId}`
+              : `attachment-${part.partId ?? Math.random().toString(36).slice(2, 8)}`;
+        const mimeType = part.mimeType || 'application/octet-stream';
+
+        if (body.attachmentId) {
+          attachments.push({
+            attachmentId: body.attachmentId,
+            filename,
+            mimeType,
+            size: body.size || 0,
+            ...(contentId && { contentId }),
+          });
+        } else if (body.data && contentId && mimeType.toLowerCase().startsWith('image/')) {
+          // Inline `cid:` image — decode base64url right here so the caller
+          // gets bytes uniformly (no extra Gmail API call needed for these).
+          try {
+            const base64 = String(body.data).replace(/-/g, '+').replace(/_/g, '/');
+            const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+            attachments.push({
+              data: Buffer.from(padded, 'base64'),
+              filename,
+              mimeType,
+              size: body.size || 0,
+              contentId,
+            });
+          } catch {
+            /* skip malformed part */
+          }
+        }
       }
-      part.parts?.forEach(walk);
+      part?.parts?.forEach(walk);
     };
 
     payload?.parts?.forEach(walk);
@@ -426,7 +474,7 @@ export class GoogleService {
       async replyToConversation(params: ReplyParams): Promise<ReplyResult> {
         const { inReplyTo, references } = await fetchThreadingHeaders(gmail, params.latestExternalMessageId);
 
-        const mime = buildMimeMessage({
+        const mime = await buildMimeMessage({
           from: credentials.email,
           to: params.to,
           cc: params.cc,
@@ -435,6 +483,7 @@ export class GoogleService {
           body: params.content,
           inReplyTo,
           references,
+          ...(params.attachments && { attachments: params.attachments }),
         });
 
         const response = await gmail.users.messages.send({
@@ -500,12 +549,9 @@ function parseEmailList(value: string | undefined): string[] {
     .filter(e => e.includes('@'));
 }
 
-function base64UrlEncode(value: string): string {
-  return Buffer.from(value, 'utf8')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+function base64UrlEncode(value: string | Buffer): string {
+  const buf = typeof value === 'string' ? Buffer.from(value, 'utf8') : value;
+  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function decodeBase64Url(data: string): string {
@@ -523,15 +569,25 @@ function ensureReplyPrefix(subject: string): string {
   return subject.toLowerCase().startsWith('re:') ? subject : `Re: ${subject}`;
 }
 
-function buildMimeMessage(opts: MimeOptions): string {
-  const lines: string[] = [`From: ${opts.from}`, `To: ${opts.to.join(', ')}`];
-  if (opts.cc?.length) lines.push(`Cc: ${opts.cc.join(', ')}`);
-  if (opts.bcc?.length) lines.push(`Bcc: ${opts.bcc.join(', ')}`);
-  lines.push(`Subject: ${opts.subject}`);
-  if (opts.inReplyTo) lines.push(`In-Reply-To: ${opts.inReplyTo}`);
-  if (opts.references) lines.push(`References: ${opts.references}`);
-  lines.push('MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8', '', opts.body);
-  return lines.join('\r\n');
+async function buildMimeMessage(opts: MimeOptions): Promise<Buffer> {
+  const MailComposer = (await import('nodemailer/lib/mail-composer')).default;
+  return new MailComposer({
+    from: opts.from,
+    to: opts.to,
+    ...(opts.cc?.length && { cc: opts.cc }),
+    ...(opts.bcc?.length && { bcc: opts.bcc }),
+    subject: opts.subject,
+    html: opts.body,
+    ...(opts.inReplyTo && { inReplyTo: opts.inReplyTo }),
+    ...(opts.references && { references: opts.references }),
+    ...(opts.attachments?.length && {
+      attachments: opts.attachments.map(a => ({
+        filename: a.name,
+        content: a.content,
+        contentType: a.contentType,
+      })),
+    }),
+  } as never).compile().build() as unknown as Promise<Buffer>;
 }
 
 async function fetchThreadingHeaders(

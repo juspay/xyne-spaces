@@ -12,6 +12,7 @@ import { redisService } from './redisService';
 import { db } from '../database/client';
 import { config } from '../config/env';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
+import { AttachmentUploadError } from '../integrations/core/baseMailReplySender';
 
 export interface PendingChannelData {
   name: string;
@@ -37,6 +38,16 @@ interface GraphSubscriptionResponse {
 const PENDING_CHANNEL_TTL = 600; // 10 minutes
 const PENDING_CHANNEL_PREFIX = 'email_channel:';
 const GRAPH_SUBSCRIPTION_MAX_MINUTES = 4230; // ~3 days
+
+function extractGraphErrorMessage(rawBody: string): string {
+  try {
+    const parsed = JSON.parse(rawBody) as { error?: { message?: string } };
+    if (parsed?.error?.message) return parsed.error.message;
+  } catch {
+    /* not JSON — fall through */
+  }
+  return rawBody;
+}
 
 export class MicrosoftDeskService {
   private oauthClient: AuthorizationCode | undefined;
@@ -336,9 +347,54 @@ export class MicrosoftDeskService {
     return credentials.accessToken;
   }
 
-  static createEmailSender(encryptedCredentials: string, sourceId: string) {
-    // const externalSourceRepo = new ExternalSourceRepository();
 
+  private static async deleteDraft(accessToken: string, draftId: string): Promise<void> {
+    try {
+      const res = await fetch(`${config.microsoftGraph.baseUrl}/me/messages/${draftId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok && res.status !== 404) {
+        logger.warn(`Microsoft draft cleanup non-OK (${res.status}) for draft ${draftId}`);
+      }
+    } catch (err) {
+      logger.warn(`Microsoft draft cleanup threw for draft ${draftId}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  private static async attachFileToDraft(
+    accessToken: string,
+    draftId: string,
+    att: { name: string; contentType: string; content: Buffer | string },
+  ): Promise<void> {
+    const contentBytes = (
+      Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'utf8')
+    ).toString('base64');
+
+    const res = await fetch(
+      `${config.microsoftGraph.baseUrl}/me/messages/${draftId}/attachments`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: att.name,
+          contentType: att.contentType,
+          contentBytes,
+        }),
+      },
+    );
+    if (!res.ok) {
+      const errBody = await res.text();
+      logger.error(`Microsoft attachment add failed (${res.status}) for ${att.name}: ${errBody}`);
+      throw new Error(`${res.status}: ${extractGraphErrorMessage(errBody)}`);
+    }
+  }
+
+  static createEmailSender(encryptedCredentials: string, sourceId: string) {
     const formatRecipients = (emails: string[]) =>
       emails.map(email => ({ emailAddress: { address: email } }));
 
@@ -358,8 +414,10 @@ export class MicrosoftDeskService {
         bcc?: string[];
         latestExternalMessageId: string;
         threadId: string;
+        /** Optional inline attachments (e.g. an ICS calendar invite or user-uploaded files). */
+        attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
       }): Promise<{ threadId: string; messageId: string }> {
-        const { content, subject, to, cc, bcc, latestExternalMessageId, threadId } = params;
+        const { content, subject, to, cc, bcc, latestExternalMessageId, threadId, attachments } = params;
         const accessToken = await getAccessToken();
 
         let graphMessageId: string | null = null;
@@ -430,6 +488,28 @@ export class MicrosoftDeskService {
             internetMessageId: string;
             conversationId: string;
           };
+
+          if (attachments?.length) {
+            const settled = await Promise.allSettled(
+              attachments.map(att =>
+                MicrosoftDeskService.attachFileToDraft(accessToken, draft.id, att),
+              ),
+            );
+            const failedAttachments: Array<{ name: string; reason: string }> = [];
+            settled.forEach((r, i) => {
+              if (r.status === 'rejected') {
+                const att = attachments[i];
+                failedAttachments.push({
+                  name: att?.name ?? `attachment-${i}`,
+                  reason: r.reason instanceof Error ? r.reason.message : String(r.reason),
+                });
+              }
+            });
+            if (failedAttachments.length > 0) {
+              await MicrosoftDeskService.deleteDraft(accessToken, draft.id);
+              throw new AttachmentUploadError(failedAttachments);
+            }
+          }
 
           // 2. Send the draft.
           const sendResponse = await fetch(

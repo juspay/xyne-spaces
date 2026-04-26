@@ -5,6 +5,7 @@
 
 import { ExternalSource } from '@prisma/client';
 import { RefetchResult } from './baseRefetch';
+import type { DownloadedAttachment } from '@/services/externalAttachmentService';
 export type { RefetchResult };
 
 /**
@@ -56,7 +57,17 @@ export interface NormalizedData {
     fileUrl: string;
     mimeType?: string;
     size?: number;
+    /** MIME Content-ID (no angle brackets) for inline images from the body. */
+    contentId?: string;
+    /** Extra metadata to forward onto the stored MessageAttachment row. */
+    metadata?: Record<string, unknown>;
   }>;
+
+  /**
+   * Attachments already uploaded to GCS by the flow/preprocessor (Gmail,
+   * Microsoft Graph). When set, core ingestion uses these directly.
+   */
+  preDownloadedAttachments?: DownloadedAttachment[];
 
   // Email-specific fields (optional - for email-based integrations like Zoho)
   emailData?: {
@@ -185,4 +196,14 @@ export interface ExternalSourceAdapter {
    * Present ⇒ adapter supports the /refetch endpoint. Absent ⇒ 400 "not supported".
    */
   refetch?(source: ExternalSource): Promise<RefetchResult>;
+
+  /**
+   * Optional: outbound mail reply sender (e.g. Microsoft Graph, Gmail).
+   * Present ⇒ this provider can send mail replies through the unified
+   * email-service flow. Adapter encapsulates provider quirks (which
+   * thread/message id to anchor on).
+   */
+  sendMailReply?(ctx: MailReplyContext): Promise<MailReplyResult>;
 }
+
+import type { MailReplyContext, MailReplyResult } from './baseMailReplySender';

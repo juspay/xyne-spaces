@@ -124,15 +124,22 @@ export class ExternalSourceCore {
       }
     }
 
-    // 2. Download attachments if present
+    // 2. Resolve attachments. Gmail/Graph flows pre-stage bytes via the
+    //    unified attachment service, so `preDownloadedAttachments` is set and
+    //    we use it directly. Slack/Zoho fall through to the URL-fetch path.
     let downloadedAttachments: DownloadedAttachment[] = [];
-    if (normalizedData.attachments && normalizedData.attachments.length > 0) {
+    if (normalizedData.preDownloadedAttachments && normalizedData.preDownloadedAttachments.length > 0) {
+      downloadedAttachments = normalizedData.preDownloadedAttachments;
+      logger.info(
+        `Using ${downloadedAttachments.length} pre-downloaded attachments for ${sourceName}`,
+      );
+    } else if (normalizedData.attachments && normalizedData.attachments.length > 0) {
       try {
         logger.info(
           `Downloading ${normalizedData.attachments.length} attachments for ${sourceName}`
         );
 
-        downloadedAttachments = await ExternalAttachmentService.downloadForSource(
+        downloadedAttachments = await new ExternalAttachmentService().downloadAttachmentsForSource(
           sourceName,
           normalizedData.attachments,
           {

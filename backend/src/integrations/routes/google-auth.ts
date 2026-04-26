@@ -11,6 +11,7 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ExternalSourcePlatform } from '../core/types';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
+import { redisService } from '@/services/redisService';
 
 const TAG = '[GoogleAuth]';
 const router = express.Router();
@@ -25,16 +26,35 @@ type PendingChannelData = {
   workspaceId: string;
 };
 
-// In-memory CSRF state store (use Redis in production)
-const oauthStates = new Map<string, { channelId?: string; channelData?: PendingChannelData; timestamp: number }>();
+// Redis-backed CSRF state store. Replaces the previous in-memory Map so OAuth
+// state survives across server restarts and multi-instance deployments. TTL is
+// enforced by Redis itself — no manual eviction needed.
+type OAuthStateValue = { channelId?: string; channelData?: PendingChannelData; timestamp: number };
+const OAUTH_STATE_KEY_PREFIX = 'google_oauth_state:';
+const OAUTH_STATE_TTL_SECONDS = 60 * 60;
 
-// Evict stale states every hour
-setInterval(() => {
-  const cutoff = Date.now() - 60 * 60 * 1000;
-  for (const [key, val] of oauthStates) {
-    if (val.timestamp < cutoff) oauthStates.delete(key);
+async function setOAuthState(state: string, value: OAuthStateValue): Promise<void> {
+  await redisService.set(
+    `${OAUTH_STATE_KEY_PREFIX}${state}`,
+    JSON.stringify(value),
+    OAUTH_STATE_TTL_SECONDS,
+  );
+}
+
+async function getOAuthState(state: string): Promise<OAuthStateValue | null> {
+  const raw = await redisService.get(`${OAUTH_STATE_KEY_PREFIX}${state}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as OAuthStateValue;
+  } catch (err) {
+    logger.error(`${TAG} failed to parse oauth state from redis`, err);
+    return null;
   }
-}, 60 * 60 * 1000);
+}
+
+async function deleteOAuthState(state: string): Promise<void> {
+  await redisService.del(`${OAUTH_STATE_KEY_PREFIX}${state}`);
+}
 
 function getFrontendUrl(req: Request): string {
   const originalHost = req.headers['x-original-host'];
@@ -91,7 +111,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
     }
 
     const state = Math.random().toString(36).substring(7);
-    oauthStates.set(state, {
+    await setOAuthState(state, {
       channelData: {
         name: name as string,
         description: description as string | undefined,
@@ -131,7 +151,7 @@ router.post('/auth/start', async (req: Request, res: Response): Promise<void> =>
     }
 
     const state = Math.random().toString(36).substring(7);
-    oauthStates.set(state, { channelId, timestamp: Date.now() });
+    await setOAuthState(state, { channelId, timestamp: Date.now() });
 
     const authUrl = createOAuth2Client().generateAuthUrl({
       access_type: 'offline',
@@ -166,10 +186,10 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
 
     if (!code || !state) { res.status(400).json({ error: 'Missing code or state' }); return; }
 
-    const stateData = oauthStates.get(state as string);
+    const stateData = await getOAuthState(state as string);
     if (!stateData) { res.status(400).json({ error: 'Invalid or expired state' }); return; }
 
-    oauthStates.delete(state as string);
+    await deleteOAuthState(state as string);
 
     // Exchange code for tokens
     logger.info(`${TAG} Exchanging code for tokens`);

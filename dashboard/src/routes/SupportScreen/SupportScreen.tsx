@@ -104,6 +104,9 @@ import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThr
 import { useEmailDraft, useEmailDraftOperations } from '../../hooks/useEmailDraft';
 import { AttachmentPreview } from '../../components/ui/files/AttachmentPreview';
 import { MediaViewer } from '../../components/ui/files';
+import { formatFileSize } from '../../components/ui/utils/files';
+import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
+import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
@@ -111,8 +114,9 @@ import { useVisibleChannel } from '../../hooks/useChannels';
 import { API_BASE_URL } from '../../config';
 import Dialog from '../../components/ui/Dialog';
 import { useMutation } from '@tanstack/react-query';
-import XyneAISidebar from '../../components/Chat/XyneAISidebar/XyneAISidebar';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
+import { useSelector } from '@xstate/react';
+import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { DraftCard } from '../../components/xyne-desk/DraftCard/DraftCard';
 import { RefineInput } from '../../components/xyne-desk/RefineInput/RefineInput';
 import { useDeskAIDraft } from '../../hooks/useDeskAIDraft';
@@ -154,14 +158,140 @@ const ChannelInfoModal = ({
 
 const ALL_CHANNELS_ID = 'all';
 
-// Type definition for emails from the query
-type EmailAttachment = {
-  url: string;
-  originalFilename: string;
+type Email = NonNullable<
+  NonNullable<QueryResultType<typeof queries.supportTicketRowV2>>['emails']
+>[number];
+
+/**
+ * Image thumbnail: authenticated blob fetch via `createPreviewUrl` (same path
+ * MessageAttachment uses for chat images), rendered as an object URL.
+ */
+const EmailImageThumbnail = ({
+  attachmentId,
+  filename,
+}: {
+  attachmentId: string;
+  filename: string;
+}): ReactElement => {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let revoked = false;
+    let objectUrl: string | null = null;
+    void (async (): Promise<void> => {
+      try {
+        const blob = await createPreviewUrl(attachmentId);
+        if (revoked) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      } catch {
+        /* fall through — loading placeholder stays */
+      }
+    })();
+    return (): void => {
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachmentId]);
+
+  if (!url) {
+    return (
+      <div className='h-28 w-28 flex items-center justify-center animate-pulse bg-muted'>
+        <Paperclip size={20} className='text-muted-foreground' />
+      </div>
+    );
+  }
+  return <img src={url} alt={filename} className='h-28 w-28 object-cover' />;
 };
 
-type Email = QueryResultType<typeof queries.getEmailsForTicket>[number] & {
-  attachments?: EmailAttachment[];
+/**
+ * Renders attachment previews for a single email. Only mounted by the parent
+ * when `email.hasAttachment` is true, so emails without files skip the
+ * attachments round-trip entirely (Zero caches subsequent mounts).
+ *
+ * Image clicks open the shared `attachmentViewerActor` — same gallery/viewer
+ * the chat MessageAttachment uses (zoom, pan, next/prev). Non-image clicks
+ * download the file via the standard `downloadFile` helper.
+ */
+const EmailAttachmentsRow = ({
+  attachments: rows,
+  conversationId,
+  channelId,
+}: {
+  attachments: NonNullable<Email['attachments']>;
+  conversationId?: string;
+  channelId?: string;
+}): ReactElement | null => {
+  if (!rows || rows.length === 0) return null;
+
+  const images: AttachmentRef[] = rows
+    .filter(r => typeof r.mimetype === 'string' && r.mimetype.startsWith('image/'))
+    .map(r => ({
+      attachmentId: r.id,
+      fileName: r.originalFilename,
+      fileUrl: `/attachments/${r.id}/download`,
+      mimeType: r.mimetype,
+      fileSize: r.size ?? 0,
+      ...(conversationId && { conversationId }),
+      ...(channelId && { channelId }),
+    }));
+
+  const openImageGallery = (attachmentId: string): void => {
+    const startIndex = images.findIndex(i => i.attachmentId === attachmentId);
+    attachmentViewerActor.send({
+      type: 'OPEN',
+      attachments: images,
+      ...(startIndex >= 0 && { startIndex }),
+    });
+  };
+
+  return (
+    <div className='mt-3 flex flex-wrap gap-2'>
+      {rows.map(att => {
+        const isImage = typeof att.mimetype === 'string' && att.mimetype.startsWith('image/');
+        const sizeLabel = att.size ? formatFileSize(att.size) : '';
+
+        if (isImage) {
+          return (
+            <button
+              key={att.id}
+              type='button'
+              onClick={() => openImageGallery(att.id)}
+              title={att.originalFilename}
+              data-track-category='Support'
+              data-track-name='OpenEmailAttachmentImage'
+              className='group relative block rounded-lg overflow-hidden border border-border bg-muted hover:border-foreground/40 transition-colors'
+            >
+              <EmailImageThumbnail attachmentId={att.id} filename={att.originalFilename} />
+              <div className='absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-2 py-1 text-[10px] text-white opacity-0 group-hover:opacity-100 transition-opacity truncate text-left'>
+                {att.originalFilename}
+              </div>
+            </button>
+          );
+        }
+
+        return (
+          <button
+            key={att.id}
+            type='button'
+            onClick={() => {
+              void downloadFile(att.id, att.originalFilename).catch(() => undefined);
+            }}
+            title={att.originalFilename}
+            data-track-category='Support'
+            data-track-name='DownloadEmailAttachment'
+            className='flex items-center gap-2 px-3 py-2 bg-muted hover:bg-border rounded-lg text-xs text-foreground transition-colors min-w-0 max-w-[260px]'
+          >
+            <Paperclip size={14} className='text-muted-foreground shrink-0' />
+            <span className='flex flex-col min-w-0 text-left'>
+              <span className='truncate font-medium'>{att.originalFilename}</span>
+              {sizeLabel && <span className='text-[10px] text-muted-foreground'>{sizeLabel}</span>}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
 };
 
 // API response type for email demerge endpoint
@@ -939,17 +1069,10 @@ const SupportTicketDetail = (): ReactElement => {
     ticketId?: string;
   }>();
   const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
-  const [isAIPanelOpen, setIsAIPanelOpen] = useState<boolean>(false);
-
-  // Sync with xyneAIActor: when sidebar's own X button sends CLOSE, close our panel too
-  useEffect(() => {
-    const subscription = xyneAIActor.subscribe(snapshot => {
-      if (snapshot.context.xyneAIState === 'closed' && isAIPanelOpen) {
-        setIsAIPanelOpen(false);
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [isAIPanelOpen]);
+  const isAIPanelOpen = useSelector(
+    xyneAIActor,
+    snapshot => snapshot.context.xyneAIState === 'open',
+  );
   const [composerOpen, setComposerOpen] = useState<boolean>(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -996,6 +1119,12 @@ const SupportTicketDetail = (): ReactElement => {
   const channelId = ticket?.channelId || '';
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
+
+  useAskAiTicketContext({
+    channelId: channelId || null,
+    conversationId: conversationId ?? null,
+    previewText: title || 'Ticket conversation',
+  });
   const conversation = ticket?.conversation;
 
   // Prev / next cursor queries — each returns at most 1 adjacent ticket in the
@@ -1573,7 +1702,13 @@ const SupportTicketDetail = (): ReactElement => {
                   conversationId={conversationId}
                   onClose={() => setComposerOpen(false)}
                   isAIPanelOpen={isAIPanelOpen}
-                  onToggleAIPanel={() => setIsAIPanelOpen(prev => !prev)}
+                  onToggleAIPanel={() => {
+                    if (isAIPanelOpen) {
+                      xyneAIActor.send({ type: 'CLOSE' });
+                    } else {
+                      xyneAIActor.send({ type: 'OPEN' });
+                    }
+                  }}
                   channelId={channelId}
                   ticketId={ticketId}
                 />
@@ -1782,10 +1917,12 @@ const SupportTicketDetail = (): ReactElement => {
                     conversationId={conversationId}
                   />
                 )}
-                {/* Schedule Call Modal */}
+                {/* Schedule Call Modal — single modal that always allows guests
+                    (people outside Xyne) to be invited alongside internal members. */}
                 <ScheduleCallModal
                   isOpen={isScheduleCallModalOpen}
                   onClose={() => setIsScheduleCallModalOpen(false)}
+                  enableExternalInvitees
                   {...(channelId ? { channelId } : {})}
                   {...(conversationId ? { conversationId } : {})}
                 />
@@ -1793,28 +1930,10 @@ const SupportTicketDetail = (): ReactElement => {
             </Panel>
           </>
         )}
-        {isAIPanelOpen && (
-          <>
-            <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-              <div className='w-[1px] h-full bg-border'></div>
-            </PanelResizeHandle>
-            <Panel defaultSize={33} minSize={25} maxSize={50}>
-              <div className='max-w-[830px] h-full relative'>
-                {conversationId && channelId && (
-                  <XyneAISidebar
-                    key={conversationId}
-                    channelId={channelId}
-                    threadInfo={{
-                      conversationId,
-                      previewText: title || 'Ticket conversation',
-                    }}
-                    startFreshChat={false}
-                  />
-                )}
-              </div>
-            </Panel>
-          </>
-        )}
+        {/* Ask AI panel removed — there's now only one Ask AI window globally,
+            mounted in AppRoot. SupportScreen tells it which ticket via
+            useAskAiTicketContext above; the EmailComposer's Ask AI button
+            opens it via xyneAIActor.send('OPEN'). */}
       </PanelGroup>
     </div>
   );
@@ -2061,27 +2180,21 @@ const EmailThreadItem = ({
           <div className='flex-1 min-w-0'>
             <div className='text-sm text-foreground leading-relaxed'>
               {email.body ? (
-                <EmailBodyRenderer body={email.body} emailId={email.id} />
+                <EmailBodyRenderer
+                  body={email.body}
+                  emailId={email.id}
+                  attachments={email.attachments}
+                />
               ) : (
                 <span className='text-muted-foreground italic'>No content</span>
               )}
             </div>
             {email.attachments && email.attachments.length > 0 && (
-              <div className='mt-3 flex flex-wrap gap-2'>
-                {email.attachments.map((attachment, idx) => (
-                  <a
-                    key={idx}
-                    href={attachment.url}
-                    target='_blank'
-                    rel='noopener noreferrer'
-                    className='flex items-center gap-2 px-3 py-1.5 bg-muted hover:bg-border rounded-lg text-xs text-foreground transition-colors'
-                    title={attachment.originalFilename}
-                  >
-                    <Paperclip size={14} className='text-muted-foreground' />
-                    <span className='max-w-[150px] truncate'>{attachment.originalFilename}</span>
-                  </a>
-                ))}
-              </div>
+              <EmailAttachmentsRow
+                attachments={email.attachments}
+                conversationId={email.conversationId}
+                channelId={email.channelId}
+              />
             )}
           </div>
         </div>
@@ -2275,7 +2388,10 @@ const EmailComposer = ({
   };
 
   const handleSendEmail = async (): Promise<void> => {
-    if (!emailContent.trim() || !conversationId || isSending || toEmails.length === 0) {
+    // Allow attachment-only sends (no body) when at least one file is attached.
+    const hasContent = !!emailContent.trim();
+    const hasAttachments = attachments.length > 0;
+    if ((!hasContent && !hasAttachments) || !conversationId || isSending || toEmails.length === 0) {
       return;
     }
     setIsSending(true);
@@ -2283,15 +2399,17 @@ const EmailComposer = ({
       let attachmentIds: string[] = [];
 
       // Upload attachments if any
-      if (attachments.length > 0) {
+      if (hasAttachments) {
         attachmentIds = await uploadAttachments(attachments);
       }
 
       const activeSig = selectedSignatureId
         ? signatures?.find(s => s.id === selectedSignatureId)
         : null;
-      const bodyContent = await markdownToHtml(emailContent.trim());
-      const bodyHtml = activeSig ? `${bodyContent}<br>--<br>${activeSig.content}` : bodyContent;
+      const bodyContent = hasContent ? await markdownToHtml(emailContent.trim()) : '';
+      const bodyHtml = activeSig
+        ? `${bodyContent}${bodyContent ? '<br>--<br>' : ''}${activeSig.content}`
+        : bodyContent;
       await apiInstance.post(`/email/${conversationId}/reply`, {
         body: bodyHtml,
         type: 'REPLY_ALL',
@@ -2820,7 +2938,7 @@ const EmailComposer = ({
                 if (
                   e.key === 'Enter' &&
                   (e.metaKey || e.ctrlKey) &&
-                  emailContent.trim() &&
+                  (emailContent.trim() || attachments.length > 0) &&
                   conversationId &&
                   !isSending &&
                   toEmails.length > 0
@@ -3054,7 +3172,7 @@ const EmailComposer = ({
               className='size-7 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
               onClick={() => void handleSendEmail()}
               disabled={
-                !emailContent.trim() ||
+                (!emailContent.trim() && attachments.length === 0) ||
                 !conversationId ||
                 isSending ||
                 toEmails.length === 0 ||

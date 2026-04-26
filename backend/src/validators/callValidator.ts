@@ -21,12 +21,31 @@ export const ScheduleCallSchema = z.object({
   channelId: z.string().optional(),
   targetUserIds: z.array(z.string()).optional(),
   conversationId: z.string().optional(), // Optional: for thread-initiated scheduled calls
+  externalInvitees: z.array(z.string().email()).optional(),
+  invitation: z.object({
+    bodyHtml: z.string().min(1),
+    // Organizer-supplied overrides for the rendered email header.
+    // Date/time values are NOT accepted — they come from the scheduler —
+    // but the timezone used to FORMAT them is the organizer's local zone.
+    title: z.string().min(1).max(200).optional(),
+    organizerName: z.string().min(1).max(200).optional(),
+    organizerEmail: z.string().email().optional(),
+    orgName: z.string().max(200).optional(),
+    /** IANA timezone (e.g. "Asia/Kolkata") used to display the time in the email. */
+    timezone: z.string().min(1).max(64).optional(),
+  }).optional(),
 }).refine(
   (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
   'Either channelId or targetUserIds is required'
 ).refine(
   (data) => data.startsAt < data.endsAt,
   'endsAt must be after startsAt'
+).refine(
+  (data) => !data.externalInvitees || data.externalInvitees.length === 0 || !!data.invitation,
+  'invitation is required when externalInvitees is non-empty'
+).refine(
+  (data) => !data.externalInvitees || data.externalInvitees.length === 0 || !!data.conversationId,
+  'conversationId is required when externalInvitees is non-empty'
 );
 
 // Type inference from schema

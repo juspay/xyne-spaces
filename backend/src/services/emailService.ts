@@ -26,7 +26,11 @@ import {
   AttachmentEntityType,
   VespaOperationType,
   VespaInsertionStatus,
+  MessageDirection,
+  ExternalEntityType,
 } from '@prisma/client';
+import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
 import { isRegisteredBot, getBotInfo } from '@/bots/core/bot-utils';
@@ -441,7 +445,7 @@ export class EmailService {
           channelId,
           externalThreadId,
           externalMessageId,
-        },
+        } as Prisma.EmailUncheckedCreateInput,
       });
 
       // Generate xyneId and create ticket
@@ -916,6 +920,110 @@ export class EmailService {
       message,
       ticket,
       channel,
+    };
+  }
+
+  /**
+   * Send a mail-provider (Microsoft/Google) reply on a conversation and
+   * persist the Email + ExternalMessage rows. Used by the call-invitation
+   * flow; pass `tx` to roll back on provider failures. Zoho replies go
+   * through the controller's own path.
+   */
+  async sendReplyOnConversation(
+    params: {
+      conversationId: string;
+      body: string;
+      type: 'REPLY' | 'REPLY_ALL';
+      to?: string[];
+      cc?: string[];
+      bcc?: string[];
+      fileAttachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+    },
+    tx?: Prisma.TransactionClient,
+  ): Promise<{
+    emailId: string;
+    threadId: string;
+    externalMessageId: string;
+    externalSourceType: string;
+  }> {
+    const client = tx ?? this.prisma;
+
+    const conversation = await this.conversationRepository.findById(params.conversationId);
+    if (!conversation) throw new Error(`Conversation not found: ${params.conversationId}`);
+    const externalSource = await new ExternalSourceRepository().findByChannelId(conversation.channelId);
+    if (!externalSource) throw new Error(`No external source for channel ${conversation.channelId}`);
+    const emails = await this.emailRepository.findByConversationId(params.conversationId);
+    if (emails.length === 0) throw new Error(`No emails in conversation ${params.conversationId}`);
+    const initialEmail = emails[emails.length - 1];
+    const latestEmail = emails[0];
+
+    const to = params.to?.length
+      ? params.to
+      : params.type === 'REPLY'
+        ? [initialEmail.from]
+        : [...new Set([initialEmail.from, ...initialEmail.to])];
+    const cc = params.cc ?? (params.type === 'REPLY_ALL' && !params.to ? (initialEmail.cc || []) : []);
+    const bcc = params.bcc ?? [];
+
+    const adapter = adapterRegistry.getAdapter(externalSource.name);
+    if (!adapter.sendMailReply) {
+      throw new Error(`Adapter "${adapter.name}" does not support mail reply`);
+    }
+
+    logger.info(
+      `[emailService.sendReplyOnConversation] ${params.type} via ${externalSource.sourceType} conv=${params.conversationId}`,
+    );
+    const sent = await adapter.sendMailReply({
+      encryptedCredentials: externalSource.credentials,
+      sourceId: externalSource.id,
+      body: params.body,
+      subject: initialEmail.subject,
+      to, cc, bcc,
+      initialExternalThreadId: initialEmail.externalThreadId,
+      latestExternalThreadId: latestEmail.externalThreadId,
+      latestExternalMessageId: latestEmail.externalMessageId,
+      ...(params.fileAttachments && { fileAttachments: params.fileAttachments }),
+    });
+
+    const externalMessageId = sent.messageId || sent.threadId;
+    const email = await client.email.create({
+      data: {
+        type: params.type === 'REPLY' ? EmailType.REPLY : EmailType.REPLY_ALL,
+        subject: `Re: ${initialEmail.subject}`,
+        body: params.body,
+        to,
+        from: initialEmail.to[0],
+        cc,
+        bcc,
+        conversationId: params.conversationId,
+        channelId: conversation.channelId,
+        externalThreadId: sent.threadId,
+        externalMessageId,
+      } as Prisma.EmailUncheckedCreateInput,
+    });
+
+    try {
+      await client.externalMessage.create({
+        data: {
+          externalSourceId: externalSource.id,
+          externalId: externalMessageId,
+          externalThreadId: initialEmail.externalThreadId,
+          messageId: email.id,
+          entityId: email.id,
+          direction: MessageDirection.OUTGOING,
+          entityType: ExternalEntityType.EMAIL,
+        },
+      });
+    } catch (err) {
+      // P2002 = webhook raced us with the inbound copy of this same message.
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) throw err;
+    }
+
+    return {
+      emailId: email.id,
+      threadId: sent.threadId,
+      externalMessageId,
+      externalSourceType: externalSource.sourceType,
     };
   }
 }

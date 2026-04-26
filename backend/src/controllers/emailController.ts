@@ -13,10 +13,14 @@ import { EmailDraftRepository } from '@/database/repositories/emailDraftReposito
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { logger } from '@/utils/logger';
-import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType } from '@prisma/client';
+import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma } from '@prisma/client';
 import { ZohoService } from '@/services/zohoService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 import { GoogleService } from '@/services/googleService';
+import { ExternalAttachmentService } from '@/services/externalAttachmentService';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
+import { adapterRegistry } from '@/integrations/core/adapterRegistry';
+import { AttachmentUploadError } from '@/integrations/core/baseMailReplySender';
 
 interface ReplyEmailRequest {
   body: string;
@@ -40,20 +44,29 @@ export class EmailController {
   /**
    * POST /api/email/:conversationId/reply
    * Send email reply (REPLY or REPLY_ALL)
+   *
+   * Allows attachment-only sends (empty body) when at least one
+   * `attachmentIds` entry is provided.
    */
   replyToEmail = async (req: Request, res: Response) => {
     try {
       const { conversationId } = req.params;
       const { body, type, to: customTo, cc: customCc, bcc: customBcc } = req.body as ReplyEmailRequest;
+      const attachmentIds: string[] = Array.isArray(req.body.attachmentIds) ? req.body.attachmentIds : [];
 
-      // Validate input
-      if (!body || typeof body !== 'string') {
-        return res.status(400).json({ error: 'Body is required' });
+      // Validate input — body OR at least one attachment is required.
+      if ((typeof body !== 'string' || body.trim().length === 0) && attachmentIds.length === 0) {
+        return res.status(400).json({ error: 'Body or at least one attachment is required' });
+      }
+      if (typeof body !== 'undefined' && typeof body !== 'string') {
+        return res.status(400).json({ error: 'Body must be a string' });
       }
 
       if (!type || !['REPLY', 'REPLY_ALL'].includes(type)) {
         return res.status(400).json({ error: 'Type must be REPLY or REPLY_ALL' });
       }
+
+      const safeBody = typeof body === 'string' ? body : '';
 
       // 1. Fetch conversation
       const conversation = await this.conversationRepo.findById(conversationId);
@@ -109,7 +122,7 @@ export class EmailController {
         ccRecipients = initialEmail.cc || [];
       }
 
-      // 4. Get external source for Zoho credentials
+      // 4. Get external source for credentials
       const channel = await this.channelRepo.findById(conversation.channelId);
       if (!channel) {
         return res.status(404).json({ error: 'Channel not found' });
@@ -125,43 +138,64 @@ export class EmailController {
 
       logger.info(`[EmailController] Sending ${type} via ${externalSource.sourceType} for conversation ${conversationId}`);
 
+      // Mail-providers (those with a registered mail-reply sender) take
+      // attachment bytes inline; Zoho takes its own native attachmentIds in
+      // the send body and doesn't need buffer resolution here.
+      const adapter = adapterRegistry.getAdapter(externalSource.name);
+      const isMailProvider = !!adapter.sendMailReply;
+      const { attachments: fileAttachments, stagedRowIds: stagedAttachmentRowIds } =
+        await new ExternalAttachmentService().prepareOutboundAttachments(
+          isMailProvider ? { attachmentIds } : {},
+        );
+
       // 5. Send reply via the appropriate provider
       // messageId (optional) is the per-message unique id from the provider —
       // used for the email row's externalMessageId + webhook dedup. Falls back
       // to threadId for providers (Zoho/Microsoft) that don't expose one.
       let result: { threadId: string; messageId?: string };
 
-      if (externalSource.sourceType === 'microsoft') {
+      if (externalSource.sourceType === ExternalSourcePlatform.MICROSOFT) {
         const sender = MicrosoftDeskService.createEmailSender(
           externalSource.credentials,
           externalSource.id
         );
         result = await sender.replyToConversation({
-          content: body,
+          content: safeBody,
           subject: initialEmail.subject,
           to: toRecipients,
           cc: ccRecipients,
           bcc: bccRecipients,
           latestExternalMessageId: latestEmail.externalMessageId,
           threadId: latestEmail.externalThreadId,
+          ...(fileAttachments.length > 0 && { attachments: fileAttachments }),
         });
-      } else if (externalSource.sourceType === 'google') {
+      } else if (externalSource.sourceType === ExternalSourcePlatform.GOOGLE) {
         const sender = GoogleService.createEmailSender(
           externalSource.credentials,
           externalSource.id
         );
-        result = await sender.replyToConversation({
-          content: body,
-          subject: initialEmail.subject,
-          to: toRecipients,
-          cc: ccRecipients,
-          bcc: bccRecipients,
-          threadId: initialEmail.externalThreadId,
-          latestExternalMessageId: latestEmail.externalMessageId,
-        });
+        try {
+          result = await sender.replyToConversation({
+            content: safeBody,
+            subject: initialEmail.subject,
+            to: toRecipients,
+            cc: ccRecipients,
+            bcc: bccRecipients,
+            threadId: initialEmail.externalThreadId,
+            latestExternalMessageId: latestEmail.externalMessageId,
+            ...(fileAttachments.length > 0 && { attachments: fileAttachments }),
+          });
+        } catch (sendErr: any) {
+          if (fileAttachments.length > 0) {
+            const reason = sendErr instanceof Error ? sendErr.message : String(sendErr);
+            throw new AttachmentUploadError(
+              fileAttachments.map(a => ({ name: a.name, reason })),
+            );
+          }
+          throw sendErr;
+        }
       } else {
         // Zoho (default)
-        const attachmentIds = req.body.attachmentIds || [];
         const ticketId = initialEmail.externalThreadId;
         const sourceId = externalSource.id;
 
@@ -172,7 +206,7 @@ export class EmailController {
 
         const zohoResult = await zohoService.sendReply({
           ticketId,
-          content: body,
+          content: safeBody,
           to: toRecipients,
           cc: ccRecipients,
           bcc: bccRecipients,
@@ -191,7 +225,7 @@ export class EmailController {
       const newEmail = await this.emailRepo.create({
         type: emailType,
         subject: `Re: ${initialEmail.subject}`,
-        body,
+        body: safeBody,
         to: toRecipients,
         from: fromEmailAddress,
         cc: ccRecipients,
@@ -202,8 +236,9 @@ export class EmailController {
         externalMessageId,
       });
 
-      // 7. Create ExternalMessage tracking record for deduplication
-      // This prevents Zoho sync from creating a duplicate email when it syncs back the sent reply
+      // 7. Create ExternalMessage tracking record for deduplication.
+      // Prevents the provider sync from re-creating an Email row for the
+      // outbound message we just sent.
       try {
         await this.externalMessageRepo.create({
           externalSourceId: externalSource.id,
@@ -215,7 +250,26 @@ export class EmailController {
         });
         logger.info(`[EmailController] ExternalMessage tracking record created for email: ${newEmail.id}`);
       } catch (error) {
-        logger.warn(`[EmailController] Failed to create ExternalMessage tracking record:`, error);
+        if (
+          !(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+        ) {
+          logger.warn(`[EmailController] Failed to create ExternalMessage tracking record:`, error);
+        }
+      }
+
+      // 7a. Rebind any pre-staged GCS attachments (MS/Google) to the sent
+      // Email row so the UI renders them under this message. The upload
+      // endpoint stages them with `entityId='pending-email:<conversationId>'`.
+      if (stagedAttachmentRowIds.length > 0) {
+        try {
+          await this.messageAttachmentRepo.updateManyEntityTypeAndId(
+            stagedAttachmentRowIds,
+            AttachmentEntityType.EMAIL,
+            newEmail.id,
+          );
+        } catch (error) {
+          logger.warn(`[EmailController] Failed to rebind staged attachments to email ${newEmail.id}:`, error);
+        }
       }
 
       try {
@@ -225,61 +279,89 @@ export class EmailController {
         logger.warn(`[EmailController] Failed to delete draft for conversation ${conversationId}:`, error);
       }
 
-      // 8. Store Zoho attachment references in MessageAttachment table for UI display
-      let storedAttachments: any[] = [];
-      if (externalSource.sourceType === 'zoho') {
-        const attachmentIds = req.body.attachmentIds || [];
-        if (attachmentIds.length > 0) {
-          try {
+      // 8. Store Zoho attachment references in MessageAttachment table for UI display.
+      let storedAttachments: Array<{
+        id: string;
+        url: string;
+        originalFilename: string;
+        size: number;
+        mimetype: string;
+      }> = [];
+      if (externalSource.sourceType === 'zoho' && attachmentIds.length > 0) {
+        try {
           const emailWorkspaceId = await this.channelRepo.getWorkspaceId(conversation.channelId);
-            for (const attachmentId of attachmentIds) {
-              await this.messageAttachmentRepo.create({
+          await Promise.all(
+            attachmentIds.map(attachmentId =>
+              this.messageAttachmentRepo.create({
                 entityType: AttachmentEntityType.EMAIL,
                 entityId: newEmail.id,
                 url: `https://desk.zoho.com/api/v1/uploads/${attachmentId}`,
                 originalFilename: `attachment-${attachmentId}`,
                 size: 0,
                 mimetype: 'application/octet-stream',
-                createdBy: req.user?.id || 'system',
-                uploadedByUserId: req.user?.id || 'system',
+                createdBy: userId,
+                uploadedByUserId: userId,
                 storageProvider: 'zoho',
                 conversationId: conversationId,
-              workspaceId: emailWorkspaceId,
+                workspaceId: emailWorkspaceId,
                 metadata: { zohoAttachmentId: attachmentId, source: 'zoho_upload' },
-              });
-            }
-            logger.info(`[EmailController] Stored ${attachmentIds.length} attachment references for email: ${newEmail.id}`);
-          } catch (error) {
-            logger.warn(`[EmailController] Failed to store attachment references:`, error);
-          }
-
-          try {
-            storedAttachments = await this.messageAttachmentRepo.findByEntityIdAndType(newEmail.id, AttachmentEntityType.EMAIL);
-          } catch (error) {
-            logger.warn(`[EmailController] Failed to fetch stored attachments:`, error);
-          }
+              }),
+            ),
+          );
+          logger.info(`[EmailController] Stored ${attachmentIds.length} Zoho attachment references for email: ${newEmail.id}`);
+        } catch (error) {
+          logger.warn(`[EmailController] Failed to store Zoho attachment references:`, error);
         }
       }
 
-      logger.info(`[EmailController] Reply sent. Email ID: ${newEmail.id}, Zoho Thread ID: ${result.threadId}`);
-
-      return res.status(200).json({
-        success: true,
-        emailId: newEmail.id,
-        threadId: result.threadId,
-        attachments: storedAttachments.map(att => ({
+      // Always surface the canonical attachments-for-this-email list (covers
+      // both Zoho rows just created and MS/Google rows rebound above).
+      try {
+        const stored = await this.messageAttachmentRepo.findByEntityIdAndType(
+          newEmail.id,
+          AttachmentEntityType.EMAIL,
+        );
+        storedAttachments = stored.map(att => ({
           id: att.id,
           url: att.url,
           originalFilename: att.originalFilename,
           size: att.size,
           mimetype: att.mimetype,
-        })),
+        }));
+      } catch (error) {
+        logger.warn(`[EmailController] Failed to fetch stored attachments:`, error);
+      }
+
+      logger.info(`[EmailController] Reply sent. Email ID: ${newEmail.id}, Thread ID: ${result.threadId}`);
+
+      return res.status(200).json({
+        success: true,
+        emailId: newEmail.id,
+        threadId: result.threadId,
+        attachments: storedAttachments,
       });
     } catch (error: any) {
-      logger.error('[EmailController] Failed to send email reply:', error);
+      if (error instanceof AttachmentUploadError) {
+        logger.error('[EmailController] Reply aborted — attachment upload failed', {
+          failed: error.failedAttachments.map(f => f.name),
+        });
+        return res.status(422).json({
+          error: 'attachment_upload_failed',
+          message: error.message,
+          failedAttachments: error.failedAttachments,
+        });
+      }
+      // Log only the safe fields. Provider SDKs (Gaxios/Graph) attach the
+      // entire request config — including the raw MIME body + base64 attachment
+      // bytes — to thrown errors. Logging `error` directly leaks that payload.
+      logger.error('[EmailController] Failed to send email reply', {
+        message: error?.message,
+        code: error?.code,
+        status: error?.response?.status,
+      });
       return res.status(500).json({
         error: 'Failed to send email reply',
-        message: error.message,
+        message: error?.message,
       });
     }
   };

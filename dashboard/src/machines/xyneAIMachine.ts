@@ -70,6 +70,8 @@ export type XyneAIEvent =
   | { type: 'CLOSE' }
   | { type: 'SET_CONTEXT'; contextType: XyneAIContextType; contextId: string }
   | { type: 'SET_CHANNEL'; channelId: string }
+  | { type: 'SET_TICKET_CONTEXT'; channelId: string; threadInfo: ThreadInfo }
+  | { type: 'CLEAR_TICKET_CONTEXT' }
   | { type: 'REMOVE_CANVAS_CONTEXT'; viewAccessId: string }
   | { type: 'CLEAR_SELECTIONS'; viewAccessId?: string }
   | { type: 'REMOVE_SELECTION'; viewAccessId: string; selectionIndex: number };
@@ -337,7 +339,8 @@ export const xyneAIMachine = setup({
     // Update context when transitioning to different states
     setOpen: assign(({ event, context }) => {
       if (event.type === 'OPEN') {
-        // Determine context type: canvas -> canvas, has channelId -> chat, else general
+        // Determine context type: canvas -> canvas, has channelId -> chat,
+        // else preserve existing chat context (from SET_TICKET_CONTEXT), else general.
         let contextType: XyneAIContextType = 'general';
         if (event.canvasInfo) {
           contextType = 'canvas';
@@ -345,9 +348,12 @@ export const xyneAIMachine = setup({
           contextType = event.contextType;
         } else if (event.channelId) {
           contextType = 'chat';
+        } else if (context.contextType === 'chat' && context.channelId) {
+          // Preserve ticket-context-driven chat state when OPEN has no payload
+          contextType = 'chat';
         }
 
-        const contextId = event.contextId ?? event.channelId ?? null;
+        const contextId = event.contextId ?? event.channelId ?? context.contextId ?? null;
 
         // Build new canvasContexts from selections
         const newCanvasContexts = buildCanvasContexts(
@@ -365,12 +371,16 @@ export const xyneAIMachine = setup({
               ? true
               : false;
 
+        // Preserve existing threadInfo when OPEN doesn't supply one (e.g.,
+        // ticket Ask AI button after SET_TICKET_CONTEXT already set it).
+        const threadInfo = event.threadInfo !== undefined ? event.threadInfo : context.threadInfo;
+
         const newContext = {
           xyneAIState: 'open' as XyneAIState,
           contextType,
           contextId,
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
-          threadInfo: event.threadInfo ?? null,
+          threadInfo,
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
@@ -386,7 +396,8 @@ export const xyneAIMachine = setup({
     // Update context when already open
     updateOpen: assign(({ event, context }) => {
       if (event.type === 'OPEN') {
-        // Determine context type: canvas -> canvas, has channelId -> chat, else general
+        // Determine context type: canvas -> canvas, has channelId -> chat,
+        // else preserve existing chat context, else general.
         let contextType: XyneAIContextType = 'general';
         if (event.canvasInfo) {
           contextType = 'canvas';
@@ -394,9 +405,11 @@ export const xyneAIMachine = setup({
           contextType = event.contextType;
         } else if (event.channelId) {
           contextType = 'chat';
+        } else if (context.contextType === 'chat' && context.channelId) {
+          contextType = 'chat';
         }
 
-        const contextId = event.contextId ?? event.channelId ?? null;
+        const contextId = event.contextId ?? event.channelId ?? context.contextId ?? null;
 
         // Build new canvasContexts from selections
         const newCanvasContexts = buildCanvasContexts(
@@ -414,11 +427,13 @@ export const xyneAIMachine = setup({
               ? true
               : false;
 
+        const threadInfo = event.threadInfo !== undefined ? event.threadInfo : context.threadInfo;
+
         const newContext = {
           contextType,
           contextId,
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
-          threadInfo: event.threadInfo ?? null,
+          threadInfo,
           startFreshChat,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
@@ -477,6 +492,29 @@ export const xyneAIMachine = setup({
         return newContext;
       }
       return {};
+    }),
+    setTicketContext: assign(({ event }) => {
+      if (event.type === 'SET_TICKET_CONTEXT') {
+        const newContext = {
+          contextType: 'chat' as XyneAIContextType,
+          contextId: event.channelId,
+          channelId: event.channelId,
+          threadInfo: event.threadInfo,
+        };
+        void saveContextToIndexedDB(newContext);
+        return newContext;
+      }
+      return {};
+    }),
+    clearTicketContext: assign(() => {
+      const newContext = {
+        contextType: 'general' as XyneAIContextType,
+        contextId: null,
+        channelId: null,
+        threadInfo: null,
+      };
+      void saveContextToIndexedDB(newContext);
+      return newContext;
     }),
     // Remove entire canvas context (cascades to all its selections)
     removeCanvasContext: assign(({ event, context }) => {
@@ -559,6 +597,12 @@ export const xyneAIMachine = setup({
           target: 'open',
           actions: 'setOpen',
         },
+        SET_TICKET_CONTEXT: {
+          actions: 'setTicketContext',
+        },
+        CLEAR_TICKET_CONTEXT: {
+          actions: 'clearTicketContext',
+        },
       },
     },
     open: {
@@ -575,6 +619,12 @@ export const xyneAIMachine = setup({
         },
         SET_CHANNEL: {
           actions: 'setChannel',
+        },
+        SET_TICKET_CONTEXT: {
+          actions: 'setTicketContext',
+        },
+        CLEAR_TICKET_CONTEXT: {
+          actions: 'clearTicketContext',
         },
         REMOVE_CANVAS_CONTEXT: {
           actions: 'removeCanvasContext',

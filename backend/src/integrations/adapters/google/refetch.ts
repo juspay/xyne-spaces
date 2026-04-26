@@ -12,6 +12,7 @@ import { adapterRegistry } from '../../core/adapterRegistry';
 import { BaseRefetch, RefetchResult } from '../../core/baseRefetch';
 import { ExternalSourcePlatform } from '../../core/types';
 import { GoogleTransformer } from './transformer';
+import { preDownloadGmailAttachments } from './attachments';
 import { logger } from '@/utils/logger';
 
 const TAG = '[GoogleRefetch]';
@@ -50,7 +51,18 @@ export class GoogleRefetch extends BaseRefetch {
         const messageData = await google.getMessageById(id);
         if (!messageData) continue;
 
-        const parsed = await transformer.transform({ parsedEmail: google.parseEmailData(messageData) });
+        const parsedEmail = google.parseEmailData(messageData);
+        const preDownloadedAttachments = await preDownloadGmailAttachments({
+          googleService: google,
+          messageId: id,
+          messageData,
+          sourceName: source.name,
+        });
+
+        const parsed = await transformer.transform({
+          parsedEmail: { ...parsedEmail, attachments: [] },
+          ...(preDownloadedAttachments.length > 0 && { preDownloadedAttachments }),
+        });
         if (!parsed.success || !parsed.data) throw new Error(parsed.error);
 
         const result = await externalSourceCore.sync(
