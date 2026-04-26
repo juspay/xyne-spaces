@@ -9306,5 +9306,32 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
+    emailChannelPreference: {
+      upsert: defineMutator(
+        z.object({
+          channelId: z.string(),
+          ownerUserId: z.string().optional(),
+          assigneeUserGroupId: z.string().optional().nullable(),
+        }),
+        async ({ tx, args: { channelId, ownerUserId, assigneeUserGroupId } }) => {
+          const existing = await tx.run(
+            zql.email_channel_preferences.where('channelId', channelId).one(),
+          );
+          if (existing) {
+            await tx.mutate.email_channel_preferences.update({
+              channelId,
+              ...(ownerUserId !== undefined ? { ownerUserId } : {}),
+              ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
+            });
+          } else {
+            await tx.mutate.email_channel_preferences.insert({
+              channelId,
+              ownerUserId: ownerUserId ?? authData.sub,
+              assigneeUserGroupId: assigneeUserGroupId ?? null,
+            });
+          }
+        },
+      ),
+    },
   })
 };

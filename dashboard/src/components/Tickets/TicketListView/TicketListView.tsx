@@ -8,6 +8,7 @@ import { useShortcut } from '../../../shortcuts';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { TicketListItem } from './TicketListView.types';
+import { TicketPriority } from '@xyne/shared';
 
 const ROW_HEIGHT = 45;
 
@@ -20,7 +21,9 @@ type TicketStart = { id: string; lastEmailAt: number };
 interface TicketListViewProps {
   filter: {
     channelId: string;
-    assignedTo?: string | undefined;
+    assignedTo?: string[] | undefined;
+    priority?: TicketPriority[] | undefined;
+    stageName?: string[] | undefined;
   };
   onTicketClick: (ticket: SupportTicketRow) => void;
   activeTicketId?: string | null | undefined;
@@ -48,7 +51,7 @@ export function TicketListView({
 }: TicketListViewProps): React.ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { channelId, assignedTo } = filter;
+  const { channelId, assignedTo, priority, stageName } = filter;
   // Feeds TicketsACL fast-path (scalar EXISTS on channel_participants) instead
   // of the per-row OR(PUBLIC, EXISTS) fallback.
   const channelUserStatus = useGetChannelUserStatus(channelId);
@@ -68,12 +71,14 @@ export function TicketListView({
         channelId,
         isMember,
         assignedTo,
+        priority,
+        stageName,
         limit,
         start,
         dir,
       }),
     }),
-    [channelId, isMember, assignedTo],
+    [channelId, isMember, assignedTo, priority, stageName],
   );
 
   const getSingleQuery = useCallback(
@@ -86,7 +91,10 @@ export function TicketListView({
   const getScrollElement = useCallback(() => scrollRef.current, []);
   const estimateSize = useCallback(() => ROW_HEIGHT, []);
 
-  const listContextParams = useMemo(() => ({ channelId, assignedTo }), [channelId, assignedTo]);
+  const listContextParams = useMemo(
+    () => ({ channelId, assignedTo, priority, stageName }),
+    [channelId, assignedTo, priority, stageName],
+  );
 
   const virt = useZeroVirtualizer({
     listContextParams,

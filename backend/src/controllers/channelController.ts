@@ -22,6 +22,7 @@ import {
 import { websocketService } from '../services/websocketService';
 import { createChannelCreatedActivity } from '../utils/channelActivityUtils';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
+import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
@@ -40,6 +41,7 @@ export class ChannelController {
   private userGroupRepository: UserGroupRepository;
   private channelUserStatusRepository: ChannelUserStatusRepository;
   private projectRepository: ProjectRepository;
+  private emailChannelPreferenceRepository: EmailChannelPreferenceRepository;
 
   constructor() {
     this.channelRepository = new ChannelRepository();
@@ -51,6 +53,7 @@ export class ChannelController {
     this.userGroupRepository = new UserGroupRepository();
     this.channelUserStatusRepository = new ChannelUserStatusRepository();
     this.projectRepository = new ProjectRepository();
+    this.emailChannelPreferenceRepository = new EmailChannelPreferenceRepository();
   }
 
   // Helper method to get user info
@@ -649,7 +652,8 @@ export class ChannelController {
         visibility,
         projectId,
         participants,
-        type: channelType
+        type: channelType,
+        assigneeUserGroupId
       }: {
         scopeType: ChannelScopeType;
         scopeId?: string;
@@ -659,6 +663,7 @@ export class ChannelController {
         projectId: string;
         participants?: string[];
         type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT';
+        assigneeUserGroupId?: string;
       } = req.body;
 
       const userId = req.user!.id;
@@ -810,6 +815,20 @@ export class ChannelController {
               error: 'Failed to add participant'
             });
           }
+        }
+      }
+
+      // Save EmailChannelPreference for EMAIL channels
+      if (channelType === 'EMAIL') {
+        try {
+          await this.emailChannelPreferenceRepository.create({
+            channelId: channel.id,
+            ownerUserId: userId,
+            ...(assigneeUserGroupId && { assigneeUserGroupId }),
+          });
+        } catch (error) {
+          logger.error('Failed to create EmailChannelPreference:', error);
+          // Don't fail the entire channel creation if preference fails
         }
       }
 

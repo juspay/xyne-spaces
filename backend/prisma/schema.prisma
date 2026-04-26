@@ -1833,6 +1833,19 @@ model EmailSignature {
   @@schema("public")
 }
 
+model EmailChannelPreference {
+  channelId            String   @id // Channel ID (no FK constraint) - Primary key
+  ownerUserId          String?  // User ID who owns this preference (no FK constraint)
+  assigneeUserGroupId  String?  // User group ID for assignee (no FK constraint)
+  boardId              String?  // Target board for ticket creation (no FK constraint)
+
+  @@index([ownerUserId])
+  @@index([assigneeUserGroupId])
+  @@index([boardId])
+  @@map("email_channel_preferences")
+  @@schema("public")
+}
+
 // Message Models
 model Message {
   messageId           String      @id @default(cuid())
@@ -2032,8 +2045,8 @@ model ExternalSource {
   sourceType      String                    // "zoho", "slack", "jira", etc. - flexible string
   displayName     String                    // "Zoho (Euler Team)"
   channelId       String?                   // Target channel for messages (legacy/optional)
-  boardId         String?                   // Target board for ticket creation (no FK constraint) - N:1 with Board
-  ownerUserId     String?                   // Owner for user-scoped integrations like Gmail search
+  boardId         String?                   // @deprecated - Use EmailChannelPreference.boardId instead. Target board for ticket creation (no FK constraint) - N:1 with Board
+  ownerUserId     String?                   // @deprecated - Use EmailChannelPreference table instead. Owner for user-scoped integrations like Gmail search
   credentials     String                    // Encrypted credentials (IV:ciphertext format)
   isActive        Boolean  @default(true)
   lastSyncCursor  String?                   // Per-adapter resume cursor. Google: Gmail historyId. Microsoft: ISO timestamp of last synced receivedDateTime.

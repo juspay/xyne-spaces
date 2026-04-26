@@ -59,6 +59,10 @@ import {
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useUsers } from '../../hooks/useUsers';
+import * as Popover from '@radix-ui/react-popover';
+import { UserSubmenu } from '../../components/Tickets/TicketFilters/Submenus/UserSubmenu/UserSubmenu';
+import { PrioritySubmenu } from '../../components/Tickets/TicketFilters/Submenus/PrioritySubmenu/PrioritySubmenu';
+import { StagesSubmenu } from '../../components/Tickets/TicketFilters/Submenus/StagesSubmenu/StagesSubmenu';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
 import { DragAndDropOverlay } from '../../components/Chat/DragAndDropOverlay';
@@ -92,6 +96,7 @@ import {
   groupTicketsByStage,
   createTagsByTicketIdMap,
 } from '../KanbanBoardScreen/KanbanBoardScreen.utils';
+import { TicketPriority } from '@xyne/shared';
 import type { Ticket } from '@xyne/shared';
 import { getDraft } from '../../hooks/useDraft';
 import { useShortcut } from '../../shortcuts';
@@ -112,6 +117,8 @@ import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
+import { InboxAssigneeSettings } from '../../components/xyne-desk/InboxAssigneeSettings/InboxAssigneeSettings';
+import { useEmailChannelPreference } from '../../hooks/useEmailChannelPreference';
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
@@ -133,6 +140,13 @@ import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadC
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV2>[number];
+
+const toStageColumn = (stage: { id: string; name: string; sequenceNumber?: number }) => ({
+  id: stage.id,
+  name: stage.name,
+  color: getStageColor(stage.name.toLowerCase().replace(/\s+/g, '_')),
+  ...(stage.sequenceNumber !== undefined && { sequenceNumber: stage.sequenceNumber }),
+});
 
 const ChannelInfoModal = ({
   channelId,
@@ -327,6 +341,16 @@ const SupportScreen = (): ReactElement => {
   // Channel selection is sourced strictly from the URL path (/support/:channelId).
   // A bare /support visit renders the empty state prompting the user to pick one.
   const selectedChannelId = channelIdParam ?? null;
+
+  // Fetch email channel preference for assignee user group and boardId
+  const emailChannelPreference = useEmailChannelPreference(selectedChannelId);
+
+  // Fetch stages for the board configured in email channel preference
+  const boardId = emailChannelPreference?.boardId;
+  const [stages] = useCachedQuery(queries.stagesByBoard({ boardId: boardId || '' }), {
+    enabled: !!boardId,
+  });
+
   const setSelectedChannelId = useCallback(
     (next: string | null): void => {
       // Preserve non-routing query params (settings, openSettings, etc.).
@@ -344,6 +368,38 @@ const SupportScreen = (): ReactElement => {
     const saved = localStorage.getItem('support-view-mode');
     return (saved as ViewMode) || 'list';
   });
+  const [selectedPriorities, setSelectedPriorities] = useState<TicketPriority[]>([]);
+  const [selectedStages, setSelectedStages] = useState<string[]>([]);
+  const [selectedAssignees, setSelectedAssignees] = useState<string[]>([]);
+  const [assigneeFilterOpen, setAssigneeFilterOpen] = useState(false);
+  const [priorityFilterOpen, setPriorityFilterOpen] = useState(false);
+  const [stageFilterOpen, setStageFilterOpen] = useState(false);
+
+  // Build the filter args once — reused by both the kanban query and the list view.
+  // "My Tickets" toggle is the assignee fallback when the explicit assignee filter is empty.
+  const ticketFilter = useMemo(
+    () => ({
+      assignedTo:
+        selectedAssignees.length > 0 ? selectedAssignees : showMyTicketsOnly ? [userID] : undefined,
+      priority: selectedPriorities.length > 0 ? selectedPriorities : undefined,
+      stageName: selectedStages.length > 0 ? selectedStages : undefined,
+    }),
+    [selectedAssignees, selectedPriorities, selectedStages, showMyTicketsOnly, userID],
+  );
+
+  const hasActiveFilters =
+    showMyTicketsOnly ||
+    selectedPriorities.length > 0 ||
+    selectedStages.length > 0 ||
+    selectedAssignees.length > 0;
+
+  const clearAllFilters = useCallback(() => {
+    setShowMyTicketsOnly(false);
+    setSelectedPriorities([]);
+    setSelectedStages([]);
+    setSelectedAssignees([]);
+  }, []);
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(
     () =>
       searchParams.get('settings') === 'open' || searchParams.get('openSettings') === 'signatures',
@@ -351,6 +407,11 @@ const SupportScreen = (): ReactElement => {
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
+
+  // Reset stage filter when channel changes (different channels may have different stages)
+  useEffect(() => {
+    setSelectedStages([]);
+  }, [selectedChannelId]);
 
   useEffect(() => {
     const emailError = searchParams.get('emailError');
@@ -425,6 +486,7 @@ const SupportScreen = (): ReactElement => {
     queries.supportTicketsFilteredV2({
       channelId: selectedChannelId ?? '',
       isMember: kanbanIsMember,
+      ...ticketFilter,
     }),
     { enabled: viewMode === 'kanban' && !!selectedChannelId },
   );
@@ -485,26 +547,14 @@ const SupportScreen = (): ReactElement => {
   // Get full selected channel for member count and other stats
   const selectedChannelFull = useVisibleChannel(selectedChannelId ?? '');
 
-  // The unified query already handles filtering, just apply user filter
-  const displayedTickets = useMemo(() => {
-    const tickets = supportTickets ?? [];
-    if (showMyTicketsOnly) {
-      return tickets.filter(ticket => ticket.assignedTo === userID);
-    }
-    return tickets;
-  }, [supportTickets, showMyTicketsOnly, userID]);
+  // Filters are now applied server-side via the supportTicketsFilteredV2 query
+  const displayedTickets = supportTickets;
 
   const [localTickets, setLocalTickets] = useState<Ticket[]>([]);
-  const stageColumns = useMemo(
-    () => [
-      { id: 'backlog', name: 'Backlog', color: getStageColor('backlog') },
-      { id: 'to_do', name: 'To Do', color: getStageColor('todo') },
-      { id: 'in_progress', name: 'In Progress', color: getStageColor('in_progress') },
-      { id: 'review', name: 'Review', color: getStageColor('review') },
-      { id: 'done', name: 'Done', color: getStageColor('done') },
-    ],
-    [],
-  );
+
+  // Stages fetched dynamically from the board configured in EmailChannelPreference.
+  // Empty if no board is configured — dropdown and kanban will show no stages.
+  const stageColumns = useMemo(() => stages?.map(toStageColumn) ?? [], [stages]);
 
   useEffect(() => {
     if (displayedTickets) {
@@ -564,6 +614,7 @@ const SupportScreen = (): ReactElement => {
     data: CreateChannelFormData & {
       connector?: 'google' | 'microsoft' | null;
       channelType?: 'EMAIL' | undefined;
+      assigneeUserGroupId?: string;
     },
   ) => {
     const { connector, ...rest } = data;
@@ -577,6 +628,9 @@ const SupportScreen = (): ReactElement => {
       if (rest.description) {
         params.set('description', rest.description);
       }
+      if (rest.assigneeUserGroupId) {
+        params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
+      }
       window.location.href = `${API_BASE_URL}/integrations/microsoft/connect?${params.toString()}`;
       return;
     }
@@ -589,6 +643,9 @@ const SupportScreen = (): ReactElement => {
       });
       if (rest.description) {
         params.set('description', rest.description);
+      }
+      if (rest.assigneeUserGroupId) {
+        params.set('assigneeUserGroupId', rest.assigneeUserGroupId);
       }
       window.location.href = `${API_BASE_URL}/integrations/google/connect?${params.toString()}`;
       return;
@@ -794,22 +851,159 @@ const SupportScreen = (): ReactElement => {
                 </div>
                 <div className='flex items-center gap-2'>
                   {isSelectedChannelJoined && (
-                    <button
-                      onClick={() => setShowMyTicketsOnly(!showMyTicketsOnly)}
-                      className={cn(
-                        'text-sm font-medium transition-colors px-2 py-1 rounded whitespace-nowrap',
-                        showMyTicketsOnly
-                          ? 'text-primary  bg-border'
-                          : 'text-muted-foreground hover:text-foreground',
+                    <>
+                      <button
+                        onClick={() => setShowMyTicketsOnly(!showMyTicketsOnly)}
+                        className={cn(
+                          'inline-flex items-center h-8 px-3 py-2 text-sm font-medium whitespace-nowrap rounded-md border border-input shadow-xs transition-[color,box-shadow] outline-none',
+                          showMyTicketsOnly
+                            ? 'text-primary bg-border'
+                            : 'bg-transparent text-muted-foreground hover:text-foreground',
+                        )}
+                        data-track-category='Support'
+                        data-track-name='ToggleMyTickets'
+                        data-track-metadata={JSON.stringify({
+                          showMyTicketsOnly: !showMyTicketsOnly,
+                        })}
+                      >
+                        My Tickets
+                      </button>
+
+                      {/* Priority Filter — dropdown with multi-select submenu */}
+                      <Popover.Root open={priorityFilterOpen} onOpenChange={setPriorityFilterOpen}>
+                        <Popover.Trigger asChild>
+                          <button
+                            type='button'
+                            className={cn(
+                              'inline-flex items-center justify-between gap-2 w-[130px] h-8 px-3 text-sm font-medium rounded-md border border-input shadow-xs whitespace-nowrap transition-[color,box-shadow] outline-none',
+                              selectedPriorities.length > 0
+                                ? 'text-primary bg-border'
+                                : 'bg-transparent text-foreground hover:text-foreground',
+                            )}
+                          >
+                            <span className='truncate'>
+                              {selectedPriorities.length > 0
+                                ? `${selectedPriorities.length} selected`
+                                : 'Priority'}
+                            </span>
+                            <ChevronDown
+                              className={cn(
+                                'w-4 h-4 opacity-50 shrink-0 transition-transform',
+                                priorityFilterOpen && 'rotate-180',
+                              )}
+                            />
+                          </button>
+                        </Popover.Trigger>
+                        <Popover.Content
+                          side='bottom'
+                          align='start'
+                          sideOffset={6}
+                          className='z-[60]'
+                        >
+                          <PrioritySubmenu
+                            selectedPriorities={selectedPriorities}
+                            onChange={setSelectedPriorities}
+                          />
+                        </Popover.Content>
+                      </Popover.Root>
+
+                      {/* Stage Filter — dropdown with searchable multi-select */}
+                      <Popover.Root open={stageFilterOpen} onOpenChange={setStageFilterOpen}>
+                        <Popover.Trigger asChild>
+                          <button
+                            type='button'
+                            className={cn(
+                              'inline-flex items-center justify-between gap-2 w-[130px] h-8 px-3 text-sm font-medium rounded-md border border-input shadow-xs whitespace-nowrap transition-[color,box-shadow] outline-none',
+                              selectedStages.length > 0
+                                ? 'text-primary bg-border'
+                                : 'bg-transparent text-foreground hover:text-foreground',
+                            )}
+                          >
+                            <span className='truncate'>
+                              {selectedStages.length > 0
+                                ? `${selectedStages.length} selected`
+                                : 'Stage'}
+                            </span>
+                            <ChevronDown
+                              className={cn(
+                                'w-4 h-4 opacity-50 shrink-0 transition-transform',
+                                stageFilterOpen && 'rotate-180',
+                              )}
+                            />
+                          </button>
+                        </Popover.Trigger>
+                        <Popover.Content
+                          side='bottom'
+                          align='start'
+                          sideOffset={6}
+                          className='z-[60]'
+                        >
+                          <StagesSubmenu
+                            selectedStages={selectedStages}
+                            onChange={setSelectedStages}
+                            availableStages={
+                              stages?.map(s => ({
+                                name: s.name,
+                                status: s.defaultTicketStatusV2,
+                              })) ?? []
+                            }
+                          />
+                        </Popover.Content>
+                      </Popover.Root>
+
+                      {/* Assignee Filter — dropdown with searchable user list */}
+                      <Popover.Root open={assigneeFilterOpen} onOpenChange={setAssigneeFilterOpen}>
+                        <Popover.Trigger asChild>
+                          <button
+                            type='button'
+                            className={cn(
+                              'inline-flex items-center justify-between gap-2 w-[150px] h-8 px-3 text-sm font-medium rounded-md border border-input shadow-xs whitespace-nowrap transition-[color,box-shadow] outline-none',
+                              selectedAssignees.length > 0
+                                ? 'text-primary bg-border'
+                                : 'bg-transparent text-foreground hover:text-foreground',
+                            )}
+                          >
+                            <span className='truncate'>
+                              {selectedAssignees.length > 0
+                                ? `${selectedAssignees.length} assignee${selectedAssignees.length > 1 ? 's' : ''}`
+                                : 'Assignee'}
+                            </span>
+                            <ChevronDown
+                              className={cn(
+                                'w-4 h-4 opacity-50 shrink-0 transition-transform',
+                                assigneeFilterOpen && 'rotate-180',
+                              )}
+                            />
+                          </button>
+                        </Popover.Trigger>
+                        <Popover.Content
+                          side='bottom'
+                          align='start'
+                          sideOffset={6}
+                          className='z-[60]'
+                        >
+                          <UserSubmenu
+                            selectedUsers={selectedAssignees}
+                            onChange={setSelectedAssignees}
+                            label='Assignee'
+                          />
+                        </Popover.Content>
+                      </Popover.Root>
+
+                      {hasActiveFilters && (
+                        <Tooltip side='bottom' content='Clear all filters'>
+                          <button
+                            type='button'
+                            onClick={clearAllFilters}
+                            className='inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                            data-track-category='Support'
+                            data-track-name='ClearAllFilters'
+                          >
+                            <X size={16} />
+                          </button>
+                        </Tooltip>
                       )}
-                      data-track-category='Support'
-                      data-track-name='ToggleMyTickets'
-                      data-track-metadata={JSON.stringify({
-                        showMyTicketsOnly: !showMyTicketsOnly,
-                      })}
-                    >
-                      My Tickets
-                    </button>
+                    </>
                   )}
                   {selectedChannelId &&
                     selectedChannelId !== ALL_CHANNELS_ID &&
@@ -819,7 +1013,7 @@ const SupportScreen = (): ReactElement => {
                           setInfoDefaultTab('members');
                           setIsInfoOpen(true);
                         }}
-                        className='flex items-center gap-1 text-sm font-medium transition-colors px-2 py-1 rounded whitespace-nowrap text-muted-foreground hover:text-foreground bg-transparent'
+                        className='inline-flex items-center gap-2 h-8 px-3 py-2 text-sm font-medium whitespace-nowrap rounded-md border border-input shadow-xs transition-[color,box-shadow] outline-none text-muted-foreground hover:text-foreground bg-transparent'
                         data-track-category='Support'
                         data-track-name='ViewMembers'
                         data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
@@ -936,7 +1130,16 @@ const SupportScreen = (): ReactElement => {
                       <X size={16} />
                     </button>
                   </div>
-                  <div className='p-4'>
+                  <div className='p-4 space-y-6'>
+                    {selectedChannelId && (
+                      <>
+                        <InboxAssigneeSettings
+                          channelId={selectedChannelId}
+                          currentAssigneeUserGroupId={emailChannelPreference?.assigneeUserGroupId}
+                        />
+                        <div className='border-t border-border' />
+                      </>
+                    )}
                     <SignatureEditor />
                   </div>
                 </div>
@@ -1001,7 +1204,7 @@ const SupportScreen = (): ReactElement => {
                   <TicketListView
                     filter={{
                       channelId: selectedChannelId,
-                      assignedTo: showMyTicketsOnly ? userID : undefined,
+                      ...ticketFilter,
                     }}
                     showExtraFields={true}
                     activeTicketId={ticketId}

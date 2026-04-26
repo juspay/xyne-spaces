@@ -32,6 +32,7 @@ export class ExternalSourceRepository {
    * Create external source
    * @param data.credentials - Encrypted credentials string (use encrypt() from encryptionService)
    * @param data.boardId - Optional target board for ticket creation
+   * @deprecated ownerUserId - Use EmailChannelPreference table instead
    */
   async create(data: {
     name: string;
@@ -40,7 +41,7 @@ export class ExternalSourceRepository {
     channelId: string;
     boardId?: string; // Target board for ticket creation
     credentials: string; // Encrypted credentials
-    ownerUserId?: string; // Channel creator — author for auto-created tickets
+    ownerUserId?: string; // @deprecated - Use EmailChannelPreference table instead
   }) {
     return await this.db.externalSource.create({
       data: {
@@ -58,6 +59,7 @@ export class ExternalSourceRepository {
 
   /**
    * Update external source
+   * @deprecated ownerUserId - Use EmailChannelPreference table instead
    */
   async update(id: string, data: {
     displayName?: string;
@@ -66,7 +68,7 @@ export class ExternalSourceRepository {
     isActive?: boolean;
     credentials?: string;
     lastSyncCursor?: string | null;
-    ownerUserId?: string;
+    ownerUserId?: string; // @deprecated - Use EmailChannelPreference table instead
   }) {
     return await this.db.externalSource.update({
       where: { id },

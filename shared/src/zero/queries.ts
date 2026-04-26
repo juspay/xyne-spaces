@@ -24,6 +24,7 @@ import {
   LinkVisibility,
   NudgeState,
   Status,
+  TicketPriority,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -516,12 +517,27 @@ export const queries = defineQueries({
       channelId: z.string(),
       isMember: z.boolean(),
       merchantMid: z.string().optional(),
+      assignedTo: z.array(z.string()).optional(),
+      priority: z.array(z.nativeEnum(TicketPriority)).optional(),
+      stageName: z.array(z.string()).optional(),
     }),
-    ({ args: { channelId, merchantMid } }) => {
+    ({ args: { channelId, merchantMid, assignedTo, priority, stageName } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
       if (merchantMid) {
         query = query.where('merchantId', merchantMid);
+      }
+
+      if (assignedTo && assignedTo.length > 0) {
+        query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
+      }
+
+      if (priority && priority.length > 0) {
+        query = query.where(({ or, cmp }) => or(...priority.map((p) => cmp('priority', p))));
+      }
+
+      if (stageName && stageName.length > 0) {
+        query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
       }
 
       return query
@@ -635,16 +651,26 @@ export const queries = defineQueries({
     z.object({
       channelId: z.string(),
       isMember: z.boolean(),
-      assignedTo: z.string().optional(),
+      assignedTo: z.array(z.string()).optional(),
+      priority: z.array(z.nativeEnum(TicketPriority)).optional(),
+      stageName: z.array(z.string()).optional(),
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
-    ({ ctx, args: { channelId, assignedTo, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, priority, stageName, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
 
-      if (assignedTo) {
-        query = query.where('assignedTo', assignedTo);
+      if (assignedTo && assignedTo.length > 0) {
+        query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
+      }
+
+      if (priority && priority.length > 0) {
+        query = query.where(({ or, cmp }) => or(...priority.map((p) => cmp('priority', p))));
+      }
+
+      if (stageName && stageName.length > 0) {
+        query = query.where(({ or, cmp }) => or(...stageName.map((s) => cmp('stageName', s))));
       }
 
       const orderDirection = dir === 'forward' ? 'desc' : 'asc';
@@ -684,6 +710,12 @@ export const queries = defineQueries({
       return zql.email_drafts
         .where('conversationId', conversationId)
         .where('userId', ctx.userID);
+    },
+  ),
+  getEmailChannelPreference: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.email_channel_preferences.where('channelId', channelId);
     },
   ),
   ticketById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {

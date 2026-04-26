@@ -12,6 +12,7 @@ export interface CreateChannelFormData {
   visibility: 'public' | 'private';
   topicTags: string[];
   projectId: string;
+  assigneeUserGroupId?: string;
 }
 
 export interface CreateChannelRequest {
@@ -24,6 +25,7 @@ export interface CreateChannelRequest {
   projectId: string;
   participants?: string[];
   type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT';
+  assigneeUserGroupId?: string;
 }
 
 export interface CreateChannelResponse {
@@ -102,13 +104,14 @@ export class ChannelService {
     formData: CreateChannelFormData,
     channelType: 'DEFAULT' | 'EMAIL' | 'SUPPORT' = 'DEFAULT',
   ): Promise<CreateChannelResponse> {
-    const requestData = {
+    const requestData: CreateChannelRequest = {
       name: formData.name,
       scopeType: 'DEFAULT',
       description: formData.description || '',
       visibility: formData.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
       projectId: formData.projectId,
       type: channelType,
+      ...(formData.assigneeUserGroupId && { assigneeUserGroupId: formData.assigneeUserGroupId }),
     };
 
     const response = await apiInstance.post<CreateChannelResponse>('/channels', requestData);

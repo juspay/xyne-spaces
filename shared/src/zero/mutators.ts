@@ -5585,6 +5585,33 @@ export const mutators = defineMutators({
       },
     ),
   },
+  emailChannelPreference: {
+    upsert: defineMutator(
+      z.object({
+        channelId: z.string(),
+        ownerUserId: z.string().optional(),
+        assigneeUserGroupId: z.string().optional().nullable(),
+      }),
+      async ({ tx, ctx, args: { channelId, ownerUserId, assigneeUserGroupId } }) => {
+        const existing = await tx.run(
+          zql.email_channel_preferences.where('channelId', channelId).one(),
+        );
+        if (existing) {
+          await tx.mutate.email_channel_preferences.update({
+            channelId,
+            ...(ownerUserId !== undefined ? { ownerUserId } : {}),
+            ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
+          });
+        } else {
+          await tx.mutate.email_channel_preferences.insert({
+            channelId,
+            ownerUserId: ownerUserId ?? ctx.userID,
+            assigneeUserGroupId: assigneeUserGroupId ?? null,
+          });
+        }
+      },
+    ),
+  },
 
   emailRead: {
     markAsRead: defineMutator(
