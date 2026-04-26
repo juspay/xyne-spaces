@@ -413,12 +413,14 @@ export async function searchFilesImpl(
 
       return scoredChunks.map((sc) => {
         entityCounter++;
+        const words = sc.chunk.split(/\s+/);
+        const truncatedChunk = words.length > 2000 ? words.slice(0, 2000).join(' ') : sc.chunk;
         return {
           ...baseFields,
           entityIndex: entityCounter,
-          content: `${docMeta}\nContent: ${sc.chunk}`,
+          content: `${docMeta}\nContent: ${truncatedChunk}`,
           chunkIndex: sc.index,
-          chunkText: sc.chunk,
+          chunkText: truncatedChunk,
           chunkPos: resolveChunkPos(sc.index),
         } as ToolEntity;
       });
