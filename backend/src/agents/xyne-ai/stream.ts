@@ -257,6 +257,7 @@ const {
   canvasIds,
   ticketIds,
   callIds,
+  systemPromptOverride,
 } = request;
 
   // Use provided config or fetch defaults
@@ -584,6 +585,7 @@ const {
     memoryEnabled: request.memoryEnabled !== false,  // default true; false disables get_memories/update_memory
     modelName: cacConfig.xyneAiModelName,
     agentName: request.agentName,
+    systemPromptOverride,
     requestMappings: {
       channelNameToId: new Map<string, string>(),
       userNameToId: new Map<string, string>(),

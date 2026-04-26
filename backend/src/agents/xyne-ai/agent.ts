@@ -243,22 +243,26 @@ export async function createAgentRunner(
   
   // Determine if we have thread context (conversationId is present)
   const hasThreadContext = !!context.conversationId;
-  
-  const systemPrompt = await buildAgentPrompt(
-    source,
-    context.timestamp,
-    context.userInfo,
-    channelNames,
-    context.webSearchEnabled,
-    context.deepResearchEnabled,
-    context.researchContext,
-    researchOptions,
-    context.customInstruction,
-    hasThreadContext,
-    context.userId,
-    context.agentName,
-    providedContexts
-  );
+
+  // If a systemPromptOverride is provided (e.g. draft mode), use it directly
+  // and skip the standard prompt-builder logic.
+  const systemPrompt = context.systemPromptOverride
+    ? context.systemPromptOverride
+    : await buildAgentPrompt(
+        source,
+        context.timestamp,
+        context.userInfo,
+        channelNames,
+        context.webSearchEnabled,
+        context.deepResearchEnabled,
+        context.researchContext,
+        researchOptions,
+        context.customInstruction,
+        hasThreadContext,
+        context.userId,
+        context.agentName,
+        providedContexts
+      );
   const agent = createXyneAIAgent(systemPrompt, context.webSearchEnabled, context.deepResearchEnabled, hasThreadContext, context.memoryEnabled);
   const agentRegistry = createAgentRegistry(agent);
   const runConfig = createRunConfig(agentRegistry, modelName, apiKey, onEvent);
