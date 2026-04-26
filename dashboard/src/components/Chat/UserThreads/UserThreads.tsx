@@ -65,6 +65,7 @@ const ThreadRow = memo(
               channelId={channelId}
               conversationId={conversationId}
               showHeader={false}
+              previewCardMode
             />
           </div>
         </div>
