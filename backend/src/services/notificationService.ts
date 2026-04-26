@@ -870,7 +870,7 @@ class NotificationService {
       type: NotificationType.MENTION,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
-      actionUrl: `/chat/${channelId}/${conversationId}#messageId=${messageId}`,
+      actionUrl: `/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -1124,7 +1124,7 @@ class NotificationService {
       type: NotificationType.DIRECT_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: conversationId,
-      actionUrl: `/chat/${channelId}`,
+      actionUrl: `/chat/dm/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         senderId,
         senderName,

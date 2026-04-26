@@ -124,6 +124,7 @@ export class NotificationHelper {
 
       // Remove HTML tags from message content for clean notification
       const cleanContent = data.content.replace(/<[^>]*>/g, '');
+      const actionUrl = `/chat/${data.channelId}/${data.conversationId}#origin=${data.conversationId}&messageId=${data.messageId}`;
 
       // Filter out the sender and create notification promises
       const notificationPromises = participants
@@ -142,7 +143,8 @@ export class NotificationHelper {
               senderName: data.senderName,
               channelTitle: data.channelTitle,
               messageType: 'direct_message'
-            }
+            },
+            actionUrl
           )
         );
 
@@ -174,6 +176,7 @@ export class NotificationHelper {
     try {
       // Remove HTML tags from message content for clean notification
       const cleanContent = data.content.replace(/<[^>]*>/g, '');
+      const actionUrl = `/chat/${data.channelId}/${data.conversationId}#origin=${data.conversationId}&messageId=${data.messageId}`;
 
       const notificationPromises = mentionedUserIds
         .filter(userId => userId !== data.senderId) // Don't notify sender if they mentioned themselves
@@ -191,7 +194,8 @@ export class NotificationHelper {
               senderName: data.senderName,
               channelTitle: data.channelTitle,
               messageType: 'mention'
-            }
+            },
+            actionUrl
           )
         );
 

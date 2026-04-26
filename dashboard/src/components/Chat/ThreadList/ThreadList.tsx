@@ -4,7 +4,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { useLocation } from 'react-router-dom';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
-import { extractOriginFromHash, extractMessageIdFromHash } from '../ChatList/ChatListUtils';
+import { useThreadListInitialScroll } from './useThreadListInitialScroll';
 import type { ThreadListItemWithSeparator } from '../../../utils/chatUtils';
 import { DatePill } from '../DatePill';
 import { MessageType, ChannelScopeType } from '@xyne/shared';
@@ -31,6 +31,8 @@ type ThreadListProps = {
   disableAskAI?: boolean;
   enableCollapsing?: boolean;
   enableJumpFab?: boolean;
+  /** When false, hash deep-link scroll waits until Zero reports the thread query complete (avoids scroll before prepends). */
+  isMessagesLoaded?: boolean;
 };
 
 const ThreadList = ({
@@ -47,6 +49,7 @@ const ThreadList = ({
   disableAskAI,
   enableCollapsing = false,
   enableJumpFab = true,
+  isMessagesLoaded = true,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
   const { editingMessageId, requestEdit } = useEditContext();
@@ -143,7 +146,21 @@ const ThreadList = ({
     hasAppliedInitialScrollRef.current = false;
     setIsNearBottom(false);
     setHasOverflow(false);
-  }, [conversationId, location.key]);
+  }, [conversationId, location.key, location.hash]);
+
+  useThreadListInitialScroll({
+    scrollContainerRef,
+    conversationId,
+    location,
+    threadMessages,
+    enableCollapsing,
+    firstUnreadIndex,
+    savedScrollPosition,
+    initialScrollOffset,
+    isMessagesLoaded,
+    hasAppliedInitialScrollRef,
+    setIsNearBottom,
+  });
 
   // Handle collapsible thread logic - only when enableCollapsing is true
   const shouldCollapse = enableCollapsing && !isExpanded;
@@ -164,76 +181,6 @@ const ThreadList = ({
       hiddenCount: hidden,
     };
   })();
-
-  /**
-   * 1️⃣ On initial load → force scroll to specific message, first unread, saved position, or bottom
-   *    Priority: message navigation > first unread > saved position > bottom
-   */
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container || !threadMessages?.length) return;
-    if (hasAppliedInitialScrollRef.current) return;
-    if (enableCollapsing && typeof initialScrollOffset !== 'number' && !location.hash) {
-      hasAppliedInitialScrollRef.current = true;
-      return;
-    }
-
-    const originConversationId = extractOriginFromHash(location.hash);
-    const targetMessageId = extractMessageIdFromHash(location.hash);
-
-    requestAnimationFrame(() => {
-      // Priority 1: Check for specific message navigation from URL hash
-      if (originConversationId === conversationId && targetMessageId) {
-        const elementId = `thread-message-${conversationId}-${targetMessageId}`;
-        const targetElement = document.getElementById(elementId);
-        if (targetElement) {
-          targetElement.scrollIntoView({ behavior: 'auto', block: 'start' });
-          hasAppliedInitialScrollRef.current = true;
-          return;
-        }
-      }
-
-      // Priority 1.5: Scroll to first unread message
-      if (!enableCollapsing && firstUnreadIndex !== null && threadMessages[firstUnreadIndex]) {
-        const elementId = `thread-message-${conversationId}-${threadMessages[firstUnreadIndex].messageId}`;
-        const targetElement = document.getElementById(elementId);
-        if (targetElement) {
-          targetElement.scrollIntoView({ behavior: 'auto', block: 'start' });
-          hasAppliedInitialScrollRef.current = true;
-          return;
-        }
-      }
-
-      // Priority 2: Use saved scroll position
-      if (!enableCollapsing && savedScrollPosition !== null) {
-        container.scrollTop = savedScrollPosition;
-        hasAppliedInitialScrollRef.current = true;
-        return;
-      }
-
-      // Priority 2.5: Use provided initialScrollOffset
-      if (typeof initialScrollOffset === 'number') {
-        container.scrollTop = initialScrollOffset;
-        hasAppliedInitialScrollRef.current = true;
-        return;
-      }
-
-      // Priority 3: Default to TOP (new thread behavior)
-      container.scrollTop = 0;
-      hasAppliedInitialScrollRef.current = true;
-      setIsNearBottom(false);
-    });
-  }, [
-    channelId,
-    conversationId,
-    enableCollapsing,
-    location.hash,
-    location.key,
-    firstUnreadIndex,
-    savedScrollPosition,
-    initialScrollOffset,
-    threadMessages,
-  ]);
 
   /**
    * 2️⃣ Auto-scroll on new messages
