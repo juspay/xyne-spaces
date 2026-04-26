@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
-import { CallStatus, InvitationResponse } from '@prisma/client';
+import { CallStatus } from '@prisma/client';
 import { callLobbyController } from '@/controllers/callLobbyController';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -88,43 +88,22 @@ async function resolveCallSession(req: Request, res: Response, next: NextFunctio
 // Layer 2: requireCallParticipant
 //
 // For protected routes (messages, participants). Ensures the request has an
-// authenticated participant — cookie session or participantId param fallback.
-// Sets req.callParticipantId. Never returns 401.
+// authenticated external participant via cookie session.
+// Sets req.callParticipantId.
+// Internal (logged-in) users use /api/calls/chat/ endpoints instead.
 // ---------------------------------------------------------------------------
 
 async function requireCallParticipant(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const lobbyReq = req as CallLobbyRequest;
 
-    // 1. Cookie session (external users)
     if (lobbyReq.callSession) {
       lobbyReq.callParticipantId = lobbyReq.callSession.participantId;
       next();
       return;
     }
 
-    // 2. Fallback: participantId from query/body (internal users)
-    const participantId = (req.query.participantId as string) || (req.body as { participantId?: string })?.participantId;
-    if (!participantId) {
-      res.status(403).json({ error: 'Not authenticated for this call' });
-      return;
-    }
-
-    const participant = await db.callParticipant.findFirst({
-      where: {
-        userId: participantId,
-        callId: lobbyReq.call.callId,
-        response: InvitationResponse.ACCEPTED,
-      },
-    });
-
-    if (!participant) {
-      res.status(403).json({ error: 'Not an accepted participant of this call' });
-      return;
-    }
-
-    lobbyReq.callParticipantId = participantId;
-    next();
+    res.status(403).json({ error: 'Not authenticated for this call' });
   } catch (err) {
     logger.error(`[call-lobby] requireCallParticipant failed | error=${err}`);
     res.status(500).json({ error: 'Internal server error' });

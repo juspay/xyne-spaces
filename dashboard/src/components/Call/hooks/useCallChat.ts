@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { RoomEvent } from 'livekit-client';
 import type { RemoteParticipant, Room } from 'livekit-client';
 import { callLobbyService } from '../../../services/Call/callLobbyService';
-import type { CallChatMessage } from '../../../services/Call/callLobbyService';
+import { callChatService } from '../../../services/Call/callChatService';
+import type { CallChatMessage } from '@xyne/shared';
 
 export const CALL_CHAT_TOPIC = 'call-chat';
 
@@ -57,13 +58,11 @@ export function useCallChat(
     fetchedRef.current = true;
     setIsLoading(true);
 
-    void callLobbyService
-      .getMessages(
-        externalId,
-        undefined,
-        undefined,
-        isExternalUser ? undefined : localParticipantId,
-      )
+    const fetchMessages = isExternalUser
+      ? callLobbyService.getMessages(externalId)
+      : callChatService.getMessages(externalId);
+
+    void fetchMessages
       .then(msgs => {
         const chatMsgs: ChatMessage[] = msgs.map(m => ({
           ...m,
@@ -76,7 +75,7 @@ export function useCallChat(
       .catch(() => {
         setIsLoading(false);
       });
-  }, [externalId, localParticipantId]);
+  }, [externalId, localParticipantId, isExternalUser]);
 
   // Add a message to state, deduplicating by id
   const addMessage = useCallback((msg: ChatMessage) => {
@@ -131,11 +130,9 @@ export function useCallChat(
     async (text: string) => {
       if (!room || !externalId || !localParticipantId || !text.trim()) return;
 
-      const created = await callLobbyService.sendMessage(
-        externalId,
-        text.trim(),
-        isExternalUser ? undefined : localParticipantId,
-      );
+      const created = isExternalUser
+        ? await callLobbyService.sendMessage(externalId, text.trim())
+        : await callChatService.sendMessage(externalId, text.trim());
 
       // Broadcast to other participants via LiveKit data channel
       const dataMsg: CallChatDataMessage = {
@@ -159,7 +156,7 @@ export function useCallChat(
         isLocal: true,
       });
     },
-    [room, externalId, localParticipantId, addMessage],
+    [room, externalId, localParticipantId, isExternalUser, addMessage],
   );
 
   return { messages, sendMessage, isLoading };

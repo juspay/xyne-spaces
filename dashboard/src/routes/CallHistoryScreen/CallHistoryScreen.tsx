@@ -45,6 +45,7 @@ import axios from 'axios';
 import { API_BASE_URL } from '../../config';
 import { CallCard, UpcomingCallCard } from './CallCard';
 import { Call, isExternalCalendarEvent } from './callHistoryItem.utils';
+import { CallExternalChatDialog } from '../../components/Call/CallExternalChatDialog/CallExternalChatDialog';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { ParticipantsModal } from './ParticipantsModal';
 import * as Tabs from '@radix-ui/react-tabs';
@@ -87,6 +88,7 @@ const CallHistoryScreen = (): ReactElement => {
   } | null>(null);
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
+  const [externalChatCallId, setExternalChatCallId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
   const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>('month');
   const [calendarProvider, setCalendarProvider] = useState<'GOOGLE' | 'MICROSOFT' | null>(null);
@@ -936,6 +938,7 @@ const CallHistoryScreen = (): ReactElement => {
                           onParticipantsClick={() => handleParticipantsClick(call)}
                           handleGotoTranscript={getGotoTranscriptHandler(call)}
                           handleDownloadTranscript={() => handleDownloadTranscript(call)}
+                          onViewExternalChat={() => setExternalChatCallId(call.externalId)}
                         />
                       ))
                     ) : (
@@ -961,6 +964,7 @@ const CallHistoryScreen = (): ReactElement => {
                             onParticipantsClick={() => handleParticipantsClick(call)}
                             handleGotoTranscript={getGotoTranscriptHandler(call)}
                             handleDownloadTranscript={() => handleDownloadTranscript(call)}
+                            onViewExternalChat={() => setExternalChatCallId(call.externalId)}
                           />
                         )}
                       />
@@ -1080,6 +1084,7 @@ const CallHistoryScreen = (): ReactElement => {
                       onParticipantsClick={() => handleParticipantsClick(call)}
                       handleGotoTranscript={getGotoTranscriptHandler(call)}
                       handleDownloadTranscript={() => handleDownloadTranscript(call)}
+                      onViewExternalChat={() => setExternalChatCallId(call.externalId)}
                     />
                   ))}
                 </div>
@@ -1142,6 +1147,13 @@ const CallHistoryScreen = (): ReactElement => {
         isOpen={isInstantCallModalOpen}
         onClose={() => setIsInstantCallModalOpen(false)}
         onSubmit={handleInstantCall}
+      />
+
+      {/* External Chat History Dialog */}
+      <CallExternalChatDialog
+        open={!!externalChatCallId}
+        onOpenChange={open => !open && setExternalChatCallId(null)}
+        callExternalId={externalChatCallId ?? ''}
       />
 
       {/* Delete Call Modal */}

@@ -4,6 +4,7 @@ import {
   Copy,
   Download,
   Hash,
+  MessageSquare,
   MoveDownLeft,
   MoveUpRight,
   Pencil,
@@ -77,6 +78,7 @@ interface CallHistoryItemProps {
   onParticipantsClick: () => void;
   handleGotoTranscript?: (() => void) | undefined;
   handleDownloadTranscript?: (() => void) | undefined;
+  onViewExternalChat?: (() => void) | undefined;
 }
 
 const MAX_AVATARS_TO_SHOW = 3;
@@ -321,6 +323,7 @@ export const CallCard = ({
   onParticipantsClick,
   handleGotoTranscript,
   handleDownloadTranscript,
+  onViewExternalChat,
   isLastItem,
 }: CallHistoryItemProps) => {
   // Get channel information
@@ -557,6 +560,18 @@ export const CallCard = ({
                       <Download className='size-3.5 text-muted-foreground' />
                     </Button>
                   </span>
+                </Tooltip>
+                <Tooltip content='View External Chat' delayDuration={300}>
+                  <Button
+                    onClick={onViewExternalChat}
+                    variant='outline'
+                    size='icon'
+                    className='size-7'
+                    data-track-category='calls'
+                    data-track-name='view-external-chat'
+                  >
+                    <MessageSquare className='size-3.5 text-muted-foreground' />
+                  </Button>
                 </Tooltip>
               </>
             )}

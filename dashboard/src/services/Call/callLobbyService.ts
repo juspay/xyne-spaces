@@ -1,4 +1,5 @@
 import { CallType } from '@xyne/shared';
+import type { CallChatMessage } from '@xyne/shared';
 import { apiInstance } from '../clients/apiClient';
 
 export interface CallInfo {
@@ -26,15 +27,8 @@ export interface LobbyParticipant {
   response: string | null;
 }
 
-export interface CallChatMessage {
-  id: string;
-  callId: string;
-  participantId: string;
-  displayName: string;
-  message: string;
-  createdAt: string;
-  isExternal: boolean;
-}
+// Re-export shared type for backward compatibility
+export type { CallChatMessage } from '@xyne/shared';
 
 export interface ExternalJoinResponse {
   token: string;
@@ -105,45 +99,41 @@ export const callLobbyService = {
 
   /**
    * Send a chat message in a call.
-   * Auth is via HTTP-only cookie (external) or participantId param (internal).
+   * Auth is via HTTP-only cookie (external users only).
+   * Internal users should use callChatService instead.
    */
-  async sendMessage(
-    externalId: string,
-    message: string,
-    participantId?: string,
-  ): Promise<CallChatMessage> {
+  async sendMessage(externalId: string, message: string): Promise<CallChatMessage> {
     const response = await apiInstance.post<CallChatMessage>(`${BASE}/${externalId}/messages`, {
       message,
-      ...(participantId && { participantId }),
     });
     return response.data;
   },
 
   /**
    * Get chat messages for a call.
-   * Auth is via HTTP-only cookie (external) or participantId param (internal).
+   * Auth is via HTTP-only cookie (external users only).
+   * Internal users should use callChatService instead.
    */
   async getMessages(
     externalId: string,
     limit?: number,
     before?: string,
-    participantId?: string,
   ): Promise<CallChatMessage[]> {
     const response = await apiInstance.get<{ messages: CallChatMessage[] }>(
       `${BASE}/${externalId}/messages`,
-      { params: { ...(participantId && { participantId }), limit, before } },
+      { params: { limit, before } },
     );
     return response.data.messages;
   },
 
   /**
    * Get participant list with resolved display names (public-safe).
-   * Auth is via HTTP-only cookie (external) or participantId param (internal).
+   * Auth is via HTTP-only cookie (external users only).
+   * Internal users should use callChatService instead.
    */
-  async getParticipants(externalId: string, participantId?: string): Promise<LobbyParticipant[]> {
+  async getParticipants(externalId: string): Promise<LobbyParticipant[]> {
     const response = await apiInstance.get<{ participants: LobbyParticipant[] }>(
       `${BASE}/${externalId}/participants`,
-      { params: { ...(participantId && { participantId }) } },
     );
     return response.data.participants;
   },

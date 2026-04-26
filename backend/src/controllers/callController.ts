@@ -1919,6 +1919,50 @@ export class CallController {
     }
   };
 
+  getCallChatHistory = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId: externalId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!externalId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    try {
+      const call = await db.call.findUnique({
+        where: { externalId },
+        select: { id: true },
+      });
+
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      const participant = await db.callParticipant.findFirst({
+        where: { callId: call.id, userId },
+      });
+
+      if (!participant) {
+        res.status(404).json({ success: false, error: 'You are not a participant of this call' });
+        return;
+      }
+
+      const messages = await repositories.callMessages.getByCallId(call.id);
+      const hasExternalMessages = messages.some(m => m.isExternal);
+
+      res.json({ success: true, messages, hasExternalMessages });
+    } catch (error) {
+      logger.error('Failed to get call chat history:', error);
+      res.status(500).json({ success: false, error: 'Failed to get call chat history' });
+    }
+  };
+
 }
 
 export const callController = new CallController();

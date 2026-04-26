@@ -143,6 +143,13 @@ class LiveKitWebhookController {
         } catch (sideEffectError) {
           logger.error(`[LiveKit Webhook] Failed to trigger call metrics side effects:`, sideEffectError);
         }
+
+        // Post external chat summary if external participants sent messages
+        try {
+          await callSideEffectService.postExternalChatSummary(result.call.id, callId);
+        } catch (sideEffectError) {
+          logger.error(`[LiveKit Webhook] Failed to post external chat summary for ${callId}:`, sideEffectError);
+        }
       } else {
         logger.debug(`[LiveKit Webhook] Call ${callId} already marked as ENDED`);
       }
@@ -469,6 +476,13 @@ class LiveKitWebhookController {
           logger.info(`[LiveKit Webhook] Triggered call metrics side effects for ${callId}`);
         } catch (sideEffectError) {
           logger.error(`[LiveKit Webhook] Failed to trigger call metrics side effects:`, sideEffectError);
+        }
+
+        // Post external chat summary if external participants sent messages
+        try {
+          await callSideEffectService.postExternalChatSummary(result.call.id, callId);
+        } catch (sideEffectError) {
+          logger.error(`[LiveKit Webhook] Failed to post external chat summary for ${callId}:`, sideEffectError);
         }
       }
 
