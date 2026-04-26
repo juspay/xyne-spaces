@@ -223,6 +223,7 @@ export const ThreadMessages = ({
   // Use pre-fetched messages if provided, otherwise use queried
   const messages = propThreadMessages ?? queriedMessages;
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
+  const isMessagesLoaded = messagesDetails.type === 'complete' || messagesDetails.type === 'error';
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const channel = useChannel(derivedChannelId);
@@ -839,6 +840,7 @@ export const ThreadMessages = ({
               workflowNumberMap={workflowNumberMap}
               enableCollapsing={previewCardMode}
               enableJumpFab={!previewCardMode}
+              isMessagesLoaded={isMessagesLoaded}
               {...(disableAskAI !== undefined && { disableAskAI })}
             />
 
@@ -1267,6 +1269,7 @@ export const ThreadMessages = ({
               workflowNumberMap={workflowNumberMap}
               enableCollapsing={previewCardMode}
               enableJumpFab={!previewCardMode}
+              isMessagesLoaded={isMessagesLoaded}
               {...(disableAskAI !== undefined && { disableAskAI })}
             />
 
@@ -1694,6 +1697,7 @@ export const ThreadMessages = ({
             workflowNumberMap={workflowNumberMap}
             enableCollapsing={previewCardMode}
             enableJumpFab={!previewCardMode}
+            isMessagesLoaded={isMessagesLoaded}
             {...(disableAskAI !== undefined && { disableAskAI })}
           />
 

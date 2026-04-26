@@ -46,6 +46,29 @@ interface NotificationData {
   timestamp: string;
 }
 
+const buildChatActionUrl = (notification: NotificationData['notification']): string | undefined => {
+  if (notification.actionUrl) return notification.actionUrl;
+
+  const channelId = notification.data?.channelId;
+  const conversationId = notification.data?.conversationId;
+  const messageId = notification.data?.messageId;
+  const isDirectMessage = notification.type.toLowerCase() === 'direct_message';
+  const routeBase = isDirectMessage ? `/chat/dm/${channelId}` : `/chat/${channelId}`;
+
+  if (!channelId) return undefined;
+  if (conversationId && messageId) {
+    if (isDirectMessage) {
+      return `${routeBase}#origin=${conversationId}&messageId=${messageId}`;
+    }
+    return `${routeBase}/${conversationId}#origin=${conversationId}&messageId=${messageId}`;
+  }
+  if (conversationId) {
+    return `${routeBase}#origin=${conversationId}`;
+  }
+
+  return routeBase;
+};
+
 export const NotificationHandler: React.FC = () => {
   const { user } = useAuthContext();
   const navigate = useNavigate();
@@ -69,6 +92,8 @@ export const NotificationHandler: React.FC = () => {
               ? `/redirected?canvasId=${encodeURIComponent(data.notification.data.canvasId)}&blockId=${encodeURIComponent(data.notification.data.blockId)}`
               : `/redirected?canvasId=${encodeURIComponent(data.notification.data.canvasId)}`
             : undefined;
+        const fallbackChatActionUrl = buildChatActionUrl(data.notification);
+        const resolvedActionUrl = canvasActionUrl || fallbackChatActionUrl;
 
         if (
           isElectron &&
@@ -79,7 +104,7 @@ export const NotificationHandler: React.FC = () => {
           window.electronAPI.showNotification({
             title: data.notification.title,
             body: data.notification.message,
-            actionUrl: canvasActionUrl || data.notification.actionUrl || '/chat',
+            actionUrl: resolvedActionUrl || '/chat',
           });
         } else if (!(reactNativeBridge.isAvailable() && suppressNativeToasts)) {
           playNotificationSound();
@@ -87,44 +112,40 @@ export const NotificationHandler: React.FC = () => {
           const toastFn = getToastFn(data.notification.type);
           toastFn(data.notification.title, {
             description: data.notification.message,
-            action:
-              canvasActionUrl || data.notification.actionUrl
-                ? {
-                    label: 'View',
-                    onClick: (): void => {
-                      if (canvasActionUrl || data.notification.actionUrl) {
-                        // If in VS Code editor and notification has thread/conversation data, open thread in editor
-                        if (
-                          isOnVSCode &&
-                          (data.notification.data?.conversationId ||
-                            data.notification.data?.channelId)
-                        ) {
-                          // Dispatch custom event to open thread in VS Code workspace
-                          window.dispatchEvent(
-                            new CustomEvent('vscode-open-thread', {
-                              detail: {
-                                conversationId: data.notification.data.conversationId,
-                                channelId: data.notification.data.channelId,
-                                messageId: data.notification.data.messageId,
-                              },
-                            }),
-                          );
-                        } else {
-                          // Normal navigation behavior
-                          const actionUrl = canvasActionUrl || data.notification.actionUrl;
-                          if (actionUrl) {
-                            void navigate(actionUrl);
-                          }
-                        }
+            action: resolvedActionUrl
+              ? {
+                  label: 'View',
+                  onClick: (): void => {
+                    if (resolvedActionUrl) {
+                      // If in VS Code editor and notification has thread/conversation data, open thread in editor
+                      if (
+                        isOnVSCode &&
+                        (data.notification.data?.conversationId ||
+                          data.notification.data?.channelId)
+                      ) {
+                        // Dispatch custom event to open thread in VS Code workspace
+                        window.dispatchEvent(
+                          new CustomEvent('vscode-open-thread', {
+                            detail: {
+                              conversationId: data.notification.data.conversationId,
+                              channelId: data.notification.data.channelId,
+                              messageId: data.notification.data.messageId,
+                            },
+                          }),
+                        );
+                      } else {
+                        // Normal navigation behavior
+                        void navigate(resolvedActionUrl);
                       }
-                    },
-                  }
-                : {
-                    label: 'View',
-                    onClick: (): void => {
-                      void navigate('/chat');
-                    },
+                    }
                   },
+                }
+              : {
+                  label: 'View',
+                  onClick: (): void => {
+                    void navigate('/chat');
+                  },
+                },
             duration: 5000,
           });
         }
