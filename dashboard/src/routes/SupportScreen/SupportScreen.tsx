@@ -16,6 +16,7 @@ import {
   List,
   // Split,  // DISABLED: used by commented-out demerge-email button
   Paperclip,
+  Link as LinkIcon,
   Settings,
   Signature,
   Minimize2,
@@ -111,7 +112,7 @@ import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/Sign
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
-import { API_BASE_URL } from '../../config';
+import { API_BASE_URL, SHAREABLE_ORIGIN } from '../../config';
 import Dialog from '../../components/ui/Dialog';
 import { useMutation } from '@tanstack/react-query';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
@@ -1437,6 +1438,30 @@ const SupportTicketDetail = (): ReactElement => {
                     <div className='w-px h-4 bg-border' />
                   </>
                 )}
+
+                <Tooltip side='bottom' delayDuration={300} content='Copy link to ticket'>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      if (!channelId || !ticketIdParam) {
+                        toast.error('Cannot copy link');
+                        return;
+                      }
+                      const url = `${SHAREABLE_ORIGIN}/support/${channelId}/${ticketIdParam}`;
+                      void navigator.clipboard
+                        .writeText(url)
+                        .then(() => toast.success('Link copied'))
+                        .catch(() => toast.error('Failed to copy link'));
+                    }}
+                    className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                    aria-label='Copy link to ticket'
+                    data-track-category='Support'
+                    data-track-name='CopyTicketLink'
+                  >
+                    <LinkIcon size={16} />
+                  </button>
+                </Tooltip>
+                <div className='w-px h-4 bg-border' />
 
                 <div className='flex items-center gap-1'>
                   <Tooltip
