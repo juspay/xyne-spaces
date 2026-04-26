@@ -124,6 +124,7 @@ export class ApplicationRepository {
               statusV2: TicketStatusV2.TODO,
               priority: TicketPriority.LOW,
               stageName: 'Release',
+              lastEmailAt: new Date(),
             },
           });
 

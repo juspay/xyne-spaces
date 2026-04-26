@@ -957,7 +957,11 @@ export const router = createBrowserRouter([
                 path: 'support',
                 element: (
                   <ResourceProtectedRoute resourceName='SUPPORT'>
-                    <SaveRoute keyword='support' stripSearchParams={['settings', 'openSettings']}>
+                    <SaveRoute
+                      keyword='support'
+                      stripSearchParams={['settings', 'openSettings']}
+                      preserveSearchParams={['emailConnected', 'emailError']}
+                    >
                       <SupportScreen />
                     </SaveRoute>
                   </ResourceProtectedRoute>

@@ -45,6 +45,10 @@ export interface ChannelPreviousValue {
   name: string;
 }
 
+export interface EmailReadPreviousValue {
+  lastReadEmailId: string;
+}
+
 export type PreviousValue =
   | ConversationPreviousValue
   | TicketPreviousValue
@@ -52,7 +56,8 @@ export type PreviousValue =
   | ReactionPreviousValue
   | MessagePreviousValue
   | TicketTagPreviousValue
-  | ChannelPreviousValue;
+  | ChannelPreviousValue
+  | EmailReadPreviousValue;
 
 export interface SideEffectJobConfig {
   entityType: TableName;
@@ -81,6 +86,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   ticket_stage_eta: ['update'],
   canvases: ['insert'],
   channels: ['update'],
+  email_reads: ['insert', 'update'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

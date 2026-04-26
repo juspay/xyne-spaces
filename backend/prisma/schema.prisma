@@ -384,6 +384,7 @@ model Ticket {
   stageName        String            // Current stage of the ticket
   ticketType       String?           
   isArchived       Boolean           @default(false)
+  lastEmailAt      DateTime          // Timestamp of most recent email in the ticket's conversation; powers Gmail-style ordering. No @default(now()) because Zero needs every write to flow through the application — every ticket-create call site sets this explicitly.
 
   // Relations
   createdByUser      User                   @relation("TicketCreatedBy", fields: [createdBy], references: [id])
@@ -408,6 +409,7 @@ model Ticket {
   @@index([assignedTo, status])
   @@index([createdAt])
   @@index([updatedAt])
+  @@index([lastEmailAt])
   @@index([eta])
   @@index([boardId])
   @@index([projectId])
@@ -1799,6 +1801,21 @@ model EmailDraft {
   @@index([conversationId])
   @@index([channelId])
   @@map("email_drafts")
+  @@schema("public")
+}
+
+model EmailRead {
+  id              String   @id @default(cuid())
+  ticketId        String
+  userId          String
+  lastReadEmailId String
+  createdAt       DateTime
+  updatedAt       DateTime @updatedAt
+
+  @@unique([ticketId, userId])
+  @@index([userId])
+  @@index([ticketId])
+  @@map("email_reads")
   @@schema("public")
 }
 

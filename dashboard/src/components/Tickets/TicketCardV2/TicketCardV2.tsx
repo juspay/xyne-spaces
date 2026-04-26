@@ -61,6 +61,7 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     ticketType: summary.ticketType ?? null,
     isArchived: false,
     workspaceId: workspaceId,
+    lastEmailAt: summary.createdAt ?? now,
   };
 };
 

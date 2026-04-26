@@ -6,6 +6,7 @@ import { apiInstance } from '../services/clients/apiClient';
 export interface RefetchResponse {
   success: boolean;
   processed: number;
+  newTickets: number;
   skipped: number;
   errors: string[];
 }
@@ -42,10 +43,13 @@ export const useRefetchExternalSource = (
     if (!channelId || mutation.isPending) return;
     mutation.mutate(undefined, {
       onSuccess: result => {
-        if (result.processed > 0) {
+        if (result.newTickets > 0) {
           toast.success(
-            `Fetched ${result.processed} new message${result.processed === 1 ? '' : 's'}`,
+            `Fetched ${result.newTickets} new email${result.newTickets === 1 ? '' : 's'}`,
           );
+        } else if (result.processed > 0) {
+          // Replies-only run: tickets stayed the same, but threads got updates.
+          toast.success(`Updated ${result.processed} thread${result.processed === 1 ? '' : 's'}`);
         } else if (result.errors.length > 0) {
           toast.error(`Refetch completed with ${result.errors.length} error(s)`);
         } else {

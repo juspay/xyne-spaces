@@ -142,6 +142,7 @@ export interface IngestionResult {
   conversationId: string;
   entityId: string;
   action: 'created' | 'updated' | 'duplicate' | 'skipped';
+  isNew?: boolean;
 }
 
 /**

@@ -39,9 +39,10 @@ export class MicrosoftRefetch extends BaseRefetch {
       listUrl.searchParams.set('$orderby', 'receivedDateTime asc');
     } else {
       listUrl.searchParams.set('$orderby', 'receivedDateTime desc');
-      listUrl.searchParams.set('$top', String(FALLBACK_LIMIT));
+      // Over-fetch then thread-cap below so N=10 = 10 tickets, not 10 raw messages.
+      listUrl.searchParams.set('$top', String(FALLBACK_LIMIT * 10));
     }
-    listUrl.searchParams.set('$select', 'id,receivedDateTime');
+    listUrl.searchParams.set('$select', 'id,receivedDateTime,conversationId');
 
     const listResponse = await fetch(listUrl.toString(), {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -50,9 +51,25 @@ export class MicrosoftRefetch extends BaseRefetch {
       const body = await listResponse.text().catch(() => '');
       throw new Error(`Failed to list messages: ${listResponse.status} ${body}`);
     }
-    const { value = [] } = (await listResponse.json()) as {
-      value: Array<{ id: string; receivedDateTime: string }>;
-    };
+    const rawValue = (
+      (await listResponse.json()) as {
+        value: Array<{ id: string; receivedDateTime: string; conversationId?: string }>;
+      }
+    ).value ?? [];
+
+    let value = rawValue;
+    if (!source.lastSyncCursor) {
+      const picked: typeof rawValue = [];
+      const threads = new Set<string>();
+      for (const m of rawValue) {
+        const tid = m.conversationId ?? m.id;
+        if (threads.size >= FALLBACK_LIMIT && !threads.has(tid)) continue;
+        threads.add(tid);
+        picked.push(m);
+      }
+      value = picked;
+    }
+
     const nextCursor = value.reduce<string | null>(
       (acc, m) => (!acc || m.receivedDateTime > acc ? m.receivedDateTime : acc),
       source.lastSyncCursor ?? null,
@@ -60,6 +77,7 @@ export class MicrosoftRefetch extends BaseRefetch {
 
     // Step 2: ingest each — fetch full message, transform, sync
     let processed = 0;
+    let newTickets = 0;
     let skipped = 0;
     const errors: string[] = [];
 
@@ -92,8 +110,12 @@ export class MicrosoftRefetch extends BaseRefetch {
           source.name,
           parsed.data,
         );
-        if (result.action === 'duplicate') skipped++;
-        else processed++;
+        if (result.action === 'duplicate') {
+          skipped++;
+        } else {
+          processed++;
+          if (result.isNew) newTickets++;
+        }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
         logger.warn(`${TAG} ingest failed for ${id}`, { error: errMsg });
@@ -106,7 +128,7 @@ export class MicrosoftRefetch extends BaseRefetch {
       await new ExternalSourceRepository().update(source.id, { lastSyncCursor: nextCursor });
     }
 
-    logger.info(`${TAG} ${source.name}: processed=${processed} skipped=${skipped} errors=${errors.length}`);
-    return { processed, skipped, errors };
+    logger.info(`${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`);
+    return { processed, newTickets, skipped, errors };
   }
 }

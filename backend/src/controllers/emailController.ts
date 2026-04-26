@@ -14,6 +14,7 @@ import { ExternalMessageRepository } from '@/database/repositories/externalMessa
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { logger } from '@/utils/logger';
 import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma } from '@prisma/client';
+import { db } from '@/database/client';
 import { ZohoService } from '@/services/zohoService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
 import { GoogleService } from '@/services/googleService';
@@ -234,6 +235,11 @@ export class EmailController {
         channelId: conversation.channelId,
         externalThreadId: result.threadId,
         externalMessageId,
+      });
+      
+      await db.ticket.updateMany({
+        where: { conversationId },
+        data: { lastEmailAt: new Date() },
       });
 
       // 7. Create ExternalMessage tracking record for deduplication.

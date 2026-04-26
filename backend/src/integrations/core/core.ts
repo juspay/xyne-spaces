@@ -172,7 +172,8 @@ export class ExternalSourceCore {
         success: true,
         conversationId: "",
         entityId: existingExtMsg.entityId || "",
-        action: "duplicate"
+        action: "duplicate",
+        isNew: false,
       }
     }
 
@@ -199,6 +200,7 @@ export class ExternalSourceCore {
         conversationId: '',
         entityId: '',
         action: 'created',
+        isNew: false,
       };
     }
 
@@ -237,6 +239,7 @@ export class ExternalSourceCore {
       conversationId: conversation.conversationId,
       entityId: resolvedEntityId,
       action: 'created',
+      isNew,
     };
   }
 
@@ -300,6 +303,7 @@ export class ExternalSourceCore {
           externalThreadId: normalizedData.externalThreadId,
           externalMessageId: normalizedData.externalId,
           uploadedFiles: uploadedFiles,
+          receivedAt: normalizedData.metadata.timestamp,
         });
         return { conversation, message: undefined, email, isNew: false };
       } else {
@@ -376,6 +380,7 @@ export class ExternalSourceCore {
           externalMessageId: normalizedData.externalId,
           emailType: EmailType.DEFAULT,
           uploadedFiles: uploadedFiles,
+          receivedAt: normalizedData.metadata.timestamp,
         });
 
         logger.info(`[EMAIL_DUPLICATE_SUCCESS] Successfully added email to existing conversation`, {
@@ -419,6 +424,7 @@ export class ExternalSourceCore {
         ticketMetadata: normalizedData.metadata,
         uploadedFiles: uploadedFiles,
         sourceName: source.name, // Pass sourceName for Superposition context
+        receivedAt: normalizedData.metadata.timestamp,
       });
       if ((createResult as any)?.blocked || (createResult as any)?.isDuplicate) {
         return { conversation: undefined, message: undefined, email: undefined, isNew: false, blocked: true };

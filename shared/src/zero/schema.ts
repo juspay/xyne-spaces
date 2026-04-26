@@ -744,6 +744,7 @@ export const ticketTable = table('tickets')
     stageName: string(),
     ticketType: string().optional(),
     isArchived: boolean(),
+    lastEmailAt: number(),
   })
   .primaryKey('id');
 
@@ -1681,6 +1682,17 @@ export const emailSignatureTable = table('email_signatures')
   })
   .primaryKey('id');
 
+export const emailReadTable = table('email_reads') // Prisma model: EmailRead
+  .columns({
+    id: string(),
+    ticketId: string(),
+    userId: string(),
+    lastReadEmailId: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const formTable = table('forms')
   .columns({
     id: string(),
@@ -2123,6 +2135,11 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ['channelId'],
     destField: ['id'],
     destSchema: channelTable,
+  }),
+  emailReads: many({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: emailReadTable,
   }),
   project: one({
     sourceField: ['projectId'],
@@ -3376,6 +3393,19 @@ export const emailTableRelationships = relationships(emailTable, ({ one, many })
   }),
 }));
 
+export const emailReadTableRelationships = relationships(emailReadTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  user: one({
+    sourceField: ['userId'],
+    destField: ['id'],
+    destSchema: userTable,
+  }),
+}));
+
 export const emailDraftTableRelationships = relationships(emailDraftTable, ({ one }) => ({
   conversation: one({
     sourceField: ['conversationId'],
@@ -3721,6 +3751,7 @@ export const schema = createSchema({
     emailTable,
     emailDraftTable,
     emailSignatureTable,
+    emailReadTable,
     formTable,
     formContextMappingTable,
     formFieldsTable,
@@ -3820,6 +3851,7 @@ export const schema = createSchema({
     emailTableRelationships,
     emailDraftTableRelationships,
     emailSignatureTableRelationships,
+    emailReadTableRelationships,
     formTableRelationships,
     formContextMappingTableRelationships,
     formFieldsTableRelationships,
@@ -3918,6 +3950,7 @@ export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
+export type EmailRead = Row<typeof schema.tables.email_reads>;
 export type Form = Row<typeof schema.tables.forms>;
 export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>;
 export type FormFields = Row<typeof schema.tables.form_fields>;

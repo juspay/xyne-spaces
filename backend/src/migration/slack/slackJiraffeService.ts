@@ -391,6 +391,7 @@ async function ingestTicket(
             ...(assignedToUserId && { assignedTo: assignedToUserId }),
             ...(ticket.eta && { eta: new Date(ticket.eta) }),
             createdAt: new Date(ticket.created_at),
+            lastEmailAt: new Date(ticket.created_at),
          },
       });
 

@@ -5586,6 +5586,43 @@ export const mutators = defineMutators({
     ),
   },
 
+  emailRead: {
+    markAsRead: defineMutator(
+      z.object({
+        id: z.string(),
+        ticketId: z.string(),
+        lastReadEmailId: z.string(),
+        updatedAt: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, ticketId, lastReadEmailId, updatedAt } }) => {
+        const existing = await tx.run(
+          zql.email_reads
+            .where('ticketId', ticketId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (existing) {
+          if (existing.lastReadEmailId !== lastReadEmailId) {
+            await tx.mutate.email_reads.update({
+              id: existing.id,
+              lastReadEmailId,
+              updatedAt,
+            });
+          }
+        } else {
+          await tx.mutate.email_reads.insert({
+            id,
+            ticketId,
+            userId: ctx.userID,
+            lastReadEmailId,
+            createdAt: updatedAt,
+            updatedAt,
+          });
+        }
+      },
+    ),
+  },
+
   cleanupStageApprovals: defineMutator(
     z.object({
       ticketId: z.string(),

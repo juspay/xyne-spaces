@@ -2,6 +2,7 @@ import { ExternalSource } from '@prisma/client';
 
 export interface RefetchResult {
   processed: number;
+  newTickets: number;
   skipped: number;
   errors: string[];
 }

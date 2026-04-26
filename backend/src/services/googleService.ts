@@ -184,19 +184,46 @@ export class GoogleService {
     }
   }
 
-  async listRecentMessages(maxResults = 10): Promise<string[]> {
+  async listRecentMessages(
+    count = 10,
+    opts: { mode?: 'messages' | 'threads' } = {},
+  ): Promise<string[]> {
+    const mode = opts.mode ?? 'messages';
     try {
+      if (mode === 'threads') {
+        const threadList = await this.gmail.users.threads.list({
+          userId: 'me',
+          maxResults: count,
+          labelIds: ['INBOX'],
+        });
+        const threadIds = (threadList.data.threads || [])
+          .map(t => t.id)
+          .filter((id): id is string => !!id);
+
+        const messageIds: string[] = [];
+        for (const threadId of threadIds) {
+          const thread = await this.gmail.users.threads.get({
+            userId: 'me',
+            id: threadId,
+            format: 'minimal',
+          });
+          for (const msg of thread.data.messages || []) {
+            if (msg.id) messageIds.push(msg.id);
+          }
+        }
+        return messageIds;
+      }
+
       const response = await this.gmail.users.messages.list({
         userId: 'me',
-        maxResults,
+        maxResults: count,
         labelIds: ['INBOX'],
       });
-
       return (response.data.messages || [])
         .map(msg => msg.id)
         .filter((id): id is string => !!id);
     } catch (error) {
-      logger.error(`${TAG} Failed to fetch recent messages`, error);
+      logger.error(`${TAG} Failed to fetch recent messages (mode=${mode})`, error);
       throw new Error(`Failed to fetch recent messages: ${getErrorMessage(error)}`);
     }
   }
@@ -346,6 +373,29 @@ export class GoogleService {
   }
 
   // ─── ExternalSource + Pub/Sub provisioning ───────────────────────────────
+
+  static async prepareExternalSourceNetwork(params: {
+    emailAddress: string;
+    accessToken: string;
+    refreshToken: string;
+  }): Promise<{
+    sourceName: string;
+    webhookUrl: string;
+    subscriptionName: string;
+    watchResult: WatchResult;
+    encryptedCredentials: string;
+  }> {
+    const { emailAddress, accessToken, refreshToken } = params;
+    const sourceName = GoogleService.getSourceName(emailAddress);
+    const credentials: GoogleCredentials = { accessToken, refreshToken, email: emailAddress };
+    const encryptedCredentials = encrypt(JSON.stringify(credentials));
+
+    const watchResult = await new GoogleService(credentials).setupGmailWatch();
+    const webhookUrl = GoogleService.generateWebhookUrl(sourceName);
+    const subscriptionName = await GoogleService.setupPubSubSubscription(sourceName, webhookUrl);
+
+    return { sourceName, webhookUrl, subscriptionName, watchResult, encryptedCredentials };
+  }
 
   static async setupExternalSource(params: SetupExternalSourceParams): Promise<SetupExternalSourceResult> {
     const { channelId, emailAddress, accessToken, refreshToken, boardId } = params;

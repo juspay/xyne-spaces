@@ -78,6 +78,7 @@ export interface CreateConversationWithEmailParams {
   ticketMetadata?: Record<string, unknown>;
   uploadedFiles?: UploadedFileResult[];
   sourceName?: string; // External source name for Superposition context
+  receivedAt?: Date;
 }
 
 export interface AddEmailToConversationParams {
@@ -92,6 +93,7 @@ export interface AddEmailToConversationParams {
   externalMessageId: string;
   emailType?: EmailType;
   uploadedFiles?: UploadedFileResult[];
+  receivedAt?: Date;
 }
 
 export interface CreateConversationFromEmailParams {
@@ -312,6 +314,7 @@ export class EmailService {
       ticketMetadata,
       uploadedFiles = [],
       sourceName,
+      receivedAt,
     } = params;
 
     // Check if channel exists and get projectId
@@ -445,14 +448,17 @@ export class EmailService {
           channelId,
           externalThreadId,
           externalMessageId,
+          ...(receivedAt && { createdAt: receivedAt }),
         } as Prisma.EmailUncheckedCreateInput,
       });
 
       // Generate xyneId and create ticket
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+      const ticketTitle =
+        (emailSubject ?? '').replace(/^(\s*(re|fwd|fw)\s*:\s*)+/i, '').trim() || emailSubject;
       const createdTicket = await tx.ticket.create({
         data: {
-          title: emailSubject,
+          title: ticketTitle,
           description: emailBody,
           createdBy: userId,
           updatedBy: userId,
@@ -462,6 +468,7 @@ export class EmailService {
           projectId,
           workspaceId: channel.workspaceId,
           boardId,
+          lastEmailAt: receivedAt ?? new Date(),
           stageName: firstStage.name,
           ...(userGroup && { userGroupId: groupId }),
           ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
@@ -469,6 +476,11 @@ export class EmailService {
       });
 
       await syncConversationTicketMdFromPrismaTicket(tx, createdTicket);
+
+      await tx.channelUserStatus.updateMany({
+        where: { channelId, isDeleted: false },
+        data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
+      });
 
       return { conversation: conv, ticket: createdTicket, email: createdEmail };
     });
@@ -689,6 +701,7 @@ export class EmailService {
         externalMessageId,
         emailType = EmailType.DEFAULT,
         uploadedFiles = [],
+        receivedAt,
       } = params;
 
       // Validate conversation exists
@@ -718,9 +731,47 @@ export class EmailService {
         channelId: conversation.channelId,
         externalThreadId: externalThreadId,
         externalMessageId: externalMessageId,
+        ...(receivedAt && { createdAt: receivedAt }),
       };
 
       const email = await this.emailRepository.create(emailData);
+      const ticketRow = await this.prisma.ticket.findFirst({
+        where: { conversationId },
+        select: { id: true },
+      });
+
+      if (ticketRow) {
+        await this.prisma.ticket.update({
+          where: { id: ticketRow.id },
+          data: { lastEmailAt: new Date() },
+        });
+
+        const previousLatest = await this.prisma.email.findFirst({
+          where: { conversationId, id: { not: email.id } },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true },
+        });
+
+        if (previousLatest) {
+          const caughtUpUsers = await this.prisma.emailRead.findMany({
+            where: {
+              ticketId: ticketRow.id,
+              lastReadEmailId: previousLatest.id,
+            },
+            select: { userId: true },
+          });
+          if (caughtUpUsers.length > 0) {
+            await this.prisma.channelUserStatus.updateMany({
+              where: {
+                channelId: conversation.channelId,
+                userId: { in: caughtUpUsers.map(r => r.userId) },
+                isDeleted: false,
+              },
+              data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
+            });
+          }
+        }
+      }
 
       // Create MessageAttachment entries for email attachments
       await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel?.workspaceId ?? '', uploadedFiles);
@@ -832,6 +883,7 @@ export class EmailService {
           boardId: boardId,
           stageName: stageName,
           ...(userGroupId && { userGroupId }),
+          lastEmailAt: new Date(),
         }
       });
     });

@@ -112,6 +112,7 @@ export class TicketRepository {
         merchantId: data.merchantId,
         ticketType: data.ticketType,
         ...(data.createdAt && { createdAt: data.createdAt }),
+        lastEmailAt: data.createdAt ?? new Date(),
       }
     });
 

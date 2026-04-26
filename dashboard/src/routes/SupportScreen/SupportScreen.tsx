@@ -56,6 +56,7 @@ import {
   useEmailChannels,
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
+import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { useUsers } from '../../hooks/useUsers';
 import { useChannelSubscription } from '../../hooks/useChannelSubscription';
@@ -68,6 +69,7 @@ import { TicketDetails } from '../../components/Tickets/TicketDetails/TicketDeta
 import { apiInstance } from '../../services/clients/apiClient';
 import TextareaAutosize from 'react-textarea-autosize';
 import { Button } from '../../components/ui/Button/Button';
+import Badge from '../../components/ui/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
@@ -103,6 +105,7 @@ import { EmailTagWithAvatar } from '../../components/xyne-desk/EmailTagWithAvata
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { useEmailDraft, useEmailDraftOperations } from '../../hooks/useEmailDraft';
+import { useMarkEmailRead } from '../../hooks/useMarkEmailRead';
 import { AttachmentPreview } from '../../components/ui/files/AttachmentPreview';
 import { MediaViewer } from '../../components/ui/files';
 import { formatFileSize } from '../../components/ui/utils/files';
@@ -352,33 +355,44 @@ const SupportScreen = (): ReactElement => {
   useEffect(() => {
     const emailError = searchParams.get('emailError');
     const emailConnected = searchParams.get('emailConnected');
+    const channelFromCallback = searchParams.get('channel');
 
     if (emailConnected === 'true') {
       const provider = searchParams.get('provider') ?? 'Email';
       toast.success(
         `${provider.charAt(0).toUpperCase() + provider.slice(1)} channel connected successfully`,
       );
-      setSearchParams(
-        prev => {
-          const p = new URLSearchParams(prev);
-          p.delete('emailConnected');
-          p.delete('provider');
-          return p;
-        },
-        { replace: true },
-      );
+      if (channelFromCallback) {
+        void navigate(`/support/${channelFromCallback}`, { replace: true });
+      } else {
+        setSearchParams(
+          prev => {
+            const p = new URLSearchParams(prev);
+            p.delete('emailConnected');
+            p.delete('provider');
+            p.delete('channel');
+            return p;
+          },
+          { replace: true },
+        );
+      }
     } else if (emailError) {
       toast.error(emailError);
-      setSearchParams(
-        prev => {
-          const p = new URLSearchParams(prev);
-          p.delete('emailError');
-          return p;
-        },
-        { replace: true },
-      );
+      if (channelFromCallback) {
+        void navigate(`/support/${channelFromCallback}`, { replace: true });
+      } else {
+        setSearchParams(
+          prev => {
+            const p = new URLSearchParams(prev);
+            p.delete('emailError');
+            p.delete('channel');
+            return p;
+          },
+          { replace: true },
+        );
+      }
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams, navigate]);
 
   // Sync panel open/close with the URL so back button works correctly
   useEffect(() => {
@@ -418,6 +432,7 @@ const SupportScreen = (): ReactElement => {
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
   const userChannelStatuses = useUserChannelStatuses();
+  const unreadCounts = useAllUnreadCount();
   // Both star and joined state live on channel_user_status (per-user). A row
   // in that list for a given channelId means the user has joined the channel;
   // isStarred narrows that further.
@@ -610,6 +625,7 @@ const SupportScreen = (): ReactElement => {
   const renderChannelRow = (c: (typeof sortedEmailChannels)[number]): ReactElement => {
     const isActive = selectedChannelId === c.id;
     const isPrivate = c.visibility === ChannelVisibility.PRIVATE;
+    const unreadCount = unreadCounts[c.id] ?? 0;
     return (
       <div
         key={c.id}
@@ -638,9 +654,19 @@ const SupportScreen = (): ReactElement => {
             <Hash size={12} className={isActive ? 'text-[#1D1E1F]' : 'text-[#464C53]'} />
           )}
         </span>
-        <span className='text-sm flex-1 truncate min-w-0'>
+        <span
+          className={cn(
+            'text-sm flex-1 truncate min-w-0',
+            unreadCount > 0 && !isActive && 'font-semibold text-sidebar-primary-foreground',
+          )}
+        >
           {c.name?.trim() || 'Unnamed Channel'}
         </span>
+        {unreadCount > 0 && (
+          <Badge className='font-mono h-[18px] bg-sidebar-badge-accent px-1.5 text-sidebar-badge-accent-foreground'>
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </Badge>
+        )}
       </div>
     );
   };
@@ -1129,11 +1155,11 @@ const SupportTicketDetail = (): ReactElement => {
   const conversation = ticket?.conversation;
 
   // Prev / next cursor queries — each returns at most 1 adjacent ticket in the
-  // EMAIL-channel scope ordered by createdAt desc. Served from IVM when cached,
-  // otherwise a tiny server fetch.
+  // EMAIL-channel scope ordered by lastEmailAt desc. Served from IVM when
+  // cached, otherwise a tiny server fetch.
   const cursorStart =
-    ticket?.id && typeof ticket.createdAt === 'number'
-      ? { id: ticket.id, createdAt: ticket.createdAt }
+    ticket?.id && typeof ticket.lastEmailAt === 'number'
+      ? { id: ticket.id, lastEmailAt: ticket.lastEmailAt }
       : null;
   const [nextPage] = useCachedQuery(
     queries.supportTicketsPageV2({
@@ -1717,7 +1743,15 @@ const SupportTicketDetail = (): ReactElement => {
             <div className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'>
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
-                  <EmailThread collapseState={emailCollapseState} />
+                  <EmailThread
+                    collapseState={emailCollapseState}
+                    ticketId={ticket?.id}
+                    emailReads={
+                      ticket?.emailReads as
+                        | Array<{ userId: string; lastReadEmailId: string }>
+                        | undefined
+                    }
+                  />
                 </div>
               )}
             </div>
@@ -2032,8 +2066,21 @@ const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
   };
 };
 
-const EmailThread = ({ collapseState }: { collapseState: EmailCollapseState }): ReactElement => {
+const EmailThread = ({
+  collapseState,
+  ticketId,
+  emailReads,
+}: {
+  collapseState: EmailCollapseState;
+  ticketId?: string | null | undefined;
+  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailId: string }> | undefined;
+}): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
+  // Thread-level: upsert the current user's email_reads row with the id of
+  // the newest email in this thread. `isRead` is derived by comparing that
+  // stored id to the current latest email, so every email header in the
+  // thread flips read/unread together.
+  const { isRead } = useMarkEmailRead(ticketId, lastEmailId ?? null, emailReads, true);
   return (
     <div className='divide-y divide-gray-200 relative'>
       {sortedEmails.map(email => (
@@ -2043,6 +2090,7 @@ const EmailThread = ({ collapseState }: { collapseState: EmailCollapseState }): 
           isCollapsed={collapsedIds.has(email.id)}
           canCollapse={email.id !== lastEmailId}
           onToggleCollapse={() => toggleOne(email.id)}
+          isRead={isRead}
         />
       ))}
     </div>
@@ -2068,11 +2116,13 @@ const EmailThreadItem = ({
   isCollapsed = false,
   canCollapse = true,
   onToggleCollapse,
+  isRead = true,
 }: {
   email: Email;
   isCollapsed?: boolean;
   canCollapse?: boolean;
   onToggleCollapse?: () => void;
+  isRead?: boolean;
 }): ReactElement => {
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
   const toList = email.to || [];
@@ -2196,6 +2246,7 @@ const EmailThreadItem = ({
           createdAt={email.createdAt}
           isCollapsed={isCollapsed}
           previewText={preview}
+          isRead={isRead}
           // extras={demergeButton}  // DISABLED: see commented handleDemerge block above
         />
       </div>
