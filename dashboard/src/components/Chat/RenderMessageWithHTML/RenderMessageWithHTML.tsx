@@ -16,7 +16,6 @@ import {
   getAnchorTargetProps,
   getInternalLinkLabel,
   isExternalUrl,
-  isExternalXynePath,
   parseInternalXyneLink,
   patchLegacyInternalUrl,
   shouldReplaceWithSemanticLabel,
@@ -736,7 +735,7 @@ const parseNode = (
         addTokenizedNodes(parts, textBeforeUrl, skipEmojiWrapping, `emoji-url-${offset}`);
       }
 
-      if (parseInternalXyneLink(url) && !isExternalXynePath(url)) {
+      if (parseInternalXyneLink(url)) {
         const external = isExternalUrl(url);
         const linkProps = getAnchorTargetProps(url);
 
@@ -754,30 +753,14 @@ const parseNode = (
           </InternalXyneLink>,
         );
       } else {
-        const external = isExternalUrl(url) || isExternalXynePath(url);
-        const linkProps = external
-          ? { target: '_blank', rel: 'noopener noreferrer' }
-          : getAnchorTargetProps(url);
-
-        const handleExternalXyneClick = isExternalXynePath(url)
-          ? (e: React.MouseEvent<HTMLAnchorElement>): void => {
-              if (isElectronApp()) {
-                e.preventDefault();
-                if (e.metaKey || e.ctrlKey) {
-                  window.electronAPI?.openExternal?.(url);
-                } else {
-                  window.open(url, '_blank');
-                }
-              }
-            }
-          : undefined;
+        const external = isExternalUrl(url);
+        const linkProps = getAnchorTargetProps(url);
 
         parts.push(
           <a
             key={`${keyPrefix}-url-${offset}`}
             href={url}
             {...linkProps}
-            onClick={handleExternalXyneClick}
             className={cn('text-primary hover:underline', breakLongLinks && 'break-all')}
             data-track-category='MESSAGE'
             data-track-name='ClickExternalLink'
@@ -1061,7 +1044,7 @@ const parseNode = (
     if (href && isValidURL(href)) {
       href = patchLegacyInternalUrl(href);
       const urlObj = new URL(href, window.location.origin);
-      if (parseInternalXyneLink(href) && !isExternalXynePath(href)) {
+      if (parseInternalXyneLink(href)) {
         const { key, ...restProps } = props;
         const linkProps = { ...restProps, href };
         const external = isExternalUrl(href);
@@ -1082,26 +1065,11 @@ const parseNode = (
       (props as { href: string; target: string; rel: string }).href = href;
 
       // Only open external links in new tab
-      const isExternal = isExternalUrl(href) || isExternalXynePath(href);
+      const isExternal = isExternalUrl(href);
 
       if (isExternal) {
         (props as { href: string; target: string; rel: string }).target = '_blank';
         (props as { href: string; target: string; rel: string }).rel = 'noopener noreferrer';
-        // For external Xyne paths (same domain, non-app route):
-        // Electron: single click → in-app browser panel, Cmd+Click → OS browser
-        if (isExternalXynePath(href)) {
-          const capturedHref = href;
-          props['onClick'] = (e: React.MouseEvent<HTMLAnchorElement>): void => {
-            if (isElectronApp()) {
-              e.preventDefault();
-              if (e.metaKey || e.ctrlKey) {
-                window.electronAPI?.openExternal?.(capturedHref);
-              } else {
-                window.open(capturedHref, '_blank');
-              }
-            }
-          };
-        }
       } else {
         const isSupportedRoute = urlObj.pathname.startsWith('/chat/');
 
