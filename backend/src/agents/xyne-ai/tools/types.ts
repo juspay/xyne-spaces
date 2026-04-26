@@ -78,6 +78,7 @@ export interface XyneAIAgentContext {
   // Model config
   modelName?: string;  // LLM model name from CAC config (xyneAiModelName), used by tools that make internal LLM calls
   agentName?: string;  // Agent identifier ('ask-ai' or 'ask-ai-chat'); also selects Langfuse prompt
+  systemPromptOverride?: string;  // When set, replaces the agent's system prompt entirely (used for draft mode)
   // Request context for tracing/metadata purposes
   agentRequestContext?: AgentRequestContext;
 }

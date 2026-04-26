@@ -208,7 +208,7 @@ export class XyneAIController {
         isRegenerate: is_regenerate,
         agentName: 'ask-ai',
         displayQuery: display_query,
-        ...(draft_mode && { systemPrompt: buildDraftEmailSystemPrompt(userInfo) }),
+        ...(draft_mode && { systemPromptOverride: buildDraftEmailSystemPrompt(userInfo) }),
       };
 
       // Track metrics: context channels count

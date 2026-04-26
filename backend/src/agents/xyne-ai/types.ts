@@ -52,6 +52,7 @@ export interface XyneAIRequest {
   canvasIds?: string[];  // Canvas IDs to fetch and inject as context
   ticketIds?: string[];  // Ticket IDs to fetch and inject as context
   callIds?: string[];    // Call IDs (transcripts + recordings) to fetch and inject as context
+  systemPromptOverride?: string; // When set, replaces the agent's system prompt entirely (used for draft mode)
 }
 
 // ============================================================================
