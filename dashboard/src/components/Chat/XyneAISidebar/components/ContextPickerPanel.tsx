@@ -355,6 +355,7 @@ export const ContextPickerPanel = ({
           enabledTabs={ENABLED_TABS}
           inline
           onTabChange={handleTabChange}
+          disableAutoFocus
         />
       </div>
 

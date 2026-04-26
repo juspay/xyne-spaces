@@ -30,6 +30,7 @@ interface GlobalCommandMenuProps {
   enabledTabs?: TabType[];
   inline?: boolean;
   onTabChange?: (tab: TabType) => void;
+  disableAutoFocus?: boolean;
 }
 
 const GlobalCommandMenu = ({
@@ -42,6 +43,7 @@ const GlobalCommandMenu = ({
   enabledTabs,
   inline,
   onTabChange,
+  disableAutoFocus,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
@@ -170,6 +172,7 @@ const GlobalCommandMenu = ({
       {...(enabledTabs !== undefined ? { enabledTabs } : {})}
       {...(inline !== undefined ? { inline } : {})}
       {...(onTabChange !== undefined ? { onTabChange } : {})}
+      {...(disableAutoFocus !== undefined ? { disableAutoFocus } : {})}
     />
   );
 };

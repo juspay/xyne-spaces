@@ -48,6 +48,7 @@ interface LexicalSearchInputProps {
   autocompleteSuffix?: string;
   onInsertTextReady?: (insertText: (text: string) => void) => void;
   initialMention?: MentionData | null | undefined;
+  disableAutoFocus?: boolean;
 }
 
 function InitialMentionPlugin({ initialMention }: { initialMention?: MentionData | null }) {
@@ -111,14 +112,20 @@ function PlaceholderPlugin({ placeholder }: { placeholder?: string }) {
   );
 }
 
-function AutoFocusPlugin({ open }: { open?: boolean }) {
+function AutoFocusPlugin({
+  open,
+  disableAutoFocus,
+}: {
+  open?: boolean;
+  disableAutoFocus?: boolean;
+}) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
-    if (open) {
+    if (open && !disableAutoFocus) {
       editor.focus();
     }
-  }, [open, editor]);
+  }, [open, disableAutoFocus, editor]);
 
   return null;
 }
@@ -298,6 +305,7 @@ export function LexicalSearchInput({
   autocompleteSuffix,
   onInsertTextReady,
   initialMention,
+  disableAutoFocus = false,
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
   const [suffixLeft, setSuffixLeft] = useState(0);
@@ -351,7 +359,9 @@ export function LexicalSearchInput({
           />
           <HistoryPlugin />
           {onChange && <OnChangePluginWrapper onChange={onChange} />}
-          {open !== undefined && <AutoFocusPlugin open={open} />}
+          {open !== undefined && (
+            <AutoFocusPlugin open={open} disableAutoFocus={disableAutoFocus} />
+          )}
           {(onPasteDetected || onManualKeystroke) && (
             <PastePlugin
               {...(onPasteDetected && { onPasteDetected })}
