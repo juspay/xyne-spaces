@@ -85,6 +85,62 @@ export interface UnreadCounts {
   [channelId: string]: number;
 }
 
+export interface ThreadTrackingEntry {
+  lastReadAt: number | null;
+  scrollTop: number | null;
+  updatedAt: number;
+}
+
+export interface ThreadTrackingMap {
+  [conversationId: string]: ThreadTrackingEntry | undefined;
+}
+
+const THREAD_TRACKING_STORAGE_KEY = 'xyne:thread-tracking';
+const MAX_THREAD_TRACKING_ENTRIES = 300;
+
+const pruneThreadTracking = (tracking: ThreadTrackingMap): ThreadTrackingMap => {
+  const entries = Object.entries(tracking).filter(([, value]) => value !== undefined) as Array<
+    [string, ThreadTrackingEntry]
+  >;
+  if (entries.length <= MAX_THREAD_TRACKING_ENTRIES) {
+    return tracking;
+  }
+
+  const sorted = entries.sort((a, b) => b[1].updatedAt - a[1].updatedAt);
+  return Object.fromEntries(sorted.slice(0, MAX_THREAD_TRACKING_ENTRIES));
+};
+
+const hydrateThreadTracking = (): ThreadTrackingMap => {
+  try {
+    const raw = safeGetItem(THREAD_TRACKING_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+    const result: ThreadTrackingMap = {};
+    for (const [conversationId, value] of Object.entries(parsed)) {
+      if (!value || typeof value !== 'object') continue;
+      const candidate = value as Partial<ThreadTrackingEntry>;
+      result[conversationId] = {
+        lastReadAt: typeof candidate.lastReadAt === 'number' ? candidate.lastReadAt : null,
+        scrollTop: typeof candidate.scrollTop === 'number' ? candidate.scrollTop : null,
+        updatedAt: typeof candidate.updatedAt === 'number' ? candidate.updatedAt : 0,
+      };
+    }
+    return pruneThreadTracking(result);
+  } catch {
+    return {};
+  }
+};
+
+const persistThreadTracking = (tracking: ThreadTrackingMap): void => {
+  try {
+    safeSetItem(THREAD_TRACKING_STORAGE_KEY, JSON.stringify(tracking));
+  } catch {
+    // no-op when storage unavailable
+  }
+};
+
 /**
  * Presence status from Socket.IO (online/away/offline)
  * This is managed via Redis + Socket.IO, NOT Zero/DB
@@ -135,6 +191,8 @@ interface StateMachineContext {
   onlineUsers: OnlineUser[];
   /** Overlay depth for tracking open dialogs/modals */
   overlayDepth: number;
+  /** Per-conversation thread read/scroll tracking */
+  threadTracking: ThreadTrackingMap;
 }
 
 type StateMachineEvent =
@@ -168,7 +226,9 @@ type StateMachineEvent =
   | { type: 'PUSH_OVERLAY' }
   | { type: 'POP_OVERLAY' }
   | { type: 'ARCHIVE_CHANNEL'; channelId: string }
-  | { type: 'UNARCHIVE_CHANNEL'; channelId: string };
+  | { type: 'UNARCHIVE_CHANNEL'; channelId: string }
+  | { type: 'SET_THREAD_LAST_READ'; conversationId: string; lastReadAt: number }
+  | { type: 'SET_THREAD_SCROLL'; conversationId: string; scrollTop: number };
 
 export const stateMachine = setup({
   types: {
@@ -482,6 +542,42 @@ export const stateMachine = setup({
         return context.allChannels;
       },
     }),
+    setThreadLastRead: assign({
+      threadTracking: ({ context, event }) => {
+        if (event.type !== 'SET_THREAD_LAST_READ') {
+          return context.threadTracking;
+        }
+        const existing = context.threadTracking[event.conversationId];
+        const next = pruneThreadTracking({
+          ...context.threadTracking,
+          [event.conversationId]: {
+            lastReadAt: event.lastReadAt,
+            scrollTop: existing?.scrollTop ?? null,
+            updatedAt: Date.now(),
+          },
+        });
+        persistThreadTracking(next);
+        return next;
+      },
+    }),
+    setThreadScroll: assign({
+      threadTracking: ({ context, event }) => {
+        if (event.type !== 'SET_THREAD_SCROLL') {
+          return context.threadTracking;
+        }
+        const existing = context.threadTracking[event.conversationId];
+        const next = pruneThreadTracking({
+          ...context.threadTracking,
+          [event.conversationId]: {
+            lastReadAt: existing?.lastReadAt ?? null,
+            scrollTop: event.scrollTop,
+            updatedAt: Date.now(),
+          },
+        });
+        persistThreadTracking(next);
+        return next;
+      },
+    }),
   },
 }).createMachine({
   id: 'stateMachine',
@@ -517,6 +613,7 @@ export const stateMachine = setup({
     filteredTicketIds: [],
     onlineUsers: [],
     overlayDepth: 0,
+    threadTracking: hydrateThreadTracking(),
   },
   initial: 'idle',
   states: {
@@ -600,12 +697,32 @@ export const stateMachine = setup({
         UNARCHIVE_CHANNEL: {
           actions: 'unarchiveChannel',
         },
+        SET_THREAD_LAST_READ: {
+          actions: 'setThreadLastRead',
+        },
+        SET_THREAD_SCROLL: {
+          actions: 'setThreadScroll',
+        },
       },
     },
   },
 });
 
 export const stateMachineActor = createActor(stateMachine).start();
+
+export function getThreadTrackingSnapshot(
+  conversationId: string,
+): ThreadTrackingEntry | undefined {
+  return stateMachineActor.getSnapshot().context.threadTracking[conversationId];
+}
+
+export function setThreadLastRead(conversationId: string, lastReadAt: number): void {
+  stateMachineActor.send({ type: 'SET_THREAD_LAST_READ', conversationId, lastReadAt });
+}
+
+export function setThreadScroll(conversationId: string, scrollTop: number): void {
+  stateMachineActor.send({ type: 'SET_THREAD_SCROLL', conversationId, scrollTop });
+}
 
 // Flag to track if presence listeners are already set up
 let presenceListenersSetup = false;

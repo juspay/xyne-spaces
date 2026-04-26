@@ -27,6 +27,9 @@ export {
   getHasOverlay,
   useHasOverlay,
   useOverlayEffect,
+  getThreadTrackingSnapshot,
+  setThreadLastRead,
+  setThreadScroll,
 } from './stateMachine.js';
 
 export type {
@@ -46,4 +49,6 @@ export type {
   PresenceStatus,
   OnlineUser,
   UserStatusUpdatedEvent,
+  ThreadTrackingEntry,
+  ThreadTrackingMap,
 } from './stateMachine.js';

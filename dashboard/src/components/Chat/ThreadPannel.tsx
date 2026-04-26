@@ -88,6 +88,7 @@ interface ThreadMessagesProps {
   onSummaryClick?: () => void;
   threadMessages?: QueryResultType<typeof queries.conversationMessagesV2>;
   disableAskAI?: boolean;
+  previewCardMode?: boolean;
 }
 
 export const ThreadMessages = ({
@@ -101,6 +102,7 @@ export const ThreadMessages = ({
   hideHeader = false,
   threadMessages: propThreadMessages,
   disableAskAI,
+  previewCardMode = false,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -835,6 +837,8 @@ export const ThreadMessages = ({
               channelScopeType={channel?.scopeType}
               conversation={conversation}
               workflowNumberMap={workflowNumberMap}
+              enableCollapsing={previewCardMode}
+              enableJumpFab={!previewCardMode}
               {...(disableAskAI !== undefined && { disableAskAI })}
             />
 
@@ -1261,6 +1265,8 @@ export const ThreadMessages = ({
               channelScopeType={channel?.scopeType}
               conversation={conversation}
               workflowNumberMap={workflowNumberMap}
+              enableCollapsing={previewCardMode}
+              enableJumpFab={!previewCardMode}
               {...(disableAskAI !== undefined && { disableAskAI })}
             />
 
@@ -1686,6 +1692,8 @@ export const ThreadMessages = ({
             channelScopeType={channel?.scopeType}
             conversation={conversation}
             workflowNumberMap={workflowNumberMap}
+            enableCollapsing={previewCardMode}
+            enableJumpFab={!previewCardMode}
             {...(disableAskAI !== undefined && { disableAskAI })}
           />
 

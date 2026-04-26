@@ -8,6 +8,9 @@ export {
   getHasOverlay,
   useHasOverlay,
   useOverlayEffect,
+  getThreadTrackingSnapshot,
+  setThreadLastRead,
+  setThreadScroll,
 } from '@xyne/shared/machines';
 
 export type {
@@ -27,4 +30,6 @@ export type {
   PresenceStatus,
   OnlineUser,
   UserStatusUpdatedEvent,
+  ThreadTrackingEntry,
+  ThreadTrackingMap,
 } from '@xyne/shared/machines';
