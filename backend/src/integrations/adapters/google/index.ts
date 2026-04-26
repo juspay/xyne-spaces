@@ -9,6 +9,7 @@ import { GoogleTransformer } from './transformer';
 import { GoogleFlow } from './flow';
 import { GooglePostprocessor } from './postprocessor';
 import { GoogleRefetch } from './refetch';
+import { GoogleMailReplySender } from './mailReplySender';
 
 export const googleAdapter = AdapterFactory.create(
   ExternalSourcePlatform.GOOGLE,
@@ -17,6 +18,7 @@ export const googleAdapter = AdapterFactory.create(
   new GoogleFlow(),
   new GooglePostprocessor(),
   new GoogleRefetch(),
+  new GoogleMailReplySender(),
 );
 
 export { GoogleAuthenticator } from './authenticator';
@@ -24,4 +26,5 @@ export { GoogleTransformer } from './transformer';
 export { GoogleFlow } from './flow';
 export { GooglePostprocessor } from './postprocessor';
 export { GoogleRefetch } from './refetch';
+export { GoogleMailReplySender } from './mailReplySender';
 export * from './types';

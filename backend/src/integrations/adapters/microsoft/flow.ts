@@ -13,6 +13,7 @@ import { BaseFlow } from '../../core/baseFlow';
 import { TestPayloadResult } from '../../core/types';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
+import { preDownloadGraphAttachments } from './attachments';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { GraphChangeNotification, GraphMailMessage } from './types';
@@ -129,6 +130,14 @@ export class MicrosoftFlow extends BaseFlow {
       }
     }
 
-    return { notification, emails: [email] };
+    const preDownloadedAttachments = email.hasAttachments
+      ? await preDownloadGraphAttachments({
+          accessToken,
+          graphMessageId: messageId,
+          sourceName: source.name,
+        })
+      : [];
+
+    return { notification, emails: [email], preDownloadedAttachments };
   }
 }

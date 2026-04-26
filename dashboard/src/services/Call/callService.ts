@@ -48,6 +48,19 @@ export interface ScheduleCallRequest {
   channelId?: string;
   targetUserIds?: string[];
   conversationId?: string; // Optional: for thread-initiated scheduled calls
+  /** External emails to invite via a reply on the ticket thread. */
+  externalInvitees?: string[];
+  /** Organizer's curated invitation body (rich-text HTML). Required when externalInvitees is non-empty. */
+  invitation?: {
+    bodyHtml: string;
+    /** Override the call title on the rendered invitation (date/time are not overridable). */
+    title?: string;
+    organizerName?: string;
+    organizerEmail?: string;
+    orgName?: string;
+    /** IANA timezone used to format start/end times in the email body. */
+    timezone?: string;
+  };
 }
 
 export interface ScheduleCallResponse {
@@ -346,6 +359,11 @@ export class CallService {
         channelId: data.channelId,
         targetUserIds: data.targetUserIds,
         ...(data.conversationId && { conversationId: data.conversationId }),
+        ...(data.externalInvitees &&
+          data.externalInvitees.length > 0 && {
+            externalInvitees: data.externalInvitees,
+            invitation: data.invitation,
+          }),
       });
 
       return response.data;

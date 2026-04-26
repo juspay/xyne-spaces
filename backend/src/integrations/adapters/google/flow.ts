@@ -7,6 +7,7 @@ import { ExternalSource } from '@prisma/client';
 import { BaseFlow } from '../../core/baseFlow';
 import { logger } from '../../../utils/logger';
 import { GoogleService } from '@/services/googleService';
+import { preDownloadGmailAttachments } from './attachments';
 import { GooglePubSubMessage, GooglePubSubData } from './types';
 
 const TAG = '[GoogleFlow]';
@@ -33,9 +34,21 @@ export class GoogleFlow extends BaseFlow {
         return { authenticated: false };
       }
 
+      const parsedEmail = googleService.parseEmailData(messageData);
+
+      const preDownloadedAttachments = await preDownloadGmailAttachments({
+        googleService,
+        messageId,
+        messageData,
+        sourceName: source.name,
+      });
+
+      const parsedEmailNoAttachments = { ...parsedEmail, attachments: [] };
+
       return {
         pubsubData,
-        parsedEmail: googleService.parseEmailData(messageData),
+        parsedEmail: parsedEmailNoAttachments,
+        ...(preDownloadedAttachments.length > 0 && { preDownloadedAttachments }),
       };
     } catch (error: any) {
       logger.error(`${TAG} Error fetching Gmail data`, { error: error?.message });

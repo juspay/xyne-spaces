@@ -12,6 +12,12 @@ export function sanitizeHtml(text: string): string {
   return DOMPurify.sanitize(text, { ALLOWED_TAGS: [] });
 }
 
+// Strips scripts/handlers/unsafe URLs while keeping formatting tags.
+export function sanitizeEmailBodyHtml(html: string): string {
+  if (!html) return '';
+  return DOMPurify.sanitize(html);
+}
+
 /**
  * Converts HTML content to plain text for search indexing
  * Preserves code structure while making it searchable

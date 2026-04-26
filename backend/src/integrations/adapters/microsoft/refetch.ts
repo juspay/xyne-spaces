@@ -14,6 +14,7 @@ import { adapterRegistry } from '../../core/adapterRegistry';
 import { BaseRefetch, RefetchResult } from '../../core/baseRefetch';
 import { ExternalSourcePlatform } from '../../core/types';
 import { MicrosoftTransformer } from './transformer';
+import { preDownloadGraphAttachments } from './attachments';
 import { GraphMailMessage } from './types';
 
 const TAG = '[MicrosoftRefetch]';
@@ -71,7 +72,19 @@ export class MicrosoftRefetch extends BaseRefetch {
         if (!msgResponse.ok) throw new Error(`fetch message ${id}: ${msgResponse.status}`);
 
         const email = (await msgResponse.json()) as GraphMailMessage;
-        const parsed = await transformer.transform({ emails: [email] });
+
+        const preDownloadedAttachments = email.hasAttachments
+          ? await preDownloadGraphAttachments({
+              accessToken,
+              graphMessageId: id,
+              sourceName: source.name,
+            })
+          : [];
+
+        const parsed = await transformer.transform({
+          emails: [email],
+          ...(preDownloadedAttachments.length > 0 && { preDownloadedAttachments }),
+        });
         if (!parsed.success || !parsed.data) throw new Error(parsed.error);
 
         const result = await externalSourceCore.sync(
@@ -82,9 +95,9 @@ export class MicrosoftRefetch extends BaseRefetch {
         if (result.action === 'duplicate') skipped++;
         else processed++;
       } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        logger.warn(`${TAG} ingest failed for ${id}`, { error: msg });
-        errors.push(msg);
+        const errMsg = error instanceof Error ? error.message : String(error);
+        logger.warn(`${TAG} ingest failed for ${id}`, { error: errMsg });
+        errors.push(errMsg);
       }
     }
 

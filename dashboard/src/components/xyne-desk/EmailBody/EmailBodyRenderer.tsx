@@ -3,11 +3,14 @@ import { Image as ImageIcon } from 'lucide-react';
 import { JSX, useEffect, useMemo, useRef, useState } from 'react';
 import { preprocessEmailHtml } from './preprocessEmailHtml';
 import { collapseQuotedHistory } from './collapseQuotedHistory';
+import { useCidImageResolver } from './useCidImageResolver';
 
 interface EmailBodyRendererProps {
   body: string;
   /** Unique key so each email's blocked-images choice is independent */
   emailId?: string;
+  /** Email attachments (loaded via Zero relation) — used to resolve cid: refs */
+  attachments?: ReadonlyArray<{ id: string; metadata?: unknown }>;
 }
 
 const TRANSPARENT_PIXEL =
@@ -207,7 +210,11 @@ const buildIframeSrcdoc = (rawBody: string, showRemoteImages: boolean): BuiltDoc
   return { srcdoc, hasBlockedImages: blockedCount > 0 };
 };
 
-export const EmailBodyRenderer = ({ body, emailId }: EmailBodyRendererProps): JSX.Element => {
+export const EmailBodyRenderer = ({
+  body,
+  emailId,
+  attachments,
+}: EmailBodyRendererProps): JSX.Element => {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [height, setHeight] = useState<number>(24);
   const [showRemoteImages, setShowRemoteImages] = useState<boolean>(false);
@@ -216,9 +223,12 @@ export const EmailBodyRenderer = ({ body, emailId }: EmailBodyRendererProps): JS
     setShowRemoteImages(false);
   }, [emailId]);
 
+  const { rewrite: rewriteCidRefs } = useCidImageResolver(attachments);
+  const rewrittenBody = useMemo(() => rewriteCidRefs(body), [rewriteCidRefs, body]);
+
   const { srcdoc, hasBlockedImages } = useMemo(
-    () => buildIframeSrcdoc(body, showRemoteImages),
-    [body, showRemoteImages],
+    () => buildIframeSrcdoc(rewrittenBody, showRemoteImages),
+    [rewrittenBody, showRemoteImages],
   );
 
   useEffect(() => {

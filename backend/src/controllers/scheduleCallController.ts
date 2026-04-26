@@ -10,11 +10,97 @@ import { scheduledCallNotificationService } from '@/services/scheduledCallNotifi
 import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
 import { recurringCallService } from '@/services/recurringCallService';
 import { addHHMMDuration } from '@/utils/dateUtils';
+import { emailService } from '@/services/emailService';
+import { renderCallInvitationHtml, buildCallInvitationIcs } from '@xyne/shared';
+import { sanitizeEmailBodyHtml } from '@/utils/contentUtils';
+import { config } from '@/config/env';
+import { Prisma } from '@prisma/client';
 import rruleLib from 'rrule';
+
+// Precedence: x-original-host (ingress) → FRONTEND_URL → config fallback.
+function resolveFrontendUrl(req: Request): string {
+  const originalHost = req.headers['x-original-host'];
+  if (originalHost && typeof originalHost === 'string' && originalHost.trim()) {
+    const protocol =
+      (req.headers['x-forwarded-proto'] as string | undefined) || req.protocol || 'https';
+    return `${protocol}://${originalHost.trim()}`;
+  }
+  const envUrl = (process.env.FRONTEND_URL ?? '').trim();
+  if (envUrl) return envUrl;
+  if (config.slackFrontendUrl) return config.slackFrontendUrl;
+  throw new Error('Frontend URL is not configured');
+}
 const { RRule } = rruleLib;
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
+
+async function sendCallInvitationReply(
+  params: {
+    conversationId: string;
+    externalId: string;
+    callTitle: string;
+    startsAt: Date;
+    endsAt: Date;
+    organizerUserId: string;
+    externalInvitees: string[];
+    invitation: {
+      bodyHtml: string;
+      title?: string;
+      organizerName?: string;
+      organizerEmail?: string;
+      orgName?: string;
+      timezone?: string;
+    };
+    frontendUrl: string;
+  },
+  tx: Prisma.TransactionClient,
+): Promise<void> {
+  const organizer = await repositories.users.findById(params.organizerUserId);
+  const title = params.invitation.title || params.callTitle;
+  const organizerName =
+    params.invitation.organizerName || organizer?.name || organizer?.email || 'A colleague';
+  const organizerEmail = params.invitation.organizerEmail || organizer?.email || '';
+  const timezone = params.invitation.timezone || 'UTC';
+  const joinUrl = `${params.frontendUrl}/call/${params.externalId}`;
+
+  const renderedBody = renderCallInvitationHtml({
+    title,
+    startsAt: params.startsAt,
+    endsAt: params.endsAt,
+    timezone,
+    organizerName,
+    organizerEmail,
+    ...(params.invitation.orgName && { orgName: params.invitation.orgName }),
+    joinUrl,
+    userBodyHtml: sanitizeEmailBodyHtml(params.invitation.bodyHtml),
+  });
+
+  const ics = buildCallInvitationIcs({
+    uid: params.externalId,
+    title,
+    startsAt: params.startsAt,
+    endsAt: params.endsAt,
+    organizerName,
+    organizerEmail,
+    attendeeEmails: params.externalInvitees,
+    description: `You have been invited to "${title}" by ${organizerName}.`,
+    joinUrl,
+  });
+
+  await emailService.sendReplyOnConversation(
+    {
+      conversationId: params.conversationId,
+      body: renderedBody,
+      type: 'REPLY',
+      to: params.externalInvitees,
+      fileAttachments: [
+        { name: 'invite.ics', contentType: 'text/calendar', content: ics },
+      ],
+    },
+    tx,
+  );
+}
 
 /**
  * If the RRULE contains UNTIL or COUNT, derive the effective end date so that
@@ -197,7 +283,16 @@ export class ScheduleCallController {
       }
 
       // Validate request body with Zod
-      const { title, startsAt, endsAt, channelId, targetUserIds, conversationId } = ScheduleCallSchema.parse(req.body);
+      const {
+        title,
+        startsAt,
+        endsAt,
+        channelId,
+        targetUserIds,
+        conversationId,
+        externalInvitees,
+        invitation,
+      } = ScheduleCallSchema.parse(req.body);
 
       // update-channel mode: channelId is the broadcast channel, targetUserIds are the actual participants
       const isUpdateChannelMode = !!(channelId && targetUserIds?.length);
@@ -225,24 +320,48 @@ export class ScheduleCallController {
       // Generate room link for scheduled call
       const roomLink = `${livekitService.getClientUrl()}/call/${externalId}?type=${CallType.AUDIO}`;
 
-      // Create the scheduled call and participants atomically via repository
+      const hasExternals = !!(
+        externalInvitees && externalInvitees.length > 0 && invitation && conversationId
+      );
+
       const db = DatabaseClient.getInstance();
-      const { participantUserIds } = await db.$transaction(async (tx) => repositories.calls.createCallWithParticipants({
-        callId,
-        externalId,
-        title,
-        createdByUserId: userId,
-        channelId: finalChannelId!,
-        callType: CallType.AUDIO,
-        callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
-        roomLink,
-        timezone: 'UTC',
-        isRecurring: false,
-        startsAt: new Date(startsAt),
-        endsAt: new Date(endsAt),
-        ...(finalTargetUserIds && { targetUserIds: finalTargetUserIds }),
-        ...(conversationId && { metadata: { conversationId } }),
-      }, tx));
+      const { participantUserIds } = await db.$transaction(async (tx) => {
+        const result = await repositories.calls.createCallWithParticipants({
+          callId,
+          externalId,
+          title,
+          createdByUserId: userId,
+          channelId: finalChannelId!,
+          callType: CallType.AUDIO,
+          callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
+          roomLink,
+          timezone: 'UTC',
+          isRecurring: false,
+          startsAt: new Date(startsAt),
+          endsAt: new Date(endsAt),
+          ...(finalTargetUserIds && { targetUserIds: finalTargetUserIds }),
+          ...(conversationId && { metadata: { conversationId } }),
+        }, tx);
+
+        if (hasExternals) {
+          await sendCallInvitationReply(
+            {
+              conversationId: conversationId!,
+              externalId,
+              callTitle: title,
+              startsAt: new Date(startsAt),
+              endsAt: new Date(endsAt),
+              organizerUserId: userId,
+              externalInvitees: externalInvitees!,
+              invitation: invitation!,
+              frontendUrl: resolveFrontendUrl(req).replace(/\/+$/, ''),
+            },
+            tx,
+          );
+        }
+
+        return result;
+      });
 
       // Send immediate notifications + create activities for all participants (excluding organizer)
       try {
@@ -297,8 +416,9 @@ export class ScheduleCallController {
         channelId: finalChannelId,
       });
     } catch (error) {
-      logger.error('Failed to schedule call:', error);
-      res.status(500).json({ success: false, error: 'Failed to schedule call' });
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      logger.error(`Failed to schedule call: ${message}`);
+      res.status(500).json({ success: false, error: 'Failed to schedule call', message });
     }
   };
 

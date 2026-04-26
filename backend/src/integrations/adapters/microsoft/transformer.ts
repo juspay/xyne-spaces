@@ -12,6 +12,7 @@ import { logger } from '@/utils/logger';
 interface EnrichedPayload {
   notification: any;
   emails: GraphMailMessage[];
+  preDownloadedAttachments?: NormalizedData['preDownloadedAttachments'];
 }
 
 export class MicrosoftTransformer extends BaseTransformer<any, NormalizedData> {
@@ -38,6 +39,10 @@ export class MicrosoftTransformer extends BaseTransformer<any, NormalizedData> {
         },
 
         content: cleanedContent,
+
+        ...(payload.preDownloadedAttachments && payload.preDownloadedAttachments.length > 0 && {
+          preDownloadedAttachments: payload.preDownloadedAttachments,
+        }),
 
         emailData: {
           subject: email.subject,

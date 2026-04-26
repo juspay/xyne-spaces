@@ -47,10 +47,18 @@ export interface GmailBody {
 }
 
 export interface GmailAttachment {
-  attachmentId: string;
+  attachmentId?: string;
+  /** Pre-decoded bytes when Gmail inlined the part on `body.data`. */
+  data?: Buffer;
   filename: string;
   mimeType: string;
   size: number;
+  /**
+   * MIME `Content-ID` header (without angle brackets) for inline images
+   * referenced from the HTML body via `cid:<contentId>`. The renderer
+   * rewrites those `cid:` URLs to authenticated blob URLs.
+   */
+  contentId?: string;
 }
 
 /** Structured email data extracted from GmailMessageData */

@@ -10,9 +10,20 @@ import { UploadedFileResult } from '@/services/fileUploadService';
 
 export interface ExternalAttachment {
   fileName: string;
-  fileUrl: string;
+  /**
+   * Public URL to GET. Required for URL-fetchable attachments (Slack, Zoho).
+   * Optional when `buffer` is provided (Gmail / MS Graph fetch their bytes
+   * via authed provider APIs that don't return raw HTTP responses).
+   */
+  fileUrl?: string;
+  /** Pre-fetched bytes — when provided, the URL fetch is skipped. */
+  buffer?: Buffer;
   mimeType?: string;
   size?: number;
+  /** MIME Content-ID (no angle brackets) for inline images referenced from the HTML body. */
+  contentId?: string;
+  /** Extra metadata to propagate onto the resulting MessageAttachment (e.g. provider-specific ids). */
+  metadata?: Record<string, unknown>;
 }
 
 export interface DownloadedAttachment {
@@ -116,54 +127,43 @@ export class ExternalAttachmentService {
   }
 
   /**
-   * Download attachments for a specific external source
-   * Automatically handles platform-specific authentication
+   * Single ingest entry. Each attachment is either fetched from `fileUrl`
+   * (Slack / Zoho — auth headers come from the source's credentials) or
+   * processed straight from `buffer` (Gmail / Graph pre-fetched the bytes
+   * via their provider API and pass them inline).
    */
   async downloadAttachmentsForSource(
     sourceName: string,
     attachments: ExternalAttachment[],
     options: DownloadAttachmentsOptions = {}
   ): Promise<DownloadedAttachment[]> {
-    if (!attachments || attachments.length === 0) {
-      return [];
-    }
+    if (!attachments || attachments.length === 0) return [];
 
     logger.info(`Downloading ${attachments.length} attachments for source: ${sourceName}`);
 
-    // Get external source configuration
     const source = await this.externalSourceRepo.findByName(sourceName);
-    if (!source) {
-      throw new Error(`External source not found: ${sourceName}`);
-    }
+    if (!source) throw new Error(`External source not found: ${sourceName}`);
+    if (!source.isActive) throw new Error(`External source is inactive: ${sourceName}`);
 
-    if (!source.isActive) {
-      throw new Error(`External source is inactive: ${sourceName}`);
-    }
-
-    // Decrypt and parse credentials
-    let credentials: any;
-    try {
-      const decryptedCredentials = decrypt(source.credentials);
-      credentials = JSON.parse(decryptedCredentials);
-    } catch (error) {
-      logger.error(`Failed to decrypt/parse credentials for source: ${sourceName}`, error);
-      throw new Error(`Invalid credentials for source: ${sourceName}`);
-    }
-
-    // Get authentication headers for this platform
-    const authHandler = this.getAuthHandler(source.sourceType);
-    const authHeaders = authHandler.getHeaders(credentials);
-
-    // Download attachments with platform-specific authentication
-    return this.downloadAttachments(
-      attachments,
-      authHeaders,
-      {
-        ...options,
-        scopeType: options.scopeType || 'EXTERNAL_MESSAGE',
-        scopeId: options.scopeId || source.sourceType
+    // Auth headers are only needed when at least one attachment will be
+    // URL-fetched. Skip the decrypt+handler dance if every entry already
+    // carries its bytes.
+    let authHeaders: Record<string, string> = {};
+    if (attachments.some(a => !a.buffer && a.fileUrl)) {
+      try {
+        const credentials = JSON.parse(decrypt(source.credentials));
+        authHeaders = this.getAuthHandler(source.sourceType).getHeaders(credentials);
+      } catch (error) {
+        logger.error(`Failed to decrypt credentials for source: ${sourceName}`, error);
+        throw new Error(`Invalid credentials for source: ${sourceName}`);
       }
-    );
+    }
+
+    return this.downloadAttachments(attachments, authHeaders, {
+      ...options,
+      scopeType: options.scopeType || 'EXTERNAL_MESSAGE',
+      scopeId: options.scopeId || source.sourceType,
+    });
   }
 
   /**
@@ -220,45 +220,41 @@ export class ExternalAttachmentService {
 
     const { fileName, fileUrl, mimeType: expectedMimeType, size: expectedSize } = attachment;
 
-    if (!fileUrl) {
-      throw new Error(`No URL provided for attachment: ${fileName}`);
-    }
+    let buffer: Buffer;
+    let responseMimeType: string | undefined;
 
-    logger.debug(`Downloading attachment: ${fileName} from ${fileUrl}`);
+    if (attachment.buffer) {
+      // Bytes already in hand (Gmail / Graph). Skip the HTTP fetch.
+      buffer = attachment.buffer;
+      if (buffer.length > maxFileSize) {
+        throw new Error(`File too large: ${buffer.length} bytes (max: ${maxFileSize})`);
+      }
+    } else {
+      if (!fileUrl) throw new Error(`No URL or buffer for attachment: ${fileName}`);
+      logger.debug(`Downloading attachment: ${fileName} from ${fileUrl}`);
 
-    try {
-      // Create fetch request with timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-      const response = await fetch(fileUrl, {
-        method: 'GET',
-        headers: authHeaders,
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      let response;
+      try {
+        response = await fetch(fileUrl, { method: 'GET', headers: authHeaders, signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
       }
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 
-      // Check content length
       const contentLength = response.headers.get('content-length');
       if (contentLength && parseInt(contentLength) > maxFileSize) {
         throw new Error(`File too large: ${contentLength} bytes (max: ${maxFileSize})`);
       }
-
-      // Get file buffer
-      const buffer = await response.buffer();
-
+      buffer = await response.buffer();
       if (buffer.length > maxFileSize) {
         throw new Error(`File too large: ${buffer.length} bytes (max: ${maxFileSize})`);
       }
+      responseMimeType = response.headers.get('content-type')?.split(';')[0] ?? undefined;
+    }
 
-      // Determine MIME type from response or fallback to expected
-      const responseMimeType = response.headers.get('content-type')?.split(';')[0];
-      
+    try {
       const finalMimeType = responseMimeType || expectedMimeType || 'application/octet-stream';
 
       // Generate unique filename to avoid conflicts
@@ -289,13 +285,13 @@ export class ExternalAttachmentService {
         contentType: finalMimeType,
         metadata: {
           originalName: fileName,
-          externalUrl: fileUrl,
+          ...(fileUrl && { externalUrl: fileUrl }),
           downloadedAt: new Date().toISOString(),
           expectedSize: expectedSize?.toString() || 'unknown',
-          expectedMimeType: expectedMimeType || 'unknown'
+          expectedMimeType: expectedMimeType || 'unknown',
         },
         scopeType,
-        scopeId
+        scopeId,
       });
 
       return {
@@ -305,17 +301,77 @@ export class ExternalAttachmentService {
         mimeType: finalMimeType,
         fileUrl: gcsResult.path,
         metadata: {
-          externalUrl: fileUrl,
+          ...(fileUrl && { externalUrl: fileUrl }),
           gcsPath: gcsResult.path,
-          downloadedAt: new Date().toISOString()
-        }
+          downloadedAt: new Date().toISOString(),
+          // Propagate provider-side hints (contentId for inline cid references,
+          // gmailAttachmentId, etc.) so downstream code can rewrite HTML refs.
+          ...(attachment.contentId && { contentId: attachment.contentId }),
+          ...(attachment.metadata ?? {}),
+        },
       };
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error(`Failed to download attachment ${fileName} from ${fileUrl}:`, errorMessage);
+      logger.error(`Failed to process attachment ${fileName}:`, errorMessage);
       throw new Error(`Download failed for ${fileName}: ${errorMessage}`);
     }
+  }
+
+  /**
+   * Outbound: resolve staged attachment ids (GCS-uploaded MessageAttachment
+   * rows) to Buffers, merge with caller-supplied inline file attachments,
+   * dedupe by `name+contentType`. Used by the email reply send path.
+   */
+  async prepareOutboundAttachments(params: {
+    attachmentIds?: string[];
+    fileAttachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+  }): Promise<{
+    attachments: Array<{ name: string; contentType: string; content: Buffer | string }>;
+    stagedRowIds: string[];
+  }> {
+    const ids = params.attachmentIds ?? [];
+    const stagedRowIds: string[] = [];
+    let stagedAttachments: Array<{ name: string; contentType: string; content: Buffer }> = [];
+
+    if (ids.length > 0) {
+      const { repositories } = await import('@/database/repositories');
+      const results = await Promise.allSettled(
+        ids.map(async id => {
+          const row = await repositories.messageAttachments.findById(id);
+          if (!row) return null;
+          const content = await storageService.getFileBuffer(row.url);
+          return {
+            row,
+            attachment: { name: row.originalFilename, contentType: row.mimetype, content },
+          };
+        }),
+      );
+
+      stagedAttachments = results.flatMap((result, i) => {
+        if (result.status === 'rejected') {
+          logger.warn(
+            `[ExternalAttachmentService] failed to load staged attachment id=${ids[i]}: ${result.reason instanceof Error ? result.reason.message : 'unknown'}`,
+          );
+          return [];
+        }
+        if (!result.value) {
+          logger.warn(`[ExternalAttachmentService] staged attachment not found: ${ids[i]}`);
+          return [];
+        }
+        stagedRowIds.push(result.value.row.id);
+        return [result.value.attachment];
+      });
+    }
+
+    const seen = new Set<string>();
+    const attachments = [...(params.fileAttachments ?? []), ...stagedAttachments].filter(att => {
+      const key = `${att.name}|${att.contentType}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    return { attachments, stagedRowIds };
   }
 
   /**
@@ -349,18 +405,6 @@ export class ExternalAttachmentService {
 
     return mimeToExt[mimeType] || '';
   }
-
-  /**
-   * Static factory method for convenience
-   */
-  static async downloadForSource(
-    sourceName: string,
-    attachments: ExternalAttachment[],
-    options: DownloadAttachmentsOptions = {}
-  ): Promise<DownloadedAttachment[]> {
-    const service = new ExternalAttachmentService();
-    return service.downloadAttachmentsForSource(sourceName, attachments, options);
-  }
 }
 export class AttachmentConversionService {
   /**
@@ -388,26 +432,4 @@ export class AttachmentConversionService {
     });
   }
 
-  /**
-   * Validate that downloaded attachments are in the expected format
-   */
-  static validateDownloadedAttachments(attachments: DownloadedAttachment[]): void {
-    for (const attachment of attachments) {
-      if (!attachment.originalName) {
-        throw new Error('Downloaded attachment missing originalName');
-      }
-      if (!attachment.fileName) {
-        throw new Error('Downloaded attachment missing fileName');
-      }
-      if (!attachment.fileUrl) {
-        throw new Error('Downloaded attachment missing fileUrl');
-      }
-      if (!attachment.mimeType) {
-        throw new Error('Downloaded attachment missing mimeType');
-      }
-      if (typeof attachment.fileSize !== 'number' || attachment.fileSize < 0) {
-        throw new Error('Downloaded attachment has invalid fileSize');
-      }
-    }
-  }
 }

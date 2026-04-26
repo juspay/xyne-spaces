@@ -22,6 +22,10 @@ export class GoogleTransformer extends BaseTransformer<any, NormalizedData> {
         ? historyId
         : undefined;
 
+      const preDownloadedAttachments = rawPayload?.preDownloadedAttachments as
+        NormalizedData['preDownloadedAttachments']
+        | undefined;
+
       const normalized: NormalizedData = {
         externalId: email.messageId,
         externalThreadId: email.threadId,
@@ -33,7 +37,15 @@ export class GoogleTransformer extends BaseTransformer<any, NormalizedData> {
           fileUrl: '',
           mimeType: att.mimeType,
           size: att.size,
+          ...(att.contentId && { contentId: att.contentId }),
+          metadata: {
+            gmailAttachmentId: att.attachmentId,
+            ...(att.contentId && { contentId: att.contentId }),
+          },
         })),
+        ...(preDownloadedAttachments && preDownloadedAttachments.length > 0 && {
+          preDownloadedAttachments,
+        }),
         emailData: {
           subject: email.subject,
           to: email.to || [],

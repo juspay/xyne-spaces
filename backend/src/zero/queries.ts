@@ -440,7 +440,7 @@ export const queries = defineQueries({
         .related('project')
         .related('tags')
         .related('entity')
-        .related('emails')
+        .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q => q.where('userId', ctx.userID))
         .related('conversation')
         .one();
@@ -467,7 +467,7 @@ export const queries = defineQueries({
         .related('project')
         .related('tags')
         .related('entity')
-        .related('emails')
+        .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q => q.where('userId', ctx.userID))
         .one();
     }
@@ -546,7 +546,7 @@ export const queries = defineQueries({
         .related('project')
         .related('tags')
         .related('entity')
-        .related('emails')
+        .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q => q.where('userId', ctx.userID));
     }
   ),
@@ -1412,7 +1412,6 @@ export const queries = defineQueries({
         .orderBy('createdAt', 'desc');
     },
   ),
-
   channelConversationsPaginated: defineQuery(
     z.object({
       channelId: z.string(),

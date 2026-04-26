@@ -5,7 +5,8 @@ import Input from '../../ui/Input';
 import { ChannelScopeType, UserStatus, ChannelVisibility } from '@xyne/shared';
 import { useSelf, useUsers } from '../../../hooks/useUsers';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { callService } from '../../../services/Call/callService';
+import { callService, type ScheduleCallRequest } from '../../../services/Call/callService';
+import DOMPurify from 'dompurify';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { cn } from '../../../utils/classNames';
@@ -30,6 +31,8 @@ import { toast } from 'sonner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { ExternalInviteesInput } from './ExternalInviteesInput';
+import { InvitationPreviewStep } from './InvitationPreviewStep';
 
 /** Shape of a scheduled call passed in for pre-filling in edit mode. */
 export interface EditCallData {
@@ -58,6 +61,10 @@ interface ScheduleCallModalProps {
   channelId?: string;
   /** When set, links the scheduled call to this thread conversation. */
   conversationId?: string;
+  /** When true (ticket threads), shows the Guests email-chip input below the
+   *  participant picker, and routes the submit through Step 2 (invitation
+   *  preview) when at least one guest is added. */
+  enableExternalInvitees?: boolean;
 }
 
 interface ScheduleCallFormData {
@@ -65,6 +72,17 @@ interface ScheduleCallFormData {
   startsAt: Date;
   endsAt: Date;
   participants: string[];
+  externalEmails: string[];
+  /** Organizer's free-form invitation message body as HTML (written via TipTap). */
+  invitationMessageHtml: string;
+  /** Editable display-title for the invitation (falls back to `title`). */
+  invitationTitle: string;
+  /** Editable organizer name for the invitation header. */
+  invitationOrganizerName: string;
+  /** Editable organizer email for the invitation header. */
+  invitationOrganizerEmail: string;
+  /** Optional org/team name for the header band. */
+  invitationOrgName: string;
 }
 
 const DAY_OPTIONS: { key: string; label: string }[] = [
@@ -145,6 +163,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   initialEndsAt,
   channelId: threadChannelId,
   conversationId: threadConversationId,
+  enableExternalInvitees = false,
 }) => {
   const user = useSelf();
   const allUsers = useUsers();
@@ -159,6 +178,22 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     if (!threadChannelId || !channelParticipants) return null;
     return new Set(channelParticipants.map((p: { userId: string }) => p.userId));
   }, [threadChannelId, channelParticipants]);
+
+  // Thread/ticket emails — used to prefill Guests with addresses already on the thread.
+  const [ticketEmails] = useCachedQuery(
+    queries.getEmailsForTicket({ conversationId: threadConversationId ?? '' }),
+    { enabled: isOpen && !!threadConversationId && enableExternalInvitees },
+  );
+
+  // Step 1 (participants) / Step 2 (invitation preview) + direction used for
+  // the slide animation between them.
+  const [step, setStep] = React.useState<'participants' | 'invitation'>('participants');
+  const [slideDir, setSlideDir] = React.useState<1 | -1>(1);
+  const goToStep = useCallback((next: 'participants' | 'invitation') => {
+    setSlideDir(next === 'invitation' ? 1 : -1);
+    setStep(next);
+  }, []);
+
   const isEditMode = mode === 'edit' && !!initialCall;
   const [showCustomPanel, setShowCustomPanel] = React.useState(false);
 
@@ -271,6 +306,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       startsAt: defaultStart,
       endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000), // Default 1 hours after start time
       participants: [],
+      externalEmails: [],
+      invitationMessageHtml: "<p>You've been invited to a call. Details below.</p>",
+      invitationTitle: '',
+      invitationOrganizerName: '',
+      invitationOrganizerEmail: '',
+      invitationOrgName: '',
     },
     mode: 'onChange',
   });
@@ -280,6 +321,34 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   const startsAt = watch('startsAt');
   const endsAt = watch('endsAt');
   const participants = watch('participants');
+  const externalEmails = watch('externalEmails') ?? [];
+  const invitationMessageHtml = watch('invitationMessageHtml') ?? '';
+
+  // Every unique address from the thread; user removes chips they don't want.
+  const suggestedExternalEmails = useMemo<string[]>(() => {
+    if (!enableExternalInvitees || !ticketEmails || ticketEmails.length === 0) return [];
+
+    const emails = ticketEmails as Array<{
+      from?: string | null;
+      to?: string[] | null;
+      cc?: string[] | null;
+    }>;
+
+    const extract = (s: string): string => {
+      const trimmed = s.trim();
+      const angle = /<([^>]+)>\s*$/.exec(trimmed);
+      return (angle ? angle[1]! : trimmed).trim().toLowerCase();
+    };
+    const isValidEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
+    const addresses = emails
+      .flatMap(e => [e.from, ...(e.to ?? []), ...(e.cc ?? [])])
+      .filter((raw): raw is string => !!raw)
+      .map(extract)
+      .filter(isValidEmail);
+
+    return Array.from(new Set(addresses));
+  }, [enableExternalInvitees, ticketEmails]);
 
   // Show "Post call updates" checkbox only when:
   //   - at least one participant is added
@@ -440,9 +509,8 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
     setIsRecurring(true);
 
-    // When editing the entire series, preserve the user's current form values
-    // (they want to apply their edits to the series, not overwrite with old series data)
-    // Only update series metadata like endsOn
+    // When editing the whole series, only update series-level metadata
+    // (endsOn) — keep the user's current form values intact.
     if (editEntireSeries && seriesData.endsOn) {
       setSeriesEndsOn(new Date(seriesData.endsOn));
       setSeriesEndsType('on');
@@ -915,10 +983,31 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         return;
       }
 
-      // Validate post call updates requires channel selection
       if (postCallUpdates && !updateChannelId) {
         toast.error('Select a channel', {
           description: 'Please select a channel to post call updates.',
+          duration: 3000,
+        });
+        return;
+      }
+
+      // ── Step advance: externals present and still on Step 1 ──────────────
+      // Invitation preview + Send happens on Step 2.
+      if (
+        enableExternalInvitees &&
+        !isEditMode &&
+        !isRecurring &&
+        (data.externalEmails ?? []).length > 0 &&
+        step === 'participants'
+      ) {
+        goToStep('invitation');
+        return;
+      }
+
+      // Step 2 has no participants field, so RHF's silent error never shows.
+      if (data.participants.length === 0) {
+        toast.error('Add at least one participant', {
+          description: 'A scheduled call needs at least one teammate from this channel.',
           duration: 3000,
         });
         return;
@@ -1009,14 +1098,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           duration: 3000,
         });
       } else {
-        const requestData: {
-          title: string;
-          startsAt: number;
-          endsAt: number;
-          channelId?: string;
-          targetUserIds?: string[];
-          conversationId?: string;
-        } = {
+        const requestData: ScheduleCallRequest = {
           title: data.title,
           startsAt: data.startsAt.getTime(),
           endsAt: data.endsAt.getTime(),
@@ -1033,9 +1115,31 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           if (channelId) requestData.channelId = channelId;
           if (userIds.length > 0) requestData.targetUserIds = userIds;
         }
+        const effExternals = data.externalEmails ?? [];
+        if (enableExternalInvitees && effExternals.length > 0) {
+          // Server re-sanitizes; doing it here too keeps a tampered payload
+          // from ever shipping unsafe HTML over the wire.
+          const safeBody = DOMPurify.sanitize((data.invitationMessageHtml || '').trim());
+          requestData.externalInvitees = effExternals;
+          requestData.invitation = {
+            bodyHtml: safeBody || '<p></p>',
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            ...(data.invitationTitle?.trim() && { title: data.invitationTitle.trim() }),
+            ...(data.invitationOrganizerName?.trim() && {
+              organizerName: data.invitationOrganizerName.trim(),
+            }),
+            ...(data.invitationOrganizerEmail?.trim() && {
+              organizerEmail: data.invitationOrganizerEmail.trim(),
+            }),
+            ...(data.invitationOrgName?.trim() && { orgName: data.invitationOrgName.trim() }),
+          };
+        }
         await callService.scheduleCall(requestData);
         toast.success('Call Scheduled', {
-          description: 'Call scheduled successfully',
+          description:
+            effExternals.length > 0
+              ? `Call scheduled. Invitation sent to ${effExternals.length} external recipient(s).`
+              : 'Call scheduled successfully',
           duration: 3000,
         });
       }
@@ -1058,7 +1162,14 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       startsAt: defaultStart,
       endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
       participants: [],
+      externalEmails: [],
+      invitationMessageHtml: "<p>You've been invited to a call. Details below.</p>",
+      invitationTitle: '',
+      invitationOrganizerName: '',
+      invitationOrganizerEmail: '',
+      invitationOrgName: '',
     });
+    setStep('participants');
     setSearchQuery('');
     setIsRecurring(false);
     setRecurrenceFrequency('WEEK');
@@ -1079,907 +1190,1099 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     onClose();
   }, [reset, onClose, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const isDesigningInvitation = enableExternalInvitees && step === 'invitation';
+  const dialogSizing = isDesigningInvitation
+    ? 'w-[min(1280px,96vw)] !max-w-[96vw] h-[min(820px,92vh)]'
+    : 'max-w-[584px]';
+  const dialogPositioning = isDesigningInvitation
+    ? 'top-1/2 !-translate-y-1/2'
+    : 'top-1/3 !-translate-y-1/3';
+
+  // Resolved invitation fields — user overrides fall back to call/user defaults.
+  const resolvedInvitationTitle =
+    (watch('invitationTitle') ?? '').trim() || title || 'Untitled call';
+  const resolvedOrganizerName =
+    (watch('invitationOrganizerName') ?? '').trim() || getUserDisplayName(user);
+  const resolvedOrganizerEmail =
+    (watch('invitationOrganizerEmail') ?? '').trim() || (user?.email ?? '');
+  const resolvedOrgName = (watch('invitationOrgName') ?? '').trim();
+
+  // Single source of truth for the submit button: drives `disabled`, the
+  // hover-tooltip contents, and the label.
+  const missingRequirements: string[] = [];
+  if (!title.trim()) missingRequirements.push('Add a title');
+  if (participants.length === 0) missingRequirements.push('Add at least one participant');
+  if (errors.startsAt) missingRequirements.push('Pick a valid start time');
+  if (errors.endsAt) missingRequirements.push('Pick a valid end time');
+  if (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) {
+    missingRequirements.push('Pick at least one weekday');
+  }
+  if (postCallUpdates && !updateChannelId) {
+    missingRequirements.push('Pick a channel for post-call updates');
+  }
+  const submitDisabled = isSubmitting || missingRequirements.length > 0;
+  const submitLabel = isSubmitting
+    ? isEditMode
+      ? 'Saving...'
+      : isRecurring
+        ? 'Creating...'
+        : 'Scheduling...'
+    : enableExternalInvitees && !isEditMode && !isRecurring && externalEmails.length > 0
+      ? 'Next: Customize invitation'
+      : isEditMode
+        ? 'Save Changes'
+        : isRecurring
+          ? 'Create Series'
+          : 'Schedule Call';
+
   return (
     <Dialog
       open={isOpen}
       onOpenChange={open => !open && handleClose()}
-      className={cn('max-w-[584px] rounded-xl', 'top-1/3 !-translate-y-1/3')}
+      className={cn(
+        dialogSizing,
+        'rounded-xl overflow-hidden flex flex-col transition-[max-width,width,height] duration-300 ease-out',
+        dialogPositioning,
+      )}
     >
-      <form className='flex flex-col w-full' onSubmit={e => void handleSubmit(onSubmit)(e)}>
-        {/* Header */}
-        <div className='flex items-start justify-between px-5 py-3.5 border-b border-border '>
-          <span>
-            <h2 className='text-[15px] font-semibold text-foreground leading-5'>
-              {isEditMode ? 'Edit Call Details' : 'Schedule a Call'}
-            </h2>
-            <p className='text-sidebar-secondary-foreground text-[13px] font-medium leading-5'>
-              {isEditMode
-                ? 'Edit time or participants for this call'
-                : 'Schedule call with people, groups or channel'}
-            </p>
-          </span>
-          <Button
-            variant='outline'
-            size='icon'
-            tabIndex={-1}
-            className='size-7 rounded-lg'
-            onClick={handleClose}
+      <AnimatePresence mode='popLayout' initial={false} custom={slideDir}>
+        {isDesigningInvitation ? (
+          <motion.div
+            key='step-invitation'
+            custom={slideDir}
+            initial={{ x: slideDir * 32, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: -slideDir * 32, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className='flex flex-col w-full min-h-0 overflow-hidden'
+            // Dialog wraps children in a plain <div> which breaks `h-full`
+            // cascading, so anchor the step height to the viewport directly.
+            style={{ height: 'min(820px, 92vh)' }}
           >
-            <X className='size-4' />
-          </Button>
-        </div>
-        <div className='flex flex-col gap-8 pt-4 px-5'>
-          {/* Tiltte Input */}
-          <div>
-            <Controller
-              name='title'
-              control={control}
-              render={({ field }) => (
-                <Input
-                  {...field}
-                  id='call-title'
-                  type='text'
-                  placeholder='Enter call title'
-                  tabIndex={0}
-                  className={cn(
-                    '!text-[22px] truncate',
-                    'px-0 border-none focus-visible:ring-0 rounded-none',
-                    'font-semibold text-foreground placeholder:text-xl placeholder:text-muted-foreground',
-                    errors.title && 'border-red-500',
-                  )}
-                />
-              )}
-              rules={{
-                required: 'Title is reqiured',
-                maxLength: {
-                  value: 80,
-                  message: 'Title must be less than 80 characters',
-                },
-                validate: value => value.trim().length > 0 || 'Title cannot be empty',
+            <div className='px-5 py-3.5 border-b border-border flex items-start justify-between gap-4 shrink-0'>
+              <div>
+                <h2 className='text-[15px] font-semibold text-foreground leading-5'>
+                  Design the invitation
+                </h2>
+                <p className='text-sidebar-secondary-foreground text-[13px] font-medium leading-5'>
+                  Curate the message and edit header details — the invitation goes out as a reply on
+                  this ticket&apos;s email thread.
+                </p>
+              </div>
+            </div>
+            <InvitationPreviewStep
+              recipients={externalEmails}
+              messageHtml={invitationMessageHtml}
+              onMessageChange={html => setValue('invitationMessageHtml', html)}
+              editableTitle={watch('invitationTitle') ?? ''}
+              onEditableTitleChange={(v: string) => setValue('invitationTitle', v)}
+              editableOrganizerName={watch('invitationOrganizerName') ?? ''}
+              onEditableOrganizerNameChange={(v: string) => setValue('invitationOrganizerName', v)}
+              editableOrganizerEmail={watch('invitationOrganizerEmail') ?? ''}
+              onEditableOrganizerEmailChange={(v: string) =>
+                setValue('invitationOrganizerEmail', v)
+              }
+              editableOrgName={watch('invitationOrgName') ?? ''}
+              onEditableOrgNameChange={(v: string) => setValue('invitationOrgName', v)}
+              data={{
+                title: resolvedInvitationTitle,
+                startsAt,
+                endsAt,
+                // Display in the user's local timezone so Step 1 and Step 2 show
+                // the same clock time (they pick times in local tz on Step 1).
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                organizerName: resolvedOrganizerName,
+                organizerEmail: resolvedOrganizerEmail,
+                orgName: resolvedOrgName,
+                joinUrlPlaceholder: `${typeof window !== 'undefined' ? window.location.origin : 'https://example.com'}/call/preview`,
               }}
+              onBack={() => goToStep('participants')}
+              onSend={() => {
+                void handleSubmit(onSubmit)();
+              }}
+              isSubmitting={isSubmitting}
             />
-            {errors.title && <p className='text-red-500 text-xs mt-1'>{errors.title.message}</p>}
-          </div>
-          <div className='flex flex-col gap-3'>
-            {isRecurring ? (
-              /* ── Recurring mode: date on its own row, times side-by-side below ── */
-              <>
-                {/* Series start date */}
-                <div className='space-y-3'>
-                  <label
-                    htmlFor='series-starts-on'
-                    className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
-                  >
-                    Series starts on
-                  </label>
-                  <Controller
-                    name='startsAt'
-                    control={control}
-                    render={({ field }) => (
-                      <DatePicker
-                        id='series-starts-on'
-                        selectedDate={startsAt}
-                        onSelect={date => {
-                          if (date) field.onChange(date);
-                        }}
-                        placeholder='Select start date'
-                        minDate={new Date(new Date().setHours(0, 0, 0, 0))}
-                        inputClassName={cn(
-                          'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
-                          errors.startsAt && 'border-red-500',
-                        )}
-                        showClearButton={false}
-                      />
-                    )}
-                  />
-                  {errors.startsAt && (
-                    <p className='text-red-500 text-xs'>{errors.startsAt.message}</p>
+          </motion.div>
+        ) : (
+          <motion.form
+            key='step-participants'
+            custom={slideDir}
+            initial={{ x: slideDir * 32, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: -slideDir * 32, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className='flex flex-col w-full'
+            onSubmit={e => void handleSubmit(onSubmit)(e)}
+          >
+            {/* Header */}
+            <div className='flex items-start justify-between px-5 py-3.5 border-b border-border '>
+              <span>
+                <h2 className='text-[15px] font-semibold text-foreground leading-5'>
+                  {isEditMode ? 'Edit Call Details' : 'Schedule a Call'}
+                </h2>
+                <p className='text-sidebar-secondary-foreground text-[13px] font-medium leading-5'>
+                  {isEditMode
+                    ? 'Edit time or participants for this call'
+                    : 'Schedule call with people, groups or channel'}
+                </p>
+              </span>
+              <Button
+                variant='outline'
+                size='icon'
+                tabIndex={-1}
+                className='size-7 rounded-lg'
+                onClick={handleClose}
+              >
+                <X className='size-4' />
+              </Button>
+            </div>
+            <div className='flex flex-col gap-8 pt-4 px-5'>
+              {/* Tiltte Input */}
+              <div>
+                <Controller
+                  name='title'
+                  control={control}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      id='call-title'
+                      type='text'
+                      placeholder='Enter call title'
+                      tabIndex={0}
+                      className={cn(
+                        '!text-[22px] truncate',
+                        'px-0 border-none focus-visible:ring-0 rounded-none',
+                        'font-semibold text-foreground placeholder:text-xl placeholder:text-muted-foreground',
+                        errors.title && 'border-red-500',
+                      )}
+                    />
                   )}
-                </div>
-                {/* Call time: start → end on one row */}
-                <div className='space-y-3'>
-                  <label
-                    htmlFor='call-time-start'
-                    className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
-                  >
-                    Call time
-                  </label>
-                  <div className='flex items-center gap-2'>
-                    <Controller
-                      name='startsAt'
-                      control={control}
-                      render={({ field }) => (
-                        <TimePicker
-                          id='call-time-start'
-                          value={
-                            field.value
-                              ? field.value.toLocaleTimeString('en-US', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : ''
-                          }
-                          onChange={handleRecurringStartTimeChange}
-                          onClose={validateTimes}
-                          placeholder='Start time'
-                          disabled={false}
-                        />
-                      )}
-                    />
-                    <span className='text-gray-400 text-sm shrink-0'>→</span>
-                    <Controller
-                      name='endsAt'
-                      control={control}
-                      render={({ field }) => (
-                        <TimePicker
-                          value={
-                            field.value
-                              ? field.value.toLocaleTimeString('en-US', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : ''
-                          }
-                          onChange={handleRecurringEndTimeChange}
-                          onClose={validateTimes}
-                          placeholder='End time'
-                          disabled={false}
-                        />
-                      )}
-                    />
-                  </div>
-                  {errors.endsAt && <p className='text-red-500 text-xs'>{errors.endsAt.message}</p>}
-                </div>
-              </>
-            ) : (
-              /* ── One-time mode: original two-row layout ── */
-              <>
-                <div className='space-y-3'>
-                  <label
-                    htmlFor='start-time'
-                    className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
-                  >
-                    Start Date and time
-                  </label>
-                  <div className='flex items-center justify-between gap-3'>
-                    <Controller
-                      name='startsAt'
-                      control={control}
-                      render={({ field }) => (
-                        <DatePicker
-                          selectedDate={startsAt}
-                          onSelect={date => {
-                            if (date) field.onChange(date);
-                          }}
-                          placeholder='Select start date'
-                          minDate={new Date(new Date().setHours(0, 0, 0, 0))}
-                          inputClassName={cn(
-                            'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
-                            errors.startsAt && 'border-red-500',
-                          )}
-                          showClearButton={false}
-                        />
-                      )}
-                    />
-                    <Controller
-                      name='startsAt'
-                      control={control}
-                      render={({ field }) => (
-                        <TimePicker
-                          value={
-                            field.value
-                              ? field.value.toLocaleTimeString('en-US', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : ''
-                          }
-                          onChange={handleStartTimeChange}
-                          onClose={validateTimes}
-                          placeholder='Select start time'
-                          disabled={false}
-                        />
-                      )}
-                    />
-                  </div>
-                  {errors.startsAt && (
-                    <p className='text-red-500 text-xs'>{errors.startsAt.message}</p>
-                  )}
-                </div>
-
-                <div className='space-y-3'>
-                  <label
-                    htmlFor='end-time'
-                    className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
-                  >
-                    End Date and time
-                  </label>
-                  <div className='flex items-center justify-between gap-3'>
-                    <Controller
-                      name='endsAt'
-                      control={control}
-                      render={({ field }) => (
-                        <DatePicker
-                          selectedDate={field.value}
-                          onSelect={date => {
-                            if (date) field.onChange(date);
-                          }}
-                          placeholder='Select end date'
-                          minDate={startsAt ?? new Date(new Date().setHours(0, 0, 0, 0))}
-                          inputClassName={cn(
-                            'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
-                            errors.endsAt && 'border-red-500',
-                          )}
-                          showClearButton={false}
-                        />
-                      )}
-                    />
-                    <Controller
-                      name='endsAt'
-                      control={control}
-                      render={({ field }) => (
-                        <TimePicker
-                          value={
-                            field.value
-                              ? field.value.toLocaleTimeString('en-US', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })
-                              : ''
-                          }
-                          onChange={handleEndTimeChange}
-                          onClose={validateTimes}
-                          placeholder='Select end time'
-                          disabled={false}
-                        />
-                      )}
-                    />
-                  </div>
-                  {errors.endsAt && <p className='text-red-500 text-xs'>{errors.endsAt.message}</p>}
-                </div>
-              </>
-            )}
-            {/* Repeat Toggle + Recurrence Options */}
-            {!(isEditMode && !initialCall?.recurringSeriesId) && !threadConversationId && (
+                  rules={{
+                    required: 'Title is required',
+                    maxLength: {
+                      value: 80,
+                      message: 'Title must be less than 80 characters',
+                    },
+                    validate: value => value.trim().length > 0 || 'Title cannot be empty',
+                  }}
+                />
+                {errors.title && (
+                  <p className='text-red-500 text-xs mt-1'>{errors.title.message}</p>
+                )}
+              </div>
               <div className='flex flex-col gap-3'>
-                <div className='flex items-center'>
-                  <DropdownMenu
-                    onOpenChange={open => {
-                      if (!open) setShowCustomPanel(false); // reset when dropdown closes
-                    }}
-                  >
-                    <DropdownMenuTrigger asChild>
-                      <Button className='py-2 px-3 flex gap-2.5 rounded-lg bg-transparent hover:bg-secondary/80 border border-border text-foreground'>
-                        <span className='text-sm font-normal leading-6'>
-                          {getRecurrenceLabel()}
-                        </span>
-                        <ChevronDown className='size-4' strokeWidth={2.3} />
-                      </Button>
-                    </DropdownMenuTrigger>
-
-                    <DropdownMenuContent
-                      align='start'
-                      sideOffset={6}
-                      className='rounded-xl overflow-hidden p-0 [&[data-state=open]]:animate-none [&[data-state=closed]]:animate-none'
-                      asChild
-                    >
-                      <motion.div
-                        layout='size'
-                        initial={{ opacity: 0, scale: 0.95, y: -8 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: -8 }}
-                        transition={{ duration: 0.15, ease: [0.4, 0, 0.2, 1] }}
-                        className='overflow-hidden'
-                        style={{ originX: 0, originY: 0 }}
+                {isRecurring ? (
+                  /* ── Recurring mode: date on its own row, times side-by-side below ── */
+                  <>
+                    {/* Series start date */}
+                    <div className='space-y-3'>
+                      <label
+                        htmlFor='series-starts-on'
+                        className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
                       >
-                        <AnimatePresence initial={false} mode='popLayout'>
-                          {!showCustomPanel ? (
-                            /* ── Default list view ── */
-                            <motion.div
-                              key='list'
-                              layout='size'
-                              initial={false}
-                              animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
-                              exit={{ opacity: 0, x: 0, filter: 'blur(8px)' }}
-                              transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-                              className='p-2 flex flex-col min-w-[220px]'
-                            >
-                              <DropdownMenuItem
-                                className='text-sm rounded-lg p-2'
-                                onClick={() => setIsRecurring(false)}
-                              >
-                                Does Not Repeat
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className='text-sm rounded-lg p-2'
-                                onClick={() => {
-                                  setIsRecurring(true);
-                                  setRecurrenceFrequency('DAY');
-                                  setRecurrenceDays([]);
-                                }}
-                              >
-                                Daily
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className='text-sm rounded-lg p-2'
-                                onClick={() => {
-                                  setIsRecurring(true);
-                                  setRecurrenceFrequency('WEEK');
-                                  setRecurrenceDays(['MO', 'TU', 'WE', 'TH', 'FR']);
-                                }}
-                              >
-                                Every Weekday (Mon – Fri)
-                              </DropdownMenuItem>
-                              {(() => {
-                                const { weekday, ordinalWord } = getWeekdayOccurrence(startsAt);
-                                return (
+                        Series starts on
+                      </label>
+                      <Controller
+                        name='startsAt'
+                        control={control}
+                        render={({ field }) => (
+                          <DatePicker
+                            id='series-starts-on'
+                            selectedDate={startsAt}
+                            onSelect={date => {
+                              if (date) field.onChange(date);
+                            }}
+                            placeholder='Select start date'
+                            minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                            inputClassName={cn(
+                              'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
+                              errors.startsAt && 'border-red-500',
+                            )}
+                            showClearButton={false}
+                          />
+                        )}
+                      />
+                      {errors.startsAt && (
+                        <p className='text-red-500 text-xs'>{errors.startsAt.message}</p>
+                      )}
+                    </div>
+                    {/* Call time: start → end on one row */}
+                    <div className='space-y-3'>
+                      <label
+                        htmlFor='call-time-start'
+                        className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
+                      >
+                        Call time
+                      </label>
+                      <div className='flex items-center gap-2'>
+                        <Controller
+                          name='startsAt'
+                          control={control}
+                          render={({ field }) => (
+                            <TimePicker
+                              id='call-time-start'
+                              value={
+                                field.value
+                                  ? field.value.toLocaleTimeString('en-US', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })
+                                  : ''
+                              }
+                              onChange={handleRecurringStartTimeChange}
+                              onClose={validateTimes}
+                              placeholder='Start time'
+                              disabled={false}
+                            />
+                          )}
+                        />
+                        <span className='text-gray-400 text-sm shrink-0'>→</span>
+                        <Controller
+                          name='endsAt'
+                          control={control}
+                          render={({ field }) => (
+                            <TimePicker
+                              value={
+                                field.value
+                                  ? field.value.toLocaleTimeString('en-US', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })
+                                  : ''
+                              }
+                              onChange={handleRecurringEndTimeChange}
+                              onClose={validateTimes}
+                              placeholder='End time'
+                              disabled={false}
+                            />
+                          )}
+                        />
+                      </div>
+                      {errors.endsAt && (
+                        <p className='text-red-500 text-xs'>{errors.endsAt.message}</p>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  /* ── One-time mode: original two-row layout ── */
+                  <>
+                    <div className='space-y-3'>
+                      <label
+                        htmlFor='start-time'
+                        className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
+                      >
+                        Start Date and time
+                      </label>
+                      <div className='flex items-center justify-between gap-3'>
+                        <Controller
+                          name='startsAt'
+                          control={control}
+                          render={({ field }) => (
+                            <DatePicker
+                              selectedDate={startsAt}
+                              onSelect={date => {
+                                if (date) field.onChange(date);
+                              }}
+                              placeholder='Select start date'
+                              minDate={new Date(new Date().setHours(0, 0, 0, 0))}
+                              inputClassName={cn(
+                                'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
+                                errors.startsAt && 'border-red-500',
+                              )}
+                              showClearButton={false}
+                            />
+                          )}
+                        />
+                        <Controller
+                          name='startsAt'
+                          control={control}
+                          render={({ field }) => (
+                            <TimePicker
+                              value={
+                                field.value
+                                  ? field.value.toLocaleTimeString('en-US', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })
+                                  : ''
+                              }
+                              onChange={handleStartTimeChange}
+                              onClose={validateTimes}
+                              placeholder='Select start time'
+                              disabled={false}
+                            />
+                          )}
+                        />
+                      </div>
+                      {errors.startsAt && (
+                        <p className='text-red-500 text-xs'>{errors.startsAt.message}</p>
+                      )}
+                    </div>
+
+                    <div className='space-y-3'>
+                      <label
+                        htmlFor='end-time'
+                        className='text-[13px] text-sidebar-secondary-foreground font-medium leading-5'
+                      >
+                        End Date and time
+                      </label>
+                      <div className='flex items-center justify-between gap-3'>
+                        <Controller
+                          name='endsAt'
+                          control={control}
+                          render={({ field }) => (
+                            <DatePicker
+                              selectedDate={field.value}
+                              onSelect={date => {
+                                if (date) field.onChange(date);
+                              }}
+                              placeholder='Select end date'
+                              minDate={startsAt ?? new Date(new Date().setHours(0, 0, 0, 0))}
+                              inputClassName={cn(
+                                'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 w-full',
+                                errors.endsAt && 'border-red-500',
+                              )}
+                              showClearButton={false}
+                            />
+                          )}
+                        />
+                        <Controller
+                          name='endsAt'
+                          control={control}
+                          render={({ field }) => (
+                            <TimePicker
+                              value={
+                                field.value
+                                  ? field.value.toLocaleTimeString('en-US', {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })
+                                  : ''
+                              }
+                              onChange={handleEndTimeChange}
+                              onClose={validateTimes}
+                              placeholder='Select end time'
+                              disabled={false}
+                            />
+                          )}
+                        />
+                      </div>
+                      {errors.endsAt && (
+                        <p className='text-red-500 text-xs'>{errors.endsAt.message}</p>
+                      )}
+                    </div>
+                  </>
+                )}
+                {/* Repeat Toggle + Recurrence Options */}
+                {!(isEditMode && !initialCall?.recurringSeriesId) && !threadConversationId && (
+                  <div className='flex flex-col gap-3'>
+                    <div className='flex items-center'>
+                      <DropdownMenu
+                        onOpenChange={open => {
+                          if (!open) setShowCustomPanel(false); // reset when dropdown closes
+                        }}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <Button className='py-2 px-3 flex gap-2.5 rounded-lg bg-transparent hover:bg-secondary/80 border border-border text-foreground'>
+                            <span className='text-sm font-normal leading-6'>
+                              {getRecurrenceLabel()}
+                            </span>
+                            <ChevronDown className='size-4' strokeWidth={2.3} />
+                          </Button>
+                        </DropdownMenuTrigger>
+
+                        <DropdownMenuContent
+                          align='start'
+                          sideOffset={6}
+                          className='rounded-xl overflow-hidden p-0 [&[data-state=open]]:animate-none [&[data-state=closed]]:animate-none'
+                          asChild
+                        >
+                          <motion.div
+                            layout='size'
+                            initial={{ opacity: 0, scale: 0.95, y: -8 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: -8 }}
+                            transition={{ duration: 0.15, ease: [0.4, 0, 0.2, 1] }}
+                            className='overflow-hidden'
+                            style={{ originX: 0, originY: 0 }}
+                          >
+                            <AnimatePresence initial={false} mode='popLayout'>
+                              {!showCustomPanel ? (
+                                /* ── Default list view ── */
+                                <motion.div
+                                  key='list'
+                                  layout='size'
+                                  initial={false}
+                                  animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
+                                  exit={{ opacity: 0, x: 0, filter: 'blur(8px)' }}
+                                  transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+                                  className='p-2 flex flex-col min-w-[220px]'
+                                >
+                                  <DropdownMenuItem
+                                    className='text-sm rounded-lg p-2'
+                                    onClick={() => setIsRecurring(false)}
+                                  >
+                                    Does Not Repeat
+                                  </DropdownMenuItem>
                                   <DropdownMenuItem
                                     className='text-sm rounded-lg p-2'
                                     onClick={() => {
                                       setIsRecurring(true);
-                                      setRecurrenceFrequency('MONTH');
-                                      setMonthlyType('monthly_nth_weekday');
+                                      setRecurrenceFrequency('DAY');
                                       setRecurrenceDays([]);
                                     }}
                                   >
-                                    Monthly on {ordinalWord} {weekday}
+                                    Daily
                                   </DropdownMenuItem>
-                                );
-                              })()}
-                              <DropdownMenuItem
-                                className='text-sm rounded-lg p-2'
-                                onClick={e => {
-                                  e.preventDefault(); // keep dropdown open
-                                  // Save current state before entering custom panel
-                                  setPreviousRecurrenceState({
-                                    isRecurring,
-                                    recurrenceFrequency,
-                                    recurrenceDays,
-                                    repeatValue,
-                                    monthlyType,
-                                    seriesEndsType,
-                                    seriesEndsOn,
-                                    occurrenceCount,
-                                  });
-                                  setIsRecurring(true);
-                                  setShowCustomPanel(true);
-                                }}
-                              >
-                                Custom…
-                              </DropdownMenuItem>
-                            </motion.div>
-                          ) : (
-                            /* ── Custom panel view ── */
-                            <motion.div
-                              key='custom'
-                              layout
-                              initial={{ opacity: 0, x: 0, filter: 'blur(8px)' }}
-                              animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
-                              exit={{ opacity: 0, x: 0, filter: 'blur(8px)' }}
-                              transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-                              className='p-4 flex flex-col gap-3 min-w-[320px]'
-                            >
-                              <p className='text-secondary-foreground/60 text-[13px] font-medium'>
-                                Repeat every
-                              </p>
-                              <div className='relative'>
-                                <Input
-                                  type='number'
-                                  inputMode='numeric'
-                                  value={repeatValue}
-                                  onChange={e => {
-                                    const val = parseInt(e.target.value, 10);
-                                    if (e.target.value === '') {
-                                      setRepeatValue('');
-                                    } else if (!isNaN(val) && val >= 1) {
-                                      setRepeatValue(val);
-                                    }
-                                  }}
-                                  onBlur={() => {
-                                    if (repeatValue === '' || repeatValue < 1) {
-                                      setRepeatValue(1);
-                                    }
-                                  }}
-                                  className='rounded-lg border py-2 px-3 pr-8 focus-visible:ring-0
+                                  <DropdownMenuItem
+                                    className='text-sm rounded-lg p-2'
+                                    onClick={() => {
+                                      setIsRecurring(true);
+                                      setRecurrenceFrequency('WEEK');
+                                      setRecurrenceDays(['MO', 'TU', 'WE', 'TH', 'FR']);
+                                    }}
+                                  >
+                                    Every Weekday (Mon – Fri)
+                                  </DropdownMenuItem>
+                                  {(() => {
+                                    const { weekday, ordinalWord } = getWeekdayOccurrence(startsAt);
+                                    return (
+                                      <DropdownMenuItem
+                                        className='text-sm rounded-lg p-2'
+                                        onClick={() => {
+                                          setIsRecurring(true);
+                                          setRecurrenceFrequency('MONTH');
+                                          setMonthlyType('monthly_nth_weekday');
+                                          setRecurrenceDays([]);
+                                        }}
+                                      >
+                                        Monthly on {ordinalWord} {weekday}
+                                      </DropdownMenuItem>
+                                    );
+                                  })()}
+                                  <DropdownMenuItem
+                                    className='text-sm rounded-lg p-2'
+                                    onClick={e => {
+                                      e.preventDefault(); // keep dropdown open
+                                      // Save current state before entering custom panel
+                                      setPreviousRecurrenceState({
+                                        isRecurring,
+                                        recurrenceFrequency,
+                                        recurrenceDays,
+                                        repeatValue,
+                                        monthlyType,
+                                        seriesEndsType,
+                                        seriesEndsOn,
+                                        occurrenceCount,
+                                      });
+                                      setIsRecurring(true);
+                                      setShowCustomPanel(true);
+                                    }}
+                                  >
+                                    Custom…
+                                  </DropdownMenuItem>
+                                </motion.div>
+                              ) : (
+                                /* ── Custom panel view ── */
+                                <motion.div
+                                  key='custom'
+                                  layout
+                                  initial={{ opacity: 0, x: 0, filter: 'blur(8px)' }}
+                                  animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }}
+                                  exit={{ opacity: 0, x: 0, filter: 'blur(8px)' }}
+                                  transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+                                  className='p-4 flex flex-col gap-3 min-w-[320px]'
+                                >
+                                  <p className='text-secondary-foreground/60 text-[13px] font-medium'>
+                                    Repeat every
+                                  </p>
+                                  <div className='relative'>
+                                    <Input
+                                      type='number'
+                                      inputMode='numeric'
+                                      value={repeatValue}
+                                      onChange={e => {
+                                        const val = parseInt(e.target.value, 10);
+                                        if (e.target.value === '') {
+                                          setRepeatValue('');
+                                        } else if (!isNaN(val) && val >= 1) {
+                                          setRepeatValue(val);
+                                        }
+                                      }}
+                                      onBlur={() => {
+                                        if (repeatValue === '' || repeatValue < 1) {
+                                          setRepeatValue(1);
+                                        }
+                                      }}
+                                      className='rounded-lg border py-2 px-3 pr-8 focus-visible:ring-0
                                   [&::-webkit-outer-spin-button]:appearance-none
                                   [&::-webkit-inner-spin-button]:appearance-none
                                   [&::-webkit-inner-spin-button]:m-0
                                   [appearance:textfield]'
-                                />
-                                <span className='flex flex-col absolute top-1.5 right-3'>
-                                  <ChevronUp
-                                    onClick={() =>
-                                      setRepeatValue(prev =>
-                                        typeof prev === 'number' ? prev + 1 : 1,
-                                      )
-                                    }
-                                    className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
-                                    strokeWidth={3}
-                                  />
-                                  <ChevronDown
-                                    onClick={() =>
-                                      setRepeatValue(prev =>
-                                        Math.max(1, typeof prev === 'number' ? prev - 1 : 0),
-                                      )
-                                    }
-                                    className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
-                                    strokeWidth={3}
-                                  />
-                                </span>
-                              </div>
-                              {/* Frequency pills */}
-                              <div className='flex gap-2 justify-between -mt-1'>
-                                {(['DAY', 'WEEK', 'MONTH'] as const).map(freq => (
-                                  <button
-                                    key={freq}
-                                    type='button'
-                                    onClick={() => {
-                                      setRecurrenceFrequency(freq);
-                                      if (freq === 'WEEK') {
-                                        // Set default day based on startsAt date when switching to WEEK
-                                        setRecurrenceDays(prev => {
-                                          const dayIndex = startsAt.getDay();
-                                          if (dayIndex >= 0 && dayIndex < DAY_KEYS.length) {
-                                            const todayKey = DAY_KEYS[dayIndex];
-                                            if (todayKey) {
-                                              setRecurrenceDays([todayKey]);
-                                            }
+                                    />
+                                    <span className='flex flex-col absolute top-1.5 right-3'>
+                                      <ChevronUp
+                                        onClick={() =>
+                                          setRepeatValue(prev =>
+                                            typeof prev === 'number' ? prev + 1 : 1,
+                                          )
+                                        }
+                                        className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
+                                        strokeWidth={3}
+                                      />
+                                      <ChevronDown
+                                        onClick={() =>
+                                          setRepeatValue(prev =>
+                                            Math.max(1, typeof prev === 'number' ? prev - 1 : 0),
+                                          )
+                                        }
+                                        className='size-3 text-secondary-foreground/40 hover:text-secondary-foreground/60 cursor-pointer'
+                                        strokeWidth={3}
+                                      />
+                                    </span>
+                                  </div>
+                                  {/* Frequency pills */}
+                                  <div className='flex gap-2 justify-between -mt-1'>
+                                    {(['DAY', 'WEEK', 'MONTH'] as const).map(freq => (
+                                      <button
+                                        key={freq}
+                                        type='button'
+                                        onClick={() => {
+                                          setRecurrenceFrequency(freq);
+                                          if (freq === 'WEEK') {
+                                            // Set default day based on startsAt date when switching to WEEK
+                                            setRecurrenceDays(prev => {
+                                              const dayIndex = startsAt.getDay();
+                                              if (dayIndex >= 0 && dayIndex < DAY_KEYS.length) {
+                                                const todayKey = DAY_KEYS[dayIndex];
+                                                if (todayKey) {
+                                                  setRecurrenceDays([todayKey]);
+                                                }
+                                              }
+                                              return prev;
+                                            });
+                                          } else if (freq === 'DAY') {
+                                            // Clear days when switching to DAY frequency
+                                            setRecurrenceDays([]);
                                           }
-                                          return prev;
-                                        });
-                                      } else if (freq === 'DAY') {
-                                        // Clear days when switching to DAY frequency
-                                        setRecurrenceDays([]);
-                                      }
-                                    }}
-                                    data-track-category='calls'
-                                    data-track-name={`set-recurrence-frequency-${freq.toLowerCase()}`}
-                                    className={cn(
-                                      'w-full h-7 rounded-full text-[13px] font-medium transition-colors',
-                                      recurrenceFrequency === freq
-                                        ? 'bg-sidebar-badge-accent text-white'
-                                        : 'text-foreground bg-secondary',
-                                    )}
-                                  >
-                                    {freq.charAt(0) + freq.slice(1).toLowerCase()}
-                                  </button>
-                                ))}
-                              </div>
+                                        }}
+                                        data-track-category='calls'
+                                        data-track-name={`set-recurrence-frequency-${freq.toLowerCase()}`}
+                                        className={cn(
+                                          'w-full h-7 rounded-full text-[13px] font-medium transition-colors',
+                                          recurrenceFrequency === freq
+                                            ? 'bg-sidebar-badge-accent text-white'
+                                            : 'text-foreground bg-secondary',
+                                        )}
+                                      >
+                                        {freq.charAt(0) + freq.slice(1).toLowerCase()}
+                                      </button>
+                                    ))}
+                                  </div>
 
-                              {/* Day-of-week pills — weekly only */}
-                              <AnimatePresence initial={false} mode='wait'>
-                                {recurrenceFrequency === 'WEEK' && (
-                                  <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: 'auto' }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    transition={{ duration: 0.2, ease: 'easeInOut' }}
-                                    className='flex flex-col gap-1.5 overflow-hidden'
-                                  >
-                                    <p className='text-secondary-foreground/60 text-[13px] font-medium'>
-                                      Repeat on
-                                    </p>
-                                    <div className='flex gap-2.5'>
-                                      {DAY_OPTIONS.map(({ key, label }) => (
-                                        <button
-                                          key={key}
-                                          type='button'
-                                          onClick={() => toggleRecurrenceDay(key)}
-                                          data-track-category='calls'
-                                          data-track-name={`toggle-recurrence-day-${key.toLowerCase()}`}
-                                          className={cn(
-                                            'size-[22px] rounded-full text-[12px] transition-colors',
-                                            recurrenceDays.includes(key)
-                                              ? 'bg-sidebar-badge-accent text-white'
-                                              : 'bg-secondary/90',
-                                          )}
-                                        >
-                                          {label}
-                                        </button>
-                                      ))}
-                                    </div>
-                                    {recurrenceDays.length === 0 && (
-                                      <p className='text-red-500 text-xs'>
-                                        Select at least one day
-                                      </p>
+                                  {/* Day-of-week pills — weekly only */}
+                                  <AnimatePresence initial={false} mode='wait'>
+                                    {recurrenceFrequency === 'WEEK' && (
+                                      <motion.div
+                                        initial={{ opacity: 0, height: 0 }}
+                                        animate={{ opacity: 1, height: 'auto' }}
+                                        exit={{ opacity: 0, height: 0 }}
+                                        transition={{ duration: 0.2, ease: 'easeInOut' }}
+                                        className='flex flex-col gap-1.5 overflow-hidden'
+                                      >
+                                        <p className='text-secondary-foreground/60 text-[13px] font-medium'>
+                                          Repeat on
+                                        </p>
+                                        <div className='flex gap-2.5'>
+                                          {DAY_OPTIONS.map(({ key, label }) => (
+                                            <button
+                                              key={key}
+                                              type='button'
+                                              onClick={() => toggleRecurrenceDay(key)}
+                                              data-track-category='calls'
+                                              data-track-name={`toggle-recurrence-day-${key.toLowerCase()}`}
+                                              className={cn(
+                                                'size-[22px] rounded-full text-[12px] transition-colors',
+                                                recurrenceDays.includes(key)
+                                                  ? 'bg-sidebar-badge-accent text-white'
+                                                  : 'bg-secondary/90',
+                                              )}
+                                            >
+                                              {label}
+                                            </button>
+                                          ))}
+                                        </div>
+                                        {recurrenceDays.length === 0 && (
+                                          <p className='text-red-500 text-xs'>
+                                            Select at least one day
+                                          </p>
+                                        )}
+                                      </motion.div>
                                     )}
-                                  </motion.div>
-                                )}
-                                {recurrenceFrequency === 'MONTH' && (
-                                  <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: 'auto' }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    transition={{ duration: 0.2, ease: 'easeInOut' }}
-                                    className='flex flex-col gap-1.5 overflow-hidden'
-                                  >
+                                    {recurrenceFrequency === 'MONTH' && (
+                                      <motion.div
+                                        initial={{ opacity: 0, height: 0 }}
+                                        animate={{ opacity: 1, height: 'auto' }}
+                                        exit={{ opacity: 0, height: 0 }}
+                                        transition={{ duration: 0.2, ease: 'easeInOut' }}
+                                        className='flex flex-col gap-1.5 overflow-hidden'
+                                      >
+                                        <p className='text-secondary-foreground/60 text-[13px] font-medium'>
+                                          Repeat on
+                                        </p>
+                                        <RadioGroup
+                                          className='!gap-1.5 text-[13px]'
+                                          value={monthlyType}
+                                          onChange={val =>
+                                            setMonthlyType(
+                                              val as 'monthly_day' | 'monthly_nth_weekday',
+                                            )
+                                          }
+                                        >
+                                          <div className='flex flex-col flex-1 items-start gap-2'>
+                                            {(() => {
+                                              const dayOfMonth = startsAt.getDate();
+                                              const { occurrence, weekday, isLast, ordinalWord } =
+                                                getWeekdayOccurrence(startsAt);
+                                              return (
+                                                <>
+                                                  <Radio value='monthly_day'>
+                                                    Monthly on day {dayOfMonth}
+                                                    {dayOfMonth > 28 && (
+                                                      <span className='block text-amber-600 text-xs mt-0.5'>
+                                                        (not all months have {dayOfMonth} days)
+                                                      </span>
+                                                    )}
+                                                  </Radio>
+                                                  <Radio value='monthly_nth_weekday'>
+                                                    Monthly on {ordinalWord} {weekday.toLowerCase()}
+                                                    {isLast && occurrence >= 4 && (
+                                                      <span className='block text-amber-600 text-xs mt-0.5'>
+                                                        (only months with {occurrence} {weekday}s)
+                                                      </span>
+                                                    )}
+                                                  </Radio>
+                                                </>
+                                              );
+                                            })()}
+                                          </div>
+                                        </RadioGroup>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+
+                                  {/* Series end date */}
+                                  <div className='flex flex-col gap-3'>
                                     <p className='text-secondary-foreground/60 text-[13px] font-medium'>
-                                      Repeat on
+                                      Ends
                                     </p>
                                     <RadioGroup
-                                      className='!gap-1.5 text-[13px]'
-                                      value={monthlyType}
-                                      onChange={val =>
-                                        setMonthlyType(val as 'monthly_day' | 'monthly_nth_weekday')
+                                      className='!gap-1.5'
+                                      value={seriesEndsType}
+                                      onChange={(val: string) =>
+                                        setSeriesEndsType(val as 'never' | 'on' | 'after')
                                       }
                                     >
-                                      <div className='flex flex-col flex-1 items-start gap-2'>
-                                        {(() => {
-                                          const dayOfMonth = startsAt.getDate();
-                                          const { occurrence, weekday, isLast, ordinalWord } =
-                                            getWeekdayOccurrence(startsAt);
-                                          return (
-                                            <>
-                                              <Radio value='monthly_day'>
-                                                Monthly on day {dayOfMonth}
-                                                {dayOfMonth > 28 && (
-                                                  <span className='block text-amber-600 text-xs mt-0.5'>
-                                                    (not all months have {dayOfMonth} days)
-                                                  </span>
-                                                )}
-                                              </Radio>
-                                              <Radio value='monthly_nth_weekday'>
-                                                Monthly on {ordinalWord} {weekday.toLowerCase()}
-                                                {isLast && occurrence >= 4 && (
-                                                  <span className='block text-amber-600 text-xs mt-0.5'>
-                                                    (only months with {occurrence} {weekday}s)
-                                                  </span>
-                                                )}
-                                              </Radio>
-                                            </>
-                                          );
-                                        })()}
+                                      <Radio value='never'>Never</Radio>
+                                      <div className='flex flex-1 items-center justify-between'>
+                                        <Radio value='on'>On</Radio>
+                                        <DatePicker
+                                          selectedDate={seriesEndsOn ?? null}
+                                          onSelect={date => {
+                                            setSeriesEndsOn(date ?? null);
+                                            if (date) setSeriesEndsType('on');
+                                          }}
+                                          placeholder='Pick end date'
+                                          minDate={startsAt ?? new Date()}
+                                          inputClassName={cn(
+                                            'text-sm leading-5 bg-transparent rounded-lg h-8 gap-2.5 min-w-44',
+                                            seriesEndsType !== 'on' &&
+                                              'opacity-40 pointer-events-none',
+                                          )}
+                                          showClearButton={
+                                            !!seriesEndsOn && seriesEndsType === 'on'
+                                          }
+                                        />
+                                      </div>
+                                      <div className='flex items-center justify-between'>
+                                        <Radio value='after' className='text-[13px] leading-5'>
+                                          After
+                                        </Radio>
+                                        <div className='relative overflow-hidden'>
+                                          <Input
+                                            type='text'
+                                            inputMode='numeric'
+                                            pattern='[0-9]*'
+                                            maxLength={3}
+                                            value={occurrenceCount}
+                                            disabled={seriesEndsType !== 'after'}
+                                            onChange={e => {
+                                              const val = parseInt(e.target.value, 10);
+                                              if (e.target.value === '') {
+                                                setOccurrenceCount('');
+                                              } else if (!isNaN(val)) {
+                                                setOccurrenceCount(Math.min(Math.max(val, 1), 365));
+                                              }
+                                            }}
+                                            onBlur={() => {
+                                              if (occurrenceCount === '' || occurrenceCount < 1) {
+                                                setOccurrenceCount(1);
+                                              }
+                                            }}
+                                            className={cn(
+                                              'rounded-lg border py-2 pl-3 pr-8 focus-visible:ring-0 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0 [appearance:textfield] text-[13px] w-44',
+                                              seriesEndsType !== 'after' &&
+                                                'opacity-40 cursor-not-allowed',
+                                            )}
+                                          />
+                                          <span
+                                            aria-hidden
+                                            className='invisible absolute left-3 top-1/2 -translate-y-1/2 whitespace-pre text-sm font-normal pointer-events-none'
+                                          >
+                                            {occurrenceCount}
+                                          </span>
+
+                                          <span
+                                            aria-hidden
+                                            style={{
+                                              left: `calc(0.75rem + ${String(occurrenceCount).length}ch)`,
+                                            }}
+                                            className={cn(
+                                              'absolute top-1/2 -translate-y-1/2 text-sm text-foreground pointer-events-none select-none whitespace-nowrap',
+                                              seriesEndsType !== 'after' && 'opacity-40',
+                                            )}
+                                          >
+                                            &nbsp;
+                                            {occurrenceCount === 1 ? 'occurrence' : 'occurrences'}
+                                          </span>
+                                          <span className='h-full  absolute right-0 rounded-r-lg w-8 ' />
+                                          <span className='flex flex-col absolute top-1.5 right-3 '>
+                                            <ChevronUp
+                                              onClick={() =>
+                                                seriesEndsType === 'after' &&
+                                                setOccurrenceCount(prev =>
+                                                  Math.min((prev === '' ? 0 : prev) + 1, 365),
+                                                )
+                                              }
+                                              className={cn(
+                                                'size-3 text-secondary-foreground/40 cursor-pointer',
+                                                seriesEndsType !== 'after' &&
+                                                  'opacity-40 cursor-not-allowed',
+                                              )}
+                                              strokeWidth={3}
+                                            />
+                                            <ChevronDown
+                                              onClick={() =>
+                                                seriesEndsType === 'after' &&
+                                                setOccurrenceCount(prev =>
+                                                  Math.max(1, (prev === '' ? 0 : prev) - 1),
+                                                )
+                                              }
+                                              className={cn(
+                                                'size-3 text-secondary-foreground/40 cursor-pointer',
+                                                seriesEndsType !== 'after' &&
+                                                  'opacity-40 cursor-not-allowed',
+                                              )}
+                                              strokeWidth={3}
+                                            />
+                                          </span>
+                                        </div>
                                       </div>
                                     </RadioGroup>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-
-                              {/* Series end date */}
-                              <div className='flex flex-col gap-3'>
-                                <p className='text-secondary-foreground/60 text-[13px] font-medium'>
-                                  Ends
-                                </p>
-                                <RadioGroup
-                                  className='!gap-1.5'
-                                  value={seriesEndsType}
-                                  onChange={(val: string) =>
-                                    setSeriesEndsType(val as 'never' | 'on' | 'after')
-                                  }
-                                >
-                                  <Radio value='never'>Never</Radio>
-                                  <div className='flex flex-1 items-center justify-between'>
-                                    <Radio value='on'>On</Radio>
-                                    <DatePicker
-                                      selectedDate={seriesEndsOn ?? null}
-                                      onSelect={date => {
-                                        setSeriesEndsOn(date ?? null);
-                                        if (date) setSeriesEndsType('on');
+                                  </div>
+                                  {/* Action buttons */}
+                                  <div className='flex items-center justify-between gap-2 w-full py-1.5'>
+                                    <Button
+                                      variant='outline'
+                                      onClick={() => {
+                                        setShowCustomPanel(false);
+                                        // Restore previous state if available
+                                        if (previousRecurrenceState) {
+                                          setIsRecurring(previousRecurrenceState.isRecurring);
+                                          setRecurrenceFrequency(
+                                            previousRecurrenceState.recurrenceFrequency,
+                                          );
+                                          setRecurrenceDays(previousRecurrenceState.recurrenceDays);
+                                          setRepeatValue(previousRecurrenceState.repeatValue);
+                                          setMonthlyType(previousRecurrenceState.monthlyType);
+                                          setSeriesEndsType(previousRecurrenceState.seriesEndsType);
+                                          setSeriesEndsOn(previousRecurrenceState.seriesEndsOn);
+                                          setOccurrenceCount(
+                                            previousRecurrenceState.occurrenceCount,
+                                          );
+                                        }
                                       }}
-                                      placeholder='Pick end date'
-                                      minDate={startsAt ?? new Date()}
-                                      inputClassName={cn(
-                                        'text-sm leading-5 bg-transparent rounded-lg h-8 gap-2.5 min-w-44',
-                                        seriesEndsType !== 'on' && 'opacity-40 pointer-events-none',
-                                      )}
-                                      showClearButton={!!seriesEndsOn && seriesEndsType === 'on'}
-                                    />
+                                      className='rounded-lg text-sm leading-5 bg-transparent h-8 gap-2.5'
+                                    >
+                                      Cancel
+                                    </Button>
+                                    <Button
+                                      onClick={() => {
+                                        // Validate weekly recurrence has at least one day selected
+                                        if (
+                                          recurrenceFrequency === 'WEEK' &&
+                                          recurrenceDays.length === 0
+                                        ) {
+                                          toast.error('Select at least one day', {
+                                            description:
+                                              'Weekly recurrence requires at least one day of the week.',
+                                            duration: 3000,
+                                          });
+                                          return;
+                                        }
+                                        setShowCustomPanel(false);
+                                      }}
+                                      className='rounded-lg text-sm leading-5 bg-sidebar-badge-accent h-8 gap-2.5'
+                                    >
+                                      Done
+                                    </Button>
                                   </div>
-                                  <div className='flex items-center justify-between'>
-                                    <Radio value='after' className='text-[13px] leading-5'>
-                                      After
-                                    </Radio>
-                                    <div className='relative overflow-hidden'>
-                                      <Input
-                                        type='text'
-                                        inputMode='numeric'
-                                        pattern='[0-9]*'
-                                        maxLength={3}
-                                        value={occurrenceCount}
-                                        disabled={seriesEndsType !== 'after'}
-                                        onChange={e => {
-                                          const val = parseInt(e.target.value, 10);
-                                          if (e.target.value === '') {
-                                            setOccurrenceCount('');
-                                          } else if (!isNaN(val)) {
-                                            setOccurrenceCount(Math.min(Math.max(val, 1), 365));
-                                          }
-                                        }}
-                                        onBlur={() => {
-                                          if (occurrenceCount === '' || occurrenceCount < 1) {
-                                            setOccurrenceCount(1);
-                                          }
-                                        }}
-                                        className={cn(
-                                          'rounded-lg border py-2 pl-3 pr-8 focus-visible:ring-0 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0 [appearance:textfield] text-[13px] w-44',
-                                          seriesEndsType !== 'after' &&
-                                            'opacity-40 cursor-not-allowed',
-                                        )}
-                                      />
-                                      <span
-                                        aria-hidden
-                                        className='invisible absolute left-3 top-1/2 -translate-y-1/2 whitespace-pre text-sm font-normal pointer-events-none'
-                                      >
-                                        {occurrenceCount}
-                                      </span>
-
-                                      <span
-                                        aria-hidden
-                                        style={{
-                                          left: `calc(0.75rem + ${String(occurrenceCount).length}ch)`,
-                                        }}
-                                        className={cn(
-                                          'absolute top-1/2 -translate-y-1/2 text-sm text-foreground pointer-events-none select-none whitespace-nowrap',
-                                          seriesEndsType !== 'after' && 'opacity-40',
-                                        )}
-                                      >
-                                        &nbsp;{occurrenceCount === 1 ? 'occurrence' : 'occurrences'}
-                                      </span>
-                                      <span className='h-full  absolute right-0 rounded-r-lg w-8 ' />
-                                      <span className='flex flex-col absolute top-1.5 right-3 '>
-                                        <ChevronUp
-                                          onClick={() =>
-                                            seriesEndsType === 'after' &&
-                                            setOccurrenceCount(prev =>
-                                              Math.min((prev === '' ? 0 : prev) + 1, 365),
-                                            )
-                                          }
-                                          className={cn(
-                                            'size-3 text-secondary-foreground/40 cursor-pointer',
-                                            seriesEndsType !== 'after' &&
-                                              'opacity-40 cursor-not-allowed',
-                                          )}
-                                          strokeWidth={3}
-                                        />
-                                        <ChevronDown
-                                          onClick={() =>
-                                            seriesEndsType === 'after' &&
-                                            setOccurrenceCount(prev =>
-                                              Math.max(1, (prev === '' ? 0 : prev) - 1),
-                                            )
-                                          }
-                                          className={cn(
-                                            'size-3 text-secondary-foreground/40 cursor-pointer',
-                                            seriesEndsType !== 'after' &&
-                                              'opacity-40 cursor-not-allowed',
-                                          )}
-                                          strokeWidth={3}
-                                        />
-                                      </span>
-                                    </div>
-                                  </div>
-                                </RadioGroup>
-                              </div>
-                              {/* Action buttons */}
-                              <div className='flex items-center justify-between gap-2 w-full py-1.5'>
-                                <Button
-                                  variant='outline'
-                                  onClick={() => {
-                                    setShowCustomPanel(false);
-                                    // Restore previous state if available
-                                    if (previousRecurrenceState) {
-                                      setIsRecurring(previousRecurrenceState.isRecurring);
-                                      setRecurrenceFrequency(
-                                        previousRecurrenceState.recurrenceFrequency,
-                                      );
-                                      setRecurrenceDays(previousRecurrenceState.recurrenceDays);
-                                      setRepeatValue(previousRecurrenceState.repeatValue);
-                                      setMonthlyType(previousRecurrenceState.monthlyType);
-                                      setSeriesEndsType(previousRecurrenceState.seriesEndsType);
-                                      setSeriesEndsOn(previousRecurrenceState.seriesEndsOn);
-                                      setOccurrenceCount(previousRecurrenceState.occurrenceCount);
-                                    }
-                                  }}
-                                  className='rounded-lg text-sm leading-5 bg-transparent h-8 gap-2.5'
-                                >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  onClick={() => {
-                                    // Validate weekly recurrence has at least one day selected
-                                    if (
-                                      recurrenceFrequency === 'WEEK' &&
-                                      recurrenceDays.length === 0
-                                    ) {
-                                      toast.error('Select at least one day', {
-                                        description:
-                                          'Weekly recurrence requires at least one day of the week.',
-                                        duration: 3000,
-                                      });
-                                      return;
-                                    }
-                                    setShowCustomPanel(false);
-                                  }}
-                                  className='rounded-lg text-sm leading-5 bg-sidebar-badge-accent h-8 gap-2.5'
-                                >
-                                  Done
-                                </Button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </motion.div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </motion.div>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Participants Input */}
-          <div className='space-y-2 -mb-3'>
-            <p className='text-muted-foreground text-[13px] leading-5'>Participants</p>
-            <Controller
-              name='participants'
-              control={control}
-              render={({ field }) => (
-                <SearchParticipants
-                  options={inviteUserOrChannelOptions}
-                  selectedValues={field.value}
-                  onMultiSelect={field.onChange}
-                  searchQuery={searchQuery}
-                  setSearchQuery={setSearchQuery}
+              {/* Participants — channel members (Xyne users). */}
+              <div className='space-y-2'>
+                <p className='text-muted-foreground text-[13px] leading-5'>Participants</p>
+                <Controller
+                  name='participants'
+                  control={control}
+                  render={({ field }) => (
+                    <SearchParticipants
+                      options={inviteUserOrChannelOptions}
+                      selectedValues={field.value}
+                      onMultiSelect={field.onChange}
+                      searchQuery={searchQuery}
+                      setSearchQuery={setSearchQuery}
+                    />
+                  )}
+                  rules={{
+                    validate: value => value.length > 0 || 'At least one participant is required',
+                  }}
+                />
+                {participants.length === 0 && !errors.participants && (
+                  <p className='text-[11px] text-muted-foreground'>
+                    Add at least one teammate from this channel to host the call.
+                  </p>
+                )}
+                {errors.participants && (
+                  <p className='text-red-500 text-xs'>{errors.participants.message}</p>
+                )}
+              </div>
+
+              {/* Guests — people outside Xyne, invited by email. */}
+              {enableExternalInvitees && threadConversationId && (
+                <div className='space-y-2 -mb-3'>
+                  <div className='flex items-baseline justify-between'>
+                    <p className='text-muted-foreground text-[13px] leading-5'>Guests</p>
+                    <p className='text-[11px] text-muted-foreground/80'>
+                      Invited by email · join via link
+                    </p>
+                  </div>
+                  <Controller
+                    name='externalEmails'
+                    control={control}
+                    render={({ field }) => (
+                      <ExternalInviteesInput
+                        value={field.value}
+                        onChange={field.onChange}
+                        suggestedEmails={suggestedExternalEmails}
+                        prefillKey={threadConversationId ?? 'none'}
+                      />
+                    )}
+                  />
+                </div>
+              )}
+
+              {/* Edit entire series checkbox — only for recurring calls in edit mode */}
+              {isEditMode && initialCall?.recurringSeriesId && (
+                <Checkbox
+                  checked={editEntireSeries}
+                  onChange={setEditEntireSeries}
+                  label='Apply to all calls in this series'
                 />
               )}
-              rules={{
-                validate: value => value.length > 0 || 'At least one participant is required',
-              }}
-            />
-            {errors.participants && (
-              <p className='text-red-500 text-xs'>{errors.participants.message}</p>
-            )}
-          </div>
 
-          {/* Post call updates to channel — only when participants are added and no channel is selected */}
-          {showPostCallUpdates && (
-            <div className='flex items-center gap-3'>
-              <div className='flex items-center gap-1.5'>
-                <Checkbox
-                  checked={postCallUpdates}
-                  onChange={checked => {
-                    setPostCallUpdates(checked);
-                    if (!checked) {
-                      setUpdateChannelId(null);
-                      setChannelSearchQuery('');
-                    }
-                  }}
-                  label='Post call updates to channel'
-                />
-                <Tooltip
-                  content='Only selected participants will receive call notifications, and the summaries will be posted to the chosen channel.'
-                  side='top'
-                  sideOffset={6}
-                  className='max-w-60'
-                >
-                  <button
-                    type='button'
-                    className='text-muted-foreground hover:text-foreground transition-colors'
-                  >
-                    <Info className='size-3.5' strokeWidth={2} />
-                  </button>
-                </Tooltip>
-              </div>
-              {postCallUpdates && (
-                <div className='min-w-48 flex-1 relative'>
-                  <div
-                    className={cn(
-                      'flex items-center gap-2 rounded-lg border h-8 px-3',
-                      !updateChannelId ? 'border-red-500' : 'border-input',
-                    )}
-                  >
-                    {updateChannelId && !channelPickerOpen && selectedChannelItem?.leftSlot}
-                    <input
-                      ref={channelInputRef}
-                      value={
-                        channelPickerOpen ? channelSearchQuery : (selectedChannelItem?.label ?? '')
-                      }
-                      onChange={e => setChannelSearchQuery(e.target.value)}
-                      onFocus={() => {
-                        setChannelSearchQuery('');
-                        setChannelPickerOpen(true);
-                      }}
-                      onBlur={() => setChannelPickerOpen(false)}
-                      placeholder='Select channel'
-                      data-track-category='calls'
-                      data-track-name='channel-picker-search'
-                      className='flex-1 min-w-0 text-sm bg-transparent outline-none placeholder:text-muted-foreground'
-                    />
-                    {updateChannelId && (
-                      <button
-                        type='button'
-                        onMouseDown={e => {
-                          e.preventDefault();
+              {/* Post call updates to channel — only when participants are added and no channel is selected */}
+              {showPostCallUpdates && (
+                <div className='flex items-center gap-3'>
+                  <div className='flex items-center gap-1.5'>
+                    <Checkbox
+                      checked={postCallUpdates}
+                      onChange={checked => {
+                        setPostCallUpdates(checked);
+                        if (!checked) {
                           setUpdateChannelId(null);
                           setChannelSearchQuery('');
-                          setChannelPickerOpen(true);
-                          channelInputRef.current?.focus();
-                        }}
-                        className='text-muted-foreground hover:text-foreground transition-colors flex-shrink-0'
+                        }
+                      }}
+                      label='Post call updates to channel'
+                    />
+                    <Tooltip
+                      content='Only selected participants will receive call notifications, and the summaries will be posted to the chosen channel.'
+                      side='top'
+                      sideOffset={6}
+                      className='max-w-60'
+                    >
+                      <button
+                        type='button'
+                        className='text-muted-foreground hover:text-foreground transition-colors'
                       >
-                        <X className='size-3.5' />
+                        <Info className='size-3.5' strokeWidth={2} />
                       </button>
-                    )}
+                    </Tooltip>
                   </div>
-                  {channelPickerOpen && (
-                    <div className='absolute top-full mt-1 left-0 right-0 z-50 bg-popover border border-border rounded-md shadow-lg max-h-48 overflow-y-auto py-1'>
-                      {channelComboboxItems.length === 0 ? (
-                        <p className='text-sm text-muted-foreground px-3 py-2'>No channels found</p>
-                      ) : (
-                        channelComboboxItems.map(item => (
+                  {postCallUpdates && (
+                    <div className='min-w-48 flex-1 relative'>
+                      <div
+                        className={cn(
+                          'flex items-center gap-2 rounded-lg border h-8 px-3',
+                          !updateChannelId ? 'border-red-500' : 'border-input',
+                        )}
+                      >
+                        {updateChannelId && !channelPickerOpen && selectedChannelItem?.leftSlot}
+                        <input
+                          ref={channelInputRef}
+                          value={
+                            channelPickerOpen
+                              ? channelSearchQuery
+                              : (selectedChannelItem?.label ?? '')
+                          }
+                          onChange={e => setChannelSearchQuery(e.target.value)}
+                          onFocus={() => {
+                            setChannelSearchQuery('');
+                            setChannelPickerOpen(true);
+                          }}
+                          onBlur={() => setChannelPickerOpen(false)}
+                          placeholder='Select channel'
+                          data-track-category='calls'
+                          data-track-name='channel-picker-search'
+                          className='flex-1 min-w-0 text-sm bg-transparent outline-none placeholder:text-muted-foreground'
+                        />
+                        {updateChannelId && (
                           <button
-                            key={item.value}
                             type='button'
                             onMouseDown={e => {
-                              e.preventDefault(); // prevent input blur before selection
-                              setUpdateChannelId(item.value);
+                              e.preventDefault();
+                              setUpdateChannelId(null);
                               setChannelSearchQuery('');
-                              setChannelPickerOpen(false);
+                              setChannelPickerOpen(true);
+                              channelInputRef.current?.focus();
                             }}
-                            data-track-category='calls'
-                            data-track-name='select-post-call-channel'
-                            className='w-full flex items-center gap-2 mx-1 px-2 py-1.5 text-sm cursor-pointer hover:bg-accent rounded-md'
+                            className='text-muted-foreground hover:text-foreground transition-colors flex-shrink-0'
                           >
-                            {item.leftSlot}
-                            {item.label}
+                            <X className='size-3.5' />
                           </button>
-                        ))
+                        )}
+                      </div>
+                      {channelPickerOpen && (
+                        <div className='absolute top-full mt-1 left-0 right-0 z-50 bg-popover border border-border rounded-md shadow-lg max-h-48 overflow-y-auto py-1'>
+                          {channelComboboxItems.length === 0 ? (
+                            <p className='text-sm text-muted-foreground px-3 py-2'>
+                              No channels found
+                            </p>
+                          ) : (
+                            channelComboboxItems.map(item => (
+                              <button
+                                key={item.value}
+                                type='button'
+                                onMouseDown={e => {
+                                  e.preventDefault(); // prevent input blur before selection
+                                  setUpdateChannelId(item.value);
+                                  setChannelSearchQuery('');
+                                  setChannelPickerOpen(false);
+                                }}
+                                data-track-category='calls'
+                                data-track-name='select-post-call-channel'
+                                className='w-full flex items-center gap-2 mx-1 px-2 py-1.5 text-sm cursor-pointer hover:bg-accent rounded-md'
+                              >
+                                {item.leftSlot}
+                                {item.label}
+                              </button>
+                            ))
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
                 </div>
               )}
+
+              <SubmitFooter
+                missingRequirements={missingRequirements}
+                disabled={submitDisabled}
+                isSubmitting={isSubmitting}
+                label={submitLabel}
+                onCancel={handleClose}
+              />
             </div>
-          )}
-
-          {/* Edit entire series checkbox — only for recurring calls in edit mode */}
-          {isEditMode && initialCall?.recurringSeriesId && (
-            <Checkbox
-              checked={editEntireSeries}
-              onChange={setEditEntireSeries}
-              label='Apply to all calls in this series'
-            />
-          )}
-
-          {/* Submit and Cancel Buttons */}
-          <div className='flex items-center justify-between pb-5'>
-            <Button
-              variant='outline'
-              size='sm'
-              className='rounded-lg text-[13px] px-4 h-9'
-              onClick={handleClose}
-              disabled={isSubmitting}
-            >
-              Cancel
-            </Button>
-            <Button
-              size='sm'
-              type='submit'
-              disabled={
-                isSubmitting ||
-                participants.length === 0 ||
-                !title.trim() ||
-                !!errors.startsAt ||
-                !!errors.endsAt ||
-                (isRecurring && recurrenceFrequency === 'WEEK' && recurrenceDays.length === 0) ||
-                (postCallUpdates && !updateChannelId)
-              }
-              className='rounded-lg text-[13px] px-4 h-9 bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
-            >
-              {isSubmitting
-                ? isEditMode
-                  ? 'Saving...'
-                  : isRecurring
-                    ? 'Creating...'
-                    : 'Scheduling...'
-                : isEditMode
-                  ? 'Save Changes'
-                  : isRecurring
-                    ? 'Create Series'
-                    : 'Schedule Call'}
-            </Button>
-          </div>
-        </div>
-      </form>
+          </motion.form>
+        )}
+      </AnimatePresence>
     </Dialog>
+  );
+};
+
+const SubmitFooter: React.FC<{
+  missingRequirements: string[];
+  disabled: boolean;
+  isSubmitting: boolean;
+  label: string;
+  onCancel: () => void;
+}> = ({ missingRequirements, disabled, isSubmitting, label, onCancel }) => {
+  // The <span> lets the Tooltip pick up pointer events even when the
+  // wrapped Button is disabled.
+  const submitButton = (
+    <span className='inline-flex'>
+      <Button
+        size='sm'
+        type='submit'
+        disabled={disabled}
+        className='rounded-lg text-[13px] px-4 h-9 text-white bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed'
+      >
+        {label}
+      </Button>
+    </span>
+  );
+
+  return (
+    <div className='flex items-center justify-between pb-5'>
+      <Button
+        variant='outline'
+        size='sm'
+        className='rounded-lg text-[13px] px-4 h-9'
+        onClick={onCancel}
+        disabled={isSubmitting}
+      >
+        Cancel
+      </Button>
+      {missingRequirements.length === 0 ? (
+        submitButton
+      ) : (
+        <Tooltip
+          content={
+            <div className='text-left'>
+              <p className='font-medium mb-1'>Still needed to schedule:</p>
+              <ul className='list-disc pl-4 space-y-0.5'>
+                {missingRequirements.map(m => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            </div>
+          }
+          side='top'
+          delayDuration={150}
+        >
+          {submitButton}
+        </Tooltip>
+      )}
+    </div>
   );
 };
