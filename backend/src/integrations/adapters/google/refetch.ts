@@ -37,12 +37,13 @@ export class GoogleRefetch extends BaseRefetch {
       }
     }
     if (messageIds.length === 0 && !source.lastSyncCursor) {
-      messageIds = await google.listRecentMessages(FALLBACK_LIMIT);
+      messageIds = await google.listRecentMessages(FALLBACK_LIMIT, { mode: 'threads' });
       nextCursor = (await google.getCurrentHistoryId()) ?? nextCursor;
     }
 
     // Step 2: ingest each — fetch full message, transform, sync
     let processed = 0;
+    let newTickets = 0;
     let skipped = 0;
     const errors: string[] = [];
 
@@ -70,8 +71,12 @@ export class GoogleRefetch extends BaseRefetch {
           source.name,
           parsed.data,
         );
-        if (result.action === 'duplicate') skipped++;
-        else processed++;
+        if (result.action === 'duplicate') {
+          skipped++;
+        } else {
+          processed++;
+          if (result.isNew) newTickets++;
+        }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         logger.warn(`${TAG} ingest failed for ${id}`, { error: msg });
@@ -84,7 +89,7 @@ export class GoogleRefetch extends BaseRefetch {
       await new ExternalSourceRepository().update(source.id, { lastSyncCursor: nextCursor });
     }
 
-    logger.info(`${TAG} ${source.name}: processed=${processed} skipped=${skipped} errors=${errors.length}`);
-    return { processed, skipped, errors };
+    logger.info(`${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`);
+    return { processed, newTickets, skipped, errors };
   }
 }

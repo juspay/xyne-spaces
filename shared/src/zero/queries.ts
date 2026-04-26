@@ -555,6 +555,7 @@ export const queries = defineQueries({
         .related('entity')
         .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q => q.where('userId', ctx.userID))
+        .related('emailReads', q => q.where('userId', ctx.userID))
         .related('conversation')
         .one();
     },
@@ -582,12 +583,13 @@ export const queries = defineQueries({
         .related('entity')
         .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q => q.where('userId', ctx.userID))
+        .related('emailReads', q => q.where('userId', ctx.userID))
         .related('conversation')
         .one();
     },
   ),
   // Paginated variant of supportTicketsFiltered for use with @rocicorp/zero-virtual.
-  // Cursor = (createdAt, id) matching the orderBy.
+  // Cursor = (lastEmailAt, id) matching the orderBy. Active threads bubble up.
   // channelId + isMember are forwarded to TicketsACL for membership gating.
   supportTicketsPage: defineQuery(
     z.object({
@@ -635,7 +637,7 @@ export const queries = defineQueries({
       isMember: z.boolean(),
       assignedTo: z.string().optional(),
       limit: z.number(),
-      start: z.object({ id: z.string(), createdAt: z.number() }).nullable(),
+      start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
     }),
     ({ ctx, args: { channelId, assignedTo, limit, start, dir } }) => {
@@ -646,11 +648,11 @@ export const queries = defineQueries({
       }
 
       const orderDirection = dir === 'forward' ? 'desc' : 'asc';
-      query = query.orderBy('createdAt', orderDirection);
+      query = query.orderBy('lastEmailAt', orderDirection);
 
       if (start) {
         query = query.start(
-          { createdAt: start.createdAt, id: start.id },
+          { lastEmailAt: start.lastEmailAt, id: start.id },
           { inclusive: false },
         );
       }
@@ -662,6 +664,7 @@ export const queries = defineQueries({
         .related('entity')
         .related('emails', q => q.related('attachments'))
         .related('emailDrafts', q => q.where('userId', ctx.userID))
+        .related('emailReads', q => q.where('userId', ctx.userID))
         .related('conversation');
     },
   ),

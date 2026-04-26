@@ -116,6 +116,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   });
 
   const visibility = useStore(form.store, state => state.values.visibility);
+  const nameValue = useStore(form.store, state => state.values.name);
+  const projectIdValue = useStore(form.store, state => state.values.projectId);
+
+  const isSubmitDisabled =
+    !nameValue ||
+    nameValue.length < 2 ||
+    nameValue.length > 80 ||
+    !projectIdValue ||
+    (requireConnector && !selectedConnector) ||
+    duplicateCheck?.isDuplicate === true;
 
   // Auto-select first project if none selected
   useEffect(() => {
@@ -452,7 +462,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           size='default'
           loading={loading || false}
           type='submit'
-          disabled={requireConnector && !selectedConnector}
+          disabled={isSubmitDisabled}
           className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed'
           data-testid='create-channel-button'
           data-track-category='ADD_CHANNEL_FORM'

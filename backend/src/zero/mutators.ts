@@ -1027,10 +1027,14 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             throw new Error('Not a channel participant');
           }
 
+          const channel = await tx.run(zql.channels.where('id', channelId).one());
+          const isEmailChannel = channel?.type === 'EMAIL';
           const updateData: any = {
             lastViewedAt: timestamp,
-            unreadCount: 0,
           };
+          if (!isEmailChannel) {
+            updateData.unreadCount = 0;
+          }
 
           if (conversationId) {
             updateData.lastViewedConversationId = conversationId;
@@ -7450,6 +7454,45 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           );
           if (existing) {
             await tx.mutate.email_drafts.delete({ id: existing.id });
+          }
+        },
+      ),
+    },
+    emailRead: {
+      // KEEP IN SYNC with shared/src/zero/mutators.ts emailRead.markAsRead.
+      // The shared copy runs client-side (optimistic); this copy runs
+      // server-side (authoritative). Diverging logic causes state drift.
+      markAsRead: defineMutator(
+        z.object({
+          id: z.string(),
+          ticketId: z.string(),
+          lastReadEmailId: z.string(),
+          updatedAt: z.number(),
+        }),
+        async ({ tx, ctx, args: { id, ticketId, lastReadEmailId, updatedAt } }) => {
+          const existing = await tx.run(
+            zql.email_reads
+              .where('ticketId', ticketId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (existing) {
+            if (existing.lastReadEmailId !== lastReadEmailId) {
+              await tx.mutate.email_reads.update({
+                id: existing.id,
+                lastReadEmailId,
+                updatedAt,
+              });
+            }
+          } else {
+            await tx.mutate.email_reads.insert({
+              id,
+              ticketId,
+              userId: ctx.userID,
+              lastReadEmailId,
+              createdAt: updatedAt,
+              updatedAt,
+            });
           }
         },
       ),

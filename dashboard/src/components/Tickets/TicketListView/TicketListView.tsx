@@ -15,7 +15,7 @@ export type SupportTicketRow = NonNullable<
   QueryResultType<typeof queries.supportTicketsPageV2>[number]
 >;
 
-type TicketStart = { id: string; createdAt: number };
+type TicketStart = { id: string; lastEmailAt: number };
 
 interface TicketListViewProps {
   filter: {
@@ -32,7 +32,7 @@ interface TicketListViewProps {
 
 const toStartRow = (row: SupportTicketRow): TicketStart => ({
   id: row.id,
-  createdAt: row.createdAt,
+  lastEmailAt: row.lastEmailAt,
 });
 
 const getRowKey = (row: SupportTicketRow): string => row.id;

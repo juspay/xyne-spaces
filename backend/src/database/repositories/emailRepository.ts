@@ -16,6 +16,7 @@ export class EmailRepository {
     channelId: string;
     externalThreadId: string;
     externalMessageId: string;
+    createdAt?: Date;
   }): Promise<Email> {
     if (!data.to || data.to.length === 0) {
       throw new Error('At least one recipient is required');
@@ -34,6 +35,7 @@ export class EmailRepository {
         channelId: data.channelId,
         externalThreadId: data.externalThreadId,
         externalMessageId: data.externalMessageId,
+        ...(data.createdAt && { createdAt: data.createdAt }),
       },
     });
   }

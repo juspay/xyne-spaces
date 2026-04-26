@@ -8,11 +8,14 @@ export interface TicketListItem {
   status: TicketStatus | string;
   stageName?: string | null;
   createdAt: number;
+  lastEmailAt?: number | null;
   priority?: TicketPriority | string | null;
   assignedTo?: string | null;
   metadata?: unknown;
   emails?: readonly unknown[] | null;
   emailDrafts?: readonly unknown[] | null;
+  emailReads?: readonly unknown[] | null;
+  conversation?: unknown;
   _raw?: Record<string, unknown>;
 }
 

@@ -96,6 +96,15 @@ export async function collectSideEffectJobs(
     }
   }
 
+  if (operation === 'update' && table === 'email_reads') {
+    const entity = await tx.run(zql.email_reads.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        lastReadEmailId: entity.lastReadEmailId,
+      };
+    }
+  }
+
   accumulator.push({
     entityType: table,
     entityId,
@@ -185,6 +194,7 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'form_fields':
     case 'forms_context_mapping':
     case 'email_drafts':
+    case 'email_reads':
     case 'form_entity_values':
     case 'ticket_reference_mappings':
     case 'ticket_tags':

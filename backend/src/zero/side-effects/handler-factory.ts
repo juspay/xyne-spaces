@@ -13,6 +13,7 @@ import { CanvasSideEffectHandler } from './tables/canvas-handler';
 import { ReactionsSideEffectHandler } from './tables/reactions-handler';
 import { TicketTagsSideEffectHandler } from './tables/ticket-tags-handler';
 import { ChannelsSideEffectHandler } from './tables/channels-handler';
+import { EmailReadsSideEffectHandler } from './tables/email-reads-handler';
 
 export class SideEffectHandlerFactory {
 
@@ -43,6 +44,8 @@ export class SideEffectHandlerFactory {
         return new TicketTagsSideEffectHandler(ctx);
       case 'channels':
         return new ChannelsSideEffectHandler(ctx);
+      case 'email_reads':
+        return new EmailReadsSideEffectHandler(ctx);
         
       default:
         return new BaseSideEffectHandler(ctx);

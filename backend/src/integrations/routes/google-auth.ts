@@ -231,13 +231,17 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
       }
     }
 
-    // Resolve or create the channel
+    // Resolve or create the channel. Reuses the `sourceName` computed above.
     logger.info(`${TAG} Creating channel / resolving board`);
-    let channelId: string;
-    let boardId: string | undefined;
     if (stateData.channelData) {
       // /connect flow: create channel + resolve default board from project
       const cd = stateData.channelData;
+      const network = await GoogleService.prepareExternalSourceNetwork({
+        emailAddress,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+      });
+
       const txResult = await db.$transaction(async (tx) => {
         const ch = await tx.channel.create({
           data: {
@@ -277,13 +281,31 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
           where: { projectId: cd.projectId },
           orderBy: { createdAt: 'asc' },
         });
-        return { channelId: ch.id, boardId: board?.id };
+
+        await tx.externalSource.create({
+          data: {
+            name: network.sourceName,
+            sourceType: ExternalSourcePlatform.GOOGLE,
+            displayName: emailAddress,
+            channelId: ch.id,
+            boardId: board?.id,
+            credentials: network.encryptedCredentials,
+            ownerUserId: cd.userId,
+            isActive: true,
+          },
+        });
+
+        return { channelId: ch.id };
       });
-      channelId = txResult.channelId;
-      boardId = txResult.boardId;
+
+      logger.info(`${TAG} Gmail integration setup complete`, { sourceName: network.sourceName });
+      res.redirect(
+        `${frontendUrl}/support?emailConnected=true&channel=${txResult.channelId}&provider=google`,
+      );
     } else if (stateData.channelId) {
       // /auth/start flow: channel was pre-created, resolve board from channel's project
-      channelId = stateData.channelId;
+      const channelId = stateData.channelId;
+      let boardId: string | undefined;
       const channel = await db.channel.findUnique({ where: { id: channelId } });
       if (channel?.projectId) {
         const board = await db.board.findFirst({
@@ -292,33 +314,25 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         });
         boardId = board?.id;
       }
-    } else {
-      throw new Error('No channel info in OAuth state');
-    }
-
-    // Setup ExternalSource + watch + Pub/Sub
-    logger.info(`${TAG} Setting up ExternalSource, Gmail watch, Pub/Sub`, { channelId, boardId });
-    const result = await GoogleService.setupExternalSource({
-      channelId,
-      emailAddress,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      boardId,
-    });
-
-    logger.info(`${TAG} Gmail integration setup complete`, { sourceName: result.sourceName });
-
-    if (stateData.channelData) {
-      // /connect flow: redirect to frontend like Microsoft
-      res.redirect(`${frontendUrl}/support?emailConnected=true&channel=${channelId}&provider=google`);
-    } else {
+      const result = await GoogleService.setupExternalSource({
+        channelId,
+        emailAddress,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        boardId,
+      });
+      logger.info(`${TAG} Gmail integration setup complete`, { sourceName: result.sourceName });
       res.send(htmlPage('Gmail Integration Successful', `
         <h1>✓ Gmail Connected</h1>
         <p><strong>Email:</strong> ${emailAddress}</p>
         <p><strong>Source:</strong> <code>${result.sourceName}</code></p>
         <p><strong>Webhook:</strong> <code>${result.webhookUrl}</code></p>
         <p class="muted">You can close this window. New emails will sync automatically.</p>
-      `));
+      `,
+        ),
+      );
+    } else {
+      throw new Error('No channel info in OAuth state');
     }
   } catch (error: any) {
     const message = error?.message || 'Unknown error';

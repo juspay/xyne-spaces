@@ -3,6 +3,7 @@ import { Sparkles, Pencil } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import useMeasure from '../../../hooks/useMeasure';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { TicketListItem } from './TicketListView.types';
 import { AssigneePicker } from './AssigneePicker';
 import { StagePicker } from './StagePicker';
@@ -65,9 +66,11 @@ export const TicketListRow = ({
   const fromEmailAddress = metadata?.fromEmailAddress;
   const senderEmail = useMemo(() => extractSenderEmail(fromEmailAddress), [fromEmailAddress]);
 
+  // Display the date that drives the row's sort position so the column
+  // matches the order users see (Gmail-style: most recent activity first).
   const dueDate = useMemo(() => {
-    return ticket.createdAt ? new Date(ticket.createdAt) : new Date();
-  }, [ticket.createdAt]);
+    return ticket.lastEmailAt ? new Date(ticket.lastEmailAt) : new Date();
+  }, [ticket.lastEmailAt]);
 
   const displayEmail = senderEmail || (showExtraFields ? fromEmailAddress?.trim() || null : null);
   const statusLabel = isHumanInterventionTicket
@@ -77,6 +80,23 @@ export const TicketListRow = ({
   // EmailDraftsACL already scopes to ctx.userID, so this is the current
   // user's unsent draft count for the ticket's conversation.
   const hasDraft = (ticket.emailDrafts?.length ?? 0) > 0;
+
+  // Thread-level unread: compare the thread's most recent email id against
+  // the id the current user last saw (stored in email_reads.lastReadEmailId).
+  // Mismatch OR no stored row → unread. Assignment state doesn't short-circuit
+  // — auto-assign boards would otherwise mark every inbound email read for
+  // everyone instantly.
+  const { userID } = useAuthContextValues();
+  const ticketReads = ticket.emailReads as
+    | ReadonlyArray<{ userId: string; lastReadEmailId: string }>
+    | undefined;
+  const latestEmailId = useMemo(() => {
+    const emails = (ticket.emails ?? []) as ReadonlyArray<{ id: string; createdAt: number }>;
+    if (emails.length === 0) return null;
+    return emails.reduce((latest, e) => (e.createdAt > latest.createdAt ? e : latest)).id;
+  }, [ticket.emails]);
+  const userRow = (ticketReads ?? []).find(r => r.userId === userID);
+  const hasUnread = emailCount > 0 && (!userRow || userRow.lastReadEmailId !== latestEmailId);
 
   return (
     <div
@@ -95,7 +115,11 @@ export const TicketListRow = ({
       data-slot='ticket-list-row'
       className={cn(
         'flex items-center justify-between px-6 py-3 border-b border-border last:border-b-0 w-full cursor-pointer transition-colors gap-10',
-        isActive ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-muted',
+        isActive
+          ? 'bg-blue-50 hover:bg-blue-100'
+          : hasUnread
+            ? 'bg-gray-100 hover:bg-gray-100'
+            : 'bg-background hover:bg-gray-100',
       )}
     >
       <div className='flex items-center gap-2 min-w-0 flex-1'>
@@ -113,10 +137,20 @@ export const TicketListRow = ({
         ) : (
           <PriorityPicker ticketId={ticket.id} priority={ticket.priority} compact />
         )}
-        <span className='text-xs text-muted-foreground font-mono flex-shrink-0 font-medium'>
+        <span
+          className={cn(
+            'text-xs font-mono flex-shrink-0',
+            hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-medium',
+          )}
+        >
           {ticketIdValue}
         </span>
-        <span className='text-sm font-medium text-foreground min-w-0 overflow-hidden text-ellipsis whitespace-nowrap'>
+        <span
+          className={cn(
+            'text-sm min-w-0 overflow-hidden text-ellipsis whitespace-nowrap',
+            hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
+          )}
+        >
           {ticket.title}
         </span>
         {emailCount > 0 && (
@@ -141,7 +175,12 @@ export const TicketListRow = ({
         {!shouldHideDetails && displayEmail && (
           <>
             <span className='size-1 rounded-full bg-muted flex-shrink-0' />
-            <span className='text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap'>
+            <span
+              className={cn(
+                'text-xs flex-shrink-0 whitespace-nowrap',
+                hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
+              )}
+            >
               {displayEmail}
             </span>
           </>
@@ -150,7 +189,14 @@ export const TicketListRow = ({
       <div className='flex items-center justify-center gap-3 flex-shrink-0'>
         <StagePicker ticketId={ticket.id} stageName={ticket.stageName} stageLabel={statusLabel} />
         <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} />
-        <span className='text-xs text-foreground whitespace-nowrap'>{formatDate(dueDate)}</span>
+        <span
+          className={cn(
+            'text-xs whitespace-nowrap',
+            hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
+          )}
+        >
+          {formatDate(dueDate)}
+        </span>
       </div>
     </div>
   );
