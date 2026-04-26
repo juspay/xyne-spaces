@@ -1,3 +1,21 @@
+## [1.129.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.128.1...v1.129.0) (2026-04-26)
+
+
+### Features
+
+* ai summary for email threads ([206b8cc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/206b8cc56dafc887152274cc34a89d805e302580)), closes [#5505](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5505)
+* disable send on zero disconnect ([08de63c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/08de63c6e386c25fa85ef70e23e402bbe5f1e55b)), closes [#5509](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5509)
+
+
+### Bug Fixes
+
+* added trimming logic before rendering messages ([b63bb89](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b63bb894689a2cac0a3974cc5f242026bb2aec7b)), closes [#5499](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5499)
+* change center to start while navigating to message through url ([4fdcc42](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4fdcc427b86137f9915d9af7a037ddd0dd02bef0)), closes [#5496](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5496)
+* fixed emoji parsing regex to include boundaries ([55388a7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/55388a7a5678b71011b77d8f29dc0ec642584f54))
+* Fixed z-index of toolbar items in threadpanel of attachment carousel ([a3b2408](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a3b24081869ac8935392c9c223e4697d3939b53a))
+* Made vaul drawer scrollable ([898a41c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/898a41c8c439bd895a4ec3268ce52bf9e41bb0e1)), closes [#5513](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5513)
+* reverted z-index for dialog box back to 50 ([7bdcf76](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7bdcf7660cfda44bbc90cbf838c735678e20c252)), closes [#5546](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5546)
+
 ## [1.128.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.128.0...v1.128.1) (2026-04-24)
 
 
