@@ -87,7 +87,7 @@ const CallHistoryScreen = (): ReactElement => {
   } | null>(null);
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
   const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>('month');
   const [calendarProvider, setCalendarProvider] = useState<'GOOGLE' | 'MICROSOFT' | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -275,6 +275,8 @@ const CallHistoryScreen = (): ReactElement => {
     void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
     if (newTab !== 'upcoming') {
       setViewMode('list');
+    } else {
+      setViewMode('calendar');
     }
   };
 
