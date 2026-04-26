@@ -29,6 +29,7 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../../hooks/useIsInPanelWebview';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
+import { CallExternalChatPanel } from '../../Call/CallExternalChatPanel/CallExternalChatPanel';
 
 interface ChatScreenContext {
   shouldStackThread?: boolean;
@@ -158,6 +159,9 @@ const ChatView = (): ReactElement => {
     };
   })();
 
+  const externalChatCallId = searchParams.get('external-call-chat');
+  const isExternalChatActive = !!externalChatCallId;
+
   const isThreadActive = !!conversationId;
   const isProfileActive = !!userId;
   const showSecondaryPanel =
@@ -165,7 +169,8 @@ const ChatView = (): ReactElement => {
     isCanvasActive ||
     isProfileActive ||
     isChannelSummaryActive ||
-    isGroupPanelOpen;
+    isGroupPanelOpen ||
+    isExternalChatActive;
 
   // Stack when either narrow view OR parent says to stack (XyneAI > 700px with thread)
   const shouldStack = bounds.width < 700 || shouldStackThreadFromParent;
@@ -267,7 +272,9 @@ const ChatView = (): ReactElement => {
               )}
               {showSecondaryPanel && !shouldStackThreadFromParent && (
                 <div className='absolute inset-0 bg-background z-10 rounded-lg animate-slide-in-from-right'>
-                  {isCanvasActive ? (
+                  {isExternalChatActive ? (
+                    <CallExternalChatPanel callExternalId={externalChatCallId} />
+                  ) : isCanvasActive ? (
                     <CanvasScreen
                       canvasId={canvasId}
                       isFullscreen={isCanvasFullscreen}
@@ -381,7 +388,9 @@ const ChatView = (): ReactElement => {
                     minSize={isCanvasFullscreen ? 100 : minSecondaryPanelSize}
                   >
                     <div className='h-full'>
-                      {isCanvasActive ? (
+                      {isExternalChatActive ? (
+                        <CallExternalChatPanel callExternalId={externalChatCallId} />
+                      ) : isCanvasActive ? (
                         <CanvasScreen
                           canvasId={canvasId}
                           isFullscreen={isCanvasFullscreen}

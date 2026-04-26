@@ -1,12 +1,15 @@
 import { db } from '@/database/client';
+import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { notificationService } from '@/services/notificationService';
 import { livekitService } from '@/services/liveKitService';
 import { activityService } from '@/services/activity/activityService';
 import { callTimeoutWorker } from '@/workers/callTimeoutWorker';
 import { websocketService } from '@/services/websocketService';
+import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
+import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { InvitationResponse, NotificationType, ChannelScopeType, CallType } from '@prisma/client';
-import { ActivityClassification } from '@xyne/shared';
+import { ActivityClassification, MessageType } from '@xyne/shared';
 
 class CallSideEffectService {
     private logger = logger.child({ module: 'CallSideEffectService' });
@@ -319,6 +322,78 @@ class CallSideEffectService {
 
         } catch (error) {
             this.logger.error(`Failed to handle response change for ${participantId}:`, error);
+        }
+    }
+
+    async postExternalChatSummary(callId: string, callExternalId: string): Promise<void> {
+        this.logger.info(`Checking external chat messages for call: ${callExternalId}`);
+
+        try {
+            const messages = await repositories.callMessages.getByCallId(callId);
+            if (messages.length === 0) return;
+
+            const externalMessages = messages.filter(m => m.isExternal);
+            if (externalMessages.length === 0) return;
+
+            const totalParticipants = new Set(messages.map(m => m.participantId)).size;
+            const externalParticipantCount = new Set(externalMessages.map(m => m.participantId)).size;
+
+            const call = await db.call.findUnique({
+                where: { id: callId },
+                select: { metadata: true, channelId: true },
+            });
+
+            if (!call) {
+                this.logger.warn(`Call not found for id ${callId} — skipping external chat summary`);
+                return;
+            }
+
+            const callMetadata = call.metadata as { conversationId?: string } | null;
+            if (!callMetadata?.conversationId) {
+                this.logger.warn(`No conversationId found for call ${callExternalId} — skipping external chat summary`);
+                return;
+            }
+
+            const bot = await unifiedBotUserService.getBotByBotId('xyne-automatic');
+            if (!bot) {
+                this.logger.warn('Xyne Automatic bot not found — skipping external chat summary');
+                return;
+            }
+
+            const chatHistoryUrl = `/chat/dir/${call.channelId}/${callMetadata.conversationId}?external-call-chat=${callExternalId}`;
+            const content = `<b>External Call Chat:</b> ${messages.length} messages from ${totalParticipants} participants (${externalParticipantCount} external). Check full chat <a href="${chatHistoryUrl}" style="color: var(--action-primary); text-decoration: underline;">here</a>.`;
+
+            const message = await repositories.messages.create({
+                conversationId: callMetadata.conversationId,
+                senderId: bot.id,
+                content,
+                msgType: MessageType.BOT,
+                showInChannel: false,
+                metadata: {
+                    messageSubtype: 'external_call_chat',
+                    callId: callExternalId,
+                },
+            });
+            await repositories.conversations.incrementReplyCount(callMetadata.conversationId);
+
+            const orgMember = await db.orgMember.findUnique({
+                where: { email: bot.email },
+                select: { memberId: true, role: true },
+            });
+
+            const handler = new MessagesSideEffectHandler({
+                userID: bot.id,
+                workspaceId: bot.workspaceId ?? '',
+                role: bot.role ?? 'MEMBER',
+                orgRole: orgMember?.role ?? '',
+                memberId: orgMember?.memberId ?? '',
+            });
+            handler.onInsert({ entityId: message.messageId, entityType: 'messages', operation: 'insert' })
+                .catch(err => this.logger.error(`[postExternalChatSummary] Side-effect handler error:`, err));
+
+            this.logger.info(`Posted external chat summary for call ${callExternalId} in conversation ${callMetadata.conversationId}`);
+        } catch (error) {
+            this.logger.error(`Failed to post external chat summary for call ${callExternalId}:`, error);
         }
     }
 }

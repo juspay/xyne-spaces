@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { callController } from '@/controllers/callController';
 import { scheduleCallController } from '@/controllers/scheduleCallController';
+import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
 
 const router = Router();
 
@@ -19,6 +20,11 @@ router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 // Pulse org list proxy (must be before /:callId wildcard)
 router.get('/pulse-orgs', callController.getPulseOrgs);
+
+
+router.post('/chat/:externalId/messages', requireInternalCallParticipant, callChatController.sendMessage);
+router.get('/chat/:externalId/messages', requireInternalCallParticipant, callChatController.getMessages);
+router.get('/chat/:externalId/participants', requireInternalCallParticipant, callChatController.getParticipants);
 
 // Edit a single scheduled call instance (must come after all static /... routes)
 router.patch('/:callId', scheduleCallController.updateScheduledCall);
@@ -53,6 +59,9 @@ router.post('/:callId/rsvp', callController.updateMeetingStatus);
 
 // Get call participants (for native Participants screen)
 router.get('/:callId/participants', callController.getCallParticipants);
+
+// Get call chat history (for recording detail page)
+router.get('/:callId/chat-history', callController.getCallChatHistory);
 
 // Leave call endpoint
 router.post('/:callId/leave', callController.leaveCall);
