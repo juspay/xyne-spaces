@@ -1,9 +1,7 @@
 import React from 'react';
-import { X } from 'lucide-react';
 import { queries } from '../../../zero/queries';
 import { TicketDetails } from '../TicketDetails/TicketDetails';
 import ThreadMessages from '../../Chat/ThreadPannel';
-import { Button } from '../../ui/Button';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
 interface MappedTicketModalProps {
@@ -17,35 +15,9 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
   onClose,
   onNavigateToParent,
 }) => {
-  // Track navigation history for breadcrumb
-  const [ticketHistory, setTicketHistory] = React.useState<Array<{ id: string; title: string }>>(
-    [],
-  );
-
-  // Query current ticket details
   const [currentTicket] = useCachedQuery(queries.ticketById({ ticketId: mappedTicketId }), {
     enabled: !!mappedTicketId,
   });
-
-  // Update history when ticket changes
-  React.useEffect(() => {
-    if (currentTicket) {
-      setTicketHistory(prev => {
-        // Check if this ticket is already in history (going back)
-        const existingIndex = prev.findIndex(t => t.id === currentTicket.id);
-        if (existingIndex !== -1) {
-          // Going back - truncate history to this point
-          return prev.slice(0, existingIndex + 1);
-        }
-        // Going forward - add to history
-        return [...prev, { id: currentTicket.id, title: currentTicket.title }];
-      });
-    }
-  }, [currentTicket]);
-
-  const truncateTitle = (title: string, maxLength: number = 30): string => {
-    return title.length > maxLength ? title.substring(0, maxLength) : title;
-  };
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center'>
@@ -65,56 +37,6 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
 
       {/* Modal */}
       <div className='relative bg-background dark:bg-gray-800 rounded-lg shadow-xl w-[80vw] max-w-[1400px] h-[90vh] mx-auto flex flex-col'>
-        {/* Header */}
-        <div className='flex items-center justify-between p-4 border-b border-border dark:border-gray-700'>
-          {/* Breadcrumb */}
-          <div className='flex items-center gap-2 text-sm flex-1 min-w-0 mr-4 overflow-x-auto'>
-            {ticketHistory.length > 0 ? (
-              ticketHistory.map((ticket, index) => (
-                <React.Fragment key={ticket.id}>
-                  {index > 0 && (
-                    <span className='text-muted-foreground dark:text-muted-foreground flex-shrink-0 text-lg'>
-                      ›
-                    </span>
-                  )}
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    onClick={() => onNavigateToParent(ticket.id)}
-                    className={`px-2 py-1 font-medium rounded transition-colors flex-shrink-0 max-w-[200px] truncate ${
-                      index === ticketHistory.length - 1
-                        ? 'text-foreground dark:text-gray-100'
-                        : 'text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-muted'
-                    }`}
-                    title={ticket.title}
-                    data-track-category='Tickets'
-                    data-track-name='NavigateToParentTicket'
-                    data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                  >
-                    {truncateTitle(ticket.title)}
-                  </Button>
-                </React.Fragment>
-              ))
-            ) : (
-              <span className='text-foreground dark:text-gray-100 font-semibold'>
-                Ticket Details
-              </span>
-            )}
-          </div>
-
-          {/* Close Button */}
-          <Button
-            variant='ghost'
-            size='icon'
-            onClick={onClose}
-            className='flex-shrink-0'
-            data-track-category='Tickets'
-            data-track-name='CloseMappedTicketModal'
-          >
-            <X className='w-5 h-5 text-muted-foreground' />
-          </Button>
-        </div>
-
         {/* Content - Split View */}
         <div className='flex-1 min-h-0 flex'>
           {/* Left: Ticket Details */}
@@ -124,7 +46,16 @@ export const MappedTicketModal: React.FC<MappedTicketModalProps> = ({
 
           {/* Right: Thread Messages */}
           <div className='w-[47%] overflow-y-auto'>
-            <ThreadMessages showHeader={true} ticketId={mappedTicketId} />
+            <ThreadMessages
+              ticketId={mappedTicketId}
+              onClose={onClose}
+              {...(currentTicket?.conversation?.channelId && {
+                channelId: currentTicket.conversation.channelId,
+              })}
+              {...(currentTicket?.conversationId && {
+                conversationId: currentTicket.conversationId,
+              })}
+            />
           </div>
         </div>
       </div>
