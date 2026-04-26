@@ -21,7 +21,6 @@ let mainWindow: BrowserWindow | null = null;
 let isCompactMode = false;
 let isReloading = false;
 let normalBounds: { width: number; height: number } | null = null;
-const EXTERNAL_XYNE_PATHS: string[] = ['/claw', '/changelog', '/demo', '/apps/downloads'];
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
@@ -133,13 +132,10 @@ export async function createMainWindow(): Promise<BrowserWindow> {
         return { action: 'deny' };
       }
 
-      const isExternalXynePath =
-        isInternalUrl &&
-        EXTERNAL_XYNE_PATHS.some(
-          (p) => urlObj.pathname === p || urlObj.pathname.startsWith(p + '/'),
-        );
 
-      if (!isInternalUrl || isExternalXynePath) {
+
+      // External URLs
+      if (!isInternalUrl) {
         if (details.disposition === 'foreground-tab') {
           mainWindow?.webContents.send('open-in-browser-panel', url);
         }
