@@ -287,7 +287,8 @@ export class RecapGenerationService {
         entityMapping,
       };
 
-      const agentsConfig = await AgentsConfig.defaults();
+      // Fetch from Superposition first, fallback to defaults if fetch fails
+      const agentsConfig = await AgentsConfig.fetch().catch(() => AgentsConfig.defaults());
       const context: SummarizerContext = {
         userId: 'recap-system',
         conversationId: '',
@@ -347,6 +348,9 @@ export class RecapGenerationService {
       `Generating custom recaps for ${customUsers.length} user(s) in channel ${channelId}`
     );
 
+    // Fetch agents config from CAC (falls back to defaults if fetch fails)
+    const agentsConfig = await AgentsConfig.fetch().catch(() => AgentsConfig.defaults());
+
     for (const { userId, customRecapPrompt } of customUsers) {
       if (!customRecapPrompt) continue;
       try {
@@ -356,7 +360,7 @@ export class RecapGenerationService {
           channelId,
           summarizationType: 'recap',
           customPrompt: customRecapPrompt,
-          modelName: AgentsConfig.defaults().summariserModelName,
+          modelName: agentsConfig.summariserModelName,
         };
         const customOutput = await summarizeThread(input, customContext);
         const customSummary = this.convertToRecapSummary(customOutput);
