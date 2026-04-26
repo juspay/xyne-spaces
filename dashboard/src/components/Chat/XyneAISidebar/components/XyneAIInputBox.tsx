@@ -96,6 +96,8 @@ export interface XyneAIInputBoxProps {
   onAddChannel?: (channel: SelectedChannel) => void;
   nonDMChannels?: VisibleChannel[];
   onOpenContextModal?: () => void;
+  onCloseContextModal?: () => void;
+  isContextModalOpen?: boolean;
   selectedTickets?: SelectedTicket[];
   onRemoveTicket?: (id: string) => void;
   selectedCanvases?: SelectedCanvas[];
@@ -162,6 +164,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       onAddChannel,
       nonDMChannels = [],
       onOpenContextModal,
+      onCloseContextModal,
+      isContextModalOpen = false,
       selectedTickets = [],
       onRemoveTicket,
       selectedCanvases = [],
@@ -190,6 +194,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     const researchDropdownRef = useRef<HTMLDivElement>(null);
     const researchSearchInputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const isContextModalOpenRef = useRef(isContextModalOpen);
+    const onCloseContextModalRef = useRef(onCloseContextModal);
+    const onOpenContextModalRef = useRef(onOpenContextModal);
+    useEffect(() => {
+      isContextModalOpenRef.current = isContextModalOpen;
+    }, [isContextModalOpen]);
+    useEffect(() => {
+      onCloseContextModalRef.current = onCloseContextModal;
+    }, [onCloseContextModal]);
+    useEffect(() => {
+      onOpenContextModalRef.current = onOpenContextModal;
+    }, [onOpenContextModal]);
     const { isMobile } = usePlatform();
     const navigate = useNavigate();
 
@@ -206,6 +222,9 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     } = useResearchOptions();
 
     const [selectedAttachments, setSelectedAttachments] = useState<Attachment[]>([]);
+
+    // Channel search state for # mentions
+    const [channelSearchQuery, setChannelSearchQuery] = useState('');
 
     // Research Agent state
     const [selectedResearch, setSelectedResearch] = useState<ResearchContext | null>(null);
@@ -479,10 +498,28 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           autocomplete: 'on',
         },
         handleKeyDown: (view, event) => {
-          // Open context modal when '/' is typed
-          if (event.key === '/') {
+          // Any key typed while modal is open (printable char, '/', or backspace) → close modal
+          if (isContextModalOpenRef.current) {
+            const isChar =
+              event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+            if (isChar || event.key === 'Backspace') {
+              onCloseContextModalRef.current?.();
+              // Let the character be typed into the editor
+              return false;
+            }
+          }
+
+          // '/' when modal is NOT open → open the modal
+          if (event.key === '/' && !isContextModalOpenRef.current) {
+            onOpenContextModalRef.current?.();
+            // Let '/' be typed into the editor
+            return false;
+          }
+
+          // Escape closes the context modal when it's open
+          if (event.key === 'Escape' && isContextModalOpenRef.current) {
             event.preventDefault();
-            onOpenContextModal?.();
+            onCloseContextModalRef.current?.();
             return true;
           }
 
@@ -592,16 +629,24 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     }, [inputValue, editor]);
 
-    // Convert channels to MentionResult format for MentionSelector (exclude DMs)
+    // Convert channels to MentionResult format for MentionSelector (exclude DMs), filtered by search query
     const channelMentionItems: MentionResult[] = useMemo(() => {
-      return nonDMChannels.map(channel => ({
-        id: channel.id,
-        name: channel.name,
-        type: 'channel' as const,
-        isPrivate: String(channel.visibility) === 'PRIVATE',
-        ...(channel.description && { description: channel.description }),
-      }));
-    }, [nonDMChannels]);
+      const query = channelSearchQuery.toLowerCase();
+      return nonDMChannels
+        .filter(channel => !query || channel.name.toLowerCase().includes(query))
+        .map(channel => ({
+          id: channel.id,
+          name: channel.name,
+          type: 'channel' as const,
+          isPrivate: String(channel.visibility) === 'PRIVATE',
+          ...(channel.description && { description: channel.description }),
+        }));
+    }, [nonDMChannels, channelSearchQuery]);
+
+    // Handle channel search from # mention trigger
+    const handleChannelSearch = useCallback((query: string) => {
+      setChannelSearchQuery(query);
+    }, []);
 
     // Handle channel mention selection from TipTap selector
     const handleChannelMentionSelect = useCallback(
@@ -1081,6 +1126,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           editor={editor}
           mentionItems={channelMentionItems}
           triggerChar='#'
+          onMentionSearch={handleChannelSearch}
           {...(handleChannelMentionSelect && { onMentionSelect: handleChannelMentionSelect })}
         />
 

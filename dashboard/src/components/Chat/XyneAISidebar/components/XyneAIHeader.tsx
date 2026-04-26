@@ -30,8 +30,8 @@ export const XyneAIHeader = ({
   hideHistory = false,
 }: XyneAIHeaderProps): ReactElement => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const mobileActionButtonClass =
-    'flex p-4 justify-center items-center gap-2 rounded-full border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent aspect-square';
+  const mwebActionPillClass =
+    'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0';
 
   const handleClose = (): void => {
     if (onClose) {
@@ -49,7 +49,7 @@ export const XyneAIHeader = ({
           <div className='flex items-center gap-2'>
             <button
               onClick={onNewChat}
-              className={mobileActionButtonClass}
+              className={mwebActionPillClass}
               title='New chat'
               data-track-category='XyneAI'
               data-track-name='NEW_CHAT'
@@ -65,7 +65,7 @@ export const XyneAIHeader = ({
           <div className='flex items-center gap-2'>
             <button
               onClick={() => setIsSettingsModalOpen(true)}
-              className={mobileActionButtonClass}
+              className={mwebActionPillClass}
               title='Custom instructions'
               data-track-category='XYNE_AI'
               data-track-name='OpenCustomInstructions'
@@ -75,7 +75,7 @@ export const XyneAIHeader = ({
             {!hideMemoriesAndActivity && (
               <button
                 onClick={onShowMemories}
-                className={mobileActionButtonClass}
+                className={mwebActionPillClass}
                 title='Memories'
                 data-track-category='XyneAI'
                 data-track-name='SHOW_MEMORIES_MOBILE'
@@ -86,7 +86,7 @@ export const XyneAIHeader = ({
             {!hideMemoriesAndActivity && (
               <button
                 onClick={onShowUserActivity}
-                className={mobileActionButtonClass}
+                className={mwebActionPillClass}
                 title='Your activity'
                 data-track-category='XyneAI'
                 data-track-name='SHOW_USER_ACTIVITY_MOBILE'
@@ -97,7 +97,7 @@ export const XyneAIHeader = ({
             {!hideHistory && (
               <button
                 onClick={onShowHistory}
-                className={mobileActionButtonClass}
+                className={mwebActionPillClass}
                 title='Chat history'
                 data-track-category='XyneAI'
                 data-track-name='SHOW_HISTORY_MOBILE'
@@ -107,7 +107,7 @@ export const XyneAIHeader = ({
             )}
             <button
               onClick={handleClose}
-              className={mobileActionButtonClass}
+              className={mwebActionPillClass}
               title='Close'
               data-track-category='XyneAI'
               data-track-name='CLOSE_MOBILE'

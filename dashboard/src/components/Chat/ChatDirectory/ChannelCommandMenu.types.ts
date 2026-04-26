@@ -124,4 +124,6 @@ export interface ChannelCommandMenuProps {
   inline?: boolean;
   /** Called whenever the active tab changes; used to track active tab for call/recording disambiguation. */
   onTabChange?: (tab: TabType) => void;
+  /** When true, the search input will not steal focus on open (used when parent wants to keep focus elsewhere) */
+  disableAutoFocus?: boolean;
 }

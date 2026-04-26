@@ -179,6 +179,7 @@ const ChannelCommandMenu = ({
   enabledTabs,
   inline = false,
   onTabChange,
+  disableAutoFocus = false,
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
@@ -1805,6 +1806,7 @@ const ChannelCommandMenu = ({
               }))}
               className='flex-1'
               open={open}
+              disableAutoFocus={disableAutoFocus}
               mentionSearchType={mentionSearchType}
               selectedMentionIndex={selectedMentionIndex}
               setSelectedMentionIndex={setSelectedMentionIndex}

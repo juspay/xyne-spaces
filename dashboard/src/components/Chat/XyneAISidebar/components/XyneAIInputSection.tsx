@@ -61,7 +61,12 @@ export const XyneAIInputSection = forwardRef<XyneAIInputBoxHandle, XyneAIInputSe
             </div>
           </>
         )}
-        <XyneAIInputBox ref={ref} {...inputBoxProps} />
+        <XyneAIInputBox
+          ref={ref}
+          {...inputBoxProps}
+          onCloseContextModal={onCloseContextModal}
+          isContextModalOpen={showContextModal}
+        />
       </div>
     );
   },

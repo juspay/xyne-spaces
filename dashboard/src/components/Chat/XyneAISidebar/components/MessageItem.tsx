@@ -616,7 +616,7 @@ export const MessageItem = React.memo(
                                   href={href}
                                   target='_blank'
                                   rel='noopener noreferrer'
-                                  className='text-primary hover:text-primary/80 underline'
+                                  className='text-blue-500 hover:text-blue-600 underline'
                                   {...props}
                                 >
                                   {children}
@@ -628,7 +628,7 @@ export const MessageItem = React.memo(
                               return (
                                 <a
                                   href={href}
-                                  className='text-primary hover:text-primary/80 underline'
+                                  className='text-blue-500 hover:text-blue-600 underline'
                                   data-track-category='xyne-ai'
                                   data-track-name='api-download'
                                   onClick={e => {
@@ -645,7 +645,7 @@ export const MessageItem = React.memo(
                             return (
                               <a
                                 href={href}
-                                className='text-primary hover:text-primary/80 underline'
+                                className='text-blue-500 hover:text-blue-600 underline'
                                 {...props}
                               >
                                 {children}

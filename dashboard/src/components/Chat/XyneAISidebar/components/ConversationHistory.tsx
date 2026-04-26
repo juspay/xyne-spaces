@@ -72,8 +72,6 @@ export const ConversationHistory = ({
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const mobileActionButtonClass =
-    'flex p-4 justify-center items-center gap-2 rounded-full border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent aspect-square';
 
   const handleClose = (): void => {
     // Send close event to xstate machine
@@ -106,7 +104,7 @@ export const ConversationHistory = ({
               }}
               className={
                 isMobile
-                  ? mobileActionButtonClass
+                  ? 'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
                   : 'p-1 hover:bg-accent rounded transition-colors flex-shrink-0'
               }
               data-track-category='XyneAI'
@@ -147,7 +145,7 @@ export const ConversationHistory = ({
                 onClick={onBack}
                 className={
                   isMobile
-                    ? mobileActionButtonClass
+                    ? 'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
                     : 'p-1 hover:bg-accent rounded transition-colors'
                 }
                 data-track-category='XyneAI'
@@ -162,7 +160,7 @@ export const ConversationHistory = ({
                 onClick={() => setIsSearchExpanded(true)}
                 className={
                   isMobile
-                    ? mobileActionButtonClass
+                    ? 'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
                     : 'p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                 }
                 data-track-category='XyneAI'

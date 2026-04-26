@@ -29,7 +29,7 @@ import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
 import CallPage from './CallScreen/CallPage';
 import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
-import { ReactElement, useRef, useEffect, useState } from 'react';
+import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
 import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarningModal';
@@ -200,6 +200,16 @@ const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null 
   }, [isOnboarding, startOnboarding]);
 
   return null;
+};
+
+/** Elevate Ask AI panel only during AI onboarding so it stacks above the overlay; otherwise leave z-index default (e.g. for @/# mention popovers). */
+const XyneAISidebarZIndexShell = ({ children }: { children: ReactNode }): ReactElement => {
+  const { state: aiOnboarding } = useAIOnboarding();
+  return (
+    <div className={aiOnboarding.isActive ? 'h-full relative z-[56]' : 'h-full relative'}>
+      {children}
+    </div>
+  );
 };
 
 const WorkspaceRedirect = (): ReactElement => {
@@ -466,14 +476,14 @@ const AppRoot = (): ReactElement => {
                         <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
                       </PanelResizeHandle>
                       <Panel ref={xyneAIRightPanelRef} defaultSize={35} maxSize={50} minSize={25}>
-                        <div className='h-full relative z-[56]'>
+                        <XyneAISidebarZIndexShell>
                           <XyneAISidebar
                             channelId={xyneAIChannelId}
                             threadInfo={xyneAIThreadInfo}
                             startFreshChat={xyneAIStartFreshChat}
                             canvasInfo={xyneAICanvasInfo}
                           />
-                        </div>
+                        </XyneAISidebarZIndexShell>
                       </Panel>
                     </PanelGroup>
                   </div>
