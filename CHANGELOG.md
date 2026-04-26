@@ -1,3 +1,24 @@
+## [1.130.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.129.0...v1.130.0) (2026-04-26)
+
+
+### Features
+
+* added scroll fab for threads ([41187a7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/41187a7efd4d169f4ebdbfa47f087b3840b4fa2f)), closes [#5457](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5457)
+* default as calender view ([94bcdf9](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/94bcdf9a75f53e682296998cb10716666b5ec548)), closes [#5522](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5522)
+* draft fixes ([6e2cbba](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6e2cbba24aaf9b24cb5d1c9b671c93216966d089)), closes [#5561](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5561)
+* external call improvements ([4f31259](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4f3125986324ef256972040671a6b76d69f78844)), closes [#5539](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5539)
+* support for email for scheduled calls and attachments in desk ([a9678f6](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a9678f68e13ef6bb75cdc77932eb8e5720b39ac5)), closes [#5555](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5555)
+
+
+### Bug Fixes
+
+* Feature/xyne desk v3 main ([7f74a49](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7f74a492bb245522647b13c0284a2755daedbe04)), closes [#5556](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5556)
+* fix for notification link not jumping to new message ([4ede779](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4ede77984ad9f33963f6e0856640ef311d8f4cb4))
+* removed AgentConfigs.defaults() in summariserModel ([0709957](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/0709957ae51892a4d60dee9e01189b93c2445dda)), closes [#5523](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5523)
+* revert pr for internal route ([33db122](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/33db122d0a71e0360451170ea3402d3e1cc974e2)), closes [#5521](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5521) [#5512](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5512)
+* show tagged participants on first modal open ([c2946d3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c2946d3703c269c24880013a7b7b97041c0e6394)), closes [#5525](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5525)
+* subticket thread messages issue main ([20c0af1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/20c0af1024c5fcdfa308df4d6f667c6ce93df2aa)), closes [#5553](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5553)
+
 ## [1.129.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.128.1...v1.129.0) (2026-04-26)
 
 
