@@ -16,6 +16,8 @@ import {
   VolumeChartRenderer,
   type ToolOutput as GeniusToolOutput,
 } from 'cosmic-ai-genius';
+import { PptSlideViewer } from '../../../PptSlideViewer';
+import type { PptSlide } from '../../../PptSlideViewer';
 import { Tooltip } from '../../../ui/Tooltip';
 import { UserHoverWrapper } from '../../../ui/UserMentionPopover/UserMentionPopover';
 import { useAuth } from '../../../../hooks/useAuth';
@@ -1023,6 +1025,39 @@ const ToolOutputsSection = ({ toolOutputs }: { toolOutputs: GeniusToolOutput[] }
             <Table data={toolOutput.tableData} />
           </div>
         )}
+
+        {/* PPT Slide Viewer */}
+        {(() => {
+          const pptData = (
+            toolOutput as {
+              pptData?: {
+                attachmentId: string;
+                downloadUrl: string;
+                filename: string;
+                title: string;
+                slideCount?: number;
+                slides?: Array<{ index: number; background?: unknown; objects: unknown[] }>;
+              };
+            }
+          ).pptData;
+          if (!pptData) return null;
+          return (
+            <div className='w-full max-w-full overflow-hidden'>
+              <PptSlideViewer
+                attachmentId={pptData.attachmentId}
+                downloadUrl={pptData.downloadUrl}
+                filename={pptData.filename}
+                title={pptData.title}
+                slideCount={
+                  typeof pptData.slideCount === 'number'
+                    ? pptData.slideCount
+                    : (pptData.slides?.length ?? 0)
+                }
+                slides={pptData.slides as PptSlide[]}
+              />
+            </div>
+          );
+        })()}
       </div>
     ))}
   </div>
