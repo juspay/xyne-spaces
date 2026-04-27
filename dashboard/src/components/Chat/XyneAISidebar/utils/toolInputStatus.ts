@@ -361,6 +361,19 @@ export const generateToolInputStatus = (
           'Wrapping up the research',
         ];
 
+      case 'generate_image': {
+        const prompt = extractSafeString(input['prompt']);
+        return [
+          prompt
+            ? `Generating image: "${prompt.length > 50 ? prompt.slice(0, 50) + '...' : prompt}"`
+            : 'Generating image',
+          'Composing the scene',
+          'Rendering details',
+          'Adding finishing touches',
+          'Uploading your image',
+        ];
+      }
+
       case 'create_ppt': {
         return [
           `Designing your presentation`,

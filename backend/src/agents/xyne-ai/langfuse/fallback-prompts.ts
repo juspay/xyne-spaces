@@ -1697,6 +1697,39 @@ const GET_PAGE_CONTENT_FALLBACK = `Retrieve the exact text content of specific p
 const GET_DOCUMENT_OUTLINE_FALLBACK = `Retrieve the outline or table of contents of a document to understand its structure and navigate it effectively. Use a semantic query to find relevant documents, or pass docIds directly (from search_files). After receiving the outline: if an entry includes a page number like "(Page N)", call get_page_content with that page number; if an entry has NO page number, call search_files with the section title as the query to find the relevant content.`;
 
 /**
+ * Fallback description for generate_image tool
+ */
+const GENERATE_IMAGE_FALLBACK = `Generate an image from a text description using the open-image AI model.
+
+## When to use
+Trigger when the user asks to generate, create, draw, or make an image, picture, illustration, or visual.
+
+---
+
+## Parameters
+
+### prompt (required)
+A detailed description of the image to generate. Include:
+- **Subject:** What or who is in the image
+- **Style:** Photorealistic, illustration, painting, sketch, anime, etc.
+- **Colors & mood:** Vibrant, dark, pastel, cinematic, etc.
+- **Composition:** Close-up, wide shot, aerial view, etc.
+- **Additional details:** Lighting, background, textures
+
+The more descriptive the prompt, the better the result.
+
+### height (optional)
+Height of the image in pixels. Default: 1024.
+
+### width (optional)
+Width of the image in pixels. Default: 1024.
+
+---
+
+## Output
+The tool returns a single download URL. You MUST include this URL verbatim in your final response, formatted as: "Your image is ready ![View image](URL)"`;
+
+/**
  * Fallback prompt for summarizing email threads in Xyne Desk
  */
 const SUMMARIZE_EMAIL_THREAD_FALLBACK = `Output ONLY valid JSON. No markdown. No code fences. No explanation. Nothing before or after the JSON.
@@ -1739,6 +1772,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'search_files': SEARCH_FILES_FALLBACK,
   'fetch_skill_instructions': FETCH_SKILL_INSTRUCTIONS_FALLBACK,
   'create_ppt': CREATE_PPT_FALLBACK,
+  'generate_image': GENERATE_IMAGE_FALLBACK,
   'get_memories': GET_MEMORIES_FALLBACK,
   'user_activity': USER_ACTIVITY_FALLBACK,
   'update_memory': UPDATE_MEMORY_FALLBACK,
