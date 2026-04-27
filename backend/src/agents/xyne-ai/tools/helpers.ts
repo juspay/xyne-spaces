@@ -34,7 +34,7 @@ let isInitialized = false;
  * Get tool description - tries Langfuse first, then falls back to hardcoded prompts
  */
 async function fetchToolDescriptions(): Promise<ToolDescriptions> {
-  const [fetchChannel, fetchThread, searchContent, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, deepResearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, fetchSkillInstructions, createPpt, generateImage, searchMeetingInsights, getMemories, updateMemory, userActivity, listUserChannels, searchFiles, getPageContent, getDocumentOutline] = await Promise.all([
+  const [fetchChannel, fetchThread, searchContent, geniusQuery, xyneRcaQuery, fieldValueDiscovery, webSearch, deepResearch, researchAgent, createCanvas, readCanvas, editCanvas, fetchLinkContent, fetchSkillInstructions, manageUserSkill, createPpt, generateImage, searchMeetingInsights, getMemories, updateMemory, userActivity, listUserChannels, searchFiles, getPageContent, getDocumentOutline] = await Promise.all([
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_CHANNEL_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_THREAD_MESSAGES),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_RELEVANT_CONTENT),
@@ -49,6 +49,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     getPromptFromLangfuse(PROMPT_NAMES.EDIT_CANVAS),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_LINK_CONTENT),
     getPromptFromLangfuse(PROMPT_NAMES.FETCH_SKILL_INSTRUCTIONS),
+    getPromptFromLangfuse(PROMPT_NAMES.MANAGE_USER_SKILL),
     getPromptFromLangfuse(PROMPT_NAMES.CREATE_PPT),
     getPromptFromLangfuse(PROMPT_NAMES.GENERATE_IMAGE),
     getPromptFromLangfuse(PROMPT_NAMES.SEARCH_MEETING_INSIGHTS),
@@ -76,6 +77,7 @@ async function fetchToolDescriptions(): Promise<ToolDescriptions> {
     edit_canvas: editCanvas || 'Edit an existing canvas by replacing its content.',
     fetch_link_content: fetchLinkContent || 'Fetch content from a Xyne Spaces link (message, conversation, ticket, or canvas).',
     fetch_skill_instructions: fetchSkillInstructions || 'Fetch the full instructions for a skill by name. Use this when you need to load a skill that the user has enabled.',
+    manage_user_skill: manageUserSkill || 'Create or update a custom user skill programmatically. Supports skill.md file parsing with YAML frontmatter.',
     create_ppt: createPpt || 'Create a visually stunning PowerPoint presentation from structured slide content.',
     generate_image: generateImage || 'Generate an image from a text description using the open-image model.',
     search_meeting_insights: searchMeetingInsights || 'Search for AI-analyzed meeting insights including summaries, action items, pain points, and merchant discussions.',

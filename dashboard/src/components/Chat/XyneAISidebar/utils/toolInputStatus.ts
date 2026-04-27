@@ -392,6 +392,18 @@ export const generateToolInputStatus = (
         return 'Loaded skill';
       }
 
+      case 'manage_user_skill': {
+        const operation = extractSafeString(input['operation']);
+        const name = extractSafeString(input['name']);
+        if (operation === 'create') {
+          return name ? `Creating skill "${sanitizeString(name)}"` : 'Creating skill';
+        }
+        if (operation === 'update') {
+          return name ? `Updating skill "${sanitizeString(name)}"` : 'Updating skill';
+        }
+        return 'Managing skill';
+      }
+
       case 'user_activity': {
         return [
           'Perusing your activity',

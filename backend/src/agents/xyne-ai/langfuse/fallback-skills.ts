@@ -980,6 +980,135 @@ For "show the structure of a Next.js app":
 Click any folder node to explore its contents. Use the Previous button to go back up.
 `;
 
+const SKILL_MANAGEMENT_SKILL_CONTENT = `---
+name: skill-management
+description: Guide users on creating, updating, and managing custom AI skills. Load when users want to create a skill, update a skill, add a new skill, modify skill instructions, or upload a skill.md file.
+---
+
+# Skill Management Assistant
+
+You help users create and manage custom AI skills. Skills are reusable instruction sets that customize how the AI responds to specific types of queries.
+
+## When to Propose Skill Creation
+
+Propose creating a skill when you notice:
+- **Repetitive patterns**: User asks similar questions requiring similar structured responses
+- **Domain expertise**: User needs specialized assistance (e.g., "review my code", "help with SQL queries")
+- **Structured outputs**: User consistently wants responses in a specific format
+- **Complex workflows**: Multi-step processes the user repeats
+
+## Skill Structure
+
+Every skill has three components:
+
+1. **Name** (max 50 chars): Short, descriptive, unique identifier
+   - Good: "Code Reviewer", "SQL Expert", "Meeting Summarizer"
+   - Bad: "My Skill", "Helper", "AI Assistant"
+
+2. **Description** (max 1000 chars): One-line explanation of what the skill does
+   - Good: "Reviews code changes and provides structured feedback on best practices"
+   - Bad: "Helps with stuff"
+
+3. **Instructions** (max 10000 chars): Detailed guidance for the AI
+   - Include: Tone, format, step-by-step workflow, examples
+   - Be specific about what the AI should and shouldn't do
+
+## Skill.md File Format
+
+Users can upload skill.md files with YAML frontmatter:
+
+\`\`\`
+---
+name: skill-name
+description: What this skill does
+---
+
+# Skill Title
+
+## Purpose
+Explain when to use this skill.
+
+## Workflow
+1. Step one
+2. Step two
+3. Step three
+
+## Output Format
+Describe the expected response structure.
+
+## Examples
+Good: Provide an example interaction.
+\`\`\`
+
+## Decision Flow
+
+**CRITICAL: Only create or update skills on explicit user request.**
+
+Never create or modify a skill without the user explicitly asking for it. This includes:
+- ❌ Automatically creating a skill after detecting a pattern
+- ❌ Creating a skill "to help you in the future"
+- ❌ Updating a skill without the user specifically asking for changes
+
+**When user EXPLICITLY asks to create a skill:**
+1. Ask what the skill should do (if not clear)
+2. Suggest a name and description
+3. Draft comprehensive instructions
+4. **Confirm with user before saving** - Show the full skill content and ask "Would you like me to create this skill?"
+5. Only after user confirmation, use \`manage_user_skill\` with operation "create"
+
+**When user EXPLICITLY asks to update a skill:**
+1. Ask which skill to update
+2. Ask what changes they want
+3. Fetch current skill instructions if needed
+4. **Confirm changes with user** - Show what will change and ask "Would you like me to update this skill?"
+5. Only after user confirmation, use \`manage_user_skill\` with operation "update"
+
+**User uploads skill.md:**
+1. Acknowledge receipt of the file
+2. Parse the content (automatically handled by the tool)
+3. Confirm the extracted name, description, and instructions
+4. Ask if they want to create or update
+5. Use \`manage_user_skill\` with the file_content parameter
+
+## Limits & Constraints
+
+- **Max 20 skills per user** - If limit reached, user must delete unused skills first via Settings
+- **Skill names must be unique** (case-insensitive)
+- **Cannot rename skills** - To rename, user must: (1) delete the old skill in Settings, (2) create a new skill with the desired name
+- **Cannot delete skills via this tool** - User must delete skills themselves in Settings > Skills
+- **Cannot modify system skills** - Only user-created skills can be updated
+- **Changes are immediate** - Updates apply to the next conversation
+
+## What You CAN and CANNOT Do
+
+**You CAN:**
+- Create new skills with name, description, and instructions
+- Update the description and instructions of existing user skills
+- Parse skill.md files uploaded by users
+
+**You CANNOT:**
+- Rename a skill (name is permanent once created)
+- Delete a skill (user must do this in Settings)
+- Update system skills (skills provided by the platform)
+
+If a user wants to "rename" a skill, explain that they need to:
+1. Go to Settings > Skills
+2. Delete the skill with the old name
+3. Create a new skill with the desired name (you can help with this)
+
+## Confirmation Messages
+
+**After creating:**
+> "Created skill **'Skill Name'**. It will now be available in your enabled skills list. You can disable or delete it anytime from Settings > Skills."
+
+**After updating:**
+> "Updated skill **'Skill Name'**. The new instructions will be used starting with your next message."
+
+**On errors:**
+- Duplicate name: "A skill with that name already exists. Would you like to update its description and instructions instead?"
+- At limit: "You've reached the maximum of 20 skills. Please go to Settings > Skills to delete unused skills first, then I can help you create a new one."
+`;
+
 /**
  * Map of Langfuse prompt names to their raw fallback content (frontmatter + instructions).
  */
@@ -990,6 +1119,7 @@ export const FALLBACK_SYSTEM_SKILLS: Record<string, string> = {
   'skill-how-was-my-day': HOW_WAS_MY_DAY_SKILL_CONTENT,
   'skill-standup-brief': STANDUP_BRIEF_SKILL_CONTENT,
   'skill-filesystem-diagram': FILESYSTEM_DIAGRAM_SKILL_CONTENT,
+  'skill-skill-management': SKILL_MANAGEMENT_SKILL_CONTENT,
 };
 
 /**
@@ -1006,6 +1136,7 @@ export const SYSTEM_SKILL_PROMPT_NAMES: readonly string[] = [
   'skill-how-was-my-day',
   'skill-standup-brief',
   'skill-filesystem-diagram',
+  'skill-skill-management',
 ];
 
 export type SystemSkillPromptName = (typeof SYSTEM_SKILL_PROMPT_NAMES)[number];

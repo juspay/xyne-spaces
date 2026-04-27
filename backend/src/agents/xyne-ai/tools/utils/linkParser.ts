@@ -18,6 +18,8 @@ export const ALLOWED_DOMAINS = [
   'spaces.xyne.juspay.net',        // web
   'app.spaces.xyne.juspay.net',    // app
   'xyne-spaces.web.app',
+  'spaces.xyne.rbihub.in',        // web RBI
+  'app.spaces.xyne.rbihub.in',    // app RBI
   'localhost:5173',                // local development
 ] as const;
 

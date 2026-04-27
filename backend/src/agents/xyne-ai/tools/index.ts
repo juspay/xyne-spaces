@@ -78,6 +78,7 @@ import { createFetchLinkContentTool, getFetchLinkContentTool } from './fetch_lin
 import { createCreatePptTool, getCreatePptTool } from './create_ppt/index.js';
 import { createGenerateImageTool, getGenerateImageTool } from './generate_image/index.js';
 import { createFetchSkillInstructionsTool, getFetchSkillInstructionsTool } from './skills.js';
+import { createManageUserSkillTool, getManageUserSkillTool } from './manage_user_skill.js';
 import { createGetMemoriesTool, getGetMemoriesTool } from './get_memories.js';
 import { createUpdateMemoryTool, getUpdateMemoryTool } from './update_memory.js';
 import { createUserActivityTool, getUserActivityTool } from './user_activity.js';
@@ -143,6 +144,9 @@ export { createGenerateImageTool, getGenerateImageTool };
 // Fetch Skill Instructions
 export { createFetchSkillInstructionsTool, getFetchSkillInstructionsTool };
 
+// Manage User Skills
+export { createManageUserSkillTool, getManageUserSkillTool };
+
 // Get Memories
 export { createGetMemoriesTool, getGetMemoriesTool };
 
@@ -188,7 +192,7 @@ export interface GetXyneAIToolsOptions {
  */
 export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneAIAgentContext>[] {
   const { webSearchEnabled = false, deepResearchEnabled = false, hasThreadContext = false, memoryEnabled = true } = options || {};
-  
+
   const tools: Tool<any, XyneAIAgentContext>[] = [
     createFetchChannelMessagesTool(),
     createSearchRelevantContentTool(),
@@ -204,6 +208,7 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createCreatePptTool(),
     createGenerateImageTool(),
     createFetchSkillInstructionsTool(),
+    createManageUserSkillTool(),
     createUserActivityTool(),
     createListUserChannelsTool(),
     createSearchFilesTool(),

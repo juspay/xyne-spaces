@@ -1182,6 +1182,8 @@ Use this tool when:
 **Supported Domains:**
 - spaces.xyne.juspay.net
 - app.spaces.xyne.juspay.net
+- spaces.xyne.rbihub.in
+- app.spaces.xyne.rbihub.in
 
 **Parameters:**
 - url: (required) The full Xyne Spaces URL to fetch content from
@@ -1618,6 +1620,57 @@ Returns a chronologically ordered list of activity events — each with timestam
 - Blacklisted and aliased event types are handled automatically`;
 
 /**
+ * Fallback description for manage_user_skill tool
+ */
+const MANAGE_USER_SKILL_FALLBACK = `Create or update a custom user skill programmatically.
+
+Use this tool when the user wants to:
+- Create a new custom skill with specific instructions
+- Update an existing skill's description or instructions
+- Upload/import a skill from a skill.md file
+
+**Two Input Modes:**
+
+**Mode 1: Direct Fields (provide name, description, instructions)**
+- name: The skill name (max 50 chars)
+- description: Brief description of what the skill does (max 1000 chars)
+- instructions: Full instructions for the AI when using this skill (max 10000 chars)
+
+**Mode 2: File Content (provide file_content)**
+- file_content: Raw content of a skill.md file with optional YAML frontmatter
+
+The tool will automatically parse skill.md files in this format:
+\`\`\`
+---
+name: my-skill
+description: What this skill does
+---
+# Instructions
+Detailed instructions for the AI...
+\`\`\`
+
+**Parameters:**
+- operation: Either "create" or "update"
+- For create: Provide name/description/instructions OR file_content
+- For update: Provide name + new description/instructions OR file_content
+
+**Examples:**
+- Create skill: manage_user_skill({operation: "create", name: "Code Reviewer", description: "Reviews code", instructions: "When reviewing code..."})
+- Update skill: manage_user_skill({operation: "update", name: "Code Reviewer", description: "Updated desc", instructions: "New instructions..."})
+- From file: manage_user_skill({operation: "create", file_content: "---\\nname: Debug Expert\\n..."})
+
+**Limits:**
+- Max 20 skills per user
+- Max 50 chars for name
+
+**Important Limitations:**
+- **Cannot rename skills** - The skill name is permanent once created. To "rename", the user must delete the old skill (in Settings > Skills) and create a new one with the desired name.
+- **Cannot delete skills via this tool** - Users must delete skills themselves via Settings > Skills interface.
+- **Cannot update system skills** - Only user-created custom skills can be updated.
+- Max 1000 chars for description
+- Max 10000 chars for instructions`;
+
+/**
  * Fallback description for get_memories tool
  */
 const GET_MEMORIES_FALLBACK = `Retrieve all stored memories for the current user from the memory service.
@@ -1778,6 +1831,7 @@ export const FALLBACK_PROMPTS: Record<string, string> = {
   'update_memory': UPDATE_MEMORY_FALLBACK,
   'deep_research': DEEP_RESEARCH_FALLBACK,
   'list_user_channels': LIST_USER_CHANNELS_FALLBACK,
+  'manage_user_skill': MANAGE_USER_SKILL_FALLBACK,
   'ticket_description_cleaner': TICKET_DESCRIPTION_CLEANER_FALLBACK,
   'cluster_theme_single': CLUSTER_THEME_SINGLE_FALLBACK,
   'meta_theme_single': META_THEME_SINGLE_FALLBACK,

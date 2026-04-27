@@ -315,6 +315,7 @@ export interface ToolDescriptions {
   create_ppt: string;
   generate_image: string;
   fetch_skill_instructions: string;
+  manage_user_skill: string;
   get_memories: string;
   update_memory: string;
   user_activity: string;
