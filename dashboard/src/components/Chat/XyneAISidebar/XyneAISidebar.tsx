@@ -8,7 +8,10 @@ import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
-import type { ConversationHistory as ConversationHistoryType } from './utils/XyneAITypes';
+import type {
+  ConversationHistory as ConversationHistoryType,
+  LastInputContext,
+} from './utils/XyneAITypes';
 import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
 import {
   useSessionsList,
@@ -404,6 +407,20 @@ const XyneAISidebar = ({
   }, [sessionsData]);
 
   // Load most recent conversation on mount
+  // Restore input box state from lastInputContext
+  const restoreInputContext = useCallback((ctx: LastInputContext | undefined) => {
+    if (!ctx) return;
+    setSelectedChannels(ctx.selectedChannels ?? []);
+    setSelectedTickets((ctx.selectedTickets ?? []) as SelectedTicket[]);
+    setSelectedCanvases(ctx.selectedCanvases ?? []);
+    setSelectedTranscripts(ctx.selectedTranscripts ?? []);
+    setSelectedRecordings(ctx.selectedRecordings ?? []);
+    setWebSearchEnabled(ctx.webSearchEnabled ?? false);
+    setDeepResearchEnabled(ctx.deepResearchEnabled ?? false);
+    setCreateCanvasEnabled(ctx.createCanvasEnabled ?? false);
+    setSelectedResearchContext(ctx.researchContext ?? null);
+  }, []);
+
   // Thread context: load thread-specific conversation (channel-specific)
   // Global context: load most recent conversation across all channels
   useEffect(() => {
@@ -518,6 +535,9 @@ const XyneAISidebar = ({
         setConversationId(mostRecent.sessionId);
         setBranchSelections(mostRecent.branchSelections ?? {});
 
+        // Restore input box state
+        restoreInputContext(mostRecent.lastInputContext);
+
         // Restore feedback from stored messages
         const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};
         mostRecent.messages.forEach(msg => {
@@ -551,6 +571,7 @@ const XyneAISidebar = ({
     startFreshChat,
     sessionsData,
     refetchSessions,
+    restoreInputContext,
   ]);
 
   // Refetch sessions list when history sidebar is opened to get fresh data
@@ -637,6 +658,9 @@ const XyneAISidebar = ({
       setBranchSelections(fullConversation.branchSelections ?? {});
       setEditingMessageId(null);
       setShowHistorySidebar(false);
+
+      // Restore input box state
+      restoreInputContext(fullConversation.lastInputContext);
 
       // Restore feedback from stored messages
       const restoredFeedbackMap: Record<string, 'LIKE' | 'DISLIKE' | null> = {};

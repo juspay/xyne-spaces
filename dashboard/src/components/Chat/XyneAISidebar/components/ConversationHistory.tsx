@@ -586,8 +586,52 @@ const ConversationItem = ({
           >
             {conversation.title}
           </div>
-          <div className="text-xs text-muted-foreground font-['Inter'] mt-0.5">
-            {formatRelativeTime(conversation.lastUpdated)}
+          <div className="text-xs text-muted-foreground font-['Inter'] mt-0.5 flex items-center gap-1 flex-wrap">
+            <span>{formatRelativeTime(conversation.lastUpdated)}</span>
+            {(() => {
+              const channels = (conversation.lastInputContext?.selectedChannels ?? []) as Array<{
+                id: string;
+                name: string;
+              }>;
+              if (!channels.length) return null;
+              const PILL_COLORS = [
+                'bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200',
+                'bg-purple-100 text-purple-700 border border-purple-200 hover:bg-purple-200',
+                'bg-green-100 text-green-700 border border-green-200 hover:bg-green-200',
+                'bg-orange-100 text-orange-700 border border-orange-200 hover:bg-orange-200',
+                'bg-pink-100 text-pink-700 border border-pink-200 hover:bg-pink-200',
+                'bg-teal-100 text-teal-700 border border-teal-200 hover:bg-teal-200',
+                'bg-red-100 text-red-700 border border-red-200 hover:bg-red-200',
+                'bg-yellow-100 text-yellow-700 border border-yellow-200 hover:bg-yellow-200',
+                'bg-indigo-100 text-indigo-700 border border-indigo-200 hover:bg-indigo-200',
+                'bg-cyan-100 text-cyan-700 border border-cyan-200 hover:bg-cyan-200',
+              ];
+              const getColor = (id: string) => {
+                let hash = 0;
+                for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+                return PILL_COLORS[hash % PILL_COLORS.length]!;
+              };
+              const visible = channels.slice(0, 2);
+              const overflow = channels.length - 2;
+              return (
+                <>
+                  <div className='w-px h-3 bg-border' />
+                  {visible.map(ch => (
+                    <span
+                      key={ch.id}
+                      className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-semibold leading-none shadow-sm cursor-default select-none transition-colors ${getColor(ch.id)}`}
+                    >
+                      # {ch.name}
+                    </span>
+                  ))}
+                  {overflow > 0 && (
+                    <span className='text-[10px] text-muted-foreground font-medium'>
+                      +{overflow}
+                    </span>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </button>
       )}

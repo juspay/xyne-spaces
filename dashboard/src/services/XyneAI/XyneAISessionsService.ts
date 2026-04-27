@@ -6,6 +6,7 @@
 import { apiInstance } from '../clients/apiClient';
 import type {
   ConversationHistory as ConversationHistoryType,
+  LastInputContext,
   StoredMessage,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 
@@ -34,6 +35,7 @@ export interface SessionListItem {
   isStarred: boolean;
   createdAt: string;
   updatedAt: string;
+  lastInputContext?: LastInputContext;
 }
 
 export interface SessionDetailMessage {
@@ -76,6 +78,7 @@ export interface SessionDetailResponse {
   title: string;
   isStarred: boolean;
   branchSelections: Record<string, string>;
+  lastInputContext?: LastInputContext;
   createdAt: string;
   updatedAt: string;
   messages: BackendMessage[];
@@ -131,6 +134,7 @@ export function sessionDetailToConversationHistory(
   if (detail.threadConversationId !== undefined)
     result.threadConversationId = detail.threadConversationId;
   if (detail.branchSelections !== undefined) result.branchSelections = detail.branchSelections;
+  if (detail.lastInputContext !== undefined) result.lastInputContext = detail.lastInputContext;
 
   return result;
 }
@@ -153,6 +157,7 @@ export async function fetchSessions(): Promise<ConversationHistoryType[]> {
       isStarred: s.isStarred,
     };
     if (s.threadConversationId !== undefined) history.threadConversationId = s.threadConversationId;
+    if (s.lastInputContext !== undefined) history.lastInputContext = s.lastInputContext;
     return history;
   });
 }

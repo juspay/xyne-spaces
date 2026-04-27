@@ -579,6 +579,7 @@ export class XyneAIController {
         title,
         isStarred: rawMeta.isStarred || false,
         branchSelections: rawMeta.branchSelections || {},
+        lastInputContext: rawMeta.lastInputContext,
         createdAt: sessionData.createdAt,
         updatedAt: sessionData.updatedAt,
         messages: applyFeedbackToMessages(frontendMessages, rawMeta.feedbackMap || {}),
