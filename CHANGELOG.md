@@ -1,3 +1,10 @@
+## [1.132.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.132.0...v1.132.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* add darkmode fixes again ([7a80837](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/7a808377a1da4645b1a85fa3f59fc5c889bd5577))
+
 ## [1.132.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.131.0...v1.132.0) (2026-04-27)
 
 
