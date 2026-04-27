@@ -1024,6 +1024,16 @@ export class EmailService {
     const initialEmail = emails[emails.length - 1];
     const latestEmail = emails[0];
 
+    const preference = await this.emailChannelPreferenceRepository.findByChannelId(conversation.channelId);
+    if (!preference?.ownerUserId) {
+      throw new Error(`Desk owner not configured for channel ${conversation.channelId}. Set ownerUserId in EmailChannelPreference.`);
+    }
+    const owner = await this.userRepository.findById(preference.ownerUserId);
+    if (!owner?.email) {
+      throw new Error(`Desk owner user ${preference.ownerUserId} not found or has no email.`);
+    }
+    const fromEmailAddress = owner.email;
+
     const to = params.to?.length
       ? params.to
       : params.type === 'REPLY'
@@ -1059,7 +1069,7 @@ export class EmailService {
         subject: `Re: ${initialEmail.subject}`,
         body: params.body,
         to,
-        from: initialEmail.to[0],
+        from: fromEmailAddress,
         cc,
         bcc,
         conversationId: params.conversationId,

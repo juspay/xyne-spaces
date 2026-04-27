@@ -12,6 +12,8 @@ import { ChannelParticipantRepository } from '@/database/repositories/channelPar
 import { EmailDraftRepository } from '@/database/repositories/emailDraftRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
+import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
+import { UserRepository } from '@/database/repositories/users';
 import { logger } from '@/utils/logger';
 import { EmailType, MessageDirection, ExternalEntityType, AttachmentEntityType, Prisma } from '@prisma/client';
 import { db } from '@/database/client';
@@ -41,6 +43,8 @@ export class EmailController {
   private emailDraftRepo = new EmailDraftRepository();
   private externalMessageRepo = new ExternalMessageRepository();
   private messageAttachmentRepo = new MessageAttachmentRepository();
+  private emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
+  private userRepo = new UserRepository();
 
   /**
    * POST /api/email/:conversationId/reply
@@ -134,8 +138,17 @@ export class EmailController {
         return res.status(404).json({ error: 'External source not found' });
       }
 
-      // Get fromEmailAddress from initial email
-      const fromEmailAddress = initialEmail.to[0]; // Reply from the original recipient address
+      const preference = await this.emailChannelPreferenceRepo.findByChannelId(channel.id);
+      if (!preference?.ownerUserId) {
+        return res.status(400).json({
+          error: 'Desk owner not configured for this channel. Set ownerUserId in EmailChannelPreference.',
+        });
+      }
+      const owner = await this.userRepo.findById(preference.ownerUserId);
+      if (!owner?.email) {
+        return res.status(400).json({ error: 'Desk owner user not found or has no email.' });
+      }
+      const fromEmailAddress = owner.email;
 
       logger.info(`[EmailController] Sending ${type} via ${externalSource.sourceType} for conversation ${conversationId}`);
 
