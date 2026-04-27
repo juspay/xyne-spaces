@@ -15,6 +15,7 @@ import { DelayedMessagesSideEffectHandler } from './tables/delayed-messages-hand
 import { TicketTagsSideEffectHandler } from './tables/ticket-tags-handler';
 import { ChannelsSideEffectHandler } from './tables/channels-handler';
 import { EmailReadsSideEffectHandler } from './tables/email-reads-handler';
+import { EmailsSideEffectHandler } from './tables/emails-handler';
 
 export class SideEffectHandlerFactory {
 
@@ -50,7 +51,9 @@ export class SideEffectHandlerFactory {
         return new ChannelsSideEffectHandler(ctx);
       case 'email_reads':
         return new EmailReadsSideEffectHandler(ctx);
-        
+      case 'emails':
+        return new EmailsSideEffectHandler(ctx);
+
       default:
         return new BaseSideEffectHandler(ctx);
     }

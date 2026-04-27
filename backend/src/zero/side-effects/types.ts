@@ -94,6 +94,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   delayed_messages: ['insert', 'update', 'delete'],
   channels: ['update'],
   email_reads: ['insert', 'update'],
+  emails: ['insert'],
 };
 
 export function createSideEffectJobsAccumulator(): SideEffectJobsAccumulator {

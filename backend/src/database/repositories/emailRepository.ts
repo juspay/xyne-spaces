@@ -73,6 +73,42 @@ export class EmailRepository {
     });
   }
 
+  async findManyWithCursor(
+    conversationId: string,
+    limit: number,
+    cursor?: { id: string; createdAt: number }
+  ): Promise<Email[]> {
+    const where: any = { conversationId };
+
+    if (cursor) {
+      where.OR = [
+        { createdAt: { lt: new Date(cursor.createdAt) } },
+        {
+          createdAt: new Date(cursor.createdAt),
+          id: { lt: cursor.id },
+        },
+      ];
+    }
+
+    return await this.db.email.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+    });
+  }
+
+  async findRootsByExternalThreadIds(
+    externalThreadIds: string[]
+  ): Promise<Array<{ id: string; externalThreadId: string }>> {
+    if (externalThreadIds.length === 0) return [];
+
+    return await this.db.email.findMany({
+      where: { externalThreadId: { in: externalThreadIds }, type: EmailType.DEFAULT },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, externalThreadId: true },
+    });
+  }
+
   async updateConversationId(emailId: string, conversationId: string): Promise<Email> {
     return await this.db.email.update({
       where: { id: emailId },
