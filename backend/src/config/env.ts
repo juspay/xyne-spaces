@@ -97,6 +97,8 @@ const envSchema = Joi.object({
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
   ASK_AI_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  IMAGE_GENERATION_ENDPOINT: Joi.string().default(''),
+  IMAGE_GENERATION_MODEL: Joi.string().default(''),
   ACTIVITY_CLASSIFICATION_LITELLM_API_KEY: Joi.string().allow('').default(''),
   // LiteLLM config specifically for call features (transcript summary, PRD, detailed summary)
   CALL_LITELLM_API_KEY: Joi.string().allow('').default(''),
@@ -361,6 +363,8 @@ export const config = {
     baseUrl: envVars.LITELLM_BASE_URL,
     apiKey: envVars.LITELLM_API_KEY,
     askAiApiKey: envVars.ASK_AI_LITELLM_API_KEY || envVars.LITELLM_API_KEY,
+    imageGenerationEndpoint: envVars.IMAGE_GENERATION_ENDPOINT,
+    imageGenerationModel: envVars.IMAGE_GENERATION_MODEL,
   },
   productInsights: {
     recluster: {

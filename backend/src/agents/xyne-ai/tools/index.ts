@@ -76,6 +76,7 @@ import { createReadCanvasTool, getReadCanvasTool } from './read_canvas.js';
 import { createEditCanvasTool, getEditCanvasTool } from './edit_canvas.js';
 import { createFetchLinkContentTool, getFetchLinkContentTool } from './fetch_link_content.js';
 import { createCreatePptTool, getCreatePptTool } from './create_ppt/index.js';
+import { createGenerateImageTool, getGenerateImageTool } from './generate_image/index.js';
 import { createFetchSkillInstructionsTool, getFetchSkillInstructionsTool } from './skills.js';
 import { createGetMemoriesTool, getGetMemoriesTool } from './get_memories.js';
 import { createUpdateMemoryTool, getUpdateMemoryTool } from './update_memory.js';
@@ -135,6 +136,9 @@ export { createFetchLinkContentTool, getFetchLinkContentTool };
 
 // Create PPT
 export { createCreatePptTool, getCreatePptTool };
+
+// Generate Image
+export { createGenerateImageTool, getGenerateImageTool };
 
 // Fetch Skill Instructions
 export { createFetchSkillInstructionsTool, getFetchSkillInstructionsTool };
@@ -198,6 +202,7 @@ export function getXyneAITools(options?: GetXyneAIToolsOptions): Tool<any, XyneA
     createEditCanvasTool(),
     createFetchLinkContentTool(),
     createCreatePptTool(),
+    createGenerateImageTool(),
     createFetchSkillInstructionsTool(),
     createUserActivityTool(),
     createListUserChannelsTool(),

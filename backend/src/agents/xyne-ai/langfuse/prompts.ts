@@ -174,6 +174,7 @@ export const PROMPT_NAMES = {
   READ_CANVAS: 'read_canvas',
   EDIT_CANVAS: 'edit_canvas',
   CREATE_PPT: 'create_ppt',
+  GENERATE_IMAGE: 'generate_image',
   FETCH_SKILL_INSTRUCTIONS: 'fetch_skill_instructions',
   GET_MEMORIES: 'get_memories',
   UPDATE_MEMORY: 'update_memory',

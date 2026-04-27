@@ -313,6 +313,7 @@ export interface ToolDescriptions {
   fetch_link_content: string;
   search_files: string;
   create_ppt: string;
+  generate_image: string;
   fetch_skill_instructions: string;
   get_memories: string;
   update_memory: string;

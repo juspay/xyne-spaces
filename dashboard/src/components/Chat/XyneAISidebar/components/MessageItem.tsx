@@ -1,11 +1,13 @@
 import { ReactElement, useState, useMemo, useEffect } from 'react';
-import { Globe, Pencil, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Globe, Pencil, RefreshCw, ChevronLeft, ChevronRight, Download, Check } from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { createMarkdownComponents } from '../../../../utils/markdownComponents';
+import { genericInstance } from '../../../../services/clients/genericClient';
+import type { Components } from 'react-markdown';
 import {
   SingleStat,
   Table,
@@ -30,6 +32,79 @@ import type {
   Participant,
   SelectionContext,
 } from '../utils/XyneAITypes';
+
+// ─── Image Component with Download Button (Sidebar only) ─────────────────────
+
+const ImageWithDownload = ({
+  src,
+  alt,
+  className,
+}: React.ImgHTMLAttributes<HTMLImageElement>): ReactElement => {
+  const [downloaded, setDownloaded] = useState(false);
+
+  const handleDownload = (): void => {
+    if (!src) return;
+
+    void (async (): Promise<void> => {
+      try {
+        // Fetch the image as a blob to force download
+        const response = await genericInstance.get<Blob>(src, {
+          responseType: 'blob',
+        });
+        const blob = response.data;
+        const blobUrl = window.URL.createObjectURL(blob);
+
+        // Create a temporary anchor element to trigger download
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = alt || 'generated-image.png';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Clean up the blob URL
+        window.URL.revokeObjectURL(blobUrl);
+
+        setDownloaded(true);
+        setTimeout(() => setDownloaded(false), 2000);
+      } catch (error) {
+        console.error('Failed to download image:', error);
+        // Fallback: try direct download
+        const link = document.createElement('a');
+        link.href = src;
+        link.download = alt || 'generated-image.png';
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    })();
+  };
+
+  return (
+    <div className='relative inline-block max-w-full group'>
+      <img
+        src={src}
+        alt={alt}
+        className={className || 'max-w-full h-auto rounded-lg'}
+        loading='lazy'
+      />
+      <button
+        onClick={handleDownload}
+        className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-background z-10'
+        title='Download image'
+        data-track-category='xyne-ai'
+        data-track-name='download-image'
+      >
+        {downloaded ? (
+          <Check size={14} className='text-green-600' />
+        ) : (
+          <Download size={14} className='text-muted-foreground' />
+        )}
+      </button>
+    </div>
+  );
+};
 
 // ============================================================================
 // User Tag Component and Utilities
@@ -773,6 +848,14 @@ const MessageContent = ({
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
 
+  // Extend markdown components with image download button for sidebar
+  const sidebarMarkdownComponents = useMemo<Components>(() => {
+    return {
+      ...markdownComponents,
+      img: props => <ImageWithDownload {...props} />,
+    };
+  }, [markdownComponents]);
+
   return (
     <div className='space-y-4 max-w-full'>
       {/* Tool Outputs */}
@@ -786,7 +869,7 @@ const MessageContent = ({
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{
-              ...markdownComponents,
+              ...sidebarMarkdownComponents,
               p: ({ children }) => {
                 const processed = processNodeForUserTags(children, message.userTags);
                 return <p className='mb-2 last:mb-0'>{processed}</p>;
@@ -986,6 +1069,13 @@ const SummarizerContent = ({
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
 
+  const sidebarMarkdownComponents = useMemo<Components>(() => {
+    return {
+      ...markdownComponents,
+      img: props => <ImageWithDownload {...props} />,
+    };
+  }, [markdownComponents]);
+
   // Same trailing-newline fix as displayContent: flush the current incomplete
   // line so remark-breaks renders line breaks / code blocks correctly mid-stream.
   const summaryContent = message.summarizerOutput?.summary
@@ -1003,7 +1093,7 @@ const SummarizerContent = ({
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkBreaks]}
               components={{
-                ...markdownComponents,
+                ...sidebarMarkdownComponents,
                 p: ({ children }) => {
                   const processed = processNodeForUserTags(children, message.userTags);
                   return <p className='mb-2 last:mb-0'>{processed}</p>;
