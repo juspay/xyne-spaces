@@ -176,6 +176,7 @@ export const PROMPT_NAMES = {
   CREATE_PPT: 'create_ppt',
   GENERATE_IMAGE: 'generate_image',
   FETCH_SKILL_INSTRUCTIONS: 'fetch_skill_instructions',
+  MANAGE_USER_SKILL: 'manage_user_skill',
   GET_MEMORIES: 'get_memories',
   UPDATE_MEMORY: 'update_memory',
   USER_ACTIVITY: 'user_activity',
