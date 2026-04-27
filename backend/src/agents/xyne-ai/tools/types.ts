@@ -79,6 +79,22 @@ export interface XyneAIAgentContext {
   modelName?: string;  // LLM model name from CAC config (xyneAiModelName), used by tools that make internal LLM calls
   agentName?: string;  // Agent identifier ('ask-ai' or 'ask-ai-chat'); also selects Langfuse prompt
   systemPromptOverride?: string;  // When set, replaces the agent's system prompt entirely (used for draft mode)
+  // Per-tool soft token budgets from CAC (xyneAiToolBudget*). Required —
+  // callers populate from AgentsConfig so we have a single source of truth.
+  toolBudgets: {
+    searchRelevantContent: number;
+    fetchChannelMessages: number;
+    fetchThreadMessages: number;
+    fetchLinkContent: number;
+    userActivity: number;
+    searchFiles: number;
+  };
+  // Session-history compaction thresholds from CAC. Required — single source
+  // of truth is AgentsConfig; no fallback constants in the compaction util.
+  historyCompaction: {
+    trigger: number;
+    target: number;
+  };
   // Request context for tracing/metadata purposes
   agentRequestContext?: AgentRequestContext;
 }

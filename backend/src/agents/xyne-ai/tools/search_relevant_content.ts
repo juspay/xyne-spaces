@@ -20,6 +20,11 @@ import {
   appendEnhancedSessionMappings,
   formatToolResultForContext,
 } from './helpers.js';
+import {
+  enforceTokenBudget,
+  formatOverflowNotice,
+  renderMessageForBudget,
+} from './utils/tokenBudget.js';
 
 // ============================================================================
 // Types
@@ -159,7 +164,8 @@ function flattenVespaChildren(children: any[]): any[] {
 // Implementation
 // ============================================================================
 
-const CANVAS_CONTENT_MAX_CHARS = 2000;
+const CANVAS_CONTENT_MAX_CHARS = 1500;
+const CALL_TRANSCRIPT_MAX_CHARS = 2000;
 
 function truncateContent(content: string, maxChars: number): string {
   if (content.length <= maxChars) return content;
@@ -174,8 +180,9 @@ async function searchRelevantContentImpl(
   channelIds: string[],
   slackFilters: Partial<SlackFilters>,
   ticketFilters: Partial<TicketFilters>,
+  tokenBudget: number,
   precomputedChannelNameMap?: Map<string, string>
-): Promise<ToolResult> {
+): Promise<ToolResult & { truncated?: boolean; totalAvailable?: number }> {
   try {
     logger.info(`[Tool] search_relevant_content: query="${query}", contentTypes=${JSON.stringify(contentTypes)}, userId=${userId}`);
 
@@ -289,10 +296,10 @@ async function searchRelevantContentImpl(
       logger.info(`[Tool] [${sessionId}] search_relevant_content: fetched full content for ${canvasContentMap.size}/${canvasResultIds.length} canvas(es)`);
     }
 
-    // Convert to ToolMessage format, deriving contentType from docType/subApp
-    let messageIndex = 0;
+    // Convert to ToolMessage format, deriving contentType from docType/subApp.
+    // messageIndex is assigned *after* budget enforcement so citation refs stay
+    // dense — refs the LLM emits must resolve in the UI.
     const messages: ToolMessage[] = transformedResults.map((result) => {
-      messageIndex++;
       const subApp = result.searchContext?.subApp?.toUpperCase();
 
       // Determine content type from Vespa result type
@@ -346,7 +353,7 @@ async function searchRelevantContentImpl(
         channelName = channelNameMap.get(channelId) || result.metadata?.channelName || '';
         conversationId = result.searchContext?.conversationId || '';
       } else if (contentType === 'call') {
-        content = truncateContent(`Title: ${result.title}\nTranscript:\n${stripHtml(result.subtitle || result.context || '')}`, 3000);
+        content = truncateContent(`Title: ${result.title}\nTranscript:\n${stripHtml(result.subtitle || result.context || '')}`, CALL_TRANSCRIPT_MAX_CHARS);
         authorName = result.avatar || 'Unknown';
         authorId = result.avatar || '';
         channelId = result.searchContext?.channelId || channelIds[0] || '';
@@ -369,7 +376,7 @@ async function searchRelevantContentImpl(
 
       return {
         messageId: entityId,
-        messageIndex,
+        messageIndex: 0, // assigned below after budget enforcement
         content,
         authorName,
         authorId,
@@ -383,12 +390,23 @@ async function searchRelevantContentImpl(
       };
     });
 
-    logger.info(`[Tool] [${sessionId}] search_relevant_content: Found ${messages.length} results`);
+    // Apply token budget in Vespa relevance order (top hits win)
+    const { kept, total: totalAvailable } = enforceTokenBudget(messages, tokenBudget, renderMessageForBudget);
+    kept.forEach((msg, idx) => {
+      msg.messageIndex = idx + 1;
+    });
+    const truncated = kept.length < totalAvailable;
+
+    logger.info(
+      `[Tool] [${sessionId}] search_relevant_content: Returned ${kept.length}/${totalAvailable} results after token budget (${tokenBudget})${truncated ? ' [TRUNCATED]' : ''}`
+    );
 
     return {
       success: true,
-      messages,
-      metadata: { totalCount: messages.length },
+      messages: kept,
+      metadata: { totalCount: kept.length },
+      truncated,
+      totalAvailable,
     };
   } catch (error) {
     logger.error(`[Tool] [${sessionId}] search_relevant_content error:`, error);
@@ -531,6 +549,7 @@ export function createSearchRelevantContentTool(): Tool<{
 
       logger.info(`[Tool] search_relevant_content: contentTypes=${JSON.stringify(contentTypes)}, channelIds=${JSON.stringify(resolvedChannelIds)}`);
 
+      const tokenBudget = context.toolBudgets.searchRelevantContent;
       const result = await searchRelevantContentImpl(
         query,
         contentTypes,
@@ -539,6 +558,7 @@ export function createSearchRelevantContentTool(): Tool<{
         resolvedChannelIds,
         slackFilters,
         ticketFilters,
+        tokenBudget,
         context.contextChannelIdToName,
       );
 
@@ -546,7 +566,12 @@ export function createSearchRelevantContentTool(): Tool<{
       if (result.success && result.messages.length > 0) {
         await appendEnhancedSessionMappings(context.sessionId, buildSearchContentMappings(result), prefix);
       }
-      return formatToolResultForContext(result, prefix);
+
+      const overflow = result.truncated
+        ? formatOverflowNotice(result.messages.length, result.totalAvailable ?? result.messages.length, 'Narrow the query with more specific terms, a channel filter, or a date range to see more.')
+        : '';
+
+      return overflow + formatToolResultForContext(result, prefix);
     },
   };
 }

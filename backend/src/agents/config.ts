@@ -41,6 +41,24 @@ const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_NUDGE_CREATE_TICKET_MODEL = 'glm-flash-experimental';
 const DEFAULT_NUDGE_RELATED_TICKET_MODEL = 'glm-flash-experimental';
 const DEFAULT_NUDGE_RELATED_MESSAGE_MODEL = 'glm-flash-experimental';
+
+// Xyne AI per-tool soft token budgets.
+const DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_RELEVANT_CONTENT = 10000;
+const DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_CHANNEL_MESSAGES = 40000;
+const DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_THREAD_MESSAGES = 20000;
+const DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_LINK_CONTENT = 20000;
+const DEFAULT_XYNE_AI_TOOL_BUDGET_USER_ACTIVITY = 50000;
+const DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_FILES = 10000;
+
+// Xyne AI session-history compaction thresholds. Trigger > estimated full
+// input tokens (baseline + history + current query) → drop oldest turn pairs
+// until <= target. Sized for a 256k model window with ~16k baseline overhead
+// and up to ~80k tool trajectory + ~8k response growth during the turn, which
+// leaves ~170k as the safe pre-turn ceiling. Gap between trigger and target
+// prevents thrashing when the next turn is also near the edge.
+const DEFAULT_XYNE_AI_HISTORY_COMPACTION_TRIGGER = 170000;
+const DEFAULT_XYNE_AI_HISTORY_COMPACTION_TARGET = 120000;
+
 // ============================================================================
 // CAC Keys
 // ============================================================================
@@ -60,6 +78,16 @@ const CAC_KEYS = {
   nudgeCreateTicketModel: 'nudge_create_ticket_model_name',
   nudgeRelatedTicketModel: 'nudge_related_ticket_model_name',
   nudgeRelatedMessageModel: 'nudge_related_message_model_name',
+  // Xyne AI per-tool soft token budgets
+  xyneAiToolBudgetSearchRelevantContent: 'xyne_ai_tool_budget_search_relevant_content',
+  xyneAiToolBudgetFetchChannelMessages: 'xyne_ai_tool_budget_fetch_channel_messages',
+  xyneAiToolBudgetFetchThreadMessages: 'xyne_ai_tool_budget_fetch_thread_messages',
+  xyneAiToolBudgetFetchLinkContent: 'xyne_ai_tool_budget_fetch_link_content',
+  xyneAiToolBudgetUserActivity: 'xyne_ai_tool_budget_user_activity',
+  xyneAiToolBudgetSearchFiles: 'xyne_ai_tool_budget_search_files',
+  // Xyne AI session-history compaction thresholds
+  xyneAiHistoryCompactionTrigger: 'xyne_ai_history_compaction_trigger',
+  xyneAiHistoryCompactionTarget: 'xyne_ai_history_compaction_target',
 } as const;
 
 // ============================================================================
@@ -89,6 +117,18 @@ export class AgentsConfig {
   public readonly nudgeRelatedTicketModelName: string;
   public readonly nudgeRelatedMessageModelName: string;
 
+  // Xyne AI per-tool soft token budgets
+  public readonly xyneAiToolBudgetSearchRelevantContent: number;
+  public readonly xyneAiToolBudgetFetchChannelMessages: number;
+  public readonly xyneAiToolBudgetFetchThreadMessages: number;
+  public readonly xyneAiToolBudgetFetchLinkContent: number;
+  public readonly xyneAiToolBudgetUserActivity: number;
+  public readonly xyneAiToolBudgetSearchFiles: number;
+
+  // Xyne AI session-history compaction thresholds
+  public readonly xyneAiHistoryCompactionTrigger: number;
+  public readonly xyneAiHistoryCompactionTarget: number;
+
   private constructor(
     xyneAiTracingEnabled: boolean,
     xyneAiMaskingEnabled: boolean,
@@ -102,6 +142,14 @@ export class AgentsConfig {
     nudgeCreateTicketModelName: string,
     nudgeRelatedTicketModelName: string,
     nudgeRelatedMessageModelName: string,
+    xyneAiToolBudgetSearchRelevantContent: number,
+    xyneAiToolBudgetFetchChannelMessages: number,
+    xyneAiToolBudgetFetchThreadMessages: number,
+    xyneAiToolBudgetFetchLinkContent: number,
+    xyneAiToolBudgetUserActivity: number,
+    xyneAiToolBudgetSearchFiles: number,
+    xyneAiHistoryCompactionTrigger: number,
+    xyneAiHistoryCompactionTarget: number,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -115,6 +163,14 @@ export class AgentsConfig {
     this.nudgeCreateTicketModelName = nudgeCreateTicketModelName;
     this.nudgeRelatedTicketModelName = nudgeRelatedTicketModelName;
     this.nudgeRelatedMessageModelName = nudgeRelatedMessageModelName;
+    this.xyneAiToolBudgetSearchRelevantContent = xyneAiToolBudgetSearchRelevantContent;
+    this.xyneAiToolBudgetFetchChannelMessages = xyneAiToolBudgetFetchChannelMessages;
+    this.xyneAiToolBudgetFetchThreadMessages = xyneAiToolBudgetFetchThreadMessages;
+    this.xyneAiToolBudgetFetchLinkContent = xyneAiToolBudgetFetchLinkContent;
+    this.xyneAiToolBudgetUserActivity = xyneAiToolBudgetUserActivity;
+    this.xyneAiToolBudgetSearchFiles = xyneAiToolBudgetSearchFiles;
+    this.xyneAiHistoryCompactionTrigger = xyneAiHistoryCompactionTrigger;
+    this.xyneAiHistoryCompactionTarget = xyneAiHistoryCompactionTarget;
   }
 
   /**
@@ -166,6 +222,18 @@ export class AgentsConfig {
       const nudgeCreateTicketModelName = getValue<string>(CAC_KEYS.nudgeCreateTicketModel, DEFAULT_NUDGE_CREATE_TICKET_MODEL);
       const nudgeRelatedTicketModelName = getValue<string>(CAC_KEYS.nudgeRelatedTicketModel, DEFAULT_NUDGE_RELATED_TICKET_MODEL);
       const nudgeRelatedMessageModelName = getValue<string>(CAC_KEYS.nudgeRelatedMessageModel, DEFAULT_NUDGE_RELATED_MESSAGE_MODEL);
+
+      // Extract Xyne AI tool budget values
+      const xyneAiToolBudgetSearchRelevantContent = getValue<number>(CAC_KEYS.xyneAiToolBudgetSearchRelevantContent, DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_RELEVANT_CONTENT);
+      const xyneAiToolBudgetFetchChannelMessages = getValue<number>(CAC_KEYS.xyneAiToolBudgetFetchChannelMessages, DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_CHANNEL_MESSAGES);
+      const xyneAiToolBudgetFetchThreadMessages = getValue<number>(CAC_KEYS.xyneAiToolBudgetFetchThreadMessages, DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_THREAD_MESSAGES);
+      const xyneAiToolBudgetFetchLinkContent = getValue<number>(CAC_KEYS.xyneAiToolBudgetFetchLinkContent, DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_LINK_CONTENT);
+      const xyneAiToolBudgetUserActivity = getValue<number>(CAC_KEYS.xyneAiToolBudgetUserActivity, DEFAULT_XYNE_AI_TOOL_BUDGET_USER_ACTIVITY);
+      const xyneAiToolBudgetSearchFiles = getValue<number>(CAC_KEYS.xyneAiToolBudgetSearchFiles, DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_FILES);
+
+      // Extract Xyne AI history compaction thresholds
+      const xyneAiHistoryCompactionTrigger = getValue<number>(CAC_KEYS.xyneAiHistoryCompactionTrigger, DEFAULT_XYNE_AI_HISTORY_COMPACTION_TRIGGER);
+      const xyneAiHistoryCompactionTarget = getValue<number>(CAC_KEYS.xyneAiHistoryCompactionTarget, DEFAULT_XYNE_AI_HISTORY_COMPACTION_TARGET);
 
       // Check which values were actually fetched from CAC vs using defaults
       const fromCAC: string[] = [];
@@ -245,7 +313,55 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.nudgeRelatedMessageModel);
       }
 
-      const totalKeys = 12;
+      if (CAC_KEYS.xyneAiToolBudgetSearchRelevantContent in allConfigs) {
+        fromCAC.push(CAC_KEYS.xyneAiToolBudgetSearchRelevantContent);
+      } else {
+        usingDefaults.push(CAC_KEYS.xyneAiToolBudgetSearchRelevantContent);
+      }
+
+      if (CAC_KEYS.xyneAiToolBudgetFetchChannelMessages in allConfigs) {
+        fromCAC.push(CAC_KEYS.xyneAiToolBudgetFetchChannelMessages);
+      } else {
+        usingDefaults.push(CAC_KEYS.xyneAiToolBudgetFetchChannelMessages);
+      }
+
+      if (CAC_KEYS.xyneAiToolBudgetFetchThreadMessages in allConfigs) {
+        fromCAC.push(CAC_KEYS.xyneAiToolBudgetFetchThreadMessages);
+      } else {
+        usingDefaults.push(CAC_KEYS.xyneAiToolBudgetFetchThreadMessages);
+      }
+
+      if (CAC_KEYS.xyneAiToolBudgetFetchLinkContent in allConfigs) {
+        fromCAC.push(CAC_KEYS.xyneAiToolBudgetFetchLinkContent);
+      } else {
+        usingDefaults.push(CAC_KEYS.xyneAiToolBudgetFetchLinkContent);
+      }
+
+      if (CAC_KEYS.xyneAiToolBudgetUserActivity in allConfigs) {
+        fromCAC.push(CAC_KEYS.xyneAiToolBudgetUserActivity);
+      } else {
+        usingDefaults.push(CAC_KEYS.xyneAiToolBudgetUserActivity);
+      }
+
+      if (CAC_KEYS.xyneAiToolBudgetSearchFiles in allConfigs) {
+        fromCAC.push(CAC_KEYS.xyneAiToolBudgetSearchFiles);
+      } else {
+        usingDefaults.push(CAC_KEYS.xyneAiToolBudgetSearchFiles);
+      }
+
+      if (CAC_KEYS.xyneAiHistoryCompactionTrigger in allConfigs) {
+        fromCAC.push(CAC_KEYS.xyneAiHistoryCompactionTrigger);
+      } else {
+        usingDefaults.push(CAC_KEYS.xyneAiHistoryCompactionTrigger);
+      }
+
+      if (CAC_KEYS.xyneAiHistoryCompactionTarget in allConfigs) {
+        fromCAC.push(CAC_KEYS.xyneAiHistoryCompactionTarget);
+      } else {
+        usingDefaults.push(CAC_KEYS.xyneAiHistoryCompactionTarget);
+      }
+
+      const totalKeys = 20;
       if (usingDefaults.length === totalKeys) {
         logger.debug('[Agents Config] All configs using DEFAULTS (not configured in CAC)', {
           xyneAiTracingEnabled: `${xyneAiTracingEnabled} (default)`,
@@ -317,6 +433,14 @@ export class AgentsConfig {
         nudgeCreateTicketModelName,
         nudgeRelatedTicketModelName,
         nudgeRelatedMessageModelName,
+        xyneAiToolBudgetSearchRelevantContent,
+        xyneAiToolBudgetFetchChannelMessages,
+        xyneAiToolBudgetFetchThreadMessages,
+        xyneAiToolBudgetFetchLinkContent,
+        xyneAiToolBudgetUserActivity,
+        xyneAiToolBudgetSearchFiles,
+        xyneAiHistoryCompactionTrigger,
+        xyneAiHistoryCompactionTarget,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -334,6 +458,14 @@ export class AgentsConfig {
         DEFAULT_NUDGE_CREATE_TICKET_MODEL,
         DEFAULT_NUDGE_RELATED_TICKET_MODEL,
         DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,
+        DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_RELEVANT_CONTENT,
+        DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_CHANNEL_MESSAGES,
+        DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_THREAD_MESSAGES,
+        DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_LINK_CONTENT,
+        DEFAULT_XYNE_AI_TOOL_BUDGET_USER_ACTIVITY,
+        DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_FILES,
+        DEFAULT_XYNE_AI_HISTORY_COMPACTION_TRIGGER,
+        DEFAULT_XYNE_AI_HISTORY_COMPACTION_TARGET,
       );
     }
   }
@@ -352,6 +484,14 @@ export class AgentsConfig {
       DEFAULT_NUDGE_CREATE_TICKET_MODEL,
       DEFAULT_NUDGE_RELATED_TICKET_MODEL,
       DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,
+      DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_RELEVANT_CONTENT,
+      DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_CHANNEL_MESSAGES,
+      DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_THREAD_MESSAGES,
+      DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_LINK_CONTENT,
+      DEFAULT_XYNE_AI_TOOL_BUDGET_USER_ACTIVITY,
+      DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_FILES,
+      DEFAULT_XYNE_AI_HISTORY_COMPACTION_TRIGGER,
+      DEFAULT_XYNE_AI_HISTORY_COMPACTION_TARGET,
     );
   }
 }

@@ -22,6 +22,11 @@ import {
   buildEnhancedCitationMappings,
   formatEnhancedToolResultForContext,
 } from './helpers.js';
+import {
+  enforceTokenBudget,
+  formatOverflowNotice,
+  renderEntityForBudget,
+} from './utils/tokenBudget.js';
 import { askAIFileSearchUsedTotal } from '../../../services/otel/aiMetrics.js';
 
 // ============================================================================
@@ -253,7 +258,8 @@ export async function searchFilesImpl(
   userId: string,
   sessionId: string,
   fileFilters: Partial<FileFilters>,
-): Promise<EnhancedToolResult> {
+  tokenBudget: number,
+): Promise<EnhancedToolResult & { truncated?: boolean; totalAvailable?: number }> {
   try {
     logger.info(
       `[Tool] [${sessionId}] search_files: query="${query}", filters=${JSON.stringify(fileFilters)}`,
@@ -426,19 +432,31 @@ export async function searchFilesImpl(
       });
     });
 
-    logger.info(`[Tool] [${sessionId}] search_files: Returning ${entities.length} file results`);
+    // Apply token budget in Vespa relevance order (best chunks first). Re-index
+    // kept entities so citation refs stay dense (no gaps) before mappings are built.
+    const { kept, total: totalAvailable } = enforceTokenBudget(entities, tokenBudget, renderEntityForBudget);
+    kept.forEach((entity, idx) => {
+      entity.entityIndex = idx + 1;
+    });
+    const truncated = kept.length < totalAvailable;
+
+    logger.info(
+      `[Tool] [${sessionId}] search_files: Returning ${kept.length}/${totalAvailable} file results after token budget (${tokenBudget})${truncated ? ' [TRUNCATED]' : ''}`,
+    );
 
     return {
       success: true,
-      entities,
+      entities: kept,
       metadata: {
-        totalCount: entities.length,
+        totalCount: kept.length,
         messageCount: 0,
-        attachmentCount: entities.filter(e => e.entityType === 'attachment').length,
-        callCount: entities.filter(e => e.entityType === 'call').length,
-        canvasCount: entities.filter(e => e.entityType === 'canvas').length,
-        ticketCount: entities.filter(e => e.entityType === 'ticket').length,
+        attachmentCount: kept.filter(e => e.entityType === 'attachment').length,
+        callCount: kept.filter(e => e.entityType === 'call').length,
+        canvasCount: kept.filter(e => e.entityType === 'canvas').length,
+        ticketCount: kept.filter(e => e.entityType === 'ticket').length,
       },
+      truncated,
+      totalAvailable,
     };
   } catch (error) {
     logger.error(`[Tool] [${sessionId}] search_files error:`, error);
@@ -577,7 +595,8 @@ export function createSearchFilesTool(): Tool<
 
       // ── Execute search ─────────────────────────────────────────────────
 
-      const result = await searchFilesImpl(query, context.userId, context.sessionId, fileFilters);
+      const tokenBudget = context.toolBudgets.searchFiles;
+      const result = await searchFilesImpl(query, context.userId, context.sessionId, fileFilters, tokenBudget);
 
       // ── Store citation mappings & format output ────────────────────────
 
@@ -594,8 +613,11 @@ export function createSearchFilesTool(): Tool<
         logger.error('[Tool] search_files: Error recording metrics:', metricsError);
       }
 
-      const toolOutput = formatEnhancedToolResultForContext(result, prefix);
-      return toolOutput;
+      const overflow = result.truncated
+        ? formatOverflowNotice(result.entities.length, result.totalAvailable ?? result.entities.length, 'Narrow the query with a more specific term, a file_type filter, or a channel filter to see more.')
+        : '';
+
+      return overflow + formatEnhancedToolResultForContext(result, prefix);
     },
   };
 }

@@ -40,6 +40,11 @@ import {
   transformEmailToEntity,
   toIST,
 } from './helpers.js';
+import {
+  enforceTokenBudget,
+  formatOverflowNotice,
+  renderEntityForBudget,
+} from './utils/tokenBudget.js';
 
 // ============================================================================
 // Implementation
@@ -51,8 +56,9 @@ import {
  */
 async function fetchThreadMessagesImpl(
   conversationId: string,
-  sessionId: string
-): Promise<EnhancedToolResult> {
+  sessionId: string,
+  tokenBudget: number,
+): Promise<EnhancedToolResult & { truncated?: boolean; totalAvailable?: number }> {
   try {
     logger.info(`[Tool] [${sessionId}] fetch_thread_messages: conversationId=${conversationId}`);
 
@@ -247,26 +253,32 @@ async function fetchThreadMessagesImpl(
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
 
-    // Apply global limit of 500 items (newest 500)
-    const limitedEntities = allEntities.slice(0, 500);
+    // Apply token budget — newest entities win; drop tail until we fit.
+    const { kept: keptEntities, total: totalAvailable } = enforceTokenBudget(
+      allEntities,
+      tokenBudget,
+      renderEntityForBudget,
+    );
 
-    // Re-index after sorting and limiting
-    limitedEntities.forEach((entity, idx) => {
+    // Re-index after budgeting so citation refs stay dense
+    keptEntities.forEach((entity, idx) => {
       entity.entityIndex = idx + 1;
     });
 
+    const truncated = keptEntities.length < totalAvailable;
+
     logger.info(
-      `[Tool] [${sessionId}] fetch_thread_messages: Found ${limitedEntities.length} total entities ` +
+      `[Tool] [${sessionId}] fetch_thread_messages: Returned ${keptEntities.length}/${totalAvailable} entities after token budget (${tokenBudget}) ` +
       `(${messageEntities.length} messages, ${attachmentEntities.length} attachments, ` +
       `${ticketEntities.length} tickets, ${canvasEntities.length} canvases, ` +
-      `${emailEntities.length} emails) for conversation ${conversationId}`
+      `${emailEntities.length} emails) for conversation ${conversationId}${truncated ? ' [TRUNCATED]' : ''}`
     );
 
     return {
       success: true,
-      entities: limitedEntities,
+      entities: keptEntities,
       metadata: {
-        totalCount: limitedEntities.length,
+        totalCount: keptEntities.length,
         messageCount: messageEntities.length,
         attachmentCount: attachmentEntities.length,
         callCount: 0,  // Calls are channel-level, not thread-level
@@ -274,6 +286,8 @@ async function fetchThreadMessagesImpl(
         ticketCount: ticketEntities.length,
         emailCount: emailEntities.length,
       },
+      truncated,
+      totalAvailable,
     };
   } catch (error) {
     logger.error(`[Tool] [${sessionId}] fetch_thread_messages error:`, error);
@@ -309,9 +323,11 @@ export function createFetchThreadMessagesTool(): Tool<Record<string, never>, Xyn
       // channelId is fetched from conversation table inside the implementation
       // No need to pass channelId from context
 
+      const tokenBudget = context.toolBudgets.fetchThreadMessages;
       const result = await fetchThreadMessagesImpl(
         context.conversationId,
-        context.sessionId
+        context.sessionId,
+        tokenBudget,
       );
 
       const prefix = await getNextPrefix(context.sessionId);
@@ -319,7 +335,11 @@ export function createFetchThreadMessagesTool(): Tool<Record<string, never>, Xyn
         await appendEnhancedSessionMappings(context.sessionId, buildEnhancedCitationMappings(result), prefix);
       }
 
-      return formatEnhancedToolResultForContext(result, prefix);
+      const overflow = result.truncated
+        ? formatOverflowNotice(result.entities.length, result.totalAvailable ?? result.entities.length, 'This thread is long — ask about a specific message or topic to see more.')
+        : '';
+
+      return overflow + formatEnhancedToolResultForContext(result, prefix);
     },
   };
 }

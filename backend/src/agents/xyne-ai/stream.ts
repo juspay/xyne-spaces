@@ -21,6 +21,7 @@ import { createOnEventHandler, buildProvidedContextCitationRefs, finalizeTrace }
 import { createAgentRunner } from './agent.js';
 import { AgentsConfig } from '../config.js';
 import { convertAttachmentsToJAF } from './utils/attachmentConverter.js';
+import { compactHistoryIfNeeded } from './utils/historyCompaction.js';
 import { getAskAIToolUsedTotal } from '@/services/otel';
 
 import type {
@@ -458,7 +459,7 @@ const {
   }
 
   // Convert history messages to JAF Message format (content must be string)
-  const messages: Message[] = [
+  let messages: Message[] = [
     ...historyMessages.map(msg => ({
       role: msg.role as 'user' | 'assistant',
       content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
@@ -470,6 +471,32 @@ const {
       ...(jafAttachments.length > 0 && { attachments: jafAttachments }),
     },
   ];
+
+  // Pre-flight history compaction — avoid context-window-exceeded on the next
+  // LLM call by dropping oldest turn pairs when the built payload is too large.
+  // In-memory only; DB-persisted messages are untouched.
+  const compactionResult = compactHistoryIfNeeded(
+    messages,
+    {
+      trigger: cacConfig.xyneAiHistoryCompactionTrigger,
+      target: cacConfig.xyneAiHistoryCompactionTarget,
+    },
+    session.sessionId,
+  );
+  messages = compactionResult.messages;
+  if (compactionResult.compacted) {
+    logger.info(
+      `[XyneAI] [${session.sessionId}] history_compaction ` +
+        `droppedTurns=${compactionResult.droppedTurns} ` +
+        `tokensBefore=${compactionResult.tokensBefore} ` +
+        `tokensAfter=${compactionResult.tokensAfter} ` +
+        `targetMet=${compactionResult.tokensAfter <= cacConfig.xyneAiHistoryCompactionTarget}`,
+    );
+  } else {
+    logger.debug(
+      `[XyneAI] [${session.sessionId}] history_size tokensBefore=${compactionResult.tokensBefore}`,
+    );
+  }
   
   const streamProvider = getStreamProvider();
 
@@ -602,6 +629,18 @@ const {
     modelName: cacConfig.xyneAiModelName,
     agentName: request.agentName,
     systemPromptOverride,
+    toolBudgets: {
+      searchRelevantContent: cacConfig.xyneAiToolBudgetSearchRelevantContent,
+      fetchChannelMessages: cacConfig.xyneAiToolBudgetFetchChannelMessages,
+      fetchThreadMessages: cacConfig.xyneAiToolBudgetFetchThreadMessages,
+      fetchLinkContent: cacConfig.xyneAiToolBudgetFetchLinkContent,
+      userActivity: cacConfig.xyneAiToolBudgetUserActivity,
+      searchFiles: cacConfig.xyneAiToolBudgetSearchFiles,
+    },
+    historyCompaction: {
+      trigger: cacConfig.xyneAiHistoryCompactionTrigger,
+      target: cacConfig.xyneAiHistoryCompactionTarget,
+    },
     requestMappings: {
       channelNameToId: new Map<string, string>(),
       userNameToId: new Map<string, string>(),
