@@ -876,6 +876,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               const vespaResponse = await searchService.vespaSearch({
                 ...searchFilters,
                 searchId: currentSessionId,
+                presentationSummary: 'lean',
               });
 
               // Only merge local users when no type filter is applied
@@ -903,6 +904,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               const results = await searchService.vespaSearch({
                 ...searchFilters,
                 searchId: currentSessionId,
+                presentationSummary: 'lean',
               });
               mergedResults = results.results;
               totalCount = results.totalCount;
@@ -1166,6 +1168,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         const results = await searchService.vespaSearch({
           ...searchFilters,
           searchId: currentSessionId,
+          presentationSummary: 'lean',
         });
         setSearchResults(prev => [...prev, ...results.results]);
 

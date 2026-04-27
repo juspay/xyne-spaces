@@ -161,6 +161,10 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'callType must be a string'
   }),
 
+  presentationSummary: Joi.string().optional().messages({
+    'string.base': 'presentationSummary must be a string'
+  }),
+
   // Filter-only mode flag
   filterOnly: Joi.string().valid('true', 'false').optional().messages({
     'any.only': 'filterOnly must be "true" or "false"'

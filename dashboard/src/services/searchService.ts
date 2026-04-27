@@ -437,6 +437,10 @@ export class SearchService {
       params['callType'] = filters.callType;
     }
 
+    if (filters.presentationSummary) {
+      params['presentationSummary'] = filters.presentationSummary;
+    }
+
     if (filters.filterOnly !== undefined) {
       params['filterOnly'] = filters.filterOnly.toString();
     }

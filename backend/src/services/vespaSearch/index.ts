@@ -110,7 +110,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       stage,       // Ticket stage
       assignee,    // Assigned user name
       filterOnly,  // Flag for filter-only search (no query text)
-      callType    // Call type filter (e.g. HEADLESS for recordings)
+      callType,   // Call type filter (e.g. HEADLESS for recordings)
+      presentationSummary, // Optional Vespa presentation.summary profile (e.g. 'lean')
       // Note: subApp was moved up to be with other frontend filters
     } = req.query;
 
@@ -286,6 +287,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (callType) {
       options.file.callType = (callType as string).split(',');
+    }
+
+    if (presentationSummary) {
+      options.presentationSummary = presentationSummary as string;
     }
 
     // Call vespa search

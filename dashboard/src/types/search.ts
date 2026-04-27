@@ -144,6 +144,7 @@ export interface VespaSearchFilters {
   assignee?: string; // Assigned user ID
   subApp?: string; // Comma-separated sub-apps: 'canvas', 'transcript', 'RCA'
   callType?: string; // Comma-separated call types: 'HEADLESS'
+  presentationSummary?: string; // Vespa presentation.summary profile (e.g. 'lean')
 
   // Filter-only mode (no query text, just filters)
   filterOnly?: boolean;
