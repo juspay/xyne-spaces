@@ -647,6 +647,10 @@ export class App {
     logger.info('Initializing document ingest queue (producer)...');
     await documentIngestQueue.initialize();
 
+    logger.info('Initializing delayed message queue (producer)...');
+    const { delayedMessageQueue } = await import('@/queues/delayedMessageQueue');
+    await delayedMessageQueue.initialize();
+
     this.httpServer.listen(config.port, config.host, () => {
       logger.info(`Server is running on ${config.host}:${config.port} in ${config.env} mode`);
       logger.info('WebSocket server ready for connections');

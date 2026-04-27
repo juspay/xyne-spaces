@@ -54,6 +54,7 @@ export interface InputBoxProps {
   onCreateTicket?: (description?: string) => void;
   onCreateCanvas?: (initialContent?: string) => void;
   onTranscriptSelect?: (content: string) => void;
+  onScheduleSend?: (scheduledFor: number, content: string, files: File[]) => void | Promise<void>;
   hasTicket?: boolean;
   disableEnterToSend?: boolean;
   hideSendButton?: boolean;

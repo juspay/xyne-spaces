@@ -48,6 +48,7 @@ import {
   WorkspaceRole,
   Status,
   OrgRole,
+  DelayedMessageStatus,
 
 } from './schema.js';
 import { createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
@@ -6682,6 +6683,369 @@ export const mutators = defineMutators({
           memberId,
           leftAt: timestamp,
         });
+      },
+    ),
+  },
+
+  delayedMessages: {
+    /** Create a new scheduled message */
+    create: defineMutator(
+      z.object({
+        id: z.string(),
+        channelId: z.string(),
+        conversationId: z.string().optional(),
+        content: z.string(),
+        scheduledFor: z.number(),
+        timestamp: z.number(),
+      }),
+      async ({
+        tx,
+        ctx,
+        args: { id, channelId, conversationId, content, scheduledFor, timestamp },
+      }) => {
+        if (scheduledFor <= Date.now()) {
+          throw new Error('Scheduled time must be in the future');
+        }
+
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+        if (channel.isArchived) {
+          throw new Error('Channel is archived');
+        }
+
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (!participant) {
+          throw new Error('You are not a member of this channel');
+        }
+
+        const channelDrafts = await tx.run(
+          zql.draft_messages
+            .where("channelId", channelId)
+            .where("userId", ctx.userID),
+        );
+        const existingDraft = channelDrafts.find(
+          (d) =>
+            d.conversationId === (conversationId ?? null) &&
+            d.messageId === null,
+        );
+
+        const scheduledAttachments = existingDraft
+          ? await tx.run(
+              zql.message_attachments
+                .where("entityId", existingDraft.id)
+                .where("entityType", AttachmentEntityType.DRAFT),
+            )
+          : [];
+
+        if (content.trim() === '' && scheduledAttachments.length === 0) {
+          throw new Error('Message content is required');
+        }
+
+        const scheduleId = existingDraft?.id ?? id;
+
+        await tx.mutate.delayed_messages.insert({
+          id: scheduleId,
+          channelId,
+          conversationId: conversationId ?? null,
+          senderId: ctx.userID,
+          content: content.trim(),
+          hasAttachment: scheduledAttachments.length > 0,
+          scheduledFor,
+          status: DelayedMessageStatus.PENDING,
+          failureReason: null,
+          sentAt: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+
+        if (existingDraft) {
+          await tx.mutate.draft_messages.delete({ id: existingDraft.id });
+        }
+
+        if (scheduledAttachments.length > 0) {
+          for (const att of scheduledAttachments) {
+            await tx.mutate.message_attachments.update({
+              id: att.id,
+              entityType: AttachmentEntityType.DELAYED_MESSAGE,
+            });
+          }
+        }
+      },
+    ),
+
+    /** Cancel a pending scheduled message */
+    cancel: defineMutator(
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, timestamp } }) => {
+        const scheduled = await tx.run(
+          zql.delayed_messages.where('id', id).where('senderId', ctx.userID).one(),
+        );
+
+        if (!scheduled) {
+          throw new Error('Scheduled message not found');
+        }
+
+        if (scheduled.status !== DelayedMessageStatus.PENDING) {
+          throw new Error(`Cannot cancel a message with status: ${scheduled.status}`);
+        }
+
+        await tx.mutate.delayed_messages.update({
+          id,
+          status: DelayedMessageStatus.CANCELLED,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
+    /** Update the scheduled time for a pending message */
+    reschedule: defineMutator(
+      z.object({
+        id: z.string(),
+        scheduledFor: z.number(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, scheduledFor, timestamp } }) => {
+        if (scheduledFor <= Date.now()) {
+          throw new Error('Scheduled time must be in the future');
+        }
+
+        const scheduled = await tx.run(
+          zql.delayed_messages.where('id', id).where('senderId', ctx.userID).one(),
+        );
+
+        if (!scheduled) {
+          throw new Error('Scheduled message not found');
+        }
+
+        if (scheduled.status !== DelayedMessageStatus.PENDING) {
+          throw new Error(`Cannot reschedule a message with status: ${scheduled.status}`);
+        }
+
+        await tx.mutate.delayed_messages.update({
+          id,
+          scheduledFor,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
+    /** Edit the content of a pending scheduled message */
+    edit: defineMutator(
+      z.object({
+        id: z.string(),
+        content: z.string().min(1),
+        updatedAt: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, content, updatedAt } }) => {
+        const scheduled = await tx.run(
+          zql.delayed_messages
+            .where("id", id)
+            .where("senderId", ctx.userID)
+            .one(),
+        );
+
+        if (!scheduled) {
+          throw new Error("Scheduled message not found");
+        }
+
+        if (scheduled.status !== DelayedMessageStatus.PENDING) {
+          throw new Error(
+            `Cannot edit a message with status: ${scheduled.status}`,
+          );
+        }
+
+        if (scheduled.updatedAt !== updatedAt) {
+          throw new Error(
+            "Message was modified by another operation. Please refresh and try again.",
+          );
+        }
+
+        await tx.mutate.delayed_messages.update({
+          id,
+          content: content.trim(),
+          updatedAt,
+        });
+      },
+    ),
+
+    /** Convert a pending scheduled message to a draft */
+    convertToDraft: defineMutator(
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, timestamp } }) => {
+        const scheduled = await tx.run(
+          zql.delayed_messages
+            .where("id", id)
+            .where("senderId", ctx.userID)
+            .one(),
+        );
+
+        if (!scheduled) {
+          throw new Error("Scheduled message not found");
+        }
+
+        if (scheduled.status !== DelayedMessageStatus.PENDING) {
+          throw new Error(
+            `Cannot convert a message with status: ${scheduled.status} to draft`,
+          );
+        }
+
+        const channelDrafts = await tx.run(
+          zql.draft_messages
+            .where("channelId", scheduled.channelId)
+            .where("userId", ctx.userID),
+        );
+        const existingDraft = channelDrafts.find(
+          (d) =>
+            d.conversationId === (scheduled.conversationId ?? null) &&
+            d.messageId === null,
+        );
+
+        const scheduledAttachments = await tx.run(
+          zql.message_attachments
+            .where("entityId", id)
+            .where("entityType", AttachmentEntityType.DELAYED_MESSAGE),
+        );
+        const hasAttachment = scheduledAttachments.length > 0;
+
+        if (existingDraft) {
+          const existingAttachments = await tx.run(
+            zql.message_attachments
+              .where("entityId", existingDraft.id)
+              .where("entityType", AttachmentEntityType.DRAFT),
+          );
+          for (const attachment of existingAttachments) {
+            await tx.mutate.message_attachments.delete({ id: attachment.id });
+          }
+          await tx.mutate.draft_messages.delete({ id: existingDraft.id });
+        }
+
+        await tx.mutate.delayed_messages.delete({ id });
+
+        await tx.mutate.draft_messages.insert({
+          id,
+          channelId: scheduled.channelId,
+          conversationId: scheduled.conversationId,
+          userId: ctx.userID,
+          content: scheduled.content,
+          hasAttachment,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+
+        for (const att of scheduledAttachments) {
+          await tx.mutate.message_attachments.update({
+            id: att.id,
+            entityType: AttachmentEntityType.DRAFT,
+          });
+        }
+      },
+    ),
+
+    /** Send a pending scheduled message immediately */
+    sendNow: defineMutator(
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, timestamp } }) => {
+        const scheduled = await tx.run(
+          zql.delayed_messages
+            .where("id", id)
+            .where("senderId", ctx.userID)
+            .one(),
+        );
+
+        if (!scheduled) {
+          throw new Error("Scheduled message not found");
+        }
+
+        if (scheduled.status !== DelayedMessageStatus.PENDING) {
+          throw new Error(
+            `Cannot send now a message with status: ${scheduled.status}`,
+          );
+        }
+
+        await tx.mutate.delayed_messages.update({
+          id,
+          updatedAt: timestamp,
+          status: DelayedMessageStatus.SENDING,
+        });
+      },
+    ),
+  },
+
+  draftMessages: {
+    /** Delete a draft message by ID (only the owner can delete their own draft) */
+    delete: defineMutator(
+      z.object({ id: z.string() }),
+      async ({ tx, ctx, args: { id } }) => {
+        const draft = await tx.run(
+          zql.draft_messages.where("id", id).where("userId", ctx.userID).one(),
+        );
+        if (!draft) {
+          throw new Error("Draft not found");
+        }
+        await tx.mutate.draft_messages.delete({ id });
+      },
+    ),
+
+    /** Edit a draft message content */
+    edit: defineMutator(
+      z.object({
+        id: z.string(),
+        content: z.string().min(1),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, content, timestamp } }) => {
+        const draft = await tx.run(
+          zql.draft_messages.where("id", id).where("userId", ctx.userID).one(),
+        );
+        if (!draft) {
+          throw new Error("Draft not found");
+        }
+        await tx.mutate.draft_messages.update({
+          id,
+          content: content.trim(),
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
+    /** Send a draft message immediately (converts to sent message) */
+    send: defineMutator(
+      z.object({
+        id: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id } }) => {
+        const draft = await tx.run(
+          zql.draft_messages.where("id", id).where("userId", ctx.userID).one(),
+        );
+        if (!draft) {
+          throw new Error("Draft not found");
+        }
+        if (draft.content.trim() === "") {
+          const draftAtts = await tx.run(
+            zql.message_attachments
+              .where("entityId", id)
+              .where("entityType", AttachmentEntityType.DRAFT),
+          );
+          if (draftAtts.length === 0) {
+            throw new Error("Cannot send empty draft");
+          }
+        }
+        // Full implementation in backend - this validates and deletes draft
+        await tx.mutate.draft_messages.delete({ id });
       },
     ),
   },

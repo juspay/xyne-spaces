@@ -99,6 +99,7 @@ export enum AttachmentEntityType {
   CHAT = 'CHAT',
   CANVAS = 'CANVAS',
   DRAFT = 'DRAFT',
+  DELAYED_MESSAGE = 'DELAYED_MESSAGE',
   EMAIL = 'EMAIL',
   IMPACT = 'IMPACT',
 }
@@ -656,6 +657,15 @@ export enum SavedConfigVisibility {
 export enum SavedConfigEntityName {
   TICKET = 'TICKET',
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
+}
+
+// @ts-ignore TS1294
+export enum DelayedMessageStatus {
+  PENDING = 'PENDING',
+  SENDING = 'SENDING',
+  SENT = 'SENT',
+  FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
 }
 
 // Define tables
@@ -1358,6 +1368,23 @@ export const draftMessageTable = table('draft_messages')
     userId: string(),
     content: string(),
     hasAttachment: boolean(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const delayedMessageTable = table('delayed_messages' /* DelayedMessage */)
+  .columns({
+    id: string(),
+    channelId: string(),
+    conversationId: string().optional(),
+    senderId: string(),
+    content: string(),
+    hasAttachment: boolean(),
+    scheduledFor: number(),
+    status: enumeration<DelayedMessageStatus>(),
+    failureReason: string().optional(),
+    sentAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2944,6 +2971,27 @@ export const draftMessageTableRelationships = relationships(draftMessageTable, (
   })
 }));
 
+export const delayedMessageTableRelationships = relationships(
+  delayedMessageTable,
+  ({ one, many }) => ({
+    sender: one({
+      sourceField: ['senderId'],
+      destField: ['id'],
+      destSchema: userTable,
+    }),
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
+    attachments: many({
+      sourceField: ['id'],
+      destField: ['entityId'],
+      destSchema: messageAttachmentTable,
+    }),
+  }),
+);
+
 export const customEmojiTableRelationships = relationships(customEmojiTable, ({ one }) => ({
   creator: one({
     sourceField: ['createdBy'],
@@ -3758,6 +3806,7 @@ export const schema = createSchema({
     messageTable,
     messageAttachmentTable,
     draftMessageTable,
+    delayedMessageTable,
     reactionTable,
     reactionCountTable,
     customEmojiTable,
@@ -3853,6 +3902,7 @@ export const schema = createSchema({
     channelStatsTableRelationships,
     messageTableRelationships,
     draftMessageTableRelationships,
+    delayedMessageTableRelationships,
     channelParticipantTableRelationships,
     channelUserStatusTableRelationships,
     reactionTableRelationships,
@@ -3959,6 +4009,7 @@ export type Conversation = Row<typeof schema.tables.conversations>;
 export type Message = Row<typeof schema.tables.messages>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type DraftMessage = Row<typeof schema.tables.draft_messages>;
+export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;
 export type Reaction = Row<typeof schema.tables.reactions>;
 export type ReactionCount = Row<typeof schema.tables.reaction_counts>;
 export type CustomEmoji = Row<typeof schema.tables.custom_emojis>;

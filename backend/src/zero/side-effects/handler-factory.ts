@@ -11,6 +11,7 @@ import { TicketAssignmentsSideEffectHandler } from './tables/ticket-assignments-
 import { TicketStageEtaSideEffectHandler } from './tables/ticket-stage-eta-handler';
 import { CanvasSideEffectHandler } from './tables/canvas-handler';
 import { ReactionsSideEffectHandler } from './tables/reactions-handler';
+import { DelayedMessagesSideEffectHandler } from './tables/delayed-messages-handler';
 import { TicketTagsSideEffectHandler } from './tables/ticket-tags-handler';
 import { ChannelsSideEffectHandler } from './tables/channels-handler';
 import { EmailReadsSideEffectHandler } from './tables/email-reads-handler';
@@ -40,6 +41,9 @@ export class SideEffectHandlerFactory {
         return new TicketStageEtaSideEffectHandler(ctx);
       case 'canvases':
         return new CanvasSideEffectHandler(ctx);
+      case 'delayed_messages':
+        return new DelayedMessagesSideEffectHandler(ctx);
+
       case 'ticket_tags':
         return new TicketTagsSideEffectHandler(ctx);
       case 'channels':

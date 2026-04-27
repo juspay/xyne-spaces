@@ -41,6 +41,11 @@ export interface TicketTagPreviousValue {
   ticketId: string;
 }
 
+export interface DelayedMessagePreviousValue {
+  scheduledFor: number;
+  status: string;
+}
+
 export interface ChannelPreviousValue {
   name: string;
 }
@@ -56,6 +61,7 @@ export type PreviousValue =
   | ReactionPreviousValue
   | MessagePreviousValue
   | TicketTagPreviousValue
+  | DelayedMessagePreviousValue
   | ChannelPreviousValue
   | EmailReadPreviousValue;
 
@@ -85,6 +91,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   ticket_assignments: ['insert', 'update'],
   ticket_stage_eta: ['update'],
   canvases: ['insert'],
+  delayed_messages: ['insert', 'update', 'delete'],
   channels: ['update'],
   email_reads: ['insert', 'update'],
 };

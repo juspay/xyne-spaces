@@ -139,6 +139,7 @@ enum AttachmentEntityType {
   CANVAS
   EMAIL
   DRAFT
+  DELAYED_MESSAGE
   WORKFLOW_STEPS
   IMPACT
   @@schema("public")
@@ -1903,7 +1904,7 @@ model MessageSearch {
 // File Attachment Models
 model MessageAttachment {
   id                 String                @id @default(cuid())
-  entityType         AttachmentEntityType  // TICKET or CHAT or DRAFT
+  entityType         AttachmentEntityType  // TICKET, CHAT, DRAFT, DELAYED_MESSAGE, etc.
   entityId           String                // Ticket id or message id (mandatory)
   workspaceId        String                // Workspace for ACL optimization
   storageProvider    String                // Storage provider where file is stored
@@ -3348,5 +3349,38 @@ model SavedUserConfigurationValue {
 
   @@index([configId])
   @@map("saved_user_configuration_values")
+  @@schema("public")
+}
+
+// Scheduled Message Models
+enum DelayedMessageStatus {
+  PENDING    // Waiting to be sent
+  SENDING    // Currently being processed
+  SENT       // Successfully delivered
+  FAILED     // Delivery failed (retries exhausted)
+  CANCELLED  // Cancelled by user before send time
+
+  @@schema("public")
+}
+
+model DelayedMessage {
+  id              String                 @id @default(cuid())
+  channelId       String                 // Target channel (no FK constraint)
+  conversationId  String?                // Target conversation (for thread replies, no FK constraint)
+  senderId        String                 // User who scheduled the message (no FK constraint)
+  content         String                 // Message content (HTML)
+  hasAttachment   Boolean                @default(false)
+  scheduledFor    Float                  // Unix ms timestamp when the message should be sent
+  status          DelayedMessageStatus @default(PENDING)
+  failureReason   String?                // Error details if status=FAILED
+  sentAt          DateTime?              // Actual send time (set when status=SENT)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([senderId, status])
+  @@index([senderId, scheduledFor])
+  @@index([scheduledFor, status])
+  @@index([channelId, status])
+  @@map("delayed_messages")
   @@schema("public")
 }

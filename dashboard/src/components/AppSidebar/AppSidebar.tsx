@@ -164,6 +164,9 @@ const AppSidebar = (): ReactElement => {
     if (pathname.startsWith('/chat/dir')) return '/chat/dir';
     if (pathname.startsWith('/chat/dm')) return '/chat/dm';
     if (pathname.startsWith('/chat/activity')) return '/chat/activity';
+    if (pathname.startsWith('/chat/drafts')) return '/chat/drafts';
+    if (pathname.startsWith('/chat/sent')) return '/chat/sent';
+    if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
     return '/' + (pathname.split('/')[1] || '');
   };
 
@@ -198,6 +201,9 @@ const AppSidebar = (): ReactElement => {
     (location.pathname.includes('/chat/dm/') && location.pathname.split('/').length > 3) ||
     (location.pathname.includes('/chat/activity/') && location.pathname.split('/').length > 3) ||
     (location.pathname.includes('/chat/bookmarks/') && location.pathname.split('/').length > 3) ||
+    (location.pathname.includes('/chat/drafts/') && location.pathname.split('/').length > 3) ||
+    (location.pathname.includes('/chat/sent/') && location.pathname.split('/').length > 3) ||
+    (location.pathname.includes('/chat/scheduled/') && location.pathname.split('/').length > 3) ||
     location.pathname.includes('threadId') ||
     location.hash.includes('threadId');
 

@@ -59,7 +59,15 @@ export async function collectSideEffectJobs(
       };
     }
   }
-
+  if ((operation === 'update' || operation === 'delete') && table === 'delayed_messages') {
+    const entity = await tx.run(zql.delayed_messages.where('id', entityId).one());
+    if (entity) {
+      previousValue = {
+        scheduledFor: entity.scheduledFor,
+        status: entity.status,
+      };
+    }
+  }
   if (operation === 'delete' && table === 'ticket_tags') {
     const tag = await tx.run(zql.ticket_tags.where('id', entityId).one());
     if (tag) {
@@ -183,6 +191,8 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'canvas_participants':
     case 'bookmarks':
     case 'calls':
+    case 'delayed_messages':
+    case 'draft_messages':
     case 'user_assignment_states':
     case 'board_complexity_scores':
     case 'user_workload_mappings':

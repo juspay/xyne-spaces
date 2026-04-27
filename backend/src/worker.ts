@@ -22,6 +22,7 @@ import { callValidationWorker } from '@/workers/callValidationWorker';
 import { workflowStepGcsSyncQueue } from '@/queues/workflowStepGcsSyncQueue';
 import { conversationIngestionWorker } from '@/workers/conversationIngestionWorker';
 import { documentIngestionWorker } from '@/workers/documentIngestionWorker';
+import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
@@ -174,6 +175,13 @@ class WorkerService {
         await documentIngestionWorker.start();
       }
 
+      const delayedMessageWorkerEnabled = appConfig.enableDelayedMessageWorker;
+      if (delayedMessageWorkerEnabled) {
+        logger.info('Starting delayed message worker...');
+        await delayedMessageWorker.start();
+        await delayedMessageWorker.reenqueuePendingMessages();
+      }
+
       if (enableNotificationProducer) {
         logger.info('Starting notification producer for real-time notifications...');
         await notificationService.initialize();
@@ -274,6 +282,11 @@ class WorkerService {
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {
         await documentIngestionWorker.shutdown();
+      }
+
+      const delayedMessageWorkerEnabled = appConfig.enableDelayedMessageWorker;
+      if (delayedMessageWorkerEnabled) {
+        await delayedMessageWorker.shutdown();
       }
 
       await DatabaseClient.disconnect()

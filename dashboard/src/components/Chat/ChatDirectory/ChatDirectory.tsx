@@ -14,6 +14,9 @@ import {
   MessageCircle,
   Sparkles,
   HelpCircle,
+  FileEdit,
+  Clock,
+  Pencil,
 } from 'lucide-react';
 import { useWalkthrough } from '../../../hooks/useWalkthrough';
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -21,6 +24,7 @@ import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
 import { groupChannelsByScope } from './ChatDirectory.utils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useMutation } from '@tanstack/react-query';
+import { useSelector } from '@xstate/react';
 import {
   channelService,
   CreateChannelFormData,
@@ -47,6 +51,8 @@ import Tooltip from '../../ui/Tooltip';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import { useUnreadThreadsCount } from '../../../hooks/useUnreadThreadsCount';
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
+import { stateMachineActor } from '../../../machines/stateMachine';
+import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
 
 const ChatDirectory = ({
   channelData,
@@ -70,6 +76,8 @@ const ChatDirectory = ({
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
   const [newlyCreatedChannelId, setNewlyCreatedChannelId] = useState<string | null>(null);
+  const pendingScheduledCount = usePendingDelayedMessagesCount();
+  const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
 
   const { startWalkthrough } = useWalkthrough({
     feature: 'direct_messages',
@@ -345,6 +353,39 @@ const ChatDirectory = ({
             <Bookmark className='size-4' />
           </span>
           <span className='flex-1 min-w-0 text-left truncate block'>Bookmarks</span>
+        </button>
+        <button
+          className={cn(
+            'flex items-center justify-start gap-3 w-full h-8 text-sm px-2 rounded-md transition-colors hover:bg-sidebar-item-hover',
+            location.pathname.endsWith('/chat/drafts-sent')
+              ? 'text-sidebar-primary-foreground'
+              : 'text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground',
+          )}
+          onClick={() => {
+            void navigate('drafts-sent');
+          }}
+          data-testid='open-drafts-and-sent-button'
+          data-track-category='CHAT_SIDEBAR'
+          data-track-name='OPEN_DRAFTS_AND_SENT'
+        >
+          <span className='size-5 flex items-center justify-center shrink-0'>
+            <FileEdit className='size-4' />
+          </span>
+          <span className='flex-1 min-w-0 text-left truncate block'>Drafts &amp; Sent</span>
+          <span className='flex items-center gap-2 text-sidebar-secondary-foreground'>
+            {draftsCount > 0 && (
+              <span className='flex items-center gap-1 text-xs'>
+                <Pencil className='size-3' />
+                {draftsCount}
+              </span>
+            )}
+            {pendingScheduledCount > 0 && (
+              <span className='flex items-center gap-1 text-xs'>
+                <Clock className='size-3' />
+                {pendingScheduledCount}
+              </span>
+            )}
+          </span>
         </button>
         <button
           className={cn(

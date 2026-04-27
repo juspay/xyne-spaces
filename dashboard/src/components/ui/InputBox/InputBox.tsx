@@ -25,6 +25,7 @@ import {
   ChevronDown,
   Ticket,
   FileText,
+  Clock,
 } from 'lucide-react';
 import { Tooltip, TooltipSide, Menu, MenuSide, MenuAlignment } from '@juspay/blend-design-system';
 
@@ -70,6 +71,7 @@ import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { canvasService } from '../../../services/Canvas/canvasService';
 import { v4 as uuidv4 } from 'uuid';
 import { logger, Event } from '../../../utils/logger';
+import { ScheduleMessageDialog } from '../ScheduleMessageDialog/ScheduleMessageDialog';
 
 /** Extract file extension (e.g. ".pdf") from a filename. Returns empty string if none. */
 const getFileExtension = (name: string): string => {
@@ -161,6 +163,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       alsoSendToChannelChecked = false,
       onCreateTicket,
       onTranscriptSelect,
+      onScheduleSend,
       hasTicket = false,
       disableEnterToSend = false,
       hideSendButton = false,
@@ -221,6 +224,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [sendMode, setSendMode] = useState<'message' | 'ticket'>('message');
     const [isSendMenuOpen, setIsSendMenuOpen] = useState(false);
+    const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
+    const openScheduleDialog = useCallback((): void => setIsScheduleDialogOpen(true), []);
     const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
     const [isTranscriptSelectorOpen, setIsTranscriptSelectorOpen] = useState(false);
     const [emojiSizeClass, setEmojiSizeClass] = useState('text-sm');
@@ -1416,6 +1421,91 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                       },
                                     ]
                                   : []),
+                                ...(onScheduleSend
+                                  ? [
+                                      {
+                                        label: 'Schedule message',
+                                        slot1: <Clock className='h-4 w-4' />,
+                                        onClick: (): void => {
+                                          setIsSendMenuOpen(false);
+                                          openScheduleDialog();
+                                        },
+                                      },
+                                    ]
+                                  : []),
+                              ],
+                            },
+                          ]}
+                          open={isSendMenuOpen}
+                          onOpenChange={setIsSendMenuOpen}
+                          side={MenuSide.TOP}
+                          alignment={MenuAlignment.END}
+                        />
+                      </div>
+                    ) : onScheduleSend ? (
+                      // No ticket creation but schedule send is available — split button
+                      <div
+                        className={`flex items-center rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          hasSendableContent
+                            ? 'bg-primary text-white hover:bg-primary/90'
+                            : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'
+                        }`}
+                      >
+                        <Tooltip content='Send message' side={TooltipSide.TOP}>
+                          <button
+                            type='button'
+                            onClick={() => void handleSend()}
+                            disabled={disabled || isSending || !hasSendableContent}
+                            className='p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                            aria-label='Send message'
+                            data-testid='send-message-button'
+                            data-track-category='CHAT_INPUT'
+                            data-track-name='SEND_MESSAGE'
+                            data-track-metadata={JSON.stringify({
+                              ...(conversationId !== null ? { conversationId } : { channelId }),
+                              hasAttachments: allAttachments.length > 0,
+                            })}
+                          >
+                            {isSending ? (
+                              <Loader2 className='h-4 w-4 animate-spin' />
+                            ) : (
+                              <ArrowUp className='h-4 w-4' />
+                            )}
+                          </button>
+                        </Tooltip>
+                        <div
+                          className={`w-px h-4 ${hasSendableContent ? 'bg-background/20' : 'bg-muted-foreground/20'}`}
+                        ></div>
+                        <Menu
+                          trigger={
+                            <button
+                              type='button'
+                              disabled={disabled || isSending}
+                              className='p-1.5 hover:bg-black/10 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#FF4F4F] focus-visible:outline-offset-2'
+                              data-testid='send-options-menu'
+                            >
+                              <ChevronDown className='h-3 w-3' />
+                            </button>
+                          }
+                          items={[
+                            {
+                              items: [
+                                {
+                                  label: 'Send now',
+                                  slot1: <ArrowUp className='h-4 w-4' />,
+                                  onClick: (): void => {
+                                    void handleSend();
+                                    setIsSendMenuOpen(false);
+                                  },
+                                },
+                                {
+                                  label: 'Schedule message',
+                                  slot1: <Clock className='h-4 w-4' />,
+                                  onClick: (): void => {
+                                    setIsSendMenuOpen(false);
+                                    openScheduleDialog();
+                                  },
+                                },
                               ],
                             },
                           ]}
@@ -1489,6 +1579,22 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             onClose={() => setIsCanvasAttachmentModalOpen(false)}
             onSelectCanvas={handleCanvasSelect}
             onCreateNewCanvas={handleCreateNewCanvas}
+          />
+        )}
+
+        {/* Schedule send dialog */}
+        {onScheduleSend && (
+          <ScheduleMessageDialog
+            open={isScheduleDialogOpen}
+            onOpenChange={setIsScheduleDialogOpen}
+            onConfirm={scheduledFor => {
+              const html = editor?.getHTML() ?? '';
+              const files = allAttachments
+                .map(a => a.file)
+                .filter((f): f is File => f instanceof File);
+              void onScheduleSend(scheduledFor, html, files);
+              editor?.commands.clearContent(true);
+            }}
           />
         )}
       </div>
