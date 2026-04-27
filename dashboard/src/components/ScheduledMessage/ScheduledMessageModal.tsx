@@ -455,7 +455,7 @@ const ScheduledMessageModal = ({
                           data-track-name={`toggle-day-${day.value}`}
                           className='w-4 h-4 rounded border-gray-300 text-primary focus:ring-2 focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'
                         />
-                        <span className='text-sm'>{day.label}</span>
+                        <span className='text-sm text-foreground'>{day.label}</span>
                       </label>
                     ))}
                   </div>
@@ -491,6 +491,7 @@ const ScheduledMessageModal = ({
                   {...field}
                   type='time'
                   disabled={!canEdit && isEditMode}
+                  className='text-foreground dark:[color-scheme:dark]'
                 />
               )}
             />
@@ -521,7 +522,7 @@ const ScheduledMessageModal = ({
               />
               <label
                 htmlFor='active-toggle'
-                className='text-sm font-medium cursor-pointer select-none'
+                className='text-sm font-medium cursor-pointer select-none text-foreground'
               >
                 Active
               </label>

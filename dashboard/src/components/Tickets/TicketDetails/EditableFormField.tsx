@@ -1,10 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import {
-  SingleSelect,
-  SelectMenuAlignment,
-  AvatarShape,
-  AvatarSize,
-} from '@juspay/blend-design-system';
+import { SingleSelect, SelectMenuAlignment } from '@juspay/blend-design-system';
+import { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { FormFieldType, User } from '@xyne/shared';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
 import UserAvatar from '../../UserAvatar/UserAvatar';

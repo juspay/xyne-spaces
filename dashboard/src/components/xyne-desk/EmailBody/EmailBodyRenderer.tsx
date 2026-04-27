@@ -70,7 +70,7 @@ const blockRemoteImages = (root: HTMLElement): number => {
   return blockedCount;
 };
 
-const IFRAME_STYLES = `
+const IFRAME_STYLES_LIGHT = `
   html, body {
     margin: 0;
     padding: 0;
@@ -125,6 +125,61 @@ const IFRAME_STYLES = `
   }
 `;
 
+const IFRAME_STYLES_DARK = `
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #e8e8e8;
+    background: #1f1f1f;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+  }
+  body { padding: 4px 2px; }
+  img { max-width: 100%; height: auto; }
+  table { max-width: 100%; }
+  a { color: #3D9DF2; }
+  blockquote {
+    border-left: 3px solid #3d3d42;
+    margin: 8px 0;
+    padding: 0 12px;
+    color: #9ca3af;
+  }
+  .xd-quoted-history {
+    margin: 8px 0;
+    padding: 0;
+    border-left: 3px solid #3d3d42;
+  }
+  details.xd-quote-details > summary {
+    cursor: pointer;
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    margin: 4px 0;
+    background: #262626;
+    border-radius: 10px;
+    font-size: 12px;
+    color: #9ca3af;
+    user-select: none;
+  }
+  details.xd-quote-details > summary::-webkit-details-marker { display: none; }
+  details.xd-quote-details > summary::before {
+    content: '⋯';
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  details.xd-quote-details > summary:hover { background: #2e3035; }
+  details.xd-quote-details[open] > summary::before { content: '⋮'; }
+  details.xd-quote-details > .xd-quote-body {
+    padding: 8px 12px;
+    color: #9ca3af;
+  }
+`;
+
 const wrapQuotesInDetails = (doc: Document): void => {
   const wrappers = doc.querySelectorAll('.xd-quoted-history[data-xd-quote="true"]');
   wrappers.forEach(wrapper => {
@@ -161,10 +216,18 @@ interface BuiltDoc {
   hasBlockedImages: boolean;
 }
 
-const buildIframeSrcdoc = (rawBody: string, showRemoteImages: boolean): BuiltDoc => {
+const buildIframeSrcdoc = (
+  rawBody: string,
+  showRemoteImages: boolean,
+  isDark: boolean,
+): BuiltDoc => {
+  const iframeStyles = isDark ? IFRAME_STYLES_DARK : IFRAME_STYLES_LIGHT;
+  const colorScheme = isDark ? 'dark' : 'light';
+  const emptyColor = isDark ? '#9ca3af' : '#5f6368';
+
   if (!rawBody || !rawBody.trim()) {
     return {
-      srcdoc: `<!doctype html><html><head><style>${IFRAME_STYLES}</style></head><body><p style="color:#5f6368;font-style:italic;">No content</p></body></html>`,
+      srcdoc: `<!doctype html><html><head><style>${iframeStyles}</style></head><body><p style="color:${emptyColor};font-style:italic;">No content</p></body></html>`,
       hasBlockedImages: false,
     };
   }
@@ -182,7 +245,7 @@ const buildIframeSrcdoc = (rawBody: string, showRemoteImages: boolean): BuiltDoc
   const root = doc.getElementById('root');
   if (!root) {
     return {
-      srcdoc: `<!doctype html><html><head><style>${IFRAME_STYLES}</style></head><body>${sanitized}</body></html>`,
+      srcdoc: `<!doctype html><html><head><style>${iframeStyles}</style></head><body>${sanitized}</body></html>`,
       hasBlockedImages: false,
     };
   }
@@ -200,9 +263,9 @@ const buildIframeSrcdoc = (rawBody: string, showRemoteImages: boolean): BuiltDoc
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="${colorScheme}">
 <base target="_blank">
-<style>${IFRAME_STYLES}</style>
+<style>${iframeStyles}</style>
 </head>
 <body>${finalBody}</body>
 </html>`;
@@ -218,17 +281,31 @@ export const EmailBodyRenderer = ({
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [height, setHeight] = useState<number>(24);
   const [showRemoteImages, setShowRemoteImages] = useState<boolean>(false);
+  const [isDark, setIsDark] = useState<boolean>(
+    () => document.documentElement.getAttribute('data-theme') === 'midnight',
+  );
 
   useEffect(() => {
     setShowRemoteImages(false);
   }, [emailId]);
 
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.getAttribute('data-theme') === 'midnight');
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return (): void => observer.disconnect();
+  }, []);
+
   const { rewrite: rewriteCidRefs } = useCidImageResolver(attachments);
   const rewrittenBody = useMemo(() => rewriteCidRefs(body), [rewriteCidRefs, body]);
 
   const { srcdoc, hasBlockedImages } = useMemo(
-    () => buildIframeSrcdoc(rewrittenBody, showRemoteImages),
-    [rewrittenBody, showRemoteImages],
+    () => buildIframeSrcdoc(rewrittenBody, showRemoteImages, isDark),
+    [rewrittenBody, showRemoteImages, isDark],
   );
 
   useEffect(() => {
@@ -301,7 +378,7 @@ export const EmailBodyRenderer = ({
         srcDoc={srcdoc}
         sandbox='allow-same-origin allow-popups allow-popups-to-escape-sandbox'
         referrerPolicy='no-referrer'
-        className='w-full block border-0 bg-white rounded-md'
+        className='w-full block border-0 rounded-md'
         style={{ height: `${height}px` }}
       />
     </div>

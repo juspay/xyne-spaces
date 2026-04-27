@@ -102,7 +102,7 @@ export const AddCustomEmojiModal: React.FC<AddCustomEmojiModalProps> = ({
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder=':party_parrot:'
-              className='w-full rounded border px-3 py-2 outline-none focus:border-ring'
+              className='w-full bg-background rounded border px-3 py-2 outline-none focus:border-ring'
             />
             <p className='text-xs text-muted-foreground'>Letters, numbers, and underscores only</p>
           </div>

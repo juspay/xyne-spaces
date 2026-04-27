@@ -423,9 +423,9 @@ const DmsPage = (): ReactElement => {
           {directMessages.length === 0 ? (
             <div className='flex flex-col items-center justify-center h-full pb-24 px-6'>
               <img
-                src='/images/empty-chats.png'
+                src='/images/empty-chats.svg'
                 alt='No conversations'
-                className='w-full max-w-[280px] h-auto mb-6 opacity-90'
+                className='w-full max-w-[280px] h-auto mb-6 opacity-90 theme-invert'
               />
               <h3 className='text-lg font-medium text-foreground mb-2'>No conversations yet</h3>
               <p className='text-sm text-muted-foreground text-center max-w-[250px]'>
@@ -574,9 +574,9 @@ const DmsPage = (): ReactElement => {
               {directMessages.length === 0 ? (
                 <div className='flex flex-col items-center justify-center h-full px-6'>
                   <img
-                    src='/images/empty-chats.png'
+                    src='/images/empty-chats.svg'
                     alt='No conversations'
-                    className='w-full max-w-[280px] h-auto mb-6 opacity-90'
+                    className='w-full max-w-[280px] h-auto mb-6 opacity-90 theme-invert'
                   />
                   <h3 className='text-lg font-medium text-foreground mb-2'>No conversations yet</h3>
                   <p className='text-sm text-muted-foreground text-center max-w-[250px]'>

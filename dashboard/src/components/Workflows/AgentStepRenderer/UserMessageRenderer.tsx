@@ -53,25 +53,21 @@ export const UserMessageRenderer: React.FC<
 
   return (
     <div
-      className='text-foreground dark:text-gray-200 border-0 px-1 py-2 overflow-hidden max-w-full min-w-0'
+      className='text-foreground border-0 px-1 py-2 overflow-hidden max-w-full min-w-0'
       style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
     >
       <div className='flex items-start gap-3'>
-        <div className='flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center'>
-          <User className='w-4 h-4 text-blue-600 dark:text-blue-300' />
+        <div className='flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center'>
+          <User className='w-4 h-4 text-primary' />
         </div>
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-2 mb-1'>
-            <span className='text-sm font-medium text-foreground dark:text-muted'>User Input</span>
-            {timestamp && (
-              <span className='text-xs text-muted-foreground dark:text-muted-foreground'>
-                {timestamp}
-              </span>
-            )}
+            <span className='text-sm font-medium text-foreground'>User Input</span>
+            {timestamp && <span className='text-xs text-muted-foreground'>{timestamp}</span>}
             {isTruncated && isExpanded && (
               <button
                 onClick={() => setIsExpanded(false)}
-                className='ml-auto text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline focus:outline-none'
+                className='ml-auto text-xs font-medium text-primary hover:underline focus:outline-none'
                 data-track-category='UserMessageRenderer'
                 data-track-name='ShowLess'
               >
@@ -79,14 +75,12 @@ export const UserMessageRenderer: React.FC<
               </button>
             )}
           </div>
-          <div className='bg-blue-50 dark:bg-blue-900/30 rounded-lg p-3 border border-blue-200 dark:border-blue-700'>
-            <p className='text-sm text-foreground dark:text-gray-200 whitespace-pre-wrap'>
-              {displayedMessage}
-            </p>
+          <div className='bg-muted rounded-lg p-3 border border-border'>
+            <p className='text-sm text-foreground whitespace-pre-wrap'>{displayedMessage}</p>
             {isTruncated && (
               <button
                 onClick={() => setIsExpanded(prev => !prev)}
-                className='mt-2 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline focus:outline-none'
+                className='mt-2 text-xs font-medium text-primary hover:underline focus:outline-none'
                 data-track-category='UserMessageRenderer'
                 data-track-name='ToggleExpand'
               >

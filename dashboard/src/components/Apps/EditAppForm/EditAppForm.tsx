@@ -124,7 +124,13 @@ export const EditAppForm = ({
           <label htmlFor='appName' className='block text-md font-medium text-foreground'>
             App Name
           </label>
-          <Input id='appName' type='text' value={appName} disabled={true} className='bg-muted' />
+          <Input
+            id='appName'
+            type='text'
+            value={appName}
+            disabled={true}
+            className='bg-muted text-foreground'
+          />
         </div>
 
         <div className='space-y-2'>
@@ -140,12 +146,13 @@ export const EditAppForm = ({
                 placeholder='Enter app description (optional)'
                 rows={3}
                 disabled={isLoading}
+                className='text-foreground'
                 {...field}
               />
             )}
           />
           {errors.description && (
-            <p className='text-xs text-red-600'>{errors.description.message}</p>
+            <p className='text-xs text-destructive'>{errors.description.message}</p>
           )}
         </div>
 
@@ -154,7 +161,7 @@ export const EditAppForm = ({
             Webhook URL
           </label>
           {!isAppInstalled ? (
-            <div className='bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2 rounded-md text-sm'>
+            <div className='bg-amber-500/10 border border-amber-500/30 text-amber-600 px-3 py-2 rounded-md text-sm'>
               Install app to add webhook URL
             </div>
           ) : (
@@ -178,12 +185,15 @@ export const EditAppForm = ({
                   type='url'
                   placeholder='https://your-app.com/webhook'
                   disabled={isLoading}
+                  className='text-foreground'
                   {...field}
                 />
               )}
             />
           )}
-          {errors.webhookUrl && <p className='text-xs text-red-600'>{errors.webhookUrl.message}</p>}
+          {errors.webhookUrl && (
+            <p className='text-xs text-destructive'>{errors.webhookUrl.message}</p>
+          )}
         </div>
 
         <div className='space-y-2'>

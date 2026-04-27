@@ -1,6 +1,6 @@
 import React from 'react';
 import { Hash, Lock } from 'lucide-react';
-import { AvatarSize } from '@juspay/blend-design-system';
+import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { ChannelScopeType, ChannelVisibility, Channel } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import UserAvatar from '../../UserAvatar/UserAvatar';

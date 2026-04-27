@@ -239,8 +239,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               className={cn(
                 'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all',
                 selectedConnector === 'google'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-border hover:border-muted-foreground/50',
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border text-foreground hover:border-muted-foreground/50',
               )}
               data-track-category='ADD_CHANNEL_FORM'
               data-track-name='SELECT_GOOGLE_PROVIDER'
@@ -260,8 +260,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 className={cn(
                   'flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all',
                   selectedConnector === 'microsoft'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-border hover:border-muted-foreground/50',
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-foreground hover:border-muted-foreground/50',
                 )}
                 data-track-category='ADD_CHANNEL_FORM'
                 data-track-name='SELECT_MICROSOFT_PROVIDER'
