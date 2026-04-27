@@ -32,6 +32,11 @@ import {
   transformCanvasToEntity,
   transformTicketToEntity,
 } from './helpers.js';
+import {
+  enforceTokenBudget,
+  formatOverflowNotice,
+  renderEntityForBudget,
+} from './utils/tokenBudget.js';
 
 // ============================================================================
 // Implementation
@@ -44,10 +49,11 @@ async function fetchChannelMessagesMultiChannelImpl(
   channelIds: string[],
   sessionId: string,
   userId: string,
+  tokenBudget: number,
   dateFrom?: string,
   dateTo?: string,
   precomputedChannelNameMap?: Map<string, string>
-): Promise<EnhancedToolResult> {
+): Promise<EnhancedToolResult & { truncated?: boolean; totalAvailable?: number }> {
   try {
     const channelCount = channelIds.length;
     logger.info(`[Tool] [${sessionId}] fetch_channel_messages_multi: channelIds=${JSON.stringify(channelIds)}, channelCount=${channelCount}, dateFrom=${dateFrom}, dateTo=${dateTo}`);
@@ -306,26 +312,32 @@ async function fetchChannelMessagesMultiChannelImpl(
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
 
-    // Apply global limit of 500 items (newest 500)
-    const limitedEntities = allEntities.slice(0, 500);
+    // Apply token budget in sort order — newest entities win.
+    const { kept: keptEntities, total: totalAvailable } = enforceTokenBudget(
+      allEntities,
+      tokenBudget,
+      renderEntityForBudget,
+    );
 
-    // Re-index after sorting and limiting
-    limitedEntities.forEach((entity, idx) => {
+    // Re-index after budgeting so refs stay dense (A1..An with no gaps)
+    keptEntities.forEach((entity, idx) => {
       entity.entityIndex = idx + 1;
     });
 
+    const truncated = keptEntities.length < totalAvailable;
+
     logger.info(
-      `[Tool] [${sessionId}] fetch_channel_messages_multi: Found ${limitedEntities.length} total entities ` +
+      `[Tool] [${sessionId}] fetch_channel_messages_multi: Returned ${keptEntities.length}/${totalAvailable} entities after token budget (${tokenBudget}) ` +
       `(${messageEntities.length} messages, ${attachmentEntities.length} attachments, ` +
       `${callEntities.length} calls, ${canvasEntities.length} canvases, ${ticketEntities.length} tickets) ` +
-      `across ${channelCount} channels (${defaults.days} days range)`
+      `across ${channelCount} channels (${defaults.days} days range)${truncated ? ' [TRUNCATED]' : ''}`
     );
 
     return {
       success: true,
-      entities: limitedEntities,
+      entities: keptEntities,
       metadata: {
-        totalCount: limitedEntities.length,
+        totalCount: keptEntities.length,
         messageCount: messageEntities.length,
         attachmentCount: attachmentEntities.length,
         callCount: callEntities.length,
@@ -337,6 +349,8 @@ async function fetchChannelMessagesMultiChannelImpl(
       dateRangeCapped,
       requestedDays,
       actualDays: defaults.days,
+      truncated,
+      totalAvailable,
     };
   } catch (error) {
     logger.error(`[Tool] [${sessionId}] fetch_channel_messages_multi error:`, error);
@@ -437,23 +451,28 @@ Example: fetch_channel_messages({ channels: ["genius-discussions"], date_from: "
         
         // Use the resolved channel IDs with pre-computed channel name map
         const channelCount = accessibleChannelIds.length;
-        const result = await fetchChannelMessagesMultiChannelImpl(accessibleChannelIds, context.sessionId, context.userId, date_from, date_to, context.contextChannelIdToName);
+        const tokenBudget = context.toolBudgets.fetchChannelMessages;
+        const result = await fetchChannelMessagesMultiChannelImpl(accessibleChannelIds, context.sessionId, context.userId, tokenBudget, date_from, date_to, context.contextChannelIdToName);
         const prefix = await getNextPrefix(context.sessionId);
         if (result.success && result.entities.length > 0) {
           await appendEnhancedSessionMappings(context.sessionId, buildEnhancedCitationMappings(result), prefix);
         }
-        
+
         // Add info about date range used
         const dateRange = getDefaultDateRange(channelCount);
         let dateInfo = '';
-        
+
         if (result.dateRangeCapped && result.requestedDays) {
           dateInfo = `\n\nNOTE: You requested ${result.requestedDays} days, but with ${channelCount} channel${channelCount > 1 ? 's' : ''} we can only summarize the last ${dateRange.days} days. Showing content from the last ${dateRange.days} days.`;
         } else if (!date_from) {
           dateInfo = `\n\nDate range: Last ${dateRange.days} days (based on ${channelCount} channel${channelCount > 1 ? 's' : ''})`;
         }
 
-        return formatEnhancedToolResultForContext(result, prefix) + dateInfo;
+        const overflow = result.truncated
+          ? formatOverflowNotice(result.entities.length, result.totalAvailable ?? result.entities.length, 'Narrow the query with a channel filter, date range, or more specific terms to see more.')
+          : '';
+
+        return overflow + formatEnhancedToolResultForContext(result, prefix) + dateInfo;
       }
 
       // Default: use all channels from context with pre-computed channel name map
@@ -461,7 +480,8 @@ Example: fetch_channel_messages({ channels: ["genius-discussions"], date_from: "
       logger.info(`[Tool] fetch_channel_messages called with context.channelIds=${JSON.stringify(context.channelIds)}, channelCount=${channelCount}`);
 
       // Use multi-channel implementation for all cases
-      const result = await fetchChannelMessagesMultiChannelImpl(context.channelIds, context.sessionId, context.userId, date_from, date_to, context.contextChannelIdToName);
+      const tokenBudget = context.toolBudgets.fetchChannelMessages;
+      const result = await fetchChannelMessagesMultiChannelImpl(context.channelIds, context.sessionId, context.userId, tokenBudget, date_from, date_to, context.contextChannelIdToName);
       const prefix = await getNextPrefix(context.sessionId);
       if (result.success && result.entities.length > 0) {
         await appendEnhancedSessionMappings(context.sessionId, buildEnhancedCitationMappings(result), prefix);
@@ -478,7 +498,11 @@ Example: fetch_channel_messages({ channels: ["genius-discussions"], date_from: "
         dateInfo = `\n\nDate range: Last ${dateRange.days} days (based on ${channelCount} channel${channelCount > 1 ? 's' : ''})`;
       }
 
-      return formatEnhancedToolResultForContext(result, prefix) + dateInfo;
+      const overflow = result.truncated
+        ? formatOverflowNotice(result.entities.length, result.totalAvailable ?? result.entities.length, 'Narrow the query with a channel filter, date range, or more specific terms to see more.')
+        : '';
+
+      return overflow + formatEnhancedToolResultForContext(result, prefix) + dateInfo;
     },
   };
 }

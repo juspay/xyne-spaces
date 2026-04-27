@@ -10,6 +10,10 @@ import { logger } from '../../../utils/logger.js';
 import { getDescription, toIST } from './helpers.js';
 import { userActivityService } from '../../../services/userActivityService.js';
 import type { XyneAIAgentContext } from './types.js';
+import {
+  enforceTokenBudget,
+  formatOverflowNotice,
+} from './utils/tokenBudget.js';
 
 // ============================================================================
 // Tool Factory
@@ -70,12 +74,21 @@ export function createUserActivityTool(): Tool<
         }
 
         const resolved = await Promise.all(activities.map(a => userActivityService.resolveActivity(a)));
+        const formatted = resolved.map(a => ({ ...a, timestamp: toIST(a.timestamp) }));
 
-        return JSON.stringify(
-          resolved.map(a => ({ ...a, timestamp: toIST(a.timestamp) })),
-          null,
-          2,
+        // Events come in desc order (newest first); drop the tail to fit budget.
+        const tokenBudget = context.toolBudgets.userActivity;
+        const { kept, total: totalAvailable } = enforceTokenBudget(
+          formatted,
+          tokenBudget,
+          (item) => JSON.stringify(item),
         );
+
+        const overflow = kept.length < totalAvailable
+          ? formatOverflowNotice(kept.length, totalAvailable, 'Narrow the time range to see older events.')
+          : '';
+
+        return overflow + JSON.stringify(kept, null, 2);
       } catch (error) {
         logger.error('[Tool] user_activity error:', error);
         return 'An error occurred while fetching user activity. Please try again with a smaller time range.';

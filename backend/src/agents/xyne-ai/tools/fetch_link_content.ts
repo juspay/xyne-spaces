@@ -26,6 +26,11 @@ import {
   transformTicketToEntity,
 } from './helpers.js';
 import {
+  enforceTokenBudget,
+  formatOverflowNotice,
+  renderEntityForBudget,
+} from './utils/tokenBudget.js';
+import {
   parseXyneLink,
   extractXyneLinksFromText,
   ALLOWED_DOMAINS,
@@ -593,7 +598,7 @@ export function createFetchLinkContentTool(): Tool<{ url: string }, XyneAIAgentC
     },
     execute: async (args, context) => {
       const { url } = args;
-      
+
       logger.info(`[Tool] [${context.sessionId}] fetch_link_content: url=${url}`);
 
       const result = await fetchLinkContentImpl(url, context.userId, context.sessionId);
@@ -606,6 +611,21 @@ export function createFetchLinkContentTool(): Tool<{ url: string }, XyneAIAgentC
         return 'No content found at the specified link.';
       }
 
+      // Apply token budget before citation refs are assigned, so refs stay dense.
+      // For link content the natural order is already "most relevant first"
+      // (ticket/canvas/message at index 1, then its thread messages).
+      const tokenBudget = context.toolBudgets.fetchLinkContent;
+      const { kept, total: totalAvailable } = enforceTokenBudget(
+        result.entities,
+        tokenBudget,
+        renderEntityForBudget,
+      );
+      kept.forEach((entity, idx) => {
+        entity.entityIndex = idx + 1;
+      });
+      const truncated = kept.length < totalAvailable;
+      result.entities = kept;
+
       // Store citation mappings
       const prefix = await getNextPrefix(context.sessionId);
       if (result.entities.length > 0) {
@@ -616,9 +636,13 @@ export function createFetchLinkContentTool(): Tool<{ url: string }, XyneAIAgentC
         );
       }
 
+      const overflow = truncated
+        ? formatOverflowNotice(kept.length, totalAvailable, 'The linked thread is long — ask about a specific message or subtopic for more detail.')
+        : '';
+
       // Format output
-      let output = formatEnhancedToolResultForContext(result, prefix);
-      
+      let output = overflow + formatEnhancedToolResultForContext(result, prefix);
+
       // Add source link info
       output += `\n\nSource: ${url}`;
       if (result.parsedLink) {
