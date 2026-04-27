@@ -23,7 +23,7 @@ import { logger } from '@/utils/logger';
 import { activityTrackingService } from '@/services/activityTrackingService';
 import { Platform, serializeMessagePreviewMd, serializeLinkPreviewMd, parseLinkPreviewMd, type MessagePreviewData, type TicketPreviewSnapshot } from '@xyne/shared';
 import { handleEventSubscriptionsForUsers } from '@/apps/core/eventSubscriptionUtils';
-import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload } from '@/apps/types';
+import { BaseAppEvent, AppEventType, AppMentionEventPayload, DMEventPayload, UserMentionedEventPayload, EmailEventPayload } from '@/apps/types';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
@@ -1273,7 +1273,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
   private async handlleMessageAppEvents(
     eventType: AppEventType,
-    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload,
+    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload | EmailEventPayload,
     userIds: string[],
   ): Promise<void> {
     const event: BaseAppEvent = {

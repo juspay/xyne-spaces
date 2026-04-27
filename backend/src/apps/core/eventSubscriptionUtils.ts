@@ -29,6 +29,7 @@ async function sendWebhookNotification(
             headers: {
                 'Content-Type': 'application/json',
                 'X-Xyne-Signature': signature,
+                'X-Source': 'XyneSpaces'
             },
             body: payload,
         });
@@ -41,7 +42,6 @@ async function sendWebhookNotification(
         logger.info('[handleAppMentionEvents] Successfully sent webhook notification', {
             webhookUrl,
             eventType: event.eventType,
-            messageId: event.payload.messageId,
             status: response.status,
         });
     } catch (error) {
@@ -63,14 +63,15 @@ export async function handleEventSubscriptionsForUsers(
         app => app.webhookUrl && isValidUrl(app.webhookUrl)
     );
 
-    const appsToNotify = appsWithValidWebhooks.filter(
-        app => app.userId !== event.payload.userId
-    );
+    const senderId = 'userId' in event.payload ? event.payload.userId : undefined;
+    const appsToNotify = senderId
+        ? appsWithValidWebhooks.filter(app => app.userId !== senderId)
+        : appsWithValidWebhooks;
 
     if (appsToNotify.length === 0) {
         logger.info(`No apps with valid webhooks found (excluding sender)`, {
             userIds,
-            senderId: event.payload.userId,
+            senderId,
         });
         return;
     }
@@ -85,7 +86,6 @@ export async function handleEventSubscriptionsForUsers(
                 userId: app.userId,
                 webhookUrl: app.webhookUrl,
                 eventType: event.eventType,
-                messageId: event.payload.messageId,
                 error: error instanceof Error ? error.message : String(error),
             });
             return { success: false, userId: app.userId, webhookUrl: app.webhookUrl, error };

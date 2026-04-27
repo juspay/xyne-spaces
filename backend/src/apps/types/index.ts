@@ -27,6 +27,7 @@ export enum AppEventType {
     APP_MENTION = 'APP_MENTIONED',
     DM = 'DIRECT_MESSAGE',
     USER_MENTIONED = 'USER_MENTIONED',
+    EMAIL = 'EMAIL',
 }
 
 export enum ContentFormat {
@@ -97,11 +98,26 @@ export interface UserMentionedEventPayload {
 }
 
 /**
+ * Payload type for EMAIL events
+ */
+export interface EmailEventPayload {
+    conversationId: string;
+    subject: string;
+    content: string;
+    to : string[];
+    from : string;
+    recipients: string[];
+    parentId: string;
+    id : string;
+    ticketId: string;
+}
+
+/**
  * Base app event type with dynamic, event-specific payload
  */
 export interface BaseAppEvent {
     eventType: AppEventType;
-    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload;
+    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload | EmailEventPayload;
     timestamp: string; // ISO timestamp
 }
 
@@ -251,6 +267,44 @@ export interface ConversationRepliesRequest extends PaginationRequest {
  * Response type for conversation replies API endpoint
  */
 export interface ConversationRepliesResponse extends PaginatedResponse<ConversationRepliesItem> {}
+
+/**
+ * Email reply item — one email in a thread
+ */
+export interface EmailRepliesItem {
+    id: string;
+    parentId: string;
+    type: string;
+    subject: string;
+    content: string;
+    to: string[];
+    from: string;
+    cc: string[];
+    bcc: string[];
+    createdAt: Date;
+}
+
+/**
+ * Cursor for email replies pagination
+ */
+export interface EmailRepliesCursor {
+    id: string;
+    createdAt: number;
+}
+
+/**
+ * Request type for email replies API endpoint
+ */
+export interface EmailRepliesRequest extends PaginationRequest {
+    channelId?: string;
+    channelName?: string;
+    conversationId: string;
+}
+
+/**
+ * Response type for email replies API endpoint
+ */
+export interface EmailRepliesResponse extends PaginatedResponse<EmailRepliesItem> {}
 
 /**
  * User data response for user API endpoint
