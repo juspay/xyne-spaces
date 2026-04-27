@@ -57,6 +57,7 @@ import ActivityListView from '../components/Activity/ActivityListView/ActivityLi
 import Search from '../components/Chat/Search/Search';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
 import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
+import DraftsAndSentPage from '../pages/DraftsAndSentPage';
 import UserThreads from '../components/Chat/UserThreads/UserThreads';
 import { RecapPanel } from '../components/RecapPanel';
 import { RouterErrorFallback } from '../components/ErrorBoundary';
@@ -780,6 +781,30 @@ export const router = createBrowserRouter([
                   {
                     path: 'bookmarks',
                     element: <BookmarksPanel />,
+                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                  },
+                  // Drafts & Sent combined page
+                  {
+                    path: 'drafts-sent',
+                    element: <DraftsAndSentPage />,
+                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                  },
+                  // Redirect old drafts route to new combined page
+                  {
+                    path: 'drafts',
+                    element: <Navigate to='../drafts-sent?tab=drafts' replace />,
+                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                  },
+                  // Redirect old sent route to new combined page
+                  {
+                    path: 'sent',
+                    element: <Navigate to='../drafts-sent?tab=sent' replace />,
+                    children: [{ index: true, element: null }, ...sharedChatRoutes],
+                  },
+                  // Redirect old scheduled route to new combined page
+                  {
+                    path: 'scheduled',
+                    element: <Navigate to='../drafts-sent?tab=scheduled' replace />,
                     children: [{ index: true, element: null }, ...sharedChatRoutes],
                   },
                   // Canvas (full screen with 2-panel layout on desktop)

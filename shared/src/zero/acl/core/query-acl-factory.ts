@@ -58,6 +58,7 @@ import {
   EmailsACL,
   EmailDraftsACL,
   EmailChannelPreferencesACL,
+  DelayedMessagesACL,
 } from '../tables';
 export class QueryACLFactory {
   static getACL<TTable extends TableName>(
@@ -173,6 +174,8 @@ export class QueryACLFactory {
         return new SavedUserConfigurationsACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configuration_values':
         return new BaseQueryACL(ctx, table);
+      case 'delayed_messages':
+        return new DelayedMessagesACL(ctx) as BaseQueryACL<TTable>;
       default:
         return new BaseQueryACL(ctx, table);
       case 'emails':

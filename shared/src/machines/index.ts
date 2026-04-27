@@ -43,6 +43,7 @@ export type {
   UserChannelStatus,
   Conversation,
   DraftMessageDB,
+  DelayedMessageDB,
   PeriodMetrics,
   MetricsState,
   UnreadCounts,

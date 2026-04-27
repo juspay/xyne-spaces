@@ -53,6 +53,10 @@ import { isStatusExpired } from '../../../utils/statusUtils';
 import { logger, Event } from '../../../utils/logger';
 import { useZeroOfflineState } from '@xyne/shared/hooks';
 import { WifiOff, Wifi } from 'lucide-react';
+import { format } from 'date-fns';
+import { Clock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useUpcomingDelayedMessage } from '../../../hooks/useUserDelayedMessages';
 
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
@@ -100,6 +104,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     ref,
   ) => {
     const zero = useZero();
+    const navigate = useNavigate();
     const { user } = useAuth();
     const canCreateTicket = useCanCreateTicket();
     const { isOffline, isReconnecting, isReconnected, refreshConnection } = useZeroOfflineState();
@@ -134,12 +139,20 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
     const [ticketDescription, setTicketDescription] = useState('');
+    const [recentScheduledFor, setRecentScheduledFor] = useState<number | null>(null);
     const [messagesData] = useCachedQuery(
       queries.conversationMessagesV2({ conversationId: conversationId || '' }),
       { enabled: !!conversationId },
     );
     const channel = useChannel(channelId);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
+    const upcomingScheduledInContext = useUpcomingDelayedMessage(channelId, conversationId ?? null);
+
+    const bannerScheduledFor = upcomingScheduledInContext ?? recentScheduledFor;
+
+    useEffect(() => {
+      setRecentScheduledFor(null);
+    }, [channelId, conversationId]);
 
     // Use all users for mention resolution
     const allUsersForMentionResolution = React.useMemo((): MentionResult[] => {
@@ -594,6 +607,53 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       onCancel?.();
     };
 
+    const handleScheduleSend = useCallback(
+      (scheduledFor: number, html: string, files: File[]): void => {
+        if (!user) {
+          toast.error('You must be logged in to schedule messages');
+          return;
+        }
+        const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
+        const hasFiles = files.length > 0;
+        if (!processedHtml.trim() && !hasFiles) {
+          toast.error('Cannot schedule an empty message');
+          return;
+        }
+        const id = uuidv4();
+        const now = Date.now();
+        try {
+          zero.mutate(
+            mutators.delayedMessages.create({
+              id,
+              channelId,
+              ...(conversationId ? { conversationId } : {}),
+              content: processedHtml,
+              scheduledFor,
+              timestamp: now,
+            }),
+          );
+          // Clear draft after scheduling
+          saveDraft(lookupId, '', '');
+          toast.success('Message scheduled', {
+            description: `Will be sent at ${new Date(scheduledFor).toLocaleString()}`,
+          });
+          setRecentScheduledFor(scheduledFor);
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : 'Please try again.';
+          toast.error('Failed to schedule message', { description: errorMessage });
+        }
+      },
+      [
+        zero,
+        user,
+        channelId,
+        conversationId,
+        allUsersForMentionResolution,
+        lookupId,
+        setRecentScheduledFor,
+      ],
+    );
+
     const isMobile = window.innerWidth < 500;
 
     return (
@@ -639,6 +699,24 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
               <div className='px-3 py-1.5 bg-green-50 dark:bg-green-950/50 border border-green-200 dark:border-green-800 rounded text-xs text-green-700 dark:text-green-300 flex items-center gap-1.5 mx-3 mb-1'>
                 <Wifi className='w-3 h-3 shrink-0' />
                 <span>Connected</span>
+              </div>
+            )}
+            {bannerScheduledFor !== null && (
+              <div className='mx-3 mb-2 mt-2 flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground animate-in slide-in-from-bottom-2 duration-200'>
+                <Clock size={14} className='flex-shrink-0 text-muted-foreground' />
+                <span className='min-w-0'>
+                  Your message will be sent at {format(new Date(bannerScheduledFor), 'h:mm a')} on{' '}
+                  {format(new Date(bannerScheduledFor), 'MMM d')}.{' '}
+                  <button
+                    type='button'
+                    onClick={() => void navigate('/chat/scheduled')}
+                    className='font-semibold text-primary hover:underline'
+                    data-track-category='chat-input'
+                    data-track-name='open-delayed-messages-from-banner'
+                  >
+                    See all scheduled messages
+                  </button>
+                </span>
               </div>
             )}
             <InputBox
@@ -719,6 +797,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
               }}
               hasTicket={hasTicket}
               sendDisabled={isOffline}
+              onScheduleSend={handleScheduleSend}
             />
           </>
         )}

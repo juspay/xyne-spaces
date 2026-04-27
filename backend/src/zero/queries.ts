@@ -25,6 +25,7 @@ import {
   Status,
   ProjectType,
   TicketPriority,
+  DelayedMessageStatus,
 } from '@xyne/shared';
 
 export const zql = createBuilder(schema);
@@ -1426,6 +1427,7 @@ export const queries = defineQueries({
       .orderBy('createdAt', 'desc');
   }),
 
+
   attachmentsByImpact: defineQuery(z.object({ impactId: z.string() }), ({ args: { impactId } }) => {
     return zql.message_attachments
       .where('entityId', impactId)
@@ -2390,6 +2392,78 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {
       return zql.email_channel_preferences.where('channelId', channelId);
+    },
+  ),
+
+  // ── Sent Messages ─────────────────────────────────────────────────────────
+  /** Paginated messages sent by the current user, ordered newest first */
+  userSentMessagesPaginated: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ messageId: z.string(), createdAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.messages
+        .where('senderId', ctx.userID)
+        .where('isDeleted', false)
+        .orderBy('createdAt', 'desc')
+        .orderBy('messageId', 'desc');
+
+      if (start) {
+        query = query.start(
+          { messageId: start.messageId, createdAt: start.createdAt },
+          { inclusive: false },
+        );
+      }
+
+      return query.limit(limit).related('attachments').related('conversation');
+    },
+  ),
+
+  // ── Scheduled Messages ────────────────────────────────────────────────────
+  /** All delayed messages for the current user that are still pending */
+  userDelayedMessages: defineQuery(({ ctx }) => {
+    return zql.delayed_messages
+      .where('senderId', ctx.userID)
+      .where('status', DelayedMessageStatus.PENDING)
+      .orderBy('scheduledFor', 'asc')
+      .related('attachments');
+  }),
+
+  /** Paginated delayed messages for the current user */
+  userDelayedMessagesPaginated: defineQuery(
+    z.object({
+      limit: z.number(),
+      statuses: z.array(z.string()).optional(),
+      start: z.object({ id: z.string(), scheduledFor: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, statuses, start } }) => {
+      const effectiveStatuses =
+        statuses && statuses.length > 0
+          ? (statuses as DelayedMessageStatus[])
+          : [DelayedMessageStatus.PENDING];
+
+      let query = zql.delayed_messages
+        .where('senderId', ctx.userID)
+        .orderBy('scheduledFor', 'asc')
+        .orderBy('id', 'asc');
+
+      if (effectiveStatuses.length === 1 && effectiveStatuses[0]) {
+        query = query.where('status', effectiveStatuses[0]);
+      } else {
+        query = query.where(h =>
+          h.or(...effectiveStatuses.map(s => h.cmp('status', '=', s))),
+        );
+      }
+
+      if (start) {
+        query = query.start(
+          { id: start.id, scheduledFor: start.scheduledFor },
+          { inclusive: false },
+        );
+      }
+
+      return query.limit(limit).related('attachments');
     },
   ),
 });

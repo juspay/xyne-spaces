@@ -57,3 +57,4 @@ export { FormsACL } from './forms-acl';
 export { FormContextMappingsACL } from './form-context-mappings-acl';
 export { FormFieldsACL } from './form-fields-acl';
 export { FormEntityValuesACL } from './form-entity-values-acl';
+export { DelayedMessagesACL } from './delayed-messages-acl';

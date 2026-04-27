@@ -443,6 +443,10 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   });
 
   const [userDrafts, userDraftsDetails] = useCachedQuery(queries.userDrafts(), { ttl: '10m' });
+  const [userDelayedMessages, userDelayedMessagesDetails] = useCachedQuery(
+    queries.userDelayedMessages(),
+    { ttl: '10m' },
+  );
 
   const permissionsQuery = useTanStackQuery<PermissionsApiResponse>({
     queryKey: ['user-permissions', context.userID],
@@ -491,6 +495,13 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
       stateMachineActor.send({ type: 'ADD_USER_DRAFTS', draftMessages: userDrafts });
     }
 
+    if (isQueryCompleted(userDelayedMessagesDetails)) {
+      stateMachineActor.send({
+        type: 'ADD_USER_DELAYED_MESSAGES',
+        delayedMessages: userDelayedMessages,
+      });
+    }
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     visibleChannels,
@@ -502,6 +513,8 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     allUserGroupsDetails.type,
     userDrafts,
     userDraftsDetails.type,
+    userDelayedMessages,
+    userDelayedMessagesDetails.type,
   ]);
 
   const areAllQueriesCompleted =

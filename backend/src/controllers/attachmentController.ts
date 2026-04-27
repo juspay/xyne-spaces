@@ -263,7 +263,10 @@ export class AttachmentController {
         return;
       }
 
-      if (attachment.entityType !== AttachmentEntityType.DRAFT) {
+      if (
+        attachment.entityType !== AttachmentEntityType.DRAFT &&
+        attachment.entityType !== AttachmentEntityType.DELAYED_MESSAGE
+      ) {
         // CHECK: Verify user has access to this attachment
         // Attachments belong to conversations, conversations belong to channels
         // User must be a participant of the channel to access the attachment

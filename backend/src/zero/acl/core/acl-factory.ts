@@ -61,6 +61,7 @@ import { FormsACL } from '../tables/forms-acl';
 import { FormContextMappingsACL } from '../tables/form-context-mappings-acl';
 import { FormFieldsACL } from '../tables/form-fields-acl';
 import { FormEntityValuesACL } from '../tables/form-entity-values-acl';
+import { DelayedMessagesACL } from '../tables/delayed-messages-acl';
 
 export class ACLFactory {
   /**
@@ -209,6 +210,8 @@ export class ACLFactory {
         return new SavedUserConfigurationValuesACL(ctx);
       case 'surface_links':
         return new SurfaceLinksACL(ctx);
+      case 'delayed_messages':
+        return new DelayedMessagesACL(ctx);
       default:
         return new NoAcl<any>(ctx);
     }

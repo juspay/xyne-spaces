@@ -57,6 +57,7 @@ export type UserChannelStatus = QueryResultType<typeof queries.getAllChannelsUse
 export type Conversation = QueryResultType<typeof queries.channelConversationsPaginatedV3>[number];
 
 export type DraftMessageDB = QueryResultType<typeof queries.userDrafts>[number];
+export type DelayedMessageDB = QueryResultType<typeof queries.userDelayedMessages>[number];
 
 // Metrics data for a single period
 export interface PeriodMetrics {
@@ -183,6 +184,7 @@ interface StateMachineContext {
   savedRoutes: Record<string, string>;
   drafts: DraftMessages; // Draft messages per channel/conversation
   draftMessages: DraftMessageDB[];
+  delayedMessages: DelayedMessageDB[];
   allUserGroups: UserGroup[];
   metrics: MetricsState;
   filteredTicketIds: string[];
@@ -211,6 +213,7 @@ type StateMachineEvent =
   | { type: 'REMOVE_DRAFT'; lookupId: string }
   | { type: 'ADD_ALL_USER_GROUPS'; userGroups: UserGroup[] }
   | { type: 'ADD_USER_DRAFTS'; draftMessages: DraftMessageDB[] }
+  | { type: 'ADD_USER_DELAYED_MESSAGES'; delayedMessages: DelayedMessageDB[] }
   | { type: 'SET_METRICS'; metrics: Omit<MetricsState, 'loading' | 'error'> }
   | { type: 'SET_METRICS_LOADING'; loading: boolean }
   | { type: 'SET_METRICS_ERROR'; error: string | null }
@@ -439,6 +442,14 @@ export const stateMachine = setup({
         return context.draftMessages;
       },
     }),
+    addUserDelayedMessages: assign({
+      delayedMessages: ({ context, event }) => {
+        if (event.type === 'ADD_USER_DELAYED_MESSAGES') {
+          return event.delayedMessages;
+        }
+        return context.delayedMessages;
+      },
+    }),
     setMetrics: assign({
       metrics: ({ context, event }) => {
         if (event.type === 'SET_METRICS') {
@@ -608,6 +619,7 @@ export const stateMachine = setup({
     })(),
     drafts: JSON.parse(safeGetItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
     draftMessages: [],
+    delayedMessages: [],
     allUserGroups: [],
     metrics: initialMetricsState,
     filteredTicketIds: [],
@@ -663,6 +675,9 @@ export const stateMachine = setup({
         },
         ADD_USER_DRAFTS: {
           actions: 'addUserDrafts',
+        },
+        ADD_USER_DELAYED_MESSAGES: {
+          actions: 'addUserDelayedMessages',
         },
         SET_METRICS: {
           actions: 'setMetrics',
