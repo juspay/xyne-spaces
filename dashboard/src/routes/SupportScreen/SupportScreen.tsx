@@ -176,6 +176,10 @@ const ChannelInfoModal = ({
 
 const ALL_CHANNELS_ID = 'all';
 
+// Email attachment limits — kept in sync with backend/src/routes/email.ts
+const MAX_EMAIL_ATTACHMENT_FILES = 10;
+const MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB per file
+
 type Email = NonNullable<
   NonNullable<QueryResultType<typeof queries.supportTicketRowV2>>['emails']
 >[number];
@@ -2711,11 +2715,42 @@ const EmailComposer = ({
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      setAttachments(prev => [...prev, ...files]);
-    }
-    // Reset input so same file can be selected again
+    // Reset input early so the same file can be selected again after a rejection.
     e.target.value = '';
+    if (files.length === 0) return;
+
+    const accepted: File[] = [];
+    const rejectedTooLarge: string[] = [];
+    let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - attachments.length;
+    let droppedForCount = 0;
+
+    for (const file of files) {
+      if (availableSlots <= 0) {
+        droppedForCount++;
+        continue;
+      }
+      if (file.size > MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES) {
+        rejectedTooLarge.push(file.name);
+        continue;
+      }
+      accepted.push(file);
+      availableSlots--;
+    }
+
+    if (rejectedTooLarge.length > 0) {
+      toast.error(
+        `Skipped ${rejectedTooLarge.length} file${rejectedTooLarge.length > 1 ? 's' : ''} over ${MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024)}MB: ${rejectedTooLarge.join(', ')}`,
+      );
+    }
+    if (droppedForCount > 0) {
+      toast.error(
+        `You can attach at most ${MAX_EMAIL_ATTACHMENT_FILES} files per email. Dropped ${droppedForCount}.`,
+      );
+    }
+
+    if (accepted.length > 0) {
+      setAttachments(prev => [...prev, ...accepted]);
+    }
   };
 
   const handleRemoveAttachment = (index: number): void => {
