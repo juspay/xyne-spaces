@@ -1,12 +1,11 @@
 import React, { useCallback } from 'react';
-import { Avatar, AvatarSize, AvatarShape } from '@juspay/blend-design-system';
+import Avatar from '../Avatar/Avatar';
 import { Hash, Lock } from 'lucide-react';
 import { PluginKey } from '@tiptap/pm/state';
 import type { MentionSelectorProps, MentionResult } from './Selectors.types';
 import { detectMentionTrigger, detectChannelTrigger, createVirtualAnchor } from './Selectors.utils';
 import { mentionPluginKey, channelMentionPluginKey } from '../TipTapExtensions';
 import { BasePopoverSelector, type BaseSelectorPluginState } from './BasePopoverSelector';
-import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 import { useUser } from '../../../hooks/useUsers';
 import { isStatusExpired } from '../../../utils/statusUtils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
@@ -16,7 +15,6 @@ import { renderEmoji } from '../../../utils/customEmojiUtils';
  * Hooks must be called at component top level, not inside callbacks.
  */
 const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
-  const { url: pictureUrl } = useProfilePictureUrl(item.id, item.picture);
   const user = useUser(item.id);
   const hasValidStatus =
     user?.statusEmoji && (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
@@ -24,13 +22,7 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
 
   return (
     <>
-      <Avatar
-        {...(pictureUrl !== undefined && { src: pictureUrl })}
-        alt={item.name}
-        fallback={item.avatar || item.name.charAt(0).toUpperCase()}
-        size={AvatarSize.SM}
-        shape={AvatarShape.CIRCULAR}
-      />
+      <Avatar userId={item.id} size='sm' rounded showActiveStatus={false} />
       <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
         <div className='flex items-center gap-2'>
           <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>

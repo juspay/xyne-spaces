@@ -144,7 +144,7 @@ const Avatar = ({
   className,
 }: AvatarProps): ReactElement => {
   const { user: currentUser } = useAuth();
-  const targetUserId = userId || currentUser?.id || '';
+  const targetUserId = userId !== undefined ? (userId ?? '') : (currentUser?.id ?? '');
   const user: User | undefined = useUser(targetUserId);
   const [imageError, setImageError] = React.useState(false);
 

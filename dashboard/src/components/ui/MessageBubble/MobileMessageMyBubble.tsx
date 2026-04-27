@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { AvatarSize } from '@juspay/blend-design-system';
+import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { MessageType, parseForwardedMessageXml, isForwardedMessageXml } from '@xyne/shared';
 import { formatTimeAmPm, formatRelativeTimestamp } from '../../../utils/dateUtils';
 import { useReactions } from '../../../hooks/useReaction';

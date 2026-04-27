@@ -1372,7 +1372,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           <div className='flex items-center justify-between px-6 pt-6 pb-4 border-b border-border'>
             <h2 className='text-lg font-semibold text-foreground'>Delete message</h2>
             <button
-              className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2 disabled:pointer-events-none'
+              className='rounded-sm text-foreground opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2 disabled:pointer-events-none'
               onClick={() => setShowDeleteConfirm(false)}
               data-track-category='CHAT_BUBBLE'
               data-track-name='CLOSE_DELETE_CONFIRM_DIALOG'

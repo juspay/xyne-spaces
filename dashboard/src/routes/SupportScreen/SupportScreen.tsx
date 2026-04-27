@@ -1947,7 +1947,7 @@ const SupportTicketDetail = (): ReactElement => {
                   </div>
                 </div>
               )}
-            <div className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'>
+            <div className='flex-1 overflow-y-auto no-scrollbar px-6 py-4 bg-background'>
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
                   <EmailThread
@@ -3261,7 +3261,7 @@ const EmailComposer = ({
                   void handleSendEmail();
                 }
               }}
-              className='w-full px-4 py-3 focus:outline-none text-sm resize-none'
+              className='w-full px-4 py-3 focus:outline-none text-sm resize-none bg-background'
               disabled={isSending}
             />
           )}

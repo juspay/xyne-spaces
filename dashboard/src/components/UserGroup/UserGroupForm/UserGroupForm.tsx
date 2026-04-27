@@ -174,7 +174,7 @@ export const UserGroupForm = ({
       </div>
 
       {error && (
-        <div className='bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mx-6 mt-6'>
+        <div className='bg-destructive/10 border border-destructive/30 text-destructive px-4 py-3 rounded mx-6 mt-6'>
           {error}
         </div>
       )}
@@ -275,6 +275,7 @@ export const UserGroupForm = ({
                 render={({ field: { onChange, value } }) => (
                   <Textarea
                     id='description'
+                    className='text-foreground'
                     value={value}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                       onChange(e.target.value)

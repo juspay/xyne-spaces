@@ -8,7 +8,7 @@ import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import UserAvatar from '../UserAvatar/UserAvatar';
-import { AvatarSize } from '@juspay/blend-design-system';
+import { AvatarSize } from '../UserAvatar/UserAvatar';
 import { formatDistanceToNow, isToday } from 'date-fns';
 import { formatTimeAmPm } from '../../utils/dateUtils';
 import { UserHoverWrapper } from '../ui/UserMentionPopover/UserMentionPopover';

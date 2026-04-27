@@ -20,14 +20,40 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useTheme } from '../../hooks/useTheme';
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
 
 // --- Colors & Utilities ---
-// Use HSL to generate distinct colors dynamically based on the number of items
-const getThemeColor = (index: number, total: number): string => {
-  const hue = (index * 360) / total;
-  return `hsl(${hue}, 70%, 60%)`;
+const CHART_COLORS_DARK = [
+  '#60a5fa', // blue-400
+  '#34d399', // emerald-400
+  '#f472b6', // pink-400
+  '#fbbf24', // amber-400
+  '#a78bfa', // violet-400
+  '#22d3ee', // cyan-400
+  '#fb923c', // orange-400
+  '#2dd4bf', // teal-400
+  '#e879f9', // fuchsia-400
+  '#a3e635', // lime-400
+];
+
+const CHART_COLORS_LIGHT = [
+  '#2563eb', // blue-600
+  '#059669', // emerald-600
+  '#db2777', // pink-600
+  '#d97706', // amber-600
+  '#7c3aed', // violet-600
+  '#0891b2', // cyan-600
+  '#ea580c', // orange-600
+  '#0d9488', // teal-600
+  '#c026d3', // fuchsia-600
+  '#65a30d', // lime-600
+];
+
+const getThemeColor = (index: number, _total: number, isDark: boolean): string => {
+  const palette = isDark ? CHART_COLORS_DARK : CHART_COLORS_LIGHT;
+  return palette[index % palette.length] ?? palette[0]!;
 };
 
 // --- Pie Chart Component (Custom SVG) ---
@@ -369,6 +395,8 @@ const EmptyState = ({
 const ProductInsightsScreen = (): ReactElement => {
   const [selectedMetaTheme, setSelectedMetaTheme] = useState<MetaTheme | null>(null);
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
+  const { theme } = useTheme();
+  const isDark = theme === 'midnight';
 
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projects] = useCachedQuery(queries.getAllProjects());
@@ -414,12 +442,12 @@ const ProductInsightsScreen = (): ReactElement => {
   const pieData: PieSlice[] = useMemo(() => {
     if (!data) return [];
     return data.meta_themes.map((theme, index) => ({
-      color: getThemeColor(index, data.meta_themes.length),
+      color: getThemeColor(index, data.meta_themes.length, isDark),
       value: theme.impacted_clusters.length,
       label: theme.meta_theme,
       metaTheme: theme,
     }));
-  }, [data]);
+  }, [data, isDark]);
 
   const allTicketIds = useMemo(() => {
     if (!data) return [];
@@ -592,7 +620,7 @@ const ProductInsightsScreen = (): ReactElement => {
                     <MetaThemeItem
                       key={index}
                       theme={theme}
-                      color={getThemeColor(index, data.meta_themes.length)}
+                      color={getThemeColor(index, data.meta_themes.length, isDark)}
                       isSelected={selectedMetaTheme?.meta_theme === theme.meta_theme}
                       onClick={() => handleMetaThemeSelect(theme)}
                       data-track-category='ProductInsights'

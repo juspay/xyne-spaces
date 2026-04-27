@@ -1,13 +1,7 @@
 import React, { useState } from 'react';
 import { UserPlus, ChevronDown, Search, Trash2 } from 'lucide-react';
-import {
-  AvatarSize,
-  Modal,
-  Button,
-  ButtonType,
-  ButtonSize,
-  Checkbox,
-} from '@juspay/blend-design-system';
+import { Modal, Button, ButtonType, ButtonSize, Checkbox } from '@juspay/blend-design-system';
+import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import {
   ChannelRole,
   ChannelScopeType,

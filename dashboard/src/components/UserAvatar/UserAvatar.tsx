@@ -1,8 +1,24 @@
-import { Avatar, AvatarOnlinePosition, AvatarShape, AvatarSize } from '@juspay/blend-design-system';
 import { ReactElement } from 'react';
-import { useUser } from '../../hooks/useUsers';
-import { useUserPresence } from '../../hooks/usePresence';
-import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
+import Avatar, { AvatarSize as RadixAvatarSize } from '../ui/Avatar/Avatar';
+
+// Drop-in replacements for the Blend enums.
+// Values map directly to the radix Avatar's size strings.
+export const AvatarSize = {
+  SM: 'sm',
+  REGULAR: 'rg',
+  MD: 'md',
+  LG: 'lg',
+  XL: 'xl',
+} as const;
+
+export type AvatarSizeValue = (typeof AvatarSize)[keyof typeof AvatarSize];
+
+export const AvatarShape = {
+  CIRCULAR: 'circular',
+  ROUNDED: 'rounded',
+} as const;
+
+export type AvatarShapeValue = (typeof AvatarShape)[keyof typeof AvatarShape];
 
 const UserAvatar = ({
   userId,
@@ -11,34 +27,19 @@ const UserAvatar = ({
   showActiveStatus = true,
 }: {
   userId?: string | null;
-  size?: AvatarSize;
-  shape?: AvatarShape;
+  size?: AvatarSizeValue;
+  shape?: AvatarShapeValue;
   showActiveStatus?: boolean;
 }): ReactElement => {
-  const targetUserId = userId || '';
-  const user = useUser(targetUserId);
-
-  // Get online status from Socket.IO presence (not Zero/DB)
-  const { status } = useUserPresence(targetUserId);
-  const isOnline = status === 'ONLINE';
-
-  // Use the same avatar loading logic as the Avatar component
-  const { url: pictureUrl } = useProfilePictureUrl(targetUserId, user?.picture);
+  const rounded = shape === AvatarShape.CIRCULAR;
+  const radixSize = (size ?? AvatarSize.SM) as RadixAvatarSize;
 
   return (
-    // do not add DIV or SPAN here, it breaks the Avatar component's layout
     <Avatar
-      className='visual-regression-hide'
-      src={pictureUrl || ''}
-      alt={user?.name || 'User avatar'}
-      online={showActiveStatus ? isOnline : false}
-      shape={shape || AvatarShape.ROUNDED}
-      onlinePosition={AvatarOnlinePosition.BOTTOM}
-      size={size || AvatarSize.SM}
-      fallback={user?.name
-        ?.split(' ')
-        .map(n => n[0])
-        .join('')}
+      userId={userId ?? null}
+      size={radixSize}
+      rounded={rounded}
+      showActiveStatus={showActiveStatus}
     />
   );
 };

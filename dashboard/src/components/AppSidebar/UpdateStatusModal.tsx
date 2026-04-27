@@ -11,6 +11,7 @@ import { mutators } from '../../zero/mutators';
 import { DEFAULT_STATUS_EMOJI, EXPIRY_OPTIONS, calculateExpiryTime } from '../../utils/statusUtils';
 import { v4 as uuidv4 } from 'uuid';
 import { useCustomEmojis } from '../../hooks/useCustomEmojis';
+import { useTheme } from '../../hooks/useTheme';
 import { renderEmoji } from '../../utils/customEmojiUtils';
 
 // Hardcoded status suggestions
@@ -69,6 +70,8 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
 }) => {
   const zero = useZero();
   const { data: customEmojis } = useCustomEmojis();
+  const { theme } = useTheme();
+  const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
   const [statusText, setStatusText] = useState('');
   const [selectedEmoji, setSelectedEmoji] = useState<string | undefined>(undefined);
   const [isEmojiAutoAssigned, setIsEmojiAutoAssigned] = useState(false);
@@ -293,7 +296,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         onEmojiClick={handleEmojiSelect}
                         width={320}
                         height={400}
-                        theme={Theme.LIGHT}
+                        theme={emojiPickerTheme}
                         lazyLoadEmojis={true}
                         searchPlaceHolder='Search emoji...'
                         customEmojis={customEmojis || []}
@@ -310,7 +313,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 value={statusText}
                 onChange={handleTextChange}
                 placeholder='Update your status'
-                className='w-full pl-10'
+                className='w-full pl-10 text-foreground'
                 maxLength={100}
               />
             </div>
@@ -412,7 +415,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         onEmojiClick={handleEmojiSelect}
                         width={320}
                         height={400}
-                        theme={Theme.LIGHT}
+                        theme={emojiPickerTheme}
                         lazyLoadEmojis={true}
                         searchPlaceHolder='Search emoji...'
                         customEmojis={customEmojis || []}
@@ -429,7 +432,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 value={statusText}
                 onChange={handleTextChange}
                 placeholder='Update your status'
-                className='flex-1 bg-transparent border-none outline-none text-sm'
+                className='flex-1 bg-transparent border-none outline-none text-sm text-foreground'
                 maxLength={100}
                 data-track-event='blur'
                 data-track-category='Update_User_Status_Modal'
@@ -452,7 +455,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
             <div className='space-y-2'>
               <span className='text-sm font-medium text-foreground'>Remove status after</span>
               <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
-                <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring'>
+                <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring'>
                   <Select.Value />
                   <Select.Icon>
                     <ChevronDown className='size-4' />
@@ -466,7 +469,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                         <Select.Item
                           key={option.value}
                           value={option.value}
-                          className='relative flex items-center px-3 py-2 rounded-md text-sm cursor-pointer hover:bg-muted outline-none select-none data-[highlighted]:bg-muted'
+                          className='relative flex items-center px-3 py-2 rounded-md text-sm text-foreground cursor-pointer hover:bg-muted outline-none select-none data-[highlighted]:bg-muted'
                         >
                           <Select.ItemText>{option.label}</Select.ItemText>
                           <Select.ItemIndicator className='absolute right-2'>

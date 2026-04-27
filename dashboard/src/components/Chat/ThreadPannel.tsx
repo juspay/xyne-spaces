@@ -1041,7 +1041,7 @@ export const ThreadMessages = ({
             <span className='text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded flex-shrink-0'>
               {ticket.xyneId}
             </span>
-            <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0'>
+            <h3 className='text-[17px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 text-foreground'>
               {ticket.title}
             </h3>
           </div>

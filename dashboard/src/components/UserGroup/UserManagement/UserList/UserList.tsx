@@ -184,7 +184,7 @@ export const UserList = ({
                             variant='ghost'
                             size='sm'
                             onClick={() => void handleRemoveUser(user.id)}
-                            className='shrink-0 h-7 w-7 p-0 text-muted-foreground hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity'
+                            className='shrink-0 h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity'
                             data-track-category='UserGroups'
                             data-track-name='RemoveUserFromGroup'
                             data-track-metadata={JSON.stringify({ userId: user.id })}

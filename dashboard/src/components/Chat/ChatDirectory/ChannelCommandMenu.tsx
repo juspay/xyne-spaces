@@ -991,9 +991,9 @@ const ChannelCommandMenu = ({
       const otherCount = getDMParticipantIdsToFetch(channel, currentUserID).length;
       return (
         <div className='relative flex h-5 w-5 items-center justify-center'>
-          <Users size={16} className='text-gray-600' />
+          <Users size={16} className='text-muted-foreground' />
           {otherCount > 0 && (
-            <span className='absolute -bottom-0.5 -right-0.5 min-w-3 rounded-full bg-gray-200 px-0.5 text-xs font-semibold leading-none text-gray-700'>
+            <span className='absolute -bottom-0.5 -right-0.5 min-w-3 rounded-full bg-muted px-0.5 text-xs font-semibold leading-none text-muted-foreground'>
               {otherCount}
             </span>
           )}
@@ -1870,7 +1870,7 @@ const ChannelCommandMenu = ({
           <button
             onClick={() => void handleBotQuery()}
             disabled={botChatState.status === 'loading'}
-            className='px-3 py-2 mr-2 text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50'
+            className='px-3 py-2 mr-2 text-primary hover:bg-accent rounded disabled:opacity-50'
             data-track-category='CHANNEL_SEARCH'
             data-track-name='SEND_BOT_QUERY'
             data-track-metadata={JSON.stringify({
@@ -1888,10 +1888,10 @@ const ChannelCommandMenu = ({
       </div>
 
       {/* Body: results panel + optional context panel side-by-side */}
-      <div className='flex flex-1 min-h-0 overflow-hidden'>
+      <div className='flex flex-1 min-h-0 overflow-hidden bg-background rounded-b-2xl'>
         {/* Tabs, Results, Footer Container - modal overlays everything below search input */}
         <div
-          className='relative flex-1 flex flex-col min-h-0 overflow-x-hidden'
+          className='relative flex-1 flex flex-col min-h-0 overflow-x-hidden bg-background rounded-b-2xl'
           role='presentation'
           data-track-category='CHANNEL_SEARCH'
           data-track-name='ClickSearchResultsArea'
@@ -1962,7 +1962,7 @@ const ChannelCommandMenu = ({
           {/* Results */}
           <Command.List
             className={cn(
-              'flex-1 overflow-y-auto md:max-h-[32rem] p-2',
+              'flex-1 overflow-y-auto md:max-h-[32rem] p-2 bg-background',
               suppressHover && '[&_[cmdk-item]]:pointer-events-none',
             )}
             ref={el => {
@@ -2333,7 +2333,7 @@ const ChannelCommandMenu = ({
 
           {/* Footer */}
           {!inline && !isMobile && (
-            <div className='px-4 py-2 border-t border-border text-sm text-muted-foreground flex items-center justify-end shrink-0 bg-muted/50 rounded-b-2xl'>
+            <div className='px-4 py-2 border-t border-border text-sm text-muted-foreground flex items-center justify-end shrink-0'>
               {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
             <label htmlFor='vespa-toggle' className='text-xs text-muted-foreground cursor-pointer'>
@@ -2456,7 +2456,7 @@ const ChannelCommandMenu = ({
         'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full',
         isMobile ? 'h-[100dvh] flex flex-col' : 'h-screen',
         contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
-        'md:w-full md:h-auto bg-white md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-gray-200 z-[9999]',
+        'md:w-full md:h-auto bg-background md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border z-[9999]',
       )}
       onKeyDownCapture={handleCommandKeyDown}
     >

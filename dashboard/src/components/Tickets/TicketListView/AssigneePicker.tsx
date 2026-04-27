@@ -1,6 +1,6 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, UserPlus, X } from 'lucide-react';
-import { AvatarSize } from '@juspay/blend-design-system';
+import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Popover } from '../../ui/Popover/Popover';
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import { useUsers } from '../../../hooks/useUsers';

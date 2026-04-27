@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AvatarSize, Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import { Tooltip, TooltipSide } from '@juspay/blend-design-system';
+import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import * as Popover from '@radix-ui/react-popover';
 import {
   MessageType,

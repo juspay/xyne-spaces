@@ -17,7 +17,7 @@ import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { FORM_CONTEXT_TYPES, getEntityTypesForContext } from '../../../constants/formConstants';
 import { toast } from 'sonner';
-import { Checkbox } from '@juspay/blend-design-system';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -456,7 +456,7 @@ export const CreateFormModal = ({
         {/* Scrollable content area */}
         <div className='flex-1 overflow-y-auto p-6 space-y-6'>
           {createFormMutation.error && (
-            <div className='bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded'>
+            <div className='bg-destructive/10 border border-destructive/30 text-destructive px-4 py-3 rounded'>
               {createFormMutation.error instanceof Error
                 ? createFormMutation.error.message
                 : 'Operation failed'}
@@ -529,6 +529,7 @@ export const CreateFormModal = ({
                 render={({ field: { onChange, value } }) => (
                   <Textarea
                     id='formDescription'
+                    className='text-foreground'
                     value={value}
                     onChange={e => onChange(e.target.value)}
                     placeholder='Enter form description (optional)'
@@ -562,7 +563,7 @@ export const CreateFormModal = ({
                     id='contextType'
                     value={value}
                     onChange={e => onChange(e.target.value as FormContextType)}
-                    className='w-full px-3 py-2 text-sm border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-muted'
+                    className='w-full px-3 py-2 text-sm border border-input bg-card text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted'
                     disabled={isEditMode || createFormMutation.isPending}
                     data-track-event='change'
                     data-track-category='Forms'
@@ -601,7 +602,7 @@ export const CreateFormModal = ({
                     id='entityType'
                     value={value}
                     onChange={e => onChange(e.target.value)}
-                    className='w-full px-3 py-2 text-sm border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-muted'
+                    className='w-full px-3 py-2 text-sm border border-input bg-card text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted'
                     disabled={isEditMode || createFormMutation.isPending}
                     data-track-event='change'
                     data-track-category='Forms'
@@ -719,7 +720,7 @@ export const CreateFormModal = ({
                             }}
                             data-track-category='Form'
                             data-track-name='SelectFieldType'
-                            className='w-full px-3 py-2 text-sm border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-muted'
+                            className='w-full px-3 py-2 text-sm border border-input rounded-lg bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:bg-muted'
                             disabled={createFormMutation.isPending}
                           >
                             {Object.values(FormFieldType).map(type => (
@@ -733,17 +734,17 @@ export const CreateFormModal = ({
 
                       {/* Is Optional Checkbox */}
                       {!isReadOnly && (
-                        <Checkbox
-                          id={`isOptional-${index}`}
-                          defaultChecked={field.isOptional ?? false}
-                          checked={field.isOptional ?? false}
-                          onCheckedChange={(checked: boolean | 'indeterminate') =>
-                            updateField(index, { isOptional: checked === true })
+                        <div
+                          className={
+                            createFormMutation.isPending ? 'opacity-50 pointer-events-none' : ''
                           }
-                          disabled={createFormMutation.isPending}
                         >
-                          This field is optional
-                        </Checkbox>
+                          <Checkbox
+                            checked={field.isOptional ?? false}
+                            onChange={checked => updateField(index, { isOptional: checked })}
+                            label='This field is optional'
+                          />
+                        </div>
                       )}
 
                       {/* Show optional status in read mode */}
@@ -793,7 +794,7 @@ export const CreateFormModal = ({
                                     size='sm'
                                     onClick={() => removeFieldOption(index, optIndex)}
                                     disabled={createFormMutation.isPending}
-                                    className='text-red-600 hover:text-red-700 hover:bg-red-50'
+                                    className='text-destructive hover:text-destructive hover:bg-destructive/10'
                                     data-track-category='Forms'
                                     data-track-name='RemoveFieldOption'
                                     data-track-metadata={JSON.stringify({
@@ -830,7 +831,7 @@ export const CreateFormModal = ({
                         size='sm'
                         onClick={() => removeField(index)}
                         disabled={createFormMutation.isPending}
-                        className='mt-6 text-red-600 hover:text-red-700 hover:bg-red-50'
+                        className='mt-6 text-destructive hover:text-destructive hover:bg-destructive/10'
                         data-track-category='Forms'
                         data-track-name='RemoveFormField'
                         data-track-metadata={JSON.stringify({ fieldIndex: index })}

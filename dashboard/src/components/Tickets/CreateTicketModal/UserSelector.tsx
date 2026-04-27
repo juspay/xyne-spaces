@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import UserAvatar from '../../UserAvatar/UserAvatar';
-import { AvatarShape, AvatarSize } from '@juspay/blend-design-system';
+import { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import { useUserSearch, useUser } from '../../../hooks/useUsers';

@@ -189,7 +189,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                   className={cn(
                     'flex-1 text-xs font-mono py-2 rounded-l-sm font-semibold transition-colors',
                     'hover:bg-muted',
-                    'data-[state=on]:bg-primary data-[state=on]:text-white data-[state=on]:hover:bg-primary',
+                    'data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary',
                     'data-[state=off]:text-foreground',
                   )}
                 >
@@ -201,7 +201,7 @@ export const TimePicker: React.FC<TimePickerProps> = ({
                   className={cn(
                     'flex-1 text-xs font-mono py-2 font-semibold transition-colors border-l border-border',
                     'hover:bg-muted',
-                    'data-[state=on]:bg-primary data-[state=on]:text-white data-[state=on]:hover:bg-primary data-[state=on]:border-primary',
+                    'data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary data-[state=on]:border-primary',
                     'data-[state=off]:text-foreground',
                   )}
                 >

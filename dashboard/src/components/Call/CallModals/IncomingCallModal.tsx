@@ -14,17 +14,9 @@ import { queries } from '../../../zero/queries';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
-import {
-  Button,
-  ButtonType,
-  ButtonSize,
-  ButtonSubType,
-  Avatar,
-  AvatarShape,
-  AvatarSize,
-} from '@juspay/blend-design-system';
+import { Button, ButtonType, ButtonSize, ButtonSubType } from '@juspay/blend-design-system';
+import Avatar from '../../ui/Avatar/Avatar';
 import { useUsers } from '../../../hooks/useUsers';
-import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 import { cn } from '../../../utils/classNames';
 import { Dialog } from '../../ui/Dialog/Dialog';
 
@@ -392,7 +384,6 @@ function CallNotificationUI({
   const { caller, callType } = notification;
   const navigate = useNavigate();
   const hasTitle = !!(notification.title && notification.title.trim());
-  const { url: callerPictureUrl } = useProfilePictureUrl(caller.id, caller.picture);
 
   // Handle title click - navigate to conversation for thread calls
   const handleTitleClick = useCallback(() => {
@@ -465,20 +456,7 @@ function CallNotificationUI({
 
           {/* Caller Avatar */}
           <div className='flex justify-center'>
-            <div className='[&_*]:!rounded-full'>
-              <Avatar
-                src={callerPictureUrl || ''}
-                alt={caller.name}
-                shape={AvatarShape.ROUNDED}
-                size={AvatarSize.LG}
-                fallback={caller.name
-                  .split(' ')
-                  .map(n => n[0])
-                  .join('')
-                  .toUpperCase()
-                  .slice(0, 2)}
-              />
-            </div>
+            <Avatar userId={caller.id} size='lg' rounded showActiveStatus={false} />
           </div>
 
           {/* Call Info */}

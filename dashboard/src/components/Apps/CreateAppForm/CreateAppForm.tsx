@@ -62,7 +62,7 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
     <form onSubmit={e => void handleSubmit(onSubmit)(e)} className='flex flex-col max-h-[85vh]'>
       <div className='flex-1 overflow-y-auto p-6 space-y-6'>
         {createAppMutation.error && (
-          <div className='bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg'>
+          <div className='bg-destructive/10 border border-destructive/30 text-destructive px-4 py-3 rounded-lg'>
             {createAppMutation.error instanceof Error
               ? createAppMutation.error.message
               : 'Failed to create app'}
@@ -105,6 +105,7 @@ export const CreateAppForm = ({ onSuccess, onCancel }: CreateAppFormProps): Reac
             render={({ field }) => (
               <Textarea
                 id='description'
+                className='text-foreground'
                 placeholder='Enter app description (optional)'
                 rows={3}
                 disabled={createAppMutation.isPending}

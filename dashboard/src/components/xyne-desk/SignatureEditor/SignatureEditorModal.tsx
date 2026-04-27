@@ -109,7 +109,7 @@ export const SignatureEditorModal = ({
             value={name}
             onChange={e => setName(e.target.value)}
             placeholder='e.g. Work, Personal…'
-            className='border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#6276be]'
+            className='border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-[#6276be]'
             data-track-category='email-signature'
             data-track-name='edit-signature-name'
           />
