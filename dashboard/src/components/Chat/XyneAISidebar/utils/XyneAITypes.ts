@@ -1,6 +1,64 @@
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 
 // ============================================================================
+// Input context snapshot
+// ============================================================================
+
+export interface SelectedChannel {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+}
+
+export interface SelectedCanvas {
+  id: string;
+  title: string;
+}
+
+export interface SelectedTicket {
+  id: string;
+  name: string;
+  title?: string;
+}
+
+export interface SelectedTranscript {
+  id: string;
+  title: string;
+}
+
+export interface SelectedRecording {
+  id: string;
+  title: string;
+}
+
+export interface SelectionContextInput {
+  canvasViewAccessId: string;
+  selectedText: string;
+  preview?: string;
+  canvasTitle?: string;
+}
+
+export interface ResearchContext {
+  type: 'product' | 'repository';
+  name: string;
+}
+
+export interface LastInputContext {
+  selectedChannels: SelectedChannel[];
+  threadConversationId?: string;
+  selectedCanvases?: SelectedCanvas[];
+  selectedTickets?: SelectedTicket[];
+  selectedTranscripts?: SelectedTranscript[];
+  selectedRecordings?: SelectedRecording[];
+  canvasViewAccessId?: string;
+  selectionContexts?: SelectionContextInput[];
+  webSearchEnabled: boolean;
+  deepResearchEnabled: boolean;
+  createCanvasEnabled: boolean;
+  researchContext?: ResearchContext | null;
+}
+
+// ============================================================================
 // Stored / persisted types (backend PostgreSQL)
 // ============================================================================
 
@@ -37,6 +95,7 @@ export interface ConversationHistory {
   lastUpdated: Date;
   isStarred?: boolean;
   branchSelections?: Record<string, string>; // parentId → selected childId for branching
+  lastInputContext?: LastInputContext;
 }
 
 // ============================================================================

@@ -414,6 +414,22 @@ const {
     }
     userMessageId = messageId;
 
+    try {
+      const { contextChannelIdToName } = await getChannelInfo(channelIds);
+      const builtContext = {
+        selectedChannels: channelIds.map(id => ({ id, name: contextChannelIdToName.get(id) ?? id })),
+        threadConversationId: conversationId,
+        canvasViewAccessId: request.canvasViewAccessId,
+        webSearchEnabled: request.webSearchEnabled ?? false,
+        deepResearchEnabled: request.deepResearchEnabled ?? false,
+        createCanvasEnabled: request.createCanvasEnabled ?? false,
+        researchContext: request.researchContext ?? null,
+      };
+      await sessionStore.updateMetadata(session.sessionId, { lastInputContext: builtContext });
+    } catch (err) {
+      logger.error(`[XyneAI] [${session.sessionId}] Failed to persist lastInputContext:`, err);
+    }
+
     if (parentMessageId) {
       const pathHistory = await sessionStore.getHistoryForPath(session.sessionId, parentMessageId);
       historyMessages = formatHistoryForJAF(pathHistory);

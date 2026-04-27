@@ -44,6 +44,7 @@ export interface SessionMetadata {
   isStarred?: boolean;
   branchSelections?: Record<string, string>;
   feedbackMap?: Record<string, number>; // messageId → 0|1|2
+  lastInputContext?: Record<string, unknown>;
 }
 
 export interface SessionData {
@@ -62,6 +63,7 @@ export interface SessionListItem {
   isStarred: boolean;
   createdAt: Date;
   updatedAt: Date;
+  lastInputContext?: Record<string, unknown>;
 }
 
 export interface MessageData {
@@ -359,6 +361,7 @@ export async function createXyneAIMemoryProvider(): Promise<XyneAIMemoryProvider
           isStarred: metadata.isStarred || false,
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
+          lastInputContext: metadata.lastInputContext,
         };
       });
     } catch (error) {
