@@ -22,6 +22,7 @@ interface SearchOptions {
   rankProfile?: string;
   offset?: number;
   limit?: number;
+  chunkLimit?: number;
   groupBy?: string;
   nativeRankThreshold?: number;
   slack?: SlackFilters;
@@ -29,6 +30,7 @@ interface SearchOptions {
   file?: FileFilters;
   meeting?: MeetingFilters;
   prefixBoostWeight?: number;
+  presentationSummary?: string;
 }
 
 export interface ILogger {
@@ -74,6 +76,7 @@ export class SearchService {
         rankProfile = RankProfile.nativeRank,
         offset = 0,
         limit = 20,
+        chunkLimit = 6,
         groupBy = 'docType',
         nativeRankThreshold = config.nativeRankThreshold,
         slack = {},
@@ -81,6 +84,7 @@ export class SearchService {
         file = {},
         meeting = {},
         prefixBoostWeight = 0.2,
+        presentationSummary,
       } = options;
 
       // Parse time keywords from query
@@ -148,6 +152,7 @@ export class SearchService {
           offset,
           ...(useFuzzy ? { "ranking.profile": RankProfile.fuzzyRank } : { "ranking.profile": rankProfile }),
           "input.query(alpha)": 0.5,
+          "input.query(chunk_limit)": chunkLimit,
           "input.query(query_length)": queryWordCount,
           timeout: '30s',
           ...(query && query.trim() ? { 'input.query(e)': 'embed(@query)' } : {}),
@@ -157,6 +162,7 @@ export class SearchService {
           "input.query(time_from)": timeRangeStart,
           "input.query(time_to)": timeRangeEnd,
           "ranking.listFeatures": true,
+          ...(presentationSummary ? { "presentation.summary": presentationSummary } : {}),
           tracelevel: 0,
           ...(rankProfile === RankProfile.personalizedRank && {
             "input.query(channel_personalization_weights)": channelWeights,
