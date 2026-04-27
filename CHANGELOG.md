@@ -1,3 +1,18 @@
+## [1.131.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.130.0...v1.131.0) (2026-04-27)
+
+
+### Features
+
+* Schedule Messages & Drafts & Sent Panel ([eebb3b8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/eebb3b89da15a52c37f69ea188b7614c10ef25f5)), closes [#5049](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5049)
+
+
+### Bug Fixes
+
+* changes for attachment-upload ([4f9a6a3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4f9a6a30a23258e35a3db336952dad9468be7202)), closes [#5447](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5447)
+* native app thread replies pill ([5a6aae3](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5a6aae3e11720db9f9e83056a8822edcd26ddea8)), closes [#5408](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5408)
+* route feature/local-bot and fix/local-bot branches to xyne-workflow agent ([28a125c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/28a125c884fefcd9fdae20da7f2378673e5c65b3)), closes [#5118](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5118)
+* Support-Screen-bug-fix ([96abe64](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/96abe64025d943bff2b13bcee43411cfe7fdb77e)), closes [#5562](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5562)
+
 ## [1.130.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.129.0...v1.130.0) (2026-04-26)
 
 
