@@ -80,6 +80,14 @@ interface TransformedToolOutput {
     isHorizontalBar: boolean;
   };
   tableData?: Array<Record<string, string | number>>;
+  pptData?: {
+    attachmentId: string;
+    downloadUrl: string;
+    filename: string;
+    title: string;
+    slideCount: number;
+    slides: Array<{ index: number; background: unknown; objects: unknown[] }>;
+  };
 }
 
 function getMetricTypeFromKey(key: string): MetricType {
@@ -178,6 +186,17 @@ function transformQApiOutput(
  */
 function transformToolOutputContent(toolName: string, content: unknown): TransformedToolOutput | null {
   if (toolName === 'q_api') return transformQApiOutput(toolName, content);
+
+  if (toolName === 'create_ppt') {
+    let parsed = content;
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch { return null; }
+    }
+    if (!parsed || typeof parsed !== 'object') return null;
+    const base = { id: `tool-${toolName}-${randomUUID()}`, type: 'tool_output' as const, toolName };
+    return { ...base, pptData: parsed as TransformedToolOutput['pptData'] };
+  }
+
   return null; // all other tools produce no visual output
 }
 

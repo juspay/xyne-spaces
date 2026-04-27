@@ -1002,6 +1002,7 @@ class XyneAIStreamManager {
     if (toolName) {
       const inputStr = data['input'] as string;
       const outputStr = data['output'] as string;
+      const contentStr = data['content'] as string;
 
       let parsedInput: unknown = inputStr;
       let parsedOutput: unknown = outputStr;
@@ -1026,6 +1027,15 @@ class XyneAIStreamManager {
         }
       } catch (e) {
         console.warn('Failed to parse tool output:', e);
+      }
+
+      // For create_ppt, data is in 'content' field, not 'output'
+      if (toolName === 'create_ppt' && contentStr) {
+        try {
+          parsedOutput = JSON.parse(contentStr);
+        } catch (e) {
+          console.warn('Failed to parse create_ppt content:', e);
+        }
       }
 
       const transformedData = transformToolOutput(toolName, parsedInput, parsedOutput);

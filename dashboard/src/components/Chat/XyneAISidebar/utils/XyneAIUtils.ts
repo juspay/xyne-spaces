@@ -173,6 +173,14 @@ export function transformToolOutput(
     return {};
   }
 
+  // Handle create_ppt tool output — pass through the structured slide data for preview
+  if (toolName === 'create_ppt') {
+    if (output && typeof output === 'object') {
+      return { pptData: output } as Partial<GeniusToolOutput> & { pptData: unknown };
+    }
+    return {};
+  }
+
   return result;
 }
 

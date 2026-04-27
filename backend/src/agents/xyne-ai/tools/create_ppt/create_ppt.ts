@@ -323,10 +323,12 @@ export function createCreatePptTool(): Tool<
                   const rawData: any[] = obj.data ?? obj.chart_data ?? [];
                   const chartData = rawData.map((s: any) => {
                     if (Array.isArray(s)) return s; // already array of cell values
+                    const labels = Array.isArray(s.labels) ? s.labels : (Array.isArray(s.categories) ? s.categories : []);
+                    const values = Array.isArray(s.values) ? s.values : (Array.isArray(s.data) ? s.data : []);
                     return {
                       name: s.name ?? s.series ?? s.label ?? 'Series',
-                      labels: s.labels ?? s.categories ?? [],
-                      values: s.values ?? s.data ?? [],
+                      labels,
+                      values,
                     };
                   });
                   slide.addChart(chartVal, chartData, opts);
@@ -414,13 +416,25 @@ export function createCreatePptTool(): Tool<
           `[Tool] [${context.sessionId}] create_ppt: uploaded ${gcsResult.path} (${(buffer.length / 1024).toFixed(0)}KB), attachmentId=${attachment.id}`
         );
 
-        // ── Step 6: Return download URL ─────────────────────────────────────
+        // ── Step 6: Return structured output with slide config ─────────────────────────────────────
         const isLocalDev = (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') && config.gcs.fakeGcsHost;
         const downloadUrl = isLocalDev
           ? `http://${config.gcs.fakeGcsHost}/download/storage/v1/b/${config.gcs.bucketName}/o/${encodeURIComponent(gcsResult.path)}?alt=media`
           : `/api/attachments/${attachment.id}/download`;
 
-        return downloadUrl;
+        // Return structured data for slide viewer
+        return JSON.stringify({
+          attachmentId: attachment.id,
+          downloadUrl,
+          filename,
+          title,
+          slideCount: slides.length,
+          slides: slides.map((slide: any, index: number) => ({
+            index: index + 1,
+            background: slide.background,
+            objects: slide.objects ?? slide.elements ?? slide.content ?? [],
+          })),
+        });
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
         const cause = error instanceof Error ? (error as any).cause : undefined;
