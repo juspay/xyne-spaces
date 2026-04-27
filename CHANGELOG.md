@@ -1,3 +1,17 @@
+## [1.132.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.131.0...v1.132.0) (2026-04-27)
+
+
+### Features
+
+* making a common component to render the virtualised lists ([cb76004](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cb760042cf19d40bcab568601143e5d45589cb11)), closes [#5565](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5565)
+
+
+### Bug Fixes
+
+* fix for email in draft (from) ([59bd708](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/59bd7084aff61a4a8ebd059639838d3455e2e663))
+* get selected field from vespa search ([b8d6939](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b8d6939af40b4d5dc9973a07622fa9aa7e4fe353)), closes [#5554](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5554)
+* recording screen in lotus app ([2a124e0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2a124e061625e0c5cca4aa579a3e34d041a933fb)), closes [#5518](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5518)
+
 ## [1.131.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.130.0...v1.131.0) (2026-04-27)
 
 
