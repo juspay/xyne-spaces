@@ -281,7 +281,7 @@ const AppSidebar = (): ReactElement => {
 
   return (
     <aside className='h-full px-3 pt-5 pb-6 flex flex-col items-center justify-between'>
-      <div className='space-y-8 overflow-y-auto scrollbar-none min-h-0'>
+      <div className='space-y-8 overflow-y-auto scrollbar-none min-h-0 pr-2 -mr-2'>
         <nav>
           <ul ref={navListRef} className='relative flex flex-col gap-4'>
             {activeMarkerY !== null && (
