@@ -374,15 +374,63 @@ export class MicrosoftDeskService {
     }
   }
 
+  /**
+   * Microsoft Graph caps inline `fileAttachment` POSTs (the JSON-with-base64
+   * variant) at ~3 MB. Larger attachments must use upload sessions, which
+   * stream chunked PUTs to a one-time URL. Outlook accepts up to 150 MB via
+   * upload sessions.
+   * Docs: https://learn.microsoft.com/graph/api/attachment-createuploadsession
+   */
+  private static readonly MICROSOFT_GRAPH_INLINE_ATTACHMENT_LIMIT_BYTES = 3 * 1024 * 1024;
+
+  /**
+   * Upload session chunk size. Must be a multiple of 320 KiB per Graph spec.
+   * 4 MiB is the Microsoft-recommended sweet spot — large enough to amortize
+   * round-trip overhead, small enough to keep retries cheap.
+   */
+  private static readonly UPLOAD_SESSION_CHUNK_BYTES = 4 * 1024 * 1024;
+
+  /**
+   * Hard upper bound for outlook message attachments via upload session
+   * (per Microsoft docs). Beyond this, Graph rejects createUploadSession
+   * outright — we fail fast with a clear message.
+   */
+  private static readonly MICROSOFT_GRAPH_UPLOAD_SESSION_LIMIT_BYTES = 150 * 1024 * 1024;
+
   private static async attachFileToDraft(
     accessToken: string,
     draftId: string,
     att: { name: string; contentType: string; content: Buffer | string },
   ): Promise<void> {
-    const contentBytes = (
-      Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'utf8')
-    ).toString('base64');
+    const buffer = Buffer.isBuffer(att.content)
+      ? att.content
+      : Buffer.from(att.content, 'utf8');
 
+    if (buffer.length > MicrosoftDeskService.MICROSOFT_GRAPH_UPLOAD_SESSION_LIMIT_BYTES) {
+      const sizeMb = (buffer.length / (1024 * 1024)).toFixed(1);
+      const limitMb =
+        MicrosoftDeskService.MICROSOFT_GRAPH_UPLOAD_SESSION_LIMIT_BYTES / (1024 * 1024);
+      throw new Error(
+        `Attachment "${att.name}" is ${sizeMb}MB which exceeds the ${limitMb}MB Microsoft Graph upload limit.`,
+      );
+    }
+
+    if (buffer.length <= MicrosoftDeskService.MICROSOFT_GRAPH_INLINE_ATTACHMENT_LIMIT_BYTES) {
+      await MicrosoftDeskService.attachFileInline(accessToken, draftId, att, buffer);
+      return;
+    }
+
+    await MicrosoftDeskService.attachFileViaUploadSession(accessToken, draftId, att, buffer);
+  }
+
+  /** Inline attach for files ≤ 3 MB (single base64 POST). */
+  private static async attachFileInline(
+    accessToken: string,
+    draftId: string,
+    att: { name: string; contentType: string },
+    buffer: Buffer,
+  ): Promise<void> {
+    const contentBytes = buffer.toString('base64');
     const res = await fetch(
       `${config.microsoftGraph.baseUrl}/me/messages/${draftId}/attachments`,
       {
@@ -403,6 +451,86 @@ export class MicrosoftDeskService {
       const errBody = await res.text();
       logger.error(`Microsoft attachment add failed (${res.status}) for ${att.name}: ${errBody}`);
       throw new Error(`${res.status}: ${extractGraphErrorMessage(errBody)}`);
+    }
+  }
+
+  /**
+   * Chunked upload for files > 3 MB. Microsoft Graph upload session protocol:
+   *   1. POST /messages/{id}/attachments/createUploadSession  → { uploadUrl }
+   *   2. PUT chunks to uploadUrl with `Content-Range: bytes a-b/total`
+   *      until all bytes uploaded. Final PUT returns the attachment.
+   * The uploadUrl is pre-authenticated — chunk PUTs do NOT include our
+   * Bearer token (sending it would be a protocol error).
+   */
+  private static async attachFileViaUploadSession(
+    accessToken: string,
+    draftId: string,
+    att: { name: string; contentType: string },
+    buffer: Buffer,
+  ): Promise<void> {
+    const totalSize = buffer.length;
+
+    // 1. Create upload session.
+    const sessionRes = await fetch(
+      `${config.microsoftGraph.baseUrl}/me/messages/${draftId}/attachments/createUploadSession`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          AttachmentItem: {
+            attachmentType: 'file',
+            name: att.name,
+            size: totalSize,
+            contentType: att.contentType,
+          },
+        }),
+      },
+    );
+    if (!sessionRes.ok) {
+      const errBody = await sessionRes.text();
+      logger.error(
+        `Microsoft createUploadSession failed (${sessionRes.status}) for ${att.name}: ${errBody}`,
+      );
+      throw new Error(`${sessionRes.status}: ${extractGraphErrorMessage(errBody)}`);
+    }
+    const session = (await sessionRes.json()) as { uploadUrl?: string };
+    const uploadUrl = session.uploadUrl;
+    if (!uploadUrl) {
+      throw new Error(
+        `Microsoft createUploadSession returned no uploadUrl for ${att.name}.`,
+      );
+    }
+
+    // 2. Stream chunks. Content-Range is inclusive on both ends, total is N.
+    const chunkSize = MicrosoftDeskService.UPLOAD_SESSION_CHUNK_BYTES;
+    for (let offset = 0; offset < totalSize; offset += chunkSize) {
+      const end = Math.min(offset + chunkSize, totalSize);
+      const chunk = buffer.subarray(offset, end);
+      const contentRange = `bytes ${offset}-${end - 1}/${totalSize}`;
+
+      const putRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Length': String(chunk.length),
+          'Content-Range': contentRange,
+        },
+        body: chunk,
+      });
+
+      // Graph returns 202 for intermediate chunks and 200/201 for the final
+      // chunk (with the attachment payload). Anything else is fatal.
+      if (putRes.status !== 202 && putRes.status !== 200 && putRes.status !== 201) {
+        const errBody = await putRes.text();
+        logger.error(
+          `Microsoft upload session chunk failed (${putRes.status}) for ${att.name} range ${contentRange}: ${errBody}`,
+        );
+        throw new Error(
+          `${putRes.status}: ${extractGraphErrorMessage(errBody)}`,
+        );
+      }
     }
   }
 
