@@ -16,7 +16,7 @@ import {
 } from 'lexical';
 import { MentionNode, $isMentionNode, $createMentionNode } from './MentionNode';
 import type { MentionData } from './MentionNode';
-import { MentionPlugin } from './MentionPlugin';
+import { MentionPlugin, UserTriggerType, ChannelTriggerType } from './MentionPlugin';
 import { PastePlugin } from './PastePlugin';
 import { cn } from '../../../utils/classNames';
 import { MentionType } from './ChannelCommandMenu.types';
@@ -30,8 +30,8 @@ interface LexicalSearchInputProps {
     text: string,
     mentions: Array<{ id: string; type: MentionType; prefix?: string }>,
   ) => void;
-  onUserSearch?: (query: string | null) => void;
-  onChannelSearch?: (query: string | null, trigger?: '#' | 'in:') => void;
+  onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
+  onChannelSearch?: (query: string | null, trigger?: ChannelTriggerType) => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
   availableChannels?: Array<{ id: string; name: string }>;
   className?: string;

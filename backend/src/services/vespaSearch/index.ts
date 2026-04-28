@@ -211,10 +211,11 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       }
     }
     
-    // Map frontend 'from' filter to senderId (messages) and createdBy (tickets)
+    // Map frontend 'from' filter to senderId (messages), createdBy (tickets), and createdBy (files)
     if (from) {
       options.slack.senderId = from;
       options.ticket.createdBy = from;
+      options.file.createdBy = from;
     }
     
     // Map frontend 'in' filter to channelId

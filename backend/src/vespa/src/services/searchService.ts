@@ -13,10 +13,41 @@ import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import config from '../config';
 import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters } from '../utils/YqlBuilder';
-import {  
+import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
 import { executeFuzzyFallback } from '../utils/fallback';
+
+function escapeQueryForUserInput(query: string): string {
+  if (!query) return query;
+
+  // Strip leading/trailing whitespace
+  const trimmed = query.trim();
+
+  // If the entire query is only special characters with no alphanumeric content,
+  // return empty string to avoid Vespa parse errors
+  if (!/[a-zA-Z0-9]/.test(trimmed)) {
+    return '';
+  }
+
+  return trimmed
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/!/g, '\\!')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/:/g, '\\:')
+    .replace(/\*/g, '\\*')
+    .replace(/\?/g, '\\?')
+    .replace(/\|/g, '\\|')
+    .replace(/&/g, '\\&')
+    .replace(/~/g, '\\~')
+    .replace(/\^/g, '\\^')
+    .replace(/\$/g, '\\$')
+    .replace(/'/g, "\\'");
+}
 
 interface SearchOptions {
   rankProfile?: string;
@@ -131,8 +162,10 @@ export class SearchService {
       }
 
       const buildPayload = (useFuzzy: boolean) => {
+        const escapedQuery = escapeQueryForUserInput(searchQuery);
+        const effectiveQuery = escapedQuery || '*';
         const yql = this.yqlBuilder.buildYql(
-          searchQuery,
+          effectiveQuery,
           allSchemas,
           limit,
           app,
@@ -147,7 +180,7 @@ export class SearchService {
 
         return {
           yql,
-          query: searchQuery || '',
+          query: effectiveQuery,
           hits: limit,
           offset,
           ...(useFuzzy ? { "ranking.profile": RankProfile.fuzzyRank } : { "ranking.profile": rankProfile }),
@@ -169,6 +202,7 @@ export class SearchService {
             "input.query(user_personalization_weights)": userWeights,
             "input.query(saturation_point)": 100.0,
           }),
+          ...(effectiveQuery !== '*' ? { 'input.query(e)': 'embed(@query)' } : {}), // skip embedding for wildcard
         };
       };
 

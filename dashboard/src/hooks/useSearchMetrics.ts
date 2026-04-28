@@ -27,6 +27,7 @@ import {
   hasLocalTypeFilter,
   hasIncompleteType,
   getBackendTypes,
+  hasActiveMentionFilter,
 } from '../utils/searchFilterParser';
 import { sudoQueryService } from '../services/hyperAnalytics/sudoQueryService';
 
@@ -38,6 +39,7 @@ interface UseSearchMetricsOptions {
   searchLocation?: SearchLocation;
   allChannels?: Array<{ channel: Channel; category: ChannelCategory; searchableNames?: string[] }>;
   onSearchComplete?: (results: DisplaySearchResult[], query: string) => void;
+  mentionSearchType?: MentionType | null;
 }
 
 const BACKEND_RESULTS_LIMIT = 25;
@@ -776,6 +778,21 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             cumulativeCount: results.length,
           },
         }));
+      } else if (hasActiveMentionFilter(query, selectedMentions)) {
+        setSearchResults([]);
+        setPaginationState(prev => ({
+          ...prev,
+          [activeTab]: {
+            page: 1,
+            hasMore: false,
+            total: 0,
+            offset: 0,
+            cumulativeCount: 0,
+          },
+        }));
+        setIsSearching(false);
+        pendingSearchCountRef.current -= 1;
+        return;
       } else if (searchText || hasFilters) {
         setIsSearching(true);
         setSearchError(null);
@@ -827,10 +844,28 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
             // Handle type filter - only send backend-valid types (strip local types like users/people/channels)
             if (typeFilter) {
-              const backendTypes = getBackendTypes(parseTypeFilter(typeFilter));
+              const parsedTypes = parseTypeFilter(typeFilter);
+              const backendTypes = getBackendTypes(parsedTypes);
+
+              // Check for canvas/transcript types to set specific filters
+              const hasCanvas = parsedTypes.includes('canvas');
+              const hasTranscript = parsedTypes.includes('transcript');
+
               if (backendTypes.length > 0) {
                 searchFilters.type = backendTypes.join(',');
               }
+
+              // Override apps and set subApp for canvas/transcript specific searches
+              if (hasCanvas && !hasTranscript) {
+                // Only canvas - restrict to FILE app with CANVAS subApp
+                searchFilters.apps = VespaApps.FILE;
+                searchFilters.subApp = 'CANVAS';
+              } else if (hasTranscript && !hasCanvas) {
+                // Only transcript - restrict to FILE app with TRANSCRIPT subApp
+                searchFilters.apps = VespaApps.FILE;
+                searchFilters.subApp = 'transcript';
+              }
+              // If both canvas and transcript are specified, let the backend handle it naturally
             } else if (activeTab === TabType.MESSAGES) {
               searchFilters.type = VespaDocTypes.MESSAGES;
             } else if (activeTab === TabType.ATTACHMENTS) {
@@ -1025,14 +1060,32 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     [searchSessionId, markSearchStart, resetSearchState],
   );
 
+  // Track the last search text to avoid duplicate calls for trailing spaces
+  const lastSearchedTextRef = useRef('');
+
   // Debounced backend search with pagination reset
   useEffect(() => {
+    if (options.mentionSearchType) {
+      return;
+    }
+
     // Skip if channel or empty search (unless not on channels tab)
     // Actually logic from component was:
     // if (!searchText.trim() && activeTab !== TabType.CHANNELS) return;
     // but the hook can just handle it.
 
+    // Normalize text by trimming trailing spaces to avoid duplicate API calls
+    // "sak" and "sak   " should trigger the same search
+    const normalizedText = text.trimEnd();
+
+    // Skip if the normalized text is the same as the last searched text
+    // This prevents unnecessary API calls when typing only spaces
+    if (normalizedText === lastSearchedTextRef.current && normalizedText !== '') {
+      return;
+    }
+
     const timer = setTimeout(() => {
+      lastSearchedTextRef.current = normalizedText;
       void performSearch(
         text,
         activeTab,
@@ -1053,6 +1106,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     filteredLocalUsers,
     filteredLocalChannels.length,
     options.onSearchComplete,
+    options.mentionSearchType,
     performSearch,
   ]);
 

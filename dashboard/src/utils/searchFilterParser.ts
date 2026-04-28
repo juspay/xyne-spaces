@@ -199,3 +199,42 @@ export function hasIncompleteType(types: string[]): boolean {
 export function getBackendTypes(types: string[]): string[] {
   return types.filter(t => BACKEND_TYPES.includes(t));
 }
+
+const INCOMPLETE_MENTION_FILTER_REGEX = /\b(from|in|assignee):\S+/gi;
+
+export function hasActiveMentionFilter(
+  query: string,
+  selectedMentions: Array<{ id: string; type: string; prefix?: string }>,
+): boolean {
+  // Find all mention filter patterns in the query
+  const matches = query.match(INCOMPLETE_MENTION_FILTER_REGEX);
+  if (!matches || matches.length === 0) {
+    return false;
+  }
+
+  // Check each match to see if it corresponds to a selected mention
+  for (const match of matches) {
+    const prefixMatch = match.match(/\b(from|in|assignee):/i);
+    if (!prefixMatch || !prefixMatch[1]) continue;
+
+    const prefix = prefixMatch[1].toLowerCase();
+    // Map prefix to mention type
+    const mentionType = prefix === 'in:' ? 'channel' : 'user';
+
+    // Check if there's a selected mention with matching prefix/type
+    const hasMatchingMention = selectedMentions.some(
+      m =>
+        m.type === mentionType &&
+        ((prefix === 'from:' && (!m.prefix || m.prefix === 'from:')) ||
+          (prefix === 'assignee:' && m.prefix === 'assignee:') ||
+          (prefix === 'in:' && m.prefix === 'in:')),
+    );
+
+    // If no matching mention found, this is an incomplete filter
+    if (!hasMatchingMention) {
+      return true;
+    }
+  }
+
+  return false;
+}
