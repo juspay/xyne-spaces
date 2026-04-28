@@ -2080,6 +2080,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('formContextMappings')
       .orderBy('createdAt', 'desc')
   }),
+  getAllFormsList: defineQuery(() => {
+    return zql.forms.orderBy('createdAt', 'desc');
+  }),
   // Query for form fields by form ID
   getFormFieldsByFormId: defineQuery(z.object({ formId: z.string() }), ({ args: { formId } }) => {
     return zql.form_fields.where('formId', formId).orderBy('createdAt', 'asc');
