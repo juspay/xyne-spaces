@@ -1,3 +1,13 @@
+## [1.132.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.132.1...v1.132.2) (2026-04-28)
+
+
+### Bug Fixes
+
+* appActions_showAll ([c18ed8f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c18ed8f95b2ec7ec0f4d94c398c9684467695731)), closes [#5612](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5612)
+* Email Suppport in Apps ([c1e4bbd](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c1e4bbd46ad70647ad6d8d20ed931c0427e062a5)), closes [#5616](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5616)
+* support screen fix suggestions main ([c08e632](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c08e632c0b94836a38719f0f9af75e58fde2121d)), closes [#5617](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5617)
+* workspace backward compatible ([3d48a1e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/3d48a1e8f272e5f63fba79c102c00ece0aeea4ac)), closes [#5482](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5482)
+
 ## [1.132.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.132.0...v1.132.1) (2026-04-27)
 
 
