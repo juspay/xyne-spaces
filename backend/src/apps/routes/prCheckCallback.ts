@@ -138,8 +138,8 @@ router.post('/callback', async (req: Request, res: Response) => {
       select: { name: true },
     });
 
-    // Get current user from auth middleware
-    const userId = req.body.userId || req.user?.id;
+    // Get current user from auth middleware (supports both callerUserId from dispatchAction and userId)
+    const userId = req.body.callerUserId || req.body.userId || req.user?.id;
     if (!userId) {
       res.status(401).json({ error: 'User not authenticated' });
       return;
