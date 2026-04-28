@@ -6566,6 +6566,7 @@ export const mutators = defineMutators({
           email: creatorEmail,
           role: OrgRole.OWNER,
           joinedAt: timestamp,
+          userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
         });
       },
     ),
@@ -6668,6 +6669,7 @@ export const mutators = defineMutators({
             email,
             role: role as OrgRole,
             joinedAt: timestamp,
+            userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
           });
         }
       },

@@ -1161,6 +1161,7 @@ export const orgMemberTable = table('org_members')
   .columns({
     memberId: string(),
     orgId: string(),
+    userId: string(), // Deprecated: for backward compatibility only
     email: string(),
     role: enumeration<OrgRole>(),
     joinedAt: number(),

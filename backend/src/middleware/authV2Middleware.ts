@@ -45,6 +45,17 @@ class AuthV2Middleware {
    * Helper to get global session ID (not workspace-scoped)
    */
   private getSessionId(req: Request): string | undefined {
+    // Header-based session ID (API clients / old dashboards that can't set cookies)
+    const headerSessionId = req.headers['x-session-id'] as string | undefined;
+    if (headerSessionId) {
+      return headerSessionId;
+    }
+
+    // Backward compat: user_session_id cookie (for old dashboard versions)
+    if (req.cookies?.user_session_id) {
+      return req.cookies.user_session_id;
+    }
+
     return req.cookies?.xyne_session;
   }
 
@@ -55,7 +66,6 @@ class AuthV2Middleware {
     try {
       const sessionId = this.getSessionId(req);
       const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
-      
       logger.info(`[AUTH] [Auto-Refresh] Attempting refresh. Cookie found: ${!!sessionId} ${sessionId}`, {
         method: req.method,
         path: req.path,
@@ -251,6 +261,7 @@ class AuthV2Middleware {
       }
 
       // Attach user to request so downstream handlers work
+      // Safe non-null assertion: orgMember exists via FK constraint
       req.user = {
         id: session.user.id,
         googleId: session.user.providerUserId,
@@ -268,6 +279,7 @@ class AuthV2Middleware {
         googleId: session.user.providerUserId,
         email: session.user.email,
         tokenPreview,
+        workspaceId: session.user.workspaceId,
       });
       next();
       return true;
@@ -315,17 +327,49 @@ class AuthV2Middleware {
           const decoded = jwtService.verifyToken(token);
           
           if (decoded && decoded.sub) {
-              // Validate required claims in JWT token
-              if (!decoded.memberId || !decoded.workspaceId) {
-                logger.error(`[AUTH] ${logPrefix} JWT token missing required claims: memberId=${!!decoded.memberId}, workspaceId=${!!decoded.workspaceId} ${sessionId}`, {
+              /**
+               * BACKWARD COMPATIBILITY SUPPORT
+               *
+               * Old JWTs contain only { sub: userId }. New JWTs include
+               * { workspaceId, memberId, role, orgRole }.
+               *
+               * For old tokens: look up workspace context from DB so the request
+               * can proceed without requiring re-login.
+               */
+              const hasWorkspaceClaims = decoded.memberId && decoded.workspaceId;
+
+              let effectiveWorkspaceId: string | undefined = decoded.workspaceId;
+              let effectiveMemberId: string | undefined = decoded.memberId;
+
+              if (!hasWorkspaceClaims) {
+                logger.info(`[AUTH] ${logPrefix} LEGACY JWT FORMAT - User ${decoded.sub} using pre-workspace client ${sessionId}`, {
+                  sessionId,
+                  userId: decoded.sub,
+                  tokenSource,
+                  tokenPreview,
+                });
+
+                const legacyUser = await db.user.findUnique({
+                  where: { id: decoded.sub },
+                  select: { workspaceId: true, orgMemberId: true },
+                });
+
+                effectiveWorkspaceId = legacyUser?.workspaceId ?? undefined;
+                effectiveMemberId = legacyUser?.orgMemberId ?? undefined;
+              }
+              // END BACKWARD COMPAT
+
+              if (!effectiveWorkspaceId || !effectiveMemberId) {
+                logger.warn(`[AUTH] ${logPrefix} No workspace context resolved for user ${decoded.sub} ${sessionId}`, {
                   sessionId,
                   tokenSource,
                   tokenPreview,
-                  decodedClaims: Object.keys(decoded),
+                  effectiveWorkspaceId,
+                  effectiveMemberId,
                 });
                 res.status(401).json({
-                  error: 'Invalid token',
-                  message: 'Token missing required claims. Please login again.',
+                  error: 'Workspace context missing',
+                  message: 'Unable to determine workspace for this session. Please log in again.',
                 });
                 return;
               }
@@ -344,7 +388,7 @@ class AuthV2Middleware {
                   }
                 }),
                 db.orgMember.findUnique({
-                  where: { memberId: decoded.memberId },
+                  where: { memberId: effectiveMemberId! },
                   select: { role: true }
                 })
               ]);
@@ -373,10 +417,10 @@ class AuthV2Middleware {
                     googleId: user.providerUserId,
                     email: user.email,
                     name: user.name,
-                    workspaceId: decoded.workspaceId,
+                    workspaceId: effectiveWorkspaceId,
                     role: workspaceRole,
                     orgRole: orgRole,
-                    memberId: decoded.memberId,
+                    memberId: effectiveMemberId!,
                   };
                   logger.info(`[AUTH] ${logPrefix} Token verified successfully for user: ${user.email} ${sessionId}`, {
                     sessionId,
