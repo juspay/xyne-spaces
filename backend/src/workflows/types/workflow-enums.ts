@@ -24,6 +24,7 @@ export enum WorkflowType {
   VERSION_BUMP_WORKFLOW = 'VERSION_BUMP_WORKFLOW',
   IT_SUPPORT_WORKFLOW = 'IT_SUPPORT_WORKFLOW',
   JUTILS_CODE_UPDATION = 'JUTILS_CODE_UPDATION',
+  SPECS_VERIFICATION_WORKFLOW = 'SPECS_VERIFICATION_WORKFLOW'
 }
 
 export enum WorkflowExecutionStatus {
@@ -483,6 +484,11 @@ export interface IntegrityDebugContext extends BaseWorkflowContext {
   orderIds?: string[] // Array of all order IDs to analyze
 }
 
+export interface SpecsVerificationWorkFlowContext extends BaseWorkflowContext {
+  gateway: string
+  maxIterations: number
+}
+
 // Union type for all workflow contexts
 export type WorkflowContext = any
 
@@ -578,6 +584,7 @@ export function getWorkflowTypeDisplayName(workflowType: WorkflowType): string {
     [WorkflowType.VERSION_BUMP_WORKFLOW]: 'Version Bump Workflow',
     [WorkflowType.IT_SUPPORT_WORKFLOW]: 'IT Support Workflow',
     [WorkflowType.JUTILS_CODE_UPDATION]: 'jUtils Workflow',
+    [WorkflowType.SPECS_VERIFICATION_WORKFLOW]: 'Specs Verification Workflow',
   };
   return displayNames[workflowType]
 }
