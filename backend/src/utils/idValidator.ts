@@ -195,7 +195,7 @@ export async function validateTicketIds(ticketIds: string[]): Promise<IdValidati
 export const VALID_DOC_TYPES = [
   'messages', 'attachments', 'channels', 'tickets', 'users', 'files',
   'canvas', 'transcript', 'rca',
-  'people',
+  'people', 'emails',
 ] as const;
 
 /**

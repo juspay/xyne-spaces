@@ -14,6 +14,7 @@ import {
   MentionType,
   VespaApps,
   VespaDocTypes,
+  SearchableTypes,
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
@@ -173,6 +174,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     Array<{ id: string; type: MentionType; prefix?: string }>
   >([]);
   const [useVespaSearch, setUseVespaSearch] = useState(true);
+  // Cmd-K "Include bot messages" toggle. Default OFF → backend excludes BOT messages.
+  const [includeBotMessages, setIncludeBotMessages] = useState(false);
 
   // Load More Ref
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -230,6 +233,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     [TabType.CANVAS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     [TabType.CALL]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+    [TabType.DESK]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
   });
 
   const pendingSearchCountRef = useRef(0);
@@ -661,6 +665,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       [TabType.CANVAS]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.CALL]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+      [TabType.DESK]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     });
   }, [resetImpressionTracking]);
 
@@ -804,13 +809,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         try {
           if (shouldUseVespa) {
             const limit = BACKEND_RESULTS_LIMIT;
-            const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE}`;
+            const apps = `${VespaApps.CHAT},${VespaApps.TICKET},${VespaApps.FILE},${VespaApps.MAIL}`;
             const searchFilters: VespaSearchFilters = {
               query: searchText,
               apps: apps,
               offset: 0,
               limit: limit,
               filterOnly: !searchText && !!hasFilters,
+              includeBotMessages,
               ...(priorityFilter && { priority: priorityFilter }),
               ...(boardFilter && { board: boardFilter }),
               ...(tagsFilter && { tags: tagsFilter }),
@@ -872,6 +878,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.type = VespaDocTypes.FILES;
             } else if (activeTab === TabType.TICKETS) {
               searchFilters.type = VespaDocTypes.TICKETS;
+            } else if (activeTab === TabType.DESK) {
+              searchFilters.type = SearchableTypes.EMAILS;
+              searchFilters.apps = VespaApps.MAIL;
             } else if (activeTab === TabType.CANVAS) {
               searchFilters.type = 'canvas';
               searchFilters.apps = VespaApps.FILE;
@@ -944,7 +953,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               mergedResults = results.results;
               totalCount = results.totalCount;
               currentOffset = results.limit;
-              hasMore = currentOffset < totalCount;
+              hasMore =
+                results.results.length > 0 &&
+                results.results.length >= BACKEND_RESULTS_LIMIT &&
+                currentOffset < totalCount;
             }
 
             setSearchResults(mergedResults);
@@ -1057,7 +1069,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         resetSearchState();
       }
     },
-    [searchSessionId, markSearchStart, resetSearchState],
+    [searchSessionId, markSearchStart, resetSearchState, includeBotMessages],
   );
 
   // Track the last search text to avoid duplicate calls for trailing spaces
@@ -1164,6 +1176,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           offset: currentOffset,
           limit: currentOffset + pageSize,
           filterOnly: !searchText && !!hasFilters,
+          includeBotMessages,
           ...(priorityFilter && { priority: priorityFilter }),
           ...(boardFilter && { board: boardFilter }),
           ...(tagsFilter && { tags: tagsFilter }),
@@ -1227,7 +1240,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         setSearchResults(prev => [...prev, ...results.results]);
 
         const newOffset = results.limit;
-        const hasMore = newOffset < results.totalCount;
+        const hasMore =
+          results.results.length > 0 &&
+          results.results.length >= BACKEND_RESULTS_LIMIT &&
+          newOffset < results.totalCount;
 
         setPaginationState(prev => ({
           ...prev,
@@ -1304,6 +1320,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     activeTab,
     selectedMentions,
     useVespaSearch,
+    includeBotMessages,
   ]);
 
   // Load more results wrapper for effect
@@ -1391,6 +1408,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setSelectedMentions,
     useVespaSearch,
     setUseVespaSearch,
+    includeBotMessages,
+    setIncludeBotMessages,
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,

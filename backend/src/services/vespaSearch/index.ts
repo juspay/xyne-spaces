@@ -85,7 +85,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
   try {
     const {
       q,
-      apps = 'slack,ticket,user,file',
+      apps = 'slack,ticket,user,file,mail',
       offset = 0,
       limit = 20,
       rankProfile,
@@ -112,10 +112,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       filterOnly,  // Flag for filter-only search (no query text)
       callType,   // Call type filter (e.g. HEADLESS for recordings)
       presentationSummary, // Optional Vespa presentation.summary profile (e.g. 'lean')
+      includeBotMessages,  // 'true'|'false' string from cmd-K toggle; default behavior excludes BOT messages
       // Note: subApp was moved up to be with other frontend filters
     } = req.query;
 
     const userId = (req as any).user?.id;
+    const userEmail = (req as any).user?.email;
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
@@ -132,7 +134,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       limit: Number(limit),
       slack: {},
       ticket: {},
-      file: {}
+      file: {},
+      mail: { userEmail }
     };
     
      if (rankProfile) {
@@ -168,7 +171,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
       // Unified type mapping — includes subApp types (canvas, transcript, rca)
       // Types filtered locally (users, people, channels) have null app so they don't trigger a Vespa search
-      const typeMapping: Record<string, { app: 'chat' | 'ticket' | 'file' | null, optionsKey: 'slack' | 'ticket' | 'file', docType: string, subApp?: string }> = {
+      const typeMapping: Record<string, { app: 'chat' | 'ticket' | 'file' | 'mail' | null, optionsKey: 'slack' | 'ticket' | 'file' | 'mail', docType: string, subApp?: string }> = {
         'messages': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.MESSAGE },
         'attachments': { app: 'chat', optionsKey: 'slack', docType: VespaDocType.ATTACHMENT },
         'channels': { app: null, optionsKey: 'slack', docType: VespaDocType.CHANNEL },
@@ -179,9 +182,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
         'canvas': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: 'canvas' },
         'transcript': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: 'transcript' },
         'rca': { app: 'file', optionsKey: 'file', docType: VespaDocType.FILE, subApp: 'RCA' },
+        'emails': { app: 'mail', optionsKey: 'mail', docType: VespaDocType.MAIL },
       };
 
-      const mappedApps = new Set<'chat' | 'ticket' | 'file'>();
+      const mappedApps = new Set<'chat' | 'ticket' | 'file' | 'mail'>();
       const subApps: string[] = [];
 
       types.forEach(t => {
@@ -292,6 +296,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     if (presentationSummary) {
       options.presentationSummary = presentationSummary as string;
+    }
+
+    // Bot-message toggle: default OFF (exclude). Frontend opts-in by sending
+    // includeBotMessages=true. Anything else → exclude bot messages.
+    if (includeBotMessages !== 'true') {
+      options.slack.excludeBotMessages = true;
     }
 
     // Call vespa search

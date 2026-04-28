@@ -1315,6 +1315,7 @@ const SupportTicketDetail = (): ReactElement => {
   const [composerOpen, setComposerOpen] = useState<boolean>(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const routerState = location.state as {
     conversationId?: string | null;
     ticketId?: string | null;
@@ -1331,6 +1332,10 @@ const SupportTicketDetail = (): ReactElement => {
   const routeChannelId = channelIdParam ?? '';
   const channelUserStatus = useGetChannelUserStatus(routeChannelId);
   const isMember = !!channelUserStatus;
+  // `mail` is set by navigateToMail (mail search-result click) and carries
+  // either Postgres email.id or Gmail externalMessageId. We scroll to the
+  // matching EmailThreadItem after emails load.
+  const targetMailId = searchParams.get('mail');
 
   // Single consolidated fetch: the ticket row with `.related('emails')` gives us emails,
   // channelId (scalar on ticket), conversationId, and everything else we need — replaces
@@ -1355,6 +1360,27 @@ const SupportTicketDetail = (): ReactElement => {
   const ticket = ticketById ?? ticketByXyneId;
   const emails = useMemo(() => (ticket?.emails as Email[] | undefined) ?? [], [ticket?.emails]);
   const emailCollapseState = useEmailCollapseState(emails);
+
+  // When arriving via a mail deep-link (`?mail=<id>`), un-collapse the target
+  // email so it's visible, then scroll to it with a brief yellow flash.
+  useEffect(() => {
+    if (!targetMailId || emails.length === 0) return;
+    emailCollapseState.expandOne(targetMailId);
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const target =
+          document.getElementById(`mail-${targetMailId}`) ||
+          document.querySelector(`[data-external-message-id="${targetMailId}"]`);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          target.classList.add('bg-yellow-50');
+          setTimeout(() => target.classList.remove('bg-yellow-50'), 2500);
+        }
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetMailId, emails]);
   const channelId = ticket?.channelId || '';
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
@@ -2213,6 +2239,8 @@ const SupportTicketDetail = (): ReactElement => {
 interface EmailCollapseState {
   collapsedIds: Set<string>;
   toggleOne: (id: string) => void;
+  /** Force a specific email to be expanded (used for ?mail=X deep links). */
+  expandOne: (id: string) => void;
   toggleAll: () => void;
   canToggleAll: boolean;
   anyExpanded: boolean;
@@ -2259,6 +2287,15 @@ const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
     });
   };
 
+  const expandOne = (id: string): void => {
+    setCollapsedIds(prev => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
   const toggleAll = (): void => {
     if (anyExpanded) {
       setCollapsedIds(new Set(collapsibleEmails.map(e => e.id)));
@@ -2270,6 +2307,7 @@ const useEmailCollapseState = (emails: Email[]): EmailCollapseState => {
   return {
     collapsedIds,
     toggleOne,
+    expandOne,
     toggleAll,
     canToggleAll,
     anyExpanded,

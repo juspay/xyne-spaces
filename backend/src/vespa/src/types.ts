@@ -9,6 +9,7 @@ export const userSchema = 'user';
 export const fileSchema = 'file'
 export const memorySchema = 'memory';
 export const samTranscriptSchema = 'sam_transcript';
+export const mailSchema = 'mail';
 export type VespaSchema =
   | typeof ticketSchema
   | typeof messageSchema
@@ -19,6 +20,7 @@ export type VespaSchema =
   | typeof fileSchema
   | typeof memorySchema
   | typeof samTranscriptSchema
+  | typeof mailSchema
 
 export const VESPA_SCHEMAS: VespaSchema[] = [
   ticketSchema,
@@ -29,7 +31,8 @@ export const VESPA_SCHEMAS: VespaSchema[] = [
   userSchema,
   fileSchema,
   memorySchema,
-  samTranscriptSchema
+  samTranscriptSchema,
+  mailSchema
 ];
 
 export const MemoryScope = {
@@ -105,7 +108,8 @@ export enum VespaDocType {
   MEMORY = 'memory',
   FACT = 'fact',
   SOP = 'sop',
-  SAM_TRANSCRIPT = 'sam_transcript'
+  SAM_TRANSCRIPT = 'sam_transcript',
+  MAIL = 'mail'
 }
 
 export enum SubApp {
@@ -408,6 +412,32 @@ export interface VespaSamTranscriptDocument extends VespaDocument {
   merchants: string[];
 }
 
+export interface VespaMailDocument extends VespaDocument {
+  threadId: string;
+  parentThreadId?: string;
+  mailId?: string;
+  subject: string;
+  chunks: string[];
+  timestamp: number;
+  /**
+   * ExternalSource.name — e.g. "zoho-euler".
+   * null if the source could not be resolved at ingest time.
+   */
+  app: string | null;
+  /**
+   * "support_desk" for Desk/support emails; reserved for "personal" (Gmail) in the future.
+   * Search filters on `entity contains "support_desk"`.
+   */
+  entity: string;
+  /** User IDs of channel participants — ACL enforced at query time */
+  permissions: string[];
+  from: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  attachmentFilenames?: string[];
+}
+
 export type VespaSearchResult =
   | VespaChatContainerDocument
   | VespaChatAttachmentDocument
@@ -418,6 +448,7 @@ export type VespaSearchResult =
   | VespaFileDocument
   | VespaMemoryDocument
   | VespaSamTranscriptDocument
+  | VespaMailDocument
 
 export interface VespaSearchHit {
   id: string;
@@ -464,6 +495,7 @@ export type InsertDocument =
   | VespaFileDocument
   | VespaMemoryDocument
   | VespaSamTranscriptDocument
+  | VespaMailDocument
 
 export type SchemaDataMap = {
   [messageSchema]: VespaChatMessageDocument;
@@ -475,6 +507,7 @@ export type SchemaDataMap = {
   [fileSchema]: VespaFileDocument;
   [memorySchema]: VespaMemoryDocument;
   [samTranscriptSchema]: VespaSamTranscriptDocument;
+  [mailSchema]: VespaMailDocument;
 };
 
 export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
@@ -486,6 +519,7 @@ export const schemaToDocType: Partial<Record<VespaSchema, VespaDocType>> = {
   [attachmentSchema]: VespaDocType.ATTACHMENT,
   [fileSchema]: VespaDocType.FILE,
   [samTranscriptSchema]: VespaDocType.SAM_TRANSCRIPT,
+  [mailSchema]: VespaDocType.MAIL,
 };
 
 export interface MatchFeatures {

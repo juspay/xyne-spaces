@@ -1,11 +1,11 @@
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
-import { channelSchema, InsertDocument, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
+import { channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
 import { ChannelScopeType, ChannelVisibility, TicketStatus, TicketStatusV2, type Schema } from '@xyne/shared';
 import { VespaJob, VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
-import { Conversation, Channel, Message, Project, Ticket, VespaOperationType as VespaOpType, Canvas, Call } from '@prisma/client';
+import { Conversation, Channel, Message, Project, Ticket, Email, AttachmentEntityType, VespaOperationType as VespaOpType, Canvas, Call } from '@prisma/client';
 import { FileProcessor } from '@/services/fileProcessor';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import vespaClient from '@/vespa/client';
@@ -939,6 +939,109 @@ export const mapFile = async (args: InsertValue<MessageAttachmentsSchema>): Prom
   };
 };
 
+/**
+ * Chunk a plain-text string into segments of at most `maxLen` characters,
+ * splitting on word boundaries so search snippets are coherent.
+ */
+const chunkPlainText = (text: string, maxLen = 2000): string[] => {
+  const words = text.split(/\s+/).filter(Boolean);
+  const chunks: string[] = [];
+  let current = '';
+  for (const word of words) {
+    if (current.length + word.length + 1 > maxLen && current.length > 0) {
+      chunks.push(current);
+      current = word;
+    } else {
+      current = current ? `${current} ${word}` : word;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 0 ? chunks : [''];
+};
+
+/**
+ * Map a Prisma Email record to a VespaMailDocument ready for ingestion.
+ * Performs the following side-queries:
+ *   1. conversation → channelId
+ *   2. channelParticipant[]  → permissions (user IDs)
+ *   3. externalMessage       → externalSourceId
+ *   4. externalSource        → source name
+ *   5. messageAttachment[]   → attachmentFilenames
+ */
+export const mapEmail = async (email: Email): Promise<VespaMailDocument> => {
+  // 1. Resolve conversation → channelId
+  const conversation = await db.conversation.findUnique({
+    where: { conversationId: email.conversationId },
+    select: { channelId: true },
+  });
+  const channelId = conversation?.channelId ?? '';
+
+  // 2. Channel participants → permissions (user IDs; new members auto-included on next ingest)
+  const participants = await db.channelParticipant.findMany({
+    where: { channelId },
+    select: { userId: true },
+  });
+  const permissions = participants.map(p => p.userId);
+
+  // 3+4. Resolve source name via ExternalMessage → ExternalSource
+  // Stays null if the lookup fails — intentional: null is visible, a hardcoded fallback is not.
+  let sourceName: string | null = null;
+  try {
+    const externalMsg = await db.externalMessage.findFirst({
+      where: { externalId: email.externalMessageId },
+      select: { externalSourceId: true },
+    });
+    if (externalMsg?.externalSourceId) {
+      const externalSource = await db.externalSource.findUnique({
+        where: { id: externalMsg.externalSourceId },
+        select: { name: true },
+      });
+      sourceName = externalSource?.name ?? null;
+    } else {
+      logger.warn(`[mapEmail] No ExternalMessage found for externalMessageId=${email.externalMessageId} (email ${email.id})`);
+    }
+  } catch (err) {
+    logger.warn(`[mapEmail] Could not resolve ExternalSource for email ${email.id}: ${err}`);
+  }
+
+  // 5. Attachment filenames
+  const attachments = await db.messageAttachment.findMany({
+    where: { entityId: email.id, entityType: AttachmentEntityType.EMAIL },
+    select: { originalFilename: true },
+  });
+  const attachmentFilenames = attachments
+    .map(a => a.originalFilename)
+    .filter((n): n is string => Boolean(n));
+
+  // Build searchable chunks from plain-text body.
+  // Chunks contain ONLY the body — subject is indexed separately in the `subject`
+  // field, so prepending "Subject: ..." here would produce a redundant snippet
+  // ("Subject: X ...") in rendered search results.
+  const plainBody = extractPlainTextFromHtml(email.body || '') || email.subject;
+  const chunks = chunkPlainText(plainBody);
+
+  return {
+    docId: email.id,
+    docType: VespaDocType.MAIL,
+    threadId: email.conversationId,
+    parentThreadId: email.externalThreadId || undefined,
+    mailId: email.externalMessageId || undefined,
+    subject: email.subject,
+    chunks,
+    timestamp: toTimestamp(email.createdAt),
+    /** app = source name for display/per-source filtering */
+    app: sourceName,
+    /** entity = "support_desk"; future: "personal" for Gmail */
+    entity: 'support_desk',
+    permissions,
+    from: email.from,
+    to: email.to,
+    cc: email.cc.length > 0 ? email.cc : undefined,
+    bcc: email.bcc.length > 0 ? email.bcc : undefined,
+    attachmentFilenames: attachmentFilenames.length > 0 ? attachmentFilenames : undefined,
+  };
+};
+
 export const mapBySchema = async (
   schemaName: VespaSchema,
   args: VespaPayload,
@@ -977,6 +1080,8 @@ export const mapBySchema = async (
           default:
             throw new Error(`No mapper defined for sub-app: ${app}`);
         }
+      case mailSchema:
+        return mapEmail(args as unknown as Email);
       case samTranscriptSchema:
         throw new Error(`${schemaName}: SAM transcripts must be queued with pre-transformed data. Pass the document via vespaQueue.addJob({ data: vespaDocument }).`);
       default:
@@ -1012,7 +1117,7 @@ export const fetchDataBySchema = async (
   schema: VespaSchema,
   docId: string,
   app?: SubApp
-): Promise<Channel | Message | Project | Ticket | RCAWithRelations | Canvas | Call | null> => {
+): Promise<Channel | Message | Project | Ticket | Email | RCAWithRelations | Canvas | Call | null> => {
   switch (schema) {
     case channelSchema:
       return await db.channel.findUnique({
@@ -1058,6 +1163,11 @@ export const fetchDataBySchema = async (
         default:
           throw new Error(`No fetcher defined for sub-app: ${app}`);
       }
+
+    case mailSchema:
+      return await db.email.findUnique({
+        where: { id: docId },
+      });
 
     case samTranscriptSchema:
       throw new Error(`${schema}: SAM transcripts have no DB table. Pass pre-transformed data via vespaQueue.addJob({ data: vespaDocument }).`);

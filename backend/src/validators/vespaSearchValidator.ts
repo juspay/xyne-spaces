@@ -17,10 +17,10 @@ export const vespaSearchQuerySchema = Joi.object({
 
   // Apps to search (comma-separated)
   apps: Joi.string()
-    .pattern(/^(chat|ticket|user|file)(,(chat|ticket|user|file))*$/)
-    .default('chat,ticket,user,file')
+    .pattern(/^(chat|ticket|user|file|mail)(,(chat|ticket|user|file|mail))*$/)
+    .default('chat,ticket,user,file,mail')
     .messages({
-      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file'
+      'string.pattern.base': 'Apps must be comma-separated values from: chat, ticket, user, file, mail'
     }),
 
   // Pagination
@@ -45,10 +45,10 @@ export const vespaSearchQuerySchema = Joi.object({
   // Frontend-compatible filters (includes subApp types: canvas, transcript, rca)
   // Supports comma-separated values: messages,files or canvas,transcript
   type: Joi.string()
-    .pattern(/^(messages|attachments|channels|tickets|users|files|canvas|transcript|rca|people)(,(messages|attachments|channels|tickets|users|files|canvas|transcript|rca|people))*$/)
+    .pattern(/^(messages|attachments|channels|tickets|users|files|canvas|transcript|rca|people|emails)(,(messages|attachments|channels|tickets|users|files|canvas|transcript|rca|people|emails))*$/)
     .optional()
     .messages({
-      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, channels, tickets, users, files, canvas, transcript, rca, people'
+      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, channels, tickets, users, files, canvas, transcript, rca, people, emails'
     }),
 
   from: Joi.alternatives()
@@ -168,6 +168,11 @@ export const vespaSearchQuerySchema = Joi.object({
   // Filter-only mode flag
   filterOnly: Joi.string().valid('true', 'false').optional().messages({
     'any.only': 'filterOnly must be "true" or "false"'
+  }),
+
+  // Cmd-K "Include bot messages" toggle. Default behavior (omitted/false) excludes BOT messages.
+  includeBotMessages: Joi.string().valid('true', 'false').optional().messages({
+    'any.only': 'includeBotMessages must be "true" or "false"'
   }),
 
   // Debug flag

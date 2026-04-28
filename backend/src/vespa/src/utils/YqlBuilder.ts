@@ -8,10 +8,11 @@ import {
   channelSchema,
   fileSchema,
   samTranscriptSchema,
+  mailSchema,
 } from '../types';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
-type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'transcript';
+type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'transcript' | 'mail';
 
 export interface SlackFilters {
   channelId?: string[];
@@ -23,6 +24,9 @@ export interface SlackFilters {
   createdAfter?: string;        // Created after date (multiple formats)
   createdOn?: string;           // Created on specific date (multiple formats)
   createdRange?: string;        // Time keyword (today, yesterday, this week, etc.)
+  // When true, exclude messages with messageType="BOT" from chat results.
+  // Default behavior (when undefined/false) is to INCLUDE bot messages.
+  excludeBotMessages?: boolean;
 }
 
 export interface TicketFilters {
@@ -67,6 +71,14 @@ export interface MeetingFilters {
   createdRange?: string;
 }
 
+export interface MailFilters {
+  userEmail?: string;
+  createdBefore?: string;
+  createdAfter?: string;
+  createdOn?: string;
+  createdRange?: string;
+}
+
 export class YqlBuilder {
   constructor() {}
 
@@ -81,6 +93,7 @@ buildYql(
   fileFilters: FileFilters,
   meetingFilters: MeetingFilters,
   userId: string,
+  mailFilters: MailFilters = {},
   useFuzzy: boolean = false,
 ): string {
   const schemaNames = schemas.join(', ');
@@ -117,6 +130,8 @@ buildYql(
       or ({defaultIndex: "childTicketXyneIds"} userInput(@query))
       or ({defaultIndex: "stage"} userInput(@query))
       or ({defaultIndex: "status"} userInput(@query))
+      or ({defaultIndex: "subject_fuzzy"} userInput(@query))
+      or ({defaultIndex: "chunks_fuzzy"} userInput(@query))
       or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
       or ({targetHits:${limit}} nearestNeighbor(chunk_embeddings, e))
     )`);
@@ -160,6 +175,11 @@ buildYql(
     if (apps.some(a => a.toLowerCase() === 'transcript')) {
       appConditions.push(this.buildMeetingConditions(meetingFilters));
     }
+
+    if (apps.some(a => a.toLowerCase() === 'mail')) {
+      appConditions.push(this.buildMailConditions(mailFilters, userId));
+    }
+
      // Combine app conditions
     if (appConditions.length > 0) {
       whereConditions.push(`(${appConditions.join(' or ')})`);
@@ -326,6 +346,11 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
     //Permissions check
     conditions.push(`permissions contains "${userId}"`);
     conditions.push(`!(messageType contains "SYSTEM")`);
+
+    // Optionally exclude bot messages (cmd-K toggle, default off → exclude)
+    if (filters.excludeBotMessages) {
+      conditions.push(`!(messageType contains "BOT")`);
+    }
 
     return conditions.join(' and ');
   }
@@ -507,6 +532,7 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
       user: [userSchema],
       file: [fileSchema],
       transcript: [samTranscriptSchema],
+      mail: [mailSchema],
     };
 
     const result: Record<string, VespaSchema[]> = {};
@@ -519,6 +545,41 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
     }
 
     return result as Record<AppName, VespaSchema[]>;
+  }
+
+  /**
+   * Build YQL condition for mail (Desk) schema.
+   * entity = "support_desk" identifies Desk emails (future: "personal" for Gmail).
+   * permissions stores channel-participant user IDs — filtered by current user ID.
+   */
+  private buildMailConditions(filters: MailFilters, userId: string): string {
+    const conditions: string[] = [`entity contains "support_desk"`];
+
+    conditions.push(`permissions contains "${userId}"`);
+
+    if (filters.createdBefore) {
+      const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');
+      if (timestamp) conditions.push(`timestamp < ${timestamp}`);
+    }
+    if (filters.createdAfter) {
+      const timestamp = parseDateToTimestamp(filters.createdAfter, 'end');
+      if (timestamp) conditions.push(`timestamp > ${timestamp}`);
+    }
+    if (filters.createdOn) {
+      const rangeStart = parseDateToTimestamp(filters.createdOn, 'start');
+      const rangeEnd = parseDateToTimestamp(filters.createdOn, 'end');
+      if (rangeStart && rangeEnd) {
+        conditions.push(`(timestamp >= ${rangeStart} and timestamp <= ${rangeEnd})`);
+      }
+    }
+    if (filters.createdRange) {
+      const timeRange = parseTimeKeyword(filters.createdRange);
+      if (timeRange) {
+        conditions.push(`(timestamp >= ${timeRange.from} and timestamp <= ${timeRange.to})`);
+      }
+    }
+
+    return conditions.join(' and ');
   }
 
   /**

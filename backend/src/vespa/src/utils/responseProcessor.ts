@@ -172,6 +172,20 @@ const stripHighlightTags = (text: string): string => {
       newFields.initialMessage = initialMessage.highlighted;
       wasHighlighted = wasHighlighted || initialMessage.wasHighlighted;
 
+      // Mail schema fields: subject (string) + chunks (array<string>)
+      const subject = highlightField(newFields.subject, query);
+      newFields.subject = subject.highlighted;
+      wasHighlighted = wasHighlighted || subject.wasHighlighted;
+
+      if (Array.isArray(newFields.chunks)) {
+        const highlightedChunks = newFields.chunks.map((c: unknown) => {
+          const r = highlightField(typeof c === 'string' ? c : '', query);
+          wasHighlighted = wasHighlighted || r.wasHighlighted;
+          return r.highlighted;
+        });
+        newFields.chunks = highlightedChunks;
+      }
+
     // // Filter out results with no highlighting
     if (!wasHighlighted) {
       return { keep: false };

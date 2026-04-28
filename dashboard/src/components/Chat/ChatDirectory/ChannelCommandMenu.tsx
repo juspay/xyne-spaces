@@ -22,9 +22,10 @@ import {
   Phone,
   Mic,
   Lock,
+  Mail,
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
-//import * as Switch from '@radix-ui/react-switch';
+import * as Switch from '@radix-ui/react-switch';
 import { Channel, ChannelVisibility } from '@xyne/shared';
 import {
   isDMChannel,
@@ -164,6 +165,7 @@ const DEFAULT_ENABLED_TABS: TabType[] = [
   TabType.MESSAGES,
   TabType.TICKETS,
   TabType.ATTACHMENTS,
+  TabType.DESK,
 ];
 
 const ChannelCommandMenu = ({
@@ -182,6 +184,7 @@ const ChannelCommandMenu = ({
   enabledTabs,
   inline = false,
   onTabChange,
+  initialTab,
   disableAutoFocus = false,
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
@@ -333,6 +336,8 @@ const ChannelCommandMenu = ({
     setSelectedMentions,
     useVespaSearch,
     // setUseVespaSearch,
+    includeBotMessages,
+    setIncludeBotMessages,
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
@@ -688,7 +693,7 @@ const ChannelCommandMenu = ({
       setSearchText(text); // This will be used for search, mentions filtered separately
       setSelectedMentions(mentions);
 
-      // Update ref for next comparison
+      // Update refs for next comparison
       prevSearchTextRef.current = text;
     },
     [onClose, onOpen],
@@ -1034,7 +1039,7 @@ const ChannelCommandMenu = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeEnabledTabs, inline]);
 
-  // Reset state when menu closes
+  // Reset state when menu closes; also reset tab on open so dialog always starts on ALL
   useEffect(() => {
     if (!open) {
       setSearch('');
@@ -1056,8 +1061,11 @@ const ChannelCommandMenu = ({
       if (searchSessionId) {
         onClose();
       }
+    } else if (!inline) {
+      // When opening the non-inline dialog, start on initialTab if provided, else ALL
+      setActiveTab(initialTab ?? TabType.ALL);
     }
-  }, [open, searchSessionId, onClose, resetSearchState]);
+  }, [open, searchSessionId, onClose, resetSearchState, inline, initialTab]);
 
   const toggleCategoryExpansion = (category: string): void => {
     setExpandedCategories(prev => {
@@ -1195,7 +1203,9 @@ const ChannelCommandMenu = ({
     const groups: Record<string, DisplaySearchResult[]> = {};
     backendResults.forEach(result => {
       let groupKey: string;
-      if (result.type === 'attachment' && result.searchContext?.subApp) {
+      if (result.searchContext?.subApp === 'DESK') {
+        groupKey = 'desk';
+      } else if (result.type === 'attachment' && result.searchContext?.subApp) {
         const subAppKey = result.searchContext.subApp.toLowerCase();
         if (subAppKey === 'canvas') {
           groupKey = 'canvas';
@@ -1240,6 +1250,7 @@ const ChannelCommandMenu = ({
     { id: TabType.CANVAS, label: 'Canvas', icon: <LayoutDashboard size={iconSize} /> },
     { id: TabType.CALL, label: 'Calls', icon: <Phone size={iconSize} /> },
     { id: TabType.RECORDING, label: 'Recordings', icon: <Mic size={iconSize} /> },
+    { id: TabType.DESK, label: 'Desk', icon: <Mail size={iconSize} /> },
   ];
 
   const tabs = allTabDefinitions.filter(t => activeEnabledTabs.includes(t.id));
@@ -1277,6 +1288,8 @@ const ChannelCommandMenu = ({
         return 'Calls';
       case 'recording':
         return 'Recordings';
+      case 'desk':
+        return 'Desk';
       default:
         return '';
     }
@@ -1334,7 +1347,7 @@ const ChannelCommandMenu = ({
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
     <>
-      {['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording']
+      {['conversation', 'ticket', 'attachment', 'canvas', 'transcript', 'recording', 'desk']
         .filter(groupKey => {
           if (activeTab === TabType.ALL) return true;
           if (activeTab === TabType.MESSAGES && groupKey === 'conversation') return true;
@@ -1350,6 +1363,7 @@ const ChannelCommandMenu = ({
           if (activeTab === TabType.CANVAS && groupKey === 'canvas') return true;
           if (activeTab === TabType.CALL && groupKey === 'transcript') return true;
           if (activeTab === TabType.RECORDING && groupKey === 'recording') return true;
+          if (activeTab === TabType.DESK && groupKey === 'desk') return true;
           return false;
         })
         .map(groupKey => {
@@ -2060,10 +2074,11 @@ const ChannelCommandMenu = ({
           {isMobile && (
             <button
               onClick={() => {
-                if (search.trim() || searchText.trim()) {
+                if (search.trim() || searchText.trim() || selectedMentions.length > 0) {
                   setSearch('');
                   setSearchText('');
                   setSelectedMentions([]);
+                  prevSearchTextRef.current = '';
                   if (inputRef.current) {
                     inputRef.current.blur();
                   }
@@ -2755,7 +2770,7 @@ const ChannelCommandMenu = ({
 
           {/* Footer */}
           {!inline && !isMobile && (
-            <div className='px-4 py-2 border-t border-border text-sm text-muted-foreground flex items-center justify-end shrink-0'>
+            <div className='px-4 py-2 border-t border-border text-sm text-muted-foreground flex items-center justify-between shrink-0'>
               {/* Vespa Search toggle - commented out, using Vespa as default
           <div className='flex items-center gap-2'>
             <label htmlFor='vespa-toggle' className='text-xs text-muted-foreground cursor-pointer'>
@@ -2771,6 +2786,28 @@ const ChannelCommandMenu = ({
             </Switch.Root>
           </div>
           */}
+              <div className='flex items-center gap-2'>
+                <label
+                  htmlFor='include-bot-messages-toggle'
+                  className='text-xs text-muted-foreground cursor-pointer'
+                  title={
+                    includeBotMessages
+                      ? 'Bot messages are included in search results'
+                      : 'Bot messages are hidden from search results'
+                  }
+                >
+                  Include bot messages
+                </label>
+                <Switch.Root
+                  id='include-bot-messages-toggle'
+                  checked={includeBotMessages}
+                  onCheckedChange={setIncludeBotMessages}
+                  aria-label='Toggle bot messages in search results'
+                  className='w-9 h-5 bg-muted-foreground/40 rounded-full relative data-[state=checked]:bg-blue-500 transition-colors'
+                >
+                  <Switch.Thumb className='block w-4 h-4 bg-background rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-5' />
+                </Switch.Root>
+              </div>
               <div className='flex items-center gap-6'>
                 <span className='flex gap-2.5 items-center'>
                   <span>Open</span>
