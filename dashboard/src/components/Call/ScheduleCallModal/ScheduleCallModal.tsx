@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useEffect, useState, useRef } from 'react'
 import { RRule } from 'rrule';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
-import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelType, ChannelVisibility } from '@xyne/shared';
 import { useSelf, useUsers } from '../../../hooks/useUsers';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
@@ -256,9 +256,12 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     return result;
   };
 
-  // Filter for DEFAULT public channels only (not DMs)
+  // Filter for DEFAULT public channels only (not DMs, not EMAIL/Desk channels)
   const channels = useMemo(() => {
-    return allVisibleChannels.filter(channel => channel.scopeType === ChannelScopeType.DEFAULT);
+    return allVisibleChannels.filter(
+      channel =>
+        channel.scopeType === ChannelScopeType.DEFAULT && channel.type !== ChannelType.EMAIL,
+    );
   }, [allVisibleChannels]);
 
   // Combobox items for the "post call updates" channel picker — filtered by search query
@@ -1271,7 +1274,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       onOpenChange={open => !open && handleClose()}
       className={cn(
         dialogSizing,
-        'rounded-xl overflow-hidden flex flex-col transition-[max-width,width,height] duration-300 ease-out',
+        'rounded-xl flex flex-col transition-[max-width,width,height] duration-300 ease-out',
         dialogPositioning,
       )}
     >
@@ -2078,9 +2081,9 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 )}
               </div>
 
-              {/* Participants — channel members (Xyne users). */}
+              {/* Internal Users — channel members (Xyne users). */}
               <div className='space-y-2'>
-                <p className='text-muted-foreground text-[13px] leading-5'>Participants</p>
+                <p className='text-muted-foreground text-[13px] leading-5'>Internal Users</p>
                 <Controller
                   name='participants'
                   control={control}
@@ -2107,11 +2110,11 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
                 )}
               </div>
 
-              {/* Guests — people outside Xyne, invited by email. */}
+              {/* External Users — people outside Xyne, invited by email. */}
               {enableExternalInvitees && threadConversationId && (
                 <div className='space-y-2 -mb-3'>
                   <div className='flex items-baseline justify-between'>
-                    <p className='text-muted-foreground text-[13px] leading-5'>Guests</p>
+                    <p className='text-muted-foreground text-[13px] leading-5'>External Users</p>
                     <p className='text-[11px] text-muted-foreground/80'>
                       Invited by email · join via link
                     </p>

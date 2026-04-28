@@ -58,6 +58,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
 }) => {
   // Lets the prop-sync effect ignore the user's own typing echoing back.
   const lastEmittedHtmlRef = useRef<string>(messageHtml ?? '');
+  const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const editor = useEditor({
     extensions: [
@@ -99,6 +100,31 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
     editor.commands.setContent(messageHtml || '', { emitUpdate: false });
     lastEmittedHtmlRef.current = messageHtml ?? '';
   }, [messageHtml, editor]);
+
+  // Stop link clicks inside the preview iframe from navigating the iframe
+  // (or anywhere else). The preview uses placeholder URLs and is not meant
+  // to be interactive — clicks should be inert.
+  useEffect(() => {
+    const iframe = previewIframeRef.current;
+    if (!iframe) return;
+    const handleLoad = (): void => {
+      const doc = iframe.contentDocument;
+      if (!doc) return;
+      doc.addEventListener(
+        'click',
+        e => {
+          const anchor = (e.target as HTMLElement | null)?.closest?.('a');
+          if (anchor) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        },
+        true,
+      );
+    };
+    iframe.addEventListener('load', handleLoad);
+    return () => iframe.removeEventListener('load', handleLoad);
+  }, []);
 
   // Debounce so the preview iframe doesn't reload on every keystroke.
   const debouncedMessage = useDebouncedValue(messageHtml, 200);
@@ -230,9 +256,10 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
           </div>
           <div className='border rounded-md overflow-hidden bg-neutral-100 flex-1 min-h-0'>
             <iframe
+              ref={previewIframeRef}
               title='Invitation preview'
               srcDoc={previewHtml}
-              sandbox=''
+              sandbox='allow-same-origin'
               className='w-full h-full bg-white'
             />
           </div>

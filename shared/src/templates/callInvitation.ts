@@ -134,7 +134,7 @@ export function renderCallInvitationHtml(i: CallInvitationInput): string {
               <a href="${esc(i.joinUrl)}" style="display:inline-block;padding:13px 26px;color:${PRIMARY_FG};text-decoration:none;font:600 14px/1 ${FONT_SANS};letter-spacing:0.01em">Join the meeting</a>
             </td>
             <td style="padding-left:14px;vertical-align:middle">
-              <p style="margin:0;font:400 12px/1.4 ${FONT_SANS};color:${MUTED}">or copy the link:<br/><a href="${esc(i.joinUrl)}" style="color:${ACCENT};text-decoration:none;word-break:break-all">${esc(i.joinUrl)}</a></p>
+              <p style="margin:0;font:400 12px/1.4 ${FONT_SANS};color:${MUTED}">or copy the link:<br/><a href="${esc(i.joinUrl)}" data-action="copy-link" style="color:${ACCENT};text-decoration:none;word-break:break-all">${esc(i.joinUrl)}</a></p>
             </td>
           </tr>
         </table>
