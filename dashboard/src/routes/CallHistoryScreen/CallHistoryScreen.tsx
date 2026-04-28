@@ -53,6 +53,7 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import CalendarWeekView from './CalendarWeekView';
 import CalendarDayView from './CalendarDayView';
 import CalendarMonthView from './CalenderMonthView';
+import { usePlatform } from '../../hooks/usePlatform';
 
 interface EmptyStateProps {
   icon: LucideIcon;
@@ -77,6 +78,7 @@ function isSameMonth(a: Date, b: Date): boolean {
 }
 
 const CallHistoryScreen = (): ReactElement => {
+  const { isMobile } = usePlatform();
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -89,8 +91,10 @@ const CallHistoryScreen = (): ReactElement => {
   const [isInstantCallModalOpen, setIsInstantCallModalOpen] = useState(false);
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const [externalChatCallId, setExternalChatCallId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
-  const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>('month');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [calendarSubView, setCalendarSubView] = useState<'month' | 'week' | 'day'>(() =>
+    isMobile ? 'day' : 'month',
+  );
   const [calendarProvider, setCalendarProvider] = useState<'GOOGLE' | 'MICROSOFT' | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{
@@ -373,6 +377,22 @@ const CallHistoryScreen = (): ReactElement => {
         year: 'numeric',
       });
     }
+  };
+
+  const calendarMobileTitle = (): string => {
+    if (calendarSubView === 'week') {
+      const firstDayOfMonth = new Date(
+        currentWeekStart.getFullYear(),
+        currentWeekStart.getMonth(),
+        1,
+      );
+      const firstWeekDay = firstDayOfMonth.getDay();
+      const offset = firstWeekDay === 0 ? 1 : 0;
+      const weekNumber = Math.ceil((currentWeekStart.getDate() + firstWeekDay - 1) / 7) - offset;
+      const monthName = currentWeekStart.toLocaleDateString('en-US', { month: 'long' });
+      return `Week ${weekNumber} ${monthName}`;
+    }
+    return calendarTitle();
   };
 
   // Redirect to /calls/all if no tab or invalid tab
@@ -681,8 +701,25 @@ const CallHistoryScreen = (): ReactElement => {
             <div className='my-3 flex items-center justify-between gap-3'>
               {/* Left: title + prev/next */}
               <div className='flex items-center gap-2'>
-                <h2 className='text-base font-semibold text-foreground min-w-[140px]'>
-                  {calendarTitle()}
+                <h2 className='text-base font-semibold text-foreground min-w-[140px] max-sm:min-w-[78px] max-sm:font-normal'>
+                  <span className='sm:hidden flex flex-col leading-tight'>
+                    {calendarSubView === 'week' ? (
+                      <>
+                        <span>{calendarMobileTitle().split(' ').slice(0, 2).join(' ')}</span>
+                        <span className='text-xs font-normal text-muted-foreground'>
+                          {calendarMobileTitle().split(' ').slice(2).join(' ')}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span>{calendarMobileTitle().replace(/\s*\b\d{4}\b\s*$/, '')}</span>
+                        <span className='text-xs font-normal text-muted-foreground'>
+                          {calendarMobileTitle().match(/\b\d{4}\b/)?.[0]}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  <span className='hidden sm:inline'>{calendarTitle()}</span>
                 </h2>
                 <div className='flex items-center'>
                   <button
@@ -713,14 +750,14 @@ const CallHistoryScreen = (): ReactElement => {
               </div>
 
               {/* Right: Today + sub-view dropdown + list/calendar icons */}
-              <div className='flex items-center gap-2'>
+              <div className='flex items-center gap-2 max-sm:gap-1.5'>
                 <button
                   onClick={handleCalendarToday}
                   disabled={isTodayDisabled}
                   data-track-category='Calls'
                   data-track-name='calendar-today'
                   className={cn(
-                    'px-3 py-1.5 text-sm font-medium border border-border rounded-lg transition-colors',
+                    'px-3 max-sm:px-2 py-1.5 text-sm max-sm:text-xs font-medium border border-border rounded-lg transition-colors',
                     isTodayDisabled
                       ? 'text-muted-foreground/50 cursor-not-allowed'
                       : 'hover:bg-muted text-foreground',
@@ -731,7 +768,7 @@ const CallHistoryScreen = (): ReactElement => {
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className='flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-border rounded-lg hover:bg-muted transition-colors text-foreground'>
+                    <button className='flex items-center gap-1.5 px-3 max-sm:px-2 py-1.5 text-sm max-sm:text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors text-foreground'>
                       {calendarSubView.charAt(0).toUpperCase() + calendarSubView.slice(1)}
                       <ChevronDown className='size-3.5' />
                     </button>
@@ -757,7 +794,7 @@ const CallHistoryScreen = (): ReactElement => {
                     onClick={() => setViewMode('list')}
                     data-track-category='Calls'
                     data-track-name='calendar-switch-to-list'
-                    className='p-2 text-muted-foreground hover:bg-muted/50 transition-colors'
+                    className='px-2 py-1.5 text-muted-foreground hover:bg-muted/50 transition-colors'
                     aria-label='List view'
                   >
                     <LayoutList className='size-4' />
@@ -766,7 +803,7 @@ const CallHistoryScreen = (): ReactElement => {
                     onClick={() => setViewMode('calendar')}
                     data-track-category='Calls'
                     data-track-name='calendar-switch-to-calendar'
-                    className='p-2 bg-muted text-foreground transition-colors'
+                    className='px-2 py-1.5 bg-muted text-foreground transition-colors'
                     aria-label='Calendar view'
                   >
                     <Calendar className='size-4' />

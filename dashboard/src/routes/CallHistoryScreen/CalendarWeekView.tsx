@@ -38,6 +38,7 @@ import {
   isCallDraggable,
 } from './CalenderViewUtils';
 import { CalendarTimeSlotCell } from './CalendarTimeSlotCell';
+import { usePlatform } from '../../hooks/usePlatform';
 
 interface CalendarWeekViewProps {
   calls: Call[];
@@ -88,6 +89,7 @@ function WeekViewCallCard({
   onEditClick,
   onResizePointerDown,
 }: WeekViewCallCardProps): ReactElement {
+  const { isMobile } = usePlatform();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: call.id,
     disabled: !draggable,
@@ -117,13 +119,12 @@ function WeekViewCallCard({
           title={call.title ?? 'Call'}
           data-track-category='Calls'
           data-track-name='calendar-week-call-card'
-          className='group absolute right-1 rounded overflow-hidden text-left border-l-[3px] z-[5] focus:outline-none'
+          className='group absolute right-1 rounded overflow-hidden text-left z-[5] focus:outline-none'
           style={{
             top,
             height,
             left: `calc(0.25rem + ${leftPx}px)`,
             backgroundColor: meetingStatus === MeetingStatus.ACCEPTED ? '#0077FF1A' : 'transparent',
-            borderLeftColor: '#0077FF',
             opacity: isDragging || isBeingResized ? 0.3 : 1,
             cursor: draggable ? 'grab' : 'pointer',
             userSelect: 'none',
@@ -136,49 +137,52 @@ function WeekViewCallCard({
                 className='absolute inset-0'
                 style={{
                   backgroundImage:
-                    'repeating-linear-gradient(-18deg, rgba(9, 46, 88, 0.55) 0 1px, transparent 1px 4px)',
+                    'repeating-linear-gradient(-18deg, rgba(0, 119, 255, 0.1) 0 2px, transparent 2px 4px)',
                 }}
               />
             </div>
           )}
-          <div className='px-1.5 py-1 h-full flex flex-col justify-start overflow-hidden'>
-            <span
-              className='truncate'
-              style={{
-                color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
-                fontSize: '12px',
-                lineHeight: '18px',
-                fontWeight: 500,
-                textDecorationLine: isDeclined ? 'line-through' : 'none',
-              }}
-            >
-              {isGoogleCalendarCall(call) && (
-                <span className='inline-block mr-0.5 mb-px'>
-                  <GoogleCalendarIcon size={14} />
-                </span>
-              )}
-              {isMicrosoftCalendarCall(call) && (
-                <span className='inline-block mr-0.5 mb-px'>
-                  <MicrosoftIcon size={14} />
-                </span>
-              )}
-              {call.title ?? 'Call'}
-            </span>
-            {height >= 40 && (
+          <div className='px-1 py-1 h-full flex flex-row gap-1 justify-start overflow-hidden'>
+            <div className='w-0.5 rounded-full shrink-0 bg-primary self-stretch max-sm:hidden' />
+            <div className='flex flex-col flex-1 overflow-hidden'>
               <span
-                className='mt-0.5 whitespace-nowrap'
+                className='truncate max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words'
                 style={{
-                  color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
-                  fontSize: '10px',
-                  lineHeight: '14px',
-                  opacity: 0.7,
+                  color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
+                  fontSize: isMobile ? '10px' : '12px',
+                  lineHeight: isMobile ? '13px' : '18px',
+                  fontWeight: 500,
                   textDecorationLine: isDeclined ? 'line-through' : 'none',
                 }}
               >
-                {formatTime(call.startsAt)}
-                {call.endsAt && ` - ${formatTime(call.endsAt)}`}
+                {isGoogleCalendarCall(call) && (
+                  <span className='inline-block mr-0.5 mb-px'>
+                    <GoogleCalendarIcon size={14} />
+                  </span>
+                )}
+                {isMicrosoftCalendarCall(call) && (
+                  <span className='inline-block mr-0.5 mb-px'>
+                    <MicrosoftIcon size={14} />
+                  </span>
+                )}
+                {call.title ?? 'Call'}
               </span>
-            )}
+              {height >= 40 && !isMobile && (
+                <span
+                  className='mt-0.5 whitespace-nowrap'
+                  style={{
+                    color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
+                    fontSize: '10px',
+                    lineHeight: '14px',
+                    opacity: 0.7,
+                    textDecorationLine: isDeclined ? 'line-through' : 'none',
+                  }}
+                >
+                  {formatTime(call.startsAt)}
+                  {call.endsAt && ` - ${formatTime(call.endsAt)}`}
+                </span>
+              )}
+            </div>
           </div>
           {draggable && (
             <div
@@ -337,6 +341,8 @@ const CalendarWeekView = ({
   onEditClick,
   onCreateCallAtSlot,
 }: CalendarWeekViewProps): ReactElement => {
+  const { isMobile } = usePlatform();
+  const timeGutterWidth = isMobile ? 48 : TIME_GUTTER_WIDTH;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => new Date());
   const [openCallId, setOpenCallId] = useState<string | null>(null);
@@ -430,24 +436,32 @@ const CalendarWeekView = ({
       <div className='w-full flex flex-col border border-border rounded-xl overflow-hidden'>
         {/* Day header row */}
         <div className='flex shrink-0 border-b border-border bg-background'>
-          <div style={{ width: TIME_GUTTER_WIDTH }} className='shrink-0 border-r border-border' />
+          <div style={{ width: timeGutterWidth }} className='shrink-0 border-r border-border' />
           {weekDays.map((day, i) => {
             const isToday = isSameDay(day, today);
             return (
               <div
                 key={i}
                 className={cn(
-                  'flex-1 py-2.5 text-center border-r last:border-r-0 border-border',
+                  'flex-1 py-2.5 text-center border-r last:border-r-0 border-border flex flex-col items-center justify-center',
                   isToday && 'bg-primary/5',
                 )}
               >
                 <span
                   className={cn(
-                    'text-sm font-medium',
+                    'text-sm max-sm:text-xs font-medium leading-tight',
                     isToday ? 'text-primary' : 'text-muted-foreground',
                   )}
                 >
-                  {DAY_NAMES[day.getDay()]} {day.getDate()}
+                  {DAY_NAMES[day.getDay()]}
+                </span>
+                <span
+                  className={cn(
+                    'text-sm max-sm:text-xs font-medium leading-tight',
+                    isToday ? 'text-primary' : 'text-muted-foreground',
+                  )}
+                >
+                  {day.getDate()}
                 </span>
               </div>
             );
@@ -458,12 +472,12 @@ const CalendarWeekView = ({
         <div
           ref={scrollRef}
           className='overflow-y-auto'
-          style={{ maxHeight: 'calc(100dvh - 290px)' }}
+          style={{ maxHeight: isMobile ? 'calc(100dvh - 320px)' : 'calc(100dvh - 290px)' }}
         >
           <div className='flex' style={{ height: HOUR_HEIGHT * 24 }}>
             {/* Time gutter */}
             <div
-              style={{ width: TIME_GUTTER_WIDTH }}
+              style={{ width: timeGutterWidth }}
               className='shrink-0 border-r border-border relative select-none'
             >
               {HOURS.map(hour => (
@@ -479,7 +493,7 @@ const CalendarWeekView = ({
                   )}
                 </div>
               ))}
-              {isCurrentWeek && (
+              {isCurrentWeek && !isMobile && (
                 <div
                   className='absolute left-0 right-0 flex justify-end pr-2 z-20 pointer-events-none'
                   style={{ top: currentTimePx - 9 }}
