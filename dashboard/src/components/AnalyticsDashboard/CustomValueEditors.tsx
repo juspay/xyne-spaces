@@ -9,7 +9,7 @@ import { Badge } from '../../components/ui/Badge';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { X, Users, LayoutGrid } from 'lucide-react';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { getUserDisplayName } from '../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../utils/userDisplayName';
 
 function getSelectedItems(value: unknown): Array<{ id: string; name: string }> {
   if (!value) return [];
@@ -27,12 +27,14 @@ function getOptionFromUser(user: {
   name: string;
   email?: string;
   displayName?: string | null;
+  status?: string | null;
 }) {
   return {
     value: user.id,
     label: getUserDisplayName(user),
     ...(user.email && { subtitle: user.email }),
     icon: <Avatar userId={user.id} size='sm' showActiveStatus={false} />,
+    isDeactivated: isUserDeactivated(user),
   };
 }
 

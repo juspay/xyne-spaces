@@ -3,7 +3,7 @@ import UserAvatar from '../../UserAvatar/UserAvatar';
 import { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
-import { useUserSearch, useUser } from '../../../hooks/useUsers';
+import { useActiveUserSearch, useUser } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 /**
@@ -48,7 +48,7 @@ export const UserSelector: React.FC<UserSelectorProps> = ({
    * - Database searches ALL users and returns top 15 matches
    * - This enables searching through thousands of users efficiently
    */
-  const users = useUserSearch(searchValue, 15);
+  const users = useActiveUserSearch(searchValue, 15);
 
   /**
    * Fetch the selected user's details (for displaying in the button)

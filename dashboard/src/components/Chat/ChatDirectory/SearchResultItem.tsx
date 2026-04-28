@@ -16,6 +16,8 @@ import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWit
 import UserAvatar from '../../UserAvatar/UserAvatar';
 import Avatar from '../../ui/Avatar/Avatar';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
+import { useUser } from '../../../hooks/useUsers';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
 
 interface SearchResultItemProps {
   result: DisplaySearchResult;
@@ -73,6 +75,52 @@ const SelectedBadge = (): ReactElement => (
   </span>
 );
 
+const UserSearchResultItem = ({
+  result,
+  onSelect,
+  isSelected,
+  onItemMouseDown,
+}: {
+  result: DisplaySearchResult;
+  onSelect: (result: DisplaySearchResult) => Promise<void> | void;
+  isSelected: boolean;
+  onItemMouseDown?: ((e: ReactMouseEvent, result: DisplaySearchResult) => void) | undefined;
+}): ReactElement => {
+  const user = useUser(result.id);
+  const isDeactivated = isUserDeactivated(user);
+  const handleMouseDown = onItemMouseDown
+    ? (e: ReactMouseEvent) => onItemMouseDown(e, result)
+    : undefined;
+
+  return (
+    <Command.Item
+      key={result.id}
+      value={`backend-${result.type}-${result.id}`}
+      onSelect={() => void onSelect(result)}
+      onMouseDownCapture={handleMouseDown}
+      className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+    >
+      <Avatar userId={result.id} size='sm' />
+      <div className='flex-1 min-w-0'>
+        <div className='flex items-center gap-2'>
+          <span
+            className={`font-semibold text-sm truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+          >
+            {result.title}
+          </span>
+          {isDeactivated && (
+            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
+              Deactivated
+            </span>
+          )}
+        </div>
+        <div className='text-xs text-muted-foreground'>{result.subtitle}</div>
+      </div>
+      {isSelected && <SelectedBadge />}
+    </Command.Item>
+  );
+};
+
 const SearchResultItem = ({
   result,
   onSelect,
@@ -87,20 +135,12 @@ const SearchResultItem = ({
   switch (result.type) {
     case 'user':
       return (
-        <Command.Item
-          key={result.id}
-          value={`backend-${result.type}-${result.id}`}
-          onSelect={() => void onSelect(result)}
-          onMouseDownCapture={handleMouseDown}
-          className='flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
-        >
-          <Avatar userId={result.id} size='sm' />
-          <div className='flex-1 min-w-0'>
-            <div className='font-semibold text-sm text-foreground truncate'>{result.title}</div>
-            <div className='text-xs text-muted-foreground'>{result.subtitle}</div>
-          </div>
-          {isSelected && <SelectedBadge />}
-        </Command.Item>
+        <UserSearchResultItem
+          result={result}
+          onSelect={onSelect}
+          isSelected={isSelected}
+          onItemMouseDown={onItemMouseDown}
+        />
       );
 
     case 'conversation': {

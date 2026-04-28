@@ -26,6 +26,7 @@ import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { queries } from '../../../zero/queries';
 import { useUsers, useUser } from '../../../hooks/useUsers';
 import { formatRelativeTimeProfile, formatAge } from '../../../utils/dateUtils';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
@@ -344,9 +345,18 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
         </div>
 
         <div className='w-full'>
-          <h2 className='text-2xl font-semibold text-foreground mb-1'>
-            {user?.name || 'Unknown User'}
-          </h2>
+          <div className='flex items-center gap-2 mb-1'>
+            <h2
+              className={`text-2xl font-semibold ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-foreground'}`}
+            >
+              {user?.name || 'Unknown User'}
+            </h2>
+            {isUserDeactivated(user) && (
+              <span className='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground shrink-0'>
+                Deactivated
+              </span>
+            )}
+          </div>
 
           {/* Team */}
           {editingField === 'team' && isOwnProfile ? (

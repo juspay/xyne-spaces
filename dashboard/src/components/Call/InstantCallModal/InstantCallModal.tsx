@@ -1,9 +1,10 @@
-import { ChannelScopeType, ChannelVisibility, UserStatus } from '@xyne/shared';
+import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { Hash, Lock, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
-import { useSelf, useUserSearch } from '../../../hooks/useUsers';
+import { useSelf, useActiveUserSearch } from '../../../hooks/useUsers';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
 import Avatar from '../../ui/Avatar/Avatar';
 import Button from '../../ui/Button';
 import Dialog from '../../ui/Dialog';
@@ -24,7 +25,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const users = useUserSearch(searchQuery, 15);
+  const users = useActiveUserSearch(searchQuery, 15);
 
   // Focus on Search Participant Input when modal opens
   useEffect(() => {
@@ -67,13 +68,24 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 className='rounded-md size-[18px] flex items-center justify-center bg-background'
               />
               <div className='flex-1 w-full flex items-center gap-1.5'>
-                <span className='text-sm'>{user.name.split(' ')[0]}</span>
-                {user.status === UserStatus.ACTIVE ? (
+                <span
+                  className={`text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : ''}`}
+                >
+                  {user.name.split(' ')[0]}
+                </span>
+                {!isUserDeactivated(user) && (
                   <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
-                ) : (
-                  <span className='w-[5px] h-[5px] border border-border rounded-full'></span>
                 )}
-                <span className='text-sm text-muted-foreground'>{user.name}</span>
+                <span
+                  className={`text-sm ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-muted-foreground'}`}
+                >
+                  {user.name}
+                </span>
+                {isUserDeactivated(user) && (
+                  <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                    Deactivated
+                  </span>
+                )}
               </div>
             </div>
           ),

@@ -4,7 +4,7 @@ import { CheckIcon, ChevronDownIcon } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { useUserSearch } from '../../../hooks/useUsers';
 import Avatar from '../Avatar/Avatar';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { isStatusExpired } from '../../../utils/statusUtils';
 import type { User } from '@xyne/shared';
@@ -197,12 +197,19 @@ export const UserFilterTrigger: React.FC<UserFilterTriggerProps> = ({
                     )}
                   >
                     <Avatar userId={user.id} size='sm' showActiveStatus={false} />
-                    <span className='truncate flex items-center gap-1'>
+                    <span
+                      className={`truncate flex items-center gap-1 ${isUserDeactivated(user) ? 'text-muted-foreground' : ''}`}
+                    >
                       {getUserDisplayName(user)}
                       {user.statusEmoji &&
                         (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt)) &&
                         renderEmoji(user.statusEmoji)}
                     </span>
+                    {isUserDeactivated(user) && (
+                      <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                        Deactivated
+                      </span>
+                    )}
                     {isSelected && (
                       <span className='absolute right-2 flex size-3.5 items-center justify-center'>
                         <CheckIcon className='size-4 text-foreground' />

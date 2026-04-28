@@ -14,7 +14,7 @@ import { isStatusExpired } from '../../../utils/statusUtils';
 import { StatusIndicator } from '../StatusIndicator';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 
 /**
@@ -172,8 +172,17 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({ userId, childr
         <div className='flex items-start gap-4 p-4'>
           <Avatar userId={user.id} size='xl' />
           <div className='flex-1'>
-            <div className='font-semibold text-lg text-foreground mb-1'>
-              {getUserDisplayName(user)}
+            <div className='flex items-center gap-2 mb-1'>
+              <div
+                className={`font-semibold text-lg ${isUserDeactivated(user) ? 'text-muted-foreground' : 'text-foreground'}`}
+              >
+                {getUserDisplayName(user)}
+              </div>
+              {isUserDeactivated(user) && (
+                <span className='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground shrink-0'>
+                  Deactivated
+                </span>
+              )}
             </div>
             {user.email && (
               <div className='text-sm text-muted-foreground truncate'>{user.email}</div>

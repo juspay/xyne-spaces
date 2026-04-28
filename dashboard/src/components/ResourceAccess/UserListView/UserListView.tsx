@@ -5,7 +5,7 @@ import type { User as UserType } from '../../../machines/stateMachine';
 import { useUsers } from '../../../hooks/useUsers';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { queries } from '../../../zero/queries';
 import type { QueryResultType } from '@rocicorp/zero';
 
@@ -27,6 +27,7 @@ const UserRow = ({
 }): ReactElement => {
   const userProfile = user.userProfile;
   const allUsers = useUsers();
+  const isDeactivated = isUserDeactivated(user);
 
   const manager = useMemo(() => {
     if (!userProfile?.manager) return null;
@@ -43,8 +44,17 @@ const UserRow = ({
       <div className='flex items-center gap-3 flex-1 min-w-0'>
         <Avatar userId={user.id} size='sm' />
         <div className='min-w-0'>
-          <div className='text-sm font-medium text-foreground truncate'>
-            {getUserDisplayName(user)}
+          <div className='flex items-center gap-2'>
+            <span
+              className={`text-sm font-medium truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+            >
+              {getUserDisplayName(user)}
+            </span>
+            {isDeactivated && (
+              <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
+                Deactivated
+              </span>
+            )}
           </div>
           <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
         </div>

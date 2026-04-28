@@ -280,14 +280,22 @@ export const MultiSelect: React.FC<MultiSelectProps> = ({
 
                       {/* Label and Subtitle */}
                       <div className='flex flex-col items-start min-w-0 flex-1'>
-                        <span
-                          className={cn(
-                            'truncate text-left text-foreground',
-                            isSelected ? 'font-medium' : '',
+                        <div className='flex items-center gap-1.5'>
+                          <span
+                            className={cn(
+                              'truncate text-left',
+                              option.isDeactivated ? 'text-muted-foreground' : 'text-foreground',
+                              isSelected ? 'font-medium' : '',
+                            )}
+                          >
+                            {option.label}
+                          </span>
+                          {option.isDeactivated && (
+                            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                              Deactivated
+                            </span>
                           )}
-                        >
-                          {option.label}
-                        </span>
+                        </div>
                         {option.subtitle && (
                           <span className='truncate text-xs text-muted-foreground'>
                             {option.subtitle}

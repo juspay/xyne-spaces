@@ -11,7 +11,7 @@ import { mutators } from '../../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { Search, Trash2 } from 'lucide-react';
 import { useUserSearch } from '../../../../hooks/useUsers';
-import { getUserDisplayName } from '../../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../../utils/userDisplayName';
 
 interface UserListProps {
   users: User[];
@@ -160,56 +160,70 @@ export const UserList = ({
                   Members
                 </div>
                 <div className='divide-y divide-border'>
-                  {filteredUsers.map(user => (
-                    <div
-                      key={user.id}
-                      className='flex items-center justify-between px-6 py-2.5 hover:bg-muted transition-colors group'
-                    >
-                      <div className='flex items-center gap-2.5 flex-1 min-w-0'>
-                        <Avatar userId={user.id} size='sm' showActiveStatus={true} />
-                        <div className='flex flex-col min-w-0'>
-                          <span className='text-sm font-medium text-foreground truncate'>
-                            {getUserDisplayName(user)}
-                          </span>
-                          <span className='text-xs text-muted-foreground truncate'>
-                            {user.email}
-                          </span>
+                  {filteredUsers.map(user => {
+                    const deactivated = isUserDeactivated(user);
+                    return (
+                      <div
+                        key={user.id}
+                        className='flex items-center justify-between px-6 py-2.5 hover:bg-muted transition-colors group'
+                      >
+                        <div className='flex items-center gap-2.5 flex-1 min-w-0'>
+                          <Avatar userId={user.id} size='sm' showActiveStatus={true} />
+                          <div className='flex flex-col min-w-0'>
+                            <div className='flex items-center gap-1.5'>
+                              <span
+                                className={`text-sm font-medium truncate ${deactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+                              >
+                                {getUserDisplayName(user)}
+                              </span>
+                              {deactivated && (
+                                <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                                  Deactivated
+                                </span>
+                              )}
+                            </div>
+                            <span className='text-xs text-muted-foreground truncate'>
+                              {user.email}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className='flex items-center gap-3 ml-3'>
+                          {/* Remove Button */}
+                          {!disabled && (
+                            <Button
+                              variant='ghost'
+                              size='sm'
+                              onClick={() => void handleRemoveUser(user.id)}
+                              className='shrink-0 h-7 w-7 p-0 text-muted-foreground hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity'
+                              data-track-category='UserGroups'
+                              data-track-name='RemoveUserFromGroup'
+                              data-track-metadata={JSON.stringify({ userId: user.id })}
+                            >
+                              <Trash2 className='w-4 h-4' />
+                            </Button>
+                          )}
+
+                          {/* Responsibility Selector - only in edit mode */}
+                          {!disabled && !isCreateMode && (
+                            <div className='w-[140px] shrink-0 [&>div]:h-7 [&>div]:w-[140px] [&_button]:h-7 [&_button]:w-[140px] [&_button]:!text-xs [&_button]:rounded-md [&_span]:!text-xs [&_div]:!text-xs [&_*]:!text-xs'>
+                              <SingleSelect
+                                placeholder='Role'
+                                items={[{ items: responsibilityOptions }]}
+                                selected={
+                                  responsibilities.get(user.id) || UserResponsibility.MEMBER
+                                }
+                                onSelect={selected => {
+                                  responsibilities.set(user.id, selected as UserResponsibility);
+                                  forceUpdate(n => n + 1);
+                                }}
+                              />
+                            </div>
+                          )}
                         </div>
                       </div>
-
-                      <div className='flex items-center gap-3 ml-3'>
-                        {/* Remove Button */}
-                        {!disabled && (
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            onClick={() => void handleRemoveUser(user.id)}
-                            className='shrink-0 h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity'
-                            data-track-category='UserGroups'
-                            data-track-name='RemoveUserFromGroup'
-                            data-track-metadata={JSON.stringify({ userId: user.id })}
-                          >
-                            <Trash2 className='w-4 h-4' />
-                          </Button>
-                        )}
-
-                        {/* Responsibility Selector - only in edit mode */}
-                        {!disabled && !isCreateMode && (
-                          <div className='w-[140px] shrink-0 [&>div]:h-7 [&>div]:w-[140px] [&_button]:h-7 [&_button]:w-[140px] [&_button]:!text-xs [&_button]:rounded-md [&_span]:!text-xs [&_div]:!text-xs [&_*]:!text-xs'>
-                            <SingleSelect
-                              placeholder='Role'
-                              items={[{ items: responsibilityOptions }]}
-                              selected={responsibilities.get(user.id) || UserResponsibility.MEMBER}
-                              onSelect={selected => {
-                                responsibilities.set(user.id, selected as UserResponsibility);
-                                forceUpdate(n => n + 1);
-                              }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -223,35 +237,47 @@ export const UserList = ({
                   </div>
                 )}
                 <div className='divide-y divide-border'>
-                  {usersToAdd.map(user => (
-                    <div
-                      key={user.id}
-                      className='flex items-center justify-between px-6 py-2.5 hover:bg-muted transition-colors group'
-                    >
-                      <div className='flex items-center gap-2.5 flex-1 min-w-0'>
-                        <Avatar userId={user.id} size='sm' showActiveStatus={false} />
-                        <div className='flex flex-col min-w-0'>
-                          <span className='text-sm font-medium text-foreground truncate'>
-                            {getUserDisplayName(user)}
-                          </span>
-                          <span className='text-xs text-muted-foreground truncate'>
-                            {user.email}
-                          </span>
-                        </div>
-                      </div>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={() => void handleAddUser(user)}
-                        className='shrink-0 h-7 w-[140px] text-xs'
-                        data-track-category='UserGroups'
-                        data-track-name='AddUserToChannel'
-                        data-track-metadata={JSON.stringify({ userId: user.id })}
+                  {usersToAdd.map(user => {
+                    const deactivated = isUserDeactivated(user);
+                    return (
+                      <div
+                        key={user.id}
+                        className='flex items-center justify-between px-6 py-2.5 hover:bg-muted transition-colors group'
                       >
-                        Add to Group
-                      </Button>
-                    </div>
-                  ))}
+                        <div className='flex items-center gap-2.5 flex-1 min-w-0'>
+                          <Avatar userId={user.id} size='sm' showActiveStatus={false} />
+                          <div className='flex flex-col min-w-0'>
+                            <div className='flex items-center gap-1.5'>
+                              <span
+                                className={`text-sm font-medium truncate ${deactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+                              >
+                                {getUserDisplayName(user)}
+                              </span>
+                              {deactivated && (
+                                <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                                  Deactivated
+                                </span>
+                              )}
+                            </div>
+                            <span className='text-xs text-muted-foreground truncate'>
+                              {user.email}
+                            </span>
+                          </div>
+                        </div>
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          onClick={() => void handleAddUser(user)}
+                          className='shrink-0 h-7 w-[140px] text-xs'
+                          data-track-category='UserGroups'
+                          data-track-name='AddUserToChannel'
+                          data-track-metadata={JSON.stringify({ userId: user.id })}
+                        >
+                          Add to Group
+                        </Button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

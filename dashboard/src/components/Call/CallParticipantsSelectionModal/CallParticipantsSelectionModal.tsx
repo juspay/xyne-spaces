@@ -11,7 +11,7 @@ import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../../hooks/useChannels';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -83,6 +83,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
           />
         ),
         subtitle: user.email,
+        isDeactivated: isUserDeactivated(user),
       })),
     [filteredUsers],
   );

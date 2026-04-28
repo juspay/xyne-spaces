@@ -4,7 +4,7 @@ import { X } from 'lucide-react';
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { useUsersPresence } from '../../../hooks/usePresence';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import Avatar from '../Avatar/Avatar';
 import Button from '../Button';
 
@@ -251,6 +251,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                   >
                     {filteredOptions.map(user => {
                       const displayName = getUserDisplayName(user);
+                      const deactivated = isUserDeactivated(user);
                       return (
                         <BaseCombobox.Item
                           key={user.id}
@@ -266,13 +267,26 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                             className='rounded-md size-[18px] flex items-center justify-center bg-background'
                           />
                           <div className='flex-1 w-full flex items-center gap-2'>
-                            <span className='text-sm'>{displayName.split(' ')[0]}</span>
+                            <span
+                              className={`text-sm ${deactivated ? 'text-muted-foreground' : ''}`}
+                            >
+                              {displayName.split(' ')[0]}
+                            </span>
                             {onlineUserIdsSet.has(user.id) ? (
                               <span className='w-1.5 h-1.5 bg-green-600 rounded-full'></span>
                             ) : (
                               <span className='w-1.5 h-1.5 border border-muted-foreground rounded-full'></span>
                             )}
-                            <span className='text-sm text-muted-foreground'>{displayName}</span>
+                            <span
+                              className={`text-sm ${deactivated ? 'text-muted-foreground' : 'text-muted-foreground'}`}
+                            >
+                              {displayName}
+                            </span>
+                            {deactivated && (
+                              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                                Deactivated
+                              </span>
+                            )}
                           </div>
                         </BaseCombobox.Item>
                       );

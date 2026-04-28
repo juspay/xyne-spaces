@@ -5,6 +5,7 @@ import type { User } from '../machines/stateMachine.js';
 import { useSharedAuthContext } from './context.js';
 import { searchUsers as _searchUsers } from '../utils/search.js';
 import { shallowEqualUsers } from '../utils/comparators.js';
+import { UserStatus } from '../zero/schema.js';
 
 export { type User } from '../machines/stateMachine.js';
 
@@ -33,5 +34,23 @@ export const useSelf = (): User | undefined => {
 
 export const useUserSearch = (query: string, limit: number): User[] => {
   const users = useUsers();
+  return useMemo(() => searchUsers(users, query, limit), [users, query, limit]);
+};
+
+/**
+ * Returns only active users (status === ACTIVE)
+ * Use this for assignment dropdowns, participant selection, etc.
+ */
+export const useActiveUsers = (): User[] => {
+  const users = useUsers();
+  return useMemo(() => users.filter(u => u.status === UserStatus.ACTIVE), [users]);
+};
+
+/**
+ * Search only active users
+ * Use this for assignment dropdowns where deactivated users should not appear
+ */
+export const useActiveUserSearch = (query: string, limit: number): User[] => {
+  const users = useActiveUsers();
   return useMemo(() => searchUsers(users, query, limit), [users, query, limit]);
 };

@@ -20,7 +20,7 @@ import { InvitationResponse } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { InviteToCallModal } from '../CallModals/InviteToCallModal';
 import { callService } from '../../../services/Call/callService';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 
 // Speaking indicator component (animated bars like Google Meet)
 function SpeakingIndicator(): React.ReactElement {
@@ -243,6 +243,9 @@ export function ParticipantsSidebar({
         ? 'Guest'
         : getUserDisplayName(participantUser);
 
+    // Check if user is deactivated (only for non-external users with lookup)
+    const isDeactivated = !isExternal && !displayName ? isUserDeactivated(participantUser) : false;
+
     // Get initials for external users fallback
     const fallbackInitial = participantName.charAt(0).toUpperCase();
 
@@ -262,7 +265,16 @@ export function ParticipantsSidebar({
         </div>
         <div className='flex-1 min-w-0'>
           <div className='flex items-center gap-1.5'>
-            <p className='text-sm font-medium text-foreground truncate'>{participantName}</p>
+            <p
+              className={`text-sm font-medium truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+            >
+              {participantName}
+            </p>
+            {isDeactivated && (
+              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                Deactivated
+              </span>
+            )}
             {isExternal && (
               <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 shrink-0'>
                 External

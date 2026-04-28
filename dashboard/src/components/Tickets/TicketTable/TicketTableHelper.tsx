@@ -1,4 +1,4 @@
-import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
+import { TicketPriority, TicketStatusV2, UserStatus } from '@xyne/shared';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { TicketStatusIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -85,6 +85,7 @@ export const getAssigneeOptions = (users: User[], userGroups: UserGroup[]): Enti
     label: getUserDisplayName(user),
     subtitle: user.email,
     icon: <Avatar userId={user.id} size='sm' className='rounded-full' />,
+    isDeactivated: user.status === UserStatus.INACTIVE,
   }));
 
   // Filter out deactivated groups (isActive !== false)

@@ -7,6 +7,7 @@ export interface EntityOption {
   value: string;
   label: string;
   icon: React.ReactNode;
+  isDeactivated?: boolean;
 }
 
 export interface StatusEntityOption extends EntityOption {

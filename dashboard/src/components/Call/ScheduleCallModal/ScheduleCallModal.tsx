@@ -2,8 +2,9 @@ import React, { useMemo, useCallback, useEffect, useState, useRef } from 'react'
 import { RRule } from 'rrule';
 import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
-import { ChannelScopeType, UserStatus, ChannelVisibility } from '@xyne/shared';
+import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { useSelf, useUsers } from '../../../hooks/useUsers';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
 import { callService, type ScheduleCallRequest } from '../../../services/Call/callService';
 import DOMPurify from 'dompurify';
@@ -23,7 +24,7 @@ import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TimePicker } from '../../ui/TimePicker/TimePicker';
 import { RadioGroup, Radio } from '../../ui/RadioGroup/RadioGroup';
 import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchParticipants';
-import { useUserSearch } from '../../../hooks/useUsers';
+import { useActiveUserSearch } from '../../../hooks/useUsers';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Controller, useForm } from 'react-hook-form';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -378,7 +379,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
 
   // Search query state (not in form)
   const [searchQuery, setSearchQuery] = React.useState('');
-  const users = useUserSearch(searchQuery, 15);
+  const users = useActiveUserSearch(searchQuery, 15);
 
   // Recurring call state
   const [isRecurring, setIsRecurring] = React.useState(
@@ -614,13 +615,22 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
           className='rounded-md size-[18px] flex items-center justify-center bg-background'
         />
         <div className='flex-1 w-full flex items-center gap-1.5'>
-          <span className='text-sm'>{getUserDisplayName(u).split(' ')[0]}</span>
-          {u.status === UserStatus.ACTIVE ? (
+          <span className={`text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : ''}`}>
+            {getUserDisplayName(u).split(' ')[0]}
+          </span>
+          {!isUserDeactivated(u) && (
             <span className='w-[5px] h-[5px] bg-green-600 rounded-full'></span>
-          ) : (
-            <span className='w-[5px] h-[5px] border border-gray-500 rounded-full'></span>
           )}
-          <span className='text-sm text-gray-500'>{getUserDisplayName(u)}</span>
+          <span
+            className={`text-sm ${isUserDeactivated(u) ? 'text-muted-foreground' : 'text-gray-500'}`}
+          >
+            {getUserDisplayName(u)}
+          </span>
+          {isUserDeactivated(u) && (
+            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+              Deactivated
+            </span>
+          )}
         </div>
       </div>
     ),
