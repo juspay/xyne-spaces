@@ -74,6 +74,7 @@ export interface CreateConversationWithMessageParams {
   createdAt?: Date;
   isAddingParticipant?: boolean;
   isMarkdown?: boolean;
+  pinned?: boolean;
 }
 
 export interface AddMessageToConversationParams {
@@ -279,6 +280,7 @@ export class ConversationService {
       isMarkdown,
       createdAt,
       isAddingParticipant = true,
+      pinned,
     } = params;
 
     // Check if channel exists
@@ -344,6 +346,7 @@ export class ConversationService {
       createdBy: userId,
       initialMessageId: 'temp', // Will be updated after message creation
       metadata,
+      pinned: pinned || false,
       ...(createdAt && { createdAt }),
     };
 

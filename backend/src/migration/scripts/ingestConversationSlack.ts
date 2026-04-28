@@ -283,6 +283,7 @@ export async function ingestConversationSlack(
       botId?: string,
       botName?: string,
       botUserId?: string,
+      isPinned?: boolean,
     ): Promise<MessageIngestionResult> => {
 
       let resolvedUserId = userId;
@@ -332,6 +333,7 @@ export async function ingestConversationSlack(
           isBot: false,
           createdAt,
           isAddingParticipant: false,
+          pinned: isPinned || false,
         });
 
         message = result.message;
@@ -404,6 +406,7 @@ export async function ingestConversationSlack(
             slackMessage.botId,
             slackMessage.botName,
             slackMessage.botUserId,
+            slackMessage.isPinned,
           );
         }
 
@@ -436,6 +439,7 @@ export async function ingestConversationSlack(
                 reply.botId,
                 reply.botName,
                 reply.botUserId,
+                reply.isPinned,
               );
             } catch (error) {
               const errorMsg = `Failed to ingest reply ${reply.externalThreadId}: ${

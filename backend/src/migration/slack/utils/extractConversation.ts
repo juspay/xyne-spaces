@@ -48,6 +48,7 @@ export interface SlackReply {
   botId?: string;  
   botUserId?: string;
   botName?: string;
+  isPinned?: boolean;
 }
 
 export interface SlackMessage {
@@ -62,6 +63,7 @@ export interface SlackMessage {
   botId?: string;
   botUserId?: string;
   botName?: string;
+  isPinned?: boolean;
 }
 
 export type UserInfoCache = Map<
@@ -132,6 +134,53 @@ function getSlackClient(): WebClient {
     throw new Error('SLACK_BOT_TOKEN environment variable is not set');
   }
   return new WebClient(token);
+}
+
+/**
+ * Fetch pinned message timestamps from a Slack channel
+ * Slack pins.list API returns all pinned items for a channel
+ * We extract the message timestamps to identify which messages are pinned
+ */
+export async function fetchPinnedMessageTimestamps(
+  client: WebClient,
+  channelId: string
+): Promise<Set<string>> {
+  const pinnedTs = new Set<string>();
+
+  try {
+    const result = await retryWithBackoff(() =>
+      client.pins.list({ channel: channelId })
+    );
+
+    if (!result.ok) {
+      logger.error('[Migration] Failed to fetch pinned messages', {
+        channelId,
+        error: result.error,
+      });
+      return pinnedTs;
+    }
+
+    // Extract timestamps from pinned message items
+    for (const item of result.items || []) {
+      const itemAny = item as any;
+      if (item.type === 'message' && itemAny.message?.ts) {
+        pinnedTs.add(itemAny.message.ts);
+      }
+    }
+
+    logger.info('[Migration] Fetched pinned messages', {
+      channelId,
+      pinnedCount: pinnedTs.size,
+    });
+
+    return pinnedTs;
+  } catch (error) {
+    logger.error('[Migration] Unexpected error fetching pins', {
+      channelId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return pinnedTs;
+  }
 }
 
 /**
@@ -620,6 +669,7 @@ export async function transformReply(
   includeAttachments: boolean,
   allowedBots: string[] = [],
   includeBotMessages: boolean = false,
+  pinnedMessageTs?: Set<string>,
 ): Promise<SlackReply> {
   const isBot = !!reply.bot_id;
   const userInfo = !isBot && reply.user ? await getUserInfo(reply.user, cache) : {};
@@ -658,6 +708,7 @@ export async function transformReply(
     ...(userInfo?.userName && { userName: userInfo.userName }),
     ...(userInfo?.userId && { userId: userInfo.userId }),
     ...(userInfo?.isDeactivated === true && { isDeactivated: true }),
+    isPinned: pinnedMessageTs?.has(reply.ts),
     showInChannel: reply.subtype === 'thread_broadcast',
     files: transformFiles(reply.files, includeAttachments),
     ...(reply.bot_id && { botId: reply.bot_id }),
@@ -676,6 +727,7 @@ async function transformMessage(
   includeAttachments: boolean,
   includeDeactivatedUsers: boolean,
   includeBotMessages: boolean = false,
+  pinnedMessageTs?: Set<string>,
 ): Promise<SlackMessage> {
   const isBot = !!rawMessage.bot_id;
   const userInfo = !isBot && rawMessage.user ? await getUserInfo(rawMessage.user, cache) : {};
@@ -687,7 +739,7 @@ async function transformMessage(
   let replies: SlackReply[] | undefined;
   if (threadReplies?.length) {
     replies = await Promise.all(
-      threadReplies.map((reply) => transformReply(reply, cache, includeAttachments, [], includeBotMessages))
+      threadReplies.map((reply) => transformReply(reply, cache, includeAttachments, [], includeBotMessages, pinnedMessageTs))
     );
 
     // Filter replies
@@ -713,6 +765,7 @@ async function transformMessage(
     ...(userInfo?.userName && { userName: userInfo.userName }),
     ...(userInfo?.userId && { userId: userInfo.userId }),
     ...(userInfo?.isDeactivated === true && { isDeactivated: true }),
+    isPinned: pinnedMessageTs?.has(rawMessage.ts),
     replies,
     files: transformFiles(rawMessage.files, includeAttachments),
     ...(rawMessage.bot_id && { botId: rawMessage.bot_id }),
@@ -766,6 +819,7 @@ export async function extractChannelHistory(
 
   const client = getSlackClient();
   const userCache: UserInfoCache = new Map();
+  const pinnedMessageTs = await fetchPinnedMessageTimestamps(client, channelId);
 
   // Step 1: Fetch all top-level messages
   const rawMessages = await fetchChannelMessages(client, channelId, oldestTimestamp, latestTimestamp, includeBotMessages);
@@ -804,6 +858,7 @@ export async function extractChannelHistory(
         includeAttachments,
         includeDeactivatedUsers,
         includeBotMessages,
+        pinnedMessageTs,
       )
     )
   );
