@@ -74,13 +74,17 @@ export const ExternalInviteesInput: React.FC<ExternalInviteesInputProps> = ({
         {chips.map(email => (
           <span
             key={email}
-            className='inline-flex items-center gap-1 bg-muted rounded px-2 py-0.5 text-sm'
+            className='inline-flex items-center gap-1.5 bg-muted rounded pl-2 pr-1 py-0.5 text-sm'
           >
-            {email}
+            <span className='select-none'>{email}</span>
             <button
               type='button'
-              onClick={() => remove(email)}
-              className='hover:bg-accent rounded'
+              onMouseDown={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                remove(email);
+              }}
+              className='inline-flex items-center justify-center size-4 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
               aria-label={`Remove ${email}`}
               data-track-category='calls'
               data-track-name='remove-external-invitee'
@@ -92,7 +96,7 @@ export const ExternalInviteesInput: React.FC<ExternalInviteesInputProps> = ({
         <input
           ref={inputRef}
           type='text'
-          className='flex-1 min-w-[40px] outline-none bg-transparent text-sm'
+          className='flex-1 min-w-[180px] outline-none bg-transparent text-sm'
           placeholder={chips.length === 0 ? 'Add guest emails…' : ''}
           value={draft}
           data-track-category='calls'

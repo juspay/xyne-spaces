@@ -297,7 +297,12 @@ const EmailAttachmentsRow = ({
             key={att.id}
             type='button'
             onClick={() => {
-              void downloadFile(att.id, att.originalFilename).catch(() => undefined);
+              const toastId = toast.loading(`Downloading ${att.originalFilename}…`);
+              downloadFile(att.id, att.originalFilename)
+                .then(() => toast.success(`Downloaded ${att.originalFilename}`, { id: toastId }))
+                .catch(() =>
+                  toast.error(`Failed to download ${att.originalFilename}`, { id: toastId }),
+                );
             }}
             title={att.originalFilename}
             data-track-category='Support'
@@ -2513,6 +2518,9 @@ const EmailComposer = ({
   const [emails] = useCachedQuery(
     queries.getEmailsForTicket({ conversationId: conversationId || '' }),
   );
+  const composerChannelPreference = useEmailChannelPreference(channelId || null);
+  const composerOwner = useUser(composerChannelPreference?.ownerUserId || '');
+  const composerFromEmail = composerOwner?.email?.toLowerCase() || '';
   // Use email draft hooks
   const draftContent = useEmailDraft(conversationId);
   const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId, channelId);
@@ -2623,8 +2631,8 @@ const EmailComposer = ({
       const latestEmail = sortedEmailsDesc[0];
 
       if (latestEmail && initialEmail) {
-        // Backend sends FROM this address, so we should not include it in TO recipients
-        const fromEmailAddress = (initialEmail.to && initialEmail.to[0])?.toLowerCase() || '';
+        const fromEmailAddress =
+          composerFromEmail || (initialEmail.to && initialEmail.to[0])?.toLowerCase() || '';
 
         const allRecipients = new Set<string>();
         if (latestEmail.from) allRecipients.add(latestEmail.from);
@@ -2642,7 +2650,7 @@ const EmailComposer = ({
         setShowBcc(false);
       }
     }
-  }, [emails, conversationId]);
+  }, [emails, conversationId, composerFromEmail]);
 
   // Upload attachments to Zoho to get attachmentIds for email
   const uploadAttachments = async (files: File[]): Promise<string[]> => {

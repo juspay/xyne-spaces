@@ -80,7 +80,8 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
     ],
     editorProps: {
       attributes: {
-        class: 'tiptap prose prose-sm max-w-none focus:outline-none px-3 py-3 text-sm',
+        class:
+          'tiptap prose prose-sm max-w-none focus:outline-none px-3 py-3 text-sm whitespace-pre-wrap break-words',
       },
     },
     content: messageHtml || '',
@@ -199,6 +200,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
                 tabIndex={0}
                 onClick={() => editor?.commands.focus()}
                 onKeyDown={e => {
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     editor?.commands.focus();
@@ -206,7 +208,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
                 }}
                 data-track-category='calls'
                 data-track-name='focus-invitation-message'
-                className='cursor-text overflow-y-auto overscroll-contain'
+                className='cursor-text overflow-y-auto overflow-x-hidden overscroll-contain min-w-0'
                 style={{ minHeight: 220, maxHeight: 340 }}
               >
                 <EditorContent editor={editor} />

@@ -4,7 +4,7 @@ import { Button } from '../../ui/Button';
 import Input from '../../ui/Input';
 import { ChannelScopeType, UserStatus, ChannelVisibility } from '@xyne/shared';
 import { useSelf, useUsers } from '../../../hooks/useUsers';
-import { useAllVisibleChannels } from '../../../hooks/useChannels';
+import { useAllVisibleChannels, useChannel } from '../../../hooks/useChannels';
 import { callService, type ScheduleCallRequest } from '../../../services/Call/callService';
 import DOMPurify from 'dompurify';
 import { queries } from '../../../zero/queries';
@@ -185,6 +185,13 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     { enabled: isOpen && !!threadConversationId && enableExternalInvitees },
   );
 
+  const threadChannel = useChannel(threadChannelId ?? '');
+  const channelOwnEmail = useMemo(() => {
+    const name = threadChannel?.name?.trim().toLowerCase();
+    if (!name) return null;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(name) ? name : null;
+  }, [threadChannel?.name]);
+
   // Step 1 (participants) / Step 2 (invitation preview) + direction used for
   // the slide animation between them.
   const [step, setStep] = React.useState<'participants' | 'invitation'>('participants');
@@ -329,6 +336,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     if (!enableExternalInvitees || !ticketEmails || ticketEmails.length === 0) return [];
 
     const emails = ticketEmails as Array<{
+      type?: string | null;
       from?: string | null;
       to?: string[] | null;
       cc?: string[] | null;
@@ -341,14 +349,26 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     };
     const isValidEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 
+    const ownerAddresses = new Set<string>();
+    const selfEmail = user?.email?.trim().toLowerCase();
+    if (selfEmail && isValidEmail(selfEmail)) ownerAddresses.add(selfEmail);
+    if (channelOwnEmail) ownerAddresses.add(channelOwnEmail);
+    for (const e of emails) {
+      if ((e.type === 'REPLY' || e.type === 'REPLY_ALL') && e.from) {
+        const f = extract(e.from);
+        if (isValidEmail(f)) ownerAddresses.add(f);
+      }
+    }
+
     const addresses = emails
       .flatMap(e => [e.from, ...(e.to ?? []), ...(e.cc ?? [])])
       .filter((raw): raw is string => !!raw)
       .map(extract)
-      .filter(isValidEmail);
+      .filter(isValidEmail)
+      .filter(addr => !ownerAddresses.has(addr));
 
     return Array.from(new Set(addresses));
-  }, [enableExternalInvitees, ticketEmails]);
+  }, [enableExternalInvitees, ticketEmails, channelOwnEmail, user?.email]);
 
   // Show "Post call updates" checkbox only when:
   //   - at least one participant is added
