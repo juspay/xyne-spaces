@@ -18,6 +18,7 @@ import { geniusQueryWorkflow } from './genius-query-workflow/geniusQueryWorkflow
 import { stageApprovalWorkflow } from './stageApprovalWorkflow'
 import { networkDocumentWorkflow } from './network-document-workflow/networkDocumentWorkflow'
 import { integrityDebugWorkflow } from './integrity-debug-workflow/integrityDebugWorkflow'
+import { specsVerificationWorkflow } from './specs-verification-workflow/specsVerificationWorkflow'
 import { xyneAutoRcaWorkflow } from './xyne-auto-rca-workflow/xyneAutoRcaWorkflow'
 import { versionBumpWorkflow } from './version-bump-workflow/versionBumpWorkflow'
 import { itSupportWorkflow } from './it-support-workflow/itSupportWorkflow'
@@ -50,6 +51,7 @@ export const WORKFLOW_DEFINITIONS = {
   [WorkflowType.VERSION_BUMP_WORKFLOW]: versionBumpWorkflow,
   [WorkflowType.IT_SUPPORT_WORKFLOW]: itSupportWorkflow,
   [WorkflowType.JUTILS_CODE_UPDATION]: jUtilsCodeUpdationWorkflow,
+  [WorkflowType.SPECS_VERIFICATION_WORKFLOW]: specsVerificationWorkflow,
 } as const
 
 export function registerAllWorkflows(): void {
@@ -78,6 +80,7 @@ export function registerAllWorkflows(): void {
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.VERSION_BUMP_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.IT_SUPPORT_WORKFLOW])
   workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.JUTILS_CODE_UPDATION])
+  workflowRegistry.register(WORKFLOW_DEFINITIONS[WorkflowType.SPECS_VERIFICATION_WORKFLOW])
 }
 
 export { workflowRegistry } from '../registry/workflowRegistry'

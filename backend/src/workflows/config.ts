@@ -2,6 +2,7 @@
 import { ENHANCED_AI_ASSISTANT_PROMPT, AI_PLAN_MODE_PROMPT } from './constants'
 import { SYSTEM_PROMPTS as PLAN_REVIEW_LOOP_PROMPTS } from './definitions/plan-review-loop/constants';
 import { SYSTEM_PROMPTS as XYNE_SPACES_FEATURE_IMPLEMENTATION_WORKFLOW } from './definitions/xyne-spaces-workflows';
+import { verificationAgentSystemPrompt, docParserSystemPrompt2 } from './definitions/specs-verification-workflow/prompts.js';
 
 export enum ToolStatus {
   ENABLED = 'enabled',
@@ -693,6 +694,14 @@ The following files contain L2 logic and changes to them indicate L2-level modif
       { name: "write", status: ToolStatus.DISABLED },
       { name: "edit", status: ToolStatus.DISABLED }
     ]
+  },
+  "specs-verification": {
+    systemPrompt: verificationAgentSystemPrompt,
+    tools: []
+  },
+  "document-parsing": {
+    systemPrompt: docParserSystemPrompt2,
+    tools: []
   },
   "support-query-processor": {
     systemPrompt: `You are an intelligent IT Support Assistant that combines query classification and response generation into a single operation.
