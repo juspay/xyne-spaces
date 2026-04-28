@@ -5,6 +5,7 @@ import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import * as Popover from '@radix-ui/react-popover';
 import {
   MessageType,
+  UserType,
   parsePreviewMd,
   parseForwardedMessageXml,
   isForwardedMessageXml,
@@ -637,6 +638,36 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 }
               >
                 <HuddleIcon color={isActiveCall ? 'var(--status-success)' : 'white'} />
+              </div>
+            ) : showAvatar && sender?.userType === UserType.APP ? (
+              <div
+                onClick={() => handleUserClick(sender.id)}
+                className='cursor-pointer'
+                role='button'
+                tabIndex={0}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleUserClick(sender.id);
+                  }
+                }}
+                aria-label={`View ${getUserDisplayName(sender) || 'app'} profile`}
+              >
+                {isMobile ? (
+                  <UserAvatar
+                    userId={sender.id}
+                    size={AvatarSize.REGULAR}
+                    showActiveStatus={false}
+                  />
+                ) : (
+                  <UserHoverWrapper userId={sender.id}>
+                    <UserAvatar
+                      userId={sender.id}
+                      size={AvatarSize.REGULAR}
+                      showActiveStatus={false}
+                    />
+                  </UserHoverWrapper>
+                )}
               </div>
             ) : showAvatar && isXyneBot ? (
               <div className='flex items-center justify-center'>
