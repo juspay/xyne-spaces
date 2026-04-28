@@ -49,6 +49,8 @@ interface InitiateCallResponse {
 interface RecordingsResponse {
   success: boolean;
   recordings: Recording[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
 }
 
 interface RecordingDetailResponse {
@@ -88,11 +90,18 @@ class RecordingService {
   /**
    * Get all recordings for the current user
    */
-  async getRecordings(): Promise<Recording[]> {
-    const response: AxiosResponse<RecordingsResponse> = await apiInstance.get('/calls/recordings');
+  async getRecordings(params?: {
+    limit?: number;
+    cursor?: string | null;
+  }): Promise<RecordingsResponse> {
+    const queryParams = new URLSearchParams();
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+    if (params?.cursor) queryParams.append('cursor', params.cursor);
 
-    const data: RecordingsResponse = response.data;
-    return data.recordings;
+    const url = `/calls/recordings${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+    const response: AxiosResponse<RecordingsResponse> = await apiInstance.get(url);
+
+    return response.data;
   }
 
   /**

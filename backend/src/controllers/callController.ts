@@ -657,6 +657,8 @@ export class CallController {
    */
   getRecordings = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const cursorStr = req.query.cursor as string;
 
     if (!userId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
@@ -664,11 +666,25 @@ export class CallController {
     }
 
     try {
-      const recordings = await repositories.calls.findByUserAndType(userId, 'HEADLESS' as CallType);
+      // Find all headless recordings
+      let recordings = await repositories.calls.findByUserAndType(userId, 'HEADLESS' as CallType);
+      recordings.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+      
+      // Apply cursor pagination
+      if (cursorStr) {
+        const cursorIndex = recordings.findIndex(c => c.id === cursorStr);
+        if (cursorIndex >= 0) {
+          recordings = recordings.slice(cursorIndex + 1);
+        }
+      }
+      
+      // Apply limit
+      const hasMore = recordings.length > limit;
+      recordings = recordings.slice(0, limit);
+      const nextCursor = recordings.length > 0 && hasMore ? recordings[recordings.length - 1].id : null;
 
       // Map to response format and fetch messageIds for each head message
       const response = await Promise.all(recordings
-        .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
         .map(async (call) => {
           let messageId: string | null = null;
           try {
@@ -697,7 +713,7 @@ export class CallController {
           };
         }));
 
-      res.json({ success: true, recordings: response });
+      res.json({ success: true, recordings: response, nextCursor, hasMore });
     } catch (error) {
       logger.error('Failed to fetch recordings:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch recordings' });

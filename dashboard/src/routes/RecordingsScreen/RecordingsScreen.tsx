@@ -8,6 +8,7 @@
 
 import { ReactElement, useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Virtuoso } from 'react-virtuoso';
 import { recordingService, Recording } from '../../services/Recording/recordingService';
 import { Mic, Clock, FileText, Loader2, AlertCircle, ChevronDown } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -31,7 +32,11 @@ import {
 export default function RecordingsScreen(): ReactElement {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const [showTitleModal, setShowTitleModal] = useState(false);
   const [savingTitle, setSavingTitle] = useState(false);
   const [showSttPicker, setShowSttPicker] = useState(false);
@@ -53,23 +58,43 @@ export default function RecordingsScreen(): ReactElement {
   // Live transcript streaming from global store (subscription is managed by the store)
   const { transcripts } = useTranscriptStream();
 
-  const loadRecordings = useCallback(async (): Promise<void> => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await recordingService.getRecordings();
-      setRecordings(data);
-    } catch (err) {
-      logRecordingError('RecordingsScreen.loadRecordings', err);
-      setError('Failed to load recordings. Please try again.');
-    } finally {
-      setLoading(false);
+  const loadRecordings = useCallback(
+    async (reset = false): Promise<void> => {
+      try {
+        if (reset) {
+          setLoading(true);
+          setError(null);
+        } else {
+          setLoadingMore(true);
+        }
+
+        const currentCursor = reset ? null : nextCursor;
+        const data = await recordingService.getRecordings({ limit: 20, cursor: currentCursor });
+
+        setRecordings(prev => (reset ? data.recordings : [...prev, ...data.recordings]));
+        setHasMore(data.hasMore ?? false);
+        setNextCursor(data.nextCursor ?? null);
+      } catch (err) {
+        logRecordingError('RecordingsScreen.loadRecordings', err);
+        setError('Failed to load recordings. Please try again.');
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [nextCursor],
+  );
+
+  const loadMoreRecordings = useCallback(() => {
+    if (!loadingMore && hasMore) {
+      void loadRecordings(false);
     }
-  }, []);
+  }, [loadingMore, hasMore, loadRecordings]);
 
   useEffect(() => {
-    void loadRecordings();
-  }, [loadRecordings]);
+    void loadRecordings(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const formatDuration = formatRecordingDuration;
   const generateAutoTitle = (): string => generateRecordingTitle(startTime);
@@ -134,7 +159,7 @@ export default function RecordingsScreen(): ReactElement {
       sendRecordingEvent({ type: 'clearTranscripts' });
       toast.success('Recording saved', { description: title });
       // Refresh recordings list
-      void loadRecordings();
+      void loadRecordings(true);
     } catch {
       toast.error('Failed to save title');
     } finally {
@@ -184,6 +209,7 @@ export default function RecordingsScreen(): ReactElement {
     <div className='flex flex-col h-full relative bg-background md:rounded-2xl overflow-hidden shadow-md'>
       {/* ─── List View (slides out when recording is active) ───── */}
       <div
+        ref={setScrollContainer}
         className='flex-1 overflow-auto transition-transform duration-500 ease-in-out'
         style={{
           transform: isActive ? 'translateY(-100%)' : 'translateY(0)',
@@ -276,92 +302,109 @@ export default function RecordingsScreen(): ReactElement {
             </div>
           ) : (
             /* Recordings List */
-            <div className='space-y-3'>
-              {recordings.map(recording => (
-                /* Outer div — not a button so we can nest buttons inside */
-                <div
-                  key={recording.id}
-                  className='w-full bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 overflow-hidden hover:shadow-md transition-shadow group flex items-center'
-                >
-                  {/* Clickable header area → navigate to detail */}
-                  <button
-                    type='button'
-                    onClick={() => handleRecordingClick(recording)}
-                    className='flex-1 min-w-0 text-left p-4 cursor-pointer'
-                    data-track-category='RecordingsScreen'
-                    data-track-name='view_recording'
-                  >
-                    <div className='flex items-start gap-4'>
-                      {/* Icon */}
-                      <div className='flex-shrink-0 w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 transition-colors'>
-                        <Mic className='w-5 h-5 text-blue-600 dark:text-blue-400' />
-                      </div>
-
-                      {/* Content */}
-                      <div className='flex-1 min-w-0'>
-                        <h3 className='font-semibold text-foreground dark:text-gray-100 mb-1 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
-                          {recording.title}
-                        </h3>
-
-                        <div className='flex items-center gap-4 text-xs text-muted-foreground dark:text-muted-foreground mb-2'>
-                          <div className='flex items-center gap-1'>
-                            <Clock className='w-3 h-3' />
-                            <span>
-                              {formatDistanceToNow(new Date(recording.startedAt), {
-                                addSuffix: true,
-                              })}
-                            </span>
-                          </div>
-                          {recording.durationMs && (
-                            <div className='flex items-center gap-1'>
-                              <span>{formatDuration(recording.durationMs)}</span>
+            <>
+              {scrollContainer ? (
+                <Virtuoso
+                  customScrollParent={scrollContainer}
+                  data={recordings}
+                  useWindowScroll={false}
+                  endReached={loadMoreRecordings}
+                  components={{
+                    Footer: () =>
+                      loadingMore ? (
+                        <div className='py-4 text-center'>
+                          <Loader2 className='w-5 h-5 animate-spin mx-auto text-muted-foreground' />
+                        </div>
+                      ) : null,
+                  }}
+                  itemContent={(_, recording) => (
+                    <div className='pb-3'>
+                      <div className='w-full bg-background dark:bg-gray-800 rounded-lg border border-border dark:border-gray-700 overflow-hidden hover:shadow-md transition-shadow group flex items-center'>
+                        {/* Clickable header area → navigate to detail */}
+                        <button
+                          type='button'
+                          onClick={() => handleRecordingClick(recording)}
+                          className='flex-1 min-w-0 text-left p-4 cursor-pointer'
+                          data-track-category='RecordingsScreen'
+                          data-track-name='view_recording'
+                        >
+                          <div className='flex items-start gap-4'>
+                            {/* Icon */}
+                            <div className='flex-shrink-0 w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 transition-colors'>
+                              <Mic className='w-5 h-5 text-blue-600 dark:text-blue-400' />
                             </div>
-                          )}
-                        </div>
 
-                        {/* Metadata badges */}
-                        <div className='flex items-center gap-2 flex-wrap'>
-                          {recording.hasTranscript && (
-                            <span className='inline-flex items-center gap-1 px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-md text-xs'>
-                              <FileText className='w-3 h-3' />
-                              Transcript
-                            </span>
-                          )}
-                          {recording.hasSummary && (
-                            <span className='inline-flex items-center gap-1 px-2 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 rounded-md text-xs'>
-                              AI Summary
-                            </span>
-                          )}
-                          {!recording.endedAt && (
-                            <span className='inline-flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-md text-xs'>
-                              <div className='w-2 h-2 bg-blue-500 rounded-full animate-pulse' />
-                              Recording
-                            </span>
-                          )}
-                        </div>
+                            {/* Content */}
+                            <div className='flex-1 min-w-0'>
+                              <h3 className='font-semibold text-foreground dark:text-gray-100 mb-1 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors'>
+                                {recording.title}
+                              </h3>
+
+                              <div className='flex items-center gap-4 text-xs text-muted-foreground dark:text-muted-foreground mb-2'>
+                                <div className='flex items-center gap-1'>
+                                  <Clock className='w-3 h-3' />
+                                  <span>
+                                    {formatDistanceToNow(new Date(recording.startedAt), {
+                                      addSuffix: true,
+                                    })}
+                                  </span>
+                                </div>
+                                {recording.durationMs && (
+                                  <div className='flex items-center gap-1'>
+                                    <span>{formatDuration(recording.durationMs)}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Metadata badges */}
+                              <div className='flex items-center gap-2 flex-wrap'>
+                                {recording.hasTranscript && (
+                                  <span className='inline-flex items-center gap-1 px-2 py-1 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-md text-xs'>
+                                    <FileText className='w-3 h-3' />
+                                    Transcript
+                                  </span>
+                                )}
+                                {recording.hasSummary && (
+                                  <span className='inline-flex items-center gap-1 px-2 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 rounded-md text-xs'>
+                                    AI Summary
+                                  </span>
+                                )}
+                                {!recording.endedAt && (
+                                  <span className='inline-flex items-center gap-1 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-md text-xs'>
+                                    <div className='w-2 h-2 bg-blue-500 rounded-full animate-pulse' />
+                                    Recording
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+
+                        {/* Inline audio player — only present when a GCS file exists */}
+                        {recording.hasRecording && (
+                          <AudioPlayer
+                            onLoad={async signal => {
+                              await recordingService.saveRecordingAttachment(recording.externalId);
+                              return recordingService.downloadRecordingBlob(
+                                recording.externalId,
+                                signal,
+                              );
+                            }}
+                            initialDurationSec={
+                              recording.durationMs ? recording.durationMs / 1000 : undefined
+                            }
+                            stopPropagation
+                            trackCategory='RecordingsScreen'
+                            showToastOnError
+                            className='flex-shrink-0 pr-4'
+                          />
+                        )}
                       </div>
                     </div>
-                  </button>
-
-                  {/* Inline audio player — only present when a GCS file exists */}
-                  {recording.hasRecording && (
-                    <AudioPlayer
-                      onLoad={async signal => {
-                        await recordingService.saveRecordingAttachment(recording.externalId);
-                        return recordingService.downloadRecordingBlob(recording.externalId, signal);
-                      }}
-                      initialDurationSec={
-                        recording.durationMs ? recording.durationMs / 1000 : undefined
-                      }
-                      stopPropagation
-                      trackCategory='RecordingsScreen'
-                      showToastOnError
-                      className='flex-shrink-0 pr-4'
-                    />
                   )}
-                </div>
-              ))}
-            </div>
+                />
+              ) : null}
+            </>
           )}
         </div>
       </div>
