@@ -487,6 +487,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     // Only show active buttons to the intended user
     const visibleActions = parsed.appActions.filter(a => {
       const ctx = a.context ?? {};
+      // Show to all if showToAll flag is set
+      if (ctx['showToAll'] === true) return true;
+      // Otherwise only show to the intended user
       return ctx['mentionedUserId'] === user?.id || ctx['userId'] === user?.id;
     });
     return { ...parsed, appActions: visibleActions };
