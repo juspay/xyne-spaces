@@ -47,6 +47,7 @@ export interface FileFilters {
   subApp?: string[];
   callType?: string[];
   docType?: string[];
+  createdBy?: string[];
   createdBefore?: string;
   createdAfter?: string;
   createdOn?: string;
@@ -231,6 +232,12 @@ private buildUserConditions(): string {
     if (filters.callType && filters.callType.length > 0) {
       const types = filters.callType.map(t => `callType contains "${t.trim()}"`).join(' or ');
       conditions.push(`(${types})`);
+    }
+
+    // createdBy filter (for from: functionality - files uploaded by specific user)
+    if (filters.createdBy && filters.createdBy.length > 0) {
+      const creators = filters.createdBy.map(id => `createdBy contains "${id.trim()}"`).join(' or ');
+      conditions.push(`(${creators})`);
     }
 
     // Date filters

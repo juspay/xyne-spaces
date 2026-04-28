@@ -19,10 +19,11 @@ import {
 import { $createMentionNode, MentionData, $isMentionNode } from './MentionNode';
 import { MentionType } from './ChannelCommandMenu.types';
 
-export type ChannelTriggerType = '#' | 'in:';
+export type ChannelTriggerType = '#' | 'in:' | 'in:#' | 'in:@';
+export type UserTriggerType = '@' | 'from:' | 'assignee:' | 'in:@';
 
 interface MentionPluginProps {
-  onUserSearch?: (query: string | null) => void;
+  onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
   onChannelSearch?: (query: string | null, trigger?: ChannelTriggerType) => void;
   availableUsers?: Array<{ id: string; name: string; email?: string }>;
   availableChannels?: Array<{ id: string; name: string }>;
@@ -64,12 +65,20 @@ export function MentionPlugin({
     // Debounce search to avoid too many calls
     const timeoutId = setTimeout(() => {
       if (triggerType === MentionType.USER && onUserSearch) {
-        onUserSearch(searchTerm);
+        // User triggers: '@' navigates to DM; 'from:'/'assignee:' create filter chips
+        const userTrigger: UserTriggerType =
+          triggerText.current === '@'
+            ? '@'
+            : triggerText.current === 'assignee:'
+              ? 'assignee:'
+              : 'from:';
+        onUserSearch(searchTerm, userTrigger);
       } else if (triggerType === MentionType.CHANNEL && onChannelSearch) {
         // Channel triggers today: '#' or 'in:'. Anything else falls back to
         // 'in:' (chip semantics) — safer default since '#' navigates away.
         // If a new channel-type trigger is added, register it explicitly.
-        const channelTrigger: ChannelTriggerType = triggerText.current === '#' ? '#' : 'in:';
+        const channelTrigger: ChannelTriggerType =
+          triggerText.current === '#' ? '#' : triggerText.current === 'in:#' ? 'in:#' : 'in:';
         onChannelSearch(searchTerm, channelTrigger);
       }
     }, 150); // Reduced debounce for better responsiveness
@@ -79,14 +88,15 @@ export function MentionPlugin({
 
   // Insert mention
   const insertMention = useCallback(
-    (item: { id: string; name: string; email?: string }) => {
+    (item: { id: string; name: string; email?: string; type?: MentionType }) => {
       // Set flag to prevent update listener from interfering
       isInsertingMention.current = true;
 
       // Capture the mention start offset before editor.update
       const mentionStart = mentionStartOffset.current;
       const trigger = triggerText.current;
-      const type = triggerType;
+      // Use explicit type from item if provided (for in: combined list), otherwise use triggerType
+      const type = item.type ?? triggerType;
 
       if (mentionStart === null || !type) {
         isInsertingMention.current = false;
@@ -184,12 +194,23 @@ export function MentionPlugin({
         // Set the node text to only the text before trigger
         anchorNode.setTextContent(textBefore);
 
+        // Normalize trigger to the correct prefix
+        // 'in:#' and 'in:@' are trigger modifiers, but the actual prefix should be 'in:'
+        const normalizedPrefix: 'from:' | 'in:' | 'assignee:' | null =
+          trigger === 'from:'
+            ? 'from:'
+            : trigger === 'assignee:'
+              ? 'assignee:'
+              : trigger?.startsWith('in:')
+                ? 'in:'
+                : null;
+
         // Create mention node
         const mentionData: MentionData = {
           id: item.id,
           name: item.name,
           type: type === MentionType.USER ? MentionType.USER : MentionType.CHANNEL,
-          prefix: trigger as 'from:' | 'in:' | 'assignee:',
+          ...(normalizedPrefix && { prefix: normalizedPrefix }),
           ...(item.email && { email: item.email }),
         };
         const mentionNode = $createMentionNode(mentionData);
@@ -519,19 +540,38 @@ export function MentionPlugin({
             query: (assigneeMatch[1] || '').replace(/^@/, '').trim(),
             index: textBeforeCursor.lastIndexOf('assignee:'),
           };
+        } else if (inMatch) {
+          const inQuery = (inMatch[1] || '').trim();
+          // "in:@" compound trigger — search DMs (not users!) with in: prefix
+          if (inQuery.startsWith('@')) {
+            trigger = {
+              type: 'channel',
+              text: 'in:@',
+              query: inQuery.substring(1).trim(),
+              index: textBeforeCursor.lastIndexOf('in:'),
+            };
+          } else if (inQuery.startsWith('#')) {
+            // "in:#" compound trigger — search only channels
+            trigger = {
+              type: 'channel',
+              text: 'in:#',
+              query: inQuery.substring(1).trim(),
+              index: textBeforeCursor.lastIndexOf('in:'),
+            };
+          } else {
+            trigger = {
+              type: 'channel',
+              text: 'in:',
+              query: inQuery.trim(),
+              index: textBeforeCursor.lastIndexOf('in:'),
+            };
+          }
         } else if (atMatch) {
           trigger = {
             type: 'user',
             text: '@',
             query: atMatch[1] || '',
             index: textBeforeCursor.lastIndexOf('@'),
-          };
-        } else if (inMatch) {
-          trigger = {
-            type: 'channel',
-            text: 'in:',
-            query: (inMatch[1] || '').replace(/^#/, '').trim(),
-            index: textBeforeCursor.lastIndexOf('in:'),
           };
         } else if (hashMatch) {
           trigger = {
@@ -553,10 +593,19 @@ export function MentionPlugin({
 
           // Trigger search immediately when trigger is detected
           if (trigger.type === 'user' && onUserSearch) {
-            onUserSearch(trigger.query.trim());
+            const userTrigger: UserTriggerType =
+              trigger.text === '@' ? '@' : trigger.text === 'assignee:' ? 'assignee:' : 'from:';
+            onUserSearch(trigger.query.trim(), userTrigger);
           } else if (trigger.type === 'channel' && onChannelSearch) {
-            // See note in the debounced effect above: '#' or 'in:' only.
-            const channelTrigger: ChannelTriggerType = trigger.text === '#' ? '#' : 'in:';
+            // Channel triggers: '#' or 'in:' variants
+            const channelTrigger: ChannelTriggerType =
+              trigger.text === '#'
+                ? '#'
+                : trigger.text === 'in:#'
+                  ? 'in:#'
+                  : trigger.text === 'in:@'
+                    ? 'in:@'
+                    : 'in:';
             onChannelSearch(trigger.query.trim(), channelTrigger);
           }
 

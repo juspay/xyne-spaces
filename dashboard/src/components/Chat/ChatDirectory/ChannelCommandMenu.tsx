@@ -23,7 +23,6 @@ import {
   Mic,
   Lock,
 } from 'lucide-react';
-import { useQuery as useReactQuery } from '@tanstack/react-query';
 import * as Tabs from '@radix-ui/react-tabs';
 //import * as Switch from '@radix-ui/react-switch';
 import { Channel, ChannelVisibility } from '@xyne/shared';
@@ -52,7 +51,11 @@ import {
   buildContextItemFromChannel,
 } from '../ThreadContextPanel/contextItem.utils';
 import { ChannelCategory } from './ChatDirectory.types';
-import { navigateToSearchResult, openSearchResult } from '../../../utils/searchNavigation';
+import {
+  navigateToSearchResult,
+  navigateToUser,
+  openSearchResult,
+} from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { useUsers, useUserSearch } from '../../../hooks/useUsers';
@@ -234,7 +237,19 @@ const ChannelCommandMenu = ({
 
       const userIds = parseDMParticipantIds(channel);
 
-      const participantNames = userIds
+      // Check if this is a self-DM (only current user)
+      const isSelfDM = userIds.length === 1 && userIds[0] === currentUserID;
+
+      if (isSelfDM) {
+        // For self-DMs, include current user's name so it's searchable
+        const currentUserName = usersById.get(currentUserID)?.name;
+        return currentUserName ? [currentUserName, 'You'] : ['You'];
+      }
+
+      // Exclude current user from regular DM names - only show other participants
+      const otherUserIds = userIds.filter(id => id !== currentUserID);
+
+      const participantNames = otherUserIds
         .map(userId => usersById.get(userId)?.name)
         .filter((name): name is string => !!name);
 
@@ -288,6 +303,13 @@ const ChannelCommandMenu = ({
     return map;
   }, [directMessages, currentUserID]);
 
+  // Resolved enabled tabs — computed early so useEffects below can reference it
+  const activeEnabledTabs = enabledTabs ?? DEFAULT_ENABLED_TABS;
+
+  // Mention search state - declared before useSearchMetrics so it can be passed to the hook
+  const [mentionSearchQuery, setMentionSearchQuery] = useState('');
+  const [mentionSearchType, setMentionSearchType] = useState<MentionType | null>(null);
+
   const {
     searchResults: backendResults,
     isSearching: isLoading,
@@ -324,10 +346,8 @@ const ChannelCommandMenu = ({
     onSearchComplete: useCallback((results: DisplaySearchResult[], query: string) => {
       triggerSummaryFetchRef.current?.(results, query);
     }, []),
+    mentionSearchType,
   });
-
-  // Resolved enabled tabs — computed early so useEffects below can reference it
-  const activeEnabledTabs = enabledTabs ?? DEFAULT_ENABLED_TABS;
 
   // Aliases to match old usage if needed or just use new names
   const search = cleanedSearchText;
@@ -345,19 +365,20 @@ const ChannelCommandMenu = ({
   const showGroupedUsers = !typeFilter || isUsersType;
 
   // Check if user has selected from: or in: mention filters (for reordering results)
-  const hasFromOrInFilter = selectedMentions.some(m => m.prefix === 'from:' || m.prefix === 'in:');
-
-  // Mention search
-  const [mentionSearchQuery, setMentionSearchQuery] = useState('');
-  const [mentionSearchType, setMentionSearchType] = useState<MentionType | null>(null);
+  // Only count in: mentions that are CHANNEL type (not USER type from in: combined list)
+  const hasFromOrInFilter = selectedMentions.some(
+    m => m.prefix === 'from:' || (m.prefix === 'in:' && m.type === MentionType.CHANNEL),
+  );
   // Which trigger opened the channel typeahead: '#' acts like Slack's quick
   // switcher (navigate on select, show only regular channels); 'in:' creates a
   // filter chip and includes DMs/Group DMs.
-  const [channelTrigger, setChannelTrigger] = useState<'#' | 'in:' | null>(null);
+  const [channelTrigger, setChannelTrigger] = useState<'#' | 'in:' | 'in:#' | 'in:@' | null>(null);
+
+  const [userTrigger, setUserTrigger] = useState<'@' | 'from:' | 'assignee:' | 'in:@' | null>(null);
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
 
   const insertMentionRef = useRef<
-    ((item: { id: string; name: string; email?: string }) => void) | null
+    ((item: { id: string; name: string; email?: string; type?: MentionType }) => void) | null
   >(null);
 
   const insertTextRef = useRef<((text: string) => void) | null>(null);
@@ -418,16 +439,6 @@ const ChannelCommandMenu = ({
   } | null>(null);
 
   const DISPLAY_LIMIT = 5;
-
-  // Fetch available bots - only show DM-capable bots in command menu
-  const { data: availableBots = [] } = useReactQuery({
-    queryKey: ['bots', 'dm-capable'],
-    queryFn: async () => {
-      const bots = await botService.listAllBots();
-      return bots.filter(bot => bot.interactionMode === 'dm');
-    },
-    staleTime: 10 * 60 * 1000, // 10 minutes - bots don't change often
-  });
 
   const [selectedBot, setSelectedBot] = useState<UnifiedBotInfo | null>(null);
   const [botChatState, setBotChatState] = useState<BotChatState>({ status: 'idle' });
@@ -631,13 +642,6 @@ const ChannelCommandMenu = ({
     }
   }, [selectedBot, botChatState, navigate, onOpenChange]);
 
-  // Handle bot selection from dropdown
-  const handleBotSelect = useCallback((bot: UnifiedBotInfo): void => {
-    setSelectedBot(bot);
-    setSearch(''); // Clear search - bot is shown as blue box
-    setBotChatState({ status: 'idle' });
-  }, []);
-
   // Handle input keydown for bot mode
   const handleInputKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -653,19 +657,8 @@ const ChannelCommandMenu = ({
     [selectedBot, search, botChatState.status, handleBotQuery, resetBotMode],
   );
 
-  // Filter bots based on search (when typing @)
-  const filteredBots = useMemo(() => {
-    if (!search.startsWith('@')) return [];
-    const searchTerm = search.slice(1).toLowerCase().split(' ')[0] ?? '';
-    if (!searchTerm) return availableBots;
-    return availableBots.filter(
-      bot =>
-        bot.name?.toLowerCase().includes(searchTerm) || bot.id?.toLowerCase().includes(searchTerm),
-    );
-  }, [search, availableBots]);
-
-  // Show bots section when typing @ but no bot selected yet
-  const showBotsSuggestions = search.startsWith('@') && !selectedBot;
+  // Bot suggestions removed - @ functionality disabled
+  const showBotsSuggestions = false;
 
   useEffect(() => {
     if (showBotsSuggestions) {
@@ -704,8 +697,9 @@ const ChannelCommandMenu = ({
   // Handle mention selection from search results.
   // For `#`-triggered channel picks (Slack-style quick switcher) we navigate to
   // the channel and close the dialog instead of inserting a filter chip.
+  // For `@`-triggered user picks, we navigate to the user's DM.
   const handleMentionSelect = useCallback(
-    (mention: { id: string; name: string; type: MentionType; email?: string }) => {
+    async (mention: { id: string; name: string; type: MentionType; email?: string }) => {
       if (mention.type === MentionType.CHANNEL && channelTrigger === '#') {
         setMentionSearchType(null);
         setMentionSearchQuery('');
@@ -716,10 +710,32 @@ const ChannelCommandMenu = ({
         return;
       }
 
+      // For `@`-triggered user picks, navigate to DM instead of inserting a chip
+      if (mention.type === MentionType.USER && userTrigger === '@') {
+        setMentionSearchType(null);
+        setMentionSearchQuery('');
+        setUserTrigger(null);
+        setSelectedMentionIndex(0);
+        onOpenChange(false);
+
+        // Use the same navigation logic as clicking a user in default view
+        const result: DisplaySearchResult = {
+          id: mention.id,
+          type: 'user',
+          title: mention.name,
+          subtitle: mention.email || '',
+          relevanceScore: 1,
+          metadata: {},
+        };
+        await navigateToUser(result, navigate, channelData || []);
+        return;
+      }
+
       if (insertMentionRef.current) {
         insertMentionRef.current({
           id: mention.id,
           name: mention.name,
+          type: mention.type,
           ...(mention.email ? { email: mention.email } : {}),
         });
 
@@ -728,96 +744,256 @@ const ChannelCommandMenu = ({
           setMentionSearchType(null);
           setMentionSearchQuery('');
           setChannelTrigger(null);
+          setUserTrigger(null);
           setSelectedMentionIndex(0);
         }, 100);
       }
     },
-    [channelTrigger, onOpenChange, navigate],
+    [channelTrigger, userTrigger, onOpenChange, navigate],
   );
 
   // Store the insertMention function when it's ready
   const handleInsertMentionReady = useCallback(
-    (insertMention: (item: { id: string; name: string; email?: string }) => void) => {
+    (
+      insertMention: (item: {
+        id: string;
+        name: string;
+        email?: string;
+        type?: MentionType;
+      }) => void,
+    ) => {
       insertMentionRef.current = insertMention;
     },
     [],
   );
 
   // Handle user search from mention plugin
-  const handleUserSearch = useCallback((query: string | null) => {
-    if (query === null) {
-      // Mention search was cancelled/cleared
-      setMentionSearchType(null);
-      setMentionSearchQuery('');
-      setSelectedMentionIndex(0);
-      return;
-    }
-    setMentionSearchQuery(query);
-    setMentionSearchType(MentionType.USER);
-    setSelectedMentionIndex(0); // Reset selection when search changes
-  }, []);
+  const handleUserSearch = useCallback(
+    (query: string | null, trigger?: '@' | 'from:' | 'assignee:' | 'in:@') => {
+      if (query === null) {
+        // Mention search was cancelled/cleared
+        setMentionSearchType(null);
+        setMentionSearchQuery('');
+        setUserTrigger(null);
+        setSelectedMentionIndex(0);
+        return;
+      }
+      setMentionSearchQuery(query);
+      setMentionSearchType(MentionType.USER);
+      setUserTrigger(trigger ?? 'from:');
+      setSelectedMentionIndex(0); // Reset selection when search changes
+    },
+    [],
+  );
 
   // Handle channel search from mention plugin
-  const handleChannelSearch = useCallback((query: string | null, trigger?: '#' | 'in:') => {
-    if (query === null) {
-      // Mention search was cancelled/cleared
-      setMentionSearchType(null);
-      setMentionSearchQuery('');
-      setChannelTrigger(null);
-      setSelectedMentionIndex(0);
-      return;
-    }
-    setMentionSearchQuery(query);
-    setMentionSearchType(MentionType.CHANNEL);
-    setChannelTrigger(trigger ?? 'in:');
-    setSelectedMentionIndex(0); // Reset selection when search changes
-  }, []);
+  const handleChannelSearch = useCallback(
+    (query: string | null, trigger?: '#' | 'in:' | 'in:#' | 'in:@') => {
+      if (query === null) {
+        // Mention search was cancelled/cleared
+        setMentionSearchType(null);
+        setMentionSearchQuery('');
+        setChannelTrigger(null);
+        setSelectedMentionIndex(0);
+        return;
+      }
+      setMentionSearchQuery(query);
+      // When trigger is 'in:@', we want to show DMs (not users!)
+      // When trigger is 'in:#', we want to show only channels
+      // When trigger is 'in:', we want to show both channels and DMs
+      // When trigger is '#', we want to show only channels (quick switcher)
+      if (trigger === 'in:@') {
+        // 'in:@' shows DMs only (not users!)
+        setMentionSearchType(MentionType.CHANNEL);
+        setChannelTrigger('in:@');
+      } else if (trigger === 'in:#') {
+        // Show only channels (like '#' trigger but with 'in:' prefix)
+        setMentionSearchType(MentionType.CHANNEL);
+        setChannelTrigger('in:#');
+      } else if (trigger === '#') {
+        // '#' trigger - show only channels (Slack-style quick switcher)
+        setMentionSearchType(MentionType.CHANNEL);
+        setChannelTrigger('#');
+      } else {
+        // Plain 'in:' - show both channels and DMs
+        setMentionSearchType(MentionType.CHANNEL);
+        setChannelTrigger('in:');
+      }
+      setSelectedMentionIndex(0); // Reset selection when search changes
+    },
+    [],
+  );
 
   // `from:` typeahead user candidates. Uses the same data source and rank as
   // plain user search (useUserSearch + rankUsers) so a query like "abhi"
   // returns the same Abhisheks in the same order regardless of how the user
   // typed it. ChatInput `@` mentions still go through useMentionSearch
   // because they need chat-context signals (channel participants, recency).
-  const mentionUsersQuery = mentionSearchType === MentionType.USER ? mentionSearchQuery : '';
+
+  // When using 'in:' (plain), we want to show both channels AND users
+  // So we need to also fetch users for that case
+  // But NOT for 'in:#' which should only show channels
+  const mentionUsersQuery =
+    mentionSearchType === MentionType.USER || channelTrigger === 'in:' ? mentionSearchQuery : '';
   const mentionUsers = useUserSearch(mentionUsersQuery, CMDK_USER_LIMIT);
+
+  // Available users - populated when:
+  // 1. mentionSearchType is USER (direct user search like @, from:, assignee:, in:@)
+  // 2. channelTrigger is 'in:' (combined search - show both channels and users)
   const availableUsers = useMemo(() => {
-    if (mentionSearchType !== MentionType.USER) return [];
+    if (mentionSearchType !== MentionType.USER && channelTrigger !== 'in:') return [];
     return rankUsers(mentionUsers, mentionSearchQuery, dmContactRecency).map(user => ({
       id: user.id,
       name: user.name,
       ...(user.email && { email: user.email }),
     }));
-  }, [mentionUsers, mentionSearchQuery, mentionSearchType, dmContactRecency]);
+  }, [mentionUsers, mentionSearchQuery, mentionSearchType, channelTrigger, dmContactRecency]);
 
   // Filter mention results for channels.
   // Mirrors the plain-search regular/DM split in useSearchMetrics so `in:` typeahead
   // matches the same channels the rest of the app does (fuzzy + hyphen-strip via
   // searchChannels). DM/Group DM matching is unchanged: comma-split AND-semantics
   // against participant searchableNames.
-  const availableChannels = useMemo(() => {
+
+  // Regular channels (excludes DMs) - used for `in:` and `in:#` triggers
+  const availableRegularChannels = useMemo(() => {
     if (mentionSearchType !== MentionType.CHANNEL) return [];
 
-    const toDisplay = ({ channel }: { channel: Channel; searchableNames?: string[] }) => {
-      if (!isDMChannel(channel.scopeType)) return { channel, displayName: channel.name };
-      const otherNames = getDMParticipantIdsToFetch(channel, currentUserID)
+    // Filter to only regular channels (no DMs)
+    const regularChannels = allChannels.filter(({ channel }) => !isDMChannel(channel.scopeType));
+
+    // Apply search filtering
+    const filtered = filterChannelsBySearchableNames(regularChannels, mentionSearchQuery, {
+      excludeDMs: false, // Already filtered above
+    });
+
+    // Apply stricter filtering when there's a query
+    const query = mentionSearchQuery.toLowerCase().trim();
+    if (query) {
+      const queryParts = query.split(/[,\s]+/).filter(Boolean);
+      const strictlyFiltered = filtered.filter(({ channel }) => {
+        const nameLower = channel.name.toLowerCase();
+        return queryParts.every(part => nameLower.includes(part));
+      });
+      return strictlyFiltered.map(({ channel }) => ({ channel, displayName: channel.name }));
+    }
+
+    return filtered.map(({ channel }) => ({ channel, displayName: channel.name }));
+  }, [allChannels, mentionSearchQuery, mentionSearchType]);
+
+  // Helper to get display name for a DM channel - includes self-DMs (notes to yourself)
+  const getDMDisplayNameWithSelf = useCallback(
+    (channel: Channel, searchableNames?: string[]): string => {
+      if (!isDMChannel(channel.scopeType)) return channel.name;
+
+      // For DMs, use participant names if available
+      if (searchableNames && searchableNames.length > 0) {
+        return searchableNames.join(', ');
+      }
+
+      // Fallback: try to get names from usersById
+      const otherUserIds = getDMParticipantIdsToFetch(channel, currentUserID);
+
+      // Check if this is a self-DM (only current user)
+      const allParticipants = parseDMParticipantIds(channel);
+      const isSelfDM = allParticipants.length === 1 && allParticipants[0] === currentUserID;
+
+      if (isSelfDM) {
+        // For self-DMs, show "You" or the user's own name
+        const currentUserName = usersById.get(currentUserID)?.name;
+        return currentUserName ? `${currentUserName} (You)` : 'You';
+      }
+
+      // Regular DM with others
+      const otherNames = otherUserIds
         .map(id => usersById.get(id)?.name)
         .filter((n): n is string => !!n);
-      return { channel, displayName: otherNames.length > 0 ? otherNames.join(', ') : 'Group Chat' };
-    };
 
-    // `#` is a Slack-style quick switcher — show only regular channels.
-    // `in:` is a scope filter — DMs/Group DMs are valid targets and stay included.
-    return filterChannelsBySearchableNames(allChannels, mentionSearchQuery, {
-      excludeDMs: channelTrigger === '#',
-    }).map(toDisplay);
+      return otherNames.length > 0 ? otherNames.join(', ') : 'Group Chat';
+    },
+    [usersById, currentUserID],
+  );
+
+  // DMs and Group DMs - used for `in:` trigger (includes self-DMs / notes to yourself)
+  const availableDMs = useMemo(() => {
+    if (mentionSearchType !== MentionType.CHANNEL) return [];
+
+    // Filter to only DM channels
+    const dmChannels = allChannels.filter(({ channel }) => isDMChannel(channel.scopeType));
+
+    // Apply search filtering
+    const filtered = filterChannelsBySearchableNames(dmChannels, mentionSearchQuery, {
+      excludeDMs: false,
+    });
+
+    // Apply stricter filtering when there's a query
+    const query = mentionSearchQuery.toLowerCase().trim();
+    if (query) {
+      const queryParts = query.split(/[,\s]+/).filter(Boolean);
+      const strictlyFiltered = filtered.filter(({ channel, searchableNames }) => {
+        // Check if this is a self-DM
+        const allParticipants = parseDMParticipantIds(channel);
+        const isSelfDM = allParticipants.length === 1 && allParticipants[0] === currentUserID;
+
+        if (isSelfDM) {
+          // For self-DMs, check if query matches current user's name or "you"
+          const currentUserName = usersById.get(currentUserID)?.name?.toLowerCase() || '';
+          const selfDMNames = ['you', currentUserName].filter(Boolean);
+          return queryParts.every(part => selfDMNames.some(name => name.includes(part)));
+        }
+
+        // Get names to check: use searchableNames or fallback to usersById lookup
+        const namesToCheck =
+          searchableNames && searchableNames.length > 0
+            ? searchableNames
+            : getDMParticipantIdsToFetch(channel, currentUserID)
+                .map(id => usersById.get(id)?.name)
+                .filter((n): n is string => !!n);
+
+        if (namesToCheck.length === 0) return false;
+
+        const namesLower = namesToCheck.map(n => n.toLowerCase());
+        // All query parts must match at least one participant name
+        return queryParts.every(part => namesLower.some(name => name.includes(part)));
+      });
+
+      // Map to display format, filtering out DMs with no resolvable names
+      return strictlyFiltered
+        .map(({ channel, searchableNames }) => {
+          const displayName = getDMDisplayNameWithSelf(channel, searchableNames);
+          // Only include if we have actual participant names
+          if (displayName === 'Group Chat') {
+            return null;
+          }
+          return { channel, displayName };
+        })
+        .filter((item): item is { channel: Channel; displayName: string } => item !== null);
+    }
+
+    // No query: show all DMs including self-DMs (with proper display names)
+    return filtered
+      .map(({ channel, searchableNames }) => {
+        const displayName = getDMDisplayNameWithSelf(channel, searchableNames);
+        // Only include if we have actual participant names
+        if (displayName === 'Group Chat') {
+          return null;
+        }
+        return { channel, displayName };
+      })
+      .filter((item): item is { channel: Channel; displayName: string } => item !== null);
   }, [
     allChannels,
     mentionSearchQuery,
     mentionSearchType,
-    channelTrigger,
+    getDMDisplayNameWithSelf,
     usersById,
     currentUserID,
   ]);
+
+  // Legacy export for backward compatibility (combines both)
+  const availableChannels = useMemo(() => {
+    return [...availableRegularChannels, ...availableDMs];
+  }, [availableRegularChannels, availableDMs]);
 
   // Use a ref for triggerSummaryFetch to avoid dependency cycles and infinite loops
   const triggerSummaryFetchRef = useRef(triggerSummaryFetch);
@@ -866,6 +1042,7 @@ const ChannelCommandMenu = ({
       setMentionSearchQuery('');
       setMentionSearchType(null);
       setChannelTrigger(null);
+      setUserTrigger(null);
       setActiveTab(TabType.ALL);
       onTabChange?.(TabType.ALL);
       resetSearchState();
@@ -1707,9 +1884,77 @@ const ChannelCommandMenu = ({
       e.preventDefault();
       e.stopPropagation();
 
+      // Handle 'in:' trigger - Channels + DMs (NO Users)
+      if (channelTrigger === 'in:') {
+        const regularChannelCount = availableRegularChannels.length;
+
+        if (selectedMentionIndex < regularChannelCount) {
+          // Selecting a regular channel
+          const channelIndex = selectedMentionIndex;
+          if (availableRegularChannels[channelIndex]) {
+            const { channel, displayName } = availableRegularChannels[channelIndex];
+            void handleMentionSelect({
+              id: channel.id,
+              name: displayName,
+              type: MentionType.CHANNEL,
+            });
+          }
+        } else {
+          // Selecting a DM
+          const dmIndex = selectedMentionIndex - regularChannelCount;
+          if (availableDMs[dmIndex]) {
+            const { channel, displayName } = availableDMs[dmIndex];
+            void handleMentionSelect({
+              id: channel.id,
+              name: displayName,
+              type: MentionType.CHANNEL,
+            });
+          }
+        }
+        return;
+      }
+
+      // Handle 'in:#' trigger - Channels only (NO DMs)
+      if (channelTrigger === 'in:#') {
+        if (availableRegularChannels[selectedMentionIndex]) {
+          const { channel, displayName } = availableRegularChannels[selectedMentionIndex];
+          void handleMentionSelect({
+            id: channel.id,
+            name: displayName,
+            type: MentionType.CHANNEL,
+          });
+        }
+        return;
+      }
+
+      // Handle 'in:@' trigger - DMs only (NOT Users!)
+      if (channelTrigger === 'in:@') {
+        if (availableDMs[selectedMentionIndex]) {
+          const { channel, displayName } = availableDMs[selectedMentionIndex];
+          void handleMentionSelect({
+            id: channel.id,
+            name: displayName,
+            type: MentionType.CHANNEL,
+          });
+        }
+        return;
+      }
+
+      // Handle '#' trigger - only Channels (legacy combined list)
+      if (channelTrigger === '#' && availableChannels[selectedMentionIndex]) {
+        const { channel, displayName } = availableChannels[selectedMentionIndex];
+        void handleMentionSelect({
+          id: channel.id,
+          name: displayName,
+          type: MentionType.CHANNEL,
+        });
+        return;
+      }
+
+      // Handle regular user mention search
       if (mentionSearchType === MentionType.USER && availableUsers[selectedMentionIndex]) {
         const user = availableUsers[selectedMentionIndex];
-        handleMentionSelect({
+        void handleMentionSelect({
           id: user.id,
           name: getUserDisplayName(user),
           type: MentionType.USER,
@@ -1720,7 +1965,7 @@ const ChannelCommandMenu = ({
         availableChannels[selectedMentionIndex]
       ) {
         const { channel, displayName } = availableChannels[selectedMentionIndex];
-        handleMentionSelect({
+        void handleMentionSelect({
           id: channel.id,
           name: displayName,
           type: MentionType.CHANNEL,
@@ -1781,16 +2026,6 @@ const ChannelCommandMenu = ({
               onValueChange={setSearch}
               onKeyDown={handleInputKeyDown}
               className='flex-1 text-base focus:outline-none'
-            />
-          ) : showBotsSuggestions ? (
-            <Command.Input
-              ref={inputRef}
-              placeholder='Search bots...'
-              value={search}
-              onValueChange={setSearch}
-              className='flex-1 text-base focus:outline-none'
-              // eslint-disable-next-line jsx-a11y/no-autofocus
-              autoFocus
             />
           ) : (
             <LexicalSearchInput
@@ -1910,7 +2145,7 @@ const ChannelCommandMenu = ({
           }}
         >
           {/* Tabs - hidden when bot is selected */}
-          {!selectedBot && !showBotsSuggestions && (
+          {!selectedBot && (
             <div className={`overflow-x-auto no-scrollbar p-2 ${isMobile ? 'mx-1' : 'ml-4'}`}>
               <Tabs.Root value={activeTab}>
                 <Tabs.List className='flex items-center justify-start gap-1.5'>
@@ -2045,62 +2280,179 @@ const ChannelCommandMenu = ({
                   </p>
                 )}
               </div>
-            ) : showBotsSuggestions ? (
-              /* Show bot suggestions when typing @ */
-              <>
-                <Command.Group
-                  heading='Bots'
-                  className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                >
-                  {filteredBots.map(bot => (
-                    <Command.Item
-                      key={bot.id}
-                      value={`@${bot.name}`}
-                      onSelect={() => handleBotSelect(bot)}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-sm cursor-pointer ${!isMobile && 'aria-selected:bg-muted'}`}
-                      style={{ WebkitTapHighlightColor: 'transparent' }}
-                    >
-                      <div className='flex items-center justify-center h-8 w-8 rounded-full bg-primary/10 flex-shrink-0'>
-                        <Bot size={16} className='text-primary' />
-                      </div>
-                      <div className='flex-1 min-w-0'>
-                        <span className='text-base font-medium text-foreground block'>
-                          {bot.name}
-                        </span>
-                        <span className='text-sm text-muted-foreground truncate block'>
-                          {bot.description}
-                        </span>
-                      </div>
-                    </Command.Item>
-                  ))}
-                </Command.Group>
-                {filteredBots.length === 0 && (
-                  <Command.Empty className='py-6 text-center text-base text-muted-foreground'>
-                    No bots found.
-                  </Command.Empty>
-                )}
-              </>
             ) : (
               /* Normal search mode */
               <>
                 {/* Mention Suggestions - Show when mention search is active */}
                 {mentionSearchType && (
                   <>
-                    {mentionSearchType === MentionType.USER && availableUsers.length > 0 && (
+                    {/* 'in:' trigger - Show Channels + DMs (NO Users) */}
+                    {channelTrigger === 'in:' && (
+                      <>
+                        {/* 1. Channels Section */}
+                        {availableRegularChannels.length > 0 && (
+                          <Command.Group
+                            heading='Channels'
+                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                          >
+                            {availableRegularChannels.map(({ channel, displayName }, index) => {
+                              return (
+                                <Command.Item
+                                  key={channel.id}
+                                  value={`mention-channel-${channel.id}`}
+                                  onSelect={() => {
+                                    void handleMentionSelect({
+                                      id: channel.id,
+                                      name: displayName,
+                                      type: MentionType.CHANNEL,
+                                    });
+                                  }}
+                                  onMouseEnter={() => {
+                                    if (setSelectedMentionIndex) {
+                                      setSelectedMentionIndex(index);
+                                    }
+                                  }}
+                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                    index === selectedMentionIndex ? 'bg-muted' : ''
+                                  } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                                >
+                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                    {getChannelIcon(channel)}
+                                  </div>
+                                  <div className='flex-1 min-w-0'>
+                                    <div className='font-semibold text-sm text-foreground truncate'>
+                                      {displayName}
+                                    </div>
+                                  </div>
+                                </Command.Item>
+                              );
+                            })}
+                          </Command.Group>
+                        )}
+                        {/* 2. DMs Section (includes Group DMs) */}
+                        {availableDMs.length > 0 && (
+                          <Command.Group
+                            heading='DMs'
+                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                          >
+                            {availableDMs.map(({ channel, displayName }, index) => {
+                              // Calculate index offset for keyboard navigation
+                              const channelCount = availableRegularChannels.length;
+                              const adjustedIndex = channelCount + index;
+                              return (
+                                <Command.Item
+                                  key={channel.id}
+                                  value={`mention-dm-${channel.id}`}
+                                  onSelect={() => {
+                                    void handleMentionSelect({
+                                      id: channel.id,
+                                      name: displayName,
+                                      type: MentionType.CHANNEL,
+                                    });
+                                  }}
+                                  onMouseEnter={() => {
+                                    if (setSelectedMentionIndex) {
+                                      setSelectedMentionIndex(adjustedIndex);
+                                    }
+                                  }}
+                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                    adjustedIndex === selectedMentionIndex ? 'bg-muted' : ''
+                                  } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                                >
+                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                    {getChannelIcon(channel)}
+                                  </div>
+                                  <div className='flex-1 min-w-0'>
+                                    <div className='font-semibold text-sm text-foreground truncate'>
+                                      {displayName}
+                                    </div>
+                                  </div>
+                                </Command.Item>
+                              );
+                            })}
+                          </Command.Group>
+                        )}
+                        {/* Empty state for in: when nothing matches */}
+                        {availableRegularChannels.length === 0 &&
+                          availableDMs.length === 0 &&
+                          mentionSearchQuery && (
+                            <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+                              No results found for &quot;{mentionSearchQuery}&quot;
+                            </Command.Empty>
+                          )}
+                      </>
+                    )}
+
+                    {/* 'in:#' trigger - Show Channels only (NO DMs, NO Users) */}
+                    {channelTrigger === 'in:#' && (
+                      <>
+                        {/* Channels Section */}
+                        {availableRegularChannels.length > 0 && (
+                          <Command.Group
+                            heading='Channels'
+                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                          >
+                            {availableRegularChannels.map(({ channel, displayName }, index) => {
+                              return (
+                                <Command.Item
+                                  key={channel.id}
+                                  value={`mention-channel-${channel.id}`}
+                                  onSelect={() => {
+                                    void handleMentionSelect({
+                                      id: channel.id,
+                                      name: displayName,
+                                      type: MentionType.CHANNEL,
+                                    });
+                                  }}
+                                  onMouseEnter={() => {
+                                    if (setSelectedMentionIndex) {
+                                      setSelectedMentionIndex(index);
+                                    }
+                                  }}
+                                  className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                    index === selectedMentionIndex ? 'bg-muted' : ''
+                                  } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                                >
+                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                    {getChannelIcon(channel)}
+                                  </div>
+                                  <div className='flex-1 min-w-0'>
+                                    <div className='font-semibold text-sm text-foreground truncate'>
+                                      {displayName}
+                                    </div>
+                                  </div>
+                                </Command.Item>
+                              );
+                            })}
+                          </Command.Group>
+                        )}
+                        {/* Empty state */}
+                        {availableRegularChannels.length === 0 && mentionSearchQuery && (
+                          <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+                            No channels found for &quot;{mentionSearchQuery}&quot;
+                          </Command.Empty>
+                        )}
+                      </>
+                    )}
+
+                    {/* 'in:@' trigger - Show DMs only (NOT Users!) */}
+                    {channelTrigger === 'in:@' && availableDMs.length > 0 && (
                       <Command.Group
-                        heading='Users'
-                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                        heading='DMs'
+                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
                       >
-                        {availableUsers.map((user, index) => (
+                        {availableDMs.map(({ channel, displayName }, index) => (
                           <Command.Item
-                            key={user.id}
-                            value={`mention-user-${user.id}`}
+                            key={channel.id}
+                            value={`mention-dm-${channel.id}`}
                             onSelect={() => {
-                              handleMentionSelect({
-                                id: user.id,
-                                name: getUserDisplayName(user),
-                                type: MentionType.USER,
-                                ...(user.email ? { email: user.email } : {}),
+                              void handleMentionSelect({
+                                id: channel.id,
+                                name: displayName,
+                                type: MentionType.CHANNEL,
                               });
                             }}
                             onMouseEnter={() => {
@@ -2113,22 +2465,28 @@ const ChannelCommandMenu = ({
                             } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
-                            <Avatar userId={user.id} size='sm' />
+                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                              {getChannelIcon(channel)}
+                            </div>
                             <div className='flex-1 min-w-0'>
                               <div className='font-semibold text-sm text-foreground truncate'>
-                                {getUserDisplayName(user)}
+                                {displayName}
                               </div>
-                              {user.email && (
-                                <div className='text-xs text-muted-foreground truncate'>
-                                  {user.email}
-                                </div>
-                              )}
                             </div>
                           </Command.Item>
                         ))}
                       </Command.Group>
                     )}
-                    {mentionSearchType === MentionType.CHANNEL && availableChannels.length > 0 && (
+                    {channelTrigger === 'in:@' &&
+                      availableDMs.length === 0 &&
+                      mentionSearchQuery && (
+                        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+                          No DMs found for &quot;{mentionSearchQuery}&quot;
+                        </Command.Empty>
+                      )}
+
+                    {/* '#' trigger - Show only Channels (Slack-style quick switcher) */}
+                    {channelTrigger === '#' && availableChannels.length > 0 && (
                       <Command.Group
                         heading='Channels'
                         className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
@@ -2139,7 +2497,7 @@ const ChannelCommandMenu = ({
                               key={channel.id}
                               value={`mention-channel-${channel.id}`}
                               onSelect={() => {
-                                handleMentionSelect({
+                                void handleMentionSelect({
                                   id: channel.id,
                                   name: displayName,
                                   type: MentionType.CHANNEL,
@@ -2168,18 +2526,69 @@ const ChannelCommandMenu = ({
                         })}
                       </Command.Group>
                     )}
-                    {mentionSearchType === MentionType.USER &&
-                      availableUsers.length === 0 &&
-                      mentionSearchQuery && (
-                        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                          No users found for &quot;{mentionSearchQuery}&quot;
-                        </Command.Empty>
-                      )}
-                    {mentionSearchType === MentionType.CHANNEL &&
+                    {channelTrigger === '#' &&
                       availableChannels.length === 0 &&
                       mentionSearchQuery && (
                         <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
                           No channels found for &quot;{mentionSearchQuery}&quot;
+                        </Command.Empty>
+                      )}
+
+                    {/* Regular USER mention search (@, from:, assignee:) - Show only Users */}
+                    {mentionSearchType === MentionType.USER &&
+                      (userTrigger === '@' ||
+                        userTrigger === 'from:' ||
+                        userTrigger === 'assignee:') &&
+                      availableUsers.length > 0 && (
+                        <Command.Group
+                          heading='Users'
+                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                        >
+                          {availableUsers.map((user, index) => (
+                            <Command.Item
+                              key={user.id}
+                              value={`mention-user-${user.id}`}
+                              onSelect={() => {
+                                void handleMentionSelect({
+                                  id: user.id,
+                                  name: getUserDisplayName(user),
+                                  type: MentionType.USER,
+                                  ...(user.email ? { email: user.email } : {}),
+                                });
+                              }}
+                              onMouseEnter={() => {
+                                if (setSelectedMentionIndex) {
+                                  setSelectedMentionIndex(index);
+                                }
+                              }}
+                              className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                index === selectedMentionIndex ? 'bg-muted' : ''
+                              } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                              style={{ WebkitTapHighlightColor: 'transparent' }}
+                            >
+                              <Avatar userId={user.id} size='sm' />
+                              <div className='flex-1 min-w-0'>
+                                <div className='font-semibold text-sm text-foreground truncate'>
+                                  {getUserDisplayName(user)}
+                                </div>
+                                {user.email && (
+                                  <div className='text-xs text-muted-foreground truncate'>
+                                    {user.email}
+                                  </div>
+                                )}
+                              </div>
+                            </Command.Item>
+                          ))}
+                        </Command.Group>
+                      )}
+                    {mentionSearchType === MentionType.USER &&
+                      (userTrigger === '@' ||
+                        userTrigger === 'from:' ||
+                        userTrigger === 'assignee:') &&
+                      availableUsers.length === 0 &&
+                      mentionSearchQuery && (
+                        <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
+                          No users found for &quot;{mentionSearchQuery}&quot;
                         </Command.Empty>
                       )}
                   </>
