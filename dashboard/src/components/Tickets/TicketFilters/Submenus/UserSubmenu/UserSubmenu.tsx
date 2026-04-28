@@ -3,7 +3,7 @@ import { Search, Check } from 'lucide-react';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
 import { useUsers, useUserSearch } from '../../../../../hooks/useUsers';
-import { getUserDisplayName } from '../../../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../../../utils/userDisplayName';
 
 interface UserSubmenuProps {
   selectedUsers: string[];
@@ -102,6 +102,7 @@ export const UserSubmenu = ({
             {finalResults.map(user => {
               const isSelected = selectedUsers.includes(user.id);
               const displayName = getUserDisplayName(user);
+              const isDeactivated = isUserDeactivated(user);
               return (
                 <button
                   key={user.id}
@@ -122,7 +123,18 @@ export const UserSubmenu = ({
                 >
                   <Avatar userId={user.id} size='sm' className='shrink-0' />
                   <div className='flex-1 text-left min-w-0'>
-                    <p className='text-sm font-medium truncate'>{displayName}</p>
+                    <div className='flex items-center gap-2'>
+                      <p
+                        className={`text-sm font-medium truncate ${isDeactivated ? 'text-muted-foreground' : ''}`}
+                      >
+                        {displayName}
+                      </p>
+                      {isDeactivated && (
+                        <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
+                          Deactivated
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {isSelected && <Check className='w-4 h-4 text-muted-foreground shrink-0' />}
                 </button>

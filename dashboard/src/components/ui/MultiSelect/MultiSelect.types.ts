@@ -10,6 +10,8 @@ export interface MultiSelectOption {
   icon?: React.ReactNode;
   /** Optional subtitle text (e.g., email) to display */
   subtitle?: string;
+  /** Whether this option represents a deactivated entity (will show gray text + Deactivated badge) */
+  isDeactivated?: boolean;
 }
 
 /**

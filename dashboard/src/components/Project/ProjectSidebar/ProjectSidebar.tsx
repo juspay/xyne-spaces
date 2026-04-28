@@ -9,6 +9,7 @@ import { useSearchFilter } from '../../../hooks/useSearchFilter';
 import { highlightText } from './highlightText';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { UserStatus } from '@xyne/shared';
 
 const ProjectSidebar = ({
   projects = [],
@@ -322,10 +323,23 @@ const ProjectSidebar = ({
                 <>
                   {personsSearch.filteredItems.slice(0, visiblePersonsCount).map(person => {
                     const displayName = getUserDisplayName(person);
+                    const isDeactivated =
+                      'status' in person && person.status === UserStatus.INACTIVE;
                     return (
                       <SidebarItem
                         key={person.id}
-                        label={highlightText(displayName, personsSearch.searchQuery)}
+                        label={
+                          <div className='flex items-center gap-1.5'>
+                            <span className={isDeactivated ? 'text-muted-foreground' : ''}>
+                              {highlightText(displayName, personsSearch.searchQuery)}
+                            </span>
+                            {isDeactivated && (
+                              <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                                Deactivated
+                              </span>
+                            )}
+                          </div>
+                        }
                         isActive={currentAssignee === person.id}
                         avatar={{
                           url: person.picture ?? null,

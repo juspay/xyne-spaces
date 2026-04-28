@@ -6,7 +6,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroupById } from '../../../hooks/useUserGroup';
 import type { User } from '@xyne/shared';
-import { UserResponsibility } from '@xyne/shared';
+import { UserResponsibility, UserStatus } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -107,39 +107,51 @@ export const UserGroupSidePanel = (): ReactElement | null => {
         <div className='px-6 py-4'>
           <h3 className='text-[13px] font-semibold text-foreground mb-3'>Members</h3>
           <div className='divide-y divide-border'>
-            {membersWithRoles.map(({ user, responsibility }) => (
-              <div
-                key={user.id}
-                className='flex items-center gap-3 py-2.5 px-2 -mx-2 rounded hover:bg-muted transition-colors cursor-pointer'
-              >
-                <Avatar userId={user.id} size='md' showActiveStatus={true} />
-                <div className='flex-1 min-w-0'>
-                  <p className='text-[14px] font-medium text-foreground truncate'>
-                    {getUserDisplayName(user)}
-                  </p>
-                  <p className='text-[12px] text-muted-foreground truncate'>{user.email}</p>
-                </div>
-                <span
-                  className={`text-[12px] px-2 py-0.5 rounded font-medium flex-shrink-0 ${
-                    responsibility === UserResponsibility.MANAGER
-                      ? 'bg-purple-100 text-purple-700'
-                      : responsibility === UserResponsibility.TEAM_LEAD
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-muted text-muted-foreground'
-                  }`}
+            {membersWithRoles.map(({ user, responsibility }) => {
+              const isDeactivated = user.status === UserStatus.INACTIVE;
+              return (
+                <div
+                  key={user.id}
+                  className='flex items-center gap-3 py-2.5 px-2 -mx-2 rounded hover:bg-muted transition-colors cursor-pointer'
                 >
-                  {responsibility === UserResponsibility.MANAGER
-                    ? 'Manager'
-                    : responsibility === UserResponsibility.TEAM_LEAD
-                      ? 'Team Lead'
-                      : responsibility === UserResponsibility.PR_REVIEWER
-                        ? 'Reviewer'
-                        : responsibility === UserResponsibility.QA
-                          ? 'QA'
-                          : 'Member'}
-                </span>
-              </div>
-            ))}
+                  <Avatar userId={user.id} size='md' showActiveStatus={true} />
+                  <div className='flex-1 min-w-0'>
+                    <div className='flex items-center gap-1.5'>
+                      <p
+                        className={`text-[14px] font-medium truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+                      >
+                        {getUserDisplayName(user)}
+                      </p>
+                      {isDeactivated && (
+                        <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                          Deactivated
+                        </span>
+                      )}
+                    </div>
+                    <p className='text-[12px] text-muted-foreground truncate'>{user.email}</p>
+                  </div>
+                  <span
+                    className={`text-[12px] px-2 py-0.5 rounded font-medium flex-shrink-0 ${
+                      responsibility === UserResponsibility.MANAGER
+                        ? 'bg-purple-100 text-purple-700'
+                        : responsibility === UserResponsibility.TEAM_LEAD
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {responsibility === UserResponsibility.MANAGER
+                      ? 'Manager'
+                      : responsibility === UserResponsibility.TEAM_LEAD
+                        ? 'Team Lead'
+                        : responsibility === UserResponsibility.PR_REVIEWER
+                          ? 'Reviewer'
+                          : responsibility === UserResponsibility.QA
+                            ? 'QA'
+                            : 'Member'}
+                  </span>
+                </div>
+              );
+            })}
           </div>
 
           {memberCount === 0 && (

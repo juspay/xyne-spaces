@@ -9,7 +9,7 @@ import { cn } from '../../../utils/classNames';
 import { Search, X } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
 import { useUserSearch } from '../../../hooks/useUsers';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { isStatusExpired } from '../../../utils/statusUtils';
 
@@ -287,13 +287,20 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                     </div>
                     <div className='flex flex-col min-w-0 flex-1'>
                       <div className='flex items-center gap-1.5'>
-                        <span className='font-medium truncate flex items-center gap-1'>
+                        <span
+                          className={`font-medium truncate flex items-center gap-1 ${isUserDeactivated(user) ? 'text-muted-foreground' : ''}`}
+                        >
                           {getUserDisplayName(user)}
                           {user.statusEmoji &&
                             (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt)) && (
                               <span className='inline-flex'>{renderEmoji(user.statusEmoji)}</span>
                             )}
                         </span>
+                        {isUserDeactivated(user) && (
+                          <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                            Deactivated
+                          </span>
+                        )}
                       </div>
                       <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
                     </div>

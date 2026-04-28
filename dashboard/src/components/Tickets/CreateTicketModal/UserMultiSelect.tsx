@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { MultiSelect } from '../../ui/MultiSelect';
-import { useUsers } from '../../../hooks/useUsers';
+import { useActiveUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import Avatar from '../../ui/Avatar/Avatar';
 
@@ -27,8 +27,8 @@ export const UserMultiSelect: React.FC<UserMultiSelectProps> = ({
   onChange,
   error,
 }) => {
-  // Fetch all users for the dropdown
-  const users = useUsers();
+  // Fetch active users only for the dropdown
+  const users = useActiveUsers();
 
   // Transform users to MultiSelect options format with avatar and email
   const userOptions = useMemo(() => {

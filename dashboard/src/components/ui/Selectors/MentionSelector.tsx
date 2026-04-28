@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import Avatar from '../Avatar/Avatar';
 import { Hash, Lock } from 'lucide-react';
 import { PluginKey } from '@tiptap/pm/state';
+import { UserStatus } from '@xyne/shared';
 import type { MentionSelectorProps, MentionResult } from './Selectors.types';
 import { detectMentionTrigger, detectChannelTrigger, createVirtualAnchor } from './Selectors.utils';
 import { mentionPluginKey, channelMentionPluginKey } from '../TipTapExtensions';
@@ -19,19 +20,22 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
   const hasValidStatus =
     user?.statusEmoji && (!user.statusExpiryAt || !isStatusExpired(user.statusExpiryAt));
   const statusText = hasValidStatus && user?.statusContent ? user.statusContent : undefined;
+  const isDeactivated = user?.status === UserStatus.INACTIVE || item.isDeactivated;
 
   return (
     <>
       <Avatar userId={item.id} size='sm' rounded showActiveStatus={false} />
       <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
         <div className='flex items-center gap-2'>
-          <span className='text-sm font-medium text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
+          <span
+            className={`text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+          >
             {item.name}
           </span>
-          {hasValidStatus && (
+          {hasValidStatus && !isDeactivated && (
             <span className='inline-flex flex-shrink-0'>{renderEmoji(user.statusEmoji || '')}</span>
           )}
-          {statusText && (
+          {statusText && !isDeactivated && (
             <span className='text-sm text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
               {statusText}
             </span>
@@ -39,6 +43,11 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
           {item.isChannelMember === false && (
             <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
               Not in channel
+            </span>
+          )}
+          {isDeactivated && (
+            <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
+              Deactivated
             </span>
           )}
         </div>

@@ -10,7 +10,7 @@ import { Tooltip } from '../../ui/Tooltip';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
-import { useUsers } from '../../../hooks/useUsers';
+import { useActiveUsers } from '../../../hooks/useUsers';
 import type { Board, UserAssignmentState } from '@xyne/shared';
 import { RotationInterval } from '@xyne/shared';
 import type { User } from '../../../machines/stateMachine';
@@ -88,7 +88,7 @@ export const AssignmentConfigScreen = ({
         }),
   );
 
-  const allUsers = useUsers();
+  const allUsers = useActiveUsers();
 
   // Create usersById map
   const usersById = useMemo(() => {

@@ -381,7 +381,18 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                       )}
                       {/* Option label and subtitle */}
                       <div className='flex-1 min-w-0'>
-                        <div className='truncate font-medium text-foreground'>{option.label}</div>
+                        <div className='flex items-center gap-1.5'>
+                          <div
+                            className={`truncate font-medium ${option.isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+                          >
+                            {option.label}
+                          </div>
+                          {option.isDeactivated && (
+                            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                              Deactivated
+                            </span>
+                          )}
+                        </div>
                         {option.subtitle && (
                           <div className='truncate text-xs text-muted-foreground'>
                             {option.subtitle}

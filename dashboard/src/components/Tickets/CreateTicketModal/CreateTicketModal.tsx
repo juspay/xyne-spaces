@@ -47,7 +47,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useDuplicateTicketCheck } from '../../../hooks/useDuplicateTicketCheck';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
-import { useUserSearch, useUsers } from '../../../hooks/useUsers';
+import { useActiveUserSearch, useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useWorkflowTypes } from '../../../hooks/useWorkflowTypes';
 import { useBoardSuggestion } from '../../../hooks/useBoardSuggestion';
@@ -503,7 +503,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const [ticketTypeOptions] = useCachedQuery(
     queries.lookupValuesByType({ type: LookupType.TICKET_TYPE }),
   );
-  const users = useUserSearch(assigneeSearchValue, 15);
+  const users = useActiveUserSearch(assigneeSearchValue, 15);
 
   // Fetch all users for dynamic USER fields
   const allUsers = useUsers();

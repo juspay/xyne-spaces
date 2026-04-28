@@ -3,7 +3,7 @@ import type { ActivityWithRelated } from '../../types/activity';
 import { PauseCircle, PlayCircle } from 'lucide-react';
 import { ActivityItemCard } from './ActivityItemCard';
 import { useUser } from '../../hooks/useUsers';
-import { getUserDisplayName } from '../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../utils/userDisplayName';
 
 export const AssignmentPauseActivity = ({
   activity,
@@ -21,6 +21,7 @@ export const AssignmentPauseActivity = ({
   if (!user) return null;
 
   const userName = getUserDisplayName(user);
+  const isDeactivated = isUserDeactivated(user);
 
   // No target path needed - this is just informational
   const targetPath = '';
@@ -35,8 +36,8 @@ export const AssignmentPauseActivity = ({
   const badgeColorClass = isPaused ? 'bg-muted' : 'bg-green-100';
 
   const expandedText = isPaused
-    ? `${userName} has paused from ticket assignment`
-    : `${userName} has resumed from ticket assignment`;
+    ? `${userName}${isDeactivated ? ' (Deactivated)' : ''} has paused from ticket assignment`
+    : `${userName}${isDeactivated ? ' (Deactivated)' : ''} has resumed from ticket assignment`;
 
   const collapsedSuffix = isPaused
     ? ' paused from ticket assignment'

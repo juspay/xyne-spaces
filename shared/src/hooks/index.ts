@@ -7,6 +7,8 @@ export {
   useUser,
   useSelf,
   useUserSearch,
+  useActiveUsers,
+  useActiveUserSearch,
 } from './useUsers.js';
 
 export {

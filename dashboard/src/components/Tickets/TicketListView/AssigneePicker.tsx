@@ -3,7 +3,7 @@ import { Search, UserPlus, X } from 'lucide-react';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Popover } from '../../ui/Popover/Popover';
 import UserAvatar from '../../UserAvatar/UserAvatar';
-import { useUsers } from '../../../hooks/useUsers';
+import { useActiveUsers } from '../../../hooks/useUsers';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -18,7 +18,7 @@ interface AssigneePickerProps {
 export function AssigneePicker({ ticketId, assignedTo, label }: AssigneePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const users = useUsers();
+  const users = useActiveUsers();
   const zero = useZero();
   const searchRef = useRef<HTMLInputElement>(null);
 

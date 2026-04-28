@@ -1,4 +1,20 @@
 import { isStatusExpired } from './statusUtils';
+import { UserStatus } from '@xyne/shared';
+
+/**
+ * Check if a user is deactivated (status is INACTIVE)
+ */
+export function isUserDeactivated(
+  user:
+    | {
+        status?: UserStatus | string | null;
+      }
+    | undefined
+    | null,
+): boolean {
+  if (!user) return false;
+  return user.status === UserStatus.INACTIVE;
+}
 
 /**
  * Get the display name for a user.

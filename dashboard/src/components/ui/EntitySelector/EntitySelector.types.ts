@@ -35,6 +35,9 @@ export interface SelectorOption {
 
   /** Whether this option is disabled and cannot be selected */
   disabled?: boolean;
+
+  /** Whether this option represents a deactivated entity (will show gray text + Deactivated badge) */
+  isDeactivated?: boolean;
 }
 
 /**

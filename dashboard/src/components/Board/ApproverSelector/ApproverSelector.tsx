@@ -1,10 +1,10 @@
 import { ReactElement, useState, useMemo } from 'react';
 import { Search, X } from 'lucide-react';
 import { type User } from '@xyne/shared';
-import { useUserSearch } from '../../../hooks/useUsers';
+import { useActiveUserSearch } from '../../../hooks/useUsers';
 import Avatar from '../../ui/Avatar/Avatar';
 import { type ApproverSelectorProps } from './ApproverSelector.types';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 
 export const ApproverSelector = ({
   selectedApprovers,
@@ -13,7 +13,7 @@ export const ApproverSelector = ({
   const [searchQuery, setSearchQuery] = useState('');
 
   // Get users matching search query
-  const searchResults = useUserSearch(searchQuery, 10);
+  const searchResults = useActiveUserSearch(searchQuery, 10);
 
   // Filter out already selected users from search results
   const availableUsers = useMemo(() => {
@@ -53,31 +53,43 @@ export const ApproverSelector = ({
         {/* Selected Users List */}
         {selectedApprovers.length > 0 && (
           <div className='flex flex-col gap-1'>
-            {selectedApprovers.map(user => (
-              <div
-                key={user.id}
-                className='flex items-center justify-between px-3 py-2 hover:bg-muted rounded-lg transition-colors group'
-              >
-                <div className='flex items-center gap-2.5 flex-1 min-w-0'>
-                  <Avatar userId={user.id} size='sm' />
-                  <div className='flex flex-col min-w-0'>
-                    <span className='text-sm font-medium text-foreground truncate'>
-                      {getUserDisplayName(user)}
-                    </span>
-                    <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
-                  </div>
-                </div>
-                <button
-                  type='button'
-                  onClick={() => handleRemoveUser(user.id)}
-                  className='shrink-0 p-1 text-muted-foreground hover:text-red-600 hover:bg-red-50 rounded transition-colors opacity-0 group-hover:opacity-100'
-                  data-track-category='board_config'
-                  data-track-name='remove_approver'
+            {selectedApprovers.map(user => {
+              const isDeactivated = isUserDeactivated(user);
+              return (
+                <div
+                  key={user.id}
+                  className='flex items-center justify-between px-3 py-2 hover:bg-muted rounded-lg transition-colors group'
                 >
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
+                  <div className='flex items-center gap-2.5 flex-1 min-w-0'>
+                    <Avatar userId={user.id} size='sm' />
+                    <div className='flex flex-col min-w-0'>
+                      <div className='flex items-center gap-1.5'>
+                        <span
+                          className={`text-sm font-medium truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+                        >
+                          {getUserDisplayName(user)}
+                        </span>
+                        {isDeactivated && (
+                          <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                            Deactivated
+                          </span>
+                        )}
+                      </div>
+                      <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
+                    </div>
+                  </div>
+                  <button
+                    type='button'
+                    onClick={() => handleRemoveUser(user.id)}
+                    className='shrink-0 p-1 text-muted-foreground hover:text-red-600 hover:bg-red-50 rounded transition-colors opacity-0 group-hover:opacity-100'
+                    data-track-category='board_config'
+                    data-track-name='remove_approver'
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 

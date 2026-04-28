@@ -61,7 +61,7 @@ import { useAllChannels } from '../../../hooks/useChannels';
 import { useUsers, useUserSearch } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import {
   mixpanelService,
   EVENTS,
@@ -845,6 +845,7 @@ const ChannelCommandMenu = ({
     return rankUsers(mentionUsers, mentionSearchQuery, dmContactRecency).map(user => ({
       id: user.id,
       name: user.name,
+      status: user.status,
       ...(user.email && { email: user.email }),
     }));
   }, [mentionUsers, mentionSearchQuery, mentionSearchType, channelTrigger, dmContactRecency]);
@@ -2544,41 +2545,53 @@ const ChannelCommandMenu = ({
                           heading='Users'
                           className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
                         >
-                          {availableUsers.map((user, index) => (
-                            <Command.Item
-                              key={user.id}
-                              value={`mention-user-${user.id}`}
-                              onSelect={() => {
-                                void handleMentionSelect({
-                                  id: user.id,
-                                  name: getUserDisplayName(user),
-                                  type: MentionType.USER,
-                                  ...(user.email ? { email: user.email } : {}),
-                                });
-                              }}
-                              onMouseEnter={() => {
-                                if (setSelectedMentionIndex) {
-                                  setSelectedMentionIndex(index);
-                                }
-                              }}
-                              className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
-                                index === selectedMentionIndex ? 'bg-muted' : ''
-                              } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                              style={{ WebkitTapHighlightColor: 'transparent' }}
-                            >
-                              <Avatar userId={user.id} size='sm' />
-                              <div className='flex-1 min-w-0'>
-                                <div className='font-semibold text-sm text-foreground truncate'>
-                                  {getUserDisplayName(user)}
-                                </div>
-                                {user.email && (
-                                  <div className='text-xs text-muted-foreground truncate'>
-                                    {user.email}
+                          {availableUsers.map((user, index) => {
+                            const isDeactivated = isUserDeactivated(user);
+                            return (
+                              <Command.Item
+                                key={user.id}
+                                value={`mention-user-${user.id}`}
+                                onSelect={() => {
+                                  void handleMentionSelect({
+                                    id: user.id,
+                                    name: getUserDisplayName(user),
+                                    type: MentionType.USER,
+                                    ...(user.email ? { email: user.email } : {}),
+                                  });
+                                }}
+                                onMouseEnter={() => {
+                                  if (setSelectedMentionIndex) {
+                                    setSelectedMentionIndex(index);
+                                  }
+                                }}
+                                className={`flex items-center gap-2 px-2 py-1.5 rounded-sm cursor-pointer transition-all duration-150 mt-1 ${
+                                  index === selectedMentionIndex ? 'bg-muted' : ''
+                                } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+                                style={{ WebkitTapHighlightColor: 'transparent' }}
+                              >
+                                <Avatar userId={user.id} size='sm' />
+                                <div className='flex-1 min-w-0'>
+                                  <div className='flex items-center gap-1.5'>
+                                    <div
+                                      className={`font-semibold text-sm truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+                                    >
+                                      {getUserDisplayName(user)}
+                                    </div>
+                                    {isDeactivated && (
+                                      <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+                                        Deactivated
+                                      </span>
+                                    )}
                                   </div>
-                                )}
-                              </div>
-                            </Command.Item>
-                          ))}
+                                  {user.email && (
+                                    <div className='text-xs text-muted-foreground truncate'>
+                                      {user.email}
+                                    </div>
+                                  )}
+                                </div>
+                              </Command.Item>
+                            );
+                          })}
                         </Command.Group>
                       )}
                     {mentionSearchType === MentionType.USER &&
