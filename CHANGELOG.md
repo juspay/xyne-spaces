@@ -1,3 +1,26 @@
+## [1.133.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.132.2...v1.133.0) (2026-04-28)
+
+
+### Features
+
+* add spec verification workflow ([88de886](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/88de886bec08317c5860ad29e13361f8e4cfe8bf)), closes [#5371](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5371)
+* Added Mail support & Desk Support in CMD + K, made scoped search using CMD + F ([bfa1d09](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/bfa1d09b04ed9c8af8a617e14651492a65c15e1a)), closes [#5618](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5618)
+
+
+### Bug Fixes
+
+* added pagination to the recordings screen. ([ad29e96](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ad29e967eda1bd26a17a06213c13c59d106e0c7e)), closes [#5590](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5590)
+* app users avatar. ([a581004](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a581004bf73e7f60f662e6ab4365c577bceb74c4)), closes [#5586](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5586)
+* backend missing getAllFormsList ([8b65cca](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8b65cca971fc81368d1508020a9a2ab4b7d238a6)), closes [#5466](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5466)
+* banner shown on tab switch ([29a6c85](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/29a6c851ce5011bd0e50028a66dea888a1733bd0)), closes [#5682](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5682)
+* Calendar mobile view UI improvements ([c79e815](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c79e81547d32c5c4e3039e9103fdc7a128035551)), closes [#5605](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5605)
+* callerUserId ([28a5bdb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/28a5bdbb893b8d509f62066e955c50bdfa226b46)), closes [#5660](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5660)
+* deactivated users label in components and useActiveUsers ([1bbf391](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1bbf391602fb7b7f7d2fc86d65cea73998bd9b43)), closes [#5656](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5656)
+* fix icon clipping ([75f43d4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/75f43d491040c06584a4ca5d9039c806ed317d2f))
+* removed bot list when typing @ in search bar ([a86a505](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/a86a5053804030f810b92da6aa8f10fae0bd8e17)), closes [#5244](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5244)
+* slack pinned messages ([306772f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/306772fcb7fae0b76e2d2e7edb80f0cda2035afb)), closes [#5569](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5569)
+* support screen fix callInvite main ([29c5e36](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/29c5e36a5946971e00dc97c780095ed9c6a01d6c))
+
 ## [1.132.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.132.1...v1.132.2) (2026-04-28)
 
 
