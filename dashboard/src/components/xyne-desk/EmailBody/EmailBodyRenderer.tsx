@@ -1,6 +1,7 @@
 import DOMPurify, { type DOMPurify as DOMPurifyInstance } from 'dompurify';
 import { Image as ImageIcon } from 'lucide-react';
 import { JSX, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { preprocessEmailHtml } from './preprocessEmailHtml';
 import { collapseQuotedHistory } from './collapseQuotedHistory';
 import { useCidImageResolver } from './useCidImageResolver';
@@ -331,6 +332,29 @@ export const EmailBodyRenderer = ({
         img.addEventListener('load', measure);
         img.addEventListener('error', measure);
       });
+
+      contentDoc.addEventListener(
+        'click',
+        e => {
+          const anchor = (e.target as HTMLElement | null)?.closest?.('a');
+          if (!anchor) return;
+          const href = anchor.getAttribute('href');
+          if (!href) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const text = (anchor.textContent || '').trim();
+          const isCopyLink = anchor.getAttribute('data-action') === 'copy-link' || text === href;
+          if (isCopyLink) {
+            navigator.clipboard
+              .writeText(href)
+              .then(() => toast.success('Link copied to clipboard'))
+              .catch(() => toast.error('Failed to copy link'));
+            return;
+          }
+          window.open(href, '_blank', 'noopener,noreferrer');
+        },
+        true,
+      );
 
       if (typeof ResizeObserver !== 'undefined' && contentDoc.documentElement) {
         resizeObserver = new ResizeObserver(() => measure());
