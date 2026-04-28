@@ -55,6 +55,8 @@ export interface SearchContext {
   ticketId?: string;
   xyneId?: string;
   ticketStatus?: string;
+  mailId?: string; // externalMessageId for mail results (used for scroll-to)
+  recipientCount?: number; // total to+cc+bcc (excluding sender) for mail results
   attachmentId?: string;
   fileName?: string;
   fileSize?: number;
@@ -148,6 +150,9 @@ export interface VespaSearchFilters {
 
   // Filter-only mode (no query text, just filters)
   filterOnly?: boolean;
+
+  // Cmd-K "Include bot messages" toggle. Default off → backend excludes BOT messages.
+  includeBotMessages?: boolean;
 }
 
 export interface VespaSearchGroup {

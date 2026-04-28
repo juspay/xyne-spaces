@@ -45,7 +45,13 @@ export const navigateToSearchResult = async (
       break;
 
     case 'conversation':
-      navigateToMessage(result, navigate);
+      // Mail results come back as type='conversation' with subApp='DESK'.
+      // Route them to the Desk view (specific thread + scroll to the mail).
+      if (result.searchContext?.subApp === 'DESK') {
+        navigateToMail(result, navigate);
+      } else {
+        navigateToMessage(result, navigate);
+      }
       break;
 
     case 'ticket':
@@ -169,6 +175,26 @@ export const navigateToMessage = (
     // This is a standalone message (no replies) - navigate to main chat only
     void navigate(`/chat/dir/${channelId}#origin=${conversationId}`);
   }
+};
+
+/**
+ * Navigate to a specific mail inside a Desk thread.
+ *
+ * Target URL: /support/{xyneId}?conversationId={conversationId}&ticketId={ticketId}&mail={mailId}
+ * The SupportScreen reads `mail` from the query string and scrolls to the
+ * matching EmailThreadItem after the thread's emails have loaded.
+ */
+export const navigateToMail = (result: DisplaySearchResult, navigate: NavigateFunction): void => {
+  const { xyneId, conversationId, ticketId, mailId } = result.searchContext || {};
+  if (!xyneId || !conversationId) {
+    toast.error('Cannot navigate to mail: missing conversation information');
+    return;
+  }
+  const params = new URLSearchParams();
+  params.set('conversationId', conversationId);
+  if (ticketId) params.set('ticketId', ticketId);
+  if (mailId) params.set('mail', mailId);
+  void navigate(`/support/${xyneId}?${params.toString()}`);
 };
 
 /**

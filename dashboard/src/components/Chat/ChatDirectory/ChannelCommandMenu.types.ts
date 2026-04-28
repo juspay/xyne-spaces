@@ -18,6 +18,7 @@ export const SearchableTypes = {
   CANVAS: 'canvas',
   TRANSCRIPT: 'transcript',
   RCA: 'rca',
+  EMAILS: 'emails',
 } as const;
 
 export type SearchableType = (typeof SearchableTypes)[keyof typeof SearchableTypes];
@@ -37,6 +38,7 @@ export const TYPE_SUGGESTIONS = [
   { id: SearchableTypes.CANVAS, name: SearchableTypes.CANVAS, subApp: 'canvas' },
   { id: SearchableTypes.TRANSCRIPT, name: SearchableTypes.TRANSCRIPT, subApp: 'transcript' },
   { id: SearchableTypes.RCA, name: SearchableTypes.RCA, subApp: 'RCA' },
+  { id: SearchableTypes.EMAILS, name: SearchableTypes.EMAILS },
 ] as const;
 
 /**
@@ -54,6 +56,7 @@ export const TabType = {
   CANVAS: 'canvas',
   CALL: 'call',
   RECORDING: 'recording',
+  DESK: 'desk',
 } as const;
 
 export type TabType = (typeof TabType)[keyof typeof TabType];
@@ -62,6 +65,7 @@ export const VespaApps = {
   CHAT: 'chat',
   TICKET: 'ticket',
   FILE: 'file',
+  MAIL: 'mail',
 } as const;
 
 export type VespaApps = (typeof VespaApps)[keyof typeof VespaApps];
@@ -111,7 +115,7 @@ export interface ChannelCommandMenuProps {
   initialMention?: MentionData | null;
   /**
    * Controls which tabs are visible. When omitted, defaults to all
-   * pre-existing tabs (users, channels, messages, gmail, tickets, attachments).
+   * pre-existing tabs (users, channels, messages, desk, tickets, attachments).
    * Pass an explicit array to show only those tabs — e.g.
    * [TabType.CHANNELS, TabType.TICKETS, TabType.CANVAS] for the AskAI context picker.
    */
@@ -124,6 +128,8 @@ export interface ChannelCommandMenuProps {
   inline?: boolean;
   /** Called whenever the active tab changes; used to track active tab for call/recording disambiguation. */
   onTabChange?: (tab: TabType) => void;
+  /** When provided, the dialog opens on this tab instead of ALL. Used by context-aware Cmd+F. */
+  initialTab?: TabType;
   /** When true, the search input will not steal focus on open (used when parent wants to keep focus elsewhere) */
   disableAutoFocus?: boolean;
 }

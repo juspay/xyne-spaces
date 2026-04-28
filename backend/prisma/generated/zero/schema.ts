@@ -190,6 +190,8 @@ export enum CallType {
 export enum CallOrigin {
   CHANNEL = "CHANNEL",
   CONVERSATION = "CONVERSATION",
+  GOOGLE_CALENDAR = "GOOGLE_CALENDAR",
+  MICROSOFT_CALENDAR = "MICROSOFT_CALENDAR",
 }
 
 export enum CallStatus {
@@ -1706,7 +1708,7 @@ export const callTable = table("calls")
     title: string().optional(),
     createdByUserId: string(),
     organizerId: string().optional(),
-    channelId: string(),
+    channelId: string().optional(),
     orgName: string().optional(),
     description: string().optional(),
     callType: enumeration<CallType>(),

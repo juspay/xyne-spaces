@@ -12,7 +12,7 @@ import {
 import VespaClient from '../client/vespaClient';
 import { getErrorMessage } from '../utils';
 import config from '../config';
-import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters } from '../utils/YqlBuilder';
+import { YqlBuilder, type SlackFilters, type TicketFilters, type FileFilters, type MeetingFilters, type MailFilters } from '../utils/YqlBuilder';
 import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
@@ -60,6 +60,7 @@ interface SearchOptions {
   ticket?: TicketFilters;
   file?: FileFilters;
   meeting?: MeetingFilters;
+  mail?: MailFilters;
   prefixBoostWeight?: number;
   presentationSummary?: string;
 }
@@ -114,6 +115,7 @@ export class SearchService {
         ticket = {},
         file = {},
         meeting = {},
+        mail = {},
         prefixBoostWeight = 0.2,
         presentationSummary,
       } = options;
@@ -175,6 +177,7 @@ export class SearchService {
           file,
           meeting,
           userId,
+          mail,
           useFuzzy
         );
 

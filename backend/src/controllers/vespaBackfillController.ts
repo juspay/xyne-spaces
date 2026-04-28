@@ -8,6 +8,7 @@ import {
   channelSchema,
   projectSchema,
   ticketSchema,
+  mailSchema,
   fileSchema,
   SubApp,
 } from '@/vespa/src/types';
@@ -396,6 +397,83 @@ export class AdminBackfillController {
   }
 
   /**
+   * Backfill mail (Desk emails) to Vespa - Transform-at-queue-time approach.
+   * Reads from the Email (mail) Postgres table and queues per-row jobs into the
+   * Vespa Redis queue; the worker fetches + maps via mapEmail() and feeds Vespa.
+   * If no timeframe is provided, backfills all emails.
+   */
+  private static async backfillMail(cutoffTime?: Date, fromTime?: Date | null): Promise<number> {
+    let timeRange: string;
+    let whereClause: any = {};
+
+    if (cutoffTime) {
+      if (fromTime) {
+        timeRange = `(created between ${fromTime.toISOString()} and ${cutoffTime.toISOString()})`;
+        whereClause = {
+          createdAt: {
+            gte: fromTime,
+            lte: cutoffTime,
+          },
+        };
+      } else {
+        timeRange = `(created before ${cutoffTime.toISOString()})`;
+        whereClause = {
+          createdAt: {
+            lte: cutoffTime,
+          },
+        };
+      }
+    } else {
+      timeRange = 'all mail (no timeframe limit)';
+      whereClause = {};
+    }
+
+    logger.info(`🔄 Backfilling mail ${timeRange}...`);
+
+    let skip = 0;
+    let totalQueued = 0;
+
+    while (true) {
+      logger.debug(`[Backfill] Fetching mail batch: skip=${skip}, take=${AdminBackfillController.BATCH_SIZE}`);
+
+      const emails = await db.email.findMany({
+        where: whereClause,
+        take: AdminBackfillController.BATCH_SIZE,
+        skip,
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+
+      if (emails.length === 0) {
+        logger.debug('[Backfill] No more mail found.');
+        break;
+      }
+
+      logger.debug(`[Backfill] Found ${emails.length} mail. Transforming and queueing...`);
+
+      for (const emailRef of emails) {
+        try {
+          await vespaQueue.addJob({
+            schema: mailSchema,
+            jobType: 'feed',
+            docId: emailRef.id,
+            userId: undefined,
+          });
+          totalQueued++;
+        } catch (error) {
+          logger.error(`[Backfill] Failed to transform mail ${emailRef.id}:`, error);
+        }
+      }
+
+      skip += AdminBackfillController.BATCH_SIZE;
+      logger.info(`  Transformed and queued ${totalQueued} mail...`);
+    }
+
+    logger.info(`✓ Transformed and queued ${totalQueued} mail for ingestion`);
+    return totalQueued;
+  }
+
+  /**
    * Backfill canvases to Vespa - Transform-at-queue-time approach
    * Only backfills canvases updated within the specified time range
    * If no timeframe is provided, backfills all canvases
@@ -766,7 +844,7 @@ export class AdminBackfillController {
       // Determine which schemas to backfill
       const requestedSchemas = schemasParam
         ? schemasParam.split(',').map(s => s.trim().toLowerCase())
-        : ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments'];
+        : ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail'];
 
       // Parse fromTimestamp if provided, otherwise start from the beginning
       let fromTime: Date | null = null;
@@ -790,7 +868,7 @@ export class AdminBackfillController {
         logger.info(`📅 No fromTimestamp provided - will backfill from the beginning`);
       }
 
-      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments'];
+      const validSchemas = ['messages', 'channels', 'tickets', 'projects', 'canvases', 'transcripts', 'chat_attachments', 'ticket_attachments', 'mail'];
       const schemasToBackfill = requestedSchemas.filter(s => validSchemas.includes(s));
 
       if (schemasToBackfill.length === 0) {
@@ -948,6 +1026,10 @@ export class AdminBackfillController {
 
       if (schemasToBackfill.includes('ticket_attachments')) {
         stats.ticket_attachments = await AdminBackfillController.backfillTicketAttachments(cutoffTime, fromTime);
+      }
+
+      if (schemasToBackfill.includes('mail')) {
+        stats.mail = await AdminBackfillController.backfillMail(cutoffTime, fromTime);
       }
 
       const totalQueued = Object.values(stats).reduce((sum, count) => sum + count, 0);

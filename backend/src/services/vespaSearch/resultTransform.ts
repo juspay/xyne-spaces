@@ -8,7 +8,8 @@ import { PrismaClient } from '@prisma/client';
      User,
      Channel,
      importedTicketFields,
-     VespaFileDocument
+     VespaFileDocument,
+     VespaMailDocument
    } from '@/vespa/src/types';
    import { logger } from '@/utils/logger';
    
@@ -54,6 +55,8 @@ import { PrismaClient } from '@prisma/client';
        xyneId?: string;
        subApp?: string;
        callType?: string;
+       mailId?: string;
+       recipientCount?: number;
      };
      debugInfo?: {
        matchfeatures?: Record<string, any>;
@@ -69,11 +72,22 @@ import { PrismaClient } from '@prisma/client';
        email: string;
      };
    }
-   
+
    interface ChannelMap {
      [channelId: string]: {
        name: string;
      };
+   }
+
+   interface MailLinkInfo {
+     emailId: string;          // Postgres email.id
+     conversationId: string;   // Postgres conversation id
+     ticketId?: string;        // Postgres ticket id (if ticket exists for the conv)
+     ticketXyneId?: string;    // URL-friendly ticket id
+     channelId?: string;
+   }
+   interface MailMap {
+     [externalMessageId: string]: MailLinkInfo;
    }
    
    /**
@@ -90,6 +104,7 @@ import { PrismaClient } from '@prisma/client';
      // Collect all user IDs and channel IDs we need to fetch
      const userIdsToFetch = new Set<string>();
      const channelIdsToFetch = new Set<string>();
+     const mailDocIds = new Set<string>();
    
      hits.forEach((hit) => {
        const doc = hit.fields;
@@ -129,6 +144,13 @@ import { PrismaClient } from '@prisma/client';
          }
        }
    
+       // For mail docs, collect docIds (== Postgres email.id) so we can
+       // batch-resolve the email → conversation → ticket mapping needed for
+       // click-through navigation into the Desk view.
+       if (docType === 'mail' && 'docId' in doc && doc.docId) {
+         mailDocIds.add(doc.docId as string);
+       }
+
        // For channels (DM/Group DM), we might need participant names
        if ((docType === 'channel' || docType === 'chat_container') && 'permissions' in doc) {
          const channelDoc = doc as VespaChatContainerDocument;
@@ -186,8 +208,39 @@ import { PrismaClient } from '@prisma/client';
        });
      }
    
+     // Batch fetch mail → conversation → ticket mapping for Desk click-through.
+     // Vespa stores the Postgres email.id directly as docId (see
+     // ingest-mail-sample.ts), so we look up by id and the join is trivial.
+     const mailMap: MailMap = {};
+     if (mailDocIds.size > 0) {
+       const emails = await prisma.email.findMany({
+         where: { id: { in: Array.from(mailDocIds) } },
+         select: { id: true, conversationId: true },
+       });
+
+       const conversationIds = Array.from(new Set(emails.map(e => e.conversationId)));
+       const tickets = conversationIds.length > 0
+         ? await prisma.ticket.findMany({
+             where: { conversationId: { in: conversationIds } },
+             select: { id: true, xyneId: true, conversationId: true, channelId: true },
+           })
+         : [];
+       const ticketByConv = new Map(tickets.map(t => [t.conversationId, t]));
+
+       for (const e of emails) {
+         const t = ticketByConv.get(e.conversationId);
+         mailMap[e.id] = {
+           emailId: e.id,
+           conversationId: e.conversationId,
+           ticketId: t?.id,
+           ticketXyneId: t?.xyneId,
+           channelId: t?.channelId,
+         };
+       }
+     }
+
      // Transform each hit
-     return hits.map((hit) => transformSingleHit(hit, userMap));
+     return hits.map((hit) => transformSingleHit(hit, userMap, mailMap));
    }
    
    /**
@@ -196,6 +249,7 @@ import { PrismaClient } from '@prisma/client';
    function transformSingleHit(
      hit: VespaSearchHit,
      userMap: UserMap,
+     mailMap: MailMap,
    ): TransformedSearchResult {
      const doc = hit.fields;
      const docType = doc.docType as string;
@@ -233,12 +287,16 @@ import { PrismaClient } from '@prisma/client';
        case 'ticket':
          result = transformTicket(hit, doc as VespaTicketDocument & importedTicketFields, userMap);
          break;
-   
+
+       case 'mail':
+         result = transformMail(hit, doc as VespaMailDocument, mailMap);
+         break;
+
        // case 'channel':
        // case 'chat_container':
        //   result = transformChannel(hit, doc as VespaChatContainerDocument, userMap);
        //   break;
-   
+
        default:
          // Fallback for unknown types - log for debugging
          logger.warn(`Unknown docType encountered: ${docType}`, { hitId: hit.id });
@@ -496,6 +554,61 @@ import { PrismaClient } from '@prisma/client';
      };
    }
    
+   /**
+    * Transform mail (Gmail) document
+    */
+   function transformMail(
+     hit: VespaSearchHit,
+     doc: VespaMailDocument,
+     mailMap: MailMap,
+   ): TransformedSearchResult {
+     // Pick the first chunk that contains a <hi>...</hi> bolding span (the chunk
+     // Vespa actually matched on). Fall back to the first chunk. Do NOT substring
+     // the string — it could cut a <hi> tag in half; the dashboard's
+     // SearchSnippetRenderer will pick a smart window around the highlights.
+     let previewChunk = '';
+     if (doc.chunks && doc.chunks.length > 0) {
+       previewChunk = doc.chunks.find((c) => typeof c === 'string' && c.includes('<hi>')) || doc.chunks[0];
+     }
+     const sentAt = doc.timestamp ? new Date(doc.timestamp).toISOString() : new Date().toISOString();
+
+     // Extract the sender's display name from a Gmail-style "Name <email>" string.
+     // Falls back to the raw string when no angle-bracket block is present.
+     const rawFrom = doc.from || '';
+     const nameMatch = rawFrom.match(/^\s*"?([^"<]*?)"?\s*<[^>]+>\s*$/);
+     const senderName = (nameMatch?.[1]?.trim() || rawFrom).replace(/^"|"$/g, '');
+
+     const recipientCount =
+       (doc.to?.length ?? 0) + (doc.cc?.length ?? 0) + (doc.bcc?.length ?? 0);
+
+     const link = mailMap[doc.docId];
+
+     return {
+       id: hit.id,
+       type: 'conversation',
+       title: doc.subject || '(no subject)',
+       subtitle: senderName,
+       context: previewChunk,
+       relevanceScore: hit.relevance,
+       metadata: {
+         timestamp: formatTimestamp(sentAt),
+         channelName: 'Desk',
+       },
+       searchContext: {
+         messageId: doc.docId,
+         mailId: link?.emailId ?? doc.docId,
+         conversationId: link?.conversationId,
+         ticketId: link?.ticketId,
+         xyneId: link?.ticketXyneId,
+         channelId: link?.channelId,
+         channelTitle: 'Desk',
+         senderName,
+         recipientCount,
+         subApp: 'DESK',
+       },
+     };
+   }
+
    /**
     * Transform channel document
     */

@@ -46,7 +46,7 @@ import { workflowManager, WorkflowType } from '@/workflows';
 import { superpositionClient } from './superpositionClient';
 import { createBlockingContext } from '@/utils/superpositionUtils';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { ticketSchema } from '@/vespa/src/types';
+import { ticketSchema, mailSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { db } from '@/database/client';
@@ -172,6 +172,39 @@ export class EmailService {
       picture: undefined,
     };
   }
+  private async pushVespaJobForMail(
+    emailId: string,
+    userId: string
+  ): Promise<void> {
+    vespaQueue.addJob({
+      schema: mailSchema,
+      jobType: 'feed',
+      docId: emailId,
+    }).catch(async (error) => {
+      logger.error('[EmailService] Error queuing Vespa job for mail:', error);
+      try {
+        const vespaLogs = db.vespaInsertionLogs;
+        if (vespaLogs) {
+          await vespaLogs.create({
+            data: {
+              status: VespaInsertionStatus.FAILED,
+              type: VespaOperationType.INSERT,
+              entityId: emailId,
+              entityType: mailSchema,
+              namespace: NAMESPACE,
+              errorMessage: `Failed to enqueue Vespa mail job: ${error instanceof Error ? error.message : String(error)}`,
+              errorDetails: JSON.stringify(error),
+              userId: userId,
+              createdAt: new Date(),
+            },
+          });
+        }
+      } catch (dbError) {
+        logger.error('[EmailService] Failed to log Vespa mail insertion error to database:', dbError);
+      }
+    });
+  }
+
   private async pushVespaJobForTicket(
     ticketId: string,
     userId: string
@@ -628,6 +661,12 @@ export class EmailService {
       await this.messageRepository.create(messageDataSys, true);
     }
 
+    // Push Vespa job for mail indexing (Desk search). `email` is created
+    // inside the conversation+email+ticket transaction earlier in this method.
+    this.pushVespaJobForMail(email.id, userId).catch(error => {
+      logger.error(`[EmailService] Error pushing Vespa job for mail ${email.id}:`, error);
+    });
+
     // Create MessageAttachment entries for email attachments
     await this.createEmailAttachments(email.id, conversation.conversationId, userId, channel.workspaceId, uploadedFiles);
 
@@ -787,6 +826,10 @@ export class EmailService {
           }
         }
       }
+
+      this.pushVespaJobForMail(email.id, conversation.createdBy).catch(error => {
+        logger.error(`[EmailService] Error pushing Vespa job for mail ${email.id}:`, error);
+      });
 
       // Create MessageAttachment entries for email attachments
       await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel?.workspaceId ?? '', uploadedFiles);

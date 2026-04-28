@@ -445,6 +445,10 @@ export class SearchService {
       params['filterOnly'] = filters.filterOnly.toString();
     }
 
+    if (filters.includeBotMessages !== undefined) {
+      params['includeBotMessages'] = filters.includeBotMessages.toString();
+    }
+
     return params;
   }
 }

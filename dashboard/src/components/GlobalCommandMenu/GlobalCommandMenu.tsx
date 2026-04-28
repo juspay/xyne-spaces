@@ -6,6 +6,7 @@ import {
   useAllVisibleChannels,
   useUserChannelStatuses,
 } from '../../hooks/useChannels';
+import { ChannelType } from '@xyne/shared';
 import {
   groupChannelsByScope,
   isDMChannel,
@@ -14,7 +15,7 @@ import {
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
-import type { TabType } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
+import { TabType } from '../Chat/ChatDirectory/ChannelCommandMenu.types';
 import { VisibleChannel } from '../../machines/stateMachine';
 import { useShortcutById } from '../../shortcuts';
 import type { MentionData } from '../Chat/ChatDirectory/MentionNode';
@@ -51,10 +52,10 @@ const GlobalCommandMenu = ({
   const allChannelsUserStatus = useUserChannelStatuses();
   const [internalOpen, setInternalOpen] = useState(false);
   const [initialMention, setInitialMention] = useState<MentionData | null>(null);
+  const [contextualTab, setContextualTab] = useState<TabType | undefined>(undefined);
   const location = useLocation();
   const allUsers = useUsers();
 
-  // Get unread counts for all channels
   const unreadCounts = useAllUnreadCount();
 
   const open = controlledOpen ?? internalOpen;
@@ -65,17 +66,57 @@ const GlobalCommandMenu = ({
       onOpenChange(newOpen);
       if (!newOpen) {
         setInitialMention(null);
+        setContextualTab(undefined);
       }
     },
     [onOpenChange],
   );
 
   const handleFindInChannel = useCallback(() => {
-    // Extract channelId from URL
     const pathParts = location.pathname.split('/').filter(Boolean);
+
+    const getDeskSelectedChannelId = (): string | null => {
+      try {
+        const saved = localStorage.getItem('support-selected-channel');
+        if (!saved || saved === 'all') return null;
+        return saved;
+      } catch {
+        return null;
+      }
+    };
+
+    const buildChannelMention = (channel: (typeof channelData)[number]): MentionData => {
+      let channelName = channel.name;
+      if (isDMChannel(channel.scopeType)) {
+        const participantIds = getDMParticipantIdsToFetch(channel, context.userID ?? '');
+        const participantNames = participantIds
+          .map(id => allUsers.find(u => u.id === id)?.name)
+          .filter((name): name is string => !!name);
+        if (participantNames.length > 0) {
+          channelName = participantNames.join(', ');
+        }
+      }
+      return { id: channel.id, name: channelName, type: 'channel', prefix: 'in:' };
+    };
+
+    if (pathParts[0] === 'tickets' || pathParts[0] === 'projects') {
+      setInitialMention(null);
+      setContextualTab(TabType.TICKETS);
+      onOpenChange(true);
+      return;
+    }
+
+    if (pathParts[0] === 'support') {
+      const deskChannelId = getDeskSelectedChannelId();
+      const deskChannel = deskChannelId ? channelData.find(c => c.id === deskChannelId) : undefined;
+      setInitialMention(deskChannel ? buildChannelMention(deskChannel) : null);
+      setContextualTab(TabType.DESK);
+      onOpenChange(true);
+      return;
+    }
+
     const chatIndex = pathParts.indexOf('chat');
     let channelId: string | null = null;
-
     if (chatIndex !== -1) {
       const nextSegment = pathParts[chatIndex + 1];
       if (
@@ -88,39 +129,37 @@ const GlobalCommandMenu = ({
       }
     }
 
-    if (!channelId) {
-      // No channel context — just open regular Cmd+K
-      onOpenChange(true);
-      return;
-    }
-
-    // Find the channel
-    const channel = channelData.find(c => c.id === channelId);
-    if (!channel) {
-      onOpenChange(true);
-      return;
-    }
-
-    // Build channel display name
-    let channelName = channel.name;
-    if (isDMChannel(channel.scopeType)) {
-      const participantIds = getDMParticipantIdsToFetch(channel, context.userID ?? '');
-      const participantNames = participantIds
-        .map(id => allUsers.find(u => u.id === id)?.name)
-        .filter((name): name is string => !!name);
-      if (participantNames.length > 0) {
-        channelName = participantNames.join(', ');
+    if (channelId) {
+      const channel = channelData.find(c => c.id === channelId);
+      if (channel) {
+        // Desk (support) channel → open with Desk tab + in:<channel> scope
+        if (channel.type === ChannelType.SUPPORT) {
+          setInitialMention(buildChannelMention(channel));
+          setContextualTab(TabType.DESK);
+          onOpenChange(true);
+          return;
+        }
+        // Inside a channel but viewing its Tickets sub-tab (URL carries
+        // `?tab=tickets`) → open with the Tickets tab + in:<channel> scope.
+        const activeChannelTab = new URLSearchParams(location.search).get('tab');
+        if (activeChannelTab === 'tickets') {
+          setContextualTab(TabType.TICKETS);
+          setInitialMention(buildChannelMention(channel));
+          onOpenChange(true);
+          return;
+        }
+        setContextualTab(TabType.MESSAGES);
+        setInitialMention(buildChannelMention(channel));
+        onOpenChange(true);
+        return;
       }
     }
 
-    setInitialMention({
-      id: channel.id,
-      name: channelName,
-      type: 'channel',
-      prefix: 'in:',
-    });
+    // Fallback — open normally (ALL tab)
+    setContextualTab(undefined);
+    setInitialMention(null);
     onOpenChange(true);
-  }, [location.pathname, channelData, allUsers, onOpenChange, context.userID]);
+  }, [location.pathname, location.search, channelData, allUsers, onOpenChange, context.userID]);
 
   useShortcutById('global.findInChannel', handleFindInChannel);
 
@@ -172,6 +211,7 @@ const GlobalCommandMenu = ({
       {...(enabledTabs !== undefined ? { enabledTabs } : {})}
       {...(inline !== undefined ? { inline } : {})}
       {...(onTabChange !== undefined ? { onTabChange } : {})}
+      {...(contextualTab !== undefined ? { initialTab: contextualTab } : {})}
       {...(disableAutoFocus !== undefined ? { disableAutoFocus } : {})}
     />
   );

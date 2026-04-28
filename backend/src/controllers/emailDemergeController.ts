@@ -10,6 +10,8 @@ import { emailService } from '@/services/emailService';
 import { logger } from '@/utils/logger';
 import { EmailType } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { mailSchema } from '@/vespa/src/types';
 
 interface DemergeEmailRequest {
   emailId: string;
@@ -111,11 +113,18 @@ export class EmailDemergeController {
         // Step 8a: Move ALL emails with matching externalThreadId to new ticket
         await tx.email.updateMany({
           where: { id: { in: emailIdsToMove } },
-          data: { 
+          data: {
             conversationId: newConversation.conversationId,
           },
         });
       });
+
+      // Re-index moved emails in Vespa — conversationId (threadId) and permissions changed
+      for (const id of emailIdsToMove) {
+        vespaQueue.addJob({ schema: mailSchema, jobType: 'feed', docId: id }).catch(err => {
+          logger.error(`[EmailDemergeController] Failed to queue Vespa re-feed for email ${id}:`, err);
+        });
+      }
 
       logger.info('[EmailDemergeController] Successfully demerged email', {
         emailId,

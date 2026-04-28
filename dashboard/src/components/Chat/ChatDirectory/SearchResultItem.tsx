@@ -4,6 +4,7 @@ import {
   Hash,
   User,
   MessageCircle,
+  Mail,
   Ticket,
   Paperclip,
   Eye,
@@ -37,6 +38,10 @@ const getResultIcon = (result: DisplaySearchResult): ReactElement => {
     case 'channel':
       return <Hash size={16} className='text-muted-foreground' />;
     case 'conversation':
+      // Mail (Desk) results come back as 'conversation' with subApp='DESK'
+      if (searchContext?.subApp === 'DESK') {
+        return <Mail size={16} className='text-muted-foreground' />;
+      }
       return <MessageCircle size={16} className='text-muted-foreground' />;
     case 'ticket':
       return <Ticket size={16} className='text-muted-foreground' />;
@@ -144,6 +149,48 @@ const SearchResultItem = ({
       );
 
     case 'conversation': {
+      // Mail results come back as type='conversation' with subApp='DESK'.
+      // They render in a distinct layout: subject (highlighted) + date on the
+      // first line, sender name + recipient count on the second, body snippet
+      // on the third. The subject goes through RenderMessageWithHTML so any
+      // <hi>...</hi> spans from Vespa turn into yellow highlights.
+      if (result.searchContext?.subApp === 'DESK') {
+        const senderName = result.searchContext?.senderName || result.subtitle || '';
+        const recipientCount = result.searchContext?.recipientCount ?? 0;
+        return (
+          <Command.Item
+            key={result.id}
+            value={`backend-${result.type}-${result.id}`}
+            onSelect={() => void onSelect(result)}
+            className='flex flex-col gap-0.5 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+          >
+            <div className='flex items-start gap-1.5'>
+              {getResultIcon(result)}
+              <div className='flex-1 min-w-0'>
+                {/* Line 1: subject gets the full row */}
+                <div className='font-semibold text-xs text-foreground truncate'>
+                  <RenderMessageWithHTML message={result.title} />
+                </div>
+                {/* Line 2: sender on the left, timestamp aligned on the right */}
+                <div className='flex items-center justify-between gap-2 text-[11px] text-muted-foreground'>
+                  <span className='min-w-0 truncate'>
+                    {senderName}
+                    {recipientCount > 0 && ` +${recipientCount} more`}
+                  </span>
+                  <span className='shrink-0 whitespace-nowrap'>
+                    {utcToIst(result.metadata.timestamp)}
+                  </span>
+                </div>
+              </div>
+              {isSelected && <SelectedBadge />}
+            </div>
+            <div className='pl-6 text-xs text-foreground'>
+              <SearchSnippetRenderer message={result.context || ''} wordLimit={40} />
+            </div>
+          </Command.Item>
+        );
+      }
+
       // Use scopeType to determine channel type instead of parsing title
       const scopeType = result.searchContext?.scopeType;
       const isDmOrGroupDm = scopeType === 'DM' || scopeType === 'GROUP_DM';
