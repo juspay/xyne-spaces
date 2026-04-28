@@ -107,7 +107,8 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const navigate = useNavigate();
     const { user } = useAuth();
     const canCreateTicket = useCanCreateTicket();
-    const { isOffline, isReconnecting, isReconnected, refreshConnection } = useZeroOfflineState();
+    const { isOffline, showOfflineBanner, isReconnecting, isReconnected, refreshConnection } =
+      useZeroOfflineState();
 
     // Summary cache invalidation - clear cache when messages change
     const { onMessageChange } = useSummaryCache();
@@ -669,7 +670,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
         ) : (
           <>
             <AgentProgressIndicator sessionId={currentSessionId} />
-            {isOffline && (
+            {showOfflineBanner && (
               <div className='px-3 py-1.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between mx-3 mb-1'>
                 <div className='flex items-center gap-1.5'>
                   <WifiOff className='w-3 h-3 shrink-0' />
