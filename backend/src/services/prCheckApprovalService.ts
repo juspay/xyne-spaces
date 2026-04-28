@@ -92,6 +92,7 @@ appActions:
     prId: "${prId}"
     projectKey: "${parsed.projectKey}"
     repositorySlug: "${parsed.repositorySlug}"
+    showToAll: true
 ---
 
 🔍 **PR Check Available**
