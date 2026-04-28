@@ -9144,6 +9144,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             email: admin.email,
             role: OrgRole.OWNER,
             joinedAt: timestamp,
+            userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
           });
         },
       ),
@@ -9294,6 +9295,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               email,
               role: role as OrgRole,
               joinedAt: timestamp,
+              userId: 'deprecated-placeholder', // Deprecated field, kept for backward compatibility
             });
           }
         },

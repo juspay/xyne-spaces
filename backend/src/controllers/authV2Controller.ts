@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library';
+import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/userService';
 import { UserSessionService } from '../services/userSessionService';
@@ -328,7 +329,111 @@ export class AuthV2Controller {
         return;
       }
 
-      logger.info(`[${requestId}] Redirecting to frontend with workspaces`);
+      /**
+       * AUTO-LOGIN SINGLE WORKSPACE USERS
+       * SHOULD REMOVE AS ITS FALLBACK FOR OLD DASHBOARD, AND NEW USERS SHOULD EXPECT TO SELECT WORKSPACE ON FIRST LOGIN
+       * Users with exactly 1 workspace get auto-logged in (good UX).
+       * Works for both old dashboards and new users with single workspace.
+       */
+      if (workspaces.length === 1) {
+        const workspaceId = workspaces[0]!.id;
+        logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
+        
+        // Create/get workspace user
+        const { user: workspaceUser } = await this.userService.createOrGetWorkspaceUser({
+          providerUserId: googleUserData.googleId,
+          email: googleUserData.email,
+          name: googleUserData.name,
+          picture: googleUserData.picture,
+          workspaceId,
+          authProvider: 'GOOGLE',
+        });
+        
+        // Create session
+        let sessionId = null;
+        if (refresh_token) {
+          try {
+            const refreshTokenExpiry = new Date();
+            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+            
+            const deviceInfo = JSON.stringify({
+              userAgent: req.headers['user-agent'],
+              acceptLanguage: req.headers['accept-language'],
+              timestamp: new Date().toISOString(),
+            });
+            
+            const session = await this.userSessionService.createSession({
+              userId: workspaceUser.id,
+              refreshToken: refresh_token,
+              refreshTokenExpiry,
+              accessToken: access_token ?? undefined,
+              deviceInfo,
+              ipAddress: req.ip || req.connection.remoteAddress || undefined,
+            });
+            
+            sessionId = session.id;
+            logger.info(`[${requestId}] Auto-login session created: ${sessionId}`);
+          } catch (sessionError) {
+            logger.error(`[${requestId}] Auto-login session creation failed:`, sessionError);
+          }
+        }
+        
+        // Generate JWT with workspace context
+        const jwtToken = jwtService.generateToken({
+          sub: workspaceUser.id,
+          email: workspaceUser.email,
+          name: workspaceUser.name,
+          picture: workspaceUser.picture || undefined,
+          workspaceId: workspaceUser.workspaceId ?? undefined,
+          memberId: workspaceUser.orgMemberId,
+        });
+        
+        // Set workspace cookies
+        // NOTE: sameSite must be 'lax' (not 'strict') for OAuth callback
+        // because the redirect comes from Google (cross-site navigation)
+        const cookieBase = {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax' as const,
+          path: '/',
+        };
+        
+        res.cookie('xyne_last_workspace', workspaceId, {
+          ...cookieBase,
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+        
+        res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
+          ...cookieBase,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+        
+        // Use xyne_session cookie (consistent with refreshSession endpoint)
+        if (sessionId) {
+          res.cookie('xyne_session', sessionId, {
+            ...cookieBase,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+          });
+        }
+        
+        logger.info(`[${requestId}] Auto-login complete - redirecting to dashboard with cookies`);
+        logger.info(`[${requestId}] Cookies set: xyne_last_workspace=${workspaceId}, xyne_session=${sessionId}, xyne_ws_${workspaceId}_token=<JWT>`);
+        
+        // Include user data and autoLoginWorkspace in redirect
+        // Frontend will call loginWorkspace which will find the session from cookies
+        const autoLoginParams = new URLSearchParams({
+          success: 'true',
+          email: googleUserData.email,
+          name: googleUserData.name,
+          picture: googleUserData.picture || '',
+          autoLoginWorkspace: workspaceId,
+          userExistsButRemoved: String(userExistsButRemoved),
+        });
+        res.redirect(`${frontendUrl}?${autoLoginParams.toString()}`);
+        return;
+      }
+
+      logger.info(`[${requestId}] Multiple workspaces (${workspaces.length}) detected - redirecting to workspace selection`);
 
       // Redirect with workspaces (frontend will select workspace)
       const params = new URLSearchParams({
@@ -811,28 +916,60 @@ export class AuthV2Controller {
         return;
       }
 
-      // Get pending auth data from cookie
+      // Get pending auth data from cookie (for normal OAuth flow)
       const pendingAuthCookie = req.cookies?.google_access_token;
-      if (!pendingAuthCookie) {
+      const existingSessionId = req.cookies?.xyne_session || req.cookies?.user_session_id;
+      
+      let oauthUserData: { email: string; name: string; googleId?: string; providerUserId?: string; picture?: string };
+      let provider: string;
+      let pendingRefreshToken: string | undefined;
+      let pendingAccessToken: string | undefined;
+
+      if (pendingAuthCookie) {
+        const parsed = this.parsePendingAuthCookie(pendingAuthCookie);
+        if (!parsed) {
+          res.status(401).json({
+            error: 'Invalid auth data',
+            message: 'Pending auth data is corrupted or expired'
+          });
+          return;
+        }
+        oauthUserData = parsed.oauthUserData;
+        provider = parsed.provider;
+        pendingRefreshToken = parsed.pendingRefreshToken;
+        pendingAccessToken = parsed.pendingAccessToken;
+      } else if (existingSessionId) {
+        /**
+         * AUTO-LOGIN FLOW: Use existing session (cookies already set)
+         * This happens when user is auto-logged in to single workspace
+         */
+        logger.info(`[LOGIN-WORKSPACE] No pending auth cookie, but session ${existingSessionId} found - using auto-login flow`);
+        
+        const session = await this.userSessionService.getSessionById(existingSessionId);
+        if (!session || !session.user || session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
+          res.status(401).json({
+            error: 'Invalid session',
+            message: 'Session not found or expired'
+          });
+          return;
+        }
+        
+        oauthUserData = {
+          email: session.user.email,
+          name: session.user.name || '',
+          providerUserId: session.user.id, // Use session user ID as provider ID
+          picture: session.user.picture || undefined,
+        };
+        provider = 'GOOGLE'; // Assume Google for auto-login
+        pendingRefreshToken = session.refreshToken;
+        pendingAccessToken = session.accessToken || undefined;
+      } else {
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Pending auth data not found or expired'
         });
         return;
       }
-
-      let customToken;
-      try {
-        customToken = JSON.parse(pendingAuthCookie);
-      } catch {
-        res.status(401).json({
-          error: 'Invalid auth data',
-          message: 'Pending auth data is corrupted'
-        });
-        return;
-      }
-
-      const { user: oauthUserData, provider, refreshToken: pendingRefreshToken, accessToken: pendingAccessToken } = customToken;
 
       if (!oauthUserData?.email) {
         res.status(401).json({
@@ -846,7 +983,7 @@ export class AuthV2Controller {
 
       // Create workspace-scoped user (or get existing)
       const { user: workspaceUser, isNewUser } = await this.userService.createOrGetWorkspaceUser({
-        providerUserId: oauthUserData.providerUserId || oauthUserData.googleId,
+        providerUserId: (oauthUserData.providerUserId || oauthUserData.googleId)!,
         email: oauthUserData.email,
         name: oauthUserData.name,
         picture: oauthUserData.picture,
@@ -983,18 +1120,15 @@ export class AuthV2Controller {
         return;
       }
 
-      let customToken;
-      try {
-        customToken = JSON.parse(pendingAuthCookie);
-      } catch {
+      const parsedAuth = this.parsePendingAuthCookie(pendingAuthCookie);
+      if (!parsedAuth) {
         res.status(401).json({
           error: 'Invalid auth data',
-          message: 'Pending auth data is corrupted'
+          message: 'Pending auth data is corrupted or expired'
         });
         return;
       }
-
-      const { user: oauthUserData, provider, refreshToken: pendingRefreshToken } = customToken;
+      const { oauthUserData, provider, pendingRefreshToken } = parsedAuth;
 
       if (!oauthUserData?.email) {
         res.status(401).json({
@@ -1007,7 +1141,7 @@ export class AuthV2Controller {
       logger.info(`[CREATE-ORG] User ${oauthUserData.email} creating org "${orgName}" with workspace "${workspaceName}" via ${provider}`);
 
       const userData = {
-        providerUserId: oauthUserData.providerUserId || oauthUserData.googleId,
+        providerUserId: (oauthUserData.providerUserId || oauthUserData.googleId)!,
         email: oauthUserData.email,
         name: oauthUserData.name,
         picture: oauthUserData.picture,
@@ -1336,4 +1470,50 @@ export class AuthV2Controller {
       });
     }
   };
+
+  /**
+   * This function is only to handle BACKWARD COMPATIBILITY for the old google_access_token cookie format (raw JWT string).
+   * Parses the google_access_token cookie, supporting both formats:
+   * - NEW format: JSON object { user, provider, refreshToken, accessToken }
+   * - OLD format: Raw JWT string (pre-workspace dashboard)
+   * Returns null if the cookie cannot be parsed.
+   */
+  private parsePendingAuthCookie(cookie: string): {
+    oauthUserData: { email: string; name: string; googleId?: string; providerUserId?: string; picture?: string };
+    provider: string;
+    pendingRefreshToken: string | undefined;
+    pendingAccessToken: string | undefined;
+  } | null {
+    try {
+      const parsed = JSON.parse(cookie);
+      if (parsed.user && parsed.provider) {
+        return {
+          oauthUserData: { ...parsed.user, name: parsed.user.name || '' },
+          provider: parsed.provider,
+          pendingRefreshToken: parsed.refreshToken,
+          pendingAccessToken: parsed.accessToken,
+        };
+      }
+      throw new Error('Invalid auth data structure');
+    } catch {
+      // OLD FORMAT: Raw JWT string - decode it
+      try {
+        const decoded = jwt.decode(cookie) as { sub?: string; email?: string; name?: string; picture?: string } | null;
+        if (!decoded?.email) throw new Error('Invalid JWT token');
+        return {
+          oauthUserData: {
+            email: decoded.email,
+            name: decoded.name || '',
+            googleId: decoded.sub,
+            picture: decoded.picture,
+          },
+          provider: 'google',
+          pendingRefreshToken: undefined,
+          pendingAccessToken: undefined,
+        };
+      } catch {
+        return null;
+      }
+    }
+  }
 }
