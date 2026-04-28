@@ -47,8 +47,6 @@ interface CalendarDayViewProps {
   onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
 }
 
-const TIME_GUTTER_WIDTH = 90;
-
 // ── Per-call card: drag handle IS the popover trigger button ─────────────────
 
 interface DayViewCallCardProps {
@@ -106,12 +104,11 @@ function DayViewCallCard({
           title={call.title ?? 'Call'}
           data-track-category='Calls'
           data-track-name='calendar-day-call-card'
-          className='group absolute left-2 right-2 rounded overflow-hidden text-left border-l-[3px] z-[5] focus:outline-none'
+          className='group absolute left-2 right-2 rounded overflow-hidden text-left z-[5] focus:outline-none'
           style={{
             top,
             height,
             backgroundColor: meetingStatus === MeetingStatus.ACCEPTED ? '#0077FF1A' : 'transparent',
-            borderLeftColor: '#0077FF',
             opacity: isDragging || isBeingResized ? 0.3 : 1,
             cursor: draggable ? 'grab' : 'pointer',
             userSelect: 'none',
@@ -124,49 +121,52 @@ function DayViewCallCard({
                 className='absolute inset-0'
                 style={{
                   backgroundImage:
-                    'repeating-linear-gradient(-18deg, rgba(9, 46, 88, 0.55) 0 1px, transparent 1px 4px)',
+                    'repeating-linear-gradient(-18deg, rgba(0, 119, 255, 0.1) 0 2px, transparent 2px 4px)',
                 }}
               />
             </div>
           )}
-          <div className='px-2 py-1.5 h-full flex flex-col justify-start overflow-hidden'>
-            <span
-              className='leading-tight truncate'
-              style={{
-                color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
-                fontSize: '12px',
-                lineHeight: '18px',
-                fontWeight: 500,
-                textDecorationLine: isDeclined ? 'line-through' : 'none',
-              }}
-            >
-              {isGoogleCalendarCall(call) && (
-                <span className='inline-block mr-0.5 mb-px'>
-                  <GoogleCalendarIcon size={14} />
-                </span>
-              )}
-              {isMicrosoftCalendarCall(call) && (
-                <span className='inline-block mr-0.5 mb-px'>
-                  <MicrosoftIcon size={14} />
-                </span>
-              )}
-              {call.title ?? 'Call'}
-            </span>
-            {height >= 40 && (
+          <div className='px-1 py-1.5 h-full flex flex-row gap-1 justify-start overflow-hidden'>
+            <div className='w-0.5 rounded-full shrink-0 bg-primary self-stretch max-sm:hidden' />
+            <div className='flex flex-col flex-1 overflow-hidden'>
               <span
-                className='leading-tight mt-0.5 whitespace-nowrap'
+                className='leading-tight truncate'
                 style={{
-                  color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
-                  fontSize: '10px',
-                  lineHeight: '14px',
-                  opacity: 0.7,
+                  color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
+                  fontSize: '12px',
+                  lineHeight: '18px',
+                  fontWeight: 500,
                   textDecorationLine: isDeclined ? 'line-through' : 'none',
                 }}
               >
-                {formatTime(call.startsAt)}
-                {call.endsAt && ` - ${formatTime(call.endsAt)}`}
+                {isGoogleCalendarCall(call) && (
+                  <span className='inline-block mr-0.5 mb-px'>
+                    <GoogleCalendarIcon size={14} />
+                  </span>
+                )}
+                {isMicrosoftCalendarCall(call) && (
+                  <span className='inline-block mr-0.5 mb-px'>
+                    <MicrosoftIcon size={14} />
+                  </span>
+                )}
+                {call.title ?? 'Call'}
               </span>
-            )}
+              {height >= 40 && (
+                <span
+                  className='leading-tight mt-0.5 whitespace-nowrap'
+                  style={{
+                    color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
+                    fontSize: '10px',
+                    lineHeight: '14px',
+                    opacity: 0.7,
+                    textDecorationLine: isDeclined ? 'line-through' : 'none',
+                  }}
+                >
+                  {formatTime(call.startsAt)}
+                  {call.endsAt && ` - ${formatTime(call.endsAt)}`}
+                </span>
+              )}
+            </div>
           </div>
           {draggable && (
             <div
@@ -386,7 +386,7 @@ const CalendarDayView = ({
       <div className='w-full flex flex-col border border-border rounded-xl overflow-hidden'>
         {/* Single day header */}
         <div className='flex shrink-0 border-b border-border bg-background'>
-          <div style={{ width: TIME_GUTTER_WIDTH }} className='shrink-0 border-r border-border' />
+          <div className='w-[50px] sm:w-[90px] shrink-0 border-r border-border' />
           <div
             className={cn(
               'flex-1 py-2.5 px-3 text-sm font-medium',
@@ -405,10 +405,7 @@ const CalendarDayView = ({
         >
           <div className='flex' style={{ height: HOUR_HEIGHT * 24 }}>
             {/* Time gutter */}
-            <div
-              style={{ width: TIME_GUTTER_WIDTH }}
-              className='shrink-0 border-r border-border relative select-none'
-            >
+            <div className='w-[50px] sm:w-[90px] shrink-0 border-r border-border relative select-none'>
               {HOURS.map(hour => (
                 <div
                   key={hour}
@@ -424,7 +421,7 @@ const CalendarDayView = ({
               ))}
               {isDisplayingToday && (
                 <div
-                  className='absolute left-0 right-0 z-20 pointer-events-none flex items-center justify-center'
+                  className='absolute left-0 right-0 z-20 pointer-events-none hidden sm:flex items-center justify-center'
                   style={{ top: currentTimePx - 10, height: 20 }}
                 >
                   <span className='text-[10px] font-semibold text-red-500 border border-red-400 dark:border-red-600 rounded-full px-2 py-0.5 bg-background leading-none whitespace-nowrap'>

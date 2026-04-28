@@ -13,6 +13,7 @@ import {
   formatTime,
   getCurrentUserMeetingStatus,
 } from './CalenderViewUtils';
+import { usePlatform } from '../../hooks/usePlatform';
 
 interface CalendarMonthViewProps {
   calls: Call[];
@@ -27,6 +28,7 @@ interface CalendarMonthViewProps {
 
 const DAYS_OF_WEEK = DAY_NAMES;
 const MAX_EVENTS_PER_CELL = 4;
+const MAX_EVENTS_PER_CELL_MOBILE = 2;
 
 function formatDayLabel(date: Date): string {
   return `${DAY_NAMES[date.getDay()]} ${date.getDate()}`;
@@ -56,6 +58,9 @@ const CalendarMonthView = ({
   onEditClick,
   onCreateCall,
 }: CalendarMonthViewProps): ReactElement => {
+  const { isMobile } = usePlatform();
+  const maxEventsPerCell = isMobile ? MAX_EVENTS_PER_CELL_MOBILE : MAX_EVENTS_PER_CELL;
+
   const today = new Date();
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
@@ -103,7 +108,7 @@ const CalendarMonthView = ({
             {week.map((day, di) => {
               const isToday = day ? isSameDay(day, today) : false;
               const dayCalls = day ? (callsByDay.get(day.getDate()) ?? []) : [];
-              const visible = dayCalls.slice(0, MAX_EVENTS_PER_CELL);
+              const visible = dayCalls.slice(0, maxEventsPerCell);
               const overflow = dayCalls.length - visible.length;
               const dayKey = day ? `${year}-${month}-${day.getDate()}` : null;
 
@@ -113,7 +118,7 @@ const CalendarMonthView = ({
                   role={day && onCreateCall ? 'gridcell' : undefined}
                   tabIndex={day && onCreateCall ? 0 : undefined}
                   className={cn(
-                    'border-r last:border-r-0 border-border p-1.5 min-h-[120px] flex flex-col',
+                    'border-r last:border-r-0 border-border p-1.5 max-sm:p-0.5 min-h-[120px] flex flex-col overflow-hidden',
                     !day && 'bg-muted/10',
                     day && onCreateCall && 'cursor-pointer',
                   )}
@@ -159,7 +164,7 @@ const CalendarMonthView = ({
                                   onClick={e => e.stopPropagation()}
                                   data-track-category='Calls'
                                   data-track-name='calendar-month-call-pill'
-                                  className='relative flex items-center gap-1 text-left w-full px-1 py-0.5 rounded transition-colors cursor-pointer focus:outline-none'
+                                  className='relative flex items-center max-sm:items-start gap-1 max-sm:gap-0.5 text-left w-full px-1 max-sm:px-0.5 py-0.5 max-sm:py-px rounded transition-colors cursor-pointer focus:outline-none'
                                   style={{
                                     backgroundColor:
                                       meetingStatus === MeetingStatus.ACCEPTED
@@ -173,40 +178,52 @@ const CalendarMonthView = ({
                                         className='absolute inset-0'
                                         style={{
                                           backgroundImage:
-                                            'repeating-linear-gradient(-18deg, rgba(9, 46, 88, 0.55) 0 1px, transparent 1px 4px)',
+                                            'repeating-linear-gradient(-18deg, rgba(0, 119, 255, 0.1) 0 2px, transparent 2px 4px)',
                                         }}
                                       />
                                     </div>
                                   )}
-                                  <div className='w-0.5 h-3.5 rounded-full shrink-0 bg-primary' />
-                                  {isGoogleCalendarCall(call) && <GoogleCalendarIcon size={14} />}
-                                  {isMicrosoftCalendarCall(call) && <MicrosoftIcon size={14} />}
-                                  <span
-                                    className='truncate flex-1 min-w-0 leading-tight'
-                                    style={{
-                                      color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
-                                      fontSize: '12px',
-                                      lineHeight: '18px',
-                                      fontWeight: 500,
-                                      textDecorationLine: isDeclined ? 'line-through' : 'none',
-                                    }}
-                                  >
-                                    {call.title ?? 'Call'}
-                                  </span>
-                                  {call.startsAt && (
+                                  <div className='w-0.5 h-3.5 rounded-full shrink-0 bg-primary max-sm:mt-0.5 max-sm:hidden' />
+                                  <div className='flex min-w-0 flex-1 items-baseline max-sm:flex-col max-sm:items-stretch gap-1 max-sm:gap-0'>
                                     <span
-                                      className='shrink-0 tabular-nums ml-1'
+                                      className='truncate min-w-0 leading-tight max-sm:w-full'
                                       style={{
-                                        color: isEnded ? 'hsl(var(--muted-foreground))' : '#092E58',
-                                        fontSize: '10px',
-                                        lineHeight: '14px',
-                                        opacity: 0.7,
+                                        color: isEnded ? 'hsl(var(--foreground))' : '#092E58',
+                                        fontSize: isMobile ? '8px' : '12px',
+                                        lineHeight: '18px',
+                                        fontWeight: 500,
                                         textDecorationLine: isDeclined ? 'line-through' : 'none',
                                       }}
                                     >
-                                      {formatTime(call.startsAt)}
+                                      {isGoogleCalendarCall(call) && (
+                                        <span className='inline-block mr-0.5 mb-px'>
+                                          <GoogleCalendarIcon size={isMobile ? 8 : 14} />
+                                        </span>
+                                      )}
+                                      {isMicrosoftCalendarCall(call) && (
+                                        <span className='inline-block mr-0.5 mb-px'>
+                                          <MicrosoftIcon size={isMobile ? 8 : 14} />
+                                        </span>
+                                      )}
+                                      {call.title ?? 'Call'}
                                     </span>
-                                  )}
+                                    {!isMobile && call.startsAt && (
+                                      <span
+                                        className='shrink-0 tabular-nums'
+                                        style={{
+                                          color: isEnded
+                                            ? 'hsl(var(--muted-foreground))'
+                                            : '#092E58',
+                                          fontSize: '10px',
+                                          lineHeight: '14px',
+                                          opacity: 0.7,
+                                          textDecorationLine: isDeclined ? 'line-through' : 'none',
+                                        }}
+                                      >
+                                        {formatTime(call.startsAt)}
+                                      </span>
+                                    )}
+                                  </div>
                                 </button>
                               </PopoverPrimitive.Trigger>
                               <PopoverPrimitive.Portal>
@@ -261,7 +278,7 @@ const CalendarMonthView = ({
                                 onClick={e => e.stopPropagation()}
                                 data-track-category='Calls'
                                 data-track-name='calendar-month-overflow'
-                                className='text-[11px] font-medium px-1 cursor-pointer hover:underline text-left focus:outline-none'
+                                className='text-[11px] max-sm:text-[10px] font-medium max-sm:font-normal px-1 cursor-pointer hover:underline text-left focus:outline-none'
                                 style={{ color: '#6276BE' }}
                               >
                                 +{overflow} more
@@ -365,7 +382,7 @@ const CalendarMonthView = ({
                                         </PopoverPrimitive.Trigger>
                                         <PopoverPrimitive.Portal>
                                           <PopoverPrimitive.Content
-                                            side='right'
+                                            side={isMobile ? 'bottom' : 'right'}
                                             sideOffset={8}
                                             avoidCollisions
                                             collisionPadding={16}
