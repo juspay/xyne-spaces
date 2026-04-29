@@ -1395,6 +1395,7 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 .mobile-my-bubble {
   background-color: var(--chat-mobile-my-bubble);
+  max-width: 100%;
 }
 
 /* AvatarGroup styling - overlapping avatars with masked borders */
