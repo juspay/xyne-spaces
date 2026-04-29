@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "public"."NudgeKind" ADD VALUE 'SCHEDULE_CALL_FROM_THREAD';
