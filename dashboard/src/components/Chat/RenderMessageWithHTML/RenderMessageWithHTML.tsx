@@ -37,6 +37,8 @@ import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { API_BASE_URL } from '../../../config';
+import { FlowScreenManager } from '../../flowUI/FlowScreenManager';
+import type { FlowDefinition } from '@xyne/shared';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -45,6 +47,9 @@ interface RenderMessageWithHTMLProps {
   showEdited?: boolean;
   isSystemMessage?: boolean;
   breakLongLinks?: boolean;
+  /** Needed to render embedded FlowScreenManager widgets */
+  messageId?: string;
+  conversationId?: string;
 }
 
 const MAX_HTML_LENGTH = 100000;
@@ -538,7 +543,8 @@ function isStructurallyEmptyElement(el: HTMLElement): boolean {
 
   if (nonEmptyTags.has(el.tagName)) return false;
 
-  // Fast path: check direct text only
+  // A div with data-flow-json is a flow widget placeholder — never treat as empty
+  if (el.hasAttribute('data-flow-json')) return false;
   for (const child of el.childNodes) {
     if (child.nodeType === Node.TEXT_NODE) {
       if ((child.textContent ?? '').trim().length > 0) {
@@ -712,6 +718,8 @@ const parseNode = (
   insideCodeBlock = false,
   skipEmojiWrapping = false,
   breakLongLinks = false,
+  messageId?: string,
+  conversationId?: string,
 ): React.ReactNode | null => {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent || '';
@@ -886,6 +894,42 @@ const parseNode = (
     }
   }
 
+  // Handle embedded flow JSON — render FlowScreenManager in place of the div
+  if (el.hasAttribute('data-flow-json')) {
+    const raw = el.getAttribute('data-flow-json');
+    console.log(
+      '[RenderMsg] data-flow-json found, raw length:',
+      raw?.length,
+      'messageId:',
+      messageId,
+      'conversationId:',
+      conversationId,
+    );
+    if (raw && messageId && conversationId) {
+      try {
+        const flowJSON = JSON.parse(raw) as FlowDefinition;
+        console.log('[RenderMsg] parsed flowJSON ok, screenId:', flowJSON.screenId);
+        return (
+          <FlowScreenManager
+            key={`${keyPrefix}-flow-${idx}-${flowJSON.screenId}`}
+            flow={flowJSON}
+            messageId={messageId}
+            conversationId={conversationId}
+          />
+        );
+      } catch (e) {
+        console.error('[RenderMsg] failed to parse data-flow-json:', e);
+        return null;
+      }
+    }
+    console.warn('[RenderMsg] data-flow-json div found but missing raw/messageId/conversationId', {
+      hasRaw: !!raw,
+      messageId,
+      conversationId,
+    });
+    return null;
+  }
+
   // Check if this is a conversation history container
   const isZohoConversationHistory =
     tag === 'div' &&
@@ -914,6 +958,8 @@ const parseNode = (
       shouldSkipAutoLink,
       skipEmojiWrapping,
       breakLongLinks,
+      messageId,
+      conversationId,
     );
     if (parsed !== null) children.push(parsed);
   });
@@ -1119,6 +1165,8 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   showEdited = false,
   isSystemMessage = false,
   breakLongLinks = false,
+  messageId,
+  conversationId,
 }): JSX.Element => {
   const navigate = useNavigate();
   const keyPrefix = useMemo<string>(() => Math.random().toString(36).slice(2), []);
@@ -1126,6 +1174,15 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   const parsedContent = useMemo<React.ReactNode[]>(() => {
     try {
       if (!message || typeof message !== 'string') return [];
+
+      if (message.includes('data-flow-json')) {
+        console.log(
+          '[RenderMsg] content contains data-flow-json, messageId:',
+          messageId,
+          'len:',
+          message.length,
+        );
+      }
 
       const safe = message.slice(0, MAX_HTML_LENGTH).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       const parser = new DOMParser();
@@ -1165,6 +1222,8 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
           false,
           skipEmojiWrapping,
           breakLongLinks,
+          messageId,
+          conversationId,
         );
         if (parsed !== null) nodes.push(parsed);
       });
@@ -1173,7 +1232,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     } catch {
       return [message.replace(/<[^>]*>/g, '')];
     }
-  }, [message, keyPrefix, navigate, breakLongLinks]);
+  }, [message, keyPrefix, navigate, breakLongLinks, messageId, conversationId]);
 
   // Inject (edited) into the last element if it's safe to do so
   const contentWithEdited = useMemo(() => {
