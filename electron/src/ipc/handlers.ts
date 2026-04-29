@@ -1,4 +1,5 @@
-import { ipcMain, shell, app, BrowserView, BrowserWindow } from 'electron';
+import { ipcMain, shell, app, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
+import { promises as fs } from 'fs';
 import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
@@ -8,7 +9,7 @@ import { config } from '../app/config';
 import { codeServerService } from '../services/code-server';
 import { docsPublishService } from '../services/docs-publish';
 import { performHardReload } from '../services/version-checker';
-import { Logger } from '../services/logger/Logger';
+import { Logger, errorLogger } from '../services/logger/Logger';
 import {
   requestAllMediaPermissions,
 } from '../services/media-permission';
@@ -17,6 +18,7 @@ import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-pop
 import { showRecordingPill, hideRecordingPill } from '../services/recording-pill-window';
 import { meetingDetectorService } from '../services/meeting-detector';
 import { browserSettingsService, BrowserSettings } from '../services/browser-settings';
+import { errorReportRecorder } from '../services/error-report-recorder';
 import Sentry from '@sentry/electron/main';
 
 
@@ -245,6 +247,96 @@ export function setupIpcHandlers(): void {
 
   ipcMain.handle('logger:get-client-session-id', () => {
     return Logger.getClientSessionId();
+  });
+
+  ipcMain.handle('error-report:get-native-logs', async () => {
+    const logFiles = [
+      {
+        fileName: 'errors.log',
+        path: errorLogger.transports.file.getFile().path,
+      },
+    ];
+
+    const MAX_LOG_BYTES = 512 * 1024;
+
+    const files = await Promise.all(
+      logFiles.map(async ({ fileName, path: filePath }) => {
+        try {
+          const stat = await fs.stat(filePath);
+          const start = Math.max(0, stat.size - MAX_LOG_BYTES);
+          const fd = await fs.open(filePath, 'r');
+          const buf = Buffer.alloc(Math.min(MAX_LOG_BYTES, stat.size));
+          await fd.read(buf, 0, buf.length, start);
+          await fd.close();
+          return { fileName, content: buf.toString('utf8') };
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    return files.filter(file => file !== null);
+  });
+
+  // Same approach as screen-picker.ts: call getSources from main process
+  ipcMain.handle('error-report:get-screen-sources', async () => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 300, height: 180 },
+      });
+
+      if (sources.length === 0) {
+        return { sources: [], permissionError: 'denied' };
+      }
+
+      return {
+        sources: sources
+          .filter(s => !s.thumbnail.isEmpty())
+          .map(s => ({
+            id: s.id,
+            name: s.name,
+            thumbnail: s.thumbnail.toDataURL(),
+            displayId: s.display_id,
+            type: s.id.startsWith('screen:') ? 'screen' : 'window',
+          })),
+        permissionError: null,
+      };
+    } catch {
+      return { sources: [], permissionError: 'denied' };
+    }
+  });
+
+  // Error Report Recorder handlers
+  ipcMain.handle('error-report:start-recording', (_event, { sourceId, withMic }: { sourceId: string; withMic: boolean }) =>
+    errorReportRecorder.startRecording(sourceId, withMic),
+  );
+  ipcMain.handle('error-report:stop-recording', () => errorReportRecorder.stopRecording());
+  ipcMain.handle('error-report:get-recording-state', () => errorReportRecorder.getRecordingState());
+  ipcMain.handle('error-report:read-recording-file', (_event, { filePath }: { filePath: string }) =>
+    errorReportRecorder.readRecordingFile(filePath),
+  );
+  ipcMain.handle('error-report:cleanup-recording', (_event, { filePath }: { filePath: string }) =>
+    errorReportRecorder.cleanupRecordingFile(filePath),
+  );
+
+  ipcMain.handle('error-report:save-file', async (_event, { fileName, buffer, sourcePath }: { fileName: string; buffer: ArrayBuffer | null; sourcePath: string | null }) => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: fileName,
+      filters: [
+        { name: 'Video', extensions: ['webm', 'mp4', 'mov'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePath) return { saved: false };
+    if (sourcePath) {
+      // Recording is already on disk — copy directly, no need to load into memory
+      errorReportRecorder.assertManagedRecordingPath(sourcePath);
+      await fs.copyFile(sourcePath, result.filePath);
+    } else if (buffer) {
+      await fs.writeFile(result.filePath, Buffer.from(new Uint8Array(buffer)));
+    }
+    return { saved: true };
   });
 
   ipcMain.on('clear-all-cookies', () => {

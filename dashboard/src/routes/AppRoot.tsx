@@ -156,6 +156,9 @@ import { buildGrafanaLogsExploreUrl } from '../components/Inspector/grafanaUrl';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
+import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
+import { useScreenRecorder } from '../hooks/useScreenRecorder';
+import type { ScreenSource } from '../types/electron';
 import AIScreen from './AIScreen/AIScreen';
 import { ExternalLobbyPage } from './ExternalLobby/ExternalLobbyPage';
 
@@ -240,6 +243,17 @@ const AppRoot = (): ReactElement => {
 
   // Shortcuts help modal state
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+  const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
+  const [pendingRecording, setPendingRecording] = useState<File | null>(null);
+  const [pendingRecordingFilePath, setPendingRecordingFilePath] = useState<string | null>(null);
+
+  const { recordingState, recordingSeconds, startRecording, stopRecording } = useScreenRecorder(
+    (file: File, filePath: string) => {
+      setPendingRecording(file);
+      setPendingRecordingFilePath(filePath);
+      setIsErrorReportOpen(true);
+    },
+  );
   useShortcutById('global.openShortcutsHelp', () => setIsShortcutsModalOpen(prev => !prev));
   useShortcutById(
     'global.composeMessage',
@@ -320,6 +334,12 @@ const AppRoot = (): ReactElement => {
     machineState === 'connecting';
   const shouldShowMobileHeader =
     isMobile && isCallActive && machineViewMode === 'mini' && externalId && !isOnboarding;
+  const globalTopBarProps = {
+    onOpenErrorReport: (): void => setIsErrorReportOpen(true),
+    isRecording: recordingState === 'recording',
+    recordingSeconds,
+    onStopRecording: stopRecording,
+  };
 
   // Enable swipe back gesture on mobile
   useSwipeBack();
@@ -449,7 +469,7 @@ const AppRoot = (): ReactElement => {
                 ) : xyneAIState.matches('open') && !isMobile ? (
                   // XyneAI is open on desktop - show panel layout with XyneAI
                   <div className='flex flex-col h-screen'>
-                    {!isMobile && <GlobalTopBar />}
+                    {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
                     <PanelGroup
                       direction='horizontal'
                       className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
@@ -491,7 +511,7 @@ const AppRoot = (): ReactElement => {
                 ) : browserPanelState === 'open' ? (
                   // Browser Panel is open - show panel layout with Browser
                   <div className='flex flex-col h-screen'>
-                    {!isMobile && <GlobalTopBar />}
+                    {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
                     <PanelGroup
                       direction='horizontal'
                       className='flex-1 no-scrollbar min-[500px]:p-2 overflow-auto'
@@ -528,7 +548,7 @@ const AppRoot = (): ReactElement => {
                 ) : webviewState === 'closed' || webviewState === 'idle' ? (
                   // When both closed or idle, only show the left panel without resize handle or right panel
                   <div className='flex flex-col h-screen'>
-                    {!isMobile && <GlobalTopBar />}
+                    {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
                     <div
                       className={`flex flex-1 overflow-hidden ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                     >
@@ -551,7 +571,7 @@ const AppRoot = (): ReactElement => {
                 ) : (
                   // WebView is open - show panel layout with WebView
                   <div className='flex flex-col h-screen'>
-                    {!isMobile && <GlobalTopBar />}
+                    {!isMobile && <GlobalTopBar {...globalTopBarProps} />}
                     <PanelGroup
                       direction='horizontal'
                       className='flex-1 overflow-hidden'
@@ -605,6 +625,23 @@ const AppRoot = (): ReactElement => {
                   </>
                 )}
                 <AttachmentGalleryModal />
+                <ErrorReportModal
+                  isOpen={isErrorReportOpen}
+                  onClose={() => setIsErrorReportOpen(false)}
+                  pendingRecording={pendingRecording}
+                  pendingRecordingFilePath={pendingRecordingFilePath}
+                  onSourceSelected={(source: ScreenSource, withMic: boolean) =>
+                    void startRecording(source, withMic)
+                  }
+                  onSubmitSuccess={() => {
+                    setPendingRecording(null);
+                    setPendingRecordingFilePath(null);
+                  }}
+                  onDiscard={() => {
+                    setPendingRecording(null);
+                    setPendingRecordingFilePath(null);
+                  }}
+                />
                 {/* XyneAI Mobile Drawer */}
                 {isMobile && !isInPanelWebview && (
                   <Drawer

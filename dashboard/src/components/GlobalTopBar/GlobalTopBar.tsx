@@ -1,11 +1,27 @@
 import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import MetricsBar from '../MetricsBar/MetricsBar';
-import { ArrowLeft, ArrowRight, LucideCommand, Search } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Circle,
+  Headset,
+  LucideCommand,
+  Search,
+  Square,
+} from 'lucide-react';
 import { ZeroConnectionStatus } from '../ZeroConnectionStatus/ZeroConnectionStatus';
 import { invokeShortcut } from '../../shortcuts';
 import { toast } from 'sonner';
+import { Tooltip } from '../ui/Tooltip';
 import { WorkspaceSwitcher } from '../AppSidebar/WorkspaceSwitcher';
+
+interface GlobalTopBarProps {
+  onOpenErrorReport?: () => void;
+  isRecording?: boolean;
+  recordingSeconds?: number;
+  onStopRecording?: () => void;
+}
 
 const NavigationAndSearch = (): ReactElement => {
   const navigate = useNavigate();
@@ -114,7 +130,12 @@ const NavigationAndSearch = (): ReactElement => {
   );
 };
 
-const GlobalTopBar = (): ReactElement => {
+const GlobalTopBar = ({
+  onOpenErrorReport,
+  isRecording,
+  recordingSeconds = 0,
+  onStopRecording,
+}: GlobalTopBarProps): ReactElement => {
   const handleDoubleClick = (): void => {
     if (typeof window.electronAPI?.toggleCompactMode === 'function') {
       window.electronAPI.toggleCompactMode();
@@ -138,10 +159,46 @@ const GlobalTopBar = (): ReactElement => {
       </div>
       <div className='flex-1 flex items-center justify-between'>
         <NavigationAndSearch />
-        <div className='flex gap-1' style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <ZeroConnectionStatus />
-          <div className='w-px h-4 bg-[var(--metrics-bar-divider)]' />
+        <div
+          className='flex items-center gap-1'
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
           <MetricsBar />
+          <ZeroConnectionStatus />
+          {isRecording && onStopRecording && (
+            <Tooltip content='Stop recording'>
+              <button
+                type='button'
+                onClick={onStopRecording}
+                className='flex h-6 items-center gap-1.5 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-red-500 dark:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer'
+                aria-label='stop-recording'
+                data-track-category='ERROR_REPORT'
+                data-track-name='StopRecordingTopBar'
+              >
+                <Circle className='size-2.5 fill-current animate-pulse' />
+                <span className='font-mono'>
+                  {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:
+                  {String(recordingSeconds % 60).padStart(2, '0')}
+                </span>
+                <Square className='size-3 fill-current' />
+              </button>
+            </Tooltip>
+          )}
+          {!isRecording && onOpenErrorReport && (
+            <Tooltip content='Report issue'>
+              <button
+                type='button'
+                onClick={onOpenErrorReport}
+                className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] hover:bg-[var(--metrics-bar-hover-bg)]/80 transition-colors cursor-pointer'
+                aria-label='report-issue'
+                data-track-category='ERROR_REPORT'
+                data-track-name='OpenModal'
+              >
+                <Headset size={14} className='text-[var(--metrics-bar-color)]' />
+                <span>Support</span>
+              </button>
+            </Tooltip>
+          )}
         </div>
       </div>
     </div>

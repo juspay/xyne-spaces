@@ -230,6 +230,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('electron-log', listener);
     return () => ipcRenderer.removeListener('electron-log', listener);
   },
+  getErrorReportNativeLogs: () => ipcRenderer.invoke('error-report:get-native-logs'),
+  getErrorReportScreenSources: () => ipcRenderer.invoke('error-report:get-screen-sources'),
+  saveErrorReportFile: (fileName: string, buffer: ArrayBuffer | null, sourcePath: string | null) =>
+    ipcRenderer.invoke('error-report:save-file', { fileName, buffer, sourcePath }),
+
+  // Error Report Recorder APIs
+  startErrorReportRecording: (sourceId: string, withMic: boolean) =>
+    ipcRenderer.invoke('error-report:start-recording', { sourceId, withMic }),
+  stopErrorReportRecording: () =>
+    ipcRenderer.invoke('error-report:stop-recording'),
+  getErrorReportRecordingState: () =>
+    ipcRenderer.invoke('error-report:get-recording-state'),
+  readErrorReportRecordingFile: (filePath: string) =>
+    ipcRenderer.invoke('error-report:read-recording-file', { filePath }),
+  cleanupErrorReportRecording: (filePath: string) =>
+    ipcRenderer.invoke('error-report:cleanup-recording', { filePath }),
+  onErrorReportRecordingProgress: (callback: (data: { elapsedSeconds: number }) => void) => {
+    const listener = (_event: unknown, data: { elapsedSeconds: number }) => callback(data);
+    ipcRenderer.on('error-report:recording-progress', listener);
+    return () => ipcRenderer.removeListener('error-report:recording-progress', listener);
+  },
 
   // Bundle version API
   getBundleVersion: () => ipcRenderer.invoke('get-bundle-version'),
@@ -246,7 +267,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Generic IPC send (used by standalone HTML windows like meeting-popup)
   ipcSend: (channel: string, ...args: unknown[]) => {
-    const allowed = ['meeting-popup:content-height', 'recording-pill:content-size', 'recording-pill:recording-stopped'];
+    const allowed = ['meeting-popup:content-height', 'recording-pill:content-size', 'recording-pill:recording-stopped', 'error-report-recorder:chunk', 'error-report-recorder:stopped', 'error-report-recorder:error'];
     if (allowed.includes(channel)) ipcRenderer.send(channel, ...args);
   },
 

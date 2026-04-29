@@ -3,6 +3,7 @@ import App from './App.tsx';
 import './global.css';
 import { mixpanelService } from './services/Analytics/mixpanelService';
 import { globalClickTracker } from './services/Analytics/globalClickTracker';
+import { installErrorReportLogCollector } from './utils/errorReportLogCollector';
 
 // Expose app version to window for Electron access
 window.__APP_VERSION__ = __APP_VERSION__;
@@ -19,12 +20,7 @@ const getCommonErrorProperties = (): {
   timestamp: new Date().toISOString(),
 });
 
-// Override console.error to capture all console errors
-// eslint-disable-next-line no-console
-console.error = (...args: unknown[]): void => {
-  // Call original console.error first
-  originalConsoleError.apply(console, args);
-
+const handleConsoleError = (args: unknown[]): void => {
   try {
     const errorMessage = args.map(arg => String(arg)).join(' ');
 
@@ -38,8 +34,7 @@ console.error = (...args: unknown[]): void => {
   }
 };
 
-// Global error handler for uncaught exceptions using addEventListener
-window.addEventListener('error', event => {
+const handleWindowError = (event: ErrorEvent): void => {
   try {
     const error = event.error as Error | undefined;
 
@@ -57,10 +52,9 @@ window.addEventListener('error', event => {
   } catch (trackingError) {
     originalConsoleError('Failed to track error to Mixpanel:', trackingError);
   }
-});
+};
 
-// Global handler for unhandled promise rejections
-window.addEventListener('unhandledrejection', event => {
+const handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
   try {
     const reason = event.reason as Error | string;
     const isError = reason instanceof Error;
@@ -82,6 +76,12 @@ window.addEventListener('unhandledrejection', event => {
   } catch (trackingError) {
     originalConsoleError('Failed to track promise rejection to Mixpanel:', trackingError);
   }
+};
+
+installErrorReportLogCollector({
+  onConsoleError: handleConsoleError,
+  onWindowError: handleWindowError,
+  onUnhandledRejection: handleUnhandledRejection,
 });
 
 // Register Service Worker for docs preview and push notifications

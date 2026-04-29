@@ -6,6 +6,16 @@ export interface ScreenSource {
   type: 'screen' | 'window';
 }
 
+export interface ErrorReportNativeLog {
+  fileName: string;
+  content: string;
+}
+
+export interface ErrorReportRecordingInfo {
+  state: 'idle' | 'recording';
+  elapsedSeconds?: number;
+}
+
 export interface ElectronAPI {
   openExternal: (url: string) => void;
   getWebviewPreloadPath?: () => string;
@@ -142,6 +152,11 @@ export interface ElectronAPI {
     getActiveSessionCount: () => Promise<number>;
   };
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
+  getErrorReportNativeLogs?: () => Promise<ErrorReportNativeLog[]>;
+  getErrorReportScreenSources?: () => Promise<{
+    sources: ScreenSource[];
+    permissionError: 'denied' | null;
+  }>;
   getBundleVersion: () => Promise<string | null>;
   onAppUpdateAvailable: (
     callback: (data: {
@@ -180,6 +195,17 @@ export interface ElectronAPI {
     stopRecording: () => void;
     cancelRecording: () => void;
   };
+  saveErrorReportFile?(
+    fileName: string,
+    buffer: ArrayBuffer | null,
+    sourcePath: string | null,
+  ): Promise<{ saved: boolean }>;
+  startErrorReportRecording?(sourceId: string, withMic: boolean): Promise<void>;
+  stopErrorReportRecording?(): Promise<{ filePath: string }>;
+  getErrorReportRecordingState?(): Promise<ErrorReportRecordingInfo>;
+  readErrorReportRecordingFile?(filePath: string): Promise<ArrayBuffer>;
+  cleanupErrorReportRecording?(filePath: string): Promise<void>;
+  onErrorReportRecordingProgress?(callback: (data: { elapsedSeconds: number }) => void): () => void;
 }
 
 declare global {

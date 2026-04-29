@@ -49,9 +49,18 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
   const [textPreview, setTextPreview] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [previewError, setPreviewError] = useState(false);
+  const [videoLightboxUrl, setVideoLightboxUrl] = useState<string | null>(null);
 
   // Cache fetched blob URLs to avoid redundant fetches
   const previewCacheRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    return (): void => {
+      if (videoLightboxUrl) {
+        URL.revokeObjectURL(videoLightboxUrl);
+      }
+    };
+  }, [videoLightboxUrl]);
 
   const category = getFileCategory({
     type: getMimeType(file),
@@ -89,8 +98,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
           const url = URL.createObjectURL(blob);
           previewCacheRef.current.set(fileId, url);
           setImagePreviewUrl(url);
-        } catch (error) {
-          console.error('Failed to fetch image preview:', fileId, error);
+        } catch {
           setPreviewError(true);
         } finally {
           setIsLoadingPreview(false);
@@ -150,8 +158,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
           const url = URL.createObjectURL(blob);
           previewCacheRef.current.set(`${fileId}-thumb`, url);
           setVideoThumbnailUrl(url);
-        } catch (error) {
-          console.error('Failed to fetch video thumbnail:', fileId, error);
+        } catch {
           setPreviewError(true);
         } finally {
           setIsLoadingPreview(false);
@@ -182,7 +189,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
       reader.readAsText(blob);
     }
     return undefined;
-  }, [file, category, isTextFile]);
+  }, [file, category, isTextFile, fileId]);
 
   const renderPreview = (): React.ReactElement => {
     // Show loading state
@@ -343,48 +350,94 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
   }
 
   return (
-    <div
-      className='relative flex items-center justify-center bg-background cursor-pointer group rounded-xl border border-border hover:border-input shadow-sm hover:shadow-md transition-all duration-200'
-      style={{ width: '80px', height: '80px' }}
-      onClick={() => onPreview?.()}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onPreview?.();
-        }
-      }}
-      role='button'
-      tabIndex={0}
-      title={getFileName(file)}
-    >
-      {/* File preview/icon */}
-      <div className='absolute inset-0 flex items-center justify-center overflow-hidden rounded-xl'>
-        {renderPreview()}
-      </div>
-
-      {/* Upload loading overlay */}
-      {isUploading && (
-        <div className='absolute inset-0 flex items-center justify-center backdrop-blur-sm bg-background/80 rounded-xl z-10'>
-          <Loader2 className='h-8 w-8 text-foreground animate-spin' />
+    <>
+      {videoLightboxUrl && (
+        <div
+          className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/80'
+          role='dialog'
+          aria-modal='true'
+        >
+          <button
+            type='button'
+            className='absolute inset-0 cursor-default'
+            onClick={() => setVideoLightboxUrl(null)}
+            aria-label='Close video lightbox'
+            tabIndex={-1}
+          />
+          <div className='relative max-w-4xl w-full mx-4'>
+            <button
+              type='button'
+              onClick={() => setVideoLightboxUrl(null)}
+              className='absolute -top-3 -right-3 z-10 flex items-center justify-center size-7 rounded-full bg-black/70 hover:bg-black text-white transition-colors border border-white/20'
+              aria-label='Close video'
+            >
+              <X className='size-4' />
+            </button>
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video
+              src={videoLightboxUrl}
+              controls
+              autoPlay
+              className='w-full rounded-lg max-h-[80vh]'
+            />
+          </div>
         </div>
       )}
+      <div
+        className='relative flex items-center justify-center bg-background cursor-pointer group rounded-xl border border-border hover:border-input shadow-sm hover:shadow-md transition-all duration-200'
+        style={{ width: '64px', height: '64px' }}
+        onClick={() => {
+          if (category === 'video' && isBrowserFile(file)) {
+            const url = URL.createObjectURL(file);
+            setVideoLightboxUrl(url);
+          } else {
+            onPreview?.();
+          }
+        }}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            if (category === 'video' && isBrowserFile(file)) {
+              const url = URL.createObjectURL(file);
+              setVideoLightboxUrl(url);
+            } else {
+              onPreview?.();
+            }
+          }
+        }}
+        role='button'
+        tabIndex={0}
+        title={getFileName(file)}
+      >
+        {/* File preview/icon */}
+        <div className='absolute inset-0 flex items-center justify-center overflow-hidden rounded-xl'>
+          {renderPreview()}
+        </div>
 
-      {/* Remove button */}
-      {!isUploading && (
-        <button
-          type='button'
-          onClick={e => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          className={`absolute -top-2 -right-2 p-1 bg-background hover:bg-destructive/10 rounded-full transition-colors shadow-md border border-border z-10 ${
-            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }`}
-          title='Remove attachment'
-        >
-          <X className='h-3.5 w-3.5 text-red-600' />
-        </button>
-      )}
-    </div>
+        {/* Upload loading overlay */}
+        {isUploading && (
+          <div className='absolute inset-0 flex items-center justify-center backdrop-blur-sm bg-background/80 rounded-xl z-10'>
+            <Loader2 className='h-8 w-8 text-foreground animate-spin' />
+          </div>
+        )}
+
+        {/* Remove button */}
+        {!isUploading && (
+          <button
+            type='button'
+            onClick={e => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            className={`absolute -top-2 -right-2 p-1 bg-background hover:bg-destructive/10 rounded-full transition-colors shadow-md border border-border z-10 ${
+              isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }`}
+            title='Remove attachment'
+          >
+            <X className='h-3.5 w-3.5 text-red-600' />
+          </button>
+        )}
+      </div>
+    </>
   );
 };
