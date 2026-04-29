@@ -193,6 +193,13 @@ enum ChannelAddUserPolicy {
   @@schema("public")
 }
 
+enum ChannelSortOrder {
+  UNREAD
+  RECENCY
+  ALPHABETICAL
+  @@schema("public")
+}
+
 enum MessageType {
   USER
   BOT
@@ -1011,6 +1018,7 @@ model UserPreference {
   id                      String   @id @default(cuid())
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
+  channelSortOrder         ChannelSortOrder @default(RECENCY) // Sidebar channel sort
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 

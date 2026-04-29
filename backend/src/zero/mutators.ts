@@ -13,6 +13,7 @@ import {
   Schema,
   ChannelScopeType,
   ChannelAddUserPolicy,
+  ChannelSortOrder,
   ConversationParticipation,
   TicketStatusV2,
   ActivityType,
@@ -9314,6 +9315,36 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
         },
       ),
     },
+    userPreference: {
+      setChannelSortOrder: defineMutator(
+        z.object({
+          id: z.string(),
+          channelSortOrder: z.nativeEnum(ChannelSortOrder),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, channelSortOrder, timestamp } }) => {
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', authData.sub).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              channelSortOrder,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              id,
+              userId: authData.sub,
+              channelSortOrder,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+    },
+
     emailChannelPreference: {
       upsert: defineMutator(
         z.object({

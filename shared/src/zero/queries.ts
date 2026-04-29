@@ -719,6 +719,9 @@ export const queries = defineQueries({
       return zql.email_channel_preferences.where('channelId', channelId);
     },
   ),
+  getCurrentUserPreference: defineQuery(z.object({}), ({ ctx }) => {
+    return zql.user_preferences.where('userId', ctx.userID).one();
+  }),
   ticketById: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
