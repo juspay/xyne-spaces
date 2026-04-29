@@ -127,6 +127,7 @@ export class MicrosoftAuthController {
         const state = await oauthStateServiceV2.generateState(
           platform,
           codeChallenge,
+          undefined,
           'microsoft',
         );
 
