@@ -133,6 +133,7 @@ export class PullRequestActivityHandler extends BaseSideEffectHandler {
       [PRStatus.UPDATED]: 'ticket_pr_updated',
       [PRStatus.MERGED]: 'ticket_pr_merged',
       [PRStatus.DECLINED]: 'ticket_pr_declined',
+      [PRStatus.DELETED]: 'ticket_pr_deleted',
     };
     return actionMap[prEvent] || 'ticket_pr_updated';
   }

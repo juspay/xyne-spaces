@@ -19,9 +19,11 @@ import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 export enum BitbucketPREventType {
   PR_OPENED = 'pr:opened',
   PR_MODIFIED = 'pr:modified',
+  PR_FROM_REF_UPDATED = 'pr:from_ref_updated',
   PR_MERGED = 'pr:merged',
   PR_DECLINED = 'pr:declined',
   PR_COMMENT_ADDED = 'pr:comment:added',
+  PR_DELETED = 'pr:deleted'
 }
 
 interface PREventContext {
@@ -59,7 +61,6 @@ export class BitbucketWebhookService {
 
       // Check if this is a PR event
       if (!this.isPullRequestEvent(eventKey)) {
-        logger.info(`[Bitbucket-Webhook] Non-PR event received: ${eventKey}, skipping`);
         return { success: true, message: `Event ${eventKey} acknowledged but not processed` };
       }
 
@@ -78,12 +79,16 @@ export class BitbucketWebhookService {
 
       // Extract PR context
       const context = this.extractPRContext(payload);
+
+      // pr:deleted bypasses title validation — we just need to remove the PR row
+      if (eventKey === BitbucketPREventType.PR_DELETED) {
+        await this.handlePRDeleted(context);
+        return { success: true, message: `Event ${eventKey} processed successfully` };
+      }
+
       let validationResult: { isValid: boolean; ticketId?: string };
 
         // PR doesn't exist or wasn't created by workflow - run full validation
-        logger.debug(
-          `[Bitbucket-Webhook] PR ${context.prId}, running validation`
-        );
         validationResult = await this.validatePRTitle(context);
 
         if (!validationResult.isValid) {
@@ -97,9 +102,6 @@ export class BitbucketWebhookService {
       // Route to appropriate handler based on event type, passing validation result
       await this.routePREvent(eventKey as BitbucketPREventType, context, validationResult);
 
-      logger.info(
-        `[Bitbucket-Webhook] Successfully processed event: ${eventKey} for PR ${context.prId}`
-      );
       return { success: true, message: `Event ${eventKey} processed successfully` };
     } catch (error) {
       logger.error(`[Bitbucket-Webhook] Error processing event ${eventKey}:`, error);
@@ -202,7 +204,7 @@ export class BitbucketWebhookService {
     const repoSlug = repo.slug;
 
     // Build repository URL (web URL, not SSH)
-    const repositoryURL = pr.links.self?.[0]?.href?.replace(`/pull-requests/${pr.id}`, '') ||
+    const repositoryURL = pr.links?.self?.[0]?.href?.replace(`/pull-requests/${pr.id}`, '') ||
       `https://bitbucket.example.com/projects/${projectName}/repos/${repoSlug}`;
     
     // Build PR URL from repository URL
@@ -241,6 +243,7 @@ export class BitbucketWebhookService {
         break;
 
       case BitbucketPREventType.PR_MODIFIED:
+      case BitbucketPREventType.PR_FROM_REF_UPDATED:
         await this.handlePRUpdated(context, validationResult);
         break;
 
@@ -250,6 +253,10 @@ export class BitbucketWebhookService {
 
       case BitbucketPREventType.PR_DECLINED:
         await this.handlePRRejected(context, validationResult);
+        break;
+
+      case BitbucketPREventType.PR_DELETED:
+        await this.handlePRDeleted(context);
         break;
 
       default:
@@ -265,7 +272,6 @@ export class BitbucketWebhookService {
     validationResult: { isValid: boolean; ticketId?: string }
   ): Promise<void> {
     logger.info(`[Bitbucket-Webhook] PR created: ${context.prId} - ${context.prUrl}`);
-    logger.info(`[Bitbucket-Webhook] Validation result:`, validationResult);
 
     // Only store in DB if validation passed
     if (validationResult.isValid) {
@@ -279,8 +285,8 @@ export class BitbucketWebhookService {
         numberOfComments: context.numberOfComments,
         ticketId: validationResult.ticketId,
       });
-      logger.info(
-        `[Bitbucket-Webhook] ✅ Stored PR in database: ${context.prUrl} (ticketId: ${validationResult.ticketId}, isNew: ${result.isNew})`
+      logger.debug(
+        `[Bitbucket-Webhook] Stored PR in database: ${context.prUrl} (ticketId: ${validationResult.ticketId}, isNew: ${result.isNew})`
       );
 
       // Post or update PR check approval button if Varys bot is in channel
@@ -302,7 +308,7 @@ export class BitbucketWebhookService {
         prEvent: PRStatusEvent.CREATED,
       });
     } else {
-      logger.warn(`[Bitbucket-Webhook] Skipping storage of invalid manual PR: ${context.prUrl}`);
+      logger.debug(`[Bitbucket-Webhook] Skipping invalid/manual PR: ${context.prUrl}`);
     }
   }
 
@@ -338,7 +344,6 @@ export class BitbucketWebhookService {
 
     // Check if validation passed before processing
     if (!validationResult.isValid) {
-      logger.info(`[Bitbucket-Webhook] PR update ignored (validation failed): ${context.prUrl}`);
       return;
     }
 
@@ -359,11 +364,7 @@ export class BitbucketWebhookService {
 
     if (result.isNew) {
       logger.info(
-        `[Bitbucket-Webhook] 🆕 Created PR from update event: ${context.prUrl} (first time stored in DB) - Event: ${prEvent}`
-      );
-    } else {
-      logger.info(
-        `[Bitbucket-Webhook] ♻️  Updated PR metadata: ${context.prUrl} - Event: ${prEvent}`
+        `[Bitbucket-Webhook] 🆕 Created PR from update event: ${context.prUrl} (first seen via ${prEvent})`
       );
     }
 
@@ -407,12 +408,9 @@ export class BitbucketWebhookService {
     });
 
     if (result) {
-      logger.info(`[Bitbucket-Webhook] ✅ Updated Xyne PR to MERGED: ${context.prUrl}`);
-
-      // Sync ticket status if PR status changed
       if (result.statusChanged) {
         logger.info(
-          `[Bitbucket-Webhook] 📊 PR status changed from ${result.previousStatus} to MERGED, syncing ticket`
+          `[Bitbucket-Webhook] PR ${context.prId} status: ${result.previousStatus} → MERGED`
         );
 
         // Check for remaining open PRs before changing ticket status
@@ -420,25 +418,20 @@ export class BitbucketWebhookService {
         const ticketId = result.pr.ticketId;
 
         if (ticketId) {
-          remainingOpenPRs = await this.prMetricsRepository.countOpenPRsForTicket(
+          remainingOpenPRs = await this.prMetricsRepository.countPRsForTicket(
             ticketId,
             context.prId,
-            context.prUrl
-          );
-          logger.debug(
-            `[Bitbucket-Webhook] Found ${remainingOpenPRs} remaining open PRs for ticket ${ticketId}`
+            context.prUrl,
+            [PRStatus.OPEN, PRStatus.UPDATED]
           );
         } else {
-          // Try to get ticketId via workflowExecutionId chain
           const prTicketId = await this.getTicketIdForPR(result.pr);
           if (prTicketId) {
-            remainingOpenPRs = await this.prMetricsRepository.countOpenPRsForTicket(
+            remainingOpenPRs = await this.prMetricsRepository.countPRsForTicket(
               prTicketId,
               context.prId,
-              context.prUrl
-            );
-            logger.debug(
-              `[Bitbucket-Webhook] Found ${remainingOpenPRs} remaining open PRs for ticket ${prTicketId} (via workflow chain)`
+              context.prUrl,
+              [PRStatus.OPEN, PRStatus.UPDATED]
             );
           }
         }
@@ -452,10 +445,6 @@ export class BitbucketWebhookService {
           prEvent: PRStatusEvent.MERGED,
           remainingOpenPRs,
         });
-      } else {
-        logger.info(
-          `[Bitbucket-Webhook] PR status unchanged (already MERGED), skipping ticket sync`
-        );
       }
     } else {
       logger.info(
@@ -516,13 +505,8 @@ export class BitbucketWebhookService {
     });
 
     if (result) {
-      logger.info(`[Bitbucket-Webhook] ✅ Updated Xyne PR to DECLINED: ${context.prUrl}`);
-
-      // Sync ticket status if PR status changed
       if (result.statusChanged) {
-        logger.info(
-          `[Bitbucket-Webhook] 📊 PR status changed from ${result.previousStatus} to DECLINED, syncing ticket`
-        );
+        logger.info(`[Bitbucket-Webhook] PR ${context.prId} status: ${result.previousStatus} → DECLINED`);
         await prTicketStatusSyncService.syncTicketStatusOnPRChange({
           prId: context.prId,
           prUrl: context.prUrl,
@@ -531,16 +515,83 @@ export class BitbucketWebhookService {
           prAuthorEmail: context.prAuthorEmail,
           prEvent: PRStatusEvent.DECLINED,
         });
-      } else {
-        logger.info(
-          `[Bitbucket-Webhook] PR status unchanged (already DECLINED), skipping ticket sync`
-        );
       }
     } else {
       logger.info(
         `[Bitbucket-Webhook] ℹ️ Ignored manual PR webhook: ${context.prUrl} (not created by Xyne)`
       );
     }
+  }
+
+  /**
+   * Handle PR deleted event.
+   * Syncs the ticket status to DELETED (only when no other open PRs remain),
+   * then soft-deletes all matching PR rows by setting status to DELETED.
+   */
+  private async handlePRDeleted(context: PREventContext): Promise<void> {
+    logger.info(`[Bitbucket-Webhook] PR deleted: ${context.prId} - ${context.prUrl}`);
+
+    const trackedPr = await this.prMetricsRepository.findPrByIdAndUrl(
+      context.prId,
+      context.prUrl
+    );
+
+    if (!trackedPr) {
+      logger.info(
+        `[Bitbucket-Webhook] ℹ️ Ignored manual PR delete webhook: ${context.prUrl} (not tracked by Xyne)`
+      );
+      return;
+    }
+
+    // Already soft-deleted — nothing more to do
+    if (trackedPr.status === PRStatus.DELETED) {
+      logger.info(
+        `[Bitbucket-Webhook] ℹ️ PR ${context.prUrl} is already marked as DELETED, ignoring`
+      );
+      return;
+    }
+
+    // Count remaining active PRs (excluding DECLINED and DELETED) for the same ticket
+    let remainingOpenPRs = 0;
+    const ticketId = trackedPr.ticketId;
+
+    if (ticketId) {
+      remainingOpenPRs = await this.prMetricsRepository.countPRsForTicket(
+        ticketId,
+        context.prId,
+        context.prUrl,
+        [PRStatus.OPEN, PRStatus.UPDATED, PRStatus.MERGED]
+      );
+    } else {
+      const prTicketId = await this.getTicketIdForPR(trackedPr);
+      if (prTicketId) {
+        remainingOpenPRs = await this.prMetricsRepository.countPRsForTicket(
+          prTicketId,
+          context.prId,
+          context.prUrl,
+          [PRStatus.OPEN, PRStatus.UPDATED, PRStatus.MERGED]
+        );
+      }
+    }
+
+    // Sync ticket status before marking the PR as deleted
+    await prTicketStatusSyncService.syncTicketStatusOnPRChange({
+      prId: context.prId,
+      prUrl: context.prUrl,
+      newStatus: trackedPr.status,
+      prAuthor: context.prAuthor,
+      prAuthorEmail: context.prAuthorEmail,
+      prEvent: PRStatusEvent.DELETED,
+      remainingOpenPRs,
+    });
+
+    // Soft-delete: mark status as DELETED instead of removing the row
+    await this.prMetricsRepository.markDeletedPr({
+      prId: context.prId,
+      prUrl: context.prUrl,
+    });
+
+    logger.info(`[Bitbucket-Webhook] ✅ Marked PR as DELETED in database: ${context.prUrl}`);
   }
 }
 

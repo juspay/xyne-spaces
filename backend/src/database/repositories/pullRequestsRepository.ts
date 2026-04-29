@@ -1,4 +1,4 @@
-import { PrismaClient, PullRequests } from '@prisma/client';
+import { PrismaClient, PullRequests, PRStatus } from '@prisma/client';
 import { db } from '../client';
 import {logger} from '@/utils/logger';
 
@@ -37,7 +37,7 @@ export class PRMetricsRepository {
    */
   async getTicketIdForWorkflowExecution(workflowExecutionId: string): Promise<string | null> {
     try {
-      console.log(`[PR-Repository] Looking up ticketId via workflowExecutionId: ${workflowExecutionId}`);
+      logger.debug(`[PR-Repository] Looking up ticketId via workflowExecutionId: ${workflowExecutionId}`);
 
       const workflowExecution = await this.prisma.workflowExecution.findUnique({
         where: { id: workflowExecutionId },
@@ -45,7 +45,7 @@ export class PRMetricsRepository {
       });
 
       if (!workflowExecution) {
-        console.log(`[PR-Repository] WorkflowExecution ${workflowExecutionId} not found`);
+        logger.debug(`[PR-Repository] WorkflowExecution ${workflowExecutionId} not found`);
         return null;
       }
 
@@ -55,14 +55,14 @@ export class PRMetricsRepository {
       });
 
       if (!workflow || !workflow.ticketId) {
-        console.log(`[PR-Repository] Workflow or ticketId not found for workflowExecutionId ${workflowExecutionId}`);
+        logger.debug(`[PR-Repository] No ticketId found for workflowExecutionId ${workflowExecutionId}`);
         return null;
       }
 
-      console.log(`[PR-Repository] Found ticketId ${workflow.ticketId} via workflow chain`);
+      logger.debug(`[PR-Repository] Resolved ticketId ${workflow.ticketId} via workflow chain`);
       return workflow.ticketId;
     } catch (error) {
-      console.error(`[PR-Repository] Error looking up ticketId from workflowExecutionId ${workflowExecutionId}:`, error);
+      logger.error(`[PR-Repository] Error looking up ticketId from workflowExecutionId ${workflowExecutionId}:`, error);
       return null;
     }
   }
@@ -78,8 +78,7 @@ export class PRMetricsRepository {
     ticketId
   }: PRInsertProps): Promise<PullRequests> {
     const today = new Date();
-    // today.setHours(0, 0, 0, 0);
-    console.log(`[PR-Repository] Inserting/updating PR ${prId} with ticketId: ${ticketId || 'none'}`);
+    logger.debug(`[PR-Repository] Inserting/updating PR ${prId} for workflowExecutionId: ${childExecutionId}`);
 
     // First find by workflowExecutionId
     const existingPr = await this.prisma.pullRequests.findFirst({
@@ -134,7 +133,7 @@ export class PRMetricsRepository {
       });
 
       if (!currentPr) {
-        console.log(`Ignoring webhook for manual PR: ${prUrl} (not created by Xyne)`);
+        logger.debug(`[PR-Repository] Ignoring merge webhook for untracked PR: ${prUrl}`);
         return null;
       }
 
@@ -152,7 +151,7 @@ export class PRMetricsRepository {
 
       return { pr: currentPr, statusChanged, previousStatus };
     } catch (err) {
-      logger.info(`Ignoring webhook for manual PR: ${prUrl} (not created by Xyne)`);
+      logger.error(`[PR-Repository] Error marking PR as merged for ${prUrl}:`, err);
       return null;
     }
   }
@@ -225,7 +224,7 @@ export class PRMetricsRepository {
       });
 
       if (!currentPr) {
-        console.log(`Ignoring webhook for manual PR: ${prUrl} (not created by Xyne)`);
+        logger.debug(`[PR-Repository] Ignoring decline webhook for untracked PR: ${prUrl}`);
         return null;
       }
 
@@ -243,8 +242,45 @@ export class PRMetricsRepository {
 
       return { statusChanged, previousStatus };
     } catch (err) {
-      // PR doesn't exist in our DB (manual PR), ignore it
-      logger.info(`Ignoring webhook for manual PR: ${prUrl} (not created by Xyne)`);
+      logger.error(`[PR-Repository] Error marking PR as declined for ${prUrl}:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Find a single PR record by prId + prUrl. Returns null if not tracked.
+   */
+  async findPrByIdAndUrl(prId: number, prUrl: string): Promise<PullRequests | null> {
+    return this.prisma.pullRequests.findFirst({ where: { prId, prUrl } });
+  }
+
+  /**
+   * Soft-delete all PR records matching prId + prUrl by setting status to DELETED.
+   * Returns one record (used for ticket sync), or null if none were tracked by Xyne.
+   */
+  async markDeletedPr({
+    prId,
+    prUrl,
+  }: Pick<BasePRProps, 'prId' | 'prUrl'>): Promise<PullRequests | null> {
+    try {
+      const prs = await this.prisma.pullRequests.findMany({
+        where: { prId, prUrl },
+      });
+
+      if (prs.length === 0) {
+        logger.debug(`[PR-Repository] Ignoring delete webhook for untracked PR: ${prUrl}`);
+        return null;
+      }
+
+      await this.prisma.pullRequests.updateMany({
+        where: { prId, prUrl },
+        data: { status: PRStatus.DELETED },
+      });
+
+      // Return the first record — enough for ticket sync (ticketId / workflowExecutionId)
+      return prs[0];
+    } catch (err) {
+      logger.error(`[PR-Repository] Error marking PR as deleted for ${prUrl}:`, err);
       return null;
     }
   }
@@ -266,78 +302,61 @@ export class PRMetricsRepository {
     });
 
     if (duplicatePR) {
-      console.log(`[PR-Repository] Found duplicate PR ${duplicatePR.prId} for ticket ${ticketId}, ` +
-        `workflowExecutionId: ${duplicatePR.workflowExecutionId || 'none'}`);
+      logger.debug(`[PR-Repository] Found duplicate PR ${duplicatePR.prId} for ticket ${ticketId} ` +
+        `(workflowExecutionId: ${duplicatePR.workflowExecutionId || 'none'})`);
     }
 
     return duplicatePR;
   }
 
   /**
-   * Count all OPEN PRs for a ticket, excluding the current PR being merged
-   * Uses groupBy to count unique PRs by prId + prUrl (since multiple entries can exist)
+   * Count PRs for a ticket, excluding the specified PR.
+   * Pass a `status` to restrict to that status (e.g. 'OPEN' for merge checks),
+   * or omit it to count all PRs regardless of status (e.g. for delete checks).
    */
-  async countOpenPRsForTicket(
+  async countPRsForTicket(
     ticketId: string,
     excludePrId: number,
-    excludePrUrl: string
+    excludePrUrl: string,
+    statuses?: PRStatus[]
   ): Promise<number> {
-    // Count PRs with direct ticketId link
+    const statusFilter = statuses && statuses.length > 0 ? { status: { in: statuses } } : {};
+    const exclude = { NOT: { AND: [{ prId: excludePrId }, { prUrl: excludePrUrl }] } };
+
     const directPRs = await this.prisma.pullRequests.groupBy({
       by: ['prId', 'prUrl'],
-      where: {
-        ticketId,
-        status: 'OPEN',
-        NOT: {
-          AND: [
-            { prId: excludePrId },
-            { prUrl: excludePrUrl }
-          ]
-        }
-      }
+      where: { ticketId, ...statusFilter, ...exclude },
     });
 
-    // Find PRs linked via workflowExecutionId chain
-    // First, get all workflow executions for the ticket
     const workflowsForTicket = await this.prisma.workflow.findMany({
       where: { ticketId },
-      select: { id: true }
+      select: { id: true },
     });
-
     const workflowIds = workflowsForTicket.map(w => w.id);
 
-    // Get workflow execution IDs for these workflows
     const workflowExecutions = await this.prisma.workflowExecution.findMany({
       where: { workflowId: { in: workflowIds } },
-      select: { id: true }
+      select: { id: true },
     });
-
     const workflowExecutionIds = workflowExecutions.map(we => we.id);
 
-    // Count PRs linked via workflowExecutionId that don't have direct ticketId
-    // (to avoid double counting)
     const chainedPRs = await this.prisma.pullRequests.groupBy({
       by: ['prId', 'prUrl'],
       where: {
         workflowExecutionId: { in: workflowExecutionIds },
-        ticketId: null, // Only count if not already linked directly
-        status: 'OPEN',
-        NOT: {
-          AND: [
-            { prId: excludePrId },
-            { prUrl: excludePrUrl }
-          ]
-        }
-      }
+        ticketId: null,
+        ...statusFilter,
+        ...exclude,
+      },
     });
 
-    const allPRs = [...directPRs, ...chainedPRs];
-    const uniquePRs = new Set(allPRs.map(p => `${p.prId}:${p.prUrl}`));
-
+    const uniquePRs = new Set([...directPRs, ...chainedPRs].map(p => `${p.prId}:${p.prUrl}`));
     const totalCount = uniquePRs.size;
-    console.log(`[PR-Repository] Found ${totalCount} unique open PRs for ticket ${ticketId} ` +
-      `(direct: ${directPRs.length}, chained: ${chainedPRs.length}), excluding PR ${excludePrId}`);
-
+    logger.debug(
+      `[PR-Repository] Found ${totalCount} active PR(s)` +
+      `${statuses && statuses.length > 0 ? ` with status [${statuses.join(', ')}]` : ''} ` +
+      `for ticket ${ticketId}, excluding PR ${excludePrId}`
+    );
     return totalCount;
   }
 

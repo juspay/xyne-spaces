@@ -25,6 +25,7 @@ enum PRActionText {
   UPDATED = 'updated',
   MERGED = 'merged',
   DECLINED = 'declined',
+  DELETED = 'deleted',
 }
 
 interface PRStatusUpdateParams {
@@ -83,16 +84,13 @@ export class PRTicketStatusSyncService {
     try {
       // workspaceId required for unique user lookup
       if (!workspaceId) {
-        logger.debug(`[PR-Ticket-Sync] No workspaceId for email ${email}, using fallback`);
         return await this.getBitbucketBotId();
       }
       const user = await this.userRepository.findByEmail(email, workspaceId);
       if (user) {
-        logger.info(`[PR-Ticket-Sync] Found user with email ${email}: ${user.id}`);
         return user.id;
       }
 
-      logger.debug(`[PR-Ticket-Sync] No user found with email ${email}, using fallback`);
       return await this.getBitbucketBotId();
     } catch (error) {
       logger.error(`[PR-Ticket-Sync] Error looking up user by email ${email}:`, error);
@@ -182,9 +180,6 @@ export class PRTicketStatusSyncService {
       });
 
       if (stages.length === 0) {
-        logger.debug(
-          `[PR-Ticket-Sync] No stages found in board ${boardId}`
-        );
         return null;
       }
 
@@ -199,9 +194,6 @@ export class PRTicketStatusSyncService {
       });
 
       if (mappings.length === 0) {
-        logger.debug(
-          `[PR-Ticket-Sync] No PR status mappings found for ${prStatusEvent}`
-        );
         return null;
       }
 
@@ -212,9 +204,6 @@ export class PRTicketStatusSyncService {
       const stage = stages.find(s => mappedStageIds.has(s.id));
 
       if (!stage) {
-        logger.debug(
-          `[PR-Ticket-Sync] No stage found for PR status ${prStatusEvent} in board ${boardId}`
-        );
         return null;
       }
 
@@ -251,17 +240,14 @@ export class PRTicketStatusSyncService {
         return;
       }
 
-      logger.info(`[PR-Ticket-Sync] Found ticket ${ticket.xyneId} for PR ${params.prId}`);
-
       // 3. Resolve the user who triggered the update
       const updatedBy = await this.resolveUpdatedBy(params.prAuthorEmail);
 
       // 4. Find stage with this PR status mapped
       const targetStage = await this.findStageForPRStatus(ticket.boardId, params.prEvent);
       if (!targetStage) {
-        logger.info(
-          `[PR-Ticket-Sync] No stage mapped for PR status: ${params.prEvent} in board ${ticket.boardId}. ` +
-            `Logging PR activity only (no stage change).`
+        logger.debug(
+          `[PR-Ticket-Sync] No stage mapped for PR status: ${params.prEvent} in board ${ticket.boardId}, logging activity only`
         );
         // Create PR activity without stage change using the repository
         await ticketService.updateTicketStageForWorkflow(
@@ -288,7 +274,7 @@ export class PRTicketStatusSyncService {
       // 5. Check if we should skip update due to remaining open PRs
       const shouldSkipUpdate = this.shouldSkipUpdate(params);
       if (shouldSkipUpdate) {
-        logger.info(
+        logger.debug(
           `[PR-Ticket-Sync] Skipping stage update: ${params.remainingOpenPRs} open PRs remaining for ticket ${ticket.xyneId}`
         );
         // Create PR activity without stage change
@@ -360,9 +346,7 @@ export class PRTicketStatusSyncService {
           },
         });
       } else {
-        logger.info(
-          `[PR-Ticket-Sync] Ticket ${ticket.xyneId} already in stage ${targetStage.name}`
-        );
+        logger.debug(`[PR-Ticket-Sync] Ticket ${ticket.xyneId} already in stage ${targetStage.name}`);
       }
 
       // 8. Auto-assign PR_REVIEWER or QA based on PR event
@@ -373,10 +357,6 @@ export class PRTicketStatusSyncService {
         ? { oldStageName, newStageName: targetStage.name }
         : undefined;
       await this.sendTicketUpdateMessage(ticket, pr, params, updatedBy, stageChange);
-
-      logger.info(
-        `[PR-Ticket-Sync] Successfully synced ticket ${ticket.xyneId} for PR ${params.prId}`
-      );
     } catch (error) {
       logger.error(`[PR-Ticket-Sync] Failed to sync ticket for PR ${params.prId}:`, error);
       // Don't throw - webhook processing should continue even if sync fails
@@ -388,7 +368,10 @@ export class PRTicketStatusSyncService {
    */
   private shouldSkipUpdate(params: PRStatusUpdateParams): boolean {
     const remainingOpenPRs = params.remainingOpenPRs ?? 0;
-    return params.prEvent === PRStatusEvent.MERGED && remainingOpenPRs > 0;
+    return (
+      (params.prEvent === PRStatusEvent.MERGED || params.prEvent === PRStatusEvent.DELETED) &&
+      remainingOpenPRs > 0
+    );
   }
 
   /**
@@ -605,6 +588,7 @@ export class PRTicketStatusSyncService {
       [PRStatusEvent.UPDATED]: PRActionText.UPDATED,
       [PRStatusEvent.MERGED]: PRActionText.MERGED,
       [PRStatusEvent.DECLINED]: PRActionText.DECLINED,
+      [PRStatusEvent.DELETED]: PRActionText.DELETED,
     };
     return actionMap[event] || PRActionText.UPDATED;
   }

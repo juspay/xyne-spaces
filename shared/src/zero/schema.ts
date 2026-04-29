@@ -348,6 +348,7 @@ export enum PRStatus {
   OPEN = 'OPEN',
   DECLINED = 'DECLINED',
   MERGED = 'MERGED',
+  DELETED = 'DELETED',
 }
 
 // @ts-ignore TS1294
@@ -356,6 +357,7 @@ export enum PRStatusEvent {
   UPDATED = 'UPDATED',
   MERGED = 'MERGED',
   DECLINED = 'DECLINED',
+  DELETED = 'DELETED',
 }
 
 // @ts-ignore TS1294
