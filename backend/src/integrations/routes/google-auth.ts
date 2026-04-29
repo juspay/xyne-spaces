@@ -228,7 +228,9 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         const channelName = existingChannel?.name || 'unknown';
         const message = `Google account ${emailAddress} is already connected to channel "${channelName}"`;
         logger.warn(`${TAG} ${message}`, { sourceName, existingChannelId: existingSource.channelId });
-        res.redirect(`${frontendUrl}/support?emailError=${encodeURIComponent(message)}`);
+        const params = new URLSearchParams({ emailError: message });
+        if (existingSource.channelId) params.set('channel', existingSource.channelId);
+        res.redirect(`${frontendUrl}/support?${params.toString()}`);
         return;
       }
     }

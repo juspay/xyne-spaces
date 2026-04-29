@@ -13,6 +13,7 @@ import { TicketAssignmentActivity } from './TicketAssignmentActivity';
 import { TicketUpdateActivity } from './TicketUpdateActivity';
 import { WorkflowQuestionActivity } from './WorkflowQuestionActivity';
 import { ScheduledCallActivity } from './ScheduledCallActivity';
+import { EmailFetchActivity } from './EmailFetchActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -82,6 +83,10 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
     case 'meeting_accepted':
     case 'meeting_declined':
       return <ScheduledCallActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'email_fetch_completed':
+    case 'email_fetch_failed':
+      return <EmailFetchActivity activity={activity} isExpanded={isExpanded} />;
 
     default:
       return null;

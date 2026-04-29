@@ -185,17 +185,57 @@ export class GoogleService {
     }
   }
 
+  async listMessagesByDateRange(params: {
+    startDate: string;
+    endDate: string;
+    maxMessages?: number;
+  }): Promise<string[]> {
+    const { startDate, endDate, maxMessages = 2000 } = params;
+    const afterUnix = Math.floor(Date.parse(startDate) / 1000);
+    const beforeUnix = Math.floor(Date.parse(endDate) / 1000);
+    if (Number.isNaN(afterUnix) || Number.isNaN(beforeUnix)) {
+      throw new Error('Invalid startDate or endDate');
+    }
+
+    const messageIds: string[] = [];
+    let pageToken: string | undefined;
+
+    try {
+      do {
+        const response = await this.gmail.users.messages.list({
+          userId: 'me',
+          q: `after:${afterUnix} before:${beforeUnix}`,
+          maxResults: Math.min(500, maxMessages - messageIds.length),
+          ...(pageToken && { pageToken }),
+        });
+
+        for (const msg of response.data.messages || []) {
+          if (msg.id) messageIds.push(msg.id);
+          if (messageIds.length >= maxMessages) break;
+        }
+
+        pageToken = response.data.nextPageToken ?? undefined;
+      } while (pageToken && messageIds.length < maxMessages);
+
+      return messageIds;
+    } catch (error) {
+      logger.error(`${TAG} Failed to list messages by date range`, error);
+      throw new Error(`Failed to list messages by date range: ${getErrorMessage(error)}`);
+    }
+  }
+
   async listRecentMessages(
     count = 10,
     opts: { mode?: 'messages' | 'threads' } = {},
   ): Promise<string[]> {
     const mode = opts.mode ?? 'messages';
+    const labelQuery = '(in:inbox OR in:sent)';
     try {
       if (mode === 'threads') {
         const threadList = await this.gmail.users.threads.list({
           userId: 'me',
           maxResults: count,
-          labelIds: ['INBOX'],
+          q: labelQuery,
         });
         const threadIds = (threadList.data.threads || [])
           .map(t => t.id)
@@ -218,7 +258,7 @@ export class GoogleService {
       const response = await this.gmail.users.messages.list({
         userId: 'me',
         maxResults: count,
-        labelIds: ['INBOX'],
+        q: labelQuery,
       });
       return (response.data.messages || [])
         .map(msg => msg.id)
@@ -238,7 +278,7 @@ export class GoogleService {
     try {
       const response = await this.gmail.users.watch({
         userId: 'me',
-        requestBody: { topicName, labelIds: ['INBOX'] },
+        requestBody: { topicName, labelIds: ['INBOX', 'SENT'] },
       });
 
       const { historyId, expiration } = response.data;

@@ -496,6 +496,10 @@ function getToastFn(notificationType: string) {
       return toast.info;
     case 'workflow_failure':
       return toast.error;
+    case 'email_fetch_completed':
+      return toast.success;
+    case 'email_fetch_failed':
+      return toast.error;
     default:
       return toast.info;
   }

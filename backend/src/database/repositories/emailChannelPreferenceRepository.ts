@@ -4,7 +4,7 @@
  */
 
 import { DatabaseClient } from '../client';
-import { ChannelType } from '@prisma/client';
+import { ChannelType, EmailChannelPreference } from '@prisma/client';
 
 export class EmailChannelPreferenceRepository {
   private db = DatabaseClient.getInstance();
@@ -33,7 +33,7 @@ export class EmailChannelPreferenceRepository {
   /**
    * Find preference by channel ID
    */
-  async findByChannelId(channelId: string) {
+  async findByChannelId(channelId: string): Promise<EmailChannelPreference | null> {
     return await this.db.emailChannelPreference.findUnique({
       where: { channelId },
     });

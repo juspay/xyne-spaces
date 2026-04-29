@@ -478,6 +478,7 @@ export class EmailService {
           channelId,
           createdBy: userId,
           initialMessageId: 'temp',
+          ...(receivedAt && { createdAt: receivedAt, lastActivityAt: receivedAt }),
         },
       });
 
@@ -520,6 +521,7 @@ export class EmailService {
           stageName: firstStage.name,
           ...(userGroup && { userGroupId: groupId }),
           ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
+          ...(receivedAt && { createdAt: receivedAt }),
         },
       });
 
@@ -797,7 +799,7 @@ export class EmailService {
       if (ticketRow) {
         await this.prisma.ticket.update({
           where: { id: ticketRow.id },
-          data: { lastEmailAt: new Date() },
+          data: { lastEmailAt: receivedAt ?? new Date() },
         });
 
         const previousLatest = await this.prisma.email.findFirst({

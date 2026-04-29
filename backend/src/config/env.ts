@@ -63,6 +63,7 @@ const envSchema = Joi.object({
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
+  ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
   BACKEND_URL: Joi.string().default(''),
   SLACK_BOT_TOKEN: Joi.string().allow('').default(''),
   SLACK_FRONTEND_URL: Joi.string().allow('').default(''),
@@ -213,6 +214,9 @@ const envSchema = Joi.object({
   VESPA_QUERY_URL: Joi.string().uri().default(''),
   // Microsoft Graph API
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default(''),
+  // Email fetch
+  EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
+  EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(2000),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -312,6 +316,7 @@ export const config = {
   enableStageEtaDeadlineWorker: envVars.ENABLE_STAGE_ETA_DEADLINE_WORKER,
   enableEtaDeadlineWorker: envVars.ENABLE_ETA_DEADLINE_WORKER,
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
+  enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   backendUrl: envVars.BACKEND_URL,
   slackBotToken: envVars.SLACK_BOT_TOKEN,
   slackFrontendUrl: envVars.SLACK_FRONTEND_URL,
@@ -494,5 +499,9 @@ export const config = {
   },
   microsoftGraph: {
     baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,
+  },
+  emailFetch: {
+    batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,
+    batchDelayMs: envVars.EMAIL_FETCH_BATCH_DELAY_MS as number,
   },
 };

@@ -3,31 +3,42 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiInstance } from '../services/clients/apiClient';
 
-export interface RefetchResponse {
+export interface RefetchResponseInline {
   success: boolean;
+  queued?: false;
   processed: number;
   newTickets: number;
   skipped: number;
   errors: string[];
 }
+export interface RefetchResponseQueued {
+  success: boolean;
+  queued: true;
+  jobId: string;
+}
+export type RefetchResponse = RefetchResponseInline | RefetchResponseQueued;
 
-/**
- * Hook that wires the manual-refetch button for a channel-backed external source.
- *
- * Returns `refetch` (a no-arg callback to invoke from the button's onClick) and
- * `isPending` (for the spinner/disabled state). Toast feedback for success/error
- * and the 403 reconnect case lives here so the UI stays dumb.
- */
+export interface RefetchRange {
+  startDate?: string;
+  endDate?: string;
+}
+
 export const useRefetchExternalSource = (
   channelId: string | undefined,
-): { refetch: () => void; isPending: boolean } => {
+): { refetch: (range?: RefetchRange) => void; isPending: boolean } => {
   const queryClient = useQueryClient();
 
-  const mutation = useMutation<RefetchResponse, Error & { status?: number }, void>({
-    mutationFn: async () => {
+  const mutation = useMutation<
+    RefetchResponse,
+    Error & { status?: number },
+    RefetchRange | undefined
+  >({
+    mutationFn: async range => {
       if (!channelId) throw new Error('channelId required');
+      const body = range?.startDate && range?.endDate ? range : undefined;
       const response = await apiInstance.post<RefetchResponse>(
         `/external-source-sync/${channelId}/refetch`,
+        body,
       );
       return response.data;
     },
@@ -39,34 +50,43 @@ export const useRefetchExternalSource = (
     },
   });
 
-  const refetch = useCallback((): void => {
-    if (!channelId || mutation.isPending) return;
-    mutation.mutate(undefined, {
-      onSuccess: result => {
-        if (result.newTickets > 0) {
-          toast.success(
-            `Fetched ${result.newTickets} new email${result.newTickets === 1 ? '' : 's'}`,
-          );
-        } else if (result.processed > 0) {
-          // Replies-only run: tickets stayed the same, but threads got updates.
-          toast.success(`Updated ${result.processed} thread${result.processed === 1 ? '' : 's'}`);
-        } else if (result.errors.length > 0) {
-          toast.error(`Refetch completed with ${result.errors.length} error(s)`);
-        } else {
-          toast.success('Inbox is up to date');
-        }
-      },
-      onError: err => {
-        if (err.status === 403) {
-          toast.error('Reconnect required', {
-            description: 'Your email account needs to be reconnected.',
-          });
-        } else {
-          toast.error('Failed to refetch', { description: err.message });
-        }
-      },
-    });
-  }, [channelId, mutation]);
+  const refetch = useCallback(
+    (range?: RefetchRange): void => {
+      if (!channelId || mutation.isPending) return;
+      mutation.mutate(range, {
+        onSuccess: result => {
+          if (result.queued) {
+            toast.success('Fetching emails in background', {
+              description: 'We’ll notify you when this finishes.',
+            });
+            return;
+          }
+          if (result.newTickets > 0) {
+            toast.success(
+              `Fetched ${result.newTickets} new email${result.newTickets === 1 ? '' : 's'}`,
+            );
+          } else if (result.processed > 0) {
+            // Replies-only run: tickets stayed the same, but threads got updates.
+            toast.success(`Updated ${result.processed} thread${result.processed === 1 ? '' : 's'}`);
+          } else if (result.errors.length > 0) {
+            toast.error(`Refetch completed with ${result.errors.length} error(s)`);
+          } else {
+            toast.success('Inbox is up to date');
+          }
+        },
+        onError: err => {
+          if (err.status === 403) {
+            toast.error('Reconnect required', {
+              description: 'Your email account needs to be reconnected.',
+            });
+          } else {
+            toast.error('Failed to refetch', { description: err.message });
+          }
+        },
+      });
+    },
+    [channelId, mutation],
+  );
 
   return { refetch, isPending: mutation.isPending };
 };

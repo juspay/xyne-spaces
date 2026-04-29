@@ -1,7 +1,50 @@
 import { Transaction } from '@rocicorp/zero';
-import { Schema, ChannelRole } from '@xyne/shared';
+import { Schema, ChannelRole, ChannelType } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { zql } from '../queries'
+
+/**
+ * Per-(channel, user) unread count for email channels.
+ * A ticket is unread if:
+ *   - the user has no email_reads row for it, OR
+ *   - their email_reads.updatedAt is older than ticket.lastEmailAt (i.e. a
+ *     newer email arrived after they last read the thread).
+ *
+ * This catches the "read but a reply arrived since" case that a plain
+ * `tickets - email_reads` subtraction would miss.
+ *
+ * Returns 0 for non-email channels (their unread is derived elsewhere).
+ */
+async function computeUnreadCountForUser(
+  tx: Transaction<Schema>,
+  channelId: string,
+  userId: string,
+): Promise<number> {
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  if (channel?.type !== ChannelType.EMAIL) return 0;
+
+  const tickets = await tx.run(
+    zql.tickets.where('channelId', channelId).where('isArchived', false),
+  );
+  if (tickets.length === 0) return 0;
+
+  const ticketIds = tickets.map(t => t.id);
+  const reads = await tx.run(
+    zql.email_reads
+      .where('userId', userId)
+      .where((helpers: any) => helpers.cmp('ticketId', 'IN', ticketIds)),
+  );
+  const readAtByTicket = new Map<string, number>(
+    reads.map(r => [r.ticketId, r.updatedAt]),
+  );
+
+  let unread = 0;
+  for (const t of tickets) {
+    const readAt = readAtByTicket.get(t.id);
+    if (readAt === undefined || readAt < t.lastEmailAt) unread += 1;
+  }
+  return unread;
+}
 /**
  * Adds a single participant to a channel and increments participantCount
  * @param tx - Zero transaction
@@ -54,18 +97,19 @@ export async function addChannelParticipant(
     isStarred: false,
     isClosed: false,
   });
+  
+  const unreadCount = await computeUnreadCountForUser(tx, channelId, userId);
 
   if (existingSoftDeletedStatus) {
-    // Restore the soft-deleted status record
     await tx.mutate.channel_user_status.update({
       id: existingSoftDeletedStatus.id,
       isDeleted: false,
       lastViewedAt: now,
       isClosed: false,
+      unreadCount,
       updatedAt: now,
     });
   } else {
-    // Insert new channel_user_status
     await tx.mutate.channel_user_status.insert({
       id: channelUserStatusId,
       channelId,
@@ -73,7 +117,7 @@ export async function addChannelParticipant(
       lastViewedAt: now,
       isStarred: false,
       isClosed: false,
-      unreadCount: 0,
+      unreadCount,
       isRecapSubscribed: false,
       desktopNotificationLevel: 'ALL',
       mobileNotificationLevel: 'ALL',
@@ -138,11 +182,12 @@ export async function addChannelParticipants(
       .map((s: any) => [s.userId, s])
   );
 
-  // Insert all new participants
+  // unreadCount is recomputed per user since rejoiners may carry their own
+  // pre-existing email_reads — no shared value across users.
   for (const userId of newUserIds) {
     const participantId = uuidv4();
     const softDeletedStatus = softDeletedStatusMap.get(userId);
-    
+
     await tx.mutate.channel_participants.insert({
       id: participantId,
       channelId,
@@ -155,17 +200,18 @@ export async function addChannelParticipants(
       isClosed: false,
     });
 
+    const unreadCount = await computeUnreadCountForUser(tx, channelId, userId);
+
     if (softDeletedStatus) {
-      // Restore the soft-deleted status record
       await tx.mutate.channel_user_status.update({
         id: softDeletedStatus.id,
         isDeleted: false,
         lastViewedAt: timestamp,
         isClosed: false,
+        unreadCount,
         updatedAt: timestamp,
       });
     } else {
-      // Insert new channel_user_status
       await tx.mutate.channel_user_status.insert({
         id: uuidv4(),
         channelId,
@@ -173,7 +219,7 @@ export async function addChannelParticipants(
         lastViewedAt: timestamp,
         isStarred: false,
         isClosed: false,
-        unreadCount: 0,
+        unreadCount,
         isRecapSubscribed: false,
         desktopNotificationLevel: 'ALL',
         mobileNotificationLevel: 'ALL',

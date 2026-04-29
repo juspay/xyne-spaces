@@ -3,11 +3,11 @@
  * Converts enriched Graph notification (with fetched emails) to NormalizedData
  */
 
-import { convert } from 'html-to-text';
 import { BaseTransformer } from '../../core/baseTransformer';
 import { NormalizedData, ParseResult } from '../../core/types';
 import { GraphMailMessage } from './types';
 import { logger } from '@/utils/logger';
+import { cleanEmailBodyHtml, cleanEmailBodyText } from '@/utils/contentUtils';
 
 interface EnrichedPayload {
   notification: any;
@@ -79,60 +79,10 @@ export class MicrosoftTransformer extends BaseTransformer<any, NormalizedData> {
 
   /**
    * Clean email body by stripping quoted reply history
-   * Outlook replies include the full previous conversation with headers like:
-   * "From: ...", "Sent: ...", "To: ...", "Subject: ..."
    */
   private cleanEmailBody(content: string, contentType: string): string {
     if (!content?.trim()) return content;
-
-    let text = content;
-
-    // Convert HTML to plain text if needed, then back to simple HTML
-    if (contentType === 'html') {
-      text = convert(content, {
-        wordwrap: false,
-        preserveNewlines: true,
-        selectors: [
-          { selector: 'a', options: { ignoreHref: true } },
-          { selector: 'img', format: 'skip' },
-        ],
-      });
-    }
-
-    // Split into lines and find where the quoted reply starts
-    const lines = text.split('\n');
-    const cleanLines: string[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i].trim();
-
-      // Stop at common reply separators
-      // "From: Name" line followed by "Sent: ..." pattern (Outlook style)
-      if (trimmed.startsWith('From:') && i + 1 < lines.length && lines[i + 1].trim().startsWith('Sent:')) {
-        break;
-      }
-
-      // "On <date>, <name> wrote:" pattern (Gmail style)
-      if (/^On .+ wrote:$/.test(trimmed)) {
-        break;
-      }
-
-      // Line of dashes separator (common in many clients)
-      if (/^-{5,}/.test(trimmed) || /^_{5,}/.test(trimmed)) {
-        break;
-      }
-
-      // Quoted lines starting with >
-      if (trimmed.startsWith('>')) {
-        break;
-      }
-
-      cleanLines.push(lines[i]);
-    }
-
-    const cleaned = cleanLines.join('\n').trimEnd();
-
-    // Convert back to simple HTML with line breaks
-    return cleaned.replace(/\n+/g, '<br>');
+    if (contentType === 'html') return cleanEmailBodyHtml(content);
+    return cleanEmailBodyText(content);
   }
 }
