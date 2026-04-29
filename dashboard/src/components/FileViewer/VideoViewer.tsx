@@ -7,6 +7,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { Menu } from '@base-ui/react/menu';
 import { cn } from '../../utils/classNames';
 import { attachmentViewerActor } from '../../machines/attachmentViewerMachine';
+import { useSelector } from '@xstate/react';
 
 interface VideoViewerProps extends BaseViewerProps {
   attachmentId?: string;
@@ -84,10 +85,37 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
 
     useScope('viewer', isViewerActive);
 
+    // Subscribe to the global attachment viewer state
+    const activeGalleryAttachmentId = useSelector(attachmentViewerActor, state => {
+      if (state.value === 'closed') return null;
+      return state.context.attachments[state.context.currentIndex]?.attachmentId;
+    });
+
+    // Pause this video if the user swipes to a different attachment in the modal
+    useEffect(() => {
+      if (activeGalleryAttachmentId && attachmentId && activeGalleryAttachmentId !== attachmentId) {
+        if (videoRef.current) {
+          // Call pause() unconditionally. If it's already paused, it's a safe no-op.
+          // If there is a pending auto-play promise, this instantly aborts it.
+          videoRef.current.pause();
+          setIsPlaying(false);
+        }
+      }
+    }, [activeGalleryAttachmentId, attachmentId]);
+
     // Auto-play video when component mounts and video is ready
     useEffect(() => {
       if (videoRef.current) {
         const attemptAutoPlay = (): void => {
+          // GUARD: Do not auto-play if there's a modal open and this isn't the active attachment
+          if (
+            activeGalleryAttachmentId &&
+            attachmentId &&
+            activeGalleryAttachmentId !== attachmentId
+          ) {
+            return;
+          }
+
           if (videoRef.current && videoRef.current.paused) {
             // Seek to initial time if provided before playing
             if (initialTime > 0) {
@@ -100,7 +128,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
         };
         attemptAutoPlay();
       }
-    }, [streamUrl, initialTime]);
+    }, [streamUrl, initialTime, activeGalleryAttachmentId, attachmentId]);
 
     // Handle play/pause
     const togglePlay = useCallback((e?: React.MouseEvent): void => {

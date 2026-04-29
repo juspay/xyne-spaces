@@ -12,6 +12,7 @@ import { cn } from '../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import ThreadMessages from '../Chat/ThreadPannel';
+import { ChatBubble } from '../Chat/ChatBubble/ChatBubble';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import {
@@ -19,6 +20,7 @@ import {
   attachmentViewerActor,
   AttachmentViewerState,
 } from '../../machines/attachmentViewerMachine';
+import { MessageType } from '@xyne/shared';
 
 export interface FileItem {
   fileName: string;
@@ -102,7 +104,8 @@ const SlideContent: React.FC<{
   file: FileItem;
   isActive: boolean;
   disableGestures?: boolean;
-}> = ({ file, isActive, disableGestures }) => {
+  initialTime?: number | undefined;
+}> = ({ file, isActive, disableGestures, initialTime }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -163,6 +166,7 @@ const SlideContent: React.FC<{
             source={null}
             fileName={file.fileName}
             attachmentId={file.attachmentId}
+            {...(initialTime !== undefined && { initialTime })}
           />
         </div>
       );
@@ -896,6 +900,13 @@ export const AttachmentGalleryModal: React.FC = () => {
         if (currentAttachment.channelId) ref.channelId = currentAttachment.channelId;
         if (currentAttachment.replyCount !== undefined)
           ref.replyCount = currentAttachment.replyCount;
+        // Preserve initialTime for the originally clicked attachment
+        if (
+          att.id === currentAttachment.attachmentId &&
+          currentAttachment.initialTime !== undefined
+        ) {
+          ref.initialTime = currentAttachment.initialTime;
+        }
         return ref;
       });
     });
@@ -1085,11 +1096,7 @@ export const AttachmentGalleryModal: React.FC = () => {
       );
     }
 
-    if (shouldQueryThread && !threadDataLoaded) {
-      return <LoadingState message='Loading thread attachments...' />;
-    }
-
-    if (status === 'loading' || state.value === 'waitingForData') {
+    if (status === 'loading') {
       return <LoadingState message={'Loading preview...'} />;
     }
 
@@ -1219,6 +1226,8 @@ export const AttachmentGalleryModal: React.FC = () => {
                 file={file}
                 isActive={index === currentFileIndex}
                 {...(disableCarouselGestures && { disableGestures: true })}
+                // Pass initialTime to active video
+                initialTime={initialTime}
               />
             ) : (
               <SlidePlaceholder file={file} />
@@ -1339,45 +1348,120 @@ export const AttachmentGalleryModal: React.FC = () => {
 
   const renderMainContent = () => (hasStackNavigation ? renderCarousel() : renderContent());
 
-  // Render thread panel content
-  const renderThreadPanel = (): JSX.Element => (
-    <div className='flex flex-col h-full w-full border-l border-border bg-background z-10 min-w-0'>
-      {/* Thread header with close button */}
-      <div className='flex items-center justify-between p-4 border-b border-border h-14 flex-shrink-0'>
-        <h3 className='font-semibold text-foreground'>Thread</h3>
-        <button
-          onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
-          data-track-category='FILE_VIEWER'
-          data-track-name='CloseThreadPanel'
-          className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
-          aria-label='Close'
-        >
-          <X className='h-5 w-5' />
-        </button>
-      </div>
-      {/* Thread messages without header */}
-      <div className='flex-1 overflow-hidden min-w-0'>
-        <ThreadMessages
-          {...(currentAttachment?.channelId && { channelId: currentAttachment.channelId })}
-          {...(currentAttachment?.conversationId && {
-            conversationId: currentAttachment.conversationId,
-          })}
-          threadMessages={threadMessages}
-          hideHeader={true}
+  // Synthetic message bubble for showing parent message while thread loads
+  const renderSyntheticMessageBubble = (): JSX.Element | null => {
+    const parentMessage = currentAttachment?.parentMessage;
+    if (!parentMessage) return null;
+
+    // Convert parent message to the format expected by ChatBubble
+    const message = {
+      ...parentMessage,
+      // Cast msgType to MessageType enum
+      msgType: parentMessage.msgType as MessageType,
+      // Ensure required fields are present
+      isSent: true,
+      showInChannel: false,
+      childConversationId: null,
+      visibleTo: null,
+      nudgeCount: 0,
+      link_preview_md: null,
+      hasAttachment: parentMessage.hasAttachment ?? false,
+      edited: parentMessage.edited ?? false,
+      isDeleted: parentMessage.isDeleted ?? false,
+      // Cast metadata to satisfy ReadonlyJSONValue type
+      metadata: parentMessage.metadata ?? null,
+    };
+
+    return (
+      <div className='flex-1 overflow-auto py-4'>
+        <ChatBubble
+          message={message as unknown as Parameters<typeof ChatBubble>[0]['message']}
+          channelId={currentAttachment?.channelId || ''}
+          showAvatar={true}
+          context='thread'
+          isFirstInThread={true}
+          isTicketThread={false}
           disableAskAI={true}
         />
       </div>
-    </div>
-  );
+    );
+  };
+
+  // Render thread panel content
+  const renderThreadPanel = (): JSX.Element => {
+    const hasParentMessage = !!currentAttachment?.parentMessage;
+
+    // Show synthetic message bubble while thread data is loading
+    if ((shouldQueryThread && !threadDataLoaded) || state.value === 'waitingForData') {
+      return (
+        <div className='flex flex-col h-full w-full border-l border-border bg-background z-10 min-w-0'>
+          {/* Thread header with close button */}
+          <div className='flex items-center justify-between p-4 border-b border-border h-14 flex-shrink-0'>
+            <h3 className='font-semibold text-foreground'>Thread</h3>
+            <button
+              onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
+              data-track-category='FILE_VIEWER'
+              data-track-name='CloseThreadPanel'
+              className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+              aria-label='Close'
+            >
+              <X className='h-5 w-5' />
+            </button>
+          </div>
+          {/* Show synthetic message if available, otherwise fallback to loading state */}
+          {hasParentMessage ? (
+            renderSyntheticMessageBubble()
+          ) : (
+            <div className='flex-1 flex items-center justify-center'>
+              <div className='flex flex-col items-center gap-3'>
+                <div className='animate-spin rounded-full h-6 w-6 border-b-2 border-primary'></div>
+                <div className='text-muted-foreground text-sm'>Loading thread...</div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className='flex flex-col h-full w-full border-l border-border bg-background z-10 min-w-0'>
+        {/* Thread header with close button */}
+        <div className='flex items-center justify-between p-4 border-b border-border h-14 flex-shrink-0'>
+          <h3 className='font-semibold text-foreground'>Thread</h3>
+          <button
+            onClick={() => attachmentViewerActor.send({ type: 'CLOSE' })}
+            data-track-category='FILE_VIEWER'
+            data-track-name='CloseThreadPanel'
+            className='p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+            aria-label='Close'
+          >
+            <X className='h-5 w-5' />
+          </button>
+        </div>
+        {/* Thread messages without header */}
+        <div className='flex-1 overflow-hidden min-w-0'>
+          <ThreadMessages
+            {...(currentAttachment?.channelId && { channelId: currentAttachment.channelId })}
+            {...(currentAttachment?.conversationId && {
+              conversationId: currentAttachment.conversationId,
+            })}
+            threadMessages={threadMessages}
+            hideHeader={true}
+            disableAskAI={true}
+          />
+        </div>
+      </div>
+    );
+  };
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={() => attachmentViewerActor.send({ type: 'CLOSE' })}>
       <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[56]' />
+        <Dialog.Overlay className='fixed inset-0 flex items-center justify-center bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 z-[50]' />
         <Dialog.Content
           data-prevent-drawer='true'
           className={cn(
-            'fixed z-[56] bg-black focus:outline-none data-[state=closed]:fade-out transition-all ease-in-out duration-300 data-[state=open]:fade-in overflow-hidden',
+            'fixed z-[50] bg-black focus:outline-none data-[state=closed]:fade-out transition-all ease-in-out duration-300 data-[state=open]:fade-in overflow-hidden',
             isMobile
               ? 'inset-0 w-screen h-screen'
               : 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[95vw] h-[95vh] rounded-2xl',
