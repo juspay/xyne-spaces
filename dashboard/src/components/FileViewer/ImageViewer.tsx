@@ -311,7 +311,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
               alt={fileName}
               onLoad={handleImageLoad}
               onError={handleImageError}
-              className='select-none max-h-screen max-w-full h-auto w-auto object-contain origin-center'
+              className='select-none max-h-full max-w-full h-auto w-auto object-contain origin-center'
               style={{
                 transform: `rotate(${rotation}deg) scale(${gestureScale})`,
                 transformOrigin,
@@ -384,7 +384,7 @@ const ImageViewer: React.FC<BaseViewerProps> = ({ source, fileName, disableGestu
                   alt={fileName}
                   onLoad={handleImageLoad}
                   onError={handleImageError}
-                  className='select-none max-h-screen max-w-full h-auto w-auto object-contain origin-center'
+                  className='select-none max-h-full max-w-full h-auto w-auto object-contain origin-center'
                   style={{ transform: `rotate(${rotation}deg)` }}
                 />
               )}
