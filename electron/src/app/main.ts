@@ -28,7 +28,8 @@ import { clearAllCookies } from '../services/cookies';
 import Sentry from "@sentry/electron/main";
 
 
-// Forward logs to renderer process
+// Forward logs to renderer process. This is a DATA TRANSPORT for CodeServer/workflow IPC
+// messages, NOT a logging transport. Suppressing it would break features.
 (log.transports as any).forwardToRenderer = (message: any) => {
   // Convert message data to string for filtering
   const msgContent = (message.data || []).map((item: any) => String(item)).join(' ');
@@ -52,8 +53,8 @@ app.setAppUserModelId(config.APP_ID);
 
 // Initialize electron-log for main process
 log.initialize();
-log.transports.file.level = 'info';
-log.transports.console.level = 'info';
+log.transports.file.level = 'error';
+log.transports.console.level = 'error';
 log.info('[Main] Electron app starting...');
 
 // Setup global error handlers FIRST to catch any initialization errors

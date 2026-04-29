@@ -1,0 +1,2 @@
+export const MAX_ERROR_REPORT_ATTACHMENTS = 9;
+export const MAX_ATTACHMENT_SIZE_BYTES = 1024 * 1024 * 1024; // 1 GB

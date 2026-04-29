@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Error Report Recorder</title>
+  <style>
+    /* Window is invisible - minimal CSS */
+    body { margin: 0; padding: 0; }
+  </style>
+</head>
+<body>
+  <script>
+    // Hidden recording window - no UI
+    // Sends chunks to main process via IPC
+
+    const { ipcRenderer } = require('electron');
+
+    let mediaRecorder = null;
+    let stream = null;
+    let micStream = null;
+    let chunks = [];
+
+    async function startRecording(sourceId, withMic) {
+      try {
+        const screenStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            mandatory: {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId
+            }
+          }
+        });
+
+        stream = screenStream;
+
+        if (withMic) {
+          try {
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            stream = new MediaStream([...screenStream.getTracks(), ...micStream.getTracks()]);
+          } catch {
+            // Continue with screen only
+          }
+        }
+
+        const mimeType = ['video/webm; codecs=vp9', 'video/webm; codecs=vp8', 'video/webm']
+          .find(type => MediaRecorder.isTypeSupported(type));
+
+        if (!mimeType) {
+          throw new Error('No supported video codec found');
+        }
+
+        chunks = [];
+        mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+        // Collect chunks synchronously — no async here to avoid race with onstop
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            chunks.push(event.data);
+          }
+        };
+
+        // onstop fires after the final ondataavailable, so all chunks are collected
+        mediaRecorder.onstop = async () => {
+          try {
+            if (chunks.length > 0) {
+              const blob = new Blob(chunks, { type: mimeType });
+              const arrayBuffer = await blob.arrayBuffer();
+              ipcRenderer.send('error-report-recorder:chunk', arrayBuffer);
+            }
+          } catch (err) {
+            ipcRenderer.send('error-report-recorder:error', err instanceof Error ? err.message : String(err));
+          } finally {
+            ipcRenderer.send('error-report-recorder:stopped');
+            cleanup();
+          }
+        };
+
+        mediaRecorder.onerror = (event) => {
+          ipcRenderer.send('error-report-recorder:error', event.message || 'MediaRecorder error');
+          cleanup();
+        };
+
+        mediaRecorder.start(1000);
+        ipcRenderer.send('error-report-recorder:started');
+
+      } catch (err) {
+        ipcRenderer.send('error-report-recorder:error', err instanceof Error ? err.message : String(err));
+        cleanup();
+      }
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      } else {
+        cleanup();
+      }
+    }
+
+    function cleanup() {
+      if (mediaRecorder) {
+        try {
+          if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+        } catch {}
+        mediaRecorder = null;
+      }
+      stream?.getTracks().forEach(t => t.stop());
+      micStream?.getTracks().forEach(t => t.stop());
+      stream = null;
+      micStream = null;
+      chunks = [];
+    }
+
+    ipcRenderer.on('error-report-recorder:start', (_event, payload) => {
+      if (!payload?.sourceId) {
+        ipcRenderer.send('error-report-recorder:error', 'Missing sourceId in start payload');
+        return;
+      }
+      cleanup();
+      startRecording(payload.sourceId, payload.withMic || false);
+    });
+
+    ipcRenderer.on('error-report-recorder:stop', stopRecording);
+
+    window.addEventListener('beforeunload', cleanup);
+  </script>
+</body>
+</html>

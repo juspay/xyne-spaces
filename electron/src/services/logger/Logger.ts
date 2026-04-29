@@ -19,7 +19,7 @@ import Store from 'electron-store';
 // Create logger instance for errors and warnings only
 export const errorLogger = log.create({ logId: 'error' });
 errorLogger.transports.file.fileName = 'errors.log';
-errorLogger.transports.file.level = 'warn'; // Only warn and error
+errorLogger.transports.file.level = 'error'; // Only error
 errorLogger.transports.console.level = false; 
 
 type EventType = EnrollmentEventType | ElectronEventType;
@@ -184,8 +184,8 @@ class LoggerService {
     // Write to main log (all levels)
     log.info(`[${logType ?? 'EnrollmentLogger'}]`, JSON.stringify(logEntry));
     
-    // Write to error log file (only warn and error)
-    if (level === LogLevel.WARN || level === LogLevel.ERROR) {
+    // Write to error log file (only error)
+    if (level === LogLevel.ERROR) {
       errorLogger[level.toLowerCase() as 'warn' | 'error'](
         `[${logType ?? 'EnrollmentLogger'}]`,
         JSON.stringify(logEntry)

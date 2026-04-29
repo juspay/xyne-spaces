@@ -27,6 +27,7 @@ import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/t
 import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
+import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
@@ -262,6 +263,38 @@ export class TicketController {
 
   createTicket = async (req: Request, res: Response): Promise<void> => {
     try {
+      // If this is a support/error-report ticket, resolve channel+board from CAC
+      if (req.headers['x-support-ticket'] === 'true') {
+        const cacConfig = await superpositionClient.getObjectValue(
+          'error_report_channel_config',
+          null,
+          {},
+        ) as { channelId: string; boardId?: string } | null;
+
+        if (!cacConfig?.channelId) {
+          res.status(503).json({ error: 'Error reporting is not configured.' });
+          return;
+        }
+
+        const channel = await this.channelRepository.findById(cacConfig.channelId);
+        if (!channel?.projectId) {
+          res.status(503).json({ error: 'Support channel not found or has no project mapping.' });
+          return;
+        }
+
+        const SUPPORT_TAG = 'Support Ticket';
+        const existingTags: string[] = Array.isArray(req.body.tags) ? req.body.tags : [];
+        req.body.channelId = cacConfig.channelId;
+        req.body.projectId = channel.projectId;
+        if (cacConfig.boardId) {
+          req.body.boardId = cacConfig.boardId;
+        }
+        req.body.tags = [
+          SUPPORT_TAG,
+          ...existingTags.filter(t => t.toLowerCase() !== SUPPORT_TAG.toLowerCase()),
+        ];
+      }
+
       // Handle both FormData (with files) and JSON requests
       const {
         title,
