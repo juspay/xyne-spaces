@@ -13,6 +13,8 @@ import { RawBodyRequest } from '@/types/express';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { authMiddleware } from '@/middleware/auth';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { emailFetchQueue } from '@/queues/emailFetchQueue';
+import { config as appConfig } from '@/config/env';
 
 const router = Router();
 
@@ -100,6 +102,8 @@ router.post(
   }
 );
 
+const MAX_REFETCH_RANGE_MS = 365 * 24 * 60 * 60 * 1000;
+
 /**
  * Manual refetch for the external source bound to a channel.
  * POST /api/external-source-sync/:channelId/refetch
@@ -110,6 +114,33 @@ router.post(
   async (req: Request, res: Response) => {
     const { channelId } = req.params;
     try {
+      const { startDate, endDate } = (req.body ?? {}) as {
+        startDate?: unknown;
+        endDate?: unknown;
+      };
+
+      let options: { startDate?: string; endDate?: string } | undefined;
+      if (startDate !== undefined || endDate !== undefined) {
+        if (typeof startDate !== 'string' || typeof endDate !== 'string') {
+          return res.status(400).json({
+            success: false,
+            error: 'startDate and endDate must both be ISO 8601 strings',
+          });
+        }
+        const startMs = Date.parse(startDate);
+        const endMs = Date.parse(endDate);
+        if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+          return res.status(400).json({ success: false, error: 'Invalid ISO 8601 date' });
+        }
+        if (startMs > endMs) {
+          return res.status(400).json({ success: false, error: 'startDate must be <= endDate' });
+        }
+        if (endMs - startMs > MAX_REFETCH_RANGE_MS) {
+          return res.status(400).json({ success: false, error: 'Range exceeds 365 days' });
+        }
+        options = { startDate, endDate };
+      }
+
       const source = await new ExternalSourceRepository().findByChannelId(channelId);
       if (!source || !source.isActive) {
         return res.status(404).json({ success: false, error: 'No active external source for this channel' });
@@ -117,16 +148,35 @@ router.post(
 
       const adapter = adapterRegistry.getAdapter(source.name);
       if (!adapter.refetch) {
-        return res.status(400).json({ success: false, error: `Refetch not supported for ${source.sourceType}` });
+        return res.status(400).json({ success: false, error: `Fetch not supported for ${source.sourceType}` });
       }
 
-      const result = await adapter.refetch(source);
+      const requesterUserId = req.user?.id;
+      if (!requesterUserId) {
+        return res.status(401).json({ success: false, error: 'Unauthenticated' });
+      }
+
+      if (appConfig.enableEmailFetchWorker) {
+        if (!emailFetchQueue.isReady) {
+          await emailFetchQueue.initialize();
+        }
+        const job = await emailFetchQueue.getQueue().add('refetch', {
+          sourceId: source.id,
+          channelId,
+          requesterUserId,
+          ...(options ?? {}),
+        });
+        logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId });
+        return res.status(202).json({ success: true, queued: true, jobId: String(job.id) });
+      }
+
+      const result = await adapter.refetch(source, options);
       return res.json({ success: true, ...result });
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error);
       const needsReauth = /invalid_grant|unauthorized_client|invalid_token/i.test(raw);
       const status = needsReauth ? 403 : 500;
-      logger.error('Refetch failed', { error: raw });
+      logger.error('Fetch failed', { error: raw });
       return res.status(status).json({
         success: false,
         error: needsReauth

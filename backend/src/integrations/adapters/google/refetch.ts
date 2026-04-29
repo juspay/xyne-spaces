@@ -1,5 +1,5 @@
 /**
- * Google Gmail refetch.
+ * Google Gmail fetch.
  * Fetch message ids (history since cursor, or latest 10 fallback),
  * ingest each through the existing sync pipeline, persist the new cursor.
  */
@@ -9,36 +9,46 @@ import { GoogleService } from '@/services/googleService';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { externalSourceCore } from '../../core/core';
 import { adapterRegistry } from '../../core/adapterRegistry';
-import { BaseRefetch, RefetchResult } from '../../core/baseRefetch';
+import { BaseRefetch, RefetchOptions, RefetchResult } from '../../core/baseRefetch';
 import { ExternalSourcePlatform } from '../../core/types';
 import { GoogleTransformer } from './transformer';
 import { preDownloadGmailAttachments } from './attachments';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 
 const TAG = '[GoogleRefetch]';
 const FALLBACK_LIMIT = 10;
 const transformer = new GoogleTransformer();
 
 export class GoogleRefetch extends BaseRefetch {
-  async refetch(source: ExternalSource): Promise<RefetchResult> {
+  async refetch(source: ExternalSource, options?: RefetchOptions): Promise<RefetchResult> {
     const google = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
+
+    const isRangeMode = !!(options?.startDate && options?.endDate);
 
     // Step 1: decide message ids + next cursor
     let messageIds: string[] = [];
     let nextCursor: string | null = source.lastSyncCursor ?? null;
 
-    if (source.lastSyncCursor) {
-      try {
-        const result = await google.listMessagesFromHistoryWithCursor(source.lastSyncCursor);
-        messageIds = result.messageIds;
-        nextCursor = result.historyId ?? source.lastSyncCursor;
-      } catch (error) {
-        logger.warn(`${TAG} history fetch failed, falling back to recent`, { error });
+    if (isRangeMode) {
+      messageIds = await google.listMessagesByDateRange({
+        startDate: options!.startDate!,
+        endDate: options!.endDate!,
+      });
+    } else {
+      if (source.lastSyncCursor) {
+        try {
+          const result = await google.listMessagesFromHistoryWithCursor(source.lastSyncCursor);
+          messageIds = result.messageIds;
+          nextCursor = result.historyId ?? source.lastSyncCursor;
+        } catch (error) {
+          logger.warn(`${TAG} history fetch failed, falling back to recent`, { error });
+        }
       }
-    }
-    if (messageIds.length === 0 && !source.lastSyncCursor) {
-      messageIds = await google.listRecentMessages(FALLBACK_LIMIT, { mode: 'threads' });
-      nextCursor = (await google.getCurrentHistoryId()) ?? nextCursor;
+      if (messageIds.length === 0 && !source.lastSyncCursor) {
+        messageIds = await google.listRecentMessages(FALLBACK_LIMIT, { mode: 'threads' });
+        nextCursor = (await google.getCurrentHistoryId()) ?? nextCursor;
+      }
     }
 
     // Step 2: ingest each — fetch full message, transform, sync
@@ -47,10 +57,10 @@ export class GoogleRefetch extends BaseRefetch {
     let skipped = 0;
     const errors: string[] = [];
 
-    for (const id of messageIds) {
+    const ingestOne = async (id: string): Promise<void> => {
       try {
         const messageData = await google.getMessageById(id);
-        if (!messageData) continue;
+        if (!messageData) return;
 
         const parsedEmail = google.parseEmailData(messageData);
         const preDownloadedAttachments = await preDownloadGmailAttachments({
@@ -82,10 +92,20 @@ export class GoogleRefetch extends BaseRefetch {
         logger.warn(`${TAG} ingest failed for ${id}`, { error: msg });
         errors.push(msg);
       }
+    };
+
+    const { batchSize, batchDelayMs } = config.emailFetch;
+    for (let i = 0; i < messageIds.length; i += batchSize) {
+      const batch = messageIds.slice(i, i + batchSize);
+      await Promise.all(batch.map(ingestOne));
+
+      if (batchDelayMs > 0 && i + batchSize < messageIds.length) {
+        await new Promise(resolve => setTimeout(resolve, batchDelayMs));
+      }
     }
 
     // Step 3: persist cursor
-    if (nextCursor && nextCursor !== source.lastSyncCursor) {
+    if (!isRangeMode && nextCursor && nextCursor !== source.lastSyncCursor) {
       await new ExternalSourceRepository().update(source.id, { lastSyncCursor: nextCursor });
     }
 

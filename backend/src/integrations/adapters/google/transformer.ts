@@ -6,6 +6,7 @@
 import { BaseTransformer } from '../../core/baseTransformer';
 import { NormalizedData, ParseResult } from '../../core/types';
 import { ParsedEmailData } from './types';
+import { cleanEmailBodyHtml, cleanEmailBodyText } from '@/utils/contentUtils';
 
 export class GoogleTransformer extends BaseTransformer<any, NormalizedData> {
   async transform(rawPayload: any): Promise<ParseResult<NormalizedData>> {
@@ -85,8 +86,8 @@ export class GoogleTransformer extends BaseTransformer<any, NormalizedData> {
 
   /** Prefer HTML body, fall back to text, convert plain text newlines to <br> */
   private formatContent(email: ParsedEmailData): string {
-    if (email.htmlBody) return email.htmlBody;
-    if (email.textBody) return email.textBody.replace(/\n/g, '<br>');
+    if (email.htmlBody) return cleanEmailBodyHtml(email.htmlBody);
+    if (email.textBody) return cleanEmailBodyText(email.textBody);
     return email.body?.trim() || '';
   }
 

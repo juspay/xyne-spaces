@@ -4,9 +4,9 @@
  */
 
 import { ExternalSource } from '@prisma/client';
-import { RefetchResult } from './baseRefetch';
+import { RefetchOptions, RefetchResult } from './baseRefetch';
 import type { DownloadedAttachment } from '@/services/externalAttachmentService';
-export type { RefetchResult };
+export type { RefetchOptions, RefetchResult };
 
 /**
  * Supported external source platforms
@@ -196,7 +196,7 @@ export interface ExternalSourceAdapter {
    * Optional: manual refetch handler. Implemented in the adapter's refetch.ts.
    * Present ⇒ adapter supports the /refetch endpoint. Absent ⇒ 400 "not supported".
    */
-  refetch?(source: ExternalSource): Promise<RefetchResult>;
+  refetch?(source: ExternalSource, options?: RefetchOptions): Promise<RefetchResult>;
 
   /**
    * Optional: outbound mail reply sender (e.g. Microsoft Graph, Gmail).

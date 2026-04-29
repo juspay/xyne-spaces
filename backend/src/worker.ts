@@ -26,6 +26,7 @@ import { delayedMessageWorker } from '@/workers/delayedMessageWorker';
 import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 import { stageEtaDeadlineWorker } from '@/workers/stageEtaDeadlineWorker';
 import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
+import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { recoveryService } from './workflows/services/recovery-service'
 config()
 
@@ -169,6 +170,13 @@ class WorkerService {
         await etaDeadlineWorker.start();
       }
 
+      if (appConfig.enableEmailFetchWorker) {
+        logger.info('Initializing notification service for email refetch worker...');
+        await notificationService.initialize();
+        logger.info('Starting email refetch worker...');
+        await emailFetchWorker.start();
+      }
+
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';
       if (documentIngestionWorkerEnabled) {
         logger.info('Starting document ingestion worker...');
@@ -277,6 +285,10 @@ class WorkerService {
 
       if (appConfig.enableEtaDeadlineWorker) {
         await etaDeadlineWorker.shutdown();
+      }
+
+      if (appConfig.enableEmailFetchWorker) {
+        await emailFetchWorker.shutdown();
       }
 
       const documentIngestionWorkerEnabled = process.env.ENABLE_DOCUMENT_INGESTION_WORKER === 'true';

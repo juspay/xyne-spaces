@@ -1,8 +1,9 @@
-import { ReactElement, useMemo, useRef } from 'react';
+import { MouseEvent, ReactElement, useMemo, useRef } from 'react';
 import { Sparkles, Pencil } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import useMeasure from '../../../hooks/useMeasure';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import type { TicketListItem } from './TicketListView.types';
 import { AssigneePicker } from './AssigneePicker';
@@ -14,6 +15,8 @@ interface TicketListRowProps {
   onClick: () => void;
   isActive?: boolean;
   showExtraFields?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 }
 
 const formatStatusText = (status: string): string => {
@@ -55,6 +58,8 @@ export const TicketListRow = ({
   onClick,
   isActive = false,
   showExtraFields = false,
+  isSelected = false,
+  onToggleSelect,
 }: TicketListRowProps): ReactElement => {
   const ticketIdValue = ticket.xyneId || ticket.id || '';
   const containerRef = useRef<HTMLDivElement>(null);
@@ -97,11 +102,15 @@ export const TicketListRow = ({
   }, [ticket.emails]);
   const userRow = (ticketReads ?? []).find(r => r.userId === userID);
   const hasUnread = emailCount > 0 && (!userRow || userRow.lastReadEmailId !== latestEmailId);
+  const handleRowClick = (e: MouseEvent<HTMLDivElement>): void => {
+    if ((e.target as HTMLElement).closest('[data-ticket-row-checkbox]')) return;
+    onClick();
+  };
 
   return (
     <div
       ref={containerRef}
-      onClick={onClick}
+      onClick={handleRowClick}
       data-track-category='Tickets'
       data-track-name='ClickTicketListRow'
       onKeyDown={e => {
@@ -116,13 +125,23 @@ export const TicketListRow = ({
       className={cn(
         'flex items-center justify-between px-6 py-3 border-b border-border last:border-b-0 w-full cursor-pointer transition-colors gap-10',
         isActive
-          ? 'bg-blue-50 hover:bg-blue-100'
+          ? 'bg-primary/10 hover:bg-primary/15'
           : hasUnread
-            ? 'bg-gray-100 hover:bg-gray-100'
-            : 'bg-background hover:bg-gray-100',
+            ? 'bg-muted hover:bg-muted'
+            : 'bg-background hover:bg-muted/50',
       )}
     >
       <div className='flex items-center gap-2 min-w-0 flex-1'>
+        {onToggleSelect && (
+          <span
+            data-ticket-row-checkbox
+            className='flex-shrink-0 inline-flex items-center mr-1'
+            data-track-category='Tickets'
+            data-track-name='ToggleTicketSelection'
+          >
+            <Checkbox checked={isSelected} onChange={() => onToggleSelect()} label='' />
+          </span>
+        )}
         {isHumanInterventionTicket ? (
           <Tooltip delayDuration={500} content='Human Intervention'>
             <span className='h-full rounded-sm text-xs whitespace-nowrap flex items-center justify-center'>
@@ -147,8 +166,8 @@ export const TicketListRow = ({
         </span>
         <span
           className={cn(
-            'text-sm min-w-0 overflow-hidden text-ellipsis whitespace-nowrap',
-            hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
+            'text-sm min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground',
+            hasUnread ? 'font-semibold' : 'font-normal',
           )}
         >
           {ticket.title}

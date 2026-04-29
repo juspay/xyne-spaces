@@ -18,6 +18,71 @@ export function sanitizeEmailBodyHtml(html: string): string {
   return DOMPurify.sanitize(html);
 }
 
+const HTML_REPLY_MARKERS: RegExp[] = [
+  /<div[^>]*\bclass=["']?[^"'>]*\bgmail_quote\b/i,
+  /<blockquote[^>]*\bclass=["']?[^"'>]*\bgmail_quote\b/i,
+  /<div[^>]*\bid=["']?appendonsend["']?/i,
+  /<div[^>]*\bid=["']?divRplyFwdMsg["']?/i,
+  /<p[^>]*>\s*<b>\s*From:\s*<\/b>/i,
+  /<div[^>]*\bclass=["']?[^"'>]*\byahoo_quoted\b/i,
+  /<blockquote[^>]*\btype=["']?cite["']?/i,
+  /<div[^>]*\bclass=["']?[^"'>]*\bmoz-cite-prefix\b/i,
+];
+
+export function cleanEmailBodyHtml(html: string): string {
+  if (!html?.trim()) return html;
+
+  let working = html
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+
+  let cutAt = working.length;
+  for (const marker of HTML_REPLY_MARKERS) {
+    const match = working.match(marker);
+    if (match && match.index !== undefined && match.index < cutAt) {
+      cutAt = match.index;
+    }
+  }
+
+  if (cutAt < working.length) {
+    const kept = working.slice(0, cutAt).replace(/<[^>]+>/g, '').trim();
+    if (kept.length >= 40) {
+      working = working.slice(0, cutAt);
+    }
+  }
+
+  return sanitizeEmailBodyHtml(working);
+}
+
+export function cleanEmailBodyText(text: string): string {
+  if (!text?.trim()) return text;
+
+  const lines = text.split('\n');
+  const cleanLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+
+    if (
+      (trimmed.startsWith('From:') &&
+        i + 1 < lines.length &&
+        lines[i + 1].trim().startsWith('Sent:')) ||
+      /\bFrom:.*\bSent:\s/i.test(trimmed)
+    ) {
+      break;
+    }
+
+    if (/^On .+ wrote:/.test(trimmed)) break;
+    if (/^-{5,}/.test(trimmed) || /^_{5,}/.test(trimmed)) break;
+    if (trimmed.startsWith('>')) break;
+
+    cleanLines.push(lines[i]);
+  }
+
+  return cleanLines.join('\n').trimEnd().replace(/\n+/g, '<br>');
+}
+
 /**
  * Converts HTML content to plain text for search indexing
  * Preserves code structure while making it searchable

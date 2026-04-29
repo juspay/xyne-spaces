@@ -5717,6 +5717,52 @@ export const mutators = defineMutators({
         }
       },
     ),
+
+    bulkMarkAsRead: defineMutator(
+      z.object({
+        items: z.array(
+          z.object({
+            id: z.string(),
+            ticketId: z.string(),
+            lastReadEmailId: z.string(),
+          }),
+        ),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { items, timestamp } }) => {
+        if (items.length === 0) return;
+
+        const ticketIds = items.map(i => i.ticketId);
+        const existing = await tx.run(
+          zql.email_reads
+            .where('userId', ctx.userID)
+            .where(h => h.cmp('ticketId', 'IN', ticketIds)),
+        );
+        const existingByTicket = new Map(existing.map(e => [e.ticketId, e]));
+
+        await Promise.all(
+          items.map(item => {
+            const ex = existingByTicket.get(item.ticketId);
+            if (ex) {
+              if (ex.lastReadEmailId === item.lastReadEmailId) return;
+              return tx.mutate.email_reads.update({
+                id: ex.id,
+                lastReadEmailId: item.lastReadEmailId,
+                updatedAt: timestamp,
+              });
+            }
+            return tx.mutate.email_reads.insert({
+              id: item.id,
+              ticketId: item.ticketId,
+              userId: ctx.userID,
+              lastReadEmailId: item.lastReadEmailId,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }),
+        );
+      },
+    ),
   },
 
   cleanupStageApprovals: defineMutator(

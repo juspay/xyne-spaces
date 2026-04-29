@@ -31,6 +31,14 @@ interface TicketListViewProps {
   skeletonRowCount?: number;
   emptyState?: React.ReactNode;
   className?: string;
+  selectedIds?: ReadonlySet<string>;
+  onToggleSelect?: (row: SelectableRow) => void;
+}
+
+export interface SelectableRow {
+  id: string;
+  emails?: ReadonlyArray<{ id: string; createdAt: number }>;
+  emailReads?: ReadonlyArray<{ userId: string; lastReadEmailId: string }>;
 }
 
 const toStartRow = (row: SupportTicketRow): TicketStart => ({
@@ -48,6 +56,8 @@ export function TicketListView({
   skeletonRowCount = 8,
   emptyState,
   className,
+  selectedIds,
+  onToggleSelect,
 }: TicketListViewProps): React.ReactElement {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -220,6 +230,24 @@ export function TicketListView({
                     ticket={row as TicketListItem}
                     isActive={isActive}
                     showExtraFields={showExtraFields}
+                    {...(onToggleSelect
+                      ? {
+                          isSelected: selectedIds?.has(row.id) ?? false,
+                          onToggleSelect: () => {
+                            const emails = row.emails as
+                              | ReadonlyArray<{ id: string; createdAt: number }>
+                              | undefined;
+                            const emailReads = row.emailReads as
+                              | ReadonlyArray<{ userId: string; lastReadEmailId: string }>
+                              | undefined;
+                            onToggleSelect({
+                              id: row.id,
+                              ...(emails ? { emails } : {}),
+                              ...(emailReads ? { emailReads } : {}),
+                            });
+                          },
+                        }
+                      : {})}
                     onClick={() => onTicketClick(row)}
                   />
                 ) : (

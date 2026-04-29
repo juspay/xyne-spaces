@@ -233,6 +233,12 @@ export class EmailController {
         result = { threadId: zohoResult.threadId };
       }
 
+      logger.info('[EmailController] email_sent', {
+        event: 'email_sent',
+        channelName: channel.name,
+        userEmail: req.user?.email,
+      });
+
       // 6. Save reply in database
       const externalMessageId = result.messageId || result.threadId;
       const emailType = type === 'REPLY' ? EmailType.REPLY : EmailType.REPLY_ALL;
