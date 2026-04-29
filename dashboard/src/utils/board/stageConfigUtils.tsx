@@ -46,6 +46,7 @@ export const PR_STATUS_OPTIONS: SelectOption[] = [
   { value: PRStatusEvent.UPDATED, label: 'Updated' },
   { value: PRStatusEvent.MERGED, label: 'Merged' },
   { value: PRStatusEvent.DECLINED, label: 'Declined' },
+  { value: PRStatusEvent.DELETED, label: 'Deleted' },
 ];
 
 export const FIELD_TYPE_OPTIONS: FieldTypeOption[] = [

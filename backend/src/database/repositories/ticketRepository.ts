@@ -592,6 +592,7 @@ export class TicketRepository {
       [PRStatusEvent.UPDATED]: 'updated',
       [PRStatusEvent.MERGED]: 'merged',
       [PRStatusEvent.DECLINED]: 'declined',
+      [PRStatusEvent.DELETED]: 'deleted',
     };
     return actionMap[event] || 'updated';
   }

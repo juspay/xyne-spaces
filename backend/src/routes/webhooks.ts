@@ -33,6 +33,9 @@ export interface BitbucketWebhookEnvelope {
     latestCommit: string;
     latestChangeset: string;
   };
+
+  // pr:from_ref_updated specific fields
+  previousFromHash?: string;
   
   // Other event types
   changes?: any[]; // for repo:refs_changed events
@@ -152,7 +155,7 @@ export interface BitbucketPullRequest {
     commentCount?: number;
   };
 
-  links: {
+  links?: {
     self: Array<{ href: string } | null>;
   };
 }

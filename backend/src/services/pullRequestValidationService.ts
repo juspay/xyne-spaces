@@ -63,7 +63,7 @@ export class PullRequestValidationService {
       }
 
       const ticketId = `${ticketIdMatch[1]}-${ticketIdMatch[2]}`;
-      logger.info(`Validating PR ${prId} for ticket ${ticketId}`);
+      logger.info(`[PR-Validation] Validating PR ${prId} against ticket ${ticketId}`);
 
       const ticket = await this.ticketRepository.getTicketByXyneId(ticketId);
 
@@ -154,12 +154,12 @@ export class PullRequestValidationService {
 
       const successMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.VALIDATION_PASSED;
       await this.postSuccessfulBuildStatus( commitHash, successMessage);
-      logger.info(`PR ${prId} validation successful for ticket ${ticketId}`);
+      logger.info(`[PR-Validation] PR ${prId} passed validation for ticket ${ticketId}`);
 
       // Validation service only validates - storage is handled by webhook handlers
       return { isValid: true, ticketId: ticket.id };
     } catch (error) {
-      logger.error('Error during PR validation:', error);
+      logger.error('[PR-Validation] Unexpected error during validation:', error);
       const errorMessage = BITBUCKET_PR_CONFIG.ERROR_MESSAGES.INTERNAL_ERROR;
       await this.postFailedBuildStatus(commitHash, errorMessage);
       return { isValid: false, errorMessage };
@@ -180,7 +180,7 @@ export class PullRequestValidationService {
         description,
       );
     } catch (error) {
-      logger.error('Error posting successful build status:', error);
+      logger.error('[PR-Validation] Failed to post successful build status:', error);
     }
   }
 
@@ -198,7 +198,7 @@ export class PullRequestValidationService {
         description
       );
     } catch (error) {
-      logger.error('Error posting failed build status:', error);
+      logger.error('[PR-Validation] Failed to post failed build status:', error);
     }
   }
 }

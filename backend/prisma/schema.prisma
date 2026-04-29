@@ -1322,6 +1322,7 @@ enum PRStatus {
   UPDATED
   DECLINED
   MERGED
+  DELETED
   @@schema("public")
 }
 
@@ -1330,6 +1331,7 @@ enum PRStatusEvent {
   UPDATED
   MERGED
   DECLINED
+  DELETED
   @@schema("public")
 }
 
