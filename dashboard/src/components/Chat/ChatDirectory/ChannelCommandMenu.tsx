@@ -25,7 +25,6 @@ import {
   Mail,
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
-import * as Switch from '@radix-ui/react-switch';
 import { Channel, ChannelVisibility } from '@xyne/shared';
 import {
   isDMChannel,
@@ -88,6 +87,7 @@ import { SearchSummaryModal, SummaryModalState } from './SearchSummaryModal';
 import XyneAIStar from '../../icons/xyne-ai/XyneAIStar';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
 import { TYPE_AUTOCOMPLETE_REGEX, parseTypeFilter } from '../../../utils/searchFilterParser';
+import { TicketPreviewPanel } from './TicketPreviewPanel';
 
 type BotChatState =
   | { status: 'idle' }
@@ -336,8 +336,6 @@ const ChannelCommandMenu = ({
     setSelectedMentions,
     useVespaSearch,
     // setUseVespaSearch,
-    includeBotMessages,
-    setIncludeBotMessages,
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
@@ -442,6 +440,7 @@ const ChannelCommandMenu = ({
     mimeType: string;
     fileSize: number;
   } | null>(null);
+  const [previewTicket, setPreviewTicket] = useState<DisplaySearchResult | null>(null);
 
   const DISPLAY_LIMIT = 5;
 
@@ -1030,6 +1029,14 @@ const ChannelCommandMenu = ({
     }
   }, [searchText]);
 
+  // Close ticket preview when switching tabs
+  useEffect(() => {
+    if (previewTicket) {
+      setPreviewTicket(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   // Reset active tab if the current tab is no longer in the enabled set.
   // In inline mode, fall back to the first enabled tab (never ALL).
   useEffect(() => {
@@ -1053,6 +1060,7 @@ const ChannelCommandMenu = ({
       onTabChange?.(TabType.ALL);
       resetSearchState();
       setExpandedCategories(new Set());
+      setPreviewTicket(null);
 
       // Reset the previous search text refs
       prevSearchTextRef.current = '';
@@ -1865,7 +1873,50 @@ const ChannelCommandMenu = ({
       setSuppressHover(true);
       hasNavigatedRef.current = true;
 
+      // Linear-style preview: update preview when navigating to a different ticket
+      if (previewTicket) {
+        const newlySelectedItem = items[nextIndex];
+        const ticketId = newlySelectedItem?.getAttribute('data-ticket-id');
+        if (ticketId) {
+          const ticket = backendResults.find(r => r.type === 'ticket' && r.id === ticketId);
+          if (ticket && ticket.id !== previewTicket.id) {
+            setPreviewTicket(ticket);
+          }
+        } else {
+          // Navigated to non-ticket item, close the preview
+          setPreviewTicket(null);
+        }
+      }
+
       e.preventDefault();
+      return;
+    }
+
+    // ArrowLeft: close ticket preview if open, otherwise do nothing (disable tab navigation)
+    if (e.key === 'ArrowLeft') {
+      if (previewTicket) {
+        e.preventDefault();
+        e.stopPropagation();
+        setPreviewTicket(null);
+      }
+      return;
+    }
+
+    // ArrowRight: open ticket preview if a ticket is selected, otherwise do nothing (disable tab navigation)
+    if (e.key === 'ArrowRight') {
+      if (!typeAutocomplete.suggestion && !previewTicket) {
+        const selectedItem = commandRef.current?.querySelector('[cmdk-item][aria-selected="true"]');
+        const ticketId = selectedItem?.getAttribute('data-ticket-id');
+        if (ticketId) {
+          const ticket = backendResults.find(r => r.type === 'ticket' && r.id === ticketId);
+          if (ticket) {
+            e.preventDefault();
+            e.stopPropagation();
+            setPreviewTicket(ticket);
+            return;
+          }
+        }
+      }
       return;
     }
 
@@ -2164,9 +2215,28 @@ const ChannelCommandMenu = ({
           {!selectedBot && (
             <div className={`overflow-x-auto no-scrollbar p-2 ${isMobile ? 'mx-1' : 'ml-4'}`}>
               <Tabs.Root value={activeTab}>
-                <Tabs.List className='flex items-center justify-start gap-1.5'>
+                <Tabs.List
+                  className='flex items-center justify-start gap-1.5'
+                  onKeyDownCapture={e => {
+                    // Capture arrow keys before Radix UI's internal handler
+                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }
+                  }}
+                >
                   {tabs.map(tab => (
-                    <Tabs.Trigger asChild key={tab.id} value={tab.id}>
+                    <Tabs.Trigger
+                      key={tab.id}
+                      value={tab.id}
+                      onKeyDown={e => {
+                        // Disable left/right arrow key navigation between tabs
+                        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                          e.preventDefault();
+                        }
+                      }}
+                      asChild
+                    >
                       <button
                         onClick={e => {
                           if (activeTab === tab.id) {
@@ -2768,69 +2838,6 @@ const ChannelCommandMenu = ({
             )}
           </Command.List>
 
-          {/* Footer */}
-          {!inline && !isMobile && (
-            <div className='px-4 py-2 border-t border-border text-sm text-muted-foreground flex items-center justify-between shrink-0'>
-              {/* Vespa Search toggle - commented out, using Vespa as default
-          <div className='flex items-center gap-2'>
-            <label htmlFor='vespa-toggle' className='text-xs text-muted-foreground cursor-pointer'>
-              Vespa Search
-            </label>
-            <Switch.Root
-              id='vespa-toggle'
-              checked={useVespaSearch}
-              onCheckedChange={setUseVespaSearch}
-              className='w-9 h-5 bg-muted-foreground/40 rounded-full relative data-[state=checked]:bg-blue-500 transition-colors'
-            >
-              <Switch.Thumb className='block w-4 h-4 bg-background rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-5' />
-            </Switch.Root>
-          </div>
-          */}
-              <div className='flex items-center gap-2'>
-                <label
-                  htmlFor='include-bot-messages-toggle'
-                  className='text-xs text-muted-foreground cursor-pointer'
-                  title={
-                    includeBotMessages
-                      ? 'Bot messages are included in search results'
-                      : 'Bot messages are hidden from search results'
-                  }
-                >
-                  Include bot messages
-                </label>
-                <Switch.Root
-                  id='include-bot-messages-toggle'
-                  checked={includeBotMessages}
-                  onCheckedChange={setIncludeBotMessages}
-                  aria-label='Toggle bot messages in search results'
-                  className='w-9 h-5 bg-muted-foreground/40 rounded-full relative data-[state=checked]:bg-blue-500 transition-colors'
-                >
-                  <Switch.Thumb className='block w-4 h-4 bg-background rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-5' />
-                </Switch.Root>
-              </div>
-              <div className='flex items-center gap-6'>
-                <span className='flex gap-2.5 items-center'>
-                  <span>Open</span>
-                  <span className='p-1 bg-background rounded-md border border-border'>
-                    <CornerDownLeft size={10} />
-                  </span>
-                </span>
-                {/* <span className='text-gray-300'>|</span> */}
-                <span className='flex gap-2.5 items-center'>
-                  <span>Navigate </span>
-                  <span className='flex gap-1'>
-                    <span className='p-1 bg-background rounded-md border border-border'>
-                      <MoveUp size={12} />
-                    </span>
-                    <span className='p-1 bg-background rounded-md border border-border'>
-                      <MoveDown size={12} />
-                    </span>
-                  </span>
-                </span>
-              </div>
-            </div>
-          )}
-
           {/* Summary Modal Overlay - covers both results and footer */}
           <SearchSummaryModal
             isOpen={showSummaryModal}
@@ -2855,8 +2862,76 @@ const ChannelCommandMenu = ({
             onConfirm={() => onContextSelectionConfirm?.()}
           />
         )}
+
+        {!inline && previewTicket && (
+          <TicketPreviewPanel ticket={previewTicket} onClose={() => setPreviewTicket(null)} />
+        )}
       </div>
       {/* end body flex row */}
+
+      {/* Footer - outside body flex so TicketPreviewPanel only spans results area */}
+      {!inline && !isMobile && (
+        <div className='px-4 py-2 border-t border-border/40 text-sm text-muted-foreground flex items-center justify-end shrink-0 bg-muted/30 rounded-b-2xl'>
+          {/* Vespa Search toggle - commented out, using Vespa as default
+          <div className='flex items-center gap-2'>
+            <label htmlFor='vespa-toggle' className='text-xs text-muted-foreground cursor-pointer'>
+              Vespa Search
+            </label>
+            <Switch.Root
+              id='vespa-toggle'
+              checked={useVespaSearch}
+              onCheckedChange={setUseVespaSearch}
+              className='w-9 h-5 bg-muted-foreground/40 rounded-full relative data-[state=checked]:bg-blue-500 transition-colors'
+            >
+              <Switch.Thumb className='block w-4 h-4 bg-background rounded-full transition-transform duration-100 translate-x-0.5 will-change-transform data-[state=checked]:translate-x-5' />
+            </Switch.Root>
+          </div>
+          */}
+          <div className='flex items-center gap-6'>
+            <span className='flex gap-2.5 items-center'>
+              <span>Open</span>
+              <span className='p-1 bg-background rounded-md border border-border'>
+                <CornerDownLeft size={10} />
+              </span>
+            </span>
+            {/* <span className='text-gray-300'>|</span> */}
+            <span className='flex gap-2.5 items-center'>
+              <span>Navigate </span>
+              <span className='flex gap-1'>
+                <span className='p-1 bg-background rounded-md border border-border'>
+                  <MoveUp size={12} />
+                </span>
+                <span className='p-1 bg-background rounded-md border border-border'>
+                  <MoveDown size={12} />
+                </span>
+              </span>
+            </span>
+            {previewTicket ? (
+              <span className='flex gap-2.5 items-center'>
+                <span className='flex gap-1'>
+                  <span className='p-1 bg-background rounded-md border border-border'>
+                    <ArrowLeft size={12} />
+                  </span>
+                </span>
+                <span>Close</span>
+              </span>
+            ) : (
+              (activeTab === TabType.TICKETS ||
+                (activeTab === TabType.ALL &&
+                  (groupedBackendResults['ticket']?.length ?? 0) > 0)) && (
+                <span className='flex gap-2.5 items-center'>
+                  <span className='flex gap-1'>
+                    <span className='p-1 bg-background rounded-md border border-border'>
+                      <ArrowRight size={12} />
+                    </span>
+                  </span>
+                  <span>Quick look</span>
+                </span>
+              )
+            )}
+          </div>
+        </div>
+      )}
 
       {/* File Preview Modal */}
       {!inline && previewFile && (

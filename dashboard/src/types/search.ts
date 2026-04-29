@@ -55,6 +55,11 @@ export interface SearchContext {
   ticketId?: string;
   xyneId?: string;
   ticketStatus?: string;
+  boardId?: string;
+  assignedTo?: string;
+  assigneeName?: string;
+  createdBy?: string;
+  creatorName?: string;
   mailId?: string; // externalMessageId for mail results (used for scroll-to)
   recipientCount?: number; // total to+cc+bcc (excluding sender) for mail results
   attachmentId?: string;
