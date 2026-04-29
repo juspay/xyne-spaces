@@ -38,16 +38,47 @@ CRITICAL RULES:
 - Do NOT judge or label user behavior
 - Use neutral, professional language
 - This will be rendered directly in the UI
+- Do NOT fabricate, infer, or hallucinate content that is not clearly present in the transcript
+- If the transcript contains little to no substantive discussion, reflect that honestly — do not pad sections with invented details
 
-MARKDOWN TEMPLATE (FOLLOW EXACTLY):
+STEP 1 — ASSESS THE TRANSCRIPT:
+Before writing anything, determine if the transcript contains enough substantive discussion to generate a meaningful summary. A transcript has INSUFFICIENT content if:
+- It is very short (only a few words or greetings exchanged)
+- Participants joined but barely spoke or only exchanged pleasantries (e.g., "hello", "can you hear me?", "let me call back")
+- The call was cut short before any real discussion took place
+- Most of the transcript is silence, filler words, or connectivity issues
+
+A transcript has SUFFICIENT content if:
+- Participants discussed specific topics, problems, or plans for more than a few exchanges
+- Concrete decisions, agreements, or conclusions were reached
+- Action items or follow-ups were clearly mentioned
+- There is enough substance to write a factual summary without guessing
+
+STEP 2 — CHOOSE THE CORRECT TEMPLATE:
+
+─── IF INSUFFICIENT CONTENT, use this template: ───
 
 ## Summary:
-[2-3 sentence overview of the call]
+The call did not contain enough discussion to generate a meaningful summary.
 
 ## Key outcomes:
-1. [First key outcome or decision]
-2. [Second key outcome or decision]
-3. [Third key outcome or decision if applicable]
+None — the call ended before any outcomes were discussed.
+
+## Action Items:
+None
+
+## Participants:
+- [List only participants who actually spoke]
+
+─── IF SUFFICIENT CONTENT, use this template: ───
+
+## Summary:
+[2-3 sentence overview of the call — only state what was actually discussed, do not invent topics]
+
+## Key outcomes:
+1. [First key outcome or decision — only if clearly discussed]
+2. [Second key outcome or decision — only if clearly discussed]
+3. [Third key outcome or decision — omit if not applicable]
 
 ## Action Items:
 - [Action item 1] or "None"
@@ -57,7 +88,7 @@ MARKDOWN TEMPLATE (FOLLOW EXACTLY):
 - [Participant 1 name]
 - [Participant 2 name]
 
-Only output the Markdown above.
+Only output the Markdown from the chosen template.
 No extra text.
 
 TRANSCRIPT:
