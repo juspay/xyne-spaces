@@ -15,7 +15,7 @@ export async function handleUnreadCount(
 
     const statuses = await db.channelUserStatus.findMany({
       where: { channelId, userId: { in: recipientIds }, isDeleted: false },
-      select: { userId: true, lastViewedAt: true }
+      select: { userId: true, lastViewedAt: true, unreadCount: true }
     });
 
     if (isDMChannel) {
@@ -31,10 +31,12 @@ export async function handleUnreadCount(
             const unreadCount = await db.conversation.count({
               where: whereClause
             });
-            await db.channelUserStatus.update({
-              where: { channelId_userId: { channelId, userId: status.userId } },
-              data: { unreadCount, updatedAt: new Date() }
-            });
+            if (unreadCount !== status.unreadCount) {
+              await db.channelUserStatus.update({
+                where: { channelId_userId: { channelId, userId: status.userId } },
+                data: { unreadCount, updatedAt: new Date() }
+              });
+            }
           }
         })
       );
@@ -69,10 +71,12 @@ export async function handleUnreadCount(
             }
           }
 
-          await db.channelUserStatus.update({
-            where: { channelId_userId: { channelId, userId: status.userId } },
-            data: { unreadCount: unreadActivitiesCount, updatedAt: new Date() }
-          });
+          if (unreadActivitiesCount !== status.unreadCount) {
+            await db.channelUserStatus.update({
+              where: { channelId_userId: { channelId, userId: status.userId } },
+              data: { unreadCount: unreadActivitiesCount, updatedAt: new Date() }
+            });
+          }
         })
       );
     }
