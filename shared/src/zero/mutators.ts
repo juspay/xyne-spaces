@@ -136,6 +136,8 @@ function getNudgeDirection(
       return { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.TICKET };
     case NudgeKind.FIND_RELATED_MESSAGE_FROM_MESSAGE:
       return { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.MESSAGE };
+    case NudgeKind.SCHEDULE_CALL_FROM_THREAD:
+      return { from: SurfaceAreaType.MESSAGE, to: SurfaceAreaType.CALL };
     default:
       return null;
   }

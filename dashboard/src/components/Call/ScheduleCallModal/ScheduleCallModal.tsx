@@ -62,6 +62,8 @@ interface ScheduleCallModalProps {
   channelId?: string;
   /** When set, links the scheduled call to this thread conversation. */
   conversationId?: string;
+  /** When set, pre-fills the call title in create mode. */
+  initialTitle?: string;
   /** When true (ticket threads), shows the Guests email-chip input below the
    *  participant picker, and routes the submit through Step 2 (invitation
    *  preview) when at least one guest is added. */
@@ -164,6 +166,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
   initialEndsAt,
   channelId: threadChannelId,
   conversationId: threadConversationId,
+  initialTitle,
   enableExternalInvitees = false,
 }) => {
   const user = useSelf();
@@ -516,7 +519,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
       const end = initialEndsAt ?? new Date(start.getTime() + 60 * 60 * 1000);
       if (displayName !== 'Unknown') {
         reset({
-          title: `${displayName.split(' ')[0]}'s Call`,
+          title: initialTitle ?? `${displayName.split(' ')[0]}'s Call`,
           startsAt: start,
           endsAt: end,
           participants: [],
@@ -576,7 +579,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
     if (displayName !== 'Unknown') {
       const firstName = displayName.split(' ')[0];
       reset({
-        title: `${firstName}'s Call`,
+        title: initialTitle ?? `${firstName}'s Call`,
         startsAt: defaultStart,
         endsAt: new Date(defaultStart.getTime() + 60 * 60 * 1000),
         participants: [],
@@ -1177,6 +1180,7 @@ export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
         });
       }
 
+      onSuccess?.();
       handleClose();
     } catch (err) {
       console.error('[ScheduleCallModal] submit failed:', err);

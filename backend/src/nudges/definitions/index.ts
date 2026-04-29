@@ -5,12 +5,14 @@ import { findRelatedMessageFromMessage } from './find-related-message-from-messa
 import { linkPasteToSurface } from './link-paste-to-surface';
 import { forwardMessageLink } from './forward-message-link';
 import { deleteMessageCleanup } from './delete-message-cleanup';
+import { scheduleCallFromThread } from './schedule-call-from-thread';
 
 export function registerAllNudgeDefinitions(): void {
   // Explicit definitions (show nudge UI)
   nudgeRegistry.register(createTicketFromMessage);
   nudgeRegistry.register(findRelatedTicketFromMessage);
   nudgeRegistry.register(findRelatedMessageFromMessage);
+  nudgeRegistry.register(scheduleCallFromThread);
 
   // Implicit definitions (fire automatically, no UI)
   nudgeRegistry.register(linkPasteToSurface);

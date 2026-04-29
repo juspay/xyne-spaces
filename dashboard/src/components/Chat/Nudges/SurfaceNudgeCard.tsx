@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { ChevronRight, Eye } from 'lucide-react';
+import { ChevronRight, Eye, Phone, X } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button/Button';
@@ -16,11 +16,13 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { getPriorityIcon } from '../../Tickets/TicketCard/TicketCard.utils';
 import { SubTicketCountIcon } from '../../../assets/icons';
+import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
 
 const NUDGE_KIND_LABELS: Record<string, string> = {
   CREATE_TICKET_FROM_MESSAGE: 'Create Ticket',
   FIND_RELATED_TICKET_FROM_MESSAGE: 'Related Ticket',
   FIND_RELATED_MESSAGE_FROM_MESSAGE: 'Related Message',
+  SCHEDULE_CALL_FROM_THREAD: 'Schedule Call',
 };
 
 const getNudgeKindLabel = (kind: string): string => NUDGE_KIND_LABELS[kind] ?? kind;
@@ -60,6 +62,12 @@ const parseActions = (actions: unknown): ActionsPayload | null => {
           actionMode: 'write' as const,
           onSuccess: 'acted_on' as const,
           createSurfaceLink: true,
+        };
+      case 'SCHEDULE_CALL_FROM_THREAD':
+        return {
+          actionMode: 'write' as const,
+          onSuccess: 'acted_on' as const,
+          createSurfaceLink: false,
         };
       default:
         return {
@@ -125,6 +133,9 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
   const isCreateTicket = nudge.nudgeKind === NudgeKind.CREATE_TICKET_FROM_MESSAGE;
   const isRelatedTicket = nudge.nudgeKind === NudgeKind.FIND_RELATED_TICKET_FROM_MESSAGE;
   const isRelatedMessage = nudge.nudgeKind === NudgeKind.FIND_RELATED_MESSAGE_FROM_MESSAGE;
+  const isScheduleCall = nudge.nudgeKind === NudgeKind.SCHEDULE_CALL_FROM_THREAD;
+
+  const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
 
   // For CREATE_TICKET: build sourceConversation from actions payload (no extra query needed)
   const sourceConversation = useMemo((): ConversationWithTicket | undefined => {
@@ -320,8 +331,9 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
   return (
     <div
       className={cn(
-        'w-full max-w-[520px] rounded-xl border border-border bg-card p-3',
+        'w-full rounded-xl border border-border bg-card p-3',
         'text-[13px]',
+        isScheduleCall ? 'max-w-[360px]' : 'max-w-[520px]',
       )}
     >
       {/* Header row */}
@@ -341,10 +353,21 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
           )}
         </div>
       ) : (
-        <div className='flex items-center'>
+        <div className='flex items-center justify-between'>
           <span className='text-xs font-[450] text-muted-foreground'>
             {getNudgeKindLabel(nudge.nudgeKind)}
           </span>
+          {isScheduleCall && canDismiss && (
+            <button
+              onClick={handleDismiss}
+              disabled={isActing}
+              data-track-category='NUDGES'
+              data-track-name='dismiss_schedule_call_nudge'
+              className='p-0.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted/50 disabled:opacity-50'
+            >
+              <X className='h-3.5 w-3.5' />
+            </button>
+          )}
         </div>
       )}
 
@@ -416,13 +439,31 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
         </div>
       )}
 
+      {/* Action buttons for SCHEDULE_CALL_FROM_THREAD */}
+      {isScheduleCall && (
+        <div className='mt-3 flex items-center justify-end gap-3'>
+          {isActionable && (
+            <Button
+              size='sm'
+              variant='outline'
+              disabled={isActing}
+              onClick={() => setIsScheduleCallModalOpen(true)}
+              className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
+            >
+              <Phone className='mr-1 h-3.5 w-3.5' />
+              Schedule Xyne Call
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Action result */}
       {localActionResult && (
         <SurfaceNudgeResult actionResult={localActionResult} channelId={channelId} />
       )}
 
-      {/* Dismiss fallback */}
-      {canDismiss && (
+      {/* Dismiss fallback - only for non-schedule call nudges */}
+      {!isScheduleCall && canDismiss && (
         <div className='mt-3 flex items-center justify-end'>
           <Button
             size='sm'
@@ -487,6 +528,41 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               );
             }, 3000);
             toast.success('Ticket created');
+            onActionCompleted?.();
+          }}
+        />
+      )}
+
+      {/* Schedule Call modal for SCHEDULE_CALL_FROM_THREAD */}
+      {isScheduleCall && (
+        <ScheduleCallModal
+          isOpen={isScheduleCallModalOpen}
+          onClose={() => setIsScheduleCallModalOpen(false)}
+          {...(typeof actionsPayload?.data['channelId'] === 'string' &&
+          actionsPayload.data['channelId']
+            ? { channelId: actionsPayload.data['channelId'] }
+            : {})}
+          {...(typeof actionsPayload?.data['conversationId'] === 'string' &&
+          actionsPayload.data['conversationId']
+            ? { conversationId: actionsPayload.data['conversationId'] }
+            : {})}
+          {...(typeof actionsPayload?.data['suggestedTitle'] === 'string' &&
+          actionsPayload.data['suggestedTitle']
+            ? { initialTitle: actionsPayload.data['suggestedTitle'] }
+            : {})}
+          onSuccess={() => {
+            setIsScheduleCallModalOpen(false);
+            setIsActing(true);
+            void zero.mutate(
+              mutators.nudges.act({
+                nudgeId: nudge.id,
+                actionResult: {
+                  actionType: 'SCHEDULE_CALL_FROM_THREAD',
+                  result: { scheduled: true },
+                },
+                timestamp: Date.now(),
+              }),
+            );
             onActionCompleted?.();
           }}
         />
