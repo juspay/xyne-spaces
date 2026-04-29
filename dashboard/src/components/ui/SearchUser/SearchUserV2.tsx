@@ -18,6 +18,7 @@ interface SearchParticipantsProps {
   isOpen?: boolean;
   setIsOpen?: (isOpen: boolean) => void;
   className?: string;
+  currentUserId?: string;
 }
 
 export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
@@ -30,6 +31,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
   isOpen = false,
   setIsOpen,
   className,
+  currentUserId,
 }) => {
   const [pillsWidth, setPillsWidth] = useState(0);
   const [pillsHeight, setPillsHeight] = useState(0);
@@ -103,8 +105,11 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
 
   // Filter options based on search query
   const filteredOptions = useMemo(() => {
+    const isSelfSearch = searchQuery.trim().toLowerCase() === 'self';
     const baseOptions = searchQuery.trim()
       ? options.filter(opt => {
+          // Always pass through current user when "self" is searched
+          if (currentUserId && opt.id === currentUserId && isSelfSearch) return true;
           const displayName = getUserDisplayName(opt);
           return (
             displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -114,7 +119,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
       : options;
 
     return baseOptions.filter(opt => !selectedUserIds.has(opt.id));
-  }, [options, searchQuery, selectedUserIds]);
+  }, [options, searchQuery, selectedUserIds, currentUserId]);
 
   const handleSelect = (userId: string | null) => {
     if (userId && !selectedUserIds.has(userId)) {
@@ -252,6 +257,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                     {filteredOptions.map(user => {
                       const displayName = getUserDisplayName(user);
                       const deactivated = isUserDeactivated(user);
+                      const isCurrentUser = currentUserId && user.id === currentUserId;
                       return (
                         <BaseCombobox.Item
                           key={user.id}
@@ -281,6 +287,8 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                               className={`text-sm ${deactivated ? 'text-muted-foreground' : 'text-muted-foreground'}`}
                             >
                               {displayName}
+
+                              {isCurrentUser ? ' (you)' : ''}
                             </span>
                             {deactivated && (
                               <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>

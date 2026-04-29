@@ -218,6 +218,7 @@ export const ComposeDmPanel: React.FC = () => {
   // Filter and map users to items, ordered by conversation history
   const filteredUsers = useMemo(() => {
     const currentUserId = context.userID;
+    const currentUser = usersById.get(currentUserId);
 
     if (!searchValue.trim()) {
       // No search query: show users ordered by most-recently-active DM
@@ -227,6 +228,8 @@ export const ComposeDmPanel: React.FC = () => {
         .filter((u): u is User => u !== undefined)
         .slice(0, 10);
     }
+
+    const isSelfSearch = searchValue.trim().toLowerCase() === 'self';
 
     // With a search query: use Fuse results but put DM conversation partners first,
     // ordered by most-recently-active DM (position in cachedDMParticipants).
@@ -245,13 +248,23 @@ export const ComposeDmPanel: React.FC = () => {
             );
           });
 
-    return baseResults
+    const otherResults = baseResults
       .filter(user => user.id !== currentUserId)
       .sort((a, b) => {
         const rankA = dmRank.get(a.id) ?? Infinity;
         const rankB = dmRank.get(b.id) ?? Infinity;
         return rankA - rankB;
       });
+
+    // Include current user when their name matches the query or "self" is searched
+    if (currentUser) {
+      const nameMatches = baseResults.some(u => u.id === currentUserId);
+      if (isSelfSearch || nameMatches) {
+        return [currentUser, ...otherResults];
+      }
+    }
+
+    return otherResults;
   }, [searchResults, searchValue, context.userID, cachedDMParticipants, usersById]);
 
   // Build chat list props
@@ -348,6 +361,7 @@ export const ComposeDmPanel: React.FC = () => {
                 setIsOpen={setIsSearchUserOpen}
                 searchQuery={searchValue}
                 onSearchChange={setSearchValue}
+                currentUserId={context.userID}
                 // className='p-0'
               />
               {/* Validation errors */}

@@ -52,6 +52,7 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
       .map(k => k.trim())
       .filter(Boolean);
 
+    const isSelfSearch = keywords.some(k => k === 'self');
     const dmChannels = allChannels.filter(channel => isDMChannel(channel.scopeType));
 
     return dmChannels
@@ -61,10 +62,19 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
           .map(id => usersById.get(id)?.name?.toLowerCase())
           .filter((name): name is string => !!name);
 
+        // For "self" keyword, match the self-DM channel (only participant is current user)
+        if (
+          isSelfSearch &&
+          participantIds.length > 0 &&
+          participantIds.every(id => id === currentUserId)
+        ) {
+          return true;
+        }
+
         return keywords.some(keyword => participantNames.some(name => name.includes(keyword)));
       })
       .sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-  }, [allChannels, dmSearchQuery, usersById]);
+  }, [allChannels, dmSearchQuery, usersById, currentUserId]);
 
   // Autofocus search input when navigating to DM page
   useEffect(() => {
@@ -86,9 +96,22 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   const userResults = useMemo(() => {
     if (!dmSearchQuery.trim()) return [];
 
-    return searchUsers(allUsers, dmSearchQuery, 10).filter(
+    const isSelfSearch = dmSearchQuery.trim().toLowerCase() === 'self';
+
+    const baseResults = searchUsers(allUsers, dmSearchQuery, 10).filter(
       u => u.id !== currentUserId && !usersWithExistingDm.has(u.id),
     );
+
+    // Include current user when searching by their name or "self" keyword
+    const currentUser = allUsers.find(u => u.id === currentUserId);
+    if (currentUser && !usersWithExistingDm.has(currentUserId)) {
+      const nameMatches = searchUsers([currentUser], dmSearchQuery, 1).length > 0;
+      if (isSelfSearch || nameMatches) {
+        return [currentUser, ...baseResults];
+      }
+    }
+
+    return baseResults;
   }, [allUsers, dmSearchQuery, currentUserId, usersWithExistingDm]);
 
   const totalResultCount = dmChannelResults.length + userResults.length;
