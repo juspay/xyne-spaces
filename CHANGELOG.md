@@ -1,3 +1,24 @@
+## [1.134.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.133.0...v1.134.0) (2026-04-29)
+
+
+### Features
+
+* Add channel sorting options: recency and alphabetical ([146245e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/146245e7e5aae55e3f27376533c0eee2ac866784)), closes [#5438](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5438)
+* add schedule call nudge from thread ([aecafc2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/aecafc2487b95b4658e11d3f12c750d03b7a9b64)), closes [#4900](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/4900)
+* added ref updated and deleted webhook handling for pull requests ([43c84fc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/43c84fca31040d56132a0448f2a0eb9bb359d62c)), closes [#5401](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5401)
+* added ticket preview via key press ([65a922b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/65a922b3a4c1326030ff470eca9178ba3ac2cae8)), closes [#5623](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5623)
+* Feature: Show reply count and latest messages in thread view ([10e4b60](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/10e4b607c0e4d6af04baa4009bba8f8f5386a1ca)), closes [#5074](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5074)
+
+
+### Bug Fixes
+
+* added mweb padding for the record button ([db875c2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/db875c251b6e54ec20f6b473dc9c72c17db64d48)), closes [#5674](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5674)
+* Added the changes for the url and big text overlapping issue ([cb36ddc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/cb36ddcee5f41d8d95b932448696215483e6991b)), closes [#5663](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5663)
+* audio capture state fix ([336306b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/336306bf8f3c20a43eeb3b0192bea7fdecf51c16)), closes [#5692](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5692)
+* Fix attachment carousel bugs ([1a99974](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1a9997474223c896bc6a8557f89ca8c2ff7b485e))
+* pass provider as 4th arg to generateState for MS electron ([6d9d76e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6d9d76ebf95744ae5ef5813ec91920f658cd096a)), closes [#5717](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5717)
+* system message opacity fix ([ea520dc](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ea520dcf96bf7989f21f793a0b66e0a330df0a94)), closes [#5672](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5672)
+
 ## [1.133.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.132.2...v1.133.0) (2026-04-28)
 
 
