@@ -33,7 +33,7 @@ const Card = ({
 );
 
 const RoleBadge = ({ role }: { role: WorkspaceRole | null }): ReactElement => {
-  const isAdmin = role === WorkspaceRole.ADMIN;
+  const isAdmin = role === WorkspaceRole.ADMIN || role === WorkspaceRole.OWNER;
   return (
     <span
       className={cn(

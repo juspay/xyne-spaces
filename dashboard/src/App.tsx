@@ -23,6 +23,7 @@ import { WorkflowVSCodeOverlay } from './components/Workflows/VSCodePanel/Workfl
 import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
+import { DEFAULT_WORKSPACE_ID } from './config';
 
 const App = (): ReactElement => {
   // Initialize theme on app load
@@ -62,11 +63,27 @@ const App = (): ReactElement => {
       // Check origin directly from anchor element
       if (anchor.origin === window.location.origin || TRUSTED_ORIGINS.includes(anchor.origin)) {
         event.preventDefault();
-        void router.navigate({
-          pathname: anchor.pathname,
-          search: anchor.search,
-          hash: anchor.hash,
-        });
+
+        const pathname = anchor.pathname;
+        const pathSegments = pathname.split('/').filter(Boolean);
+
+        // Check if first segment looks like a workspaceId (cuid format: 20+ alphanumeric chars)
+        const hasWorkspaceId = pathSegments[0]?.match(/^[a-z0-9-]{20,}$/i);
+
+        // If no workspaceId and we have a default, prepend it
+        if (!hasWorkspaceId && DEFAULT_WORKSPACE_ID) {
+          void router.navigate({
+            pathname: `/${DEFAULT_WORKSPACE_ID}${pathname}`,
+            search: anchor.search,
+            hash: anchor.hash,
+          });
+        } else {
+          void router.navigate({
+            pathname: anchor.pathname,
+            search: anchor.search,
+            hash: anchor.hash,
+          });
+        }
       }
     };
 

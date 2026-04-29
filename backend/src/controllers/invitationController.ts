@@ -350,8 +350,46 @@ export class InvitationController {
         invitationId,
       });
 
+      // If email failed, rollback everything
       if (!emailResult.success) {
+        // 1. Delete invitation
         await invitationService.deleteInvitation(invitation.id);
+        
+        // 2. Delete org member
+        await prisma.orgMember.delete({ 
+          where: { email: ownerEmail.trim().toLowerCase() } 
+        });
+        
+        // 3. Delete workspace-organization link
+        await prisma.workspaceOrganization.delete({ 
+          where: { 
+            orgId_workspaceId: {
+              orgId: org.orgId,
+              workspaceId: workspace.id,
+            },
+          }, 
+        });
+        
+        // 4. Delete DM project
+        await prisma.project.deleteMany({ 
+          where: { workspaceId: workspace.id, type: ProjectType.DM } 
+        });
+        
+        // 5. Delete workspace users (including bots created during sync)
+        await prisma.user.deleteMany({ 
+          where: { workspaceId: workspace.id } 
+        });
+        
+        // 6. Delete workspace
+        await prisma.workspace.delete({ 
+          where: { id: workspace.id } 
+        });
+        
+        // 7. Delete organization
+        await prisma.organization.delete({ 
+          where: { orgId: org.orgId } 
+        });
+        
         invitationId = null;
         throw new Error(`Failed to send invitation email: ${emailResult.error}`);
       }

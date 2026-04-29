@@ -35,6 +35,7 @@ interface AuthContext {
   selectedWorkspaceId: string | null;
   orgData: { orgName: string; workspaceName: string } | null;
   userExistsButRemoved: boolean;
+  selfDmChannelId: string | null;
 }
 
 type AuthEvent =
@@ -62,6 +63,7 @@ export type AuthState =
 
 interface ValidateSessionResponse {
   user: User & { workspaceId?: string };
+  selfDmChannelId?: string | null;
 }
 
 interface ApiErrorResponse {
@@ -75,6 +77,7 @@ interface OAuthCallbackOutput {
   autoLoginWorkspace?: string;
   isNewUser?: boolean;
   userExistsButRemoved?: boolean;
+  selfDmChannelId?: string | null;
 }
 
 interface XStateEvent {
@@ -117,6 +120,7 @@ const createClearedContext = (): AuthContext => ({
   selectedWorkspaceId: null,
   orgData: null,
   userExistsButRemoved: false,
+  selfDmChannelId: null,
 });
 
 export const authMachine = createMachine(
@@ -137,6 +141,7 @@ export const authMachine = createMachine(
       selectedWorkspaceId: null,
       orgData: null,
       userExistsButRemoved: false,
+      selfDmChannelId: null,
     },
     states: {
       checkingSession: {
@@ -329,6 +334,7 @@ export const authMachine = createMachine(
                   user: output?.user || context.user,
                   error: null,
                   isNewUser: output?.isNewUser ?? context.isNewUser,
+                  selfDmChannelId: output?.selfDmChannelId ?? null,
                   workspaces: [],
                   pendingUserData: null,
                   selectedWorkspaceId: null,
@@ -396,6 +402,7 @@ export const authMachine = createMachine(
                   user: output?.user || context.user,
                   error: null,
                   isNewUser: true,
+                  selfDmChannelId: output?.selfDmChannelId ?? null,
                   workspaces: [],
                   pendingUserData: null,
                   orgData: null,
@@ -429,6 +436,7 @@ export const authMachine = createMachine(
                 user: output?.user || context.user,
                 error: null,
                 isNewUser: output?.isNewUser ?? context.isNewUser,
+                selfDmChannelId: output?.selfDmChannelId ?? null,
               };
             }),
           },
@@ -936,9 +944,17 @@ export const authMachine = createMachine(
             },
           );
 
-          const data = response.data as { user: User; isNewUser?: boolean };
+          const data = response.data as {
+            user: User;
+            isNewUser?: boolean;
+            selfDmChannelId?: string;
+          };
           if (data.user) {
-            return { user: data.user, isNewUser: data.isNewUser ?? false };
+            return {
+              user: data.user,
+              isNewUser: data.isNewUser ?? false,
+              selfDmChannelId: data.selfDmChannelId,
+            };
           }
           throw new Error('Login to workspace failed: No user data');
         } catch (error) {
@@ -978,9 +994,13 @@ export const authMachine = createMachine(
               },
             );
 
-            const data = response.data as { user: User; isNewUser?: boolean };
+            const data = response.data as {
+              user: User;
+              isNewUser?: boolean;
+              selfDmChannelId?: string;
+            };
             if (data.user) {
-              return { user: data.user, isNewUser: true };
+              return { user: data.user, isNewUser: true, selfDmChannelId: data.selfDmChannelId };
             }
             throw new Error('Create org failed: No user data');
           } catch (error) {
@@ -1027,6 +1047,7 @@ export const authMachine = createMachine(
           return {
             user: data.user,
             isNewUser: isNewUser,
+            selfDmChannelId: data.selfDmChannelId ?? null,
           };
         } catch (error) {
           if (axios.isAxiosError(error)) {

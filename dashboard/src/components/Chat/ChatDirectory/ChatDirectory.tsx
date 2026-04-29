@@ -1,5 +1,5 @@
 import { ReactElement, useState, useMemo, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
 import {
@@ -29,7 +29,7 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { useWalkthrough } from '../../../hooks/useWalkthrough';
-import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useAuthContextValues, useAuth } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useMutation } from '@tanstack/react-query';
@@ -71,8 +71,11 @@ const ChatDirectory = ({
 }: ChatDirectoryProps): ReactElement | null => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
+  const auth = useAuth();
+  const { selfDmChannelId } = auth;
   const zero = useZero();
   const lastVisitedChannelId = useLastVisitedChannel();
   const { isMobile } = usePlatform();
@@ -147,10 +150,17 @@ const ChatDirectory = ({
   // Redirect to last visited channel or first available channel when at /chat/dir root
   useEffect(() => {
     if (isMobile) return; // Don't redirect on mobile
-    if (location.pathname !== '/chat/dir') return; // Only redirect at /chat/dir root
+    const isAtChatDirRoot =
+      location.pathname === '/chat/dir' ||
+      (workspaceId && location.pathname === `/${workspaceId}/chat/dir`);
+    if (!isAtChatDirRoot) return;
 
     const targetChannelId =
-      lastVisitedChannelId || starred[0]?.id || channels[0]?.id || directMessages[0]?.id;
+      lastVisitedChannelId ||
+      selfDmChannelId ||
+      starred[0]?.id ||
+      channels[0]?.id ||
+      directMessages[0]?.id;
 
     if (targetChannelId) {
       void navigate(`/chat/dir/${targetChannelId}`, { replace: true });
@@ -163,6 +173,8 @@ const ChatDirectory = ({
     directMessages,
     navigate,
     isMobile,
+    selfDmChannelId,
+    workspaceId,
   ]);
 
   const handleAddChannelSubmit = (data: CreateChannelFormData): void => {

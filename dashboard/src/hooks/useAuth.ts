@@ -20,6 +20,7 @@ export interface UseAuthReturn {
   isCreatingOrg: boolean;
   isLoggingInToWorkspace: boolean;
   userExistsButRemoved: boolean;
+  selfDmChannelId: string | null;
 
   signInWithGoogle: () => void;
   signInWithMicrosoft: () => void;
@@ -86,6 +87,7 @@ export const useAuth = (): UseAuthReturn => {
     isCreatingOrg: state.matches('creatingOrg'),
     isLoggingInToWorkspace: state.matches('loggingInToWorkspace'),
     userExistsButRemoved: state.context.userExistsButRemoved,
+    selfDmChannelId: state.context.selfDmChannelId,
 
     signInWithGoogle,
     signInWithMicrosoft,

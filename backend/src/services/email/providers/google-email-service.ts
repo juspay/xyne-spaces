@@ -72,7 +72,7 @@ export class GoogleEmailService extends BaseEmailService {
       logger.info(`[GoogleEmailService] Subject: ${subject}`);
       if (text) logger.info(`[GoogleEmailService] Text: ${text}`);
       logger.info('[GoogleEmailService] =====================================================================================');
-      return { success: true, messageId: 'logged-only' };
+      return { success: false, error: 'Email service not configured' };
     }
 
     try {
