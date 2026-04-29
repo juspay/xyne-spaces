@@ -50,6 +50,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingDurationRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Reset state whenever modal opens
@@ -105,7 +106,8 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
       recorder.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
         if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-        const seconds = recordingSeconds;
+        const seconds = recordingDurationRef.current;
+        recordingDurationRef.current = 0;
         setRecordingSeconds(0);
 
         if (seconds < MIN_SECONDS) {
@@ -122,7 +124,12 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
       setRecordingSeconds(0);
-      recordingTimerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds(s => {
+          recordingDurationRef.current = s + 1;
+          return s + 1;
+        });
+      }, 1000);
     } catch {
       toast.error('Microphone access denied. Please allow microphone access and try again.');
     }
