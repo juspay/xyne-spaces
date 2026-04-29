@@ -23,8 +23,18 @@ export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
 
     const newName = args.name;
     const oldName = prev.name;
+    let displayOldName = prev.name;
 
-    logger.info(`[ChannelsSideEffectHandler] Processing channel rename: ${oldName} -> ${newName}`);
+    if (prev.scopeType === 'GROUP_DM') {
+      const userIds = oldName.split(',').filter((id) => id !== this.ctx.userID);
+      const users = await db.user.findMany({
+        where: { id: { in: userIds } },
+        select: { name: true },
+      });
+      displayOldName = users.map((u) => u.name).join(', ');
+    }
+
+    logger.info(`[ChannelsSideEffectHandler] Processing channel rename: ${displayOldName} -> ${newName}`);
 
     try {
       // Get user info for system message
@@ -42,7 +52,7 @@ export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
       const nowDate = new Date(now);
       const conversationId = uuidv4();
       const messageId = uuidv4();
-      const systemMessageContent = `renamed the channel from #${oldName} to #${newName}`;
+      const systemMessageContent = `renamed the channel from #${displayOldName} to #${newName}`;
 
       // Create conversation for the system message
       await db.conversation.create({

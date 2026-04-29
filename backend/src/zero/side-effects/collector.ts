@@ -100,6 +100,7 @@ export async function collectSideEffectJobs(
     if (entity) {
       previousValue = {
         name: entity.name,
+        scopeType: entity.scopeType,
       };
     }
   }
