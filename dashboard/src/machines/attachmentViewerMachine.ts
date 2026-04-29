@@ -14,6 +14,28 @@ export interface AttachmentRef {
   conversationId?: string;
   channelId?: string;
   replyCount?: number;
+  // Parent message data for showing synthetic message while thread loads
+  parentMessage?: {
+    messageId: string;
+    senderId: string;
+    content: string;
+    createdAt: number;
+    msgType: 'USER' | 'BOT' | 'SYSTEM' | 'FORWARDED';
+    hasAttachment?: boolean;
+    attachments?: readonly {
+      id: string;
+      originalFilename: string;
+      mimetype: string;
+      size: number;
+      thumbnailUrl?: string | null;
+      uploadedByUserId: string;
+    }[];
+    reactions_md?: string | null;
+    metadata?: unknown;
+    edited?: boolean;
+    isDeleted?: boolean;
+    conversationId: string;
+  };
 }
 
 /**
@@ -87,15 +109,14 @@ export const attachmentViewerMachine = createMachine(
           }),
           onDone: [
             {
-              // If output is null (no attachment to load), transition to waitingForData
-              // This happens when attachment is undefined - we wait for UPDATE event
+              // If attachment is undefined, transition to waitingForData and wait for UPDATE event
               target: 'waitingForData',
-              guard: ({ event }) => event.output === null,
+              guard: ({ context }) => !context.attachments[context.currentIndex],
             },
             {
               target: 'viewing',
               actions: assign({
-                fileData: ({ event }) => event.output as File,
+                fileData: ({ event }) => event.output as File | null,
                 status: () => 'success',
                 error: null,
               }),
@@ -189,6 +210,14 @@ export const attachmentViewerMachine = createMachine(
             guard: ({ context }) => context.currentIndex < context.attachments.length - 1,
             actions: [
               assign({
+                attachments: ({ context }) => {
+                  const newAttachments = [...context.attachments];
+                  const currentAtt = newAttachments[context.currentIndex];
+                  if (currentAtt && context.currentVideoTime !== undefined) {
+                    currentAtt.initialTime = context.currentVideoTime;
+                  }
+                  return newAttachments;
+                },
                 currentIndex: ({ context }) => context.currentIndex + 1,
                 fileData: null,
                 status: () => 'loading',
@@ -201,6 +230,14 @@ export const attachmentViewerMachine = createMachine(
             guard: ({ context }) => context.currentIndex > 0,
             actions: [
               assign({
+                attachments: ({ context }) => {
+                  const newAttachments = [...context.attachments];
+                  const currentAtt = newAttachments[context.currentIndex];
+                  if (currentAtt && context.currentVideoTime !== undefined) {
+                    currentAtt.initialTime = context.currentVideoTime;
+                  }
+                  return newAttachments;
+                },
                 currentIndex: ({ context }) => context.currentIndex - 1,
                 fileData: null,
                 status: () => 'loading',

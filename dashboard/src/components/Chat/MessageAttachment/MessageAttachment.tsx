@@ -72,6 +72,8 @@ interface MessageAttachmentProps {
   replyCount?: number;
   allThreadAttachments?: AttachmentRef[];
   extraActions?: React.ReactNode;
+  // Parent message data for thread panel preview
+  parentMessage?: AttachmentRef['parentMessage'];
 }
 
 //to check the who can delete and delete the attachment
@@ -502,6 +504,7 @@ const InlineTextFile: React.FC<{
   channelId?: string;
   replyCount?: number;
   extraActions?: React.ReactNode;
+  parentMessage?: AttachmentRef['parentMessage'];
 }> = ({
   attachmentId,
   fileName,
@@ -510,6 +513,7 @@ const InlineTextFile: React.FC<{
   channelId,
   replyCount,
   extraActions,
+  parentMessage,
 }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -590,6 +594,7 @@ const InlineTextFile: React.FC<{
       ...(conversationId && { conversationId }),
       ...(channelId && { channelId }),
       ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
     };
     attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
   };
@@ -712,7 +717,16 @@ const InlineCodeFile: React.FC<{
   conversationId?: string;
   channelId?: string;
   replyCount?: number;
-}> = ({ attachmentId, fileName, mimeType, conversationId, channelId, replyCount }) => {
+  parentMessage?: AttachmentRef['parentMessage'];
+}> = ({
+  attachmentId,
+  fileName,
+  mimeType,
+  conversationId,
+  channelId,
+  replyCount,
+  parentMessage,
+}) => {
   const windowWidth = useWindowWidth();
   const formatFileName = (name: string) => (windowWidth < 500 ? truncateFileName(name, 28) : name);
 
@@ -726,6 +740,7 @@ const InlineCodeFile: React.FC<{
       ...(conversationId && { conversationId }),
       ...(channelId && { channelId }),
       ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
     };
     attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
   };
@@ -796,6 +811,7 @@ const InlineVideoPlayer: React.FC<{
   channelId?: string;
   replyCount?: number;
   duration?: number | undefined;
+  parentMessage?: AttachmentRef['parentMessage'];
 }> = ({
   attachmentId,
   fileName,
@@ -810,6 +826,7 @@ const InlineVideoPlayer: React.FC<{
   channelId,
   replyCount,
   duration,
+  parentMessage,
 }) => {
   const [hasClickedPlay, setHasClickedPlay] = useState(false);
   const [thumbnailBlobUrl, setThumbnailBlobUrl] = useState<string | null>(null);
@@ -883,6 +900,7 @@ const InlineVideoPlayer: React.FC<{
       ...(conversationId && { conversationId }),
       ...(channelId && { channelId }),
       ...(replyCount !== undefined && { replyCount }),
+      ...(parentMessage && { parentMessage }),
     };
     attachmentViewerActor.send({ type: 'OPEN', attachments: [attachment] });
   };
@@ -1107,6 +1125,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
   replyCount,
   allThreadAttachments,
   extraActions,
+  parentMessage,
 }) => {
   const { isMobile } = usePlatform();
   const isOpen = useSelector(
@@ -1155,6 +1174,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         if (conversationId) ref.conversationId = conversationId;
         if (channelId) ref.channelId = channelId;
         if (replyCount !== undefined) ref.replyCount = replyCount;
+        // Include parent message for synthetic thread panel rendering
+        if (parentMessage) ref.parentMessage = parentMessage;
         return ref;
       });
 
@@ -1202,6 +1223,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
         {...(extraActions && { extraActions })}
+        {...(parentMessage && { parentMessage })}
       />
     );
   }
@@ -1216,6 +1238,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(conversationId && { conversationId })}
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
+        {...(parentMessage && { parentMessage })}
       />
     );
   }
@@ -1238,6 +1261,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         {...(conversationId && { conversationId })}
         {...(channelId && { channelId })}
         {...(replyCount !== undefined && { replyCount })}
+        {...(parentMessage && { parentMessage })}
       />
     );
   }

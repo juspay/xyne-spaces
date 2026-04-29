@@ -93,6 +93,7 @@ interface AttachmentsBlockProps {
   channelId?: string;
   replyCount?: number;
   allThreadAttachments?: AttachmentRef[];
+  parentMessage?: AttachmentRef['parentMessage'];
 }
 
 /**
@@ -119,6 +120,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   channelId,
   replyCount,
   allThreadAttachments,
+  parentMessage,
 }) => {
   const zero = useZero();
   const [isExpanded, setIsExpanded] = useState(true);
@@ -233,6 +235,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
                 {...(channelId && { channelId })}
                 {...(replyCount !== undefined && { replyCount })}
                 {...(allThreadAttachments && { allThreadAttachments })}
+                {...(parentMessage && { parentMessage })}
               />
             </div>
           ))}
@@ -1188,6 +1191,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         replyCount: conversation.replyCount,
                       })}
                       {...(allThreadAttachments && { allThreadAttachments })}
+                      parentMessage={message}
                     />
                   )}
                 </>
