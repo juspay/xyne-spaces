@@ -1752,6 +1752,7 @@ model ConversationParticipant {
   participationType ConversationParticipation?    // AUTHOR, MENTIONED, or NULL (manual subscription)
   isSubscribed      Boolean                       @default(true) // Notification subscription status
   joinedAt          DateTime                      @default(now())
+  lastReadAt        DateTime?                     // Track when user last read this thread conversation
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [conversationId])

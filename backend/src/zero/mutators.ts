@@ -4094,7 +4094,6 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           const channelId = conversation.channelId;
 
-          // Query for drafts in this channel for this user (follows backend logic)
           const draft = await tx.run(
             zql.draft_messages
               .where('channelId', channelId)
@@ -4147,6 +4146,119 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             if (message?.conversation?.initialMessageId !== message?.messageId) {
               await tx.mutate.activities.update({
                 id: messageIds[index].activityId,
+                isRead: true,
+              });
+            }
+          }
+        },
+      ),
+      markThreadActivitiesAsReadV2: defineMutator(
+        z.object({ conversationId: z.string(), draftMessage: z.string(), draftMessageId: z.string(), timestamp: z.number(), participantId: z.string() }),
+        async ({ tx, args: { conversationId, draftMessage, draftMessageId, timestamp, participantId } }) => {
+          const conversation = await tx.run(zql.conversations
+            .where('conversationId', conversationId)
+            .one());
+
+          if (!conversation) {
+            throw new Error('Conversation not found');
+          }
+
+          const channelId = conversation.channelId;
+
+          // Query for drafts in this channel for this user (follows backend logic)
+          const draft = await tx.run(
+            zql.draft_messages
+              .where('channelId', channelId)
+              .where('conversationId', conversationId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+
+          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+            await tx.mutate.draft_messages.delete({ id: draft.id });
+          } else if (draftMessage.trim() !== '') {
+            await tx.mutate.draft_messages.upsert({
+              id: draft?.id || draftMessageId,
+              conversationId,
+              channelId,
+              userId: authData.sub,
+              content: draftMessage,
+              hasAttachment: draft?.hasAttachment || false,
+              updatedAt: timestamp,
+              createdAt: draft?.createdAt || timestamp,
+            });
+          }
+
+                  // Update ConversationParticipant.lastReadAt to track when user last read this thread
+          let participant = await tx.run(
+            zql.conversation_participants
+              .where('conversationId', conversationId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+
+          if (!participant) {
+            await tx.mutate.conversation_participants.insert({
+              id: participantId,
+              conversationId,
+              userId: authData.sub,
+              joinedAt: timestamp,
+              lastReadAt: timestamp,
+              isSubscribed: false,
+              participationType: null,
+            });
+          } else {
+            await tx.mutate.conversation_participants.update({
+              id: participant.id,
+              lastReadAt: timestamp,
+            });
+          }
+
+          const messagesInConversation = await tx.run(
+            zql.messages.where('conversationId', conversationId),
+          );
+
+          if (messagesInConversation.length === 0) {
+            return;
+          }
+
+          const messageIdsInConversation = messagesInConversation.map(m => m.messageId);
+
+          const unreadActivities = await tx.run(
+            zql.activities
+              .where('userId', authData.sub)
+              .where('isRead', false)
+              .where('actionSource', 'message')
+              .where('messageId', 'IN', messageIdsInConversation),
+          );
+
+          if (unreadActivities.length === 0) {
+            return;
+          }
+
+
+          const messageData = unreadActivities.map(a => ({
+            activityId: a.id,
+            sourceId: a.messageId || a.actionSourceId,
+          }));
+
+          const messages = await Promise.all(
+            messageData.map(data =>
+              tx.run(zql.messages.where('messageId', data.sourceId).one()),
+            ),
+          );
+
+          for (const [index, message] of messages.entries()) {
+            const data = messageData[index];
+            if (!message || !data) {
+              continue;
+            }
+            const conv = await tx.run(
+              zql.conversations.where('conversationId', message.conversationId).one(),
+            );
+            if (conv?.initialMessageId !== message.messageId) {
+              await tx.mutate.activities.update({
+                id: data.activityId,
                 isRead: true,
               });
             }

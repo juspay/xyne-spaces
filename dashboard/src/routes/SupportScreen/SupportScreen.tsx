@@ -1571,11 +1571,12 @@ const SupportTicketDetail = (): ReactElement => {
       if (conversationId) {
         const draft = getDraft(channelId, conversationId);
         void zero.mutate(
-          mutators.activities.markThreadActivitiesAsRead({
+          mutators.activities.markThreadActivitiesAsReadV2({
             conversationId,
             timestamp: Date.now(),
             draftMessage: draft || '',
             draftMessageId: uuidv4(),
+            participantId: uuidv4(),
           }),
         );
       }
