@@ -48,6 +48,7 @@ export interface DelayedMessagePreviousValue {
 
 export interface ChannelPreviousValue {
   name: string;
+  scopeType: string | null;
 }
 
 export interface EmailReadPreviousValue {
