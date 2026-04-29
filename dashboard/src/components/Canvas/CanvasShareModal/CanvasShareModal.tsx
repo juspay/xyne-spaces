@@ -19,6 +19,7 @@ import { mutators } from '../../../zero/mutators';
 import { useUsers } from '../../../hooks/useUsers';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 export interface CanvasShareModalProps {
   canvas: Canvas;
@@ -38,6 +39,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   const shareableOrigin = useShareableOrigin();
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isAddingUser, setIsAddingUser] = useState(false);
+  const { isMobile } = usePlatform();
   const [localVisibility, setLocalVisibility] = useState(canvas.visibility);
   const [confirmationModal, setConfirmationModal] = useState<{
     isOpen: boolean;
@@ -298,6 +300,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
               hintText=''
               {...(channelId && { channelId })}
               data-testid='canvas-user-search-input'
+              autoFocus={!isMobile}
             />
 
             {/* Role Selection Buttons */}

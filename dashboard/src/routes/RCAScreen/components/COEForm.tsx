@@ -14,6 +14,7 @@ import { renderFieldError, ReadOnlyField } from '../RCAScreen.utils.tsx';
 import { mutators } from '../../../zero/mutators';
 import type { COEFormProps, PendingCOE, SelectOption } from '../RCAScreen.types';
 import { MultiSelect } from '../../../components/ui/MultiSelect';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface ExistingCoeRow {
   id: string;
@@ -37,6 +38,7 @@ interface OwnerComboboxProps {
   onChange: (value: string) => void;
   showErrors: boolean;
   errorMessage: string | null;
+  inputRef?: React.RefObject<HTMLInputElement | null> | undefined;
 }
 
 const OwnerCombobox = ({
@@ -47,6 +49,7 @@ const OwnerCombobox = ({
   onChange,
   showErrors,
   errorMessage,
+  inputRef,
 }: OwnerComboboxProps) => {
   const selectedOwner = ownerItems.find(o => o.value === value) ?? null;
   const displayValue = selectedOwner ? selectedOwner.label : searchQuery;
@@ -59,6 +62,7 @@ const OwnerCombobox = ({
   return (
     <div className='space-y-1.5'>
       <Combobox
+        ref={inputRef}
         label='Owner *'
         placeholder='Search and select owner...'
         queryString={displayValue}
@@ -102,11 +106,13 @@ export const COEForm = ({
   }
 
   const zero = useZero();
+  const { isMobile } = usePlatform();
   const isLocked = selectedRecord.status === RCAStatus.CLOSED && !isCoeEnabled;
   const [ownerSearchQueries, setOwnerSearchQueries] = useState<Record<string, string>>({});
   const [showErrors, setShowErrors] = useState(false);
   const [deletingCoeId, setDeletingCoeId] = useState<string | null>(null);
   const previousRecordIdRef = useRef<string | null>(null);
+  const primaryOwnerRef = useRef<HTMLInputElement>(null);
 
   const form = useForm<CoeFormValues>({
     defaultValues: {
@@ -117,6 +123,17 @@ export const COEForm = ({
   });
   const { control, getValues, setValue, reset, watch, formState } = form;
   const isDirty = formState.isDirty;
+
+  useEffect(() => {
+    if (!isMobile && !isLocked && isCoeEnabled) {
+      const rafId = requestAnimationFrame(() => {
+        primaryOwnerRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+
+    return undefined;
+  }, [isMobile, isLocked, isCoeEnabled]);
 
   const {
     fields: existingCoeFields,
@@ -523,6 +540,7 @@ export const COEForm = ({
             }}
             showErrors={showErrors}
             errorMessage={errors.ownerId ?? null}
+            inputRef={index === 0 ? primaryOwnerRef : undefined}
           />
 
           <div className='space-y-1.5'>

@@ -58,6 +58,7 @@ import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { mutators } from '../../../zero/mutators';
 import { useUser, useUsers } from '../../../hooks/useUsers';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 
@@ -664,6 +665,7 @@ const ChannelMembers = ({
   const context = useAuthContextValues();
   const zero = useZero();
   const [searchQuery, setSearchQuery] = useState('');
+  const { isMobile } = usePlatform();
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [userToRemove, setUserToRemove] = useState<{ id: string; name: string } | null>(null);
 
@@ -856,6 +858,7 @@ const ChannelMembers = ({
           <Input
             type='text'
             placeholder='Find members'
+            autoFocus={!isMobile}
             value={searchQuery}
             onChange={handleSearchChange}
             className='placeholder:text-muted-foreground text-foreground px-10 rounded-[8px] border border-border focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'

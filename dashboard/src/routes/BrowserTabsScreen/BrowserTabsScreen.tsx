@@ -23,6 +23,7 @@ import { pickWebviewPartition } from '../../utils/browserPanelPartition';
 import { useActivityTracking } from '../../hooks/useActivityTracking';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { BrowserSettingsMenu } from '../../components/BrowserPanel/BrowserSettingsMenu';
+import { usePlatform } from '../../hooks/usePlatform';
 
 // Define WebviewTag interface locally since Electron types may not be available in renderer
 interface WebviewTag extends HTMLElement {
@@ -273,6 +274,8 @@ export function BrowserTabsScreen({
   const [findResults, setFindResults] = useState({ activeMatch: 0, matches: 0 });
   const webviewRefs = useRef<Record<string, WebviewTag | null>>({});
   const findInputRef = useRef<HTMLInputElement>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
   const { track } = useActivityTracking();
   const navigate = useNavigate();
 
@@ -376,6 +379,14 @@ export function BrowserTabsScreen({
       setUrlInput('');
     }
   }, [activeTabId, activeTab?.url]);
+
+  useEffect(() => {
+    if (isMobile || !activeTabId) return;
+    const rafId = requestAnimationFrame(() => {
+      urlInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [activeTabId, isMobile]);
 
   const handleCreateTab = (url?: string) => {
     const targetUrl = url || normalizeUrl(urlInput);
@@ -797,6 +808,7 @@ export function BrowserTabsScreen({
 
           <form onSubmit={handleNavigate} className='flex-1'>
             <input
+              ref={urlInputRef}
               type='text'
               value={urlInput}
               onChange={e => setUrlInput(e.target.value)}

@@ -22,6 +22,7 @@ import {
   LogicalFilter,
   FieldConfig,
 } from './QueryBuilderScreen.utils';
+import { usePlatform } from '../../hooks/usePlatform';
 
 interface FieldInfo {
   name: string;
@@ -58,6 +59,7 @@ export const QueryBuilderScreen: React.FC = () => {
   const navigate = useNavigate();
   const { dashboardId } = useParams<{ dashboardId: string }>();
   const { user } = useAuth();
+  const { isMobile } = usePlatform();
 
   const [currentDashboard] = useCachedQuery(
     queries.getDashboardById({ dashboardId: dashboardId || '' }),
@@ -294,6 +296,7 @@ export const QueryBuilderScreen: React.FC = () => {
               placeholder='Enter query name'
               value={queryName}
               onChange={e => setQueryName(e.target.value)}
+              autoFocus={!isMobile}
             />
           </div>
 

@@ -20,6 +20,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { cn } from '../../../utils/classNames';
 import { useOAuthProviders } from '../../../hooks/useOAuthProviders';
 import { useUserGroups } from '../../../hooks/useUserGroup';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
@@ -50,6 +51,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [channelName, setChannelName] = useState('');
   const [tagString, setTagString] = useState('');
   const [selectedConnector, setSelectedConnector] = useState<ConnectorType>(null);
+  const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
 
   // Fetch all projects for selection
@@ -315,6 +317,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 data-track-category='ADD_CHANNEL_FORM'
                 data-track-name='EDIT_CHANNEL_NAME'
                 data-track-metadata={JSON.stringify({ mode, channelName: field.state.value })}
+                autoFocus={!isMobile}
               />
               <div className='absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground'>
                 {getCharacterCount()}/80

@@ -2,7 +2,7 @@
  * Recording Detail Screen - View individual recording with transcript and summary
  */
 
-import { ReactElement, useState, useEffect } from 'react';
+import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { recordingService, RecordingDetail } from '../../services/Recording/recordingService';
 import {
@@ -29,6 +29,7 @@ import ForwardMessageForm from '../../components/Chat/ForwardMessageModal/Forwar
 import Dialog from '../../components/ui/Dialog';
 import { formatRecordingDuration, logRecordingError } from '../../utils/recordingUtils';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
+import { usePlatform } from '../../hooks/usePlatform';
 
 export default function RecordingDetailScreen(): ReactElement {
   const { recordingId } = useParams<{ recordingId: string }>();
@@ -41,6 +42,8 @@ export default function RecordingDetailScreen(): ReactElement {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState('');
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const forwardFocusRef = useRef<HTMLElement | null>(null);
+  const { isMobile } = usePlatform();
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -339,11 +342,16 @@ export default function RecordingDetailScreen(): ReactElement {
       </div>
 
       {/* Share Recording Dialog */}
-      <Dialog open={isShareOpen} onOpenChange={open => !open && setIsShareOpen(false)}>
+      <Dialog
+        open={isShareOpen}
+        onOpenChange={open => !open && setIsShareOpen(false)}
+        {...(!isMobile ? { focusRef: forwardFocusRef } : {})}
+      >
         {message && (
           <ForwardMessageForm
             channelId={recording?.channelId ?? ''}
             message={message}
+            {...(!isMobile ? { initialFocusRef: forwardFocusRef } : {})}
             onCancel={() => setIsShareOpen(false)}
             onSuccess={() => {
               setIsShareOpen(false);

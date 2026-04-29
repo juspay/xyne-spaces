@@ -206,6 +206,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
+  const forwardFocusRef = useRef<HTMLElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isScrollingRef = useRef(false);
   const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -1483,10 +1484,15 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         </div>
       </Dialog>
 
-      <Dialog open={isForwardModalOpen} onOpenChange={setIsForwardModalOpen}>
+      <Dialog
+        open={isForwardModalOpen}
+        onOpenChange={setIsForwardModalOpen}
+        {...(!isMobile ? { focusRef: forwardFocusRef } : {})}
+      >
         <ForwardMessageForm
           message={message}
           channelId={channelId}
+          {...(!isMobile ? { initialFocusRef: forwardFocusRef } : {})}
           onCancel={() => setIsForwardModalOpen(false)}
           onSuccess={() => setIsForwardModalOpen(false)}
         />

@@ -162,6 +162,7 @@ const CallHistoryScreen = (): ReactElement => {
   const zero = useZero();
   const callHistoryLoadStartTimeRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch the current user's calendar provider once on mount
   useEffect(() => {
@@ -213,6 +214,14 @@ const CallHistoryScreen = (): ReactElement => {
   const searchParams = new URLSearchParams(location.search);
   const tabParam = searchParams.get('tab');
   const activeTab = (tabParam as CallTabType) || 'all';
+
+  useEffect(() => {
+    if (isMobile) return;
+    const rafId = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [activeTab, isMobile]);
 
   useEffect(() => {
     if (endedCallsCount === 0) return;
@@ -818,6 +827,7 @@ const CallHistoryScreen = (): ReactElement => {
                 <div className='relative flex-1 max-w-full md:max-w-[350px]'>
                   <Search className='absolute left-2.5 top-1/2 transform -translate-y-1/2 text-muted-foreground dark:text-muted-foreground size-4' />
                   <Input
+                    ref={searchInputRef}
                     type='text'
                     placeholder='Search calls'
                     value={searchQuery}

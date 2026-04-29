@@ -18,6 +18,7 @@ import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
 import { useTheme } from '../../../hooks/useTheme';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { EmojiClickData } from 'emoji-picker-react';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 // Hardcoded status suggestions
 const STATUS_SUGGESTIONS = [
@@ -83,17 +84,11 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
   const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [recentStatuses, setRecentStatuses] = useState<RecentStatus[]>([]);
-  const inputRef = React.useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
 
   // Load recent statuses on mount
   useEffect(() => {
     setRecentStatuses(getRecentStatuses());
-  }, []);
-
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
   }, []);
 
   const handleEmojiSelect = (emojiData: EmojiClickData): void => {
@@ -192,13 +187,13 @@ export const StatusSuggestionsView: React.FC<StatusViewProps> = ({ setView }) =>
         </Popover.Root>
 
         <Input
-          ref={inputRef}
           type='text'
           value={statusText}
           onChange={handleTextChange}
           placeholder='Update your status'
           className='w-full pl-10 text-foreground'
           maxLength={100}
+          autoFocus={!isMobile}
         />
       </div>
 
@@ -279,7 +274,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
   const [customTime, setCustomTime] = useState('23:59');
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const inputRef = React.useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
 
   // Initialize with initialData (from suggestions) or current status
   useEffect(() => {
@@ -297,12 +292,6 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
       }
     }
   }, [initialData, user]);
-
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, []);
 
   // Show date picker when custom option is selected
   useEffect(() => {
@@ -480,7 +469,6 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
         </Popover.Root>
 
         <input
-          ref={inputRef}
           type='text'
           value={statusText}
           onChange={handleTextChange}
@@ -489,6 +477,7 @@ export const StatusEditView: React.FC<StatusEditViewProps> = ({ setView, initial
           maxLength={100}
           data-track-category='STATUS'
           data-track-name='EditStatusText'
+          autoFocus={!isMobile}
         />
 
         {isEditingMode && (

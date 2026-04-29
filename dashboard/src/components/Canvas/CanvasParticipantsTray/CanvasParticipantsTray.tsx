@@ -9,6 +9,7 @@ import { Dialog } from '../../ui/Dialog';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { toast } from 'sonner';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 export interface ParticipantItem {
   id: string;
@@ -42,6 +43,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showCollaborativeWarning, setShowCollaborativeWarning] = useState(false);
+  const { isMobile } = usePlatform();
   const z = useZero();
 
   const allUsers = useUsers();
@@ -144,6 +146,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
           <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
           <Input
             type='text'
+            autoFocus={!isMobile}
             placeholder='Find participants'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}

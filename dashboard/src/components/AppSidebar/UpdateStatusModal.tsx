@@ -13,6 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useCustomEmojis } from '../../hooks/useCustomEmojis';
 import { useTheme } from '../../hooks/useTheme';
 import { renderEmoji } from '../../utils/customEmojiUtils';
+import { usePlatform } from '../../hooks/usePlatform';
 
 // Hardcoded status suggestions
 const STATUS_SUGGESTIONS = [
@@ -83,6 +84,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
   const [hasExistingStatus, setHasExistingStatus] = useState(false);
   const [recentStatuses, setRecentStatuses] = useState<RecentStatus[]>([]);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
 
   // Show suggestions when statusText is empty AND no emoji is selected
   const showSuggestions = statusText.trim() === '' && !selectedEmoji;
@@ -315,6 +317,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 placeholder='Update your status'
                 className='w-full pl-10 text-foreground'
                 maxLength={100}
+                autoFocus={!isMobile}
               />
             </div>
 
@@ -437,6 +440,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 data-track-event='blur'
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Status_Text_Input'
+                autoFocus={!isMobile}
               />
 
               {isEditingMode && (

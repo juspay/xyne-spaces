@@ -2,6 +2,7 @@
 import { ReactElement, useState, useCallback, useMemo } from 'react';
 import { useLogsQuery, type LogQueryParams } from './useInspector';
 import { useAuth } from '../../hooks/useAuth';
+import { usePlatform } from '../../hooks/usePlatform';
 import { RefreshCw, Loader2, ChevronRight, ChevronDown, Copy, Check } from 'lucide-react';
 import { getImportantFields, buildImportantEventsFilter, getFieldColor } from './logEventConfig';
 
@@ -209,6 +210,7 @@ function matchesLevel(log: LogRecord, filter: LevelFilter): boolean {
 
 export default function LogsTab(): ReactElement {
   const { user } = useAuth();
+  const { isMobile } = usePlatform();
 
   const [email, setEmail] = useState(user?.email ?? '');
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all');
@@ -250,6 +252,7 @@ export default function LogsTab(): ReactElement {
         <input
           type='text'
           placeholder='Email filter...'
+          autoFocus={!isMobile}
           value={email}
           onChange={e => setEmail(e.target.value)}
           className='px-3.5 py-2 text-sm bg-background border border-border rounded-md w-56 focus:outline-none focus:ring-1 focus:ring-ring'

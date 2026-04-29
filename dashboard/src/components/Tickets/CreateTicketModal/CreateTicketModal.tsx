@@ -79,6 +79,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface CreateTicketModalProps {
   isOpen: boolean;
@@ -231,6 +232,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   // File handling state
   const [isDraggingOverModal, setIsDraggingOverModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const { isMobile } = usePlatform();
 
   // Dynamic field USER search state
   const [dynamicFieldSearchQueries, setDynamicFieldSearchQueries] = useState<
@@ -1295,6 +1298,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       onOpenChange={handleClose}
       title='Create Ticket'
       description='Create and edit ticket details before submitting.'
+      {...(!isMobile ? { focusRef: descriptionTextareaRef } : {})}
       data-testid='create-ticket-modal'
       className={cn(
         'w-full max-w-screen-md max-h-1/2 rounded-xl border border-border',
@@ -1412,6 +1416,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             {field => (
               <div className='space-y-1'>
                 <Textarea
+                  ref={descriptionTextareaRef}
                   rows={2}
                   required={true}
                   aria-required='true'

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { SearchUser } from '../../ui/SearchUser/SearchUser';
 import { User } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import { useAuth } from '../../../hooks/useAuth';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import Button from '../../ui/Button';
 import { v4 as uuidv4 } from 'uuid';
@@ -23,6 +24,8 @@ export function InviteToCallModal({
   const zero = useZero();
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isInviting, setIsInviting] = useState(false);
+  const searchInputFocusRef = useRef<HTMLElement | null>(null);
+  const { isMobile } = usePlatform();
 
   const handleInvite = (): void => {
     if (selectedUsers.length === 0) return;
@@ -56,7 +59,12 @@ export function InviteToCallModal({
   if (!isOpen) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose} title='Invite to Call'>
+    <Dialog
+      open={isOpen}
+      onOpenChange={handleClose}
+      title='Invite to Call'
+      {...(!isMobile ? { focusRef: searchInputFocusRef } : {})}
+    >
       <div className='p-4 space-y-6' data-testid='invite-to-call-modal'>
         <div>
           <h2 className='text-lg font-semibold text-foreground mb-1'>Invite to Call</h2>
@@ -74,6 +82,7 @@ export function InviteToCallModal({
             label='Select Users'
             hintText='Search by name or email to find users to invite'
             data-testid='search-user-invite'
+            autoFocus={!isMobile}
           />
         </div>
 

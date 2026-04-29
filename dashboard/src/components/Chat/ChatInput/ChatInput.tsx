@@ -57,6 +57,8 @@ import { format } from 'date-fns';
 import { Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useUpcomingDelayedMessage } from '../../../hooks/useUserDelayedMessages';
+import { useSelector } from '@xstate/react';
+import { xyneAIActor } from '../../../machines/xyneAIMachine';
 
 // Type for typing indicator system message content
 interface TypingUpdatedContent {
@@ -114,6 +116,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     const { onMessageChange } = useSummaryCache();
 
     const inputBoxRef = useRef<InputBoxHandle>(null);
+    const hasAutoFocusedRef = useRef(false);
 
     useImperativeHandle(
       ref,
@@ -129,6 +132,24 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
     );
 
     const context = useAuthContextValues();
+    const isMobile = window.innerWidth < 500;
+    const isXyneAIOpen = useSelector(xyneAIActor, state => state.matches('open'));
+
+    // TipTap requires editor.commands.focus(), not DOM .focus().
+    // Skips if already focused by TipTap's autofocus or usePageAutoFocus.
+    useEffect(() => {
+      if (hasAutoFocusedRef.current || isMobile || isXyneAIOpen) return;
+      hasAutoFocusedRef.current = true;
+
+      const rafId = requestAnimationFrame(() => {
+        const activeEl = document.activeElement;
+        if (activeEl && activeEl.closest('[contenteditable="true"]')) return;
+        inputBoxRef.current?.focus();
+      });
+
+      return () => cancelAnimationFrame(rafId);
+    }, [isMobile, isXyneAIOpen]);
+
     const { results: mentionResults, allUsers, searchMentions } = useMentionSearch(channelId);
     const [channelSearchQuery, setChannelSearchQuery] = useState('');
     const channelResults = useChannelSearch(channelSearchQuery, 10);
@@ -655,8 +676,6 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
       ],
     );
 
-    const isMobile = window.innerWidth < 500;
-
     return (
       <>
         {channel?.isArchived ? (
@@ -723,7 +742,7 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
             <InputBox
               id={currentSessionId}
               channelId={channelId}
-              autoFocus={isMobile ? false : autoFocus} // eslint-disable-line jsx-a11y/no-autofocus
+              autoFocus={isMobile || isXyneAIOpen ? false : autoFocus} // eslint-disable-line jsx-a11y/no-autofocus
               ref={inputBoxRef}
               key={`inputBox-${channelId}-${conversationId}`}
               mentionItems={mentionResults}

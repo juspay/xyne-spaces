@@ -1,7 +1,8 @@
-import { ReactElement, useState, useEffect } from 'react';
+import { ReactElement, useState, useEffect, useRef } from 'react';
 import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
 import { Edit2, Trash2, Plus, Eye, X } from 'lucide-react';
+import { usePlatform } from '../../../../hooks/usePlatform';
 
 interface Skill {
   name: string;
@@ -23,6 +24,9 @@ const MAX_CUSTOM_INSTRUCTION_LENGTH = 1000;
 
 export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactElement | null => {
   const [activeTab, setActiveTab] = useState<'custom' | 'skills'>('custom');
+  const instructionRef = useRef<HTMLTextAreaElement>(null);
+  const instructionSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const { isMobile } = usePlatform();
 
   // Custom Instructions State
   const [instruction, setInstruction] = useState<string>('');
@@ -50,6 +54,69 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
       void loadSkills();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (
+      isOpen &&
+      activeTab === 'custom' &&
+      !isMobile &&
+      !isLoadingInstruction &&
+      !isSavingInstruction
+    ) {
+      const rafId = requestAnimationFrame(() => {
+        instructionRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+
+    return undefined;
+  }, [isOpen, activeTab, isMobile, isLoadingInstruction, isSavingInstruction]);
+
+  const saveInstructionSelection = (): void => {
+    const el = instructionRef.current;
+    if (!el) return;
+    instructionSelectionRef.current = {
+      start: el.selectionStart ?? el.value.length,
+      end: el.selectionEnd ?? el.value.length,
+    };
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'custom') {
+      saveInstructionSelection();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (
+      activeTab !== 'custom' ||
+      isMobile ||
+      !isOpen ||
+      isLoadingInstruction ||
+      isSavingInstruction
+    ) {
+      return;
+    }
+
+    const rafId = requestAnimationFrame(() => {
+      const el = instructionRef.current;
+      if (!el) return;
+
+      const savedSelection = instructionSelectionRef.current;
+      if (savedSelection) {
+        const max = el.value.length;
+        const start = Math.min(savedSelection.start, max);
+        const end = Math.min(savedSelection.end, max);
+        el.setSelectionRange(start, end);
+        return;
+      }
+
+      const cursorAtEnd = el.value.length;
+      el.setSelectionRange(cursorAtEnd, cursorAtEnd);
+    });
+
+    return () => cancelAnimationFrame(rafId);
+  }, [activeTab, isMobile, isOpen, isLoadingInstruction, isSavingInstruction]);
 
   // Custom Instructions API
   const loadCustomInstruction = async (): Promise<void> => {
@@ -320,11 +387,16 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   Instructions
                 </label>
                 <textarea
+                  ref={instructionRef}
                   id='instruction'
                   value={instruction}
-                  onChange={e =>
-                    setInstruction(e.target.value.slice(0, MAX_CUSTOM_INSTRUCTION_LENGTH))
-                  }
+                  onChange={e => {
+                    setInstruction(e.target.value.slice(0, MAX_CUSTOM_INSTRUCTION_LENGTH));
+                    saveInstructionSelection();
+                  }}
+                  onSelect={saveInstructionSelection}
+                  onKeyUp={saveInstructionSelection}
+                  onClick={saveInstructionSelection}
                   placeholder={
                     isLoadingInstruction
                       ? 'Loading...'
@@ -417,6 +489,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps): ReactEle
                   id='skill-name'
                   type='text'
                   value={skillName}
+                  autoFocus={!isMobile}
                   onChange={e => handleNameChange(e.target.value.slice(0, MAX_NAME_LENGTH))}
                   placeholder='Enter skill name'
                   className={`w-full bg-background px-3 py-2 border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 disabled:bg-muted disabled:text-muted-foreground ${

@@ -1,10 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { TextInput, MultiSelect } from '@juspay/blend-design-system';
 import { Search, Brain, Upload, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { MemoryFilters } from '../../types/memory';
 import { useUploadDocuments, useCleanupAllVespaMemory } from '../../hooks/useMemory';
 import { useIsMemoryAdmin } from '../../hooks/usePermissions';
+import { usePlatform } from '../../hooks/usePlatform';
 import Dialog from '../ui/Dialog';
 
 interface MemoryHeaderProps {
@@ -18,6 +19,9 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [repoUrl, setRepoUrl] = useState('');
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLElement | null>(null);
+  const { isMobile } = usePlatform();
 
   const isMemoryAdmin = useIsMemoryAdmin();
   const uploadMutation = useUploadDocuments();
@@ -134,6 +138,22 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
     }
     return 'Search context...';
   };
+
+  useEffect(() => {
+    if (isMobile) return;
+    const input = searchContainerRef.current?.querySelector('input');
+    if (input instanceof HTMLElement) {
+      searchInputRef.current = input;
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (isMobile) return;
+    const rafId = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [filters.includeQuery, filters.includeSummary, isMobile]);
 
   return (
     <div className='space-y-6 mb-8'>
@@ -278,7 +298,7 @@ const MemoryHeader: React.FC<MemoryHeaderProps> = ({ filters, onFiltersChange })
       <div className='flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4'>
         <div className='flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto'>
           <div className='flex items-center gap-2'>
-            <div className='w-[300px]'>
+            <div ref={searchContainerRef} className='w-[300px]'>
               <TextInput
                 placeholder={getSearchPlaceholder()}
                 value={filters.searchQuery}

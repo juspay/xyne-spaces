@@ -23,6 +23,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
 import { useUsers } from '../../../hooks/useUsers';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 type FilterType = ChannelRole | 'everyone';
 
@@ -43,6 +44,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
   const context = useAuthContextValues();
   const zero = useZero();
   const navigate = useNavigate();
+  const { isMobile } = usePlatform();
 
   const [participants] = useCachedQuery(queries.channelParticipants({ channelId: channel.id }));
 
@@ -241,6 +243,7 @@ const ChannelParticipants: React.FC<ChannelParticipantsProps> = ({
             data-track-event='blur'
             data-track-category='CHANNEL_INFORMATION'
             data-track-name='SEARCH_MEMBERS_INPUT'
+            autoFocus={!isMobile}
           />
         </div>
 

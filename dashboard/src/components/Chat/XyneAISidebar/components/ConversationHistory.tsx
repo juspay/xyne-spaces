@@ -124,6 +124,7 @@ export const ConversationHistory = ({
                 className="flex-1 bg-transparent outline-none text-foreground placeholder:text-muted-foreground text-sm font-['Inter']"
                 data-track-category='XyneAI'
                 data-track-name='SearchChatsInput'
+                autoFocus={!isMobile}
               />
               <Search className='w-4 h-4 text-muted-foreground' />
             </div>

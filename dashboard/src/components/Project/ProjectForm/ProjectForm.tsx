@@ -3,6 +3,7 @@ import { TextInput, TextArea, Button, ButtonType } from '@juspay/blend-design-sy
 import { mixpanelService } from '../../../services/Analytics/mixpanelService';
 import { EVENTS, EVENT_PROPERTIES } from '../../../services/Analytics/mixpanel.types';
 import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface Project {
   id: string;
@@ -29,6 +30,7 @@ export const ProjectForm = ({
   const [code, setCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { isMobile } = usePlatform();
 
   const handleSubmit = (): void => {
     if (!name.trim()) {
@@ -103,6 +105,7 @@ export const ProjectForm = ({
           placeholder='Enter project name'
           required
           disabled={isLoading}
+          autoFocus={!isMobile}
         />
       </div>
 

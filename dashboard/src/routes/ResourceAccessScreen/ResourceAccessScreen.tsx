@@ -6,6 +6,7 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import Input from '../../components/ui/Input/Input';
 import { Search } from 'lucide-react';
 import type { User } from '../../machines/stateMachine';
+import { usePlatform } from '../../hooks/usePlatform';
 
 /**
  * ResourceAccessScreen - Admin screen for managing user resource access
@@ -20,6 +21,7 @@ import type { User } from '../../machines/stateMachine';
 export const ResourceAccessScreen = (): ReactElement => {
   const users = useUsers();
   const [searchQuery, setSearchQuery] = useState('');
+  const { isMobile } = usePlatform();
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 300);
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
@@ -51,6 +53,7 @@ export const ResourceAccessScreen = (): ReactElement => {
             <Input
               type='text'
               placeholder='Search users by name or email...'
+              autoFocus={!isMobile}
               value={searchQuery}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
               className='pl-10 w-full'

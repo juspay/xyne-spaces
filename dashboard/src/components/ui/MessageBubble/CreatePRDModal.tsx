@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Dialog from '../Dialog/Dialog';
 import { RadioGroup, Radio } from '../RadioGroup/RadioGroup';
 import Textarea from '../Textarea/Textarea';
 import { Button } from '../Button/Button';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface CreatePRDModalProps {
   isOpen: boolean;
@@ -19,11 +20,23 @@ export const CreatePRDModal: React.FC<CreatePRDModalProps> = ({
 }) => {
   const [mode, setMode] = useState<'standard' | 'custom'>('standard');
   const [customPrompt, setCustomPrompt] = useState('');
+  const customPromptRef = useRef<HTMLTextAreaElement>(null);
+  const { isMobile } = usePlatform();
 
   const MAX_PROMPT_LENGTH = 5000;
   const isCustomPromptEmpty = mode === 'custom' && customPrompt.trim().length === 0;
   const isCustomPromptTooLong = customPrompt.length > MAX_PROMPT_LENGTH;
   const isGenerateDisabled = isCustomPromptEmpty || isCustomPromptTooLong;
+  useEffect(() => {
+    if (isOpen && mode === 'custom' && !isMobile) {
+      const rafId = requestAnimationFrame(() => {
+        customPromptRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+
+    return;
+  }, [isOpen, mode, isMobile]);
 
   const handleGenerate = () => {
     if (isGenerateDisabled) {
@@ -78,6 +91,7 @@ export const CreatePRDModal: React.FC<CreatePRDModalProps> = ({
           {mode === 'custom' && (
             <div className='grid gap-2 pl-8'>
               <Textarea
+                ref={customPromptRef}
                 placeholder='E.g., Focus on the API authentication flow and error handling...'
                 value={customPrompt}
                 onChange={e => setCustomPrompt(e.target.value)}

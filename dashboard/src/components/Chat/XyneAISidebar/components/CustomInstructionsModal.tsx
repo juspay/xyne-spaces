@@ -1,7 +1,8 @@
-import { ReactElement, useState, useEffect } from 'react';
+import { ReactElement, useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { apiInstance } from '../../../../services/clients/apiClient';
 import { toast } from 'sonner';
+import { usePlatform } from '../../../../hooks/usePlatform';
 
 interface CustomInstructionsModalProps {
   isOpen: boolean;
@@ -19,6 +20,8 @@ export const CustomInstructionsModal = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [showLengthWarning, setShowLengthWarning] = useState<boolean>(false);
+  const instructionRef = useRef<HTMLTextAreaElement>(null);
+  const { isMobile } = usePlatform();
 
   // Load custom instruction on mount
   useEffect(() => {
@@ -26,6 +29,17 @@ export const CustomInstructionsModal = ({
       void loadCustomInstruction();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && !isMobile && !isLoading && !isSaving) {
+      const rafId = requestAnimationFrame(() => {
+        instructionRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+
+    return undefined;
+  }, [isOpen, isMobile, isLoading, isSaving]);
 
   const loadCustomInstruction = async (): Promise<void> => {
     setIsLoading(true);
@@ -118,6 +132,7 @@ export const CustomInstructionsModal = ({
                 Instructions
               </label>
               <textarea
+                ref={instructionRef}
                 id='instruction'
                 value={instruction}
                 onChange={e => setInstruction(e.target.value.slice(0, MAX_INSTRUCTION_LENGTH))}
