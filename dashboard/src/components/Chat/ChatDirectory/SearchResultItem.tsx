@@ -232,9 +232,10 @@ const SearchResultItem = ({
         <Command.Item
           key={result.id}
           value={`backend-${result.type}-${result.id}`}
+          data-ticket-id={result.id}
           onSelect={() => void onSelect(result)}
           onMouseDownCapture={handleMouseDown}
-          className='flex flex-col gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
+          className='group flex flex-col gap-2 px-2 py-1.5 rounded-sm cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1'
         >
           <div className='flex items-center gap-2'>
             {getResultIcon(result)}
