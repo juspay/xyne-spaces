@@ -1,9 +1,23 @@
-import { ReactElement, useState, useMemo } from 'react';
+import { ReactElement, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Plus, Search } from 'lucide-react';
+import {
+  ChevronRight,
+  Plus,
+  Search,
+  ArrowUpDown,
+  ArrowDownAZ,
+  BellDot,
+  Clock,
+  Check,
+} from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
-import { groupChannelsByScope } from './ChatDirectory.utils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useMutation } from '@tanstack/react-query';
 import {
@@ -25,6 +39,8 @@ import { MobileProfileMenu } from '../../ui/MobileProfileMenu/MobileProfileMenu'
 
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { useChannelSort } from '../../../hooks/useChannelSort';
+import { ChannelSortOrder } from '@xyne/shared';
 import { Accordion } from 'radix-ui';
 import MobileChannelItem from './MobileChannelItem';
 import Tooltip from '../../ui/Tooltip';
@@ -36,6 +52,9 @@ const MobileChatDirectory = ({
   const navigate = useNavigate();
   const context = useAuthContextValues();
   const zero = useZero();
+
+  const { starred, channels, directMessages, channelSortOrder, setChannelSortOrder } =
+    useChannelSort(channelData, allChannelsUserStatus, context.userID);
 
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
   const [showAddDmForm, setShowAddDmForm] = useState(false);
@@ -79,26 +98,6 @@ const MobileChatDirectory = ({
       void navigate(`/chat/dir/${response.id}`);
     },
   });
-
-  // Group channels by scope type
-  const { starred, channels, directMessages } = useMemo(() => {
-    if (!channelData) return { starred: [], channels: [], directMessages: [] };
-
-    const grouped = groupChannelsByScope(channelData, allChannelsUserStatus);
-
-    const sortByActivity = (list: typeof channelData) =>
-      [...list].sort(
-        (a, b) =>
-          new Date(b.channelStats?.lastActivityAt ?? 0).getTime() -
-          new Date(a.channelStats?.lastActivityAt ?? 0).getTime(),
-      );
-
-    return {
-      starred: sortByActivity(grouped.starred),
-      channels: sortByActivity(grouped.channels),
-      directMessages: sortByActivity(grouped.directMessages),
-    };
-  }, [channelData, context.userID, allChannelsUserStatus]);
 
   const handleAddChannelSubmit = (data: CreateChannelFormData): void => {
     createChannelMutation.mutate(data);
@@ -201,20 +200,84 @@ const MobileChatDirectory = ({
                     />
                   </span>
                 </button>
-                <Tooltip content='Add channel' side='top' sideOffset={0} delayDuration={500}>
-                  <button
-                    className='text-muted-foreground hover:text-foreground transition-colors'
-                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setShowAddChannelForm(true);
-                    }}
-                    data-track-category='MOBILE_CHAT_DIRECTORY'
-                    data-track-name='ADD_CHANNEL_MOBILE'
-                  >
-                    <Plus className='size-5' />
-                  </button>
-                </Tooltip>
+                <div className='flex items-center gap-2'>
+                  <DropdownMenu>
+                    <Tooltip content='Sort channels' side='top' sideOffset={0} delayDuration={500}>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          className='text-muted-foreground hover:text-foreground transition-colors focus:outline-none'
+                          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                          data-track-category='MOBILE_CHAT_DIRECTORY'
+                          data-track-name='SORT_CHANNELS_MOBILE'
+                        >
+                          <ArrowUpDown className='size-5' />
+                        </button>
+                      </DropdownMenuTrigger>
+                    </Tooltip>
+                    <DropdownMenuContent
+                      align='end'
+                      className='min-w-[160px]'
+                      onCloseAutoFocus={e => e.preventDefault()}
+                    >
+                      <DropdownMenuItem
+                        onClick={e => {
+                          e.stopPropagation();
+                          setChannelSortOrder(ChannelSortOrder.UNREAD);
+                        }}
+                        className='gap-2'
+                      >
+                        <BellDot className='size-3.5 shrink-0' />
+                        <span className='flex-1'>Unread & Activity</span>
+                        {channelSortOrder === ChannelSortOrder.UNREAD && (
+                          <Check className='size-3.5 shrink-0' />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={e => {
+                          e.stopPropagation();
+                          setChannelSortOrder(ChannelSortOrder.RECENCY);
+                        }}
+                        className='gap-2'
+                      >
+                        <Clock className='size-3.5 shrink-0' />
+                        <span className='flex-1'>By recency</span>
+                        {channelSortOrder === ChannelSortOrder.RECENCY && (
+                          <Check className='size-3.5 shrink-0' />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={e => {
+                          e.stopPropagation();
+                          setChannelSortOrder(ChannelSortOrder.ALPHABETICAL);
+                        }}
+                        className='gap-2'
+                      >
+                        <ArrowDownAZ className='size-3.5 shrink-0' />
+                        <span className='flex-1'>Alphabetical A-Z</span>
+                        {channelSortOrder === ChannelSortOrder.ALPHABETICAL && (
+                          <Check className='size-3.5 shrink-0' />
+                        )}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Tooltip content='Add channel' side='top' sideOffset={0} delayDuration={500}>
+                    <button
+                      className='text-muted-foreground hover:text-foreground transition-colors'
+                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setShowAddChannelForm(true);
+                      }}
+                      data-track-category='MOBILE_CHAT_DIRECTORY'
+                      data-track-name='ADD_CHANNEL_MOBILE'
+                    >
+                      <Plus className='size-5' />
+                    </button>
+                  </Tooltip>
+                </div>
               </div>
             </Accordion.Trigger>
             <Accordion.Content>

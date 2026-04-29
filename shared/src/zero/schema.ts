@@ -145,6 +145,13 @@ export enum ChannelAddUserPolicy {
 }
 
 // @ts-ignore TS1294
+export enum ChannelSortOrder {
+  UNREAD = 'UNREAD',
+  RECENCY = 'RECENCY',
+  ALPHABETICAL = 'ALPHABETICAL',
+}
+
+// @ts-ignore TS1294
 export enum MessageType {
   USER = 'USER',
   BOT = 'BOT',
@@ -1102,6 +1109,7 @@ export const userPreferenceTable = table('user_preferences')
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
+    channelSortOrder: enumeration<ChannelSortOrder>(), // Sidebar channel sort
     createdAt: number(),
     updatedAt: number(),
   })

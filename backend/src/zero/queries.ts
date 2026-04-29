@@ -2539,6 +2539,10 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  getCurrentUserPreference: defineQuery(z.object({}), ({ ctx }) => {
+    return zql.user_preferences.where('userId', ctx.userID).one();
+  }),
+
   // ── Sent Messages ─────────────────────────────────────────────────────────
   /** Paginated messages sent by the current user, ordered newest first */
   userSentMessagesPaginated: defineQuery(

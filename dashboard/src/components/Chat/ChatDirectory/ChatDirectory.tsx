@@ -17,11 +17,20 @@ import {
   FileEdit,
   Clock,
   Pencil,
+  ArrowUpDown,
+  ArrowDownAZ,
+  Check,
+  BellDot,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 import { useWalkthrough } from '../../../hooks/useWalkthrough';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
-import { groupChannelsByScope } from './ChatDirectory.utils';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useMutation } from '@tanstack/react-query';
 import { useSelector } from '@xstate/react';
@@ -45,6 +54,8 @@ import {
 
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
+import { useChannelSort } from '../../../hooks/useChannelSort';
+import { ChannelSortOrder } from '@xyne/shared';
 import { Accordion } from 'radix-ui';
 import ChannelItemV2 from './ChannelItemV2';
 import Tooltip from '../../ui/Tooltip';
@@ -78,6 +89,9 @@ const ChatDirectory = ({
   const [newlyCreatedChannelId, setNewlyCreatedChannelId] = useState<string | null>(null);
   const pendingScheduledCount = usePendingDelayedMessagesCount();
   const draftsCount = useSelector(stateMachineActor, state => state.context.draftMessages.length);
+  const { starred, channels, directMessages, channelSortOrder, setChannelSortOrder } =
+    useChannelSort(channelData, allChannelsUserStatus, context.userID);
+  const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
 
   const { startWalkthrough } = useWalkthrough({
     feature: 'direct_messages',
@@ -124,53 +138,6 @@ const ChatDirectory = ({
       void navigate(`/chat/dir/${response.id}`);
     },
   });
-
-  // Group channels by scope type
-  const { starred, channels, directMessages } = useMemo(() => {
-    if (!channelData) return { starred: [], channels: [], directMessages: [] };
-
-    const grouped = groupChannelsByScope(channelData, allChannelsUserStatus);
-
-    const sortByUnreadAndActivity = (list: typeof channelData) => {
-      const withUnread: typeof channelData = [];
-      const withNewActivity: typeof channelData = [];
-      const normal: typeof channelData = [];
-
-      for (const channel of list) {
-        const status = allChannelsUserStatus.find(
-          s => s.channelId === channel.id && s.userId === context.userID,
-        );
-        const unreadCount = status?.unreadCount ?? 0;
-        const lastActivityAt = channel.channelStats?.lastActivityAt ?? 0;
-        const lastViewedAt = status?.lastViewedAt ?? 0;
-
-        if (unreadCount > 0) {
-          withUnread.push(channel);
-        } else if (lastActivityAt > lastViewedAt) {
-          withNewActivity.push(channel);
-        } else {
-          normal.push(channel);
-        }
-      }
-
-      const sortByActivity = (channels: typeof channelData) =>
-        [...channels].sort(
-          (a, b) => (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0),
-        );
-
-      return [
-        ...sortByActivity(withUnread),
-        ...sortByActivity(withNewActivity),
-        ...sortByActivity(normal),
-      ];
-    };
-
-    return {
-      starred: sortByUnreadAndActivity(grouped.starred),
-      channels: sortByUnreadAndActivity(grouped.channels),
-      directMessages: sortByUnreadAndActivity(grouped.directMessages),
-    };
-  }, [channelData, allChannelsUserStatus, context.userID]);
 
   // Sum unread counts across all DM channels
   const dmCount = useMemo(() => {
@@ -572,7 +539,9 @@ const ChatDirectory = ({
                     />
                   </span>
                 </button>
-                <div className='flex items-center gap-2 mr-0.5 opacity-0 group-hover:opacity-100 transition-opacity ease-in-out duration-300'>
+                <div
+                  className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSortDropdownOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                >
                   <Tooltip content='Browse channels' side='top' sideOffset={0} delayDuration={500}>
                     <button
                       className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1'
@@ -610,6 +579,71 @@ const ChatDirectory = ({
                       />
                     </button>
                   </Tooltip>
+                  <DropdownMenu onOpenChange={setIsSortDropdownOpen}>
+                    <Tooltip content='Sort channels' side='top' sideOffset={0} delayDuration={500}>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          className='group/child text-sidebar-secondary-foreground hover:text-sidebar-primary-foreground hover:bg-sidebar-item-hover transition-colors rounded-md p-1 focus:outline-none'
+                          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                          data-track-category='CHAT_SIDEBAR'
+                          data-track-name='SORT_CHANNELS'
+                        >
+                          <ArrowUpDown
+                            strokeWidth={2.33}
+                            className='size-3.5 text-sidebar-secondary-foreground group-hover/child:text-sidebar-badge-accent transition-colors'
+                          />
+                        </button>
+                      </DropdownMenuTrigger>
+                    </Tooltip>
+                    <DropdownMenuContent
+                      align='end'
+                      className='min-w-[160px]'
+                      onCloseAutoFocus={e => e.preventDefault()}
+                    >
+                      <DropdownMenuItem
+                        onClick={e => {
+                          e.stopPropagation();
+                          setChannelSortOrder(ChannelSortOrder.UNREAD);
+                        }}
+                        className='gap-2'
+                      >
+                        <BellDot className='size-3.5 shrink-0' />
+                        <span className='flex-1'>Unread & Activity</span>
+                        {channelSortOrder === ChannelSortOrder.UNREAD && (
+                          <Check className='size-3.5 shrink-0' />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={e => {
+                          e.stopPropagation();
+                          setChannelSortOrder(ChannelSortOrder.RECENCY);
+                        }}
+                        className='gap-2'
+                      >
+                        <Clock className='size-3.5 shrink-0' />
+                        <span className='flex-1'>By recency</span>
+                        {channelSortOrder === ChannelSortOrder.RECENCY && (
+                          <Check className='size-3.5 shrink-0' />
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={e => {
+                          e.stopPropagation();
+                          setChannelSortOrder(ChannelSortOrder.ALPHABETICAL);
+                        }}
+                        className='gap-2'
+                      >
+                        <ArrowDownAZ className='size-3.5 shrink-0' />
+                        <span className='flex-1'>Alphabetical A-Z</span>
+                        {channelSortOrder === ChannelSortOrder.ALPHABETICAL && (
+                          <Check className='size-3.5 shrink-0' />
+                        )}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             </Accordion.Trigger>
