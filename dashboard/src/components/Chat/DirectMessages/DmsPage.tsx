@@ -71,16 +71,21 @@ interface DmUserSearchResultItemProps {
     name: string;
   };
   isSelected: boolean;
+  isCurrentUser?: boolean;
 }
 
 const DmUserSearchResultItem = ({
   user,
   isSelected,
+  isCurrentUser,
 }: DmUserSearchResultItemProps): ReactElement => {
   return (
     <div className={`flex items-center gap-3 px-2 py-2 ${isSelected ? 'bg-accent' : ''}`}>
       <Avatar userId={user.id} size='md' showActiveStatus className='rounded-lg' />
-      <span className='text-sm font-medium text-foreground truncate'>{user.name}</span>
+      <span className='text-sm font-medium text-foreground truncate'>
+        {user.name}
+        {isCurrentUser ? ' (you)' : ''}
+      </span>
     </div>
   );
 };
@@ -328,7 +333,11 @@ const DmsPage = (): ReactElement => {
                       data-track-category='DM'
                       data-track-name='SELECT_NEW_DM_USER'
                     >
-                      <DmUserSearchResultItem user={user} isSelected={isSelected} />
+                      <DmUserSearchResultItem
+                        user={user}
+                        isSelected={isSelected}
+                        isCurrentUser={user.id === context.userID}
+                      />
                     </button>
                   );
                 })}
