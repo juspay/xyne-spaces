@@ -1146,6 +1146,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                             message={isWorkflowMessage ? 'Workflow created' : message.content}
                             showEdited={message.edited}
                             isSystemMessage={isSystemMessage}
+                            messageId={message.messageId}
+                            conversationId={message.conversationId}
                           />
                         </div>
                       )}

@@ -16,6 +16,7 @@
     "noEmit": true,
     "resolvePackageJsonExports": true,
     "paths": {
+      "@/*": ["./src/*"],
       "@xyne/shared/*": ["../shared/dist/*"],
       "react-router-dom-actual": ["./node_modules/react-router-dom"]
     },

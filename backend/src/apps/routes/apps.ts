@@ -14,10 +14,12 @@ import prCheckCallbackRouter from './prCheckCallback';
 import { authenticateApp } from '../middelware/authenticator';
 import { uploadMultiple, uploadConfig } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
+import { FlowController } from '../controllers/flowController';
 
 const router = Router();
 const appController = new AppController();
 const chatController = new ChatController();
+const flowController = new FlowController();
 
 router.post('/create', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.createApp);
 router.post('/install/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appController.installApp);
@@ -55,5 +57,8 @@ router.use('/email', authenticateApp, emailRoutes);
 // PR check callback (called by dispatchAction when user clicks "Run PR Check" button)
 // No auth needed here - dispatchAction is already authenticated and validates the request
 router.use('/pr-check', prCheckCallbackRouter);
+
+// Flow UI route
+router.post('/flow/action', authMiddleware.authenticate, flowController.executeAction);
 
 export default router;

@@ -8,6 +8,7 @@ import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/u
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
 import { MessageType } from '@xyne/shared';
+import { validateFlowDefinition, formatValidationErrors } from '@xyne/shared';
 import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
 import { redisService } from '@/services/redisService';
@@ -33,9 +34,26 @@ const PostMessageBodySchema = ChatActionBodySchema.extend({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   channelName: z.string().min(1, 'Channel name is required').trim().optional(),
   conversationId: z.string().trim().optional(),
+  // Flow-based UI support — v2 only
+  flow: z.object({
+    version: z.literal('2.0'),
+    screenId: z.string().optional(),
+    title: z.string().optional(),
+    components: z.array(z.record(z.any())).optional(),
+    data: z.record(z.unknown()).optional(),
+    state: z.object({
+      values: z.record(z.unknown()),
+      touched: z.record(z.boolean()),
+      errors: z.record(z.string()),
+      submitting: z.boolean(),
+      submitted: z.boolean(),
+      history: z.array(z.string()),
+      loadingComponentIds: z.array(z.string()).optional(),
+    }),
+  }).optional(),
 }).refine(
-  data => !!data.text || !!data.markdownText,
-  { message: 'Either text or markdownText is required', path: ['text'] }
+  data => !!data.text || !!data.markdownText || !!data.flow,
+  { message: 'Either text, markdownText, or flow is required', path: ['text'] }
 ).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
   { message: 'Either channelId, channelName, or conversationId is required', path: ['channelId'] }
@@ -45,9 +63,10 @@ const UpdateMessageBodySchema = ChatActionBodySchema.extend({
   messageId: z.string().min(1, 'Message ID is required').trim(),
   channelId: z.string().optional(),
   channelName: z.string().trim().optional(),
+  flowJSON: z.record(z.unknown()).optional(),
 }).refine(
-  data => !!data.text || !!data.markdownText,
-  { message: 'Either text or markdownText is required', path: ['text'] }
+  data => !!data.text || !!data.markdownText || !!data.flowJSON,
+  { message: 'Either text, markdownText, or flowJSON is required', path: ['text'] }
 );
 
 const ChannelHistoryQuerySchema = z.object({
@@ -124,29 +143,24 @@ export class ChatController {
   /**
    * Post a message to a channel or conversation
    * POST /api/external-event/chat/postMessage
-   * 
+   *
    * Required fields:
    * - userId: string - User ID posting the message
    * - channelId or conversationId: string - Target channel or conversation
-   * 
+   *
    * Optional fields:
    * - text: string - Message text content
    * - attachments: array - Slack-style attachments (will be parsed)
    * - uploadedFiles: array - Pre-uploaded files to attach
-   * - msgType: 'USER' | 'BOT' | 'SYSTEM' - Message type (defaults to USER)
    * - metadata: object - Additional metadata
-   * - replyBroadcast: boolean - Show reply in channel
-   * - lastActivityAt: string - Custom last activity timestamp
-   * - isBot: boolean - Whether the message is from a bot
-   * - createdAt: string - Custom creation timestamp
+   * - flow: object - v2 Flow UI definition
    */
   postMessage = async (req: Request, res: Response): Promise<void> => {
     try {
-      // Validate request body with Zod
       const bodyResult = PostMessageBodySchema.safeParse(req.body);
-      
+
       if (!bodyResult.success) {
-        res.status(400).json({ 
+        res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
           details: bodyResult.error.errors
@@ -159,6 +173,7 @@ export class ChatController {
         channelName,
         text,
         markdownText,
+        flow,
         conversationId,
         attachments,
         userId,
@@ -167,11 +182,41 @@ export class ChatController {
         contentFormat,
       } = bodyResult.data;
 
-      // Resolve channelId from channelName or conversationId if not provided
       const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
 
       let content: string;
-      if (markdownText) {
+      let isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;
+
+      if (flow) {
+        const flowId = crypto.randomUUID();
+        const appId = (req.body as Record<string, unknown>).appId as string;
+        const flowJSON = {
+          version: '2.0' as const,
+          screenId: flow.screenId ?? flowId,
+          title: flow.title,
+          components: flow.components ?? [],
+          data: flow.data,
+          state: {
+            ...flow.state,
+            loadingComponentIds: flow.state.loadingComponentIds ?? [],
+          },
+        };
+
+        // Validate against the strict schema before storing
+        const flowResult = validateFlowDefinition(flowJSON);
+        if (!flowResult.success) {
+          res.status(400).json({
+            error: 'Invalid flowJSON',
+            code: 'VALIDATION_ERROR',
+            details: formatValidationErrors(flowResult),
+          });
+          return;
+        }
+
+        const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
+        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${appId ?? ''}" data-flow-id="${flowId}">Flow JSON</div>`;
+        isMarkdown = false;
+      } else if (markdownText) {
         content = markdownText;
       } else if (contentFormat === ContentFormat.MARKDOWN) {
         content = text || '';
@@ -179,8 +224,6 @@ export class ChatController {
         content = await this.processMessageContent(text, attachments);
       }
 
-      // Post the message with all features
-      const isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;
       const result = await findOrCreateConversation(
         resolvedChannelId,
         userId,
@@ -223,11 +266,10 @@ export class ChatController {
    */
   updateMessage = async (req: Request, res: Response): Promise<void> => {
     try {
-      // Validate request body with Zod
       const bodyResult = UpdateMessageBodySchema.safeParse(req.body);
-      
+
       if (!bodyResult.success) {
-        res.status(400).json({ 
+        res.status(400).json({
           error: `Validation error`,
           code: 'VALIDATION_ERROR',
           details: bodyResult.error.errors
@@ -235,20 +277,31 @@ export class ChatController {
         return;
       }
 
-      const { messageId, text, markdownText, attachments } = bodyResult.data;
+      const { messageId, text, markdownText, flowJSON, attachments } = bodyResult.data;
 
       let content: string;
-      if (markdownText) {
+
+      if (flowJSON) {
+        const flowResult = validateFlowDefinition(flowJSON);
+        if (!flowResult.success) {
+          res.status(400).json({
+            error: 'Invalid flowJSON',
+            code: 'VALIDATION_ERROR',
+            details: formatValidationErrors(flowResult),
+          });
+          return;
+        }
+        const appId = (req.body as Record<string, unknown>).appId as string | undefined;
+        const flowId = (flowResult.data.screenId) ?? crypto.randomUUID();
+        const escapedJSON = JSON.stringify(flowResult.data).replace(/"/g, '&quot;');
+        content = `<div data-flow-json="${escapedJSON}" data-flow-appid="${appId ?? ''}" data-flow-id="${flowId}">Flow JSON</div>`;
+      } else if (markdownText) {
         content = markdownText;
       } else {
         content = await this.processMessageContent(text, attachments);
       }
 
-      // Update the message
-      const result = await updateConversation(
-        messageId,
-        content
-      );
+      const result = await updateConversation(messageId, content);
 
       res.status(200).json(result);
     } catch (error) {
@@ -344,10 +397,9 @@ export class ChatController {
   channelHistory = async (req: Request, res: Response): Promise<void> => {
     try {
       const queryResult = ChannelHistoryQuerySchema.safeParse(req.query);
-      
-      if (!queryResult.success) {
 
-        res.status(400).json({ 
+      if (!queryResult.success) {
+        res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
           message: 'Invalid query parameters',
@@ -356,10 +408,7 @@ export class ChatController {
       }
 
       const { channelId, channelName, conversationId, limit, cursor } = queryResult.data;
-
-      // Resolve channelId from channelName or conversationId if not provided
       const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
-
       const response = await getChannelHistory(resolvedChannelId, limit, cursor);
 
       res.status(200).json(response);
@@ -394,9 +443,9 @@ export class ChatController {
   conversationReplies = async (req: Request, res: Response): Promise<void> => {
     try {
       const queryResult = ConversationRepliesQuerySchema.safeParse(req.query);
-      
+
       if (!queryResult.success) {
-        res.status(400).json({ 
+        res.status(400).json({
           error: 'Validation error',
           code: 'VALIDATION_ERROR',
           message: 'Invalid query parameters',
@@ -405,10 +454,7 @@ export class ChatController {
       }
 
       const { channelId, channelName, conversationId, limit, cursor } = queryResult.data;
-
-      // Resolve channelId from channelName or conversationId if not provided
       const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
-
       const response = await getConversationReplies(resolvedChannelId, conversationId, limit, cursor);
 
       res.status(200).json(response);
@@ -460,6 +506,7 @@ export class ChatController {
       res.status(400).json({ error: 'actionId, actionableUrl, messageId, conversationId are required' });
       return;
     }
+
 
     // Acknowledge immediately so the frontend isn't blocked
     res.status(200).json({ success: true });
