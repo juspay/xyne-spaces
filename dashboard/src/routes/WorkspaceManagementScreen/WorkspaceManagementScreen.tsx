@@ -50,10 +50,10 @@ export const WorkspaceManagementScreen = (): ReactElement => {
           <Tabs.Root value={activeTab} onValueChange={setActiveTab} className='h-full'>
             <div className='h-full overflow-y-auto p-6'>
               <Tabs.Content value='general' className='outline-none h-full'>
-                <GeneralAndMembersTab />
+                <GeneralAndMembersTab isActive={activeTab === 'general'} />
               </Tabs.Content>
               <Tabs.Content value='invitations' className='outline-none h-full'>
-                <InvitationsTab />
+                <InvitationsTab isActive={activeTab === 'invitations'} />
               </Tabs.Content>
             </div>
           </Tabs.Root>

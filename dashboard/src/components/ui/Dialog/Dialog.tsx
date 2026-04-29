@@ -1,4 +1,4 @@
-import React, { ReactNode, useState, useEffect } from 'react';
+import React, { ReactNode, RefObject, useState, useEffect } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import Drawer from '../Drawer';
 import { cn } from '../../../utils/classNames';
@@ -12,6 +12,7 @@ export interface DialogProps {
   title?: ReactNode;
   description?: ReactNode;
   className?: string;
+  focusRef?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -39,6 +40,7 @@ export const Dialog = ({
   title,
   description,
   className,
+  focusRef,
 }: DialogProps): React.ReactElement => {
   const [isMobile, setIsMobile] = useState(false);
   useOverlayEffect(open ?? false);
@@ -91,6 +93,20 @@ export const Dialog = ({
         />
 
         <DialogPrimitive.Content
+          {...(focusRef !== undefined && {
+            onOpenAutoFocus: (event: Event) => {
+              event.preventDefault();
+              if (focusRef.current) {
+                focusRef.current.focus();
+              } else {
+                // focusRef may not be populated yet (e.g. child assigns it in a
+                // ref callback that hasn't fired). Retry after the next paint.
+                requestAnimationFrame(() => {
+                  focusRef.current?.focus();
+                });
+              }
+            },
+          })}
           className={cn(
             'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
             'w-full',

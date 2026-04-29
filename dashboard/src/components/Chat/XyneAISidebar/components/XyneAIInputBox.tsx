@@ -194,6 +194,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     const researchDropdownRef = useRef<HTMLDivElement>(null);
     const researchSearchInputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const hasAutoFocusedRef = useRef(false);
     const isContextModalOpenRef = useRef(isContextModalOpen);
     const onCloseContextModalRef = useRef(onCloseContextModal);
     const onOpenContextModalRef = useRef(onOpenContextModal);
@@ -604,6 +605,32 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         },
       },
     });
+
+    // TipTap requires editor.commands.focus() — DOM .focus() doesn't properly focus the editor
+    useEffect(() => {
+      if (!editor || hasAutoFocusedRef.current) return;
+
+      hasAutoFocusedRef.current = true;
+
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const rafId = requestAnimationFrame(() => {
+        editor.commands.focus();
+      });
+
+      return () => cancelAnimationFrame(rafId);
+    }, [editor]);
+
+    useEffect(() => {
+      if (isMobile) return;
+      const rafId = requestAnimationFrame(() => {
+        researchSearchInputRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(rafId);
+    }, [researchTab]);
 
     // Notify parent component when attachments change
     useEffect(() => {

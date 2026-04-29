@@ -26,6 +26,7 @@ interface SearchUserProps {
     reason?: string;
   };
   channelId?: string;
+  autoFocus?: boolean;
 }
 
 export const SearchUser: React.FC<SearchUserProps> = ({
@@ -38,6 +39,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
   width = '100%',
   disabled = { value: false, reason: undefined },
   channelId,
+  autoFocus = false,
 }) => {
   const [searchValue, setSearchValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -214,6 +216,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
               onKeyDown={handleKeyDown}
               onFocus={handleFocus}
               disabled={disabled.value}
+              autoFocus={autoFocus}
             />
           </div>
         </Popover.Anchor>

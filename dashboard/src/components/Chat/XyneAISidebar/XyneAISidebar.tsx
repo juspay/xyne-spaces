@@ -161,6 +161,35 @@ const XyneAISidebar = ({
   // If startFreshChat is true on mount, mark as loaded immediately to prevent loading old data
   const hasLoadedInitialConversationRef = useRef(startFreshChat || isFullscreen);
 
+  // Find the ProseMirror editor element and focus it once it exists.
+  // Retry via rAF because editor mount timing can vary across renders/routes.
+  useEffect(() => {
+    if (isMobile) return;
+    let rafId: number | null = null;
+    let attempts = 0;
+
+    const resolveAndFocus = () => {
+      const editorEl = dragAndDropAreaRef.current?.querySelector('.ProseMirror');
+      if (editorEl instanceof HTMLElement) {
+        editorEl.focus();
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < 10) {
+        rafId = requestAnimationFrame(resolveAndFocus);
+      }
+    };
+
+    resolveAndFocus();
+
+    return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, [dragAndDropAreaRef, isMobile]);
+
   // Update activeThreadInfo when threadInfo prop changes
   const prevThreadConversationIdRef = useRef(threadInfo?.conversationId);
   useEffect(() => {

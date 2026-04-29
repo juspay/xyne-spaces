@@ -1,4 +1,4 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, RefObject, useEffect } from 'react';
 import { Drawer as DrawerPrimitive } from 'vaul';
 import { cn } from '../../../utils/classNames';
 import { useNativeDrawerBridge } from '../../../hooks/useNativeDrawerBridge';
@@ -10,6 +10,7 @@ export interface DrawerProps {
   onOpenChange?: (open: boolean) => void;
   title?: ReactNode;
   description?: ReactNode;
+  focusRef?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -36,8 +37,17 @@ export const Drawer = ({
   onOpenChange,
   title,
   description,
+  focusRef,
 }: DrawerProps): React.ReactElement => {
   useNativeDrawerBridge({ open, onOpenChange });
+
+  useEffect(() => {
+    if (focusRef && open) {
+      requestAnimationFrame(() => {
+        focusRef.current?.focus();
+      });
+    }
+  }, [focusRef, open]);
 
   return (
     <DrawerPrimitive.Root

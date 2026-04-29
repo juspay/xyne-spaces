@@ -1,4 +1,4 @@
-import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
 import { Save, Users, Search, Shield, User, X, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
@@ -18,6 +18,7 @@ import {
 import Dialog from '../../components/ui/Dialog';
 import type { User as UserType } from '../../machines/stateMachine';
 import { WorkspaceRole } from '@xyne/shared';
+import { usePlatform } from '../../hooks/usePlatform';
 
 const Card = ({
   children,
@@ -48,7 +49,13 @@ const RoleBadge = ({ role }: { role: WorkspaceRole | null }): ReactElement => {
   );
 };
 
-export const GeneralAndMembersTab = (): ReactElement => {
+interface GeneralAndMembersTabProps {
+  isActive?: boolean;
+}
+
+export const GeneralAndMembersTab = ({
+  isActive = false,
+}: GeneralAndMembersTabProps): ReactElement => {
   const self = useSelf();
   const z = useZero();
   const workspaceId = self?.workspaceId;
@@ -61,6 +68,8 @@ export const GeneralAndMembersTab = (): ReactElement => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
+  const { isMobile } = usePlatform();
+  const workspaceNameInputRef = useRef<HTMLInputElement>(null);
 
   // Load workspace data when available
   useEffect(() => {
@@ -79,6 +88,14 @@ export const GeneralAndMembersTab = (): ReactElement => {
       setHasChanges(nameChanged || descChanged);
     }
   }, [name, description, workspace]);
+
+  useEffect(() => {
+    if (!isActive || isMobile) return;
+    const rafId = requestAnimationFrame(() => {
+      workspaceNameInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isActive, isMobile]);
 
   const handleSaveGeneral = (): void => {
     if (!workspaceId) {
@@ -200,6 +217,7 @@ export const GeneralAndMembersTab = (): ReactElement => {
                 Workspace Name <span className='text-destructive'>*</span>
               </label>
               <Input
+                ref={workspaceNameInputRef}
                 id='workspace-name'
                 type='text'
                 placeholder='Enter workspace name...'

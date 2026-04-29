@@ -1,8 +1,9 @@
-import { ReactElement, useState, useEffect, useMemo } from 'react';
+import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Check } from 'lucide-react';
 import type { TicketStatusV2 } from '@xyne/shared';
 import Input from '../../../../ui/Input/Input';
 import { KanbanIcon } from '../../../KanbanColumns/KanbanColumns';
+import { usePlatform } from '../../../../../hooks/usePlatform';
 
 interface StageOption {
   name: string;
@@ -24,6 +25,16 @@ export const StagesSubmenu = ({
 }: StagesSubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
+
+  useEffect(() => {
+    if (isMobile) return;
+    const rafId = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isMobile]);
 
   useEffect(() => {
     const timer = setTimeout(() => setSearchTerm(searchQuery), 300);
@@ -65,6 +76,7 @@ export const StagesSubmenu = ({
         <div className='relative'>
           <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
           <Input
+            ref={searchInputRef}
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}

@@ -1,9 +1,10 @@
-import { ReactElement, useState, useEffect, useMemo, useRef } from 'react';
+import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { Search, Check } from 'lucide-react';
 import Avatar from '../../../../ui/Avatar/Avatar';
 import Input from '../../../../ui/Input/Input';
 import { useUsers, useUserSearch } from '../../../../../hooks/useUsers';
 import { getUserDisplayName, isUserDeactivated } from '../../../../../utils/userDisplayName';
+import { usePlatform } from '../../../../../hooks/usePlatform';
 
 interface UserSubmenuProps {
   selectedUsers: string[];
@@ -22,12 +23,7 @@ export const UserSubmenu = ({
 }: UserSubmenuProps): ReactElement => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  // Focus search input when component mounts
-  useEffect(() => {
-    searchInputRef.current?.focus();
-  }, []);
+  const { isMobile } = usePlatform();
 
   // 1. Debounced Search
   useEffect(() => {
@@ -85,7 +81,7 @@ export const UserSubmenu = ({
         <div className='relative'>
           <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
           <Input
-            ref={searchInputRef}
+            autoFocus={!isMobile}
             type='text'
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}

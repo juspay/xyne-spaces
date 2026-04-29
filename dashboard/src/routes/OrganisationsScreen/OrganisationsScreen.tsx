@@ -1,4 +1,4 @@
-import { ReactElement, useState } from 'react';
+import { ReactElement, useEffect, useRef, useState } from 'react';
 import {
   Building2,
   Plus,
@@ -24,6 +24,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { OrgRole } from '@xyne/shared';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config';
+import { usePlatform } from '../../hooks/usePlatform';
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,8 @@ const OrgMembersSection = ({
   const [emailInput, setEmailInput] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
 
   // Determine if the current user can manage this org (matched by email).
   // Fallback: the org creator can always manage (mirrors canInsert ACL bootstrap path).
@@ -110,6 +113,14 @@ const OrgMembersSection = ({
     selfMembership?.role === OrgRole.OWNER ||
     selfMembership?.role === OrgRole.ADMIN ||
     isOrgCreator;
+
+  useEffect(() => {
+    if (!canManage || isMobile) return;
+    const rafId = requestAnimationFrame(() => {
+      emailInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [canManage, isMobile]);
 
   const handleAdd = (): void => {
     const email = emailInput.trim().toLowerCase();
@@ -170,6 +181,7 @@ const OrgMembersSection = ({
           </p>
           <div className='flex gap-2'>
             <Input
+              ref={emailInputRef}
               type='email'
               placeholder='Enter email address...'
               value={emailInput}
@@ -268,6 +280,8 @@ export const OrganisationsScreen = (): ReactElement => {
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
+  const orgNameInputRef = useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
 
   const handleToggleExpand = (orgId: string): void => {
     setExpandedOrgId(prev => (prev === orgId ? null : orgId));
@@ -426,6 +440,7 @@ export const OrganisationsScreen = (): ReactElement => {
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
         className='max-w-md rounded-xl'
+        {...(!isMobile ? { focusRef: orgNameInputRef } : {})}
       >
         <div className='p-6 space-y-4'>
           {/* Dialog header */}
@@ -455,6 +470,7 @@ export const OrganisationsScreen = (): ReactElement => {
               Organisation Name <span className='text-destructive'>*</span>
             </label>
             <Input
+              ref={orgNameInputRef}
               id='org-name'
               type='text'
               placeholder='Enter organisation name...'

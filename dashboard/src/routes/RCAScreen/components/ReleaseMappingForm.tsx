@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Plus, Trash2 } from 'lucide-react';
@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { Button } from '../../../components/ui/Button';
@@ -53,6 +54,24 @@ export const ReleaseMappingForm = ({
   const confidence = form.watch('confidence') ?? AttributionConfidence.LOW;
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const releaseSearchRef = useRef<HTMLInputElement>(null);
+  const rootCauseSearchRef = useRef<HTMLInputElement>(null);
+  const { isMobile } = usePlatform();
+
+  useEffect(() => {
+    if (!isMobile && selectedReleaseId) {
+      const rafId = requestAnimationFrame(() => {
+        rootCauseSearchRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+
+    return undefined;
+  }, [isMobile, selectedReleaseId]);
+
+  useEffect(() => {
+    if (!isMobile) releaseSearchRef.current?.focus();
+  }, []);
 
   const [releaseSubTicketMappings] = useCachedQuery(
     queries.subTicketsForTicket({ ticketId: selectedReleaseId }),
@@ -318,6 +337,7 @@ export const ReleaseMappingForm = ({
         <div className='p-8 space-y-6'>
           <div className='space-y-1.5 w-full max-w-2xl'>
             <Combobox
+              ref={releaseSearchRef}
               label='Release Ticket *'
               placeholder='Search release tickets'
               queryString={selectedReleaseItem?.label ?? releaseSearch}
@@ -365,6 +385,7 @@ export const ReleaseMappingForm = ({
 
           <div className='space-y-1.5 w-full max-w-2xl'>
             <Combobox
+              ref={rootCauseSearchRef}
               label='Root Cause Ticket (optional)'
               placeholder='Search tickets'
               queryString={selectedRootCauseTicketItem?.label ?? rootCauseTicketSearch}

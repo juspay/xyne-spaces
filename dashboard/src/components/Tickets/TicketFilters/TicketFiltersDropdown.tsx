@@ -577,6 +577,7 @@ export const TicketFiltersDropdown = ({
       case 'assignee':
         return (
           <UserSubmenu
+            key='assignee-submenu'
             selectedUsers={filters.assignee || []}
             onChange={(users: string[]) => handleFilterChange('assignee', users)}
             label='Assignee'
@@ -595,6 +596,7 @@ export const TicketFiltersDropdown = ({
       case 'prReviewers':
         return (
           <UserSubmenu
+            key='pr-reviewers-submenu'
             selectedUsers={filters.prReviewers || []}
             onChange={(users: string[]) => handleFilterChange('prReviewers', users)}
             label='PR Reviewer'
@@ -604,6 +606,7 @@ export const TicketFiltersDropdown = ({
       case 'qaAssigned':
         return (
           <UserSubmenu
+            key='qa-assigned-submenu'
             selectedUsers={filters.qaAssigned || []}
             onChange={(users: string[]) => handleFilterChange('qaAssigned', users)}
             label='QA'
@@ -613,6 +616,7 @@ export const TicketFiltersDropdown = ({
       case 'createdBy':
         return (
           <UserSubmenu
+            key='created-by-submenu'
             selectedUsers={filters.createdBy || []}
             onChange={(users: string[]) => handleFilterChange('createdBy', users)}
             label='Created by'
@@ -625,6 +629,7 @@ export const TicketFiltersDropdown = ({
         if (filters.dueDateEnd !== undefined) dueDateRange.end = filters.dueDateEnd;
         return (
           <DateRangeSubmenu
+            key='due-date-submenu'
             dateRange={dueDateRange}
             onChange={(dateRange: DateRange) => handleDateRangeChange(dateRange, false)}
             onClose={() => setActiveSubmenu(null)}
@@ -640,6 +645,7 @@ export const TicketFiltersDropdown = ({
         if (filters.createdDateEnd !== undefined) createdDateRange.end = filters.createdDateEnd;
         return (
           <DateRangeSubmenu
+            key='created-at-submenu'
             dateRange={createdDateRange}
             onChange={(dateRange: DateRange) => handleDateRangeChange(dateRange, true)}
             onClose={() => setActiveSubmenu(null)}
@@ -773,6 +779,7 @@ export const TicketFiltersDropdown = ({
               className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
             >
               <UserSubmenu
+                key='assignee-popover-submenu'
                 selectedUsers={filters.assignee || []}
                 onChange={(users: string[]) => handleFilterChange('assignee', users)}
                 label='Assignee'
@@ -979,6 +986,7 @@ export const TicketFiltersDropdown = ({
               ref={inputRef}
               type='text'
               placeholder='Search Tickets'
+              autoFocus={!isMobile}
               value={searchValue ?? ''}
               onChange={e => {
                 if (onSearchChange) {

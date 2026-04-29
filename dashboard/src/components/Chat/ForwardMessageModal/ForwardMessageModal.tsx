@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useForm } from '@tanstack/react-form';
 import { Button } from '../../ui/Button/Button';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -51,6 +51,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   message,
   onCancel,
   onSuccess,
+  initialFocusRef,
 }) => {
   const { isMobile } = usePlatform();
   const [selectedTargets, setSelectedTargets] = useState<ForwardTarget[]>([]);
@@ -61,10 +62,14 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
   const navigate = useNavigate();
   const zero = useZero();
 
-  // Auto-focus combobox input on modal open
-  useEffect(() => {
-    comboboxInputRef.current?.focus();
-  }, []);
+  // Synchronously assign the combobox input to initialFocusRef so it's
+  // available when Dialog's onOpenAutoFocus fires (which runs before useEffects).
+  const comboboxRefCallback = (node: HTMLInputElement | null): void => {
+    comboboxInputRef.current = node;
+    if (node && initialFocusRef) {
+      initialFocusRef.current = node;
+    }
+  };
 
   // Initialize form with useForm hook
   const form = useForm({
@@ -480,7 +485,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         )}
         {selectionMode !== 'channel' && (
           <Combobox
-            ref={comboboxInputRef}
+            ref={comboboxRefCallback}
             label='Forward to'
             onInputValueChange={onInputValueChangeHandler}
             onValueChange={onValueChangeHandler}

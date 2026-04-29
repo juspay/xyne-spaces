@@ -1,10 +1,11 @@
-import { ReactElement, useState, useMemo, useEffect, useRef } from 'react';
+import { ReactElement, useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Hash, Lock, Users, Search, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
 import Input from '../../ui/Input';
 import { ChannelVisibility, User } from '@xyne/shared';
 import { useBrowsableChannels } from '../../../hooks/useChannels';
 import { useUsers } from '../../../hooks/useUsers';
+import { usePlatform } from '../../../hooks/usePlatform';
 import {
   mixpanelService,
   EVENTS,
@@ -17,11 +18,8 @@ const BrowseChannels = (): ReactElement => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    searchInputRef.current?.focus();
-  }, []);
+  const { isMobile } = usePlatform();
 
   const channels = useBrowsableChannels();
   const users = useUsers();
@@ -118,7 +116,7 @@ const BrowseChannels = (): ReactElement => {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className='pl-9'
-              ref={searchInputRef}
+              autoFocus={!isMobile}
             />
           </div>
 

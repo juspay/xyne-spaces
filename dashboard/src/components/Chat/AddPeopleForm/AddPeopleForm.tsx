@@ -14,6 +14,7 @@ import { useMutation } from '@tanstack/react-query';
 import { v4 as uuidv4 } from 'uuid';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { isOneToOneDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface AddPeopleFormProps {
   channelId: string;
@@ -33,6 +34,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [includeHistory, setIncludeHistory] = useState(true);
+  const { isMobile } = usePlatform();
   const zero = useZero();
   const navigate = useNavigate();
   const channel = useChannel(channelId);
@@ -199,6 +201,7 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           placeholder='Search users to add to channel...'
           label='Search Users'
           hintText='Search by name or email to find users to add'
+          autoFocus={!isMobile}
         />
       </div>
 

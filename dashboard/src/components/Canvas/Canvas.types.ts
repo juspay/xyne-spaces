@@ -27,6 +27,8 @@ export interface CanvasEditorProps {
   onMentionInsert?: (params: { type: 'user' | 'group'; id: string; blockId: string }) => void;
   /** When set, focus and scroll to this block on load (e.g. from activity notification) */
   initialBlockIdToFocus?: string | undefined;
+  /** Auto-focus the editor on mount */
+  autoFocus?: boolean;
 }
 
 export interface CollaborativeCanvasEditorRef {

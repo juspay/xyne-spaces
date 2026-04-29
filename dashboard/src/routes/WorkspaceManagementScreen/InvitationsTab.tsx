@@ -1,4 +1,4 @@
-import { ReactElement, useState, useMemo } from 'react';
+import { ReactElement, useState, useMemo, useRef, useEffect } from 'react';
 import {
   MailPlus,
   Send,
@@ -27,6 +27,7 @@ import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { apiInstance } from '../../services/clients/apiClient';
 import Dialog from '../../components/ui/Dialog';
+import { usePlatform } from '../../hooks/usePlatform';
 
 const Card = ({
   children,
@@ -40,13 +41,19 @@ const Card = ({
   </div>
 );
 
-export const InvitationsTab = (): ReactElement => {
+interface InvitationsTabProps {
+  isActive?: boolean;
+}
+
+export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): ReactElement => {
   const self = useSelf();
   const z = useZero();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Membertype>(Membertype.MEMBER);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const { isMobile } = usePlatform();
+  const emailInputRef = useRef<HTMLInputElement>(null);
 
   const [allInvitations] = useCachedQuery(queries.getAllInvitations({}));
 
@@ -124,6 +131,14 @@ export const InvitationsTab = (): ReactElement => {
     return true;
   };
 
+  useEffect(() => {
+    if (!isActive || isMobile) return;
+    const rafId = requestAnimationFrame(() => {
+      emailInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isActive, isMobile]);
+
   return (
     <div className='space-y-6'>
       {/* Header */}
@@ -146,6 +161,7 @@ export const InvitationsTab = (): ReactElement => {
 
         <div className='flex gap-3 flex-wrap'>
           <Input
+            ref={emailInputRef}
             type='email'
             placeholder='Enter email address...'
             value={email}

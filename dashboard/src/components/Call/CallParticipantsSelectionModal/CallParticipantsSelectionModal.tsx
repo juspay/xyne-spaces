@@ -9,6 +9,7 @@ import Dialog from '../../ui/Dialog';
 import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../../hooks/useChannels';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { ChannelScopeType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
@@ -32,6 +33,21 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const hasAutoInitiatedRef = useRef(false);
   const hasUserModifiedRef = useRef(false);
+  const selectorContainerRef = useRef<HTMLDivElement>(null);
+  const selectorInputFocusRef = useRef<HTMLElement | null>(null);
+  const { isMobile } = usePlatform();
+
+  // Synchronously discover the EntityMultiSelector's input and assign it
+  // to selectorInputFocusRef so Dialog's onOpenAutoFocus can use it.
+  const selectorContainerRefCallback = (node: HTMLDivElement | null): void => {
+    selectorContainerRef.current = node;
+    if (node) {
+      const input = node.querySelector('input');
+      if (input instanceof HTMLElement) {
+        selectorInputFocusRef.current = input;
+      }
+    }
+  };
 
   const { initiateCall } = useCallJoinOrInitiate();
   const { user: currentUser } = useAuth();
@@ -191,6 +207,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       open={isOpen}
       onOpenChange={open => !open && handleClose()}
       className='max-w-[584px] rounded-xl overflow-hidden'
+      {...(!isMobile ? { focusRef: selectorInputFocusRef } : {})}
     >
       <div className='flex flex-col w-full'>
         <div className='flex items-start justify-between px-5 py-3.5 border-b border-border h-14'>
@@ -245,7 +262,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 ))}
               </div>
             )}
-            <div className='[&_span]:hidden'>
+            <div ref={selectorContainerRefCallback} className='[&_span]:hidden'>
               <EntityMultiSelector
                 options={inviteUserOptions.filter(opt => !selectedParticipants.includes(opt.value))}
                 selectedValues={selectedParticipants}

@@ -6,6 +6,7 @@ import Textarea from '../../ui/Textarea';
 import { User } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 export interface CreateDmFormData {
   participants: User[];
@@ -21,6 +22,7 @@ interface AddDmFormProps {
 export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCancel }) => {
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const context = useAuthContextValues();
+  const { isMobile } = usePlatform();
 
   const form = useForm({
     defaultValues: {
@@ -89,6 +91,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
             placeholder='Type to find people...'
             label={`Add people (${selectedUsers.length}/9)`}
             hintText='Search user by email or name'
+            autoFocus={!isMobile}
           />
           {selectedUsers.length === 0 && (
             <div className='text-sm text-destructive mt-1'>

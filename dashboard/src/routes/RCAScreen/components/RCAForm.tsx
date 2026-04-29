@@ -5,6 +5,7 @@ import Textarea from '../../../components/ui/Textarea';
 import { Combobox } from '../../../components/ui/Combobox/Combobox';
 import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { toast } from 'sonner';
 import { rcaSchema } from '../schemas';
 import { formatDate, renderFieldError, ReadOnlyField } from '../RCAScreen.utils.tsx';
@@ -59,7 +60,9 @@ export const RCAForm = ({
   controllerRef,
 }: RCAFormComponentProps) => {
   const zero = useZero();
+  const { isMobile } = usePlatform();
   const [showErrors, setShowErrors] = useState(false);
+  const ownerComboboxRef = useRef<HTMLInputElement>(null);
   const form = useForm<RCAFormValues>({
     defaultValues: getRcaDefaultValues(selectedRecord),
   });
@@ -279,6 +282,16 @@ export const RCAForm = ({
 
   const ownerDisplayValue = selectedOwner ? selectedOwner.label : ownerSearchQuery;
 
+  useEffect(() => {
+    if (!isMobile && isRcaEditable) {
+      const rafId = requestAnimationFrame(() => {
+        ownerComboboxRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+    return undefined;
+  }, [isMobile, isRcaEditable]);
+
   return (
     <div className='h-full overflow-y-auto'>
       <div className='bg-background shadow-sm border border-border rounded-xl'>
@@ -320,6 +333,7 @@ export const RCAForm = ({
               {isRcaEditable ? (
                 <>
                   <Combobox
+                    ref={ownerComboboxRef}
                     label='Owner *'
                     placeholder='Search and select owner...'
                     queryString={ownerDisplayValue}

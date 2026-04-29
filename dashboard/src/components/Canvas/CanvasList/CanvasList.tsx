@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   FileText,
   Trash2,
@@ -110,6 +110,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const [shareCanvas, setShareCanvas] = useState<Canvas | null>(null);
   const [participantsTrayCanvas, setParticipantsTrayCanvas] = useState<Canvas | null>(null);
   const [rawItems, setRawItems] = useState<Canvas[]>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const { prefetchTopCanvases, handleMouseEnter, handleMouseLeave } = useCanvasPrefetch();
 
@@ -140,6 +141,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       );
     }
   }, [rawItems, activeFilter, prefetchTopCanvases]);
+
+  useEffect(() => {
+    if (isMobile) return;
+    const rafId = requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [activeFilter, isMobile]);
 
   const transformCanvases = useCallback(
     (items: Canvas[]) => {
@@ -522,6 +531,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           <div className='relative w-full sm:w-auto'>
             <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
             <Input
+              ref={searchInputRef}
               type='text'
               value={searchQuery}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}

@@ -42,6 +42,7 @@ import { useUserPresence } from '../../../hooks/usePresence';
 import { uploadProfilePicture } from '../../../services/userProfile/userProfileService';
 import { VoiceSignatureModal } from '../../Settings/VoiceSignatureModal/VoiceSignatureModal';
 import { queryClient } from '../../../services/clients/queryClient';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface UserProfileProps {
   userId: string;
@@ -53,6 +54,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
   const zero = useZero();
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
+  const { isMobile } = usePlatform();
 
   const [userProfile] = useCachedQuery(queries.getUserProfile({ userId }));
   const user = useUser(userId);
@@ -373,6 +375,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                   placeholder='Enter team name'
                   maxLength={20}
                   className='flex-1 px-2 py-1 text-lg border border-input rounded focus:outline-none focus:border-ring'
+                  autoFocus={!isMobile}
                 />
                 <button
                   onClick={handleSaveEdit}
@@ -568,6 +571,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                   placeholder='Search for a manager...'
                   hintText=''
                   label=''
+                  autoFocus={!isMobile}
                 />
               </div>
               <div className='flex justify-end gap-2'>
@@ -673,6 +677,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                         placeholder='Enter display name'
                         maxLength={50}
                         className='flex-1 px-2 py-1 text-sm border border-input rounded focus:outline-none focus:border-ring'
+                        autoFocus={!isMobile}
                       />
                       <button
                         onClick={handleSaveEdit}
@@ -738,6 +743,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                         placeholder='Enter phone number'
                         maxLength={15}
                         className='flex-1 px-2 py-1 text-sm border border-input rounded focus:outline-none focus:border-ring'
+                        autoFocus={!isMobile}
                       />
                       <button
                         onClick={handleSaveEdit}
@@ -826,6 +832,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
                         }}
                         max={new Date().toISOString().split('T')[0]}
                         className='flex-1 px-2 py-1 text-sm border border-input rounded focus:outline-none focus:border-ring'
+                        autoFocus={!isMobile}
                       />
                       <button
                         onClick={handleSaveEdit}

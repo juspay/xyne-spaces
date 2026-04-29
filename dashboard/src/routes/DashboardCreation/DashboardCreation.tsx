@@ -11,11 +11,13 @@ import Textarea from '../../components/ui/Textarea';
 import type { Dashboard as DashboardType } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { useCachedQuery } from '../../../src/hooks/useCachedQuery';
+import { usePlatform } from '../../hooks/usePlatform';
 
 export const DashboardCreation: React.FC = () => {
   const zero = useZero();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isMobile } = usePlatform();
   const [formData, setFormData] = useState({ name: '', description: '' });
 
   const [dashboards] = useCachedQuery(queries.getAllDashboards());
@@ -70,6 +72,7 @@ export const DashboardCreation: React.FC = () => {
                 value={formData.name}
                 onChange={handleInputChange}
                 placeholder='Enter dashboard name'
+                autoFocus={!isMobile}
               />
             </div>
             <div>

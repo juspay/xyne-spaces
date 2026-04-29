@@ -79,6 +79,8 @@ export default tseslint.config(
       ...reactPlugin.configs.recommended.rules,
       ...reactHooksPlugin.configs.recommended.rules,
       ...jsxA11yPlugin.configs.recommended.rules,
+      // Autofocus is intentional for modals, comboboxes, and editors (see Canvas, chat input).
+      "jsx-a11y/no-autofocus": "off",
       "react/react-in-jsx-scope": "off",
       "react/prop-types": "off",
       "local-rules/no-fetch-use-axios": "error",

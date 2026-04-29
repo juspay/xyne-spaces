@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   reactNativeBridge,
   NativeInboundMessageType,
@@ -9,6 +9,7 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { logger, Event } from '../../../utils/logger';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 /**
  * ShareRecordingHandler listens for SHARE_RECORDING bridge events from the native
@@ -22,6 +23,8 @@ import { logger, Event } from '../../../utils/logger';
 export const ShareRecordingHandler: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [messageId, setMessageId] = useState<string | null>(null);
+  const forwardFocusRef = useRef<HTMLElement | null>(null);
+  const { isMobile } = usePlatform();
 
   // Query the message from Zero — same pattern as BookmarkItem.tsx
   const [message] = useCachedQuery(queries.getMessageForActivityV2({ messageId: messageId ?? '' }));
@@ -66,10 +69,15 @@ export const ShareRecordingHandler: React.FC = () => {
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={open => !open && handleCancel()}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={open => !open && handleCancel()}
+      {...(!isMobile ? { focusRef: forwardFocusRef } : {})}
+    >
       <ForwardMessageForm
         message={message}
         channelId={''}
+        {...(!isMobile ? { initialFocusRef: forwardFocusRef } : {})}
         onCancel={handleCancel}
         onSuccess={handleSuccess}
       />

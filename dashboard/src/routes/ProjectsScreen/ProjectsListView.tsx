@@ -8,18 +8,19 @@ import { queries } from '../../zero/queries';
 import type { Project as ZeroProject } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { usePlatform } from '../../hooks/usePlatform';
 
 const ProjectsListView = (): ReactElement => {
   const zero = useZero();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingProject, setEditingProject] = useState<ZeroProject | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const { isMobile } = usePlatform();
 
   // Fetch all projects using zero
   const [projects] = useCachedQuery(queries.getAllProjects());
 
   const loading = projects === undefined;
-
   const filteredProjects = searchQuery.trim()
     ? (projects ?? []).filter(p => {
         const q = searchQuery.toLowerCase();
@@ -100,6 +101,7 @@ const ProjectsListView = (): ReactElement => {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder='Search by name or project code...'
+              autoFocus={!isMobile}
               className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
               data-track-category='Projects'
               data-track-name='SearchProjects'

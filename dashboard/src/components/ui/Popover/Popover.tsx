@@ -35,6 +35,7 @@ export interface PopoverProps {
   arrowHeight?: number;
   showClose?: boolean;
   closeButtonClassName?: string;
+  focusRef?: React.RefObject<HTMLElement | null>;
 }
 
 /**
@@ -186,7 +187,19 @@ export const Popover = ({
   arrowHeight = 5,
   showClose = false,
   closeButtonClassName,
+  focusRef,
 }: PopoverProps): React.ReactElement => {
+  const handleOpenAutoFocus = React.useCallback(
+    (event: Event) => {
+      if (focusRef) {
+        event.preventDefault();
+        focusRef.current?.focus();
+      }
+      onOpenAutoFocus?.(event);
+    },
+    [focusRef, onOpenAutoFocus],
+  );
+
   return (
     <PopoverPrimitive.Root
       data-slot='popover'
@@ -214,7 +227,9 @@ export const Popover = ({
           arrowPadding={arrowPadding}
           sticky={sticky}
           {...(hideWhenDetached !== undefined && { hideWhenDetached })}
-          {...(onOpenAutoFocus !== undefined && { onOpenAutoFocus })}
+          {...(onOpenAutoFocus !== undefined || focusRef !== undefined
+            ? { onOpenAutoFocus: handleOpenAutoFocus }
+            : undefined)}
           {...(onCloseAutoFocus !== undefined && { onCloseAutoFocus })}
           {...(onEscapeKeyDown !== undefined && { onEscapeKeyDown })}
           {...(onPointerDownOutside !== undefined && { onPointerDownOutside })}

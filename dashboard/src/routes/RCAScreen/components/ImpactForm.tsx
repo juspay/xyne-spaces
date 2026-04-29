@@ -20,6 +20,7 @@ import { fetchFile } from '../../../services/clients/fileFetchService';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 import { apiInstance } from '../../../services/clients/apiClient';
+import { usePlatform } from '../../../hooks/usePlatform';
 
 interface ExistingImpactRow {
   id: string;
@@ -154,6 +155,8 @@ export const ImpactForm = ({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const pendingFileInputsRef = useRef<Record<string, HTMLInputElement | null>>({});
   const previousRecordIdRef = useRef<string | null>(null);
+  const primaryImpactRef = useRef<HTMLTextAreaElement>(null);
+  const { isMobile } = usePlatform();
 
   const form = useForm<ImpactFormValues>({
     defaultValues: {
@@ -186,6 +189,18 @@ export const ImpactForm = ({
 
   const existingImpactValues = watch('existingImpacts');
   const pendingImpactValues = watch('pendingImpacts');
+  const hasAnyImpactRows =
+    (existingImpactValues?.length ?? 0) > 0 || (pendingImpactValues?.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (!isMobile && isImpactEnabled && !isLocked && hasAnyImpactRows) {
+      const rafId = requestAnimationFrame(() => {
+        primaryImpactRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+    return;
+  }, [isMobile, isImpactEnabled, isLocked, hasAnyImpactRows]);
 
   const updateExistingRow = (
     index: number,
@@ -566,6 +581,7 @@ export const ImpactForm = ({
               Impact Summary *
             </label>
             <Textarea
+              ref={index === 0 ? primaryImpactRef : undefined}
               id={impactSummaryFieldId}
               value={data.impact}
               onChange={e => {
