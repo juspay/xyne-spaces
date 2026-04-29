@@ -7,6 +7,28 @@ import { ReactElement, useEffect, useState, useRef } from 'react';
 import { Loader2, Pause, Play } from 'lucide-react';
 import { formatElapsedTime } from '../../../utils/recordingUtils';
 
+/**
+ * Returns true when the dashboard is running inside a mobile browser or
+ * Lotus WebView. In that context the MobileNavbar pill (~72 px) sits fixed
+ * at the bottom of the viewport, so the RecordingControlBar needs extra
+ * padding-bottom to keep the red button visible above the pill.
+ */
+function useMobileWebPadding(): boolean {
+  const [isMobileWeb, setIsMobileWeb] = useState(false);
+
+  useEffect(() => {
+    const ua = navigator.userAgent || '';
+    // React-Native WebView or viewport narrower than a typical tablet.
+    const isNativeWebView =
+      /ReactNative/i.test(ua) ||
+      /lotusWebEngine/i.test(ua) ||
+      (window.innerWidth < 700 && !/Electron/i.test(ua));
+    setIsMobileWeb(isNativeWebView);
+  }, []);
+
+  return isMobileWeb;
+}
+
 interface RecordingControlBarProps {
   isRecording: boolean;
   isPaused: boolean;
@@ -47,8 +69,15 @@ export function RecordingControlBar({
     };
   }, [isRecording, isPaused, startTime]);
 
+  const isMobileWeb = useMobileWebPadding();
+  // MOBILE_NAV_H ≈ height of the MobileNavbar pill (44 px items + py-2 + bottom-2)
+  const MOBILE_NAV_H = 72;
+
   return (
-    <div className='sticky bottom-0 z-10 border-t border-border dark:border-gray-700 dark:bg-gray-900 px-6 py-4'>
+    <div
+      className='sticky bottom-0 z-10 border-t border-border dark:border-gray-700 dark:bg-gray-900 px-6 pt-4'
+      style={{ paddingBottom: isMobileWeb ? `${MOBILE_NAV_H + 16}px` : '1rem' }}
+    >
       <div className='max-w-4xl mx-auto flex items-center justify-center gap-4'>
         {/* Waveform bars (left side, visible when recording) */}
         {isRecording && (
