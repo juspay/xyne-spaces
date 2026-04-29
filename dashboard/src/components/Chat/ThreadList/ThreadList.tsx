@@ -13,7 +13,7 @@ import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.typ
 import { useEditContext } from '../../../providers/EditProvider';
 import { useShortcutById } from '../../../shortcuts';
 import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/chatUtils';
-import { ArrowDown, ChevronRight, ChevronUp } from 'lucide-react';
+import { ArrowDown, ChevronUp } from 'lucide-react';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import { useThreadReadTracking } from '../../../hooks/useThreadReadTracking';
 
@@ -33,6 +33,7 @@ type ThreadListProps = {
   enableJumpFab?: boolean;
   /** When false, hash deep-link scroll waits until Zero reports the thread query complete (avoids scroll before prepends). */
   isMessagesLoaded?: boolean;
+  conversationParticipant?: { lastReadAt?: number | null };
 };
 
 const ThreadList = ({
@@ -50,6 +51,7 @@ const ThreadList = ({
   enableCollapsing = false,
   enableJumpFab = true,
   isMessagesLoaded = true,
+  conversationParticipant,
 }: ThreadListProps): ReactElement => {
   const { user } = useAuthContext();
   const { editingMessageId, requestEdit } = useEditContext();
@@ -161,26 +163,70 @@ const ThreadList = ({
     hasAppliedInitialScrollRef,
     setIsNearBottom,
   });
+  const isThreadsRoute =
+    location.pathname.includes('/chat/threads') || location.pathname.includes('/chat/dir/threads');
 
-  // Handle collapsible thread logic - only when enableCollapsing is true
-  const shouldCollapse = enableCollapsing && !isExpanded;
-  const MIN_MESSAGES_TO_COLLAPSE = 6;
+  // Handle collapsible thread logic - when on /chat/threads route or  when enableCollapsing is true
+  const shouldCollapse = (enableCollapsing || isThreadsRoute) && !isExpanded;
 
-  // Calculate which messages to display based on collapse state
+  // Calculate which messages to display based on collapse state and unread status
   const { visibleMessages, hiddenCount } = (() => {
-    if (!shouldCollapse || !threadMessages || threadMessages.length <= MIN_MESSAGES_TO_COLLAPSE) {
+    if (!shouldCollapse || !threadMessages || threadMessages.length === 0) {
       return { visibleMessages: threadMessages, hiddenCount: 0 };
     }
 
-    const first = threadMessages[0]!;
-    const last = threadMessages.slice(-3);
-    const hidden = threadMessages.length - 4;
+    const rootMessage = threadMessages[0]!;
+    const replies = threadMessages.slice(1); // everything after root
 
+    if (replies.length === 0) {
+      return { visibleMessages: threadMessages, hiddenCount: 0 };
+    }
+
+    // Timestamp-based unread detection using per-conversation lastReadAt
+    const lastReadAt = conversationParticipant?.lastReadAt;
+
+    if (lastReadAt !== undefined && lastReadAt !== null) {
+      // Find all replies created after lastReadAt
+      const unreadReplies = replies.filter(m => {
+        const messageTime = new Date(m.createdAt).getTime();
+        return messageTime > lastReadAt;
+      });
+
+      if (unreadReplies.length > 0) {
+        const readRepliesCount = replies.length - unreadReplies.length;
+        return {
+          visibleMessages: [rootMessage, ...unreadReplies],
+          hiddenCount: readRepliesCount,
+        };
+      }
+      // If no unread replies, fall through to show last N
+    }
+
+    // DEFAULT: No unread replies — show root + last 3 replies
+    const MAX_VISIBLE_REPLIES = 3;
+    if (replies.length <= MAX_VISIBLE_REPLIES) {
+      return { visibleMessages: threadMessages, hiddenCount: 0 };
+    }
+
+    const lastReplies = replies.slice(-MAX_VISIBLE_REPLIES);
+    const olderCount = replies.length - MAX_VISIBLE_REPLIES;
     return {
-      visibleMessages: [first, ...last],
-      hiddenCount: hidden,
+      visibleMessages: [rootMessage, ...lastReplies],
+      hiddenCount: olderCount,
     };
   })();
+
+  const firstUnreadReplyIndex = useMemo(() => {
+    if (!conversationParticipant?.lastReadAt || !visibleMessages || visibleMessages.length <= 1) {
+      return -1;
+    }
+    return visibleMessages.findIndex(
+      (m, i) =>
+        i > 0 &&
+        new Date(m.createdAt).getTime() > conversationParticipant.lastReadAt! &&
+        m.senderId !== user?.id,
+    );
+  }, [visibleMessages, conversationParticipant?.lastReadAt, user?.id]);
 
   /**
    * 2️⃣ Auto-scroll on new messages
@@ -401,6 +447,16 @@ const ThreadList = ({
 
             return (
               <div key={threadMessage.messageId}>
+                {index === firstUnreadReplyIndex && (
+                  <div className='relative py-3'>
+                    <div className='absolute left-0 right-0 top-1/2 h-px bg-destructive z-0'></div>
+                    <div className='relative z-5 flex items-center justify-center'>
+                      <span className='text-xs text-destructive bg-background px-2 font-medium'>
+                        New Messages
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <div id={`thread-message-${conversationId}-${threadMessage.messageId}`}>
                   <ChatBubble
                     message={threadMessage}
@@ -416,28 +472,31 @@ const ThreadList = ({
                     {...(conversation && { conversation })}
                   />
                 </div>
-                {!enableCollapsing && index === 0 && visibleMessages.length > 1 && (
-                  <div className='flex items-center pb-2 pl-2 gap-2'>
-                    <span className='flex text-xs text-muted-foreground'>
-                      {visibleMessages.length - 1}{' '}
-                      {visibleMessages.length - 1 === 1 ? 'reply' : 'replies'}
-                    </span>
-                    <div className='flex-1 bg-border w-full h-[1px]'></div>
-                  </div>
-                )}
+                {!enableCollapsing &&
+                  !isThreadsRoute &&
+                  index === 0 &&
+                  visibleMessages.length > 1 && (
+                    <div className='flex items-center pb-2 pl-2 gap-2'>
+                      <span className='flex text-xs text-muted-foreground'>
+                        {visibleMessages.length - 1}{' '}
+                        {visibleMessages.length - 1 === 1 ? 'reply' : 'replies'}
+                      </span>
+                      <div className='flex-1 bg-border w-full h-[1px]'></div>
+                    </div>
+                  )}
                 {/* Show collapse/expand button after first message when in collapsed mode */}
                 {shouldShowCollapseButton && (
                   <div className='flex items-center my-1 px-2 gap-2'>
                     <button
                       onClick={() => setIsExpanded(true)}
-                      className='flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent rounded-md transition-colors group'
+                      className='flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors'
                       data-track-category='THREAD_PANEL'
                       data-track-name='EXPAND_THREAD'
                       data-track-metadata={JSON.stringify({ hiddenCount })}
                     >
-                      <ChevronRight className='w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground' />
+                      <span className='mr-0.5'>↳</span>
                       <span>
-                        {hiddenCount} hidden {hiddenCount === 1 ? 'reply' : 'replies'}
+                        Show {hiddenCount} older {hiddenCount === 1 ? 'reply' : 'replies'}
                       </span>
                     </button>
                     <div className='flex-1 bg-border h-[1px]'></div>
@@ -446,7 +505,7 @@ const ThreadList = ({
               </div>
             );
           })}
-          {isExpanded && visibleMessages.length > MIN_MESSAGES_TO_COLLAPSE && (
+          {isExpanded && isThreadsRoute && (
             <div className='flex items-center my-1.5 px-2 gap-2'>
               <button
                 onClick={() => setIsExpanded(false)}

@@ -89,6 +89,7 @@ interface ThreadMessagesProps {
   threadMessages?: QueryResultType<typeof queries.conversationMessagesV2>;
   disableAskAI?: boolean;
   previewCardMode?: boolean;
+  conversationParticipant?: { lastReadAt?: number | null };
 }
 
 export const ThreadMessages = ({
@@ -103,6 +104,7 @@ export const ThreadMessages = ({
   threadMessages: propThreadMessages,
   disableAskAI,
   previewCardMode = false,
+  conversationParticipant: propConversationParticipant,
 }: ThreadMessagesProps = {}): ReactElement => {
   const {
     channelId: paramChannelId,
@@ -179,6 +181,41 @@ export const ThreadMessages = ({
       enabled: !!derivedConversationId && !!derivedChannelId,
     },
   );
+
+  // Fetch conversation participant to get lastReadAt (skip if provided via prop from parent)
+  const [rawConversationParticipant] = useCachedQuery(
+    queries.conversationParticipantByConversationId({
+      conversationId: derivedConversationId || ' ',
+    }),
+    {
+      enabled: !!derivedConversationId && !propConversationParticipant,
+    },
+  );
+
+  // Normalize lastReadAt to handle NULL/undefined cases
+  // Priority: use prop if provided (batch fetch), otherwise use query result
+  // lastReadAt: 0 means "show all replies as unread" (nothing has been read since epoch)
+  const conversationParticipant = useMemo(() => {
+    // Priority 1: Use prop if provided (from batch fetch in UserThreads)
+    const source =
+      propConversationParticipant !== undefined
+        ? propConversationParticipant
+        : rawConversationParticipant;
+
+    // Case 1: No data from either source
+    if (!source) {
+      return { lastReadAt: 0 };
+    }
+
+    if (source.lastReadAt === null || source.lastReadAt === undefined) {
+      // Case 2: Participant exists but lastReadAt is NULL/undefined
+      // This happens when participants are created without setting lastReadAt
+      return { ...source, lastReadAt: 0 };
+    }
+
+    // Case 3: Normal case - participant has valid lastReadAt timestamp
+    return source;
+  }, [propConversationParticipant, rawConversationParticipant]);
 
   // Extract ticketId from conversation metadata if not in URL params
   const ticketIdFromMetadata = useMemo(() => {
@@ -394,11 +431,12 @@ export const ThreadMessages = ({
       if (derivedConversationId) {
         const draft = getDraft(derivedChannelId, derivedConversationId);
         void zero.mutate(
-          mutators.activities.markThreadActivitiesAsRead({
+          mutators.activities.markThreadActivitiesAsReadV2({
             conversationId: derivedConversationId,
             draftMessage: draft || '',
             draftMessageId: uuidv4(),
             timestamp: Date.now(),
+            participantId: uuidv4(),
           }),
         );
       }
@@ -842,6 +880,7 @@ export const ThreadMessages = ({
               enableJumpFab={!previewCardMode}
               isMessagesLoaded={isMessagesLoaded}
               {...(disableAskAI !== undefined && { disableAskAI })}
+              conversationParticipant={conversationParticipant}
             />
 
             {/* ChatInput at the bottom - only show if user is a member */}
@@ -1271,6 +1310,7 @@ export const ThreadMessages = ({
               enableJumpFab={!previewCardMode}
               isMessagesLoaded={isMessagesLoaded}
               {...(disableAskAI !== undefined && { disableAskAI })}
+              conversationParticipant={conversationParticipant}
             />
 
             {/* ChatInput at the bottom - only show if user is a member */}
@@ -1699,6 +1739,7 @@ export const ThreadMessages = ({
             enableJumpFab={!previewCardMode}
             isMessagesLoaded={isMessagesLoaded}
             {...(disableAskAI !== undefined && { disableAskAI })}
+            conversationParticipant={conversationParticipant}
           />
 
           {/* ChatInput at the bottom - only show if user is a member */}

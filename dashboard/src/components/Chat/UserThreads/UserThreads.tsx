@@ -23,10 +23,12 @@ const ThreadRow = memo(
     channelId,
     conversationId,
     userId,
+    conversationParticipant,
   }: {
     channelId: string;
     conversationId: string;
     userId: string;
+    conversationParticipant?: { lastReadAt?: number | null } | undefined;
   }): ReactElement => {
     const channel = useChannel(channelId);
     const navigate = useNavigate();
@@ -66,6 +68,7 @@ const ThreadRow = memo(
               conversationId={conversationId}
               showHeader={false}
               previewCardMode
+              {...(conversationParticipant ? { conversationParticipant } : {})}
             />
           </div>
         </div>
