@@ -449,6 +449,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   }, [isForwardedMessage, message.content]);
   const systemMessageStyles: React.CSSProperties = {
     color: 'hsl(var(--muted-foreground))',
+    opacity: 0.5,
   };
   const isWorkflowMessage =
     (isSystemMessage && metadata?.workflowId && metadata?.ticketId && !metadata?.messageSubtype) ||
