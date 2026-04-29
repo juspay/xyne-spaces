@@ -2,6 +2,7 @@ import express from 'express';
 import { AuthV2Controller } from '../controllers/authV2Controller';
 import { authV2Middleware } from '../middleware/authV2Middleware';
 import { userManagementController } from '../controllers/userManagementController';
+import { channelService } from '../services/channelService';
 import { logger } from '../utils/logger'; 
 
 const router = express.Router();
@@ -35,7 +36,7 @@ router.get('/me', authV2Middleware.authenticate, (req, res) => {
   });
 });
 
-router.get('/validate', authV2Middleware.authenticate, (req, res) => {
+router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
   // [DEBUG] Log if there's a pending invitation cookie — if so, user is already logged in
   // but has an unprocessed invitation. This is the root cause of landing on wrong workspace.
   const pendingInvitation = req.cookies?.pending_invitation_id;
@@ -43,6 +44,7 @@ router.get('/validate', authV2Middleware.authenticate, (req, res) => {
   if (pendingInvitation) {
     logger.warn(`[DEBUG] [/validate] ⚠️ User already has a session but pending_invitation_id cookie exists (${pendingInvitation}). OAuth callback will be skipped — invitation will NOT be auto-accepted via callback flow.`);
   }
+  const selfDmChannelId = await channelService.getSelfDmId(req.user!.id);
   return res.json({
     success: true,
     user: {
@@ -54,7 +56,8 @@ router.get('/validate', authV2Middleware.authenticate, (req, res) => {
       role: req.user!.role,
       orgRole: req.user!.orgRole,
       memberId: req.user!.memberId,
-    }
+    },
+    selfDmChannelId,
   });
 });
 

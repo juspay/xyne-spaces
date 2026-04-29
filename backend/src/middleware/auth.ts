@@ -468,20 +468,49 @@ export class AuthMiddleware {
         return;
       }
 
-      // Validate required claims in JWT token
-      if (!payload.memberId || !payload.workspaceId) {
-        logger.error(`[AUTH] JWT token missing required claims: memberId=${!!payload.memberId}, workspaceId=${!!payload.workspaceId} [sessionId=${workspaceSession ?? 'missing'}]`, {
+      /**
+       * BACKWARD COMPATIBILITY SUPPORT
+       *
+       * Old JWTs contain only { sub: userId }. New JWTs include
+       * { workspaceId, memberId, role, orgRole }.
+       *
+       * For old tokens: look up workspace context from DB so the request
+       * can proceed without requiring re-login.
+       */
+      const hasWorkspaceClaims = payload.memberId && payload.workspaceId;
+
+      let effectiveWorkspaceId: string | undefined = payload.workspaceId;
+      let effectiveMemberId: string | undefined = payload.memberId;
+      let effectiveOrgRole: string | undefined = payload.orgRole;
+
+      if (!hasWorkspaceClaims) {
+        logger.info(`[AUTH] LEGACY JWT FORMAT - User ${payload.sub} using pre-workspace client ${workspaceSession ?? 'no-session'}`, {
+          sessionId: workspaceSession,
+          userId: payload.sub,
           tokenSource,
           tokenPreview,
-          tokenSub: payload.sub,
-          decodedClaims: Object.keys(payload),
+        });
+
+        // Use user's workspace and orgMember from DB (already fetched at line 456)
+        effectiveWorkspaceId = user.workspaceId ?? undefined;
+        effectiveMemberId = user.orgMemberId ?? undefined;
+        effectiveOrgRole = user.orgMember?.role;
+      }
+
+      if (!effectiveWorkspaceId || !effectiveMemberId) {
+        logger.warn(`[AUTH] No workspace context resolved for user ${payload.sub} ${workspaceSession ?? 'no-session'}`, {
+          tokenSource,
+          tokenPreview,
+          effectiveWorkspaceId,
+          effectiveMemberId,
         });
         res.status(401).json({
-          error: 'Invalid token',
-          message: 'Token missing required claims. Please login again.',
+          error: 'Workspace context missing',
+          message: 'Unable to determine workspace for this session. Please log in again.',
         });
         return;
       }
+      // END BACKWARD COMPAT
 
       // Attach user to request object
       req.user = {
@@ -489,12 +518,12 @@ export class AuthMiddleware {
         googleId: user.providerUserId,
         email: user.email,
         name: user.name,
-        workspaceId: user.workspaceId,
+        workspaceId: effectiveWorkspaceId,
         isApiKeyUser: false,
         scopes: [],
         role: user.role,
-        orgRole: user.orgMember!.role,
-        memberId: payload.memberId,
+        orgRole: effectiveOrgRole ?? 'MEMBER',
+        memberId: effectiveMemberId,
       };
 
       logger.info(`[AUTH] Authenticated user: ${user.email} (${user.id}) [sessionId=${workspaceSession ?? 'missing'}]`, {

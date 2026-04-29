@@ -8,8 +8,27 @@ import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
+import { channelService } from '../services/channelService';
 import '../types/express';
 import { config } from '@/config/env';
+
+/**
+ * Result type for single workspace auto-login
+ */
+type AutoLoginResult = {
+  workspaceUser: {
+    id: string;
+    email: string;
+    name: string;
+    picture: string | null;
+    workspaceId: string | null;
+    orgMemberId: string | null;
+    providerUserId: string;
+    role: string;
+  };
+  sessionId: string | null;
+  jwtToken: string;
+};
 
 export class AuthV2Controller {
   private googleClient: OAuth2Client;
@@ -31,6 +50,89 @@ export class AuthV2Controller {
     this.userService = new UserService();
     this.userSessionService = new UserSessionService();
     this.microsoftAuthController = new MicrosoftAuthController();
+  }
+
+  private async ensureSelfDmForUser(
+    userId: string,
+    workspaceId: string
+  ): Promise<string | null> {
+    try {
+      const selfDmChannelId = await channelService.ensureSelfDmExists(userId, workspaceId);
+      logger.info(`[ensureSelfDmForUser] Self-DM ensured for user ${userId}: ${selfDmChannelId}`);
+      return selfDmChannelId;
+    } catch (error) {
+      logger.error(`[ensureSelfDmForUser] Failed to ensure self-DM for user ${userId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Performs single-workspace auto-login (core logic shared across web, mobile, electron).
+   * Creates workspace user, session, and generates JWT.
+   */
+  private async performSingleWorkspaceAutoLogin(
+    googleUserData: {
+      googleId: string;
+      email: string;
+      name: string;
+      picture?: string;
+    },
+    workspaceId: string,
+    refreshToken: string | null | undefined,
+    accessToken: string | null | undefined,
+    req: Request,
+    platform: 'web' | 'mobile' | 'electron'
+  ): Promise<AutoLoginResult> {
+    // Create/get workspace user
+    const { user: workspaceUser } = await this.userService.createOrGetWorkspaceUser({
+      providerUserId: googleUserData.googleId,
+      email: googleUserData.email,
+      name: googleUserData.name,
+      picture: googleUserData.picture,
+      workspaceId,
+      authProvider: 'GOOGLE',
+    });
+
+    // Create session
+    let sessionId: string | null = null;
+    if (refreshToken) {
+      try {
+        const refreshTokenExpiry = new Date();
+        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+
+        const deviceInfo = JSON.stringify({
+          userAgent: req.headers['user-agent'],
+          acceptLanguage: req.headers['accept-language'],
+          timestamp: new Date().toISOString(),
+          platform,
+        });
+
+        const session = await this.userSessionService.createSession({
+          userId: workspaceUser.id,
+          refreshToken,
+          refreshTokenExpiry,
+          accessToken: accessToken ?? undefined,
+          deviceInfo,
+          ipAddress: req.ip || req.connection.remoteAddress || undefined,
+        });
+
+        sessionId = session.id;
+      } catch (sessionError) {
+        logger.error(`[performSingleWorkspaceAutoLogin] Session creation failed:`, sessionError);
+      }
+    }
+
+    // Generate JWT with workspace context
+    const jwtToken = jwtService.generateToken({
+      sub: workspaceUser.id,
+      email: workspaceUser.email,
+      name: workspaceUser.name,
+      picture: workspaceUser.picture || undefined,
+      workspaceId: workspaceUser.workspaceId ?? undefined,
+      memberId: workspaceUser.orgMemberId,
+    });
+
+    return { workspaceUser, sessionId, jwtToken };
   }
 
   /**
@@ -338,56 +440,16 @@ export class AuthV2Controller {
       if (workspaces.length === 1) {
         const workspaceId = workspaces[0]!.id;
         logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
-        
-        // Create/get workspace user
-        const { user: workspaceUser } = await this.userService.createOrGetWorkspaceUser({
-          providerUserId: googleUserData.googleId,
-          email: googleUserData.email,
-          name: googleUserData.name,
-          picture: googleUserData.picture,
+
+        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+          googleUserData,
           workspaceId,
-          authProvider: 'GOOGLE',
-        });
-        
-        // Create session
-        let sessionId = null;
-        if (refresh_token) {
-          try {
-            const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
-            
-            const deviceInfo = JSON.stringify({
-              userAgent: req.headers['user-agent'],
-              acceptLanguage: req.headers['accept-language'],
-              timestamp: new Date().toISOString(),
-            });
-            
-            const session = await this.userSessionService.createSession({
-              userId: workspaceUser.id,
-              refreshToken: refresh_token,
-              refreshTokenExpiry,
-              accessToken: access_token ?? undefined,
-              deviceInfo,
-              ipAddress: req.ip || req.connection.remoteAddress || undefined,
-            });
-            
-            sessionId = session.id;
-            logger.info(`[${requestId}] Auto-login session created: ${sessionId}`);
-          } catch (sessionError) {
-            logger.error(`[${requestId}] Auto-login session creation failed:`, sessionError);
-          }
-        }
-        
-        // Generate JWT with workspace context
-        const jwtToken = jwtService.generateToken({
-          sub: workspaceUser.id,
-          email: workspaceUser.email,
-          name: workspaceUser.name,
-          picture: workspaceUser.picture || undefined,
-          workspaceId: workspaceUser.workspaceId ?? undefined,
-          memberId: workspaceUser.orgMemberId,
-        });
-        
+          refresh_token,
+          access_token,
+          req,
+          'web'
+        );
+
         // Set workspace cookies
         // NOTE: sameSite must be 'lax' (not 'strict') for OAuth callback
         // because the redirect comes from Google (cross-site navigation)
@@ -397,17 +459,17 @@ export class AuthV2Controller {
           sameSite: 'lax' as const,
           path: '/',
         };
-        
+
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
           maxAge: 30 * 24 * 60 * 60 * 1000,
         });
-        
+
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
           maxAge: 24 * 60 * 60 * 1000,
         });
-        
+
         // Use xyne_session cookie (consistent with refreshSession endpoint)
         if (sessionId) {
           res.cookie('xyne_session', sessionId, {
@@ -415,10 +477,10 @@ export class AuthV2Controller {
             maxAge: 30 * 24 * 60 * 60 * 1000,
           });
         }
-        
+
         logger.info(`[${requestId}] Auto-login complete - redirecting to dashboard with cookies`);
         logger.info(`[${requestId}] Cookies set: xyne_last_workspace=${workspaceId}, xyne_session=${sessionId}, xyne_ws_${workspaceId}_token=<JWT>`);
-        
+
         // Include user data and autoLoginWorkspace in redirect
         // Frontend will call loginWorkspace which will find the session from cookies
         const autoLoginParams = new URLSearchParams({
@@ -653,8 +715,65 @@ export class AuthV2Controller {
       const workspaces = await this.userService.getWorkspacesByEmail(googleUserData.email);
       const userExistsButRemoved = await this.userService.userExistsButNoActiveWorkspaces(googleUserData.email);
 
-      // Store pending auth data for later loginWorkspace/createOrg call
       const isProduction = process.env.NODE_ENV === 'production';
+
+      /**
+       * AUTO-LOGIN SINGLE WORKSPACE USERS (Electron)
+       * Mirrors web and mobile behavior exactly - auto-login when user has exactly 1 workspace
+       */
+      if (workspaces.length === 1) {
+        const workspaceId = workspaces[0]!.id;
+        logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
+
+        const { sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+          googleUserData,
+          workspaceId,
+          refresh_token,
+          access_token,
+          req,
+          'electron'
+        );
+
+        // Set workspace cookies using electron cookie options
+        const cookieBase = {
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'strict' as const,
+          path: '/',
+        };
+
+        res.cookie('xyne_last_workspace', workspaceId, {
+          ...cookieBase,
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+
+        res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
+          ...cookieBase,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        if (sessionId) {
+          res.cookie('xyne_session', sessionId, {
+            ...cookieBase,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+          });
+        }
+
+        logger.info(`[${requestId}] Electron auto-login complete - cookies set: xyne_session`);
+
+        // Return JSON with workspaces (Electron expects this for renderer to handle)
+        res.status(200).json({
+          success: true,
+          email: googleUserData.email,
+          name: googleUserData.name,
+          picture: googleUserData.picture,
+          workspaces,
+          userExistsButRemoved,
+        });
+        return;
+      }
+
+      // Store pending auth data for later loginWorkspace/createOrg call (multi-workspace case)
       res.cookie('google_access_token', JSON.stringify({
         user: googleUserData,
         provider: 'google',
@@ -800,6 +919,69 @@ export class AuthV2Controller {
       };
       res.cookie('google_auth_pending', JSON.stringify(customToken), cookieOptions);
       logger.info(`[${requestId}] Stored pending auth data for workspace selection`);
+
+      /**
+       * AUTO-LOGIN SINGLE WORKSPACE USERS (Mobile)
+       * Mirrors web behavior exactly - auto-login when user has exactly 1 workspace
+       */
+      if (isMobileNative && workspaces.length === 1) {
+        const workspaceId = workspaces[0]!.id;
+        logger.info(`[${requestId}] Single workspace detected - auto-logging in to ${workspaceId}`);
+
+        const { workspaceUser, sessionId, jwtToken } = await this.performSingleWorkspaceAutoLogin(
+          googleUserData,
+          workspaceId,
+          refresh_token,
+          access_token,
+          req,
+          'mobile'
+        );
+
+        // Set workspace cookies using mobile cookie options
+        const cookieBase = {
+          httpOnly: true,
+          secure: isProduction || isMobileNative,
+          sameSite: (isMobileNative ? 'none' : 'lax') as 'none' | 'lax',
+          path: '/',
+        };
+
+        res.cookie('xyne_last_workspace', workspaceId, {
+          ...cookieBase,
+          maxAge: 30 * 24 * 60 * 60 * 1000,
+        });
+
+        res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
+          ...cookieBase,
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        if (sessionId) {
+          res.cookie('xyne_session', sessionId, {
+            ...cookieBase,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+          });
+          // Legacy cookie for mobile app backward compatibility
+          res.cookie('user_session_id', sessionId, {
+            ...cookieBase,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+          });
+        }
+
+        logger.info(`[${requestId}] Mobile auto-login complete - cookies set: xyne_session, user_session_id`);
+
+        // Return JSON instead of redirect (mobile expects this)
+        res.status(200).json({
+          success: true,
+          sessionId,
+          userId: workspaceUser.id,
+          email: googleUserData.email,
+          name: googleUserData.name,
+          picture: googleUserData.picture,
+          workspaces,
+          userExistsButRemoved,
+        });
+        return;
+      }
 
       if (isMobileNative) {
         logger.info(`[${requestId}] Mobile auth successful for: ${googleUserData.email}`);
@@ -993,6 +1175,8 @@ export class AuthV2Controller {
 
       // Ensure user presence for workspace-scoped user
       await this.userService.ensureUserPresence(workspaceUser.id);
+      const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspaceId);
+
       let sessionId = null;
 
       if (pendingRefreshToken) {
@@ -1092,6 +1276,7 @@ export class AuthV2Controller {
           memberId: workspaceUser.orgMemberId,
         },
         isNewUser,
+        selfDmChannelId,
       });
     } catch (error) {
       logger.error('Error logging into workspace:', error);
@@ -1156,6 +1341,8 @@ export class AuthV2Controller {
 
       // Ensure user presence for workspace-scoped user
       await this.userService.ensureUserPresence(workspaceUser.id);
+      const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
+
       let sessionId = null;
 
       if (pendingRefreshToken) {
@@ -1253,7 +1440,8 @@ export class AuthV2Controller {
           role: workspaceUser.role,
           workspaceId: workspaceUser.workspaceId
         },
-        isNewUser: true
+        isNewUser: true,
+        selfDmChannelId,
       });
 
     } catch (error) {
@@ -1310,6 +1498,7 @@ export class AuthV2Controller {
       }
 
       await this.userService.ensureUserPresence(targetUser.id);
+      const selfDmChannelId = await this.ensureSelfDmForUser(targetUser.id, workspaceId);
 
       // Get existing session from global session cookie
       // We reuse the same session across workspaces (session belongs to user, not workspace)
@@ -1362,6 +1551,7 @@ export class AuthV2Controller {
           role: targetUser.role,
           memberId: targetUser.orgMemberId,
         },
+        selfDmChannelId,
       });
     } catch (error) {
       logger.error('Error switching workspace:', error);
@@ -1397,6 +1587,7 @@ export class AuthV2Controller {
       );
 
       await this.userService.ensureUserPresence(workspaceUser.id);
+      const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
       // Reuse refresh token from current session
       // Get global session cookie
@@ -1460,6 +1651,7 @@ export class AuthV2Controller {
           workspaceId: workspaceUser.workspaceId,
         },
         isNewUser: true,
+        selfDmChannelId,
       });
     } catch (error) {
       logger.error('Error creating workspace:', error);

@@ -832,38 +832,26 @@ export class UserService {
         throw new Error(`Organization with name "${orgName}" already exists. Please choose a different name.`);
       }
 
-      // Create organization
+      // Step 1: Create organization with temporary createdBy (will update later)
       const organization = await this.prisma.organization.create({
         data: {
           name: orgName,
-          createdBy: userData.providerUserId, // Using providerUserId as creator reference
+          createdBy: userData.providerUserId, // Temporary: will update after user creation
           status: 'ACTIVE'
         }
       });
 
-      // Create workspace
+      // Step 2: Create workspace with temporary createdBy (will update later)
       const workspace = await this.prisma.workspace.create({
         data: {
           orgId: organization.orgId,
           name: workspaceName,
-          createdBy: userData.providerUserId,
+          createdBy: userData.providerUserId, // Temporary: will update after user creation
           status: 'ACTIVE'
         }
       });
 
-      // Create DM project for the workspace
-      await this.prisma.project.create({
-        data: {
-          name: 'Direct Messages',
-          code: 'DM',
-          description: 'DM project for direct message channels',
-          type: ProjectType.DM,
-          workspaceId: workspace.id,
-          createdBy: userData.providerUserId,
-        }
-      });
-
-      // Link workspace to organization
+      // Step 3: Link workspace to organization
       await this.prisma.workspaceOrganization.create({
         data: {
           orgId: organization.orgId,
@@ -872,7 +860,7 @@ export class UserService {
         }
       });
 
-      // Add user as OrgMember first so they can create additional workspaces later
+      // Step 4: Add user as OrgMember first so they can create additional workspaces later
       const orgMember = await this.prisma.orgMember.create({
         data: {
           orgId: organization.orgId,
@@ -881,7 +869,7 @@ export class UserService {
         }
       });
 
-      // Create workspace user as OWNER
+      // Step 5: Create workspace user as OWNER
       const workspaceUser = await this.prisma.user.create({
         data: {
           providerUserId: userData.providerUserId,
@@ -892,6 +880,29 @@ export class UserService {
           workspace: { connect: { id: workspace.id } },
           role: 'OWNER',
           orgMemberId: orgMember.memberId,
+        }
+      });
+
+      // Step 6: Update organization and workspace with correct createdBy (actual user ID)
+      await this.prisma.organization.update({
+        where: { orgId: organization.orgId },
+        data: { createdBy: workspaceUser.id }
+      });
+
+      await this.prisma.workspace.update({
+        where: { id: workspace.id },
+        data: { createdBy: workspaceUser.id }
+      });
+
+      // Step 7: Create DM project for the workspace with correct createdBy
+      await this.prisma.project.create({
+        data: {
+          name: 'Direct Messages',
+          code: 'DM',
+          description: 'DM project for direct message channels',
+          type: ProjectType.DM,
+          workspaceId: workspace.id,
+          createdBy: workspaceUser.id,
         }
       });
 
@@ -936,29 +947,17 @@ export class UserService {
 
     const org = orgMember.organization;
 
-    // Create workspace under existing org
+    // Step 1: Create workspace under existing org with temporary createdBy
     const workspace = await this.prisma.workspace.create({
       data: {
         orgId: org.orgId,
         name: workspaceName,
-        createdBy: userData.providerUserId,
+        createdBy: userData.providerUserId, // Temporary: will update after user creation
         status: 'ACTIVE',
       },
     });
 
-    // Create DM project for the workspace
-    await this.prisma.project.create({
-      data: {
-        name: 'Direct Messages',
-        code: 'DM',
-        description: 'DM project for direct message channels',
-        type: ProjectType.DM,
-        workspaceId: workspace.id,
-        createdBy: userData.providerUserId,
-      }
-    });
-
-    // Link workspace to organization
+    // Step 2: Link workspace to organization
     await this.prisma.workspaceOrganization.create({
       data: {
         orgId: org.orgId,
@@ -967,7 +966,7 @@ export class UserService {
       },
     });
 
-    // Fetch orgMember for the user (reuse existing orgMember if available)
+    // Step 3: Fetch orgMember for the user (reuse existing orgMember if available)
     const userOrgMember = orgMember || await this.prisma.orgMember.findUnique({
       where: { email: userData.email },
       select: { memberId: true }
@@ -977,7 +976,7 @@ export class UserService {
       throw new Error(`orgMember not found for email ${userData.email}. User must be added to the organization first.`);
     }
 
-    // Create workspace-scoped user as OWNER
+    // Step 4: Create workspace-scoped user as OWNER
     const workspaceUser = await this.prisma.user.create({
       data: {
         providerUserId: userData.providerUserId,
@@ -989,6 +988,24 @@ export class UserService {
         role: 'OWNER',
         orgMemberId: orgMember.memberId,
       },
+    });
+
+    // Step 5: Update workspace with correct createdBy (actual user ID)
+    await this.prisma.workspace.update({
+      where: { id: workspace.id },
+      data: { createdBy: workspaceUser.id }
+    });
+
+    // Step 6: Create DM project for the workspace with correct createdBy
+    await this.prisma.project.create({
+      data: {
+        name: 'Direct Messages',
+        code: 'DM',
+        description: 'DM project for direct message channels',
+        type: ProjectType.DM,
+        workspaceId: workspace.id,
+        createdBy: workspaceUser.id,
+      }
     });
 
     // Grant full admin resource access to the workspace owner
