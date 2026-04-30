@@ -470,6 +470,12 @@ export class AuthV2Controller {
           maxAge: 24 * 60 * 60 * 1000,
         });
 
+        // Legacy cookie for backward compatibility with older dashboards
+        res.cookie('user_session_id', sessionId, {
+          ...cookieBase,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
+        });
+
         // Use xyne_session cookie (consistent with refreshSession endpoint)
         if (sessionId) {
           res.cookie('xyne_session', sessionId, {
@@ -750,6 +756,11 @@ export class AuthV2Controller {
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
           ...cookieBase,
           maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        res.cookie('user_session_id', sessionId, {
+          ...cookieBase,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         if (sessionId) {
