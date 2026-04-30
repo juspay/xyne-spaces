@@ -63,28 +63,28 @@ export const useCallStatusSync = (): void => {
         );
       }
     } else {
-      // If we are not in a call, and we were the ones who set the "In a call" status
-      if (callStatusSetRef.current) {
+      // If we are not in a call, clear the "In a call" status if:
+      // (a) this tab set it (normal flow), OR
+      // (b) the status is still '🎧' even though we're not in a call — handles the case
+      //     where the tab crashed/refreshed mid-call and callStatusSetRef reset to false.
+      const hasStuckCallStatus = currentUser.statusEmoji === CALL_STATUS_EMOJI;
+      // True if the user manually changed to a different status during the call.
+      // In that case we preserve their intent and do not clear it on call end.
+      const userChangedStatusDuringCall =
+        currentUser.statusEmoji !== null && currentUser.statusEmoji !== CALL_STATUS_EMOJI;
+
+      if ((callStatusSetRef.current || hasStuckCallStatus) && !userChangedStatusDuringCall) {
         callStatusSetRef.current = false;
 
-        // Clear if the status is still the call status OR if it's null (meaning the set mutation
-        // was in-flight and may not have landed yet — clearing null is a no-op on the server).
-        // Only skip the clear if the user explicitly changed it to a different non-call status
-        // during the call, which we want to preserve.
-        const userChangedStatusDuringCall =
-          currentUser.statusEmoji !== null && currentUser.statusEmoji !== CALL_STATUS_EMOJI;
-
-        if (!userChangedStatusDuringCall) {
-          void zero.mutate(
-            mutators.userPresence.upsert({
-              statusEmoji: null,
-              statusContent: null,
-              statusExpiryAt: null,
-              timestamp: Date.now(),
-              presenceId: uuidv4(),
-            }),
-          );
-        }
+        void zero.mutate(
+          mutators.userPresence.upsert({
+            statusEmoji: null,
+            statusContent: null,
+            statusExpiryAt: null,
+            timestamp: Date.now(),
+            presenceId: uuidv4(),
+          }),
+        );
       }
     }
   }, [isInCall, zero, currentUser]);
