@@ -551,6 +551,8 @@ const InlineTextFile: React.FC<{
         });
         const file = new File([blob], fileName, { type: 'text/plain' });
         setFileData(file);
+        // Clear any previous error when data is successfully received
+        setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load file');
       } finally {
