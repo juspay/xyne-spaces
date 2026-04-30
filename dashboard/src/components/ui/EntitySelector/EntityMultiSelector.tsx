@@ -1,5 +1,5 @@
 import * as Popover from '@radix-ui/react-popover';
-import { Check, Plus, X } from 'lucide-react';
+import { Check, Plus, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../../utils/classNames';
 import { EntitySelectorProps } from './EntitySelector.types';
@@ -9,6 +9,9 @@ interface EntityMultiSelectorProps extends EntitySelectorProps {
   onMultiSelect: (tags: string[]) => void;
   allowCreate?: boolean;
   onCreateOption?: (value: string) => void;
+  showSearch?: boolean;
+  collapseSelectedAfter?: number;
+  collapsedLabel?: string;
 }
 
 export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
@@ -16,6 +19,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
   selectedValues,
   onMultiSelect,
   placeholder,
+  searchPlaceholder,
   isLoading = false,
   width = 'auto',
   onSearchChange,
@@ -24,6 +28,9 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
   inputClassName,
   allowCreate,
   onCreateOption,
+  showSearch = false,
+  collapseSelectedAfter,
+  collapsedLabel = 'items',
 }) => {
   // ==================== STATE ====================
   const [isOpen, setIsOpen] = useState(false);
@@ -75,6 +82,9 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
     }
   }, [isOpen]);
 
+  const shouldCollapseSelected =
+    typeof collapseSelectedAfter === 'number' && selectedOptions.length > collapseSelectedAfter;
+
   /* ==================== TRIGGER ==================== */
   const renderInlineTrigger = () => (
     <div
@@ -91,23 +101,35 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
         setIsOpen(false);
       }}
       className={cn(
-        'relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-muted w-fit max-w-full overflow-hidden ',
+        'relative flex items-center border border-border px-2 gap-1.5 rounded-[6px] h-7 transition-colors bg-background w-fit max-w-full overflow-hidden shadow-[0_1px_1px_0_rgba(5,5,6,0.04)] hover:bg-accent',
         inputClassName,
       )}
     >
       {inputIcon ? (
-        <span className='flex-shrink-0 flex items-center justify-center'>{inputIcon}</span>
+        <span
+          className={cn(
+            'flex-shrink-0 flex items-center justify-center',
+            selectedValues.length === 0 && 'text-muted-foreground',
+          )}
+        >
+          {inputIcon}
+        </span>
       ) : null}
       <input
         type='text'
         ref={inputRef}
         className={cn(
-          'border-none focus-visible:ring-0 text-[13px] placeholder:text-foreground outline-none bg-muted max-w-40 min-w-8 truncate',
+          'border-none focus-visible:ring-0 text-[13px] outline-none bg-transparent max-w-40 min-w-8 truncate cursor-pointer',
+          selectedValues.length > 0
+            ? 'text-foreground placeholder:text-foreground'
+            : 'text-muted-foreground placeholder:text-muted-foreground',
         )}
         style={{ fieldSizing: 'content' }}
         placeholder={placeholder}
-        value={searchValue}
+        value={showSearch ? '' : searchValue}
+        readOnly={showSearch}
         onChange={e => {
+          if (showSearch) return;
           setSearchValue(e.target.value);
           onSearchChange?.(e.target.value);
           setIsOpen(true);
@@ -120,6 +142,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
           setIsOpen(true);
         }}
         onKeyDown={e => {
+          if (showSearch) return;
           if (e.key === 'Backspace' && !searchValue && selectedValues.length) {
             const lastValue = selectedValues[selectedValues.length - 1];
             if (lastValue) {
@@ -148,27 +171,59 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
 
   return (
     <>
-      {selectedOptions.map(opt => (
-        <span
-          key={opt.value}
-          className='flex items-center gap-1.5 rounded-md bg-background border px-2 text-xs h-7 cursor-default'
-        >
-          {opt.icon && <span className='flex items-center justify-center'>{opt.icon}</span>}
-          <span className='max-w-32 text-xs font-medium text-foreground truncate'>{opt.label}</span>
-          <button
-            type='button'
-            onClick={e => {
-              e.stopPropagation();
-              removeValue(opt.value);
-            }}
-            className='text-muted-foreground hover:text-muted-foreground'
+      {!shouldCollapseSelected &&
+        selectedOptions.map(opt => (
+          <span
+            key={opt.value}
+            className='flex items-center gap-1.5 rounded-md bg-background border px-2 text-xs h-7 cursor-default'
           >
-            <X className='size-2.5' strokeWidth={2.5} />
-          </button>
-        </span>
-      ))}
+            {opt.icon && <span className='flex items-center justify-center'>{opt.icon}</span>}
+            <span className='max-w-32 text-xs font-medium text-foreground truncate'>
+              {opt.label}
+            </span>
+            <button
+              type='button'
+              onClick={e => {
+                e.stopPropagation();
+                removeValue(opt.value);
+              }}
+              className='text-muted-foreground hover:text-muted-foreground'
+            >
+              <X className='size-2.5' strokeWidth={2.5} />
+            </button>
+          </span>
+        ))}
       <Popover.Root open={isOpen} onOpenChange={setIsOpen} modal={false}>
-        <Popover.Trigger asChild>{renderInlineTrigger()}</Popover.Trigger>
+        {shouldCollapseSelected ? (
+          <Popover.Trigger asChild>
+            <span className='flex items-center gap-1.5 rounded-md bg-background border px-2 text-xs h-7 cursor-pointer'>
+              <span className='flex items-center -space-x-2.5'>
+                {selectedOptions.slice(0, collapseSelectedAfter).map(opt => (
+                  <span key={opt.value} className='flex items-center justify-center size-4'>
+                    {opt.icon}
+                  </span>
+                ))}
+              </span>
+              <span className='text-xs font-medium text-foreground'>
+                {selectedOptions.length} {collapsedLabel} selected
+              </span>
+              <button
+                type='button'
+                onClick={e => {
+                  e.stopPropagation();
+                  onMultiSelect([]);
+                }}
+                className='text-muted-foreground hover:text-muted-foreground'
+              >
+                <X className='size-2.5' strokeWidth={2.5} />
+              </button>
+            </span>
+          </Popover.Trigger>
+        ) : (
+          <Popover.Trigger asChild className='cursor-pointer'>
+            {renderInlineTrigger()}
+          </Popover.Trigger>
+        )}
         <Popover.Portal>
           <Popover.Content
             side='bottom'
@@ -184,8 +239,27 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
             onTouchMove={e => {
               e.stopPropagation();
             }}
-            className='z-[100] max-w-52 w-auto max-h-48 overflow-y-auto no-scrollbar rounded-lg border border-border bg-background shadow-lg'
+            className='z-[100] w-auto max-w-64 max-h-96 overflow-y-auto no-scrollbar rounded-lg border border-border bg-background shadow-lg'
           >
+            {/* Search input inside dropdown */}
+            {showSearch && (
+              <div className='p-2 border-b border-border'>
+                <div className='relative'>
+                  <Search className='absolute left-1.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground' />
+                  <input
+                    type='text'
+                    ref={showSearch ? inputRef : undefined}
+                    placeholder={searchPlaceholder || placeholder}
+                    value={searchValue}
+                    onChange={e => {
+                      setSearchValue(e.target.value);
+                      onSearchChange?.(e.target.value);
+                    }}
+                    className='w-full pl-6 pr-2 text-sm rounded outline-none bg-transparent text-foreground'
+                  />
+                </div>
+              </div>
+            )}
             {/* Options */}
             {isLoading ? (
               <div className='p-4 text-center text-sm text-muted-foreground'>Loading</div>
@@ -203,8 +277,23 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                             className='flex w-full items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-accent'
                             onClick={() => toggleValue(option.value)}
                           >
+                            <span
+                              className={cn(
+                                'flex-shrink-0 flex items-center justify-center size-3.5 rounded border transition-colors',
+                                isSelected
+                                  ? 'bg-primary border-primary'
+                                  : 'border-border bg-background',
+                              )}
+                            >
+                              {isSelected && (
+                                <Check
+                                  className='size-2.5 text-primary-foreground'
+                                  strokeWidth={3}
+                                />
+                              )}
+                            </span>
                             {option.icon && (
-                              <span className=' flex items-center justify-center'>
+                              <span className='flex items-center justify-center'>
                                 {option.icon}
                               </span>
                             )}
@@ -228,7 +317,6 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                                 </div>
                               )}
                             </div>
-                            {isSelected && <Check className='w-4 h-4 text-action-primary' />}
                           </button>
                         </li>
                       );
@@ -259,7 +347,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
                   )}
 
                 {filteredOptions.length === 0 && (!allowCreate || !searchValue.trim()) && (
-                  <div className='px-3 py-2.5 text-center text-xs text-muted-foreground'>
+                  <div className='px-3 py-2.5 text-center text-sm text-muted-foreground'>
                     No results found
                   </div>
                 )}

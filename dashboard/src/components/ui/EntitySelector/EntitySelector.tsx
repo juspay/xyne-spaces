@@ -103,6 +103,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   useEffect(() => {
     if (!open) {
       setSearchValue('');
+      onSearchChange?.('');
     }
   }, [open]);
 
@@ -133,25 +134,35 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         type='button'
         data-testid={testId}
         className={cn(
-          'group flex items-center gap-1.5 text-sm rounded-lg transition-colors bg-background',
-          noBorder ? 'border-none' : 'border border-border hover:bg-accent px-2 py-0.5 ',
+          'group flex items-center gap-1.5 text-sm rounded-[6px] transition-colors bg-background dark:bg-input',
+          noBorder
+            ? 'border-none'
+            : 'border border-border hover:bg-accent px-2 py-0.5 shadow-[0_1px_1px_0_rgba(5,5,6,0.04)]',
           inputClassName,
         )}
         style={{ width }}
       >
         {/* Icon: Show selected option's icon or nothing */}
         {selectedOption?.icon ? (
-          <span className='flex-shrink-0 flex items-center justify-center'>
+          <span className='flex-shrink-0 flex items-center justify-center text-foreground'>
             {selectedOption.icon}
           </span>
         ) : inputIcon ? (
-          <span className='flex-shrink-0 flex items-center justify-center'>{inputIcon}</span>
+          <span
+            className={cn(
+              'flex-shrink-0 flex items-center justify-center',
+              !selectedOption && 'text-muted-foreground',
+            )}
+          >
+            {inputIcon}
+          </span>
         ) : null}
 
         {/* Label: Show selected option's label or placeholder */}
         <span
           className={cn(
-            'text-left break-words whitespace-normal text-foreground',
+            'text-left break-words whitespace-normal',
+            selectedOption ? 'text-foreground' : 'text-muted-foreground',
             noBorder ? 'py-0' : 'py-1',
           )}
         >
@@ -190,17 +201,22 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           handleOpenChange(false);
         }}
         className={cn(
-          'relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-muted w-fit max-w-full overflow-hidden ',
+          'relative flex items-center border border-border px-2 gap-1.5 rounded-[6px] h-7 transition-colors bg-background dark:bg-input w-fit max-w-full overflow-hidden shadow-[0_1px_1px_0_rgba(5,5,6,0.04)]',
           inputClassName,
         )}
       >
         {/* Icon: Show selected option's icon or nothing */}
         {selectedOption?.icon ? (
-          <span className='flex-shrink-0 flex items-center justify-center visual-regression-hide'>
+          <span className='flex-shrink-0 flex items-center justify-center visual-regression-hide text-foreground'>
             {selectedOption.icon}
           </span>
         ) : inputIcon ? (
-          <span className='flex-shrink-0 flex items-center justify-center visual-regression-hide'>
+          <span
+            className={cn(
+              'flex-shrink-0 flex items-center justify-center visual-regression-hide',
+              !selectedOption && 'text-muted-foreground',
+            )}
+          >
             {inputIcon}
           </span>
         ) : null}
@@ -210,7 +226,10 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
           data-testid={testId ? `${testId}-input` : undefined}
           style={{ fieldSizing: 'content' }}
           className={cn(
-            'border-none focus-visible:ring-0 text-[13px] placeholder:text-foreground outline-none bg-muted max-w-40 min-w-9 truncate',
+            'border-none focus-visible:ring-0 text-[13px] outline-none bg-muted max-w-40 min-w-9 truncate',
+            selectedOption
+              ? 'text-foreground placeholder:text-foreground'
+              : 'text-muted-foreground placeholder:text-muted-foreground',
             inputClassName,
           )}
           placeholder={placeholder}
@@ -297,14 +316,14 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                 <input
                   ref={inputRef}
                   type='text'
-                  data-testid={testId ? `${testId}-search` : undefined}
+                  data-testid={testId ? `${testId}-input` : undefined}
                   placeholder={searchPlaceholder}
                   value={searchValue}
                   onChange={e => {
                     setSearchValue(e.target.value);
                     onSearchChange?.(e.target.value);
                   }}
-                  className='w-full pl-7 pr-3 rounded-md text-sm ring-none outline-none'
+                  className='w-full pl-7 pr-3 rounded-md text-sm ring-none outline-none bg-transparent text-foreground placeholder:text-muted-foreground'
                 />
               </div>
             </div>
@@ -351,63 +370,51 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                     </button>
                   </li>
                 )}
-                {filteredOptions.map(option => (
-                  <li
-                    role='option'
-                    aria-selected={selectedValue === option.value}
-                    key={option.value}
-                  >
-                    <button
-                      type='button'
-                      disabled={option.disabled}
-                      className={`relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left ${
-                        option.disabled
-                          ? 'cursor-not-allowed opacity-50 text-muted-foreground'
-                          : 'cursor-pointer text-foreground hover:bg-accent'
-                      }`}
-                      onClick={() => !option.disabled && handleSelect(option.value)}
-                      onKeyDown={(e): void => {
-                        if ((e.key === 'Enter' || e.key === ' ') && !option.disabled) {
-                          e.preventDefault();
-                          handleSelect(option.value);
-                        }
-                      }}
-                    >
-                      {/* Option icon */}
-                      {!isStatusSelector && option.icon && (
-                        <span className='flex h-5 w-5 flex-none items-center justify-center'>
-                          {option.icon}
-                        </span>
-                      )}
-                      {/* Option label and subtitle */}
-                      <div className='flex-1 min-w-0'>
-                        <div className='flex items-center gap-1.5'>
-                          <div
-                            className={`truncate font-medium ${option.isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-                          >
-                            {option.label}
-                          </div>
-                          {option.isDeactivated && (
-                            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
-                              Deactivated
-                            </span>
+                {filteredOptions.map(option => {
+                  const isSelected = selectedValue === option.value;
+                  return (
+                    <li role='option' aria-selected={isSelected} key={option.value}>
+                      <button
+                        type='button'
+                        disabled={option.disabled}
+                        className={`relative flex w-full select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors rounded text-left ${
+                          option.disabled
+                            ? 'cursor-not-allowed opacity-50 text-muted-foreground'
+                            : 'cursor-pointer text-foreground hover:bg-accent'
+                        }`}
+                        onClick={() => !option.disabled && handleSelect(option.value)}
+                        onKeyDown={(e): void => {
+                          if ((e.key === 'Enter' || e.key === ' ') && !option.disabled) {
+                            e.preventDefault();
+                            handleSelect(option.value);
+                          }
+                        }}
+                      >
+                        {/* Option icon */}
+                        {!isStatusSelector && option.icon && (
+                          <span className='flex h-5 w-5 flex-none items-center justify-center'>
+                            {option.icon}
+                          </span>
+                        )}
+                        {/* Option label and subtitle */}
+                        <div className='flex-1 min-w-0'>
+                          <div className='truncate font-medium text-foreground'>{option.label}</div>
+                          {option.subtitle && (
+                            <div className='truncate text-xs text-muted-foreground'>
+                              {option.subtitle}
+                            </div>
                           )}
                         </div>
-                        {option.subtitle && (
-                          <div className='truncate text-xs text-muted-foreground'>
-                            {option.subtitle}
-                          </div>
-                        )}
-                      </div>
 
-                      {/* Check mark if selected */}
-                      <Check
-                        className={`w-4 h-4 text-action-primary flex-shrink-0 
-                        ${selectedValue === option.value ? 'opacity-100' : 'opacity-0'}`}
-                      />
-                    </button>
-                  </li>
-                ))}
+                        {/* Check mark if selected */}
+                        <Check
+                          className={`w-4 h-4 text-action-primary flex-shrink-0 
+                            ${isSelected ? 'opacity-100' : 'opacity-0'}`}
+                        />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               // Empty state (no results found)
