@@ -16,6 +16,8 @@ Feature: Create Ticket from Channel Tickets Tab
     And I wait for "[data-testid='ticket-title-input']" to appear
     And I type "Ticket from Tickets Tab" on the element "[data-testid='ticket-title-input']"
     And I type "This ticket was created from the channel Tickets tab" on the element "[data-testid='ticket-description-input']"
+    And I click on "[data-testid='ticket-board-selector']"
+    And I click on the first button in the element "[data-testid='ticket-board-selector-options']"
     And I click on "[data-testid='ticket-assignee-selector']"
     And I type "user:user2-browser.name" on the element "[data-testid='ticket-assignee-selector-input']"
     And I click on text "user:user2-browser.name" in the element "[data-testid='ticket-assignee-selector-options']"

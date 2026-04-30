@@ -18,6 +18,8 @@ Feature: Ticket Creation E2E Flow
     Then the element "[data-testid='ticket-description-input']" should contain text "This is a bug report: Application crashes when clicking submit button"
     And I type "Ticket from Chat" on the element "[data-testid='ticket-title-input']"
     And I type "Steps to reproduce: 1. Click submit button 2. App crashes" on the element "[data-testid='ticket-description-input']"
+    And I click on "[data-testid='ticket-board-selector']"
+    And I click on the first button in the element "[data-testid='ticket-board-selector-options']"
     And I click on "[data-testid='ticket-assignee-selector']"
     And I type "user:user2-browser.name" on the element "[data-testid='ticket-assignee-selector-input']"
     And I click on text "user:user2-browser.name" in the element "[data-testid='ticket-assignee-selector-options']"
