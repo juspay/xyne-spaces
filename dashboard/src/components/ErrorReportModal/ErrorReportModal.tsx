@@ -1,21 +1,45 @@
 import { type ReactElement, useEffect, useRef, useState } from 'react';
-import { Download, Monitor, Mic, MicOff, Upload, X } from 'lucide-react';
+import {
+  CheckCircle2,
+  Download,
+  ExternalLink,
+  Monitor,
+  Mic,
+  MicOff,
+  Upload,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
+import { v4 as uuidv4 } from 'uuid';
 import { Dialog } from '../ui/Dialog';
 import { Button } from '../ui/Button';
 import Textarea from '../ui/Textarea';
 import { AttachmentPreview } from '../ui/files/AttachmentPreview';
 import { getFileCategory, getFilesDimensions, validateFile } from '../ui/utils/files';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useZero } from '../../hooks/useZero';
+import { useAuth } from '../../hooks/useAuth';
+import { useCacConfig } from '../../hooks/useCacConfig';
+import { useNavigate } from 'react-router-dom';
+import { mutators } from '../../zero/mutators';
 import {
   createErrorReportLogFile,
   type ErrorReportContext,
 } from '../../utils/errorReportLogCollector';
 import { apiInstance } from '../../services/clients/apiClient';
-import { MAX_ERROR_REPORT_ATTACHMENTS, MAX_ATTACHMENT_SIZE_BYTES } from './ErrorReportModal.utils';
+import {
+  MAX_ERROR_REPORT_ATTACHMENTS,
+  MAX_ATTACHMENT_SIZE_BYTES,
+  getTicketsPath,
+} from './ErrorReportModal.utils';
 import type { ErrorReportModalProps } from './ErrorReportModal.types';
 import { MACOS_PRIVACY_URLS } from '../../constants/permissions';
 import type { ScreenSource } from '../../types/electron';
+
+type ErrorReportCacConfig = {
+  channelId: string;
+  boardId?: string;
+};
 
 const saveFileToDisk = async (file: File, sourcePath?: string | null): Promise<void> => {
   if (window.electronAPI?.saveErrorReportFile) {
@@ -58,12 +82,20 @@ export const ErrorReportModal = ({
   onDiscard,
 }: ErrorReportModalProps): ReactElement => {
   const { isElectron } = usePlatform();
+  const zero = useZero();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { config: cacConfig } = useCacConfig<ErrorReportCacConfig>({
+    key: 'error_report_channel_config',
+    fallbackConfig: { channelId: '' },
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [attachments, setAttachments] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
 
@@ -79,6 +111,7 @@ export const ErrorReportModal = ({
     if (!isOpen) {
       setIsPicking(false);
       setScreenSources([]);
+      setIsSubmitted(false);
     }
   }, [isOpen]);
 
@@ -149,6 +182,7 @@ export const ErrorReportModal = ({
     setAttachments([]);
     setIsPicking(false);
     setScreenSources([]);
+    setIsSubmitted(false);
     pendingAttachedRef.current = null;
   };
 
@@ -267,16 +301,29 @@ export const ErrorReportModal = ({
         headers,
       });
 
+      const channelId = cacConfig.channelId;
+
+      if (channelId) {
+        zero
+          .mutate(
+            mutators.channel.joinChannel({
+              channelId,
+              channelParticipantId: uuidv4(),
+              channelUserStatusId: uuidv4(),
+              timestamp: Date.now(),
+            }),
+          )
+          .client.catch(() => {
+            // Already a member, channel not public, or join not applicable — safe to ignore
+          });
+      }
+
       // Best-effort cleanup; ticket creation already succeeded.
       cleanupPendingRecording();
       onSubmitSuccess?.();
 
       resetForm();
-      onClose();
-
-      toast.success('Issue reported', {
-        description: 'Your support ticket has been created.',
-      });
+      setIsSubmitted(true);
     } catch (error) {
       toast.error('Failed to report issue', {
         description: error instanceof Error ? error.message : 'Please try again.',
@@ -291,6 +338,9 @@ export const ErrorReportModal = ({
       open={isOpen}
       onOpenChange={open => {
         if (!open && !isSubmitting) {
+          if (isSubmitted) {
+            setIsSubmitted(false);
+          }
           handleDiscard();
         }
       }}
@@ -302,9 +352,11 @@ export const ErrorReportModal = ({
           <div className='flex items-center gap-3'>
             <div>
               <h2 className='text-lg font-semibold text-foreground'>Report Issue</h2>
-              <p className='text-sm text-muted-foreground'>
-                Sorry you hit a snag! Share what happened and we&apos;ll look into it right away.
-              </p>
+              {!isSubmitted && (
+                <p className='text-sm text-muted-foreground'>
+                  Sorry you hit a snag! Share what happened and we&apos;ll look into it right away.
+                </p>
+              )}
             </div>
           </div>
           <button
@@ -319,226 +371,275 @@ export const ErrorReportModal = ({
           </button>
         </div>
 
-        <div className='flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5'>
-          <div className='flex flex-col gap-2'>
-            <label htmlFor='error-report-title' className='text-sm font-medium text-foreground'>
-              Title
-            </label>
-            <Textarea
-              ref={titleRef}
-              id='error-report-title'
-              value={title}
-              rows={1}
-              onChange={event => {
-                setTitle(event.target.value);
-                const el = titleRef.current;
-                if (el) {
-                  el.style.height = 'auto';
-                  el.style.height = `${el.scrollHeight}px`;
-                }
-              }}
-              placeholder='Give it a short title so we know where to look'
-              maxLength={140}
-              className='min-h-0 py-2 overflow-hidden'
-              data-track-category='ERROR_REPORT'
-              data-track-name='TitleChanged'
-            />
-          </div>
-
-          <div className='flex flex-col gap-2'>
-            <label
-              htmlFor='error-report-description'
-              className='text-sm font-medium text-foreground'
-            >
-              Description
-            </label>
-            <Textarea
-              id='error-report-description'
-              value={description}
-              onChange={event => setDescription(event.target.value)}
-              placeholder='Tell us what happened, what you expected to see, and any steps that led here. Every detail helps!'
-              className='min-h-[140px]'
-              data-track-category='ERROR_REPORT'
-              data-track-name='DescriptionChanged'
-            />
-          </div>
-
-          <div className='flex flex-col gap-3'>
-            <div>
-              <h3 className='text-sm font-medium text-foreground'>Attachments</h3>
-              <p className='text-xs text-muted-foreground'>
-                A screenshot or recording can go a long way — attach up to{' '}
-                {MAX_ERROR_REPORT_ATTACHMENTS} files. We&apos;ll also include a log file
-                automatically.
-              </p>
+        {isSubmitted ? (
+          <div className='flex-1 flex flex-col items-center justify-center px-6 py-12 gap-4'>
+            <div className='rounded-full bg-action-primary/10 p-3'>
+              <CheckCircle2 className='size-8 text-action-primary' />
             </div>
+            <div className='text-center flex flex-col gap-1'>
+              <h3 className='text-lg font-semibold text-foreground'>Report submitted</h3>
+              <p className='text-sm text-muted-foreground'>We&apos;ll look into this right away.</p>
+            </div>
+            {cacConfig.channelId && (
+              <button
+                type='button'
+                onClick={() => {
+                  onClose();
+                  void navigate(getTicketsPath(cacConfig.channelId, cacConfig.boardId, user?.id));
+                }}
+                className='inline-flex items-center gap-1.5 text-sm font-medium text-action-primary hover:text-action-primary/80 transition-colors'
+                data-track-category='ERROR_REPORT'
+                data-track-name='ViewMyTickets'
+              >
+                View my tickets
+                <ExternalLink className='size-4' />
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className='flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-5'>
+              <div className='flex flex-col gap-2'>
+                <label htmlFor='error-report-title' className='text-sm font-medium text-foreground'>
+                  Title
+                </label>
+                <Textarea
+                  ref={titleRef}
+                  id='error-report-title'
+                  value={title}
+                  rows={1}
+                  onChange={event => {
+                    setTitle(event.target.value);
+                    const el = titleRef.current;
+                    if (el) {
+                      el.style.height = 'auto';
+                      el.style.height = `${el.scrollHeight}px`;
+                    }
+                  }}
+                  placeholder='Give it a short title so we know where to look'
+                  maxLength={140}
+                  className='min-h-0 py-2 overflow-hidden'
+                  data-track-category='ERROR_REPORT'
+                  data-track-name='TitleChanged'
+                />
+              </div>
 
-            <input
-              ref={fileInputRef}
-              type='file'
-              multiple
-              accept='image/*,video/*,text/plain,.log,.txt,.pdf,.zip'
-              className='hidden'
-              onChange={handleFileSelection}
-            />
+              <div className='flex flex-col gap-2'>
+                <label
+                  htmlFor='error-report-description'
+                  className='text-sm font-medium text-foreground'
+                >
+                  Description
+                </label>
+                <Textarea
+                  id='error-report-description'
+                  value={description}
+                  onChange={event => setDescription(event.target.value)}
+                  placeholder='Tell us what happened, what you expected to see, and any steps that led here. Every detail helps!'
+                  className='min-h-[140px]'
+                  data-track-category='ERROR_REPORT'
+                  data-track-name='DescriptionChanged'
+                />
+              </div>
 
-            {/* Source picker — shown after clicking "Record screen" */}
-            {isPicking && (
-              <div className='rounded-lg border border-border bg-muted/30 p-3 flex flex-col gap-3'>
-                <div className='flex items-center justify-between'>
-                  <p className='text-sm font-medium text-foreground'>Select a screen to record</p>
-                  <div className='flex items-center gap-2'>
-                    <button
-                      type='button'
-                      onClick={() => setMicEnabled(prev => !prev)}
-                      className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
-                        micEnabled
-                          ? 'border-action-primary bg-action-primary/10 text-action-primary'
-                          : 'border-border bg-background text-muted-foreground hover:text-foreground'
-                      }`}
-                      aria-label={micEnabled ? 'Disable microphone' : 'Enable microphone'}
-                      title={micEnabled ? 'Microphone on' : 'Microphone off'}
-                      data-track-category='ERROR_REPORT'
-                      data-track-name={micEnabled ? 'MicOff' : 'MicOn'}
-                    >
-                      {micEnabled ? <Mic className='size-3.5' /> : <MicOff className='size-3.5' />}
-                      <span>{micEnabled ? 'Mic on' : 'Mic off'}</span>
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => setIsPicking(false)}
-                      className='text-muted-foreground hover:text-foreground'
-                      aria-label='Cancel picker'
-                      data-track-category='ERROR_REPORT'
-                      data-track-name='CancelPicker'
-                    >
-                      <X className='size-4' />
-                    </button>
-                  </div>
+              <div className='flex flex-col gap-3'>
+                <div>
+                  <h3 className='text-sm font-medium text-foreground'>Attachments</h3>
+                  <p className='text-xs text-muted-foreground'>
+                    A screenshot or recording can go a long way — attach up to{' '}
+                    {MAX_ERROR_REPORT_ATTACHMENTS} files. We&apos;ll also include a log file
+                    automatically.
+                  </p>
                 </div>
-                <div className='grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto'>
-                  {screenSources.map(source => (
+
+                <input
+                  ref={fileInputRef}
+                  type='file'
+                  multiple
+                  accept='image/*,video/*,text/plain,.log,.txt,.pdf,.zip'
+                  className='hidden'
+                  onChange={handleFileSelection}
+                />
+
+                {/* Source picker — shown after clicking "Record screen" */}
+                {isPicking && (
+                  <div className='rounded-lg border border-border bg-muted/30 p-3 flex flex-col gap-3'>
+                    <div className='flex items-center justify-between'>
+                      <p className='text-sm font-medium text-foreground'>
+                        Select a screen to record
+                      </p>
+                      <div className='flex items-center gap-2'>
+                        <button
+                          type='button'
+                          onClick={() => setMicEnabled(prev => !prev)}
+                          className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
+                            micEnabled
+                              ? 'border-action-primary bg-action-primary/10 text-action-primary'
+                              : 'border-border bg-background text-muted-foreground hover:text-foreground'
+                          }`}
+                          aria-label={micEnabled ? 'Disable microphone' : 'Enable microphone'}
+                          title={micEnabled ? 'Microphone on' : 'Microphone off'}
+                          data-track-category='ERROR_REPORT'
+                          data-track-name={micEnabled ? 'MicOff' : 'MicOn'}
+                        >
+                          {micEnabled ? (
+                            <Mic className='size-3.5' />
+                          ) : (
+                            <MicOff className='size-3.5' />
+                          )}
+                          <span>{micEnabled ? 'Mic on' : 'Mic off'}</span>
+                        </button>
+                        <button
+                          type='button'
+                          onClick={() => setIsPicking(false)}
+                          className='text-muted-foreground hover:text-foreground'
+                          aria-label='Cancel picker'
+                          data-track-category='ERROR_REPORT'
+                          data-track-name='CancelPicker'
+                        >
+                          <X className='size-4' />
+                        </button>
+                      </div>
+                    </div>
+                    <div className='grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto'>
+                      {screenSources.map(source => (
+                        <button
+                          key={source.id}
+                          type='button'
+                          onClick={() => handleSourceSelect(source)}
+                          className='flex flex-col items-center gap-1.5 rounded-lg border border-border bg-background hover:border-action-primary hover:bg-action-primary/5 p-2 transition-colors text-left'
+                          data-track-category='ERROR_REPORT'
+                          data-track-name='SelectSource'
+                        >
+                          <img
+                            src={source.thumbnail}
+                            alt={source.name}
+                            className='w-full rounded aspect-video object-cover bg-muted'
+                          />
+                          <span className='text-xs text-foreground truncate w-full text-center'>
+                            {source.name}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!isPicking && (
+                  <div className='flex gap-2'>
                     <button
-                      key={source.id}
                       type='button'
-                      onClick={() => handleSourceSelect(source)}
-                      className='flex flex-col items-center gap-1.5 rounded-lg border border-border bg-background hover:border-action-primary hover:bg-action-primary/5 p-2 transition-colors text-left'
+                      onClick={() => fileInputRef.current?.click()}
+                      onDragEnter={handleDragEnter}
+                      onDragLeave={handleDragLeave}
+                      onDragOver={handleDragOver}
                       data-track-category='ERROR_REPORT'
-                      data-track-name='SelectSource'
+                      data-track-name='DragDropArea'
+                      onDrop={handleDrop}
+                      className={`flex-1 rounded-lg border border-dashed border-action-primary transition-all flex flex-col items-center justify-center gap-2 px-4 py-8 text-sm cursor-pointer text-action-primary ${
+                        isDragging
+                          ? 'bg-action-primary/10'
+                          : 'bg-action-primary/5 hover:bg-action-primary/10'
+                      }`}
                     >
-                      <img
-                        src={source.thumbnail}
-                        alt={source.name}
-                        className='w-full rounded aspect-video object-cover bg-muted'
-                      />
-                      <span className='text-xs text-foreground truncate w-full text-center'>
-                        {source.name}
+                      <Upload className='size-6' />
+                      <span className={isDragging ? 'font-medium' : ''}>
+                        {isDragging
+                          ? 'Drop files here'
+                          : 'Drag & drop files here, or click to browse'}
                       </span>
                     </button>
-                  ))}
-                </div>
-              </div>
-            )}
 
-            {!isPicking && (
-              <div className='flex gap-2'>
-                <button
-                  type='button'
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragEnter={handleDragEnter}
-                  onDragLeave={handleDragLeave}
-                  onDragOver={handleDragOver}
-                  data-track-category='ERROR_REPORT'
-                  data-track-name='DragDropArea'
-                  onDrop={handleDrop}
-                  className={`flex-1 rounded-lg border border-dashed border-action-primary transition-all flex flex-col items-center justify-center gap-2 px-4 py-8 text-sm cursor-pointer text-action-primary ${
-                    isDragging
-                      ? 'bg-action-primary/10'
-                      : 'bg-action-primary/5 hover:bg-action-primary/10'
-                  }`}
-                >
-                  <Upload className='size-6' />
-                  <span className={isDragging ? 'font-medium' : ''}>
-                    {isDragging ? 'Drop files here' : 'Drag & drop files here, or click to browse'}
-                  </span>
-                </button>
+                    {isElectron &&
+                      onSourceSelected &&
+                      !!window.electronAPI?.getErrorReportScreenSources && (
+                        <button
+                          type='button'
+                          onClick={() => void handleStartRecordingPicker()}
+                          data-track-category='ERROR_REPORT'
+                          data-track-name='StartRecording'
+                          className='rounded-lg border border-dashed border-muted-foreground/40 flex flex-col items-center justify-center gap-2 px-5 py-8 text-sm cursor-pointer text-muted-foreground hover:text-foreground hover:border-muted-foreground hover:bg-muted/30 transition-all'
+                        >
+                          <Monitor className='size-6' />
+                          <span>Record screen</span>
+                        </button>
+                      )}
+                  </div>
+                )}
 
-                {isElectron && onSourceSelected && (
-                  <button
-                    type='button'
-                    onClick={() => void handleStartRecordingPicker()}
-                    data-track-category='ERROR_REPORT'
-                    data-track-name='StartRecording'
-                    className='rounded-lg border border-dashed border-muted-foreground/40 flex flex-col items-center justify-center gap-2 px-5 py-8 text-sm cursor-pointer text-muted-foreground hover:text-foreground hover:border-muted-foreground hover:bg-muted/30 transition-all'
-                  >
-                    <Monitor className='size-6' />
-                    <span>Record screen</span>
-                  </button>
+                {attachments.length > 0 && (
+                  <div className='flex flex-wrap gap-3'>
+                    {attachments.map((file, index) => (
+                      <div
+                        key={`${file.name}-${file.size}-${index}`}
+                        className='flex flex-col items-center gap-1'
+                      >
+                        <AttachmentPreview
+                          file={file}
+                          onRemove={() => handleRemoveAttachment(index)}
+                          onPreview={() => {
+                            const url = URL.createObjectURL(file);
+                            window.open(url, '_blank');
+                            setTimeout(() => URL.revokeObjectURL(url), 30_000);
+                          }}
+                        />
+                        {getFileCategory(file) === 'video' && (
+                          <button
+                            type='button'
+                            onClick={() =>
+                              void saveFileToDisk(
+                                file,
+                                file === pendingAttachedRef.current
+                                  ? pendingRecordingFilePath
+                                  : null,
+                              )
+                            }
+                            className='flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors'
+                            data-track-category='ERROR_REPORT'
+                            data-track-name='SaveVideoToDisk'
+                            title='Save to desktop'
+                          >
+                            <Download className='size-3' />
+                            <span>Save</span>
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
-            )}
+            </div>
 
-            {attachments.length > 0 && (
-              <div className='flex flex-wrap gap-3'>
-                {attachments.map((file, index) => (
-                  <div
-                    key={`${file.name}-${file.size}-${index}`}
-                    className='flex flex-col items-center gap-1'
-                  >
-                    <AttachmentPreview file={file} onRemove={() => handleRemoveAttachment(index)} />
-                    {getFileCategory(file) === 'video' && (
-                      <button
-                        type='button'
-                        onClick={() =>
-                          void saveFileToDisk(
-                            file,
-                            file === pendingAttachedRef.current ? pendingRecordingFilePath : null,
-                          )
-                        }
-                        className='flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors'
-                        data-track-category='ERROR_REPORT'
-                        data-track-name='SaveVideoToDisk'
-                        title='Save to desktop'
-                      >
-                        <Download className='size-3' />
-                        <span>Save</span>
-                      </button>
-                    )}
-                  </div>
-                ))}
+            <div className='flex items-center justify-between gap-3 px-6 py-4 border-t border-border bg-background'>
+              <p className='text-xs text-muted-foreground'>
+                We appreciate you taking the time to report this.
+              </p>
+              <div className='flex items-center gap-2'>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  onClick={handleDiscard}
+                  disabled={isSubmitting}
+                  data-track-category='ERROR_REPORT'
+                  data-track-name='Cancel'
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type='button'
+                  onClick={() => void handleSubmit()}
+                  loading={isSubmitting}
+                  disabled={!title.trim() || !description.trim()}
+                  className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
+                  data-track-category='ERROR_REPORT'
+                  data-track-name='Submit'
+                >
+                  Submit report
+                </Button>
               </div>
-            )}
-          </div>
-        </div>
-
-        <div className='flex items-center justify-between gap-3 px-6 py-4 border-t border-border bg-background'>
-          <p className='text-xs text-muted-foreground'>
-            We appreciate you taking the time to report this.
-          </p>
-          <div className='flex items-center gap-2'>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={handleDiscard}
-              disabled={isSubmitting}
-              data-track-category='ERROR_REPORT'
-              data-track-name='Cancel'
-            >
-              Cancel
-            </Button>
-            <Button
-              type='button'
-              onClick={() => void handleSubmit()}
-              loading={isSubmitting}
-              disabled={!title.trim() || !description.trim()}
-              className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
-              data-track-category='ERROR_REPORT'
-              data-track-name='Submit'
-            >
-              Submit report
-            </Button>
-          </div>
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </Dialog>
   );

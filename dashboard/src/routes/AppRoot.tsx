@@ -157,6 +157,8 @@ import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
+import { getTicketsPath } from '../components/ErrorReportModal/ErrorReportModal.utils';
+import { useCacConfig } from '../hooks/useCacConfig';
 import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
 import AIScreen from './AIScreen/AIScreen';
@@ -240,6 +242,10 @@ const AppRoot = (): ReactElement => {
 
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { config: errorReportCacConfig } = useCacConfig<{ channelId: string; boardId?: string }>({
+    key: 'error_report_channel_config',
+    fallbackConfig: { channelId: '' },
+  });
 
   // Shortcuts help modal state
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
@@ -336,6 +342,19 @@ const AppRoot = (): ReactElement => {
     isMobile && isCallActive && machineViewMode === 'mini' && externalId && !isOnboarding;
   const globalTopBarProps = {
     onOpenErrorReport: (): void => setIsErrorReportOpen(true),
+    ...(errorReportCacConfig.channelId
+      ? {
+          onViewMyTickets: (): void => {
+            void navigate(
+              getTicketsPath(
+                errorReportCacConfig.channelId,
+                errorReportCacConfig.boardId,
+                user?.id,
+              ),
+            );
+          },
+        }
+      : {}),
     isRecording: recordingState === 'recording',
     recordingSeconds,
     onStopRecording: stopRecording,
