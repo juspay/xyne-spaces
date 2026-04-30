@@ -111,6 +111,7 @@ export interface XyneAIStreamChunk {
   input?: Record<string, unknown>;
   output?: XyneAIOutput;
   error?: string;
+  httpStatus?: number;
   [key: string]: unknown;
 }
 

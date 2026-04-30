@@ -197,4 +197,11 @@ export interface Message {
   participants?: Participant[]; // List of participants for Summarizer responses
   selectionContexts?: SelectionContext[]; // Canvas selection contexts
   parentId?: string | null; // Parent message ID for tree branching
+  errorInfo?: {
+    code?: string;
+    title: string;
+    message: string;
+    helpText?: string;
+    retryable?: boolean;
+  };
 }
