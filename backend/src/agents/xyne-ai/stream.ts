@@ -41,6 +41,49 @@ type InMemoryStreamProvider = ReturnType<typeof Streaming.createInMemoryStreamPr
 
 let globalStreamProvider: InMemoryStreamProvider | undefined = undefined;
 
+function toHttpStatusCode(val: unknown): number | undefined {
+  if (typeof val === 'number' && Number.isFinite(val) && val >= 100 && val <= 599) {
+    return val;
+  }
+  if (typeof val === 'string') {
+    const n = parseInt(val.trim(), 10);
+    if (Number.isFinite(n) && n >= 100 && n <= 599) return n;
+  }
+  return undefined;
+}
+
+/**
+ * Parse status from provider error text: normal JSON `"code":"401"`, SSE-escaped `\"code\":\"401\"`,
+ * bracket `[401]`, numeric `"code":401`, or `"type":"auth_error"` (401).
+ */
+function parseHttpStatusFromDetailText(detail: string): number | undefined {
+  if (!detail) return undefined;
+  const quoted = detail.match(/"code"\s*:\s*"(\d{3})"/)?.[1];
+  if (quoted) return parseInt(quoted, 10);
+  const numeric = detail.match(/"code"\s*:\s*(\d{3})\b/)?.[1];
+  if (numeric) return parseInt(numeric, 10);
+  const escapedQuoted = detail.match(/\\"code\\"\s*:\s*\\"(\d{3})\\"/)?.[1];
+  if (escapedQuoted) return parseInt(escapedQuoted, 10);
+  const bracket = detail.match(/\[(\d{3})\]/)?.[1];
+  if (bracket) return parseInt(bracket, 10);
+  if (
+    /"type"\s*:\s*"auth_error"/i.test(detail) ||
+    /\\"type\\"\s*:\s*\\"auth_error\\"/i.test(detail)
+  ) {
+    return 401;
+  }
+  return undefined;
+}
+
+function resolveAgentRunHttpStatus(err: Record<string, unknown>, detailStr: string): number | undefined {
+  return (
+    toHttpStatusCode(err.statusCode) ??
+    toHttpStatusCode(err.status) ??
+    toHttpStatusCode(err.code) ??
+    parseHttpStatusFromDetailText(detailStr)
+  );
+}
+
 export async function initializeStreamProvider(): Promise<InMemoryStreamProvider> {
   if (globalStreamProvider) {
     return globalStreamProvider;
@@ -838,7 +881,14 @@ const {
               };
               await sessionStore.addAssistantMessage(session.sessionId, fallbackOutput, currentTraceId, lastStepId);
             }
-            yield { type: 'error', error: errDetail ? `${errTag}: ${errDetail}` : errTag };
+            const errorText = errDetail ? `${errTag}: ${errDetail}` : errTag;
+            // Scan full client-facing string so `[401]` / JSON tail match even if JAF splits fields oddly.
+            const httpStatus = resolveAgentRunHttpStatus(err, errorText);
+            yield {
+              type: 'error',
+              error: errorText,
+              ...(httpStatus !== undefined ? { httpStatus } : {}),
+            };
           }
           break;
       }

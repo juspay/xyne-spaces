@@ -206,8 +206,6 @@ async function executeStream(
       return;
     }
 
-    // eslint-disable-next-line no-console
-    console.error('[XyneAIWorker] Error in stream:', err);
     const errorMessage: WorkerStreamErrorMessage = {
       type: 'STREAM_ERROR',
       payload: {

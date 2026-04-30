@@ -31,6 +31,7 @@ import { xyneAIActor } from '../../machines/xyneAIMachine';
 import XyneAIStreamWorker from './xyneAIStream.worker?worker';
 import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './xyneAIStream.worker';
 import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
+import { getAskAIErrorInfo } from '../../utils/askAIErrorMapping';
 
 export interface StreamState {
   streamId: string;
@@ -900,20 +901,34 @@ class XyneAIStreamManager {
         }
         break;
 
-      case 'error':
-        console.error('[XyneAIStreamManager] Backend error:', data['error']);
+      case 'error': {
+        const rawError = typeof data['error'] === 'string' ? data['error'] : undefined;
+        const httpStatus =
+          typeof data['httpStatus'] === 'number'
+            ? data['httpStatus']
+            : typeof data['statusCode'] === 'number'
+              ? data['statusCode']
+              : undefined;
+        const errorInfo = getAskAIErrorInfo(rawError, httpStatus);
         updateMessages(prev =>
           prev.map(msg =>
             msg.id === botMessageId
               ? {
                   ...msg,
-                  content: 'Unexpected error occurred',
+                  content:
+                    typeof msg.streamingContent === 'string' &&
+                    msg.streamingContent.trim().length > 0
+                      ? msg.streamingContent
+                      : errorInfo.message,
+                  errorInfo,
                   isStreaming: false,
+                  streamingContent: '',
                 }
               : msg,
           ),
         );
         break;
+      }
 
       case 'agent_update':
         if (data['message'] && typeof data['message'] === 'string') {
@@ -1211,16 +1226,21 @@ class XyneAIStreamManager {
     currentState.status = 'error';
     currentState.error = error;
 
+    const errorInfo = getAskAIErrorInfo(error);
+
     // Update messages to show error
-    currentState.messages = currentState.messages.map(msg =>
-      msg.id === botMessageId
-        ? {
-            ...msg,
-            content: 'Unexpected error occurred',
-            isStreaming: false,
-          }
-        : msg,
-    );
+    currentState.messages = currentState.messages.map(msg => {
+      if (msg.id !== botMessageId) return msg;
+      const sc = msg.streamingContent;
+      const hasPartial = typeof sc === 'string' && sc.trim().length > 0;
+      return {
+        ...msg,
+        content: hasPartial ? sc : errorInfo.message,
+        errorInfo,
+        isStreaming: false,
+        streamingContent: '',
+      };
+    });
 
     this.notifySubscribers({ ...currentState });
 
