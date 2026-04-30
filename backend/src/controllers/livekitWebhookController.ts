@@ -470,6 +470,15 @@ class LiveKitWebhookController {
           logger.error(`[LiveKit Webhook] Failed to trigger call ended side effects:`, sideEffectError);
         }
 
+        // Clear "In a call" presence status immediately when last participant leaves.
+        // participant_left fires before room_finished, so doing it here minimises the
+        // window where a crashed/refreshed user still shows "In a call".
+        try {
+          await callSideEffectService.clearCallStatusForParticipants(result.call.id);
+        } catch (sideEffectError) {
+          logger.error(`[LiveKit Webhook] Failed to clear call presence status for ${callId}:`, sideEffectError);
+        }
+
         // Track call metrics (count + duration) as a side effect
         try {
           await callSideEffectService.handleCallMetrics(result.call.startedAt, now);
