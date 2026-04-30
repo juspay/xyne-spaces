@@ -59,8 +59,8 @@ import { SubTicketCountIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
-import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
+import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
 import { AttachmentPreview } from '../../ui/files/AttachmentPreview';
 import type { UploadedFile } from '../../ui/files/Files.types';
 import Input from '../../ui/Input';
@@ -1169,7 +1169,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         label: board.name,
         value: board.id,
         icon: (
-          <span className='bg-blue-500 text-white text-xs aspect-square size-4 rounded text-center'>
+          <span className='bg-primary text-primary-foreground text-xs aspect-square size-4 rounded text-center'>
             {board.name.charAt(0)}
           </span>
         ),
@@ -1266,7 +1266,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       .map((tag, index) => ({
         label: tag,
         value: tag,
-        icon: <span className={cn('size-1.5 rounded', TAG_COLORS[index % TAG_COLORS.length])} />,
+        icon: <span className={cn('size-2 rounded-full', TAG_COLORS[index % TAG_COLORS.length])} />,
       }));
   }, [availableTags, newTags, initialTags, formValues?.tags]);
 
@@ -2088,7 +2088,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             <form.Field name='assignee'>
               {field => (
                 <EntitySelector
-                  variant='inline'
                   options={assigneeOptions}
                   selectedValue={
                     field.state.value
@@ -2107,7 +2106,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   searchPlaceholder={
                     showUserGroupsOnly
                       ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
-                      : `Assignee${mandatoryAssignee ? ' *' : ''}`
+                      : `Select assignee${mandatoryAssignee ? ' *' : ''}`
                   }
                   placeholder={
                     showUserGroupsOnly
@@ -2121,12 +2120,36 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       <User className='size-3.5' strokeWidth={2.33} />
                     )
                   }
+                  inputClassName='rounded-md h-7'
                   disableClientFiltering={true}
                   showIndicator={false}
                   testId='ticket-assignee-selector'
                 />
               )}
             </form.Field>
+
+            {/* Status Selection (Todo) - conditionally rendered */}
+            {showTodo && (
+              <form.Field name='status'>
+                {field => (
+                  <EntitySelector
+                    showSearch={false}
+                    options={statusOptions}
+                    selectedValue={field.state.value}
+                    onSelect={(value: string | null) =>
+                      field.handleChange(value as CreateTicketFormData['status'])
+                    }
+                    searchPlaceholder={`status${mandatoryTodo ? ' *' : ''}`}
+                    placeholder={`status${mandatoryTodo ? ' *' : ''}`}
+                    inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
+                    inputClassName='rounded-md h-7'
+                    showClearButton={true}
+                    showIndicator={false}
+                    testId='ticket-status-selector'
+                  />
+                )}
+              </form.Field>
+            )}
 
             {/* Due Date - conditionally rendered */}
             {showDueDate && (
@@ -2146,29 +2169,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               </form.Field>
             )}
 
-            {/* Status Selection (Todo) - conditionally rendered */}
-            {showTodo && (
-              <form.Field name='status'>
-                {field => (
-                  <EntitySelector
-                    showSearch={false}
-                    options={statusOptions}
-                    selectedValue={field.state.value}
-                    onSelect={(value: string | null) =>
-                      field.handleChange(value as CreateTicketFormData['status'])
-                    }
-                    searchPlaceholder={`status${mandatoryTodo ? ' *' : ''}`}
-                    placeholder={`status${mandatoryTodo ? ' *' : ''}`}
-                    inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7 bg-muted'
-                    showClearButton={true}
-                    showIndicator={false}
-                    testId='ticket-status-selector'
-                  />
-                )}
-              </form.Field>
-            )}
-
             {/* Priority Selection */}
             <form.Field name='priority'>
               {field => {
@@ -2182,8 +2182,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     }
                     searchPlaceholder='priority'
                     placeholder='priority'
-                    inputIcon={<Ellipsis className='size-3.5 text-foreground' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7 bg-muted'
+                    inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
+                    inputClassName='rounded-md h-7'
                     showClearButton={true}
                     showIndicator={false}
                     testId='ticket-priority-selector'
@@ -2210,9 +2210,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       }}
                       searchPlaceholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
                       placeholder={`workflows${mandatoryWorkflows ? ' *' : ''}`}
-                      inputIcon={
-                        <WorkflowIcon strokeWidth={2.33} className='size-[14px] text-foreground' />
-                      }
+                      inputIcon={<WorkflowIcon strokeWidth={2.33} className='size-[14px]' />}
+                      inputClassName='bg-background'
                       showIndicator={false}
                       testId='ticket-workflow-selector'
                     />
@@ -2235,9 +2234,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       field.handleChange([...field.state.value, value]);
                     }}
                     placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
-                    searchPlaceholder={`Label${mandatoryLabels ? ' *' : ''}`}
+                    searchPlaceholder='Search labels'
+                    showSearch={true}
+                    collapseSelectedAfter={3}
+                    collapsedLabel='labels'
                     inputIcon={<Tag strokeWidth={2.33} className='size-3.5' />}
-                    showIndicator={false}
                   />
                 )}
               </form.Field>
@@ -2263,8 +2264,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     }
                     searchPlaceholder='ticket type'
                     placeholder='ticket type'
-                    inputIcon={<Ticket className='size-3.5 text-foreground' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7 bg-muted'
+                    inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
+                    inputClassName='rounded-md h-7'
                     showClearButton={true}
                     showIndicator={false}
                   />
@@ -2287,7 +2288,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               </form.Field>
             )}
           </div>
-          <div className='flex justify-between items-center pt-3 pb-4'>
+          <div className='flex justify-between items-center pt-6 pb-4'>
             <Button
               type='button'
               onClick={handlePaperclipClick}
@@ -2314,7 +2315,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 disabled={form.state.isSubmitting || !isFormReadyForSubmit}
                 className={cn(
                   'px-3 rounded-lg h-8',
-                  'text-gray-50 text-sm font-medium bg-sidebar-badge-accent hover:bg-sidebar-badge-accent/80',
+                  'text-white text-sm font-medium bg-[var(--ticket-accent)] hover:bg-[var(--ticket-accent)]/90',
                 )}
                 data-testid='ticket-submit-button'
                 data-track-category='TICKETS'

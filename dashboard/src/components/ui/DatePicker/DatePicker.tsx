@@ -126,7 +126,7 @@ const MonthView: React.FC<{
               disabled={isDisabled}
               className={`
                 aspect-square flex items-center justify-center text-sm rounded-md transition-colors
-                ${isSelected ? 'bg-primary text-primary-foreground font-semibold' : ''}
+                ${isSelected ? 'bg-[var(--ticket-accent)] text-white font-semibold' : ''}
                 ${!isSelected && isToday ? 'border border-sidebar-badge-accent text-sidebar-badge-accent font-semibold' : ''}
                 ${!isSelected && !isToday && !isDisabled ? 'hover:bg-muted text-foreground' : ''}
                 ${isDisabled ? 'text-muted-foreground cursor-not-allowed' : 'cursor-pointer'}
@@ -355,12 +355,25 @@ export const DatePicker: React.FC<DatePickerProps> = ({
               setIsOpen(!isOpen);
             }
           }}
-          className={`relative flex items-center border px-2 gap-1.5 rounded-md h-7 transition-colors bg-card w-fit max-w-full overflow-hidden cursor-pointer hover:bg-muted ${inputClassName}`}
+          className={cn(
+            'relative flex items-center border border-border px-2 gap-1.5 rounded-[6px] h-7 transition-colors bg-background dark:bg-input w-fit max-w-full overflow-hidden cursor-pointer hover:bg-muted shadow-[0_1px_1px_0_rgba(5,5,6,0.04)]',
+            inputClassName,
+          )}
           data-track-category='Tickets'
           data-track-name='ToggleDatePicker'
         >
-          <Calendar className='flex-shrink-0 w-3.5 h-3.5 text-muted-foreground' />
-          <span className='text-[13px] text-foreground whitespace-nowrap w-full'>
+          <Calendar
+            className={cn(
+              'flex-shrink-0 w-3.5 h-3.5',
+              selectedDate ? 'text-foreground' : 'text-muted-foreground',
+            )}
+          />
+          <span
+            className={cn(
+              'text-[13px] whitespace-nowrap w-full',
+              selectedDate ? 'text-foreground' : 'text-muted-foreground',
+            )}
+          >
             {selectedDate ? formatDate(selectedDate) : placeholder}
           </span>
           {showClearButton && selectedDate && (
@@ -443,7 +456,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
             </Button>
             <Button
               onClick={handleApply}
-              className='h-8 px-3 text-sm font-semibold rounded-lg transition-colors'
+              className='h-8 px-3 text-sm font-semibold rounded-lg transition-colors bg-[var(--ticket-accent)] hover:bg-[var(--ticket-accent)]/90 text-white'
               data-track-category='Tickets'
               data-track-name='ApplyDatePicker'
             >

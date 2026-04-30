@@ -82,6 +82,7 @@
     --status-success: #16a34a;
     --status-failure: #dc2626;
     --status-paused: #7c3aed;
+    --ticket-accent: #445bb2;
   }
 
   /* Classic theme - default theme with current design */
@@ -162,6 +163,7 @@
     --status-success: #16a34a;
     --status-failure: #dc2626;
     --status-paused: #7c3aed;
+    --ticket-accent: #445bb2;
   }
 
   /* Midnight theme - dark theme variant */
@@ -244,6 +246,9 @@
     --status-success: #4ade80;
     --status-failure: #f87171;
     --status-paused: #a78bfa;
+
+    /* Ticket accent color - lighter for dark mode visibility */
+    --ticket-accent: #5b7ce6;
   }
 }
 
