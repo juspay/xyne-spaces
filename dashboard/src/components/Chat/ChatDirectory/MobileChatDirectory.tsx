@@ -149,7 +149,7 @@ const MobileChatDirectory = ({
         </button>
       </div>
 
-      <div className='flex-1 h-full overflow-y-scroll no-scrollbar pb-10 px-3 pt-2'>
+      <div className='flex-1 h-full overflow-y-scroll no-scrollbar pb-20 px-3 pt-2'>
         <Accordion.Root
           type='multiple'
           className='space-y-4'
