@@ -2,9 +2,11 @@ import { ReactElement, useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import MetricsBar from '../MetricsBar/MetricsBar';
 import {
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
   Circle,
+  ExternalLink,
   Headset,
   LucideCommand,
   Search,
@@ -15,10 +17,17 @@ import { invokeShortcut } from '../../shortcuts';
 import { toast } from 'sonner';
 import { Tooltip } from '../ui/Tooltip';
 import { WorkspaceSwitcher } from '../AppSidebar/WorkspaceSwitcher';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
 
 interface GlobalTopBarProps {
   onOpenErrorReport?: () => void;
+  onViewMyTickets?: () => void;
   isRecording?: boolean;
   recordingSeconds?: number;
   onStopRecording?: () => void;
@@ -133,10 +142,23 @@ const NavigationAndSearch = (): ReactElement => {
 
 const GlobalTopBar = ({
   onOpenErrorReport,
+  onViewMyTickets,
   isRecording,
   recordingSeconds = 0,
   onStopRecording,
 }: GlobalTopBarProps): ReactElement => {
+  const [supportMenuOpen, setSupportMenuOpen] = useState(false);
+  const menuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const openSupportMenu = (): void => {
+    if (menuTimerRef.current) clearTimeout(menuTimerRef.current);
+    setSupportMenuOpen(true);
+  };
+
+  const scheduleSupportMenuClose = (): void => {
+    menuTimerRef.current = setTimeout(() => setSupportMenuOpen(false), 150);
+  };
+
   const canCreateWorkspace = useCanCreateWorkspace();
 
   const handleDoubleClick = (): void => {
@@ -188,19 +210,48 @@ const GlobalTopBar = ({
             </Tooltip>
           )}
           {!isRecording && onOpenErrorReport && (
-            <Tooltip content='Report issue'>
-              <button
-                type='button'
-                onClick={onOpenErrorReport}
-                className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] hover:bg-[var(--metrics-bar-hover-bg)]/80 transition-colors cursor-pointer'
-                aria-label='report-issue'
-                data-track-category='ERROR_REPORT'
-                data-track-name='OpenModal'
+            <DropdownMenu open={supportMenuOpen} onOpenChange={setSupportMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type='button'
+                  onMouseEnter={openSupportMenu}
+                  onMouseLeave={scheduleSupportMenuClose}
+                  className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] hover:bg-[var(--metrics-bar-hover-bg)]/80 transition-colors cursor-pointer'
+                  aria-label='support'
+                  data-track-category='ERROR_REPORT'
+                  data-track-name='OpenSupportMenu'
+                >
+                  <Headset size={14} className='text-[var(--metrics-bar-color)]' />
+                  <span>Support</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align='end'
+                onMouseEnter={openSupportMenu}
+                onMouseLeave={scheduleSupportMenuClose}
               >
-                <Headset size={14} className='text-[var(--metrics-bar-color)]' />
-                <span>Support</span>
-              </button>
-            </Tooltip>
+                <DropdownMenuItem
+                  onSelect={onOpenErrorReport}
+                  data-track-category='ERROR_REPORT'
+                  data-track-name='OpenModal'
+                  className='flex items-center gap-2'
+                >
+                  <AlertCircle className='size-4 shrink-0' />
+                  <span>Report issue</span>
+                </DropdownMenuItem>
+                {onViewMyTickets && (
+                  <DropdownMenuItem
+                    onSelect={onViewMyTickets}
+                    data-track-category='ERROR_REPORT'
+                    data-track-name='ViewMyTickets'
+                    className='flex items-center gap-2'
+                  >
+                    <ExternalLink className='size-4 shrink-0' />
+                    <span>View my tickets</span>
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>
