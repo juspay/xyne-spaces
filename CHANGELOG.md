@@ -1,3 +1,24 @@
+## [1.135.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.134.0...v1.135.0) (2026-04-30)
+
+
+### Features
+
+* add error reporting to a channel. ([f9bf5cb](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/f9bf5cb716c948c3c22d5d2ac89864a8a7ee1ddf)), closes [#5236](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5236)
+* add self-message via CMD+N and DM search ([b2c6db1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b2c6db11c8c8955aa698e3784ae80011a9ab1032)), closes [#5413](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5413)
+* flowJSON V2 ([e0dc4b8](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/e0dc4b8f2f99017b4e40466aac6cee7f2704ebf3)), closes [#5727](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5727)
+* xyne desk- email fetch range and mark as read + counter backfill ([86456ea](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/86456ea9213637fc0866ccc62e115c7400643ed5)), closes [#5687](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5687)
+
+
+### Bug Fixes
+
+* added auto focus frame work for input feilds ([5b2397a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/5b2397afa4621eb2574dcf692c37d64ae6806825)), closes [#5039](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5039)
+* Fix image preview cropping issue ([1f5f27b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/1f5f27b2479d3ba444e1dc276ee6160b84fce4d9))
+* Fix org invitation rollback when email service fails ([ac41cf4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/ac41cf4a18ab6281ab8030f2f6b0843f3ce3857b))
+* fix profile icon click behavior above avatar in sidebar ([dcb254d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dcb254d38dd813224ea4672214d2f77ac366a856))
+* fixing the AI_Summary prompt. ([9b2166f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9b2166f8d4cbf2516e1e4c1c5246829c71a648e6))
+* Resolve raw userIds in group DM to channel conversion ([dc75c21](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/dc75c21ee8922dd5e87158ff95ff00d782eec842))
+* skip no-op channel_user_status updates in handleUnreadCount ([afc1f60](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/afc1f60d979a10ca15965388bd3ed752d15c4bc6)), closes [#5707](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5707)
+
 ## [1.134.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.133.0...v1.134.0) (2026-04-29)
 
 

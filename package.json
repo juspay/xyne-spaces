@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces",
-  "version": "1.134.0",
+  "version": "1.135.0",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
