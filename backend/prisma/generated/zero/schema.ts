@@ -123,6 +123,7 @@ export enum AttachmentEntityType {
   CANVAS = "CANVAS",
   EMAIL = "EMAIL",
   DRAFT = "DRAFT",
+  DELAYED_MESSAGE = "DELAYED_MESSAGE",
   WORKFLOW_STEPS = "WORKFLOW_STEPS",
   IMPACT = "IMPACT",
 }
@@ -165,6 +166,12 @@ export enum ChannelVisibility {
 export enum ChannelAddUserPolicy {
   EVERYONE = "EVERYONE",
   ADMINS_ONLY = "ADMINS_ONLY",
+}
+
+export enum ChannelSortOrder {
+  UNREAD = "UNREAD",
+  RECENCY = "RECENCY",
+  ALPHABETICAL = "ALPHABETICAL",
 }
 
 export enum MessageType {
@@ -307,6 +314,7 @@ export enum PRStatus {
   UPDATED = "UPDATED",
   DECLINED = "DECLINED",
   MERGED = "MERGED",
+  DELETED = "DELETED",
 }
 
 export enum PRStatusEvent {
@@ -314,6 +322,7 @@ export enum PRStatusEvent {
   UPDATED = "UPDATED",
   MERGED = "MERGED",
   DECLINED = "DECLINED",
+  DELETED = "DELETED",
 }
 
 export enum EmailType {
@@ -390,6 +399,8 @@ export enum NotificationType {
   CALL_REMINDER = "CALL_REMINDER",
   CALL_SCHEDULED = "CALL_SCHEDULED",
   CALL_UPDATED = "CALL_UPDATED",
+  EMAIL_FETCH_COMPLETED = "EMAIL_FETCH_COMPLETED",
+  EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
 }
 
 export enum NotificationStatus {
@@ -594,6 +605,14 @@ export enum SavedConfigEntityName {
   FORM_ENTITY_VALUE = "FORM_ENTITY_VALUE",
 }
 
+export enum DelayedMessageStatus {
+  PENDING = "PENDING",
+  SENDING = "SENDING",
+  SENT = "SENT",
+  FAILED = "FAILED",
+  CANCELLED = "CANCELLED",
+}
+
 // Define tables
 
 export const agentTable = table("agents")
@@ -681,6 +700,7 @@ export const ticketTable = table("tickets")
     stageName: string(),
     ticketType: string().optional(),
     isArchived: boolean(),
+    lastEmailAt: number(),
   })
   .primaryKey("id");
 
@@ -1002,6 +1022,7 @@ export const userPreferenceTable = table("user_preferences")
     id: string(),
     userId: string(),
     askai_custom_instruction: string().optional(),
+    channelSortOrder: enumeration<ChannelSortOrder>(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1049,6 +1070,7 @@ export const userGroupMappingTable = table("user_group_mappings")
     userGroupId: string(),
     responsibility: enumeration<UserResponsibility>(),
     onCallSetNumber: number().optional(),
+    onCallSetNumbers: json<number[]>(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1140,6 +1162,8 @@ export const userProfileTable = table("user_profiles")
     manager: string().optional(),
     role: string().optional(),
     joinedOn: number().optional(),
+    voiceSignature: string().optional(),
+    hasVoiceSignature: boolean(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1215,6 +1239,7 @@ export const orgMemberTable = table("org_members")
   .columns({
     memberId: string(),
     orgId: string(),
+    userId: string(),
     email: string(),
     role: enumeration<OrgRole>(),
     joinedAt: number(),
@@ -1419,6 +1444,7 @@ export const conversationParticipantTable = table("conversation_participants")
     participationType: enumeration<ConversationParticipation>().optional(),
     isSubscribed: boolean(),
     joinedAt: number(),
+    lastReadAt: number().optional(),
   })
   .primaryKey("id");
 
@@ -1433,6 +1459,7 @@ export const emailTable = table("emails")
     cc: json<string[]>(),
     bcc: json<string[]>(),
     conversationId: string(),
+    channelId: string(),
     externalThreadId: string(),
     externalMessageId: string(),
     createdAt: number(),
@@ -1444,7 +1471,20 @@ export const emailDraftTable = table("email_drafts")
   .columns({
     id: string(),
     conversationId: string(),
+    userId: string().optional(),
+    channelId: string(),
     draftContent: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const emailReadTable = table("email_reads")
+  .columns({
+    id: string(),
+    ticketId: string(),
+    userId: string(),
+    lastReadEmailId: string(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1461,6 +1501,15 @@ export const emailSignatureTable = table("email_signatures")
     updatedAt: number(),
   })
   .primaryKey("id");
+
+export const emailChannelPreferenceTable = table("email_channel_preferences")
+  .columns({
+    channelId: string(),
+    ownerUserId: string().optional(),
+    assigneeUserGroupId: string().optional(),
+    boardId: string().optional(),
+  })
+  .primaryKey("channelId");
 
 export const messageTable = table("messages")
   .columns({
@@ -1512,6 +1561,7 @@ export const messageAttachmentTable = table("message_attachments")
     metadata: json().optional(),
     conversationId: string().optional(),
     thumbnailUrl: string().optional(),
+    isDeleted: boolean(),
   })
   .primaryKey("id");
 
@@ -1582,6 +1632,7 @@ export const externalSourceTable = table("external_sources")
     ownerUserId: string().optional(),
     credentials: string(),
     isActive: boolean(),
+    lastSyncCursor: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1724,6 +1775,7 @@ export const callTable = table("calls")
     recurrenceRule: string().optional(),
     instanceDate: number().optional(),
     recordingEnabled: boolean(),
+    recordingUrl: string().optional(),
     transcript: string().optional(),
     aiSummary: string().optional(),
     startedAt: number(),
@@ -1820,6 +1872,7 @@ export const bookmarkTable = table("bookmarks")
     createdAt: number(),
     updatedAt: number().optional(),
     isDeleted: boolean(),
+    isCompleted: boolean(),
     metadata: json().optional(),
   })
   .primaryKey("id");
@@ -2179,6 +2232,16 @@ export const channelDailyRecapTable = table("channel_daily_recaps")
   })
   .primaryKey("id");
 
+export const channelRecapTable = table("channel_recaps")
+  .columns({
+    id: string(),
+    channelId: string(),
+    recapDate: number(),
+    summary: string(),
+    userId: string().optional(),
+  })
+  .primaryKey("id");
+
 export const sessionRecordingFileTable = table("session_recording_files")
   .columns({
     id: string(),
@@ -2227,6 +2290,21 @@ export const installedAppsTable = table("installed_apps")
   })
   .primaryKey("id");
 
+export const appIncomingWebhookTable = table("app_incoming_webhooks")
+  .columns({
+    id: string(),
+    installedAppId: string(),
+    channelId: string(),
+    name: string(),
+    secret: string(),
+    isActive: boolean(),
+    createdBy: string(),
+    createdAt: number(),
+    revokedAt: number().optional(),
+    revokedBy: string().optional(),
+  })
+  .primaryKey("id");
+
 export const savedUserConfigurationTable = table("saved_user_configurations")
   .columns({
     id: string(),
@@ -2247,6 +2325,23 @@ export const savedUserConfigurationValueTable = table("saved_user_configuration_
     entityName: enumeration<SavedConfigEntityName>(),
     fieldName: string(),
     fieldValue: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const delayedMessageTable = table("delayed_messages")
+  .columns({
+    id: string(),
+    channelId: string(),
+    conversationId: string().optional(),
+    senderId: string(),
+    content: string(),
+    hasAttachment: boolean(),
+    scheduledFor: number(),
+    status: enumeration<DelayedMessageStatus>(),
+    failureReason: string().optional(),
+    sentAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -2786,6 +2881,16 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     sourceField: ["id"],
     destField: ["userId"],
     destSchema: installedAppsTable,
+  }),
+  incomingWebhooksCreated: many({
+    sourceField: ["id"],
+    destField: ["createdBy"],
+    destSchema: appIncomingWebhookTable,
+  }),
+  incomingWebhooksRevoked: many({
+    sourceField: ["id"],
+    destField: ["revokedBy"],
+    destSchema: appIncomingWebhookTable,
   })
 }));
 
@@ -3128,6 +3233,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: channelStatsTable,
+  }),
+  incomingWebhooks: many({
+    sourceField: ["id"],
+    destField: ["channelId"],
+    destSchema: appIncomingWebhookTable,
   })
 }));
 
@@ -3342,7 +3452,7 @@ export const appsTableRelationships = relationships(appsTable, ({ one, many }) =
   })
 }));
 
-export const installedAppsTableRelationships = relationships(installedAppsTable, ({ one }) => ({
+export const installedAppsTableRelationships = relationships(installedAppsTable, ({ one, many }) => ({
   app: one({
     sourceField: ["appId"],
     destField: ["id"],
@@ -3350,6 +3460,34 @@ export const installedAppsTableRelationships = relationships(installedAppsTable,
   }),
   user: one({
     sourceField: ["userId"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  incomingWebhooks: many({
+    sourceField: ["id"],
+    destField: ["installedAppId"],
+    destSchema: appIncomingWebhookTable,
+  })
+}));
+
+export const appIncomingWebhookTableRelationships = relationships(appIncomingWebhookTable, ({ one }) => ({
+  installedApp: one({
+    sourceField: ["installedAppId"],
+    destField: ["id"],
+    destSchema: installedAppsTable,
+  }),
+  channel: one({
+    sourceField: ["channelId"],
+    destField: ["id"],
+    destSchema: channelTable,
+  }),
+  createdByUser: one({
+    sourceField: ["createdBy"],
+    destField: ["id"],
+    destSchema: userTable,
+  }),
+  revokedByUser: one({
+    sourceField: ["revokedBy"],
     destField: ["id"],
     destSchema: userTable,
   })
@@ -3407,7 +3545,6 @@ export const schema = createSchema(
       userSkillTable,
       scheduledMessageTable,
       callMessageTable,
-      scheduledMessageTable,
       userGroupMappingTable,
       userAssignmentStateTable,
       boardComplexityScoreTable,
@@ -3436,7 +3573,9 @@ export const schema = createSchema(
       conversationParticipantTable,
       emailTable,
       emailDraftTable,
+      emailReadTable,
       emailSignatureTable,
+      emailChannelPreferenceTable,
       messageTable,
       messageSearchTable,
       messageAttachmentTable,
@@ -3486,12 +3625,15 @@ export const schema = createSchema(
       coeTable,
       releaseAttributionTable,
       channelDailyRecapTable,
+      channelRecapTable,
       sessionRecordingFileTable,
       surfaceLinkTable,
       appsTable,
       installedAppsTable,
+      appIncomingWebhookTable,
       savedUserConfigurationTable,
       savedUserConfigurationValueTable,
+      delayedMessageTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -3554,6 +3696,7 @@ export const schema = createSchema(
       canvasParticipantTableRelationships,
       appsTableRelationships,
       installedAppsTableRelationships,
+      appIncomingWebhookTableRelationships,
       savedUserConfigurationTableRelationships,
       savedUserConfigurationValueTableRelationships,
     ],
@@ -3593,7 +3736,6 @@ export type UserPreference = Row<typeof schema.tables.user_preferences>;
 export type UserSkill = Row<typeof schema.tables.user_skills>;
 export type ScheduledMessage = Row<typeof schema.tables.scheduled_messages>;
 export type CallMessage = Row<typeof schema.tables.call_messages>;
-export type ScheduledMessage = Row<typeof schema.tables.scheduled_messages>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
 export type UserAssignmentState = Row<typeof schema.tables.user_assignment_states>;
 export type BoardComplexityScore = Row<typeof schema.tables.board_complexity_scores>;
@@ -3622,7 +3764,9 @@ export type Conversation = Row<typeof schema.tables.conversations>;
 export type ConversationParticipant = Row<typeof schema.tables.conversation_participants>;
 export type Email = Row<typeof schema.tables.emails>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
+export type EmailRead = Row<typeof schema.tables.email_reads>;
 export type EmailSignature = Row<typeof schema.tables.email_signatures>;
+export type EmailChannelPreference = Row<typeof schema.tables.email_channel_preferences>;
 export type Message = Row<typeof schema.tables.messages>;
 export type MessageSearch = Row<typeof schema.tables.message_search>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
@@ -3672,9 +3816,12 @@ export type Impact = Row<typeof schema.tables.impacts>;
 export type COE = Row<typeof schema.tables.coes>;
 export type ReleaseAttribution = Row<typeof schema.tables.release_attributions>;
 export type ChannelDailyRecap = Row<typeof schema.tables.channel_daily_recaps>;
+export type ChannelRecap = Row<typeof schema.tables.channel_recaps>;
 export type SessionRecordingFile = Row<typeof schema.tables.session_recording_files>;
 export type SurfaceLink = Row<typeof schema.tables.surface_links>;
 export type Apps = Row<typeof schema.tables.apps>;
 export type InstalledApps = Row<typeof schema.tables.installed_apps>;
+export type AppIncomingWebhook = Row<typeof schema.tables.app_incoming_webhooks>;
 export type SavedUserConfiguration = Row<typeof schema.tables.saved_user_configurations>;
 export type SavedUserConfigurationValue = Row<typeof schema.tables.saved_user_configuration_values>;
+export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;

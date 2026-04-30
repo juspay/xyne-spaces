@@ -18,6 +18,7 @@ interface ImportMetaEnv {
   readonly VITE_ENABLE_SUMMARY_ACTION_BUTTONS: string;
   readonly VITE_GRAFANA_URL: string;
   readonly VITE_GRAFANA_LOGS_DATASOURCE_ID: string;
+  readonly VITE_APPS_PUBLIC_BASE_URL?: string;
 }
 
 interface ImportMeta {

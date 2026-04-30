@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { AppController } from '../controllers/appController';
+import { incomingWebhookController } from '../controllers/incomingWebhookController';
 import { ChatController } from '../controllers/chatController';
 import { authorize } from '@/middleware/authorize';
 import { AccessType } from '@prisma/client';
@@ -15,17 +16,26 @@ import { authenticateApp } from '../middelware/authenticator';
 import { uploadMultiple, uploadConfig } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
 import { FlowController } from '../controllers/flowController';
+import { webhookLimiter } from '@/middleware/rateLimiters';
 
 const router = Router();
 const appController = new AppController();
 const chatController = new ChatController();
 const flowController = new FlowController();
 
+router.post('/webhooks/:workspaceId/:appId/:secret', webhookLimiter, incomingWebhookController.handleIncoming);
+
 router.post('/create', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.createApp);
 router.post('/install/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appController.installApp);
 router.post('/configureWebhook/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.configureWebhook);
 router.post('/regenerate-jwt/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.regenerateJwt);
 router.post('/upload-picture/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), uploadConfig.single('picture'), appController.uploadBotPicture);
+router.get('/bot-channels/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appController.getBotChannels);
+
+router.post('/incoming-webhooks', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.createWebhook);
+router.get('/incoming-webhooks/:installedAppId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), incomingWebhookController.listWebhooks);
+router.patch('/incoming-webhooks/:webhookId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.updateWebhook);
+router.post('/incoming-webhooks/:webhookId/revoke', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.revokeWebhook);
 
 // User-initiated app action dispatch (user auth, not app token)
 router.post('/chat/action', authMiddleware.authenticate, chatController.dispatchAction);

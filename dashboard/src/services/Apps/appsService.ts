@@ -25,6 +25,29 @@ export interface UpdateAppRequest {
   webhookUrl?: string;
 }
 
+export interface BotChannel {
+  id: string;
+  name: string;
+  visibility: string;
+}
+
+export interface IncomingWebhook {
+  id: string;
+  name: string;
+  channelId: string;
+  channelName: string;
+  channelVisibility: string;
+  isActive: boolean;
+  createdAt: string;
+  webhookUrl: string;
+}
+
+export interface CreateIncomingWebhookRequest {
+  installedAppId: string;
+  channelId: string;
+  name: string;
+}
+
 export class AppsService {
   async createApp(data: CreateAppRequest): Promise<App> {
     const response = await apiInstance.post<App>('/apps/create', data);
@@ -39,6 +62,39 @@ export class AppsService {
   async regenerateJwt(appId: string): Promise<InstallAppResponse> {
     const response = await apiInstance.post<InstallAppResponse>(`/apps/regenerate-jwt/${appId}`);
     return response.data;
+  }
+
+  async getBotChannels(appId: string): Promise<BotChannel[]> {
+    const response = await apiInstance.get<{ channels: BotChannel[] }>(
+      `/apps/bot-channels/${appId}`,
+    );
+    return response.data.channels;
+  }
+
+  async createIncomingWebhook(data: CreateIncomingWebhookRequest): Promise<IncomingWebhook> {
+    const response = await apiInstance.post<IncomingWebhook>('/apps/incoming-webhooks', data);
+    return response.data;
+  }
+
+  async getIncomingWebhooks(
+    installedAppId: string,
+    params?: { limit?: number; offset?: number; includeInactive?: boolean },
+  ): Promise<{ webhooks: IncomingWebhook[]; total: number; limit: number; offset: number }> {
+    const response = await apiInstance.get<{
+      webhooks: IncomingWebhook[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/apps/incoming-webhooks/${installedAppId}`, { params });
+    return response.data;
+  }
+
+  async updateIncomingWebhook(webhookId: string, data: { name: string }): Promise<void> {
+    await apiInstance.patch(`/apps/incoming-webhooks/${webhookId}`, data);
+  }
+
+  async revokeIncomingWebhook(webhookId: string): Promise<void> {
+    await apiInstance.post(`/apps/incoming-webhooks/${webhookId}/revoke`);
   }
 
   async uploadBotPicture(appId: string, file: File): Promise<{ picture: string }> {

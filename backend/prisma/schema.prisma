@@ -1002,6 +1002,8 @@ model User {
   expertiseMappings         UserExpertiseMapping[] @relation("UserExpertiseUser")
   appsCreated               Apps[]                @relation("AppsCreatedBy")
   installedAppsFor          InstalledApps[]        @relation("InstalledAppsUser")
+  incomingWebhooksCreated   AppIncomingWebhook[]     @relation("AppIncomingWebhookCreatedBy")
+  incomingWebhooksRevoked   AppIncomingWebhook[]     @relation("AppIncomingWebhookRevokedBy")
 
   @@unique([providerUserId, workspaceId])
   @@unique([email, workspaceId])
@@ -1611,6 +1613,7 @@ model Channel {
   tickets            Ticket[]             @relation("TicketChannel")
   calls              Call[]
   channelStats       ChannelStats?
+  incomingWebhooks   AppIncomingWebhook[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -3303,11 +3306,36 @@ model InstalledApps {
   // Relations
   app             Apps         @relation(fields: [appId], references: [id])
   user            User         @relation("InstalledAppsUser", fields: [userId], references: [id])
+  incomingWebhooks AppIncomingWebhook[]
 
   @@index([appId])
   @@index([userId])
   @@map("installed_apps")
   @@schema("public")
+}
+
+model AppIncomingWebhook {
+  id             String    @id @default(cuid())
+  installedAppId String
+  channelId      String
+  name           String
+  secret         String
+  isActive       Boolean   @default(true)
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  revokedAt      DateTime?
+  revokedBy      String?
+
+  installedApp   InstalledApps @relation(fields: [installedAppId], references: [id])
+  channel        Channel       @relation(fields: [channelId], references: [id])
+  createdByUser  User          @relation("AppIncomingWebhookCreatedBy", fields: [createdBy], references: [id])
+  revokedByUser  User?         @relation("AppIncomingWebhookRevokedBy", fields: [revokedBy], references: [id])
+
+  @@index([installedAppId, channelId])
+  @@index([installedAppId])
+  @@index([secret])
+  @@map("app_incoming_webhooks")
+  @@schema("workflow")
 }
 
 // Saved Views Enums
