@@ -258,59 +258,6 @@ const formatTicketReferenceRelationLabel = (relationType: TicketReferenceRelatio
   }
 };
 
-/**
- * Helper to sync workload mappings for users when ticket assignment changes
- */
-async function syncUserWorkloadMapping(
-  tx: Transaction<Schema>,
-  userId: string,
-  ticket: { userGroupId: string; boardId: string },
-  createdBy: string
-): Promise<void> {
-  // Count active tickets for this user
-  const userTickets = await tx.run(
-    zql.tickets
-      .where('assignedTo', userId)
-      .where('boardId', ticket.boardId)
-      .where('userGroupId', ticket.userGroupId)
-  );
-
-  const activeTasks = userTickets.filter(
-    (t: any) => t.status === 'NEW' || t.status === 'IN_PROGRESS'
-  ).length;
-
-  const totalTasks = userTickets.length;
-
-  // Check if mapping exists
-  const existingMapping = await tx.run(
-    zql.user_workload_mappings
-      .where('userId', userId)
-      .where('userGroupId', ticket.userGroupId)
-      .where('boardId', ticket.boardId)
-      .one()
-  );
-
-  if (existingMapping) {
-    await tx.mutate.user_workload_mappings.update({
-      id: existingMapping.id,
-      activeTasks,
-      totalTasks,
-      updatedAt: Date.now(),
-    });
-  } else {
-    await tx.mutate.user_workload_mappings.insert({
-      id: uuidv4(),
-      userId,
-      userGroupId: ticket.userGroupId,
-      boardId: ticket.boardId,
-      activeTasks,
-      totalTasks,
-      createdBy,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-  }
-}
 
 /**
  * Helper to create system messages for non-participant mentions within Zero transaction
@@ -4455,7 +4402,20 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                         updatedAt: Date.now(),
                         updatedBy: authData.sub,
                       });
-                      await syncUserWorkloadMapping(tx, assignmentResult.assignedUserId, { userGroupId: ticket.userGroupId!, boardId: newBoardId }, authData.sub);
+
+                      // Sync workload for the newly assigned user (async, non-blocking)
+                      asyncTasks.push(async () => {
+                        try {
+                          await syncUserWorkload(
+                            assignmentResult.assignedUserId!,
+                            ticket.userGroupId!,
+                            newBoardId,
+                            authData.sub
+                          );
+                        } catch (error) {
+                          logger.error('[Workload Sync] Failed to sync workload after board change:', error);
+                        }
+                      });
                     }
                   }
                 } catch (error) {
@@ -4683,12 +4643,33 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
 
           await tx.mutate.tickets.update({ id: params.id, ...updateData });
 
-          // Sync workload mappings if assignedTo changed
+          // Sync workload for assignedTo changes (async, non-blocking)
           if (params.assignedTo !== undefined && params.assignedTo !== oldAssignedTo && ticket.userGroupId && ticket.boardId) {
             const usersToSync = [oldAssignedTo, params.assignedTo].filter(Boolean) as string[];
-
             for (const userId of usersToSync) {
-              await syncUserWorkloadMapping(tx, userId, ticket, authData.sub);
+              asyncTasks.push(async () => {
+                try {
+                  await syncUserWorkload(userId, ticket.userGroupId!, ticket.boardId!, authData.sub);
+                } catch (error) {
+                  logger.error(`[Workload Sync] Failed for user ${userId}:`, error);
+                }
+              });
+            }
+          }
+
+          // Sync workload for statusV2 changes that affect active task count (async, non-blocking)
+          if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2 && ticket.assignedTo && ticket.userGroupId && ticket.boardId) {
+            const ACTIVE_STATUSES = ['TODO', 'STARTED'];
+            const wasActive = ACTIVE_STATUSES.includes(ticket.statusV2);
+            const isActive = ACTIVE_STATUSES.includes(params.statusV2);
+            if (wasActive !== isActive) {
+              asyncTasks.push(async () => {
+                try {
+                  await syncUserWorkload(ticket.assignedTo!, ticket.userGroupId!, ticket.boardId!, authData.sub);
+                } catch (error) {
+                  logger.error(`[Workload Sync] Failed after status change:`, error);
+                }
+              });
             }
           }
 
@@ -4775,6 +4756,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                     }
                   }
                     // Sync workload mapping using Prisma (like Zoho tickets do)
+                    logger.info(`siraj101 syncUserWorkload  5${assignmentResult.assignedUserId}`)
                     await syncUserWorkload(assignmentResult.assignedUserId, params.userGroupId!, targetBoardId, authData.sub);
 
                   logger.info(`[AUTO-ASSIGN] Ticket ${params.id} assigned to ${assignmentResult.assignedUserId} (group change)`);
@@ -4906,12 +4888,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             })
           }
 
-          // Sync workload mappings for both old and new assignees
+          // Sync workload for both old and new assignees (async, non-blocking)
           if (ticket.userGroupId && ticket.boardId) {
             const usersToSync = [oldAssignedTo, assignedTo].filter(Boolean) as string[];
-
             for (const userId of usersToSync) {
-              await syncUserWorkloadMapping(tx, userId, ticket, authData.sub);
+              asyncTasks.push(async () => {
+                try {
+                  await syncUserWorkload(userId, ticket.userGroupId!, ticket.boardId!, authData.sub);
+                } catch (error) {
+                  logger.error(`[Workload Sync] Failed for user ${userId} in assignment:`, error);
+                }
+              });
             }
           }
 
