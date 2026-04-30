@@ -29,7 +29,7 @@ import {
   EVENTS,
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
-import { VirtualizedList } from '../../VirtualizedList';
+import { Virtuoso } from 'react-virtuoso';
 import { Skeleton } from '../../ui/Skeleton';
 import { extractUserMentions } from '../../../utils/mentionParser';
 import {
@@ -43,6 +43,7 @@ import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { mutators } from '../../../zero/mutators';
 import Button from '../../ui/Button';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useQuery } from '../../../hooks/useQuery';
 import { logger, Event } from '../../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 
@@ -288,10 +289,22 @@ const ActivityListView = (): ReactElement => {
   };
 
   const PAGE_SIZE = 100;
+
+  // Accumulation-based state (Infinite Scroll)
+  const [activities, setActivities] = useState<ActivityWithRelated[]>([]);
+  const [fetchCursor, setFetchCursor] = useState<ActivityCursor | null>(null);
+  const [nextCursor, setNextCursor] = useState<ActivityCursor | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const activityLoadStartTimeRef = useRef<number | null>(null);
 
   // Reset pagination when tab changes
   useEffect(() => {
+    setActivities([]);
+    setFetchCursor(null);
+    setNextCursor(null);
+    setHasMore(true);
+    setIsLoading(true);
     activityLoadStartTimeRef.current = Date.now();
   }, [activeTab]);
 
@@ -309,50 +322,98 @@ const ActivityListView = (): ReactElement => {
   const currentTypes = useMemo(() => getActivityTypes(activeTab), [activeTab]);
   const classificationFilter = useMemo(() => getClassificationFilter(activeTab), [activeTab]);
 
-  const handleItemsChange = useCallback(
-    (_items: ActivityWithRelated[]) => {
-      if (activityLoadStartTimeRef.current !== null) {
-        const duration = Date.now() - activityLoadStartTimeRef.current;
-        logger.info(Event.ACTIVITIES_LOADED, {
-          source: 'ActivityListView',
-          message: 'Activities loaded',
-          durationMs: duration,
-          tab: activeTab,
-          url: window.location.href,
-        });
-
-        safeRecordMetric(() => {
-          dataLoadDuration.record(duration, {
-            source: 'ActivityListView',
-            event: Event.ACTIVITIES_LOADED,
-            platform: logger.platformName,
-            tab: activeTab,
-          });
-        });
-
-        activityLoadStartTimeRef.current = null;
-      }
-    },
-    [activeTab],
+  // Query with pagination - only fetches when fetchCursor changes
+  const [activitiesPage, activitiesDetails] = useQuery(
+    queries.userActivitiesPaginatedV2({
+      limit: PAGE_SIZE,
+      start: fetchCursor,
+      types: currentTypes,
+      classification: classificationFilter,
+    }),
   );
 
-  const transformActivities = useCallback(
-    (items: ActivityWithRelated[]) => {
-      if (!items || items.length === 0) return [];
+  // Accumulate results when query completes
+  useEffect(() => {
+    if (activitiesDetails.type !== 'complete') {
+      return; // Wait for query to complete before processing
+    }
 
-      const activeTabConfig = visibleTabs.find(tab => tab.value === activeTab);
-      if (!activeTabConfig) {
-        return items;
-      }
+    setIsLoading(false);
 
-      return items.filter(activity => {
-        const matchesTab = activeTabConfig.filter(activity);
-        const matchesReadState = showUnreadOnly ? !activity.isRead : true;
-        return matchesTab && matchesReadState;
+    if (activityLoadStartTimeRef.current !== null) {
+      const duration = Date.now() - activityLoadStartTimeRef.current;
+      logger.info(Event.ACTIVITIES_LOADED, {
+        source: 'ActivityListView',
+        message: 'Activities loaded',
+        durationMs: duration,
+        tab: activeTab,
+        url: window.location.href,
       });
-    },
-    [activeTab, showUnreadOnly, visibleTabs],
-  );
+
+      safeRecordMetric(() => {
+        dataLoadDuration.record(duration, {
+          source: 'ActivityListView',
+          event: Event.ACTIVITIES_LOADED,
+          platform: logger.platformName,
+          tab: activeTab,
+        });
+      });
+
+      activityLoadStartTimeRef.current = null;
+    }
+
+    if (activitiesPage.length === 0) {
+      if (fetchCursor === null) {
+        setActivities([]);
+        setNextCursor(null);
+      }
+      setHasMore(false);
+      return;
+    }
+
+    setActivities(prev => {
+      if (fetchCursor === null) return activitiesPage;
+
+      const combined = [...prev, ...activitiesPage];
+      const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+      return unique;
+    });
+
+    setHasMore(activitiesPage.length >= PAGE_SIZE);
+
+    // Store the next cursor but don't fetch yet - wait for handleEndReached
+    const lastItemOfPage = activitiesPage[activitiesPage.length - 1];
+    if (lastItemOfPage) {
+      setNextCursor({
+        id: lastItemOfPage.id,
+        updatedAt: lastItemOfPage.updatedAt ?? lastItemOfPage.createdAt,
+      });
+    }
+  }, [activitiesPage, activitiesDetails.type, fetchCursor, activeTab]);
+
+  // Scroll down - load older items (triggered ~20-25 items before end via overscan)
+  const handleEndReached = useCallback(() => {
+    if (!hasMore || isLoading || !nextCursor) return;
+
+    // Trigger the next page fetch
+    setIsLoading(true);
+    setFetchCursor(nextCursor);
+  }, [hasMore, isLoading, nextCursor]);
+
+  const filteredActivities = useMemo(() => {
+    if (!activities || activities.length === 0) return [];
+
+    const activeTabConfig = visibleTabs.find(tab => tab.value === activeTab);
+    if (!activeTabConfig) {
+      return activities;
+    }
+
+    return activities.filter(activity => {
+      const matchesTab = activeTabConfig.filter(activity);
+      const matchesReadState = showUnreadOnly ? !activity.isRead : true;
+      return matchesTab && matchesReadState;
+    });
+  }, [activities, activeTab, showUnreadOnly, visibleTabs]);
 
   const markActiveTabUnread = () => {
     const filters: {
@@ -440,28 +501,55 @@ const ActivityListView = (): ReactElement => {
     return counts;
   }, [unreadActivities]);
 
-  const renderActivityList = (): ReactElement => {
+  const renderActivityList = (activityList: ActivityWithRelated[]): ReactElement => {
     const isExpanded = active === 'detailed';
 
-    const loadingState = (
-      <div className='flex-1 flex flex-col px-4 py-4 gap-3 overflow-hidden'>
-        {Array.from({ length: 15 }).map((_, i) => (
-          <div key={i} className='flex items-start gap-3 py-2'>
-            <Skeleton className='h-8 w-8 rounded-full flex-shrink-0' />
-            <div className='flex-1 flex flex-col gap-2 min-w-0'>
-              <div className='flex items-center gap-2'>
-                <Skeleton className='h-4 w-24' />
-                <Skeleton className='h-3 w-16' />
+    // Show loading skeleton during initial load
+    if (isLoading && activityList.length === 0) {
+      return (
+        <div className='flex-1 flex flex-col px-4 py-4 gap-3 overflow-hidden'>
+          {Array.from({ length: 15 }).map((_, i) => (
+            <div key={i} className='flex items-start gap-3 py-2'>
+              <Skeleton className='h-8 w-8 rounded-full flex-shrink-0' />
+              <div className='flex-1 flex flex-col gap-2 min-w-0'>
+                <div className='flex items-center gap-2'>
+                  <Skeleton className='h-4 w-24' />
+                  <Skeleton className='h-3 w-16' />
+                </div>
+                <Skeleton className='h-3 w-full max-w-[300px]' />
+                <Skeleton className='h-3 w-3/4' />
               </div>
-              <Skeleton className='h-3 w-full max-w-[300px]' />
-              <Skeleton className='h-3 w-3/4' />
             </div>
-          </div>
-        ))}
-      </div>
-    );
+          ))}
+        </div>
+      );
+    }
 
-    const emptyState = (
+    if (activityList.length > 0) {
+      return (
+        <div
+          data-component='ActivityList'
+          style={{ height: 'calc(100vh - 200px)' }}
+          className='relative min-h-0 basis-0 grow flex flex-col'
+        >
+          <Virtuoso
+            className='no-scrollbar'
+            style={{ height: '100%' }}
+            data={activityList}
+            endReached={handleEndReached}
+            computeItemKey={(_, activity) => activity.id}
+            overscan={{ main: 2000, reverse: 500 }} // Prefetch ~25 items ahead (at ~80px each)
+            itemContent={(_, activity) => (
+              <div className='min-h-[0.5px]'>
+                <ActivityItem activity={activity} isExpanded={isExpanded} />
+              </div>
+            )}
+          />
+        </div>
+      );
+    }
+
+    return (
       <div className='flex-1 flex flex-col items-center justify-center text-muted-foreground px-4 py-8'>
         <Bell className='w-16 h-16 mb-4' />
         <p className='text-base font-medium'>
@@ -470,51 +558,6 @@ const ActivityListView = (): ReactElement => {
         <p className='text-sm mt-1'>
           {showUnreadOnly ? "You're all caught up!" : 'Activities will appear here'}
         </p>
-      </div>
-    );
-
-    return (
-      <div
-        data-component='ActivityList'
-        style={{ height: 'calc(100vh - 200px)' }}
-        className='relative min-h-0 basis-0 grow flex flex-col'
-      >
-        <VirtualizedList<ActivityWithRelated, ActivityCursor>
-          pagination={{
-            createQuery: ({ cursor }) =>
-              queries.userActivitiesPaginatedV2({
-                limit: PAGE_SIZE,
-                start: cursor,
-                types: currentTypes,
-                classification: classificationFilter,
-              }),
-            getCursor: (activity: ActivityWithRelated) => ({
-              id: activity.id,
-              updatedAt: activity.updatedAt ?? activity.createdAt,
-            }),
-            getKey: (activity: ActivityWithRelated) => activity.id,
-            mergePages: (prev: ActivityWithRelated[], next: ActivityWithRelated[]) => {
-              const combined = [...prev, ...next];
-              return Array.from(new Map(combined.map(item => [item.id, item])).values());
-            },
-            windowSize: PAGE_SIZE,
-            resetKey: [activeTab, currentTypes.join(','), classificationFilter?.join(',') ?? 'all'],
-          }}
-          transformItems={transformActivities}
-          onItemsChange={handleItemsChange}
-          renderItem={(activity: ActivityWithRelated) => (
-            <div className='min-h-[0.5px]'>
-              <ActivityItem activity={activity} isExpanded={isExpanded} />
-            </div>
-          )}
-          emptyState={emptyState}
-          loadingState={loadingState}
-          className='no-scrollbar'
-          style={{ height: '100%' }}
-          virtuoso={{
-            overscan: { main: 2000, reverse: 500 },
-          }}
-        />
       </div>
     );
   };
@@ -767,7 +810,7 @@ const ActivityListView = (): ReactElement => {
             }}
             className='focus-visible:outline-none'
           >
-            {renderActivityList()}
+            {renderActivityList(filteredActivities)}
           </Tabs.Content>
         </Tabs.Root>
       </div>
