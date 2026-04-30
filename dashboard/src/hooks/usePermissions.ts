@@ -20,3 +20,12 @@ export const useCanManageWorkspace = (): boolean => {
     permission => permission.resourceName === 'WORKSPACE' && permission.accessType === 'ADMIN',
   );
 };
+
+export const useCanCreateWorkspace = (): boolean => {
+  const permissions = usePermissions();
+  return permissions.some(
+    permission =>
+      permission.resourceName === 'WORKSPACE' &&
+      (permission.accessType === 'WRITE' || permission.accessType === 'ADMIN'),
+  );
+};

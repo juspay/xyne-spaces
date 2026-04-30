@@ -15,6 +15,7 @@ import { invokeShortcut } from '../../shortcuts';
 import { toast } from 'sonner';
 import { Tooltip } from '../ui/Tooltip';
 import { WorkspaceSwitcher } from '../AppSidebar/WorkspaceSwitcher';
+import { useCanCreateWorkspace } from '../../hooks/usePermissions';
 
 interface GlobalTopBarProps {
   onOpenErrorReport?: () => void;
@@ -136,6 +137,8 @@ const GlobalTopBar = ({
   recordingSeconds = 0,
   onStopRecording,
 }: GlobalTopBarProps): ReactElement => {
+  const canCreateWorkspace = useCanCreateWorkspace();
+
   const handleDoubleClick = (): void => {
     if (typeof window.electronAPI?.toggleCompactMode === 'function') {
       window.electronAPI.toggleCompactMode();
@@ -154,7 +157,7 @@ const GlobalTopBar = ({
         // no-drag so the button is clickable
       >
         <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} className='ml-1 mt-1'>
-          <WorkspaceSwitcher />
+          {canCreateWorkspace && <WorkspaceSwitcher />}
         </div>
       </div>
       <div className='flex-1 flex items-center justify-between'>

@@ -3,6 +3,7 @@ import { AuthV2Controller } from '../controllers/authV2Controller';
 import { authV2Middleware } from '../middleware/authV2Middleware';
 import { userManagementController } from '../controllers/userManagementController';
 import { channelService } from '../services/channelService';
+import { canCreateWorkspace } from '../middleware/workspaceAuth';
 import { logger } from '../utils/logger'; 
 
 const router = express.Router();
@@ -68,6 +69,6 @@ router.post('/create-org', authV2Controller.createOrg);
 
 router.get('/workspaces', authV2Middleware.authenticate, authV2Controller.getWorkspaces);
 router.post('/switch-workspace', authV2Middleware.authenticate, authV2Controller.switchWorkspace);
-router.post('/create-workspace', authV2Middleware.authenticate, authV2Controller.createWorkspaceAuth);
+router.post('/create-workspace', authV2Middleware.authenticate, canCreateWorkspace, authV2Controller.createWorkspaceAuth);
 
 export default router;

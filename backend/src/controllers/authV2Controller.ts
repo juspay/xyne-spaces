@@ -917,7 +917,7 @@ export class AuthV2Controller {
         refreshToken: refresh_token || null,
         accessToken: access_token || null,
       };
-      res.cookie('google_auth_pending', JSON.stringify(customToken), cookieOptions);
+      res.cookie('google_access_token', JSON.stringify(customToken), cookieOptions);
       logger.info(`[${requestId}] Stored pending auth data for workspace selection`);
 
       /**
