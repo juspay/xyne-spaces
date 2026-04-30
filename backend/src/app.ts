@@ -28,6 +28,7 @@ import agentToolsMappingRoutes from '@/routes/agent-tools-mappings';
 import analyticsRoutes from '@/routes/analytics';
 import apiKeyRoutes from '@/routes/api-keys';
 import userManagementRoutes from '@/routes/userManagement';
+import userActivationRoutes from '@/routes/userActivation';
 import channelRoutes from '@/routes/channels';
 import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
@@ -385,6 +386,12 @@ export class App {
       aclMiddleware.checkAccess,
       userManagementRoutes
     );
+
+    // User activation routes - admin operations (auth and authorize handled in route)
+    // migration/user-activation (via migration service)
+    this.app.use('/migration/user-activation', userActivationRoutes);
+    // user deactivation from dashboard 
+    this.app.use('/api/user-activation', userActivationRoutes);
 
     // Project routes (auth and ACL required)
     this.app.use('/api/projects', authMiddleware.authenticate, projectRoutes);
