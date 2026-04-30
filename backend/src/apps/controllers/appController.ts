@@ -295,4 +295,42 @@ export class AppController {
       res.status(500).json({ error: 'Failed to upload profile picture' });
     }
   };
+
+  getBotChannels = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const paramsResult = AppIdParamsSchema.safeParse(req.params);
+      if (!paramsResult.success) {
+        res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      const { appId } = paramsResult.data;
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const installedApp = await repositories.installedApps.findFirst({
+        where: { appId },
+      });
+      if (!installedApp) {
+        res.status(404).json({ error: 'App is not installed', code: 'APP_NOT_INSTALLED' });
+        return;
+      }
+
+      const participations = await repositories.channelParticipants.getUserChannels(installedApp.userId);
+      const channelIds = participations.map(p => p.channelId);
+      const requesterChannelIds = await repositories.channelParticipants.getAccessibleChannelIds(channelIds, userId);
+      const accessibleChannelIds = channelIds.filter(channelId => requesterChannelIds.has(channelId));
+      const channels = await repositories.channels.getChannelsByIds(accessibleChannelIds);
+
+      const result = channels.map(ch => ({ id: ch.id, name: ch.name, visibility: ch.visibility }));
+
+      res.status(200).json({ channels: result });
+    } catch (error) {
+      logger.error('Error getting bot channels:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
 }
