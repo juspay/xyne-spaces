@@ -246,7 +246,7 @@ const Info = ({
   return (
     <div
       ref={popoverContainerRef}
-      className='overflow-clip h-[600px] bg-background'
+      className='overflow-clip h-[600px] bg-background flex flex-col'
       style={{ position: 'relative' }}
     >
       <div className='w-full flex items-start justify-between gap-2 p-4 pb-6'>
@@ -382,8 +382,12 @@ const Info = ({
           </button>
         )}
       </div>
-      <Tabs.Root value={activeTab} onValueChange={value => setActiveTab(value as ChannelTab)}>
-        <Tabs.List className='flex items-center justify-start border-b border-border px-4'>
+      <Tabs.Root
+        value={activeTab}
+        onValueChange={value => setActiveTab(value as ChannelTab)}
+        className='flex-1 min-h-0 flex flex-col'
+      >
+        <Tabs.List className='flex items-center justify-start border-b border-border px-4 shrink-0'>
           <Tabs.Trigger
             value='about'
             className={cn(
@@ -435,7 +439,10 @@ const Info = ({
             </Tabs.Trigger>
           )}
         </Tabs.List>
-        <Tabs.Content value='about' className='outline-none h-[480px] rounded-b-lg overflow-hidden'>
+        <Tabs.Content
+          value='about'
+          className='outline-none flex-1 min-h-0 rounded-b-lg overflow-hidden'
+        >
           <AboutChannel
             channel={channel}
             {...(previousChannelId !== undefined && { previousChannelId })}
@@ -449,7 +456,7 @@ const Info = ({
         {!isDM && (
           <Tabs.Content
             value='members'
-            className='outline-none h-[480px] rounded-b-lg overflow-hidden bg-muted'
+            className='outline-none flex-1 min-h-0 rounded-b-lg overflow-hidden bg-muted'
           >
             <ChannelMembers
               channel={channel}
@@ -460,7 +467,7 @@ const Info = ({
           </Tabs.Content>
         )}
         {isDefaultChannel && (
-          <Tabs.Content value='settings' className='outline-none overflow-y-auto'>
+          <Tabs.Content value='settings' className='outline-none flex-1 min-h-0 overflow-y-auto'>
             <ChannelSettings
               channel={channel}
               isAdmin={currentUserParticipant?.role === ChannelRole.ADMIN}
@@ -470,7 +477,10 @@ const Info = ({
           </Tabs.Content>
         )}
         {isParticipant && (
-          <Tabs.Content value='notifications' className='outline-none'>
+          <Tabs.Content
+            value='notifications'
+            className='outline-none flex-1 min-h-0 overflow-y-auto'
+          >
             <NotificationsTab channel={channel} isParticipant={isParticipant} />
           </Tabs.Content>
         )}
@@ -851,7 +861,7 @@ const ChannelMembers = ({
   }, [accumulatedParticipants, searchQuery, searchResults, usersById]);
 
   return (
-    <div className='relative bg-muted h-full flex flex-col'>
+    <div className='relative bg-muted h-full min-h-0 flex flex-col'>
       <div className='shrink-0 z-10 p-4'>
         <div className='relative'>
           <Search className='text-muted-foreground absolute left-3 top-1/2 size-4 -translate-y-1/2 pointer-events-none' />
@@ -866,7 +876,8 @@ const ChannelMembers = ({
         </div>
       </div>
       <Virtuoso
-        className='flex-1 min-h-0 pb-4'
+        className='flex-1 min-h-0'
+        style={{ height: '100%' }}
         data={filteredParticipants}
         {...(!searchQuery &&
           hasMore && {
