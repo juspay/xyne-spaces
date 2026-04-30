@@ -100,7 +100,8 @@ export const LiteLLMRequestSchema = z.object({
       type: z.literal("enabled"),
       budget_tokens: z.number().int().positive()
     }).optional()
-  ]).optional()
+  ]).optional(),
+  extra_body: z.record(z.unknown()).optional()
 });
 
 export type LiteLLMRequest = z.infer<typeof LiteLLMRequestSchema>;

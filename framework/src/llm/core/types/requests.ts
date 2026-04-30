@@ -16,6 +16,8 @@ export interface LLMRequest {
   readonly tools?: readonly ToolDefinition[];
   readonly parameters?: ModelParameters;
   readonly features?: RequestFeatures;
+  /** Additional body parameters for provider-specific options (e.g., extra_body for LiteLLM) */
+  readonly extraBody?: Record<string, unknown>;
 }
 
 /**
@@ -29,6 +31,7 @@ export interface ModelParameters {
   readonly frequencyPenalty?: number;
   readonly presencePenalty?: number;
   readonly stopSequences?: readonly string[];
+  readonly extraBody?: Record<string, unknown>; // Additional provider-specific parameters
 }
 
 /**
@@ -188,6 +191,7 @@ export function createLLMRequest(
     tools?: readonly ToolDefinition[];
     parameters?: ModelParameters;
     features?: RequestFeatures;
+    extraBody?: Record<string, unknown>;
   }
 ): LLMRequest {
   return {
@@ -197,7 +201,8 @@ export function createLLMRequest(
     ...(options?.systemPrompt && { systemPrompt: options.systemPrompt }),
     ...(options?.tools && { tools: options.tools }),
     ...(options?.parameters && { parameters: options.parameters }),
-    ...(options?.features && { features: options.features })
+    ...(options?.features && { features: options.features }),
+    ...(options?.extraBody && { extraBody: options.extraBody })
   };
 }
 

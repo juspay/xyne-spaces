@@ -91,6 +91,7 @@ export class LLMClient {
       readonly thinkingMode?: boolean;
       readonly autoTemperature?: boolean;
     };
+    readonly extraBody?: Record<string, unknown>;
     readonly abortSignal?: AbortSignal;
   }): Promise<LLMResponse> {
     try {
@@ -197,6 +198,7 @@ export class LLMClient {
       readonly includeThinking?: boolean;
       readonly autoTemperature?: boolean;
     };
+    readonly extraBody?: Record<string, unknown>;
     readonly abortSignal?: AbortSignal;
   }): Promise<LLMStreamResult> {
     try {
@@ -635,6 +637,7 @@ export class LLMClient {
       readonly includeThinking?: boolean;
       readonly autoTemperature?: boolean;
     };
+    readonly extraBody?: Record<string, unknown>;
   }): LLMRequest {
     const model = options.model || this.config.defaultModel;
     
@@ -702,7 +705,8 @@ export class LLMClient {
             }
           }),
           autoTemperature: this.enabledFeatures.autoTemperature && this.config.temperature === undefined
-        }
+        },
+        ...(options.extraBody && { extraBody: options.extraBody })
       }
     );
   }

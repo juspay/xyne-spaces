@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import https from 'node:https';
 import { type Tool } from '@juspay-jaf/jaf';
 import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '../../../../utils/logger.js';
@@ -10,49 +9,19 @@ import { getStorageService } from '../../../../services/storage/index.js';
 import { MessageAttachmentRepository } from '../../../../database/repositories/messageAttachmentRepository.js';
 import { ChannelRepository } from '../../../../database/repositories/channelRepository.js';
 import { config } from '../../../../config/env.js';
+import { logLLMCallStart, logLLMSuccess, logLLMError } from '../../../agentLogger.js';
 
 const storageService = getStorageService();
 
-function httpsPost(
-  url: string,
-  body: string,
-  headers: Record<string, string>
-): Promise<{ status: number; text: string }> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const req = https.request(
-      {
-        hostname: parsed.hostname,
-        path: parsed.pathname + parsed.search,
-        method: 'POST',
-        headers: { ...headers, 'Content-Length': Buffer.byteLength(body) },
-      },
-      res => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () =>
-          resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') })
-        );
-      }
-    );
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-}
+const AGENT_NAME = 'GenerateImage';
 
-function fetchBuffer(url: string): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    https.get(url, res => {
-      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        fetchBuffer(res.headers.location).then(resolve, reject);
-        return;
-      }
-      const chunks: Buffer[] = [];
-      res.on('data', (c: Buffer) => chunks.push(c));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-    }).on('error', reject);
-  });
+async function fetchBuffer(url: string): Promise<Buffer> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
 
 export function createGenerateImageTool(): Tool<
@@ -79,25 +48,31 @@ export function createGenerateImageTool(): Tool<
       const { prompt, height = 1024, width = 1024 } = args;
       const imageModel = config.litellm.imageGenerationModel;
       const imageEndpoint = config.litellm.imageGenerationEndpoint;
+      const apiKey = config.litellm.askAiApiKey;
+      
       logger.info(
         `[Tool] [${context.sessionId}] generate_image: model=${imageModel}, ${width}x${height}, prompt="${prompt.slice(0, 80)}"`
       );
 
       try {
-        const imgRes = await httpsPost(
-          imageEndpoint,
-          JSON.stringify({ model: imageModel, prompt, height, width }),
-          {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.litellm.apiKey}`,
-          }
-        );
+        // Log LLM call start
+        logLLMCallStart(AGENT_NAME, imageModel, 'ASK_AI_API_KEY');
 
-        if (imgRes.status < 200 || imgRes.status >= 300) {
-          throw new Error(`Image generation failed: ${imgRes.status} — ${imgRes.text.slice(0, 300)}`);
+        const imgRes = await fetch(imageEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({ model: imageModel, prompt, height, width }),
+        });
+
+        if (!imgRes.ok) {
+          const text = await imgRes.text().catch(() => '');
+          throw new Error(`Image generation failed: ${imgRes.status} — ${text.slice(0, 300)}`);
         }
 
-        const imgData = JSON.parse(imgRes.text) as {
+        const imgData = await imgRes.json() as {
           data?: Array<{ b64_json?: string; url?: string }>;
         };
 
@@ -118,6 +93,9 @@ export function createGenerateImageTool(): Tool<
         } else {
           throw new Error('Response contained neither b64_json nor url');
         }
+
+        // Log success (we'll log the image generation success)
+        logLLMSuccess(AGENT_NAME, `Generated ${imageBuffer.length} byte image`);
 
         const safePrompt = prompt.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
         const filename = `${safePrompt}.${ext}`;
@@ -161,6 +139,7 @@ export function createGenerateImageTool(): Tool<
           : `/api/attachments/${attachment.id}/download`;
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
+        logLLMError(AGENT_NAME, error);
         logger.error(`[Tool] [${context.sessionId}] generate_image error: ${msg}`, error);
         return `Error generating image: ${msg}`;
       }

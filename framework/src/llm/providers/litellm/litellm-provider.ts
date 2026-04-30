@@ -478,6 +478,9 @@ export class LiteLLMProvider extends BaseProvider {
           // eslint-disable-next-line @typescript-eslint/naming-convention
           budget_tokens: request.features?.thinking?.budgetTokens || 6000
         }
+      }),
+      ...(request.extraBody && {
+        extra_body: request.extraBody
       })
     };
 

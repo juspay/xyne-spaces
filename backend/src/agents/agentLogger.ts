@@ -1,10 +1,16 @@
 /**
- * Singleton logging utility for JAF-based agents.
+ * Logging utility for agents (JAF-based and direct LLM calls).
  *
  * Usage:
+ *   // For JAF agents:
  *   const agentLogger = createAgentEventLogger('TicketDuplicate', 'LITELLM_API_KEY');
  *   // Pass as onEvent to run() / runStream(), or compose with an existing handler:
  *   const composed = composeEventHandlers(agentLogger, existingOnEvent);
+ *
+ *   // For direct LLM calls (framework):
+ *   logLLMCallStart('TitleGenerator', modelName, 'LITELLM_API_KEY');
+ *   logLLMSuccess('TitleGenerator', responseContent);
+ *   logLLMError('TitleGenerator', error);
  */
 
 import type { TraceEvent } from '@juspay-jaf/jaf';
@@ -40,11 +46,7 @@ export function createAgentEventLogger(
       case 'llm_call_end': {
         const content = event.data.choice?.message?.content;
         if (typeof content === 'string') {
-          const truncated =
-            content.length > MAX_OUTPUT_LOG_LENGTH
-              ? `${content.slice(0, MAX_OUTPUT_LOG_LENGTH)}… [truncated]`
-              : content;
-          logger.info(`${prefix} Success: ${truncated}`);
+          logLLMSuccess(agentName, content);
         }
         break;
       }
@@ -53,13 +55,7 @@ export function createAgentEventLogger(
         const outcome = event.data.outcome;
         if (outcome.status === 'error') {
           const err = outcome.error as Record<string, unknown>;
-          const tag = String(err._tag ?? 'UnknownError');
-          const code = err.statusCode ?? err.status ?? err.code ?? '';
-          const detail = err.message ?? err.detail ?? '';
-          const parts = [code ? String(code) : null, tag, detail ? String(detail) : null]
-            .filter(Boolean)
-            .join(': ');
-          logger.error(`${prefix} Error: ${parts}`);
+          logStructuredError(agentName, err);
         }
         break;
       }
@@ -68,6 +64,78 @@ export function createAgentEventLogger(
         break;
     }
   };
+}
+
+/**
+ * Log the start of an LLM call for direct framework calls.
+ *
+ * @param agentName - Short label shown in brackets, e.g. 'TitleGenerator'
+ * @param model - Model name being called
+ * @param keyName - Env-var name of the API key in use
+ */
+export function logLLMCallStart(
+  agentName: string,
+  model: string,
+  keyName: string,
+): void {
+  const prefix = `[${agentName}]`;
+  logger.info(`${prefix} Calling "${model}" with "${keyName}"`);
+}
+
+/**
+ * Log successful LLM response for direct framework calls.
+ *
+ * @param agentName - Short label shown in brackets
+ * @param content - Raw LLM output content
+ */
+export function logLLMSuccess(
+  agentName: string,
+  content: string,
+): void {
+  const prefix = `[${agentName}]`;
+  const truncated =
+    content.length > MAX_OUTPUT_LOG_LENGTH
+      ? `${content.slice(0, MAX_OUTPUT_LOG_LENGTH)}… [truncated]`
+      : content;
+  logger.info(`${prefix} Success: ${truncated}`);
+}
+
+/**
+ * Log LLM error for direct framework calls.
+ *
+ * @param agentName - Short label shown in brackets
+ * @param error - Error object or message
+ */
+export function logLLMError(
+  agentName: string,
+  error: Error | Record<string, unknown> | unknown,
+): void {
+  const prefix = `[${agentName}]`;
+  
+  if (error instanceof Error) {
+    logger.error(`${prefix} Error: ${error.message}`);
+  } else if (typeof error === 'object' && error !== null) {
+    logStructuredError(agentName, error as Record<string, unknown>);
+  } else {
+    logger.error(`${prefix} Error: ${String(error)}`);
+  }
+}
+
+/**
+ * Internal helper to log structured error details.
+ */
+function logStructuredError(
+  agentName: string,
+  err: Record<string, unknown>,
+): void {
+  const prefix = `[${agentName}]`;
+  const tag = String(err._tag ?? err.name ?? 'UnknownError');
+  const code = err.statusCode ?? err.status ?? err.code ?? '';
+  const detail = err.message ?? err.detail ?? String(err);
+  const parts = [code ? String(code) : null, tag, detail ? String(detail) : null]
+    .filter(Boolean)
+    .join(': ');
+  logger.error(`${prefix} Error: ${parts}`);
 }
 
 /**

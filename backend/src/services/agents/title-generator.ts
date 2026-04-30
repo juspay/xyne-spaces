@@ -1,23 +1,11 @@
 /**
- * Title Generator Agent using JAF (Juspay Agent Framework)
+ * Title Generator Agent — Framework LLM Client
  *
  * This agent generates concise, descriptive titles from ticket descriptions.
  */
 
 import { z } from 'zod';
-
-// Import JAF modules
-import {
-  makeLiteLLMProvider,
-  generateRunId,
-  generateTraceId,
-  run,
-  type Agent,
-  type RunState,
-  type RunConfig,
-  type Message,
-  type TraceEvent,
-} from '@juspay-jaf/jaf';
+import { LLMClient, createUserMessage } from '@framework';
 
 // Import config for environment variables
 import { config } from '../../config/env.js';
@@ -33,7 +21,9 @@ import { BaseTicketType, type ClassifiableTicketType } from '@xyne/shared';
 
 // Import agents config
 import { AgentsConfig } from '../../agents/config.js';
-import { createAgentEventLogger, composeEventHandlers } from '../../agents/agentLogger.js';
+
+// Import logger
+import { logLLMCallStart, logLLMSuccess, logLLMError } from '../../agents/agentLogger.js';
 
 // ============================================================================
 // Configuration - Loaded from environment variables
@@ -44,6 +34,8 @@ const LITELLM_BASE_URL = config.litellm.baseUrl;
 
 // LiteLLM API key from environment
 const LITELLM_API_KEY = config.litellm.apiKey;
+
+const AGENT_NAME = 'TitleGenerator';
 
 // ============================================================================
 // Types
@@ -92,25 +84,8 @@ export type AgentRawOutput = z.infer<typeof TitleGeneratorOutputSchema>;
 export type TitleGeneratorOutput = AgentRawOutput;
 
 // ============================================================================
-// Agent Definition
+// Parse and process title generator output
 // ============================================================================
-
-/**
- * Title Generator Agent
- *
- * This agent takes a ticket description and produces a concise, descriptive title.
- */
-export const titleGeneratorAgent: Agent<TitleGeneratorContext, AgentRawOutput> = {
-  name: 'TitleGenerator',
-
-  instructions: (_state: Readonly<RunState<TitleGeneratorContext>>) => {
-    return getTitleGeneratorSystemPrompt();
-  },
-
-  modelConfig: {
-    temperature: 0.3,
-  },
-};
 
 /**
  * Parse and process title generator output
@@ -132,29 +107,6 @@ function parseTitleGeneratorOutput(content: string): TitleGeneratorOutput {
 }
 
 // ============================================================================
-// Model Provider
-// ============================================================================
-
-/**
- * Create the model provider instance
- * Uses LiteLLM for model access
- */
-export function createModelProvider() {
-  return makeLiteLLMProvider(LITELLM_BASE_URL, LITELLM_API_KEY);
-}
-
-// ============================================================================
-// Agent Registry
-// ============================================================================
-
-/**
- * Agent registry containing all available agents
- */
-export const agentRegistry = new Map<string, Agent<TitleGeneratorContext, any>>([
-  ['TitleGenerator', titleGeneratorAgent],
-]);
-
-// ============================================================================
 // Execution Function
 // ============================================================================
 
@@ -162,67 +114,64 @@ export const agentRegistry = new Map<string, Agent<TitleGeneratorContext, any>>(
  * Generate a title
  *
  * @param input - The description and options
- * @param context - The execution context
- * @param onEvent - Optional event handler for tracing
- * @param agentsConfig - Optional agents config with model name from CAC
+ * @param _context - The execution context (for API compatibility)
  * @returns The generated title
  */
 export async function generateTitle(
   input: TitleGeneratorInput,
-  context: TitleGeneratorContext,
-  onEvent?: (event: TraceEvent) => void,
+  _context: TitleGeneratorContext,
+  _onEvent?: unknown, // Kept for API compatibility, not used with direct calls
   agentsConfig?: AgentsConfig
 ): Promise<TitleGeneratorOutput> {
   // Use model name from CAC config if provided, otherwise fetch or use default
   const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
   const modelName = cacConfig.titleGeneratorModelName;
 
-  const modelProvider = createModelProvider();
-
   // Format description for the agent using prompt template
   const formattedPrompt = buildTitleGeneratorUserPrompt(input.description, input.maxLength);
 
-  const agentLogger = createAgentEventLogger('TitleGenerator', 'LITELLM_API_KEY');
-  const composedOnEvent = onEvent ? composeEventHandlers(agentLogger, onEvent) : agentLogger;
-
-  // Create the run configuration
-  const runConfig: RunConfig<TitleGeneratorContext> = {
-    agentRegistry,
-    modelProvider,
-    maxTurns: 2,
-    modelOverride: modelName,
-    onEvent: composedOnEvent,
-  };
-
-  // Create initial state
-  const initialState: RunState<TitleGeneratorContext> = {
-    runId: generateRunId(),
-    traceId: generateTraceId(),
-    messages: [
-      {
-        role: 'user',
-        content: formattedPrompt,
+  // Initialize LLM client
+  const llmClient = new LLMClient({
+    provider: {
+      type: 'litellm',
+      config: {
+        apiKey: LITELLM_API_KEY,
+        baseUrl: LITELLM_BASE_URL,
       },
-    ],
-    currentAgentName: 'TitleGenerator',
-    context,
-    turnCount: 0,
-  };
+    },
+    defaultModel: modelName,
+  });
 
-  // Execute the agent
-  const result = await run(initialState, runConfig);
+  // Log LLM call start
+  logLLMCallStart(AGENT_NAME, modelName, 'LITELLM_API_KEY');
 
-  // Handle the result
-  if (result.outcome.status === 'completed') {
-    const rawOutput = result.outcome.output;
-    if (typeof rawOutput === 'string') {
-      return parseTitleGeneratorOutput(rawOutput);
-    }
-    return rawOutput as TitleGeneratorOutput;
-  } else if (result.outcome.status === 'error') {
-    throw new Error(`Title generation failed: ${result.outcome.error._tag}`);
-  } else {
-    throw new Error('Title generation was interrupted');
+  try {
+    // Generate response using framework LLM client
+    const response = await llmClient.generate({
+      messages: [
+        createUserMessage(formattedPrompt)
+      ],
+      systemPrompt: getTitleGeneratorSystemPrompt(),
+      parameters: {
+        temperature: 0.3
+      },
+      extraBody: {
+        chat_template_kwargs: {
+          enable_thinking: false
+        }
+      }
+    });
+
+    // Log success
+    logLLMSuccess(AGENT_NAME, response.content);
+
+    // Parse and return the result
+    const result = parseTitleGeneratorOutput(response.content);
+    return result;
+  } catch (error) {
+    // Log error
+    logLLMError(AGENT_NAME, error);
+    throw error;
   }
 }
 
@@ -230,4 +179,4 @@ export async function generateTitle(
 // Exports
 // ============================================================================
 
-export { TitleGeneratorOutputSchema, type Message, type TraceEvent };
+export { TitleGeneratorOutputSchema };

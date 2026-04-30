@@ -325,15 +325,16 @@ const Slide: React.FC<{ slide: PptSlide }> = ({ slide }) => (
       boxShadow: '0 2px 12px rgba(0,0,0,0.12)',
     }}
   >
-    {slide.objects.map((obj, i) => renderObject(obj, i))}
+    {slide.objects?.map((obj, i) => renderObject(obj, i))}
   </div>
 );
 
-export const PptSlideViewer: React.FC<PptSlideViewerProps> = ({
-  downloadUrl,
-  title,
-  slides = [],
-}) => {
+export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
+  // Guard against garbage input at top level
+  const downloadUrl = props?.downloadUrl ?? '';
+  const title = props?.title ?? '';
+  const slides = Array.isArray(props?.slides) ? props.slides : [];
+
   const [idx, setIdx] = useState(0);
   const [presenting, setPresenting] = useState(false);
   const fullscreenRef = useRef<HTMLDivElement>(null);
@@ -382,249 +383,260 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [presenting, prev, next, exitPresent]);
 
-  const titleMaxChars = 30;
-  const displayTitle = title.length > titleMaxChars ? `${title.slice(0, titleMaxChars)}…` : title;
+  try {
+    const titleMaxChars = 30;
+    const displayTitle =
+      title && title.length > titleMaxChars ? `${title.slice(0, titleMaxChars)}…` : title;
 
-  return (
-    <>
-      <div className='w-full rounded-xl border border-border bg-card overflow-hidden'>
-        {/* Title bar */}
-        <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
-          <span
-            className="text-xs font-semibold text-foreground font-['Inter'] truncate"
-            title={title}
-          >
-            {displayTitle}
-          </span>
-          <div className='flex items-center gap-2 ml-2 flex-shrink-0'>
-            <button
-              onClick={enterPresent}
-              disabled={!current}
-              className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40'
-              data-track-category='XyneAI'
-              data-track-name='PPT_PRESENT'
+    return (
+      <>
+        <div className='w-full rounded-xl border border-border bg-card overflow-hidden'>
+          {/* Title bar */}
+          <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
+            <span
+              className="text-xs font-semibold text-foreground font-['Inter'] truncate"
+              title={title}
             >
-              <Maximize2 size={12} />
-              Present
-            </button>
-            <div className='w-px h-3 bg-border' />
-            <button
-              onClick={() => {
-                window.location.href = downloadUrl;
-              }}
-              className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
-              data-track-category='XyneAI'
-              data-track-name='PPT_DOWNLOAD'
-            >
-              <Download size={12} />
-              Download
-            </button>
+              {displayTitle}
+            </span>
+            <div className='flex items-center gap-2 ml-2 flex-shrink-0'>
+              <button
+                onClick={enterPresent}
+                disabled={!current}
+                className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40'
+                data-track-category='XyneAI'
+                data-track-name='PPT_PRESENT'
+              >
+                <Maximize2 size={12} />
+                Present
+              </button>
+              <div className='w-px h-3 bg-border' />
+              <button
+                onClick={() => {
+                  window.location.href = downloadUrl;
+                }}
+                className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
+                data-track-category='XyneAI'
+                data-track-name='PPT_DOWNLOAD'
+              >
+                <Download size={12} />
+                Download
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* Slide area */}
-        <div className='p-3 bg-muted/30'>
-          {current ? (
-            <Slide slide={current} />
-          ) : (
-            <div
-              style={{ aspectRatio: '16/9' }}
-              className='flex items-center justify-center bg-muted rounded text-xs text-muted-foreground'
-            >
-              No slides
+          {/* Slide area */}
+          <div className='p-3 bg-muted/30'>
+            {current ? (
+              <Slide slide={current} />
+            ) : (
+              <div
+                style={{ aspectRatio: '16/9' }}
+                className='flex items-center justify-center bg-muted rounded text-xs text-muted-foreground'
+              >
+                No slides
+              </div>
+            )}
+          </div>
+
+          {/* Navigation */}
+          {total > 1 && (
+            <div className='flex items-center justify-center gap-3 py-2 border-t border-border'>
+              <button
+                onClick={prev}
+                disabled={idx === 0}
+                className='p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors'
+                data-track-category='XyneAI'
+                data-track-name='PPT_PREV'
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="text-xs text-muted-foreground font-['Inter']">
+                {idx + 1} / {total}
+              </span>
+              <button
+                onClick={next}
+                disabled={idx === total - 1}
+                className='p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors'
+                data-track-category='XyneAI'
+                data-track-name='PPT_NEXT'
+              >
+                <ChevronRight size={14} />
+              </button>
             </div>
           )}
         </div>
 
-        {/* Navigation */}
-        {total > 1 && (
-          <div className='flex items-center justify-center gap-3 py-2 border-t border-border'>
-            <button
-              onClick={prev}
-              disabled={idx === 0}
-              className='p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors'
-              data-track-category='XyneAI'
-              data-track-name='PPT_PREV'
-            >
-              <ChevronLeft size={14} />
-            </button>
-            <span className="text-xs text-muted-foreground font-['Inter']">
-              {idx + 1} / {total}
-            </span>
-            <button
-              onClick={next}
-              disabled={idx === total - 1}
-              className='p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors'
-              data-track-category='XyneAI'
-              data-track-name='PPT_NEXT'
-            >
-              <ChevronRight size={14} />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Fullscreen / Present mode */}
-      {presenting && (
-        <div
-          ref={fullscreenRef}
-          role='button'
-          tabIndex={0}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 50,
-            background: '#000',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-          onClick={exitPresent}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') exitPresent();
-          }}
-          data-track-category='XyneAI'
-          data-track-name='PPT_BG_EXIT'
-        >
-          {/* Close */}
-          <button
+        {/* Fullscreen / Present mode */}
+        {presenting && (
+          <div
+            ref={fullscreenRef}
+            role='button'
+            tabIndex={0}
             style={{
-              position: 'absolute',
-              top: 16,
-              right: 16,
-              padding: 8,
-              borderRadius: '50%',
-              background: 'rgba(255,255,255,0.12)',
-              color: '#fff',
-              border: 'none',
-              cursor: 'pointer',
-              zIndex: 10,
+              position: 'fixed',
+              inset: 0,
+              zIndex: 50,
+              background: '#000',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}
-            onClick={e => {
-              e.stopPropagation();
-              exitPresent();
-            }}
-            data-track-category='XyneAI'
-            data-track-name='PPT_EXIT'
-          >
-            <X size={20} />
-          </button>
-
-          {/* Title */}
-          <p
-            style={{
-              position: 'absolute',
-              top: 18,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              color: 'rgba(255,255,255,0.5)',
-              fontSize: 13,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              maxWidth: '55%',
-              pointerEvents: 'none',
-            }}
-          >
-            {title}
-          </p>
-
-          {/* Slide — fills viewport maintaining 16:9 */}
-          <div
-            role='button'
-            tabIndex={0}
-            style={{
-              width: 'min(100vw, calc(100vh * 16 / 9))',
-              height: 'min(100vh, calc(100vw * 9 / 16))',
-              position: 'relative',
-            }}
-            onClick={e => e.stopPropagation()}
+            onClick={exitPresent}
             onKeyDown={e => {
-              if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+              if (e.key === 'Enter' || e.key === ' ') exitPresent();
             }}
             data-track-category='XyneAI'
-            data-track-name='PPT_SLIDE_CONTAINER'
+            data-track-name='PPT_BG_EXIT'
           >
-            {current && <Slide slide={current} />}
+            {/* Close */}
+            <button
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                padding: 8,
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,0.12)',
+                color: '#fff',
+                border: 'none',
+                cursor: 'pointer',
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onClick={e => {
+                e.stopPropagation();
+                exitPresent();
+              }}
+              data-track-category='XyneAI'
+              data-track-name='PPT_EXIT'
+            >
+              <X size={20} />
+            </button>
 
-            {/* Prev arrow — left edge overlay */}
-            {total > 1 && (
-              <button
-                onClick={prev}
-                disabled={idx === 0}
-                style={{
-                  position: 'absolute',
-                  left: 16,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  padding: 12,
-                  borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.35)',
-                  color: '#fff',
-                  border: 'none',
-                  cursor: 'pointer',
-                  opacity: idx === 0 ? 0.2 : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backdropFilter: 'blur(4px)',
-                }}
-                data-track-category='XyneAI'
-                data-track-name='PPT_FS_PREV'
-              >
-                <ChevronLeft size={32} />
-              </button>
-            )}
+            {/* Title */}
+            <p
+              style={{
+                position: 'absolute',
+                top: 18,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                color: 'rgba(255,255,255,0.5)',
+                fontSize: 13,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: '55%',
+                pointerEvents: 'none',
+              }}
+            >
+              {title}
+            </p>
 
-            {/* Next arrow — right edge overlay */}
-            {total > 1 && (
-              <button
-                onClick={next}
-                disabled={idx === total - 1}
-                style={{
-                  position: 'absolute',
-                  right: 16,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  padding: 12,
-                  borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.35)',
-                  color: '#fff',
-                  border: 'none',
-                  cursor: 'pointer',
-                  opacity: idx === total - 1 ? 0.2 : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backdropFilter: 'blur(4px)',
-                }}
-                data-track-category='XyneAI'
-                data-track-name='PPT_FS_NEXT'
-              >
-                <ChevronRight size={32} />
-              </button>
-            )}
+            {/* Slide — fills viewport maintaining 16:9 */}
+            <div
+              role='button'
+              tabIndex={0}
+              style={{
+                width: 'min(100vw, calc(100vh * 16 / 9))',
+                height: 'min(100vh, calc(100vw * 9 / 16))',
+                position: 'relative',
+              }}
+              onClick={e => e.stopPropagation()}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+              }}
+              data-track-category='XyneAI'
+              data-track-name='PPT_SLIDE_CONTAINER'
+            >
+              {current && <Slide slide={current} />}
+
+              {/* Prev arrow — left edge overlay */}
+              {total > 1 && (
+                <button
+                  onClick={prev}
+                  disabled={idx === 0}
+                  style={{
+                    position: 'absolute',
+                    left: 16,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    padding: 12,
+                    borderRadius: '50%',
+                    background: 'rgba(0,0,0,0.35)',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    opacity: idx === 0 ? 0.2 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backdropFilter: 'blur(4px)',
+                  }}
+                  data-track-category='XyneAI'
+                  data-track-name='PPT_FS_PREV'
+                >
+                  <ChevronLeft size={32} />
+                </button>
+              )}
+
+              {/* Next arrow — right edge overlay */}
+              {total > 1 && (
+                <button
+                  onClick={next}
+                  disabled={idx === total - 1}
+                  style={{
+                    position: 'absolute',
+                    right: 16,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    padding: 12,
+                    borderRadius: '50%',
+                    background: 'rgba(0,0,0,0.35)',
+                    color: '#fff',
+                    border: 'none',
+                    cursor: 'pointer',
+                    opacity: idx === total - 1 ? 0.2 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backdropFilter: 'blur(4px)',
+                  }}
+                  data-track-category='XyneAI'
+                  data-track-name='PPT_FS_NEXT'
+                >
+                  <ChevronRight size={32} />
+                </button>
+              )}
+            </div>
+
+            {/* Counter */}
+            <p
+              style={{
+                position: 'absolute',
+                bottom: 20,
+                color: 'rgba(255,255,255,0.4)',
+                fontSize: 13,
+                pointerEvents: 'none',
+              }}
+            >
+              {idx + 1} / {total} · Press ← → or Esc
+            </p>
           </div>
-
-          {/* Counter */}
-          <p
-            style={{
-              position: 'absolute',
-              bottom: 20,
-              color: 'rgba(255,255,255,0.4)',
-              fontSize: 13,
-              pointerEvents: 'none',
-            }}
-          >
-            {idx + 1} / {total} · Press ← → or Esc
-          </p>
-        </div>
-      )}
-    </>
-  );
+        )}
+      </>
+    );
+  } catch (err) {
+    console.error('Error rendering PPT preview:', err);
+    return (
+      <div className='w-full rounded-xl border border-red-200 bg-red-50 p-4 text-red-600'>
+        <p className='text-sm font-medium'>Failed to render presentation preview</p>
+        <p className='text-xs mt-1'>Please try downloading the file instead.</p>
+      </div>
+    );
+  }
 };
 
 export default PptSlideViewer;
