@@ -2,7 +2,7 @@ import { ReactElement, useEffect, useState, useMemo } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
-import { Shield, X, Search, ChevronDown, Check } from 'lucide-react';
+import { Shield, X, Search, ChevronDown, Check, UserCheck, UserX } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import Input from '../../ui/Input/Input';
 import {
@@ -15,8 +15,9 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useUser } from '../../../hooks/useUsers';
-import { AccessType } from '@xyne/shared';
+import { AccessType, UserStatus } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
+import { userActivationApi } from '../../../api/userActivationApi';
 
 interface ResourceAccessModalProps {
   userId: string | null;
@@ -62,6 +63,11 @@ export const ResourceAccessModal = ({
   const [accessState, setAccessState] = useState<Record<string, AccessType | 'NONE'>>({});
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // State for user activation/deactivation
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'activate' | 'deactivate' | null>(null);
+  const [activationLoading, setActivationLoading] = useState(false);
 
   // Get user info from XState
   const userName = selectedUser?.name ?? '';
@@ -199,7 +205,67 @@ export const ResourceAccessModal = ({
     }
   };
 
-  if (!isOpen || !userId) return <></>;
+  // Handlers for user activation/deactivation
+  const handleActivateClick = (): void => {
+    setPendingAction('activate');
+    setShowConfirmDialog(true);
+  };
+
+  const handleDeactivateClick = (): void => {
+    setPendingAction('deactivate');
+    setShowConfirmDialog(true);
+  };
+
+  const handleConfirmAction = async (): Promise<void> => {
+    if (!userId || !pendingAction) return;
+
+    setActivationLoading(true);
+    try {
+      if (pendingAction === 'activate') {
+        const result = await userActivationApi.activateUser(userId);
+        if (result.failed.length > 0) {
+          toast.error('Activation Failed', {
+            description: result.failed[0]?.error || 'Unknown error',
+            duration: 5000,
+          });
+        } else {
+          toast.success('User Activated', {
+            description: `${userName} has been activated successfully`,
+            duration: 3000,
+          });
+        }
+      } else {
+        const result = await userActivationApi.deactivateUser(userId);
+        if (result.failed.length > 0) {
+          toast.error('Deactivation Failed', {
+            description: result.failed[0]?.error || 'Unknown error',
+            duration: 5000,
+          });
+        } else {
+          toast.success('User Deactivated', {
+            description: `${userName} has been deactivated successfully`,
+            duration: 3000,
+          });
+        }
+      }
+      setShowConfirmDialog(false);
+      setPendingAction(null);
+    } catch (error) {
+      toast.error('Error', {
+        description: error instanceof Error ? error.message : `Failed to ${pendingAction} user`,
+        duration: 5000,
+      });
+    } finally {
+      setActivationLoading(false);
+    }
+  };
+
+  const handleCancelAction = (): void => {
+    setShowConfirmDialog(false);
+    setPendingAction(null);
+  };
+
+  if (!isOpen || !userId) return <>;</>;
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
@@ -228,12 +294,41 @@ export const ResourceAccessModal = ({
 
         {/* User Info Card */}
         <div className='px-6 py-4 bg-muted border-b border-border'>
-          <div className='flex items-center gap-3'>
-            <Avatar userId={userId} size='md' />
-            <div>
-              <p className='font-medium text-foreground'>{userName}</p>
-              <p className='text-sm text-muted-foreground'>{userEmail}</p>
+          <div className='flex items-center justify-between'>
+            <div className='flex items-center gap-3'>
+              <Avatar userId={userId} size='md' />
+              <div>
+                <p className='font-medium text-foreground'>{userName}</p>
+                <p className='text-sm text-muted-foreground'>{userEmail}</p>
+              </div>
             </div>
+            {selectedUser?.status === UserStatus.INACTIVE ? (
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={handleActivateClick}
+                disabled={activationLoading}
+                className='gap-1.5'
+                data-track-category='USER_ACTIVATION'
+                data-track-name='ActivateUserButton'
+              >
+                <UserCheck className='w-4 h-4' />
+                Activate
+              </Button>
+            ) : (
+              <Button
+                variant='destructive'
+                size='sm'
+                onClick={handleDeactivateClick}
+                disabled={activationLoading}
+                className='gap-1.5'
+                data-track-category='USER_ACTIVATION'
+                data-track-name='DeactivateUserButton'
+              >
+                <UserX className='w-4 h-4' />
+                Deactivate
+              </Button>
+            )}
           </div>
         </div>
 
@@ -326,6 +421,37 @@ export const ResourceAccessModal = ({
             {loading ? 'Saving...' : 'Save Changes'}
           </Button>
         </div>
+
+        {/* Confirmation Dialog */}
+        {showConfirmDialog && (
+          <div className='fixed inset-0 z-[60] flex items-center justify-center bg-black/50'>
+            <div className='bg-background rounded-lg shadow-xl w-full max-w-sm p-6'>
+              <h3 className='text-lg font-semibold text-foreground mb-2'>
+                {pendingAction === 'activate' ? 'Activate User?' : 'Deactivate User?'}
+              </h3>
+              <p className='text-sm text-muted-foreground mb-6'>
+                Are you sure you want to {pendingAction} <strong>{userName}</strong>?
+                {pendingAction === 'deactivate' && ' They will lose access to the workspace.'}
+              </p>
+              <div className='flex gap-3 justify-end'>
+                <Button variant='outline' onClick={handleCancelAction} disabled={activationLoading}>
+                  Cancel
+                </Button>
+                <Button
+                  variant={pendingAction === 'activate' ? 'default' : 'destructive'}
+                  onClick={() => void handleConfirmAction()}
+                  disabled={activationLoading}
+                >
+                  {activationLoading
+                    ? 'Processing...'
+                    : pendingAction === 'activate'
+                      ? 'Activate'
+                      : 'Deactivate'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
