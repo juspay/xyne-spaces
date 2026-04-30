@@ -22,6 +22,8 @@ Feature: Create Ticket from Message Hover Actions
     And I wait for "[data-testid='ticket-title-input']" to appear
     And I type "Ticket from Message" on the element "[data-testid='ticket-title-input']"
     Then the element "[data-testid='ticket-description-input']" should contain text "We need to fix the login page timeout issue"
+    And I click on "[data-testid='ticket-board-selector']"
+    And I click on the first button in the element "[data-testid='ticket-board-selector-options']"
     And I click on "[data-testid='ticket-assignee-selector']"
     And I type "user:user2-browser.name" on the element "[data-testid='ticket-assignee-selector-input']"
     And I click on text "user:user2-browser.name" in the element "[data-testid='ticket-assignee-selector-options']"
@@ -47,6 +49,8 @@ Feature: Create Ticket from Message Hover Actions
     And I wait for "[data-testid='ticket-title-input']" to appear
     And I type "Ticket from Thread" on the element "[data-testid='ticket-title-input']"
     And I type "API response times are exceeding SLA thresholds" on the element "[data-testid='ticket-description-input']"
+    And I click on "[data-testid='ticket-board-selector']"
+    And I click on the first button in the element "[data-testid='ticket-board-selector-options']"
     And I click on "[data-testid='ticket-assignee-selector']"
     And I type "user:user2-browser.name" on the element "[data-testid='ticket-assignee-selector-input']"
     And I click on text "user:user2-browser.name" in the element "[data-testid='ticket-assignee-selector-options']"

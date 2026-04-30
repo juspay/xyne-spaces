@@ -483,16 +483,24 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     debounceMs: 2000,
   });
 
-  const {
-    boardSuggestion,
-    isCheckingBoard: _isCheckingBoard,
-    resetBoardSuggestionState,
-  } = useBoardSuggestion({
+  // Once the user acts on the board (manual select, accept, or reject), suppress all further AI suggestions
+  const [boardAISuggestionSuppressed, setBoardAISuggestionSuppressed] = useState(false);
+  const [boardSelectorOpen, setBoardSelectorOpen] = useState(false);
+
+  // Reset suppression when modal opens/closes
+  useEffect(() => {
+    if (!isOpen) {
+      setBoardAISuggestionSuppressed(false);
+      setBoardSelectorOpen(false);
+    }
+  }, [isOpen]);
+
+  const { boardSuggestion, isCheckingBoard, resetBoardSuggestionState } = useBoardSuggestion({
     title: titleValue,
     description: descriptionValue,
     projectId: selectedChannelProjectId,
     currentBoardId: formValues?.boardId || '',
-    isOpen,
+    isOpen: isOpen && !boardAISuggestionSuppressed,
     debounceMs: 2000,
   });
 
@@ -624,13 +632,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     selectedBoardId,
   ]);
 
-  // Auto-select first board if none selected or if selected board doesn't exist in current boards
+  // If a board is currently set but no longer exists in the list, clear it so AI can re-suggest
   useEffect(() => {
     if (boards && boards.length > 0) {
       const currentBoardId = form.getFieldValue('boardId');
-      // Auto-select if no board selected OR if current board is not in the list
-      if (!currentBoardId || !boards.some(board => board.id === currentBoardId)) {
-        form.setFieldValue('boardId', boards[0]!.id);
+      if (currentBoardId && !boards.some(board => board.id === currentBoardId)) {
+        form.setFieldValue('boardId', '');
       }
     }
   }, [boards, form]);
@@ -1541,7 +1548,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           )}
 
           {/* Channel and Board Selection */}
-          <div className={cn('flex items-center gap-2.5', subTickets.length > 0 && 'pt-4')}>
+          <div className={cn('flex items-center gap-2.5 pb-2', subTickets.length > 0 && 'pt-4')}>
             {/* Channel Selection - Only for SubTicket creation */}
             {(isFromSubTicket || isFromAI) && (
               <form.Field
@@ -1579,80 +1586,100 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                 },
               }}
             >
-              {field => (
-                <EntitySelector
-                  showSearch={false}
-                  options={boardOptions}
-                  selectedValue={field.state.value || ''}
-                  onSelect={(value: string | null) =>
-                    field.handleChange(value as CreateTicketFormData['boardId'])
-                  }
-                  searchPlaceholder='board'
-                  placeholder='board'
-                  inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
-                  inputClassName='!h-8 rounded-md'
-                  showIndicator={false}
-                  testId='ticket-board-selector'
-                />
-              )}
-            </form.Field>
-          </div>
+              {field => {
+                // AI is checking — no grey background yet, just the shimmer chip
+                if (isCheckingBoard && !boardAISuggestionSuppressed) {
+                  return (
+                    <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-0.5 h-8 w-fit overflow-hidden text-sm'>
+                      <SquareKanban
+                        className='size-3.5 text-muted-foreground shrink-0'
+                        strokeWidth={2.33}
+                      />
+                      <span className='text-sm whitespace-nowrap text-muted-foreground animate-pulse'>
+                        Suggesting board...
+                      </span>
+                    </div>
+                  );
+                }
 
-          {/* Board Suggestion */}
-          {boardSuggestion?.analysis.suggestedBoardId &&
-            boardSuggestion.analysis.suggestedBoardId !== formValues?.boardId && (
-              <div className='rounded-lg border border-blue-200 bg-blue-50 p-4 mb-2 transition-all duration-200 ease-out'>
-                <div className='space-y-2'>
-                  <div className='flex items-center justify-between pb-0.5'>
-                    <span className='flex items-center gap-2'>
-                      <SquareKanban className='size-3' strokeWidth={2.5} />
-                      <p className='text-sm font-medium text-foreground leading-5'>
-                        Suggested board
-                      </p>
-                    </span>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      onClick={resetBoardSuggestionState}
-                      className='size-6 '
-                    >
-                      <X strokeWidth={2.33} className='size-3.5' />
-                    </Button>
-                  </div>
-                  <div className='border border-blue-100 rounded-lg p-2.5 flex items-center justify-between gap-2 bg-background group'>
-                    <span className='flex items-center gap-2 overflow-hidden cursor-default'>
-                      <p className='text-foreground text-sm font-medium truncate'>
-                        {boardSuggestion.analysis.suggestedBoardName || 'Unknown Board'}
-                      </p>
-                    </span>
-                    <span className='opacity-100 flex items-center gap-1'>
-                      <Tooltip
-                        content='Apply suggestion'
-                        side='top'
-                        className='text-[10px] font-semibold leading-3  p-1.5'
-                      >
-                        <Button
+                // AI suggestion ready — grey outer wrapper, chip left, Accept/Reject right
+                if (
+                  boardSuggestion?.analysis.suggestedBoardId &&
+                  !boardAISuggestionSuppressed &&
+                  !field.state.value
+                ) {
+                  return (
+                    <div className='flex items-center justify-between w-full rounded-lg bg-muted px-3 py-1.5'>
+                      {/* Board name pill — clean bg inside the grey wrapper */}
+                      <div className='flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-0.5 h-8 text-sm'>
+                        <SquareKanban
+                          className='size-3.5 text-muted-foreground shrink-0'
+                          strokeWidth={2.33}
+                        />
+                        <span className='text-foreground whitespace-nowrap'>
+                          {boardSuggestion.analysis.suggestedBoardName || 'Unknown Board'}
+                        </span>
+                      </div>
+                      {/* Accept / Reject — separate bordered buttons on the right */}
+                      <div className='flex items-center gap-1.5'>
+                        <button
                           type='button'
-                          variant='ghost'
-                          size='icon'
-                          className='size-6'
+                          className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
                           onClick={() => {
                             if (boardSuggestion.analysis.suggestedBoardId) {
-                              form.setFieldValue(
-                                'boardId',
-                                boardSuggestion.analysis.suggestedBoardId,
-                              );
+                              field.handleChange(boardSuggestion.analysis.suggestedBoardId);
+                              setBoardAISuggestionSuppressed(true);
+                              resetBoardSuggestionState();
                             }
                           }}
+                          data-track-category='TICKETS'
+                          data-track-name='AcceptAISuggestedBoard'
                         >
-                          <CircleCheck className='size-3.5 text-blue-500' />
-                        </Button>
-                      </Tooltip>
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
+                          Accept
+                        </button>
+                        <button
+                          type='button'
+                          className='h-8 px-3 text-sm rounded-lg border border-border bg-background text-foreground hover:bg-accent transition-colors'
+                          onClick={() => {
+                            setBoardAISuggestionSuppressed(true);
+                            resetBoardSuggestionState();
+                            // Defer open until EntitySelector has mounted in DOM
+                            setTimeout(() => setBoardSelectorOpen(true), 0);
+                          }}
+                          data-track-category='TICKETS'
+                          data-track-name='RejectAISuggestedBoard'
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Normal selector (default / after reject / after accept — shows chevron to change)
+                return (
+                  <EntitySelector
+                    showSearch={false}
+                    options={boardOptions}
+                    selectedValue={field.state.value || ''}
+                    onSelect={(value: string | null) => {
+                      field.handleChange(value as CreateTicketFormData['boardId']);
+                      setBoardAISuggestionSuppressed(true);
+                      setBoardSelectorOpen(false);
+                    }}
+                    searchPlaceholder='board'
+                    placeholder='Select board'
+                    inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
+                    inputClassName='!h-8 rounded-lg'
+                    showIndicator={true}
+                    testId='ticket-board-selector'
+                    isOpen={boardSelectorOpen}
+                    onOpenChange={setBoardSelectorOpen}
+                  />
+                );
+              }}
+            </form.Field>
+          </div>
 
           {/* Dynamic Form Fields */}
           {requiredDynamicFields.length > 0 && (
@@ -2056,7 +2083,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             </div>
           )}
 
-          <div className='flex flex-wrap items-center gap-2.5 mt-6'>
+          <div className='flex flex-wrap items-center gap-2.5 mt-2'>
             {/* Assignee Selection */}
             <form.Field name='assignee'>
               {field => (

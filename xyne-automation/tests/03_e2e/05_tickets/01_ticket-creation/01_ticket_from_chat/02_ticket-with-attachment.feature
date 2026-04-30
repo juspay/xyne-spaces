@@ -18,6 +18,8 @@ Feature: Ticket Creation with Attachments E2E Flow
     And I type "Bug with screenshot attached" on the element "[data-testid='ticket-title-input']"
     And I type "Please see the attached screenshot for the error" on the element "[data-testid='ticket-description-input']"
     And I attach a test file to the ticket
+    And I click on "[data-testid='ticket-board-selector']"
+    And I click on the first button in the element "[data-testid='ticket-board-selector-options']"
     # Assign to user2
     And I click on "[data-testid='ticket-assignee-selector']"
     And I type "user:user2-browser.name" on the element "[data-testid='ticket-assignee-selector-input']"
