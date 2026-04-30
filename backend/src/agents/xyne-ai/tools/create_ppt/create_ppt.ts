@@ -8,7 +8,6 @@
  */
 
 import { z } from 'zod';
-import https from 'node:https';
 import { type Tool } from '@juspay-jaf/jaf';
 import { AttachmentEntityType } from '@prisma/client';
 import { logger } from '../../../../utils/logger.js';
@@ -19,39 +18,11 @@ import { MessageAttachmentRepository } from '../../../../database/repositories/m
 import { config } from '../../../../config/env.js';
 import { PPTX_DESIGNER_SYSTEM_PROMPT } from './prompt.js';
 import { ChannelRepository } from '../../../../database/repositories/channelRepository.js';
+import { logLLMCallStart, logLLMSuccess, logLLMError } from '../../../agentLogger.js';
 
 const storageService = getStorageService();
 
-// ─── HTTP helper ─────────────────────────────────────────────────────────────
-
-/** POST JSON using native https — bypasses undici/fetch HTTP/2 GOAWAY issues. */
-function httpsPost(
-  url: string,
-  body: string,
-  headers: Record<string, string>
-): Promise<{ status: number; text: string }> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const req = https.request(
-      {
-        hostname: parsed.hostname,
-        path: parsed.pathname + parsed.search,
-        method: 'POST',
-        headers: { ...headers, 'Content-Length': Buffer.byteLength(body) },
-      },
-      res => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () =>
-          resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') })
-        );
-      }
-    );
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-}
+const AGENT_NAME = 'CreatePPT';
 
 // ─── Sanitizers ──────────────────────────────────────────────────────────────
 
@@ -183,7 +154,7 @@ export function createCreatePptTool(): Tool<
           'Rich presentation brief: topic, purpose, audience, tone, key content points, ' +
           'color/style preferences, and any specific slides or data to include.'
         ),
-        num_slides: z.number().int().min(3).max(20).describe(
+        num_slides: z.number().int().describe(
           'Number of slides to generate (typically 8–12; default 10).'
         ),
       }),
@@ -195,6 +166,10 @@ export function createCreatePptTool(): Tool<
       logger.info(`[Tool] [${context.sessionId}] create_ppt: ${num_slides} slides, model=${model}, query="${queryPreview}"`);
 
       try {
+        // -- Step 0: Validate inputs --
+        if (num_slides < 3 || num_slides > 20) {
+          throw new Error('num_slides must be between 3 and 20');
+        }
         // ── Step 1: LLM call ────────────────────────────────────────────────
         const userPrompt =
           `Create a ${num_slides}-slide presentation for the following request:\n\n${query}\n\n` +
@@ -203,33 +178,49 @@ export function createCreatePptTool(): Tool<
         const baseUrl = config.litellm.baseUrl.endsWith('/')
           ? config.litellm.baseUrl
           : `${config.litellm.baseUrl}/`;
+        
+        const url = `${baseUrl}chat/completions`;
+        const apiKey = config.litellm.askAiApiKey;
 
-        const llmRes = await httpsPost(
-          `${baseUrl}chat/completions`,
-          JSON.stringify({
-            model,
-            messages: [
-              { role: 'system', content: PPTX_DESIGNER_SYSTEM_PROMPT },
-              { role: 'user', content: userPrompt },
-            ],
-            temperature: 0.3,
-            thinking: { type: 'disabled' },
-          }),
-          {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.litellm.apiKey}`,
+        const requestPayload = {
+          model,
+          messages: [
+            { role: 'system', content: PPTX_DESIGNER_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.3,
+          extra_body: {
+            chat_template_kwargs: {
+              enable_thinking: true
+            }
           }
-        );
+        };
 
-        if (llmRes.status < 200 || llmRes.status >= 300) {
-          throw new Error(`LLM call failed: ${llmRes.status} — ${llmRes.text.slice(0, 300)}`);
+        // Log LLM call start
+        logLLMCallStart(AGENT_NAME, model, 'ASK_AI_API_KEY');
+
+        const llmRes = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(requestPayload),
+        });
+
+        if (!llmRes.ok) {
+          const text = await llmRes.text().catch(() => '');
+          throw new Error(`LLM call failed: ${llmRes.status} — ${text.slice(0, 300)}`);
         }
 
-        const llmData = JSON.parse(llmRes.text) as {
+        const llmData = await llmRes.json() as {
           choices?: Array<{ message?: { content?: string } }>;
         };
         const rawContent = llmData.choices?.[0]?.message?.content;
         if (!rawContent) throw new Error('Empty LLM response');
+
+        // Log success
+        logLLMSuccess(AGENT_NAME, rawContent);
 
         logger.info(`[Tool] [${context.sessionId}] create_ppt: LLM returned ${rawContent.length} chars`);
 
@@ -438,6 +429,7 @@ export function createCreatePptTool(): Tool<
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
         const cause = error instanceof Error ? (error as any).cause : undefined;
+        logLLMError(AGENT_NAME, error);
         logger.error(`[Tool] [${context.sessionId}] create_ppt error: ${msg}`, cause ?? error);
         return `Error creating presentation: ${msg}`;
       }

@@ -1,28 +1,25 @@
 /**
- * Ticket board suggestion agent using JAF (Juspay Agent Framework)
+ * Ticket board suggestion agent — Framework LLM Client
  */
 
 import { z } from 'zod';
-import {
-  makeLiteLLMProvider,
-  generateRunId,
-  generateTraceId,
-  run,
-  type Agent,
-  type RunState,
-  type RunConfig,
-  type TraceEvent,
-} from '@juspay-jaf/jaf';
+import { LLMClient, createUserMessage } from '@framework';
 import { config } from '../../config/env.js';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { AgentsConfig } from '../config.js';
-import { createAgentEventLogger, composeEventHandlers } from '../agentLogger.js';
+import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agentLogger.js';
 
 const LITELLM_BASE_URL = config.litellm.baseUrl;
 const LITELLM_API_KEY = config.litellm.apiKey;
 const MAX_TITLE_LENGTH = 500;
 const MAX_DESCRIPTION_LENGTH = 4000;
 const MAX_BOARD_DESCRIPTION_LENGTH = 1000;
+
+const AGENT_NAME = 'TicketBoard';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface TicketBoardContext {
   readonly userId: string;
@@ -48,15 +45,16 @@ export interface TicketBoardOutput {
   readonly suggestedBoardName: string | null;
 }
 
+// ============================================================================
+// Schema & Constants
+// ============================================================================
+
 const TicketBoardOutputSchema = z.object({
   suggestedBoardId: z.string().nullable(),
   suggestedBoardName: z.string().nullable(),
 });
 
-export const ticketBoardAgent: Agent<TicketBoardContext, TicketBoardOutput> = {
-  name: 'TicketBoardSuggester',
-  instructions: () => {
-    return `You are a support triage assistant. Analyze the new ticket and suggest the most suitable board from the available candidates.
+const SYSTEM_INSTRUCTIONS = `You are a support triage assistant. Analyze the new ticket and suggest the most suitable board from the available candidates.
 
 Return ONLY valid JSON with this exact schema:
 {
@@ -68,23 +66,11 @@ Rules:
 - Use suggestedBoardId and suggestedBoardName only from the candidate list.
 - If no suitable board is found, return null for both suggestedBoardId and suggestedBoardName.
 - Output JSON only, no extra text.
-- Do not include reasoning, analysis, or  tags.`;
-  },
-  modelConfig: {
-    temperature: 0.2,
-  },
-};
+- Do not include reasoning, analysis, or thinking tags.`;
 
-export const ticketBoardAgentRegistry = new Map<string, Agent<TicketBoardContext, any>>([
-  ['TicketBoardSuggester', ticketBoardAgent],
-]);
-
-export function createModelProvider() {
-  if (!LITELLM_BASE_URL || !LITELLM_API_KEY) {
-    throw new Error('LiteLLM configuration is missing for ticket board suggestion.');
-  }
-  return makeLiteLLMProvider(LITELLM_BASE_URL, LITELLM_API_KEY);
-}
+// ============================================================================
+// Helpers
+// ============================================================================
 
 const truncateText = (value: string, maxLength: number): string => {
   if (value.length <= maxLength) {
@@ -135,7 +121,7 @@ ${candidateList}
 };
 
 const extractJson = (content: string): string | null => {
-  const sanitized = content.replace(/[\s\S]*?<\/think>/gi, '').trim();
+  const sanitized = content.replace(/<thinking>[\s\S]*?<\/think>/gi, '').trim();
   const match = sanitized.match(/\{[\s\S]*\}/);
   return match ? match[0] : null;
 };
@@ -163,10 +149,14 @@ function parseAgentOutput(content: string): TicketBoardOutput {
   return parsed.data;
 }
 
+// ============================================================================
+// Execution Function
+// ============================================================================
+
 export async function analyzeTicketBoard(
   input: TicketBoardInput,
-  context: TicketBoardContext,
-  onEvent?: (event: TraceEvent) => void,
+  _context: TicketBoardContext,
+  _onEvent?: unknown, // Kept for API compatibility, not used with direct calls
   agentsConfig?: AgentsConfig,
 ): Promise<TicketBoardOutput> {
   if (!input.candidates || input.candidates.length === 0) {
@@ -180,47 +170,48 @@ export async function analyzeTicketBoard(
   const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
   const modelName = cacConfig.ticketBoardModelName;
 
-  const modelProvider = createModelProvider();
+  // Initialize LLM client
+  const llmClient = new LLMClient({
+    provider: {
+      type: 'litellm',
+      config: {
+        apiKey: LITELLM_API_KEY,
+        baseUrl: LITELLM_BASE_URL,
+      },
+    },
+    defaultModel: modelName,
+  });
+
   const prompt = buildPrompt(input);
 
-  const agentLogger = createAgentEventLogger('TicketBoard', 'LITELLM_API_KEY');
-  const composedOnEvent = onEvent ? composeEventHandlers(agentLogger, onEvent) : agentLogger;
+  // Log LLM call start
+  logLLMCallStart(AGENT_NAME, modelName, 'LITELLM_API_KEY');
 
-  const runConfig: RunConfig<TicketBoardContext> = {
-    agentRegistry: ticketBoardAgentRegistry,
-    modelProvider: modelProvider as RunConfig<TicketBoardContext>['modelProvider'],
-    maxTurns: 2,
-    modelOverride: modelName,
-    onEvent: composedOnEvent,
-  };
-
-  const initialState: RunState<TicketBoardContext> = {
-    runId: generateRunId(),
-    traceId: generateTraceId(),
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
+  try {
+    // Generate response using framework LLM client
+    const response = await llmClient.generate({
+      messages: [
+        createUserMessage(prompt)
+      ],
+      systemPrompt: SYSTEM_INSTRUCTIONS,
+      parameters: {
+        temperature: 0.2
       },
-    ],
-    currentAgentName: 'TicketBoardSuggester',
-    context,
-    turnCount: 0,
-  };
+      extraBody: {
+        chat_template_kwargs: {
+          enable_thinking: false
+        }
+      }
+    });
 
-  const result = await run(initialState, runConfig);
+    // Log success
+    logLLMSuccess(AGENT_NAME, response.content);
 
-  if (result.outcome.status === 'completed') {
-    const output = result.outcome.output;
-    if (typeof output === 'string') {
-      return parseAgentOutput(output);
-    }
-    return output as TicketBoardOutput;
+    const result = parseAgentOutput(response.content);
+    return result;
+  } catch (error) {
+    // Log error
+    logLLMError(AGENT_NAME, error);
+    throw error;
   }
-
-  if (result.outcome.status === 'error') {
-    throw new Error(`Ticket board analysis failed: ${result.outcome.error._tag}`);
-  }
-
-  throw new Error('Ticket board analysis was interrupted.');
 }

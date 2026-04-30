@@ -1,27 +1,24 @@
 /**
- * Ticket duplicate detection agent using JAF (Juspay Agent Framework)
+ * Ticket duplicate detection agent — Framework LLM Client
  */
 
 import { z } from 'zod';
-import {
-  makeLiteLLMProvider,
-  generateRunId,
-  generateTraceId,
-  run,
-  type Agent,
-  type RunState,
-  type RunConfig,
-  type TraceEvent,
-} from '@juspay-jaf/jaf';
+import { LLMClient, createUserMessage } from '@framework';
 import { config } from '../../config/env.js';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { AgentsConfig } from '../config.js';
-import { createAgentEventLogger, composeEventHandlers } from '../agentLogger.js';
+import { logLLMCallStart, logLLMSuccess, logLLMError } from '../agentLogger.js';
 
 const LITELLM_BASE_URL = config.litellm.baseUrl;
 const LITELLM_API_KEY = config.litellm.apiKey;
 const MAX_TITLE_LENGTH = 500;
 const MAX_DESCRIPTION_LENGTH = 4000;
+
+const AGENT_NAME = 'TicketDuplicate';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface TicketDuplicateContext {
   readonly userId: string;
@@ -48,6 +45,10 @@ export interface TicketDuplicateOutput {
   readonly reason: string;
 }
 
+// ============================================================================
+// Schema & Constants
+// ============================================================================
+
 const TicketDuplicateOutputSchema = z.object({
   isDuplicate: z.boolean(),
   duplicateTicketId: z.string().nullable(),
@@ -55,10 +56,7 @@ const TicketDuplicateOutputSchema = z.object({
   reason: z.string(),
 });
 
-export const ticketDuplicateAgent: Agent<TicketDuplicateContext, TicketDuplicateOutput> = {
-  name: 'TicketDuplicateDetector',
-  instructions: () => {
-    return `You are a support triage assistant. Determine whether the new ticket is a duplicate of any candidate tickets.
+const SYSTEM_INSTRUCTIONS = `You are a support triage assistant. Determine whether the new ticket is a duplicate of any candidate tickets.
 Only mark as duplicate if the issue and root cause are effectively the same.
 
 Return ONLY valid JSON with this exact schema:
@@ -74,24 +72,12 @@ Rules:
 - Set confidence between 0.0 and 1.0.
 - Keep reason concise and specific.
 - Output JSON only, no extra text.
-- Do not include reasoning, analysis, or <think> tags.
+- Do not include reasoning, analysis, or thinking tags.
 - In the reason, do not mention ticket IDs or any candidate identifiers; refer only to the issue details (title/description).`;
-  },
-  modelConfig: {
-    temperature: 0.2,
-  },
-};
 
-export const ticketDuplicateAgentRegistry = new Map<string, Agent<TicketDuplicateContext, any>>([
-  ['TicketDuplicateDetector', ticketDuplicateAgent],
-]);
-
-export function createModelProvider() {
-  if (!LITELLM_BASE_URL || !LITELLM_API_KEY) {
-    throw new Error('LiteLLM configuration is missing for ticket duplicate detection.');
-  }
-  return makeLiteLLMProvider(LITELLM_BASE_URL, LITELLM_API_KEY);
-}
+// ============================================================================
+// Helpers
+// ============================================================================
 
 const truncateText = (value: string, maxLength: number): string => {
   if (value.length <= maxLength) {
@@ -139,7 +125,7 @@ ${candidateList}
 };
 
 const extractJson = (content: string): string | null => {
-  const sanitized = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  const sanitized = content.replace(/<thinking>[\s\S]*?<\/think>/gi, '').trim();
   const match = sanitized.match(/\{[\s\S]*\}/);
   return match ? match[0] : null;
 };
@@ -167,10 +153,14 @@ function parseAgentOutput(content: string): TicketDuplicateOutput {
   return parsed.data;
 }
 
+// ============================================================================
+// Execution Function
+// ============================================================================
+
 export async function analyzeTicketDuplicates(
   input: TicketDuplicateInput,
-  context: TicketDuplicateContext,
-  onEvent?: (event: TraceEvent) => void,
+  _context: TicketDuplicateContext,
+  _onEvent?: unknown, // Kept for API compatibility, not used with direct calls
   agentsConfig?: AgentsConfig,
 ): Promise<TicketDuplicateOutput> {
   if (!input.candidates || input.candidates.length === 0) {
@@ -186,47 +176,48 @@ export async function analyzeTicketDuplicates(
   const cacConfig = agentsConfig ?? await AgentsConfig.fetch();
   const modelName = cacConfig.ticketDuplicateModelName;
 
-  const modelProvider = createModelProvider();
+  // Initialize LLM client
+  const llmClient = new LLMClient({
+    provider: {
+      type: 'litellm',
+      config: {
+        apiKey: LITELLM_API_KEY,
+        baseUrl: LITELLM_BASE_URL,
+      },
+    },
+    defaultModel: modelName,
+  });
+
   const prompt = buildPrompt(input);
 
-  const agentLogger = createAgentEventLogger('TicketDuplicate', 'LITELLM_API_KEY');
-  const composedOnEvent = onEvent ? composeEventHandlers(agentLogger, onEvent) : agentLogger;
+  // Log LLM call start
+  logLLMCallStart(AGENT_NAME, modelName, 'LITELLM_API_KEY');
 
-  const runConfig: RunConfig<TicketDuplicateContext> = {
-    agentRegistry: ticketDuplicateAgentRegistry,
-    modelProvider: modelProvider as RunConfig<TicketDuplicateContext>['modelProvider'],
-    maxTurns: 2,
-    modelOverride: modelName,
-    onEvent: composedOnEvent,
-  };
-
-  const initialState: RunState<TicketDuplicateContext> = {
-    runId: generateRunId(),
-    traceId: generateTraceId(),
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
+  try {
+    // Generate response using framework LLM client
+    const response = await llmClient.generate({
+      messages: [
+        createUserMessage(prompt)
+      ],
+      systemPrompt: SYSTEM_INSTRUCTIONS,
+      parameters: {
+        temperature: 0.2
       },
-    ],
-    currentAgentName: 'TicketDuplicateDetector',
-    context,
-    turnCount: 0,
-  };
+      extraBody: {
+        chat_template_kwargs: {
+          enable_thinking: false
+        }
+      }
+    });
 
-  const result = await run(initialState, runConfig);
+    // Log success
+    logLLMSuccess(AGENT_NAME, response.content);
 
-  if (result.outcome.status === 'completed') {
-    const output = result.outcome.output;
-    if (typeof output === 'string') {
-      return parseAgentOutput(output);
-    }
-    return output as TicketDuplicateOutput;
+    const result = parseAgentOutput(response.content);
+    return result;
+  } catch (error) {
+    // Log error
+    logLLMError(AGENT_NAME, error);
+    throw error;
   }
-
-  if (result.outcome.status === 'error') {
-    throw new Error(`Ticket duplicate analysis failed: ${result.outcome.error._tag}`);
-  }
-
-  throw new Error('Ticket duplicate analysis was interrupted.');
 }
