@@ -412,7 +412,7 @@ const AppSidebar = (): ReactElement => {
               </div>
             ) : (
               <div
-                className='relative w-[32px] h-14 flex flex-col items-center justify-end transition-opacity hover:opacity-90'
+                className='relative w-[32px] flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer'
                 data-testid='profile-icon'
               >
                 {/* Avatar at Bottom - overlaps container slightly to match with-status state */}
