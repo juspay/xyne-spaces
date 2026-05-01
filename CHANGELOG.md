@@ -1,3 +1,27 @@
+## [1.136.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.135.0...v1.136.0) (2026-05-01)
+
+
+### Features
+
+* Add Slack-compatible incoming webhooks for apps ([c4316be](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c4316beb61645d3957024df7084baa7c9200a7ce)), closes [#5755](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5755)
+* Handle stuck presence call status ([365bf0e](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/365bf0e0c365a56ea7d9caa258d9680fbb61ad4d)), closes [#5757](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5757)
+* revert making a common component to render the virtualised lists ([b6eb30c](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/b6eb30cf6a413c100ce48ca7f8a831616f7cdd97)), closes [#5739](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5739)
+* user_deactivation and reactivation . ([2aac41a](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/2aac41aa9380f3be4975f7704b8acf725ecefb37)), closes [#5696](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5696)
+
+
+### Bug Fixes
+
+* clear error state when transcript data is successfully received ([8ac9ce7](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/8ac9ce7456ba71e2653193b68665da1fe3452a04)), closes [#5790](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5790)
+* fix in error reporting modal. ([54b7d64](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/54b7d64b9ce2153e3f982756912d047a641065dd))
+* Fix last DM visiblity in Home tab, also fixed analytics screen padding ([963b71f](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/963b71f5fb475e3af78d2f6162c45fda3c8bd9cd))
+* fixed css of info component to show last member ([c4872e5](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c4872e59112db7aadf090a66343dc17d870dae47))
+* fixing logging out thing ([6b73d15](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/6b73d15f91b762f5ee7a4714a96aa86366a7427b))
+* fixing the AI_Summary prompt." ([197c2be](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/197c2be0d562629ae9343c77ab1c7f219f251d85))
+* handle tracking sideEffects on batched mutation request ([4e300e4](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4e300e4501a7a22d28f99541456c87fe9bdc8d6e)), closes [#5740](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5740)
+* passing workspaceId and all required thing in auth to mobile login ([c1e1301](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/c1e13014139ab67b9efc10d375eb9b04b357cabd)), closes [#5720](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5720)
+* ticket UI fixes ([782689d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/782689d2eb682ddc41ce8e8f2fea63268d468cff)), closes [#5461](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5461)
+* Workload sync ([4c8618d](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/4c8618de62a33c75f440aba802712262cadc2993)), closes [#5735](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5735)
+
 ## [1.135.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.134.0...v1.135.0) (2026-04-30)
 
 
