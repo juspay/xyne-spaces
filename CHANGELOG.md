@@ -1,3 +1,10 @@
+## [1.136.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.136.0...v1.136.1) (2026-05-01)
+
+
+### Bug Fixes
+
+* xyne desk fix ([16d4b4b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/16d4b4bd47ac130dd7d632696d4a483968cd6964)), closes [#5730](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5730)
+
 ## [1.136.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.135.0...v1.136.0) (2026-05-01)
 
 
