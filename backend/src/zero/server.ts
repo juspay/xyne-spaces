@@ -150,6 +150,8 @@ export async function handleMutate(request: Request): Promise<unknown> {
     throw new Error("Rate limit exceeded");
   }
 
+  vespaJobs = createVespaJobsAccumulator();
+  sideEffectJobs = createSideEffectJobsAccumulator();
 
   try {
     const result = await handleMutateRequest(
@@ -157,11 +159,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
       transact =>
         transact((tx, mutatorName, args) => {
           capturedMutatorName = mutatorName;
-          asyncTasks = [];
           const mutators = createMutators(authData, asyncTasks);
-          vespaJobs = createVespaJobsAccumulator();
-          sideEffectJobs = createSideEffectJobsAccumulator();
-
           const wrappedTx = wrapTransactionWithACL(tx, { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId}, vespaJobs, sideEffectJobs);
           const mutator = mustGetMutator(mutators, mutatorName);
           return mutator.fn({ tx: wrappedTx, args, ctx: { userID: authData.sub, workspaceId: authData.workspaceId, role: authData.role, orgRole: authData.orgRole, memberId: authData.memberId } });
