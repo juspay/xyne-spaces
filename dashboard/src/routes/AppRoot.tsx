@@ -1042,6 +1042,7 @@ export const router = createBrowserRouter([
                       keyword='support'
                       stripSearchParams={['settings', 'openSettings']}
                       preserveSearchParams={['emailConnected', 'emailError']}
+                      redirectOnlyAt='/support'
                     >
                       <SupportScreen />
                     </SaveRoute>

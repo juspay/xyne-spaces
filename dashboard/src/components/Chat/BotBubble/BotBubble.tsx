@@ -57,12 +57,19 @@ const TicketDisplayModeV2: React.FC<{
   }
 
   // In the Desk/email ticket-detail view the user is already looking at the
-  // ticket whose card is being rendered in the right-panel thread — clicking
-  // it should be a no-op, not bounce them into the Chat ticket URL.
+  // ticket whose card is being rendered in the right-panel thread — instead
+  // of bouncing them into the Chat ticket URL, flip the right panel to the
+  // Details tab via a `?selectedTab=details` URL param. SupportTicketDetail
+  // watches this param reactively.
   const isDeskView = location.pathname.startsWith('/support');
 
   const handleClick = (e: React.MouseEvent | KeyboardEvent): void => {
-    if (isDeskView) return;
+    if (isDeskView) {
+      const params = new URLSearchParams(location.search);
+      params.set('selectedTab', 'details');
+      void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+      return;
+    }
 
     const isCmdClick = 'metaKey' in e && (e.metaKey || e.ctrlKey);
     const ticketUrl = `/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;

@@ -72,6 +72,10 @@ export const MessageRepliedActivityV2 = ({
   }
 
   const targetPath = `${baseRoute}/${conversation.channelId}/${conversation.conversationId}#origin=${conversation.conversationId}&messageId=${message.messageId}`;
+  const supportTargetPath =
+    conversation.channelId && conversation.conversationId
+      ? `/support/${conversation.channelId}?conversationId=${conversation.conversationId}&messageId=${message.messageId}`
+      : undefined;
 
   return (
     <ActivityItemCard
@@ -83,6 +87,7 @@ export const MessageRepliedActivityV2 = ({
       badgeColorClass='bg-accent'
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}
+      supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
     >
       {isExpanded ? (

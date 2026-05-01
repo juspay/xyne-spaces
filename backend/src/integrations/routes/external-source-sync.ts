@@ -118,28 +118,24 @@ router.post(
         startDate?: unknown;
         endDate?: unknown;
       };
-
-      let options: { startDate?: string; endDate?: string } | undefined;
-      if (startDate !== undefined || endDate !== undefined) {
-        if (typeof startDate !== 'string' || typeof endDate !== 'string') {
-          return res.status(400).json({
-            success: false,
-            error: 'startDate and endDate must both be ISO 8601 strings',
-          });
-        }
-        const startMs = Date.parse(startDate);
-        const endMs = Date.parse(endDate);
-        if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
-          return res.status(400).json({ success: false, error: 'Invalid ISO 8601 date' });
-        }
-        if (startMs > endMs) {
-          return res.status(400).json({ success: false, error: 'startDate must be <= endDate' });
-        }
-        if (endMs - startMs > MAX_REFETCH_RANGE_MS) {
-          return res.status(400).json({ success: false, error: 'Range exceeds 365 days' });
-        }
-        options = { startDate, endDate };
+      if (typeof startDate !== 'string' || typeof endDate !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'startDate and endDate are required (ISO 8601 strings)',
+        });
       }
+      const startMs = Date.parse(startDate);
+      const endMs = Date.parse(endDate);
+      if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+        return res.status(400).json({ success: false, error: 'Invalid ISO 8601 date' });
+      }
+      if (startMs > endMs) {
+        return res.status(400).json({ success: false, error: 'startDate must be <= endDate' });
+      }
+      if (endMs - startMs > MAX_REFETCH_RANGE_MS) {
+        return res.status(400).json({ success: false, error: 'Range exceeds 365 days' });
+      }
+      const options: { startDate: string; endDate: string } = { startDate, endDate };
 
       const source = await new ExternalSourceRepository().findByChannelId(channelId);
       if (!source || !source.isActive) {

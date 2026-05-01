@@ -974,6 +974,45 @@ export class ChannelController {
     }
   };
 
+  getConnectedEmail = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { channelId } = req.params;
+      if (!channelId) {
+        res.status(400).json({ error: 'channelId is required' });
+        return;
+      }
+
+      const source = await db.externalSource.findFirst({
+        where: { channelId, isActive: true },
+        select: { displayName: true, sourceType: true },
+      });
+      const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
+      if (fromDisplay) {
+        res.status(200).json({ email: fromDisplay.toLowerCase() });
+        return;
+      }
+
+      const preference = await db.emailChannelPreference.findUnique({
+        where: { channelId },
+        select: { ownerUserId: true },
+      });
+      if (preference?.ownerUserId) {
+        const owner = await db.user.findUnique({
+          where: { id: preference.ownerUserId },
+          select: { email: true },
+        });
+        if (owner?.email) {
+          res.status(200).json({ email: owner.email.toLowerCase() });
+          return;
+        }
+      }
+
+      res.status(200).json({ email: null });
+    } catch (error) {
+      logger.error('Error in getConnectedEmail:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
 
   // GET /api/channels/search - Unified search for users and groups
   searchForMentions = async (req: Request, res: Response): Promise<void> => {

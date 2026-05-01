@@ -24,6 +24,10 @@ export const MessageMentionActivity = ({
   const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
 
   const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
+  const supportTargetPath =
+    message.conversation?.channelId && message.conversation?.conversationId
+      ? `/support/${message.conversation.channelId}?conversationId=${message.conversation.conversationId}&messageId=${message.messageId}`
+      : undefined;
 
   return (
     <ActivityItemCard
@@ -35,6 +39,7 @@ export const MessageMentionActivity = ({
       badgeColorClass='bg-muted'
       description={<span className='text-muted-foreground text-sm'>mentioned you in</span>}
       targetPath={targetPath}
+      supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
       className='flex items-start'
     >

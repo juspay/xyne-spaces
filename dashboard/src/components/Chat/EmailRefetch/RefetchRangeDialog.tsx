@@ -1,32 +1,25 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
-import { Calendar as CalendarIcon, Sparkles } from 'lucide-react';
+import { Calendar as CalendarIcon } from 'lucide-react';
 import Dialog from '../../ui/Dialog';
 import { Button } from '../../ui/Button';
 import { cn } from '../../../utils/classNames';
 import { RangeCalendar } from './RangeCalendar';
 
-type Mode =
-  | 'incremental'
-  | 'last-7d'
-  | 'last-30d'
-  | 'last-3mo'
-  | 'last-6mo'
-  | 'last-12mo'
-  | 'custom';
+type Mode = 'today' | 'last-7d' | 'last-30d' | 'last-3mo' | 'last-6mo' | 'custom';
 
 interface PresetOption {
-  value: Exclude<Mode, 'custom' | 'incremental'>;
+  value: Exclude<Mode, 'custom'>;
   label: string;
   days: number;
 }
 
 const PRESETS: PresetOption[] = [
-  { value: 'last-7d', label: '7 days', days: 7 },
-  { value: 'last-30d', label: '30 days', days: 30 },
-  { value: 'last-3mo', label: '3 months', days: 90 },
-  { value: 'last-6mo', label: '6 months', days: 180 },
-  { value: 'last-12mo', label: '12 months', days: 365 },
+  { value: 'today', label: 'Today', days: 0 },
+  { value: 'last-7d', label: 'Last 7 days', days: 7 },
+  { value: 'last-30d', label: 'Last 30 days', days: 30 },
+  { value: 'last-3mo', label: 'Last 3 months', days: 90 },
+  { value: 'last-6mo', label: 'Last 6 months', days: 180 },
 ];
 
 const MAX_RANGE_DAYS = 365;
@@ -84,13 +77,12 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
   onConfirm,
   isPending = false,
 }) => {
-  const [mode, setMode] = useState<Mode>('incremental');
+  const [mode, setMode] = useState<Mode>('last-7d');
   const [customStart, setCustomStart] = useState<Date | null>(null);
   const [customEnd, setCustomEnd] = useState<Date | null>(null);
 
   // Resolved range for the current mode (used for both summary text and submit).
   const resolved = useMemo<{ startDate: Date; endDate: Date } | null>(() => {
-    if (mode === 'incremental') return null;
     if (mode === 'custom') {
       if (!customStart || !customEnd) return null;
       return { startDate: startOfDay(customStart), endDate: endOfDay(customEnd) };
@@ -112,15 +104,12 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
   const isConfirmDisabled = isPending || !isCustomReady;
 
   const handleConfirm = useCallback((): void => {
-    if (mode === 'incremental' || !resolved) {
-      onConfirm(undefined);
-      return;
-    }
+    if (!resolved) return;
     onConfirm({
       startDate: resolved.startDate.toISOString(),
       endDate: resolved.endDate.toISOString(),
     });
-  }, [mode, resolved, onConfirm]);
+  }, [resolved, onConfirm]);
 
   const renderPreset = (value: Mode, label: string, sublabel?: string): React.ReactElement => {
     const active = mode === value;
@@ -166,40 +155,13 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
           </p>
         </div>
 
-        {/* Sync new only — distinct from date-range presets */}
-        <button
-          type='button'
-          onClick={() => setMode('incremental')}
-          className={cn(
-            'w-full flex items-center gap-3 rounded-lg border-2 px-4 py-3 transition-all text-left',
-            mode === 'incremental'
-              ? 'border-primary bg-primary/10 text-primary'
-              : 'border-border text-foreground hover:border-muted-foreground/40 hover:bg-muted/40',
-          )}
-          data-track-category='Support'
-          data-track-name='RefetchRangeIncremental'
-        >
-          <Sparkles className='size-4 shrink-0' />
-          <div className='flex-1'>
-            <div className='text-sm font-medium'>Sync new only</div>
-            <div
-              className={cn(
-                'text-[11px]',
-                mode === 'incremental' ? 'text-primary/80' : 'text-muted-foreground',
-              )}
-            >
-              Resume from the last fetched email
-            </div>
-          </div>
-        </button>
-
         {/* Quick presets */}
         <div className='space-y-2'>
           <div className='text-xs font-medium text-muted-foreground uppercase tracking-wide'>
             Quick range
           </div>
           <div className='grid grid-cols-3 gap-2'>
-            {PRESETS.map(p => renderPreset(p.value, `Last ${p.label}`))}
+            {PRESETS.map(p => renderPreset(p.value, p.label))}
             {renderPreset('custom', 'Custom')}
           </div>
         </div>
@@ -245,7 +207,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
         )}
 
         {/* Resolved-range summary for presets */}
-        {mode !== 'incremental' && mode !== 'custom' && resolved && (
+        {mode !== 'custom' && resolved && (
           <div className='rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground'>
             Will fetch emails received{' '}
             <span className='text-foreground font-medium'>
@@ -275,7 +237,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
             data-track-name='FetchRangeConfirm'
             data-track-metadata={JSON.stringify({ mode })}
           >
-            {mode === 'incremental' ? 'Sync now' : 'Fetch'}
+            Fetch
           </Button>
         </div>
       </div>

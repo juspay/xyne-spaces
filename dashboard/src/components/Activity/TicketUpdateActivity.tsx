@@ -126,6 +126,10 @@ export const TicketUpdateActivity = ({
   // On mobile: will navigate to minimized view with details tab
   // On desktop: will navigate to tab-based route in ConversationPannel
   const targetPath = `/chat/activity/${ticket.channelId}/${ticket.conversationId}/${ticketIdValue}?selectedTab=details`;
+  const supportTargetPath =
+    ticket.channelId && ticket.conversationId
+      ? `/support/${ticket.channelId}?conversationId=${ticket.conversationId}`
+      : undefined;
 
   const isPRAction = activity.actorAction.startsWith('ticket_pr_');
   const expandedContent = (
@@ -161,6 +165,7 @@ export const TicketUpdateActivity = ({
       badgeColorClass={config.badgeColor}
       description={<span className='text-muted-foreground text-sm'>{config.description}</span>}
       targetPath={targetPath}
+      supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
     >
       {isExpanded ? expandedContent : condensedContent}

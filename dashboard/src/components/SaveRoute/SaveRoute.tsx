@@ -8,6 +8,7 @@ interface SaveRouteProps {
   /** Pathnames/queries to strip before persisting (ephemeral panels, etc.). */
   stripSearchParams?: readonly string[];
   preserveSearchParams?: readonly string[];
+  redirectOnlyAt?: string | undefined;
   children: ReactNode;
 }
 
@@ -27,6 +28,7 @@ export const SaveRoute = ({
   keyword,
   stripSearchParams,
   preserveSearchParams,
+  redirectOnlyAt,
   children,
 }: SaveRouteProps): ReactElement => {
   const location = useLocation();
@@ -48,7 +50,8 @@ export const SaveRoute = ({
     const current = `${location.pathname}${location.search}`;
     const searchKeys = new URLSearchParams(location.search);
     const hasPreservedParam = preserveSearchParams?.some(key => searchKeys.has(key)) ?? false;
-    if (saved && saved !== current && !hasPreservedParam) {
+    const allowRedirect = redirectOnlyAt ? location.pathname === redirectOnlyAt : true;
+    if (allowRedirect && saved && saved !== current && !hasPreservedParam) {
       redirectTo = saved;
     }
   }

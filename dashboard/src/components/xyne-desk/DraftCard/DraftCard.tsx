@@ -18,7 +18,7 @@ export const DraftCard = ({
   onRefine,
 }: DraftCardProps): ReactElement => {
   return (
-    <div className='mx-4 mb-3 border border-border rounded-xl bg-background shadow-sm overflow-hidden'>
+    <div className='mx-4 mt-3 mb-3 border border-border rounded-xl bg-background shadow-sm overflow-hidden'>
       {/* Header */}
       <div className='flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/30'>
         <div className='flex items-center gap-2 text-sm font-medium text-foreground'>

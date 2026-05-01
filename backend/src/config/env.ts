@@ -216,7 +216,7 @@ const envSchema = Joi.object({
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default(''),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
-  EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(2000),
+  EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);

@@ -12,6 +12,7 @@ router.post('/', channelController.createChannel);
 router.post('/check-duplicate', channelController.checkDuplicate); // Check if channel title is duplicate
 router.get('/search', channelController.searchForMentions); // Unified search for users and groups
 router.get('/publish-targets', channelController.getChannelsForDocs); // Get channels where user can publish docs
+router.get('/:channelId/connected-email', channelController.getConnectedEmail); // OAuth-connected inbox email for an email channel
 
 // Conversation Routes (nested under channels)
 router.post('/:channelId/conversations', uploadMultiple, conversationController.createConversation);
