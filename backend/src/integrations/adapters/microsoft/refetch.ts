@@ -8,7 +8,6 @@ import { ExternalSource } from '@prisma/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { externalSourceCore } from '../../core/core';
 import { adapterRegistry } from '../../core/adapterRegistry';
 import { BaseRefetch, RefetchOptions, RefetchResult } from '../../core/baseRefetch';
@@ -18,7 +17,6 @@ import { preDownloadGraphAttachments } from './attachments';
 import { GraphMailMessage } from './types';
 
 const TAG = '[MicrosoftRefetch]';
-const FALLBACK_LIMIT = 10;
 const RANGE_MAX_MESSAGES = 2000;
 const transformer = new MicrosoftTransformer();
 
@@ -33,54 +31,26 @@ type GraphMessageStub = { id: string; receivedDateTime: string; conversationId?:
 
 export class MicrosoftRefetch extends BaseRefetch {
   async refetch(source: ExternalSource, options?: RefetchOptions): Promise<RefetchResult> {
+    if (!options?.startDate || !options?.endDate) {
+      throw new Error(
+        '[MicrosoftRefetch] startDate and endDate are required — manual refetch is range-only',
+      );
+    }
     const accessToken = await MicrosoftDeskService.getValidAccessToken(source.credentials, source.id);
 
-    const isRangeMode = !!(options?.startDate && options?.endDate);
-
     // Step 1: list message ids
-    let value: GraphMessageStub[];
-
-    if (isRangeMode) {
-      value = await this.listMessagesInRange(accessToken, options!.startDate!, options!.endDate!);
-    } else {
-      const listUrl = new URL(`${config.microsoftGraph.baseUrl}/me/messages`);
-      if (source.lastSyncCursor) {
-        listUrl.searchParams.set('$filter', `receivedDateTime gt ${source.lastSyncCursor}`);
-        listUrl.searchParams.set('$orderby', 'receivedDateTime asc');
-      } else {
-        listUrl.searchParams.set('$orderby', 'receivedDateTime desc');
-        // Over-fetch then thread-cap below so N=10 = 10 tickets, not 10 raw messages.
-        listUrl.searchParams.set('$top', String(FALLBACK_LIMIT * 10));
-      }
-      listUrl.searchParams.set('$select', 'id,receivedDateTime,conversationId');
-
-      const listResponse = await fetch(listUrl.toString(), {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (!listResponse.ok) {
-        const body = await listResponse.text().catch(() => '');
-        throw new Error(`Failed to list messages: ${listResponse.status} ${body}`);
-      }
-      const rawValue = ((await listResponse.json()) as { value: GraphMessageStub[] }).value ?? [];
-
-      value = rawValue;
-      if (!source.lastSyncCursor) {
-        const picked: GraphMessageStub[] = [];
-        const threads = new Set<string>();
-        for (const m of rawValue) {
-          const tid = m.conversationId ?? m.id;
-          if (threads.size >= FALLBACK_LIMIT && !threads.has(tid)) continue;
-          threads.add(tid);
-          picked.push(m);
-        }
-        value = picked;
-      }
-    }
-
-    const nextCursor = value.reduce<string | null>(
-      (acc, m) => (!acc || m.receivedDateTime > acc ? m.receivedDateTime : acc),
-      source.lastSyncCursor ?? null,
+    const value = await this.listMessagesInRange(
+      accessToken,
+      options.startDate,
+      options.endDate,
     );
+    logger.info(`${TAG} range listing returned ${value.length} messages`, {
+      startDate: options.startDate,
+      endDate: options.endDate,
+      firstReceived: value[0]?.receivedDateTime,
+      lastReceived: value[value.length - 1]?.receivedDateTime,
+      distinctThreads: new Set(value.map(m => m.conversationId ?? m.id)).size,
+    });
 
     // Step 2: ingest each — fetch full message, transform, sync
     let processed = 0;
@@ -131,19 +101,37 @@ export class MicrosoftRefetch extends BaseRefetch {
     };
 
     const { batchSize, batchDelayMs } = config.emailFetch;
-    const ids = value.map(v => v.id);
-    for (let i = 0; i < ids.length; i += batchSize) {
-      const batch = ids.slice(i, i + batchSize);
-      await Promise.all(batch.map(ingestOne));
-      if (batchDelayMs > 0 && i + batchSize < ids.length) {
+    const groupedByThread = new Map<string, GraphMessageStub[]>();
+    for (const m of value) {
+      const threadId = m.conversationId ?? m.id;
+      const bucket = groupedByThread.get(threadId);
+      if (bucket) {
+        bucket.push(m);
+      } else {
+        groupedByThread.set(threadId, [m]);
+      }
+    }
+    const threadGroups = Array.from(groupedByThread.values()).map(group =>
+      group
+        .slice()
+        .sort((a, b) => a.receivedDateTime.localeCompare(b.receivedDateTime))
+        .map(m => m.id),
+    );
+
+    for (let i = 0; i < threadGroups.length; i += batchSize) {
+      const batch = threadGroups.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async messageIds => {
+          for (const id of messageIds) {
+            await ingestOne(id);
+          }
+        }),
+      );
+      if (batchDelayMs > 0 && i + batchSize < threadGroups.length) {
         await new Promise(resolve => setTimeout(resolve, batchDelayMs));
       }
     }
 
-    // Step 3: persist cursor
-    if (nextCursor && nextCursor > (source.lastSyncCursor ?? '')) {
-      await new ExternalSourceRepository().update(source.id, { lastSyncCursor: nextCursor });
-    }
 
     logger.info(`${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${errors.length}`);
     return { processed, newTickets, skipped, errors };

@@ -240,9 +240,9 @@ export const EmailBodyRenderer = ({
     let mutationObserver: MutationObserver | null = null;
 
     const measure = (): void => {
-      const docEl = iframe.contentDocument?.documentElement;
-      if (!docEl) return;
-      const next = Math.max(docEl.scrollHeight, docEl.offsetHeight);
+      const body = iframe.contentDocument?.body;
+      if (!body) return;
+      const next = body.scrollHeight;
       if (next > 0) setHeight(next);
     };
 
@@ -279,9 +279,9 @@ export const EmailBodyRenderer = ({
         true,
       );
 
-      if (typeof ResizeObserver !== 'undefined' && contentDoc.documentElement) {
+      if (typeof ResizeObserver !== 'undefined' && contentDoc.body) {
         resizeObserver = new ResizeObserver(() => measure());
-        resizeObserver.observe(contentDoc.documentElement);
+        resizeObserver.observe(contentDoc.body);
       }
 
       mutationObserver = new MutationObserver(() => measure());

@@ -32,6 +32,10 @@ export const TicketAssignmentActivity = ({
   // On mobile: will navigate to minimized view with details tab
   // On desktop: will navigate to tab-based route in ConversationPannel
   const targetPath = `/chat/activity/${ticket.channelId}/${ticket.conversationId}/${ticketIdValue}?selectedTab=details`;
+  const supportTargetPath =
+    ticket.channelId && ticket.conversationId
+      ? `/support/${ticket.channelId}?conversationId=${ticket.conversationId}`
+      : undefined;
 
   // Check if the recipient (activity.userId) is the one who was assigned
   const isRecipientAssigned = ticket.assignedTo === activity.userId;
@@ -78,6 +82,7 @@ export const TicketAssignmentActivity = ({
       badgeColorClass='bg-blue-100'
       description={description}
       targetPath={targetPath}
+      supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
     >
       {isExpanded ? expandedContent : condensedContent}

@@ -1,4 +1,4 @@
-import { ReactElement, useMemo } from 'react';
+import { ReactElement, useMemo, type DragEvent } from 'react';
 import { X } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useUsers } from '../../../hooks/useUsers';
@@ -8,6 +8,9 @@ interface EmailTagWithAvatarProps {
   onRemove: () => void;
   disabled?: boolean;
   users: ReturnType<typeof useUsers>;
+  draggable?: boolean;
+  onDragStart?: (e: DragEvent<HTMLDivElement>) => void;
+  onDragEnd?: (e: DragEvent<HTMLDivElement>) => void;
 }
 
 export const EmailTagWithAvatar = ({
@@ -15,6 +18,9 @@ export const EmailTagWithAvatar = ({
   onRemove,
   disabled,
   users,
+  draggable,
+  onDragStart,
+  onDragEnd,
 }: EmailTagWithAvatarProps): ReactElement => {
   const user = useMemo(() => {
     return users.find(u => u.email.toLowerCase() === email.toLowerCase());
@@ -30,7 +36,12 @@ export const EmailTagWithAvatar = ({
   const initialLetter = (user?.name?.charAt(0) ?? namePart.charAt(0) ?? '').toUpperCase();
 
   return (
-    <div className='inline-flex items-center gap-2 rounded-lg border border-input bg-background py-1 px-1.5'>
+    <div
+      className={`inline-flex items-center gap-2 rounded-lg border border-input bg-background py-1 px-1.5 ${draggable && !disabled ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      draggable={draggable && !disabled ? true : undefined}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+    >
       {/* Use Avatar component for internal users, custom fallback for external */}
       {user?.id ? (
         <Avatar

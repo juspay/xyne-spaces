@@ -793,14 +793,16 @@ export class EmailService {
       const email = await this.emailRepository.create(emailData);
       const ticketRow = await this.prisma.ticket.findFirst({
         where: { conversationId },
-        select: { id: true },
+        select: { id: true, lastEmailAt: true },
       });
 
       if (ticketRow) {
-        await this.prisma.ticket.update({
-          where: { id: ticketRow.id },
-          data: { lastEmailAt: receivedAt ?? new Date() },
-        });
+        if (receivedAt && receivedAt > ticketRow.lastEmailAt) {
+          await this.prisma.ticket.update({
+            where: { id: ticketRow.id },
+            data: { lastEmailAt: receivedAt },
+          });
+        }
 
         const previousLatest = await this.prisma.email.findFirst({
           where: { conversationId, id: { not: email.id } },

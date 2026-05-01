@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useZeroVirtualizer } from '@rocicorp/zero-virtual/react';
 import { cn } from '../../../utils/classNames';
 import { Skeleton } from '../../ui/Skeleton';
@@ -11,6 +11,7 @@ import type { TicketListItem } from './TicketListView.types';
 import { TicketPriority } from '@xyne/shared';
 
 const ROW_HEIGHT = 45;
+const SCROLL_POSITIONS = new Map<string, number>();
 
 export type SupportTicketRow = NonNullable<
   QueryResultType<typeof queries.supportTicketsPageV2>[number]
@@ -121,6 +122,40 @@ export function TicketListView({
   const totalSize = virtualizer.getTotalSize();
   const showInitialSkeletons = !complete && virtualItems.length === 0 && !rowsEmpty;
 
+  const scrollKey = useMemo(
+    () =>
+      JSON.stringify({
+        c: channelId,
+        a: assignedTo ?? null,
+        p: priority ?? null,
+        s: stageName ?? null,
+      }),
+    [channelId, assignedTo, priority, stageName],
+  );
+
+  const hasRestoredRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (hasRestoredRef.current === scrollKey) return;
+    if (totalSize <= 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const saved = SCROLL_POSITIONS.get(scrollKey);
+    if (typeof saved === 'number' && saved > 0) {
+      el.scrollTop = saved;
+    }
+    hasRestoredRef.current = scrollKey;
+  }, [scrollKey, totalSize]);
+
+  const handleScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      // Only persist after the initial restore has run — otherwise an early scroll
+      // event with scrollTop=0 (mount before restore) would clobber the saved value.
+      if (hasRestoredRef.current !== scrollKey) return;
+      SCROLL_POSITIONS.set(scrollKey, e.currentTarget.scrollTop);
+    },
+    [scrollKey],
+  );
+
   // Keyboard navigation: j/k to move, Enter to open the highlighted row.
   // Null = no row highlighted yet (first j/k starts at 0).
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -183,6 +218,7 @@ export function TicketListView({
           setSelectedIndex(0);
         }
       }}
+      onScroll={handleScroll}
       className={cn('h-full w-full overflow-y-auto outline-none', className)}
     >
       {rowsEmpty ? (

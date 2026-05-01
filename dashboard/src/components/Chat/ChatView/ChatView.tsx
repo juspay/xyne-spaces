@@ -2,6 +2,7 @@ import { ReactElement, useRef, useEffect } from 'react';
 import useMeasure from '../../../hooks/useMeasure';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import {
+  Navigate,
   Outlet,
   useNavigate,
   useParams,
@@ -14,7 +15,7 @@ import CanvasScreen from '../../Canvas/CanvasScreen';
 import { ChannelSummary, ThreadSummary } from '../Summary';
 import { ThreadMessages } from '../ThreadPannel';
 import { useZero } from '../../../hooks/useZero';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, ChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
 import {
@@ -122,10 +123,10 @@ const ChatView = (): ReactElement => {
 
   // Save the current channelId as the last visited channel
   useEffect(() => {
-    if (channelId) {
-      setLastVisitedChannel(channelId);
-    }
-  }, [channelId]);
+    if (!channelId || !channel) return;
+    if (channel.type === ChannelType.EMAIL) return;
+    setLastVisitedChannel(channelId);
+  }, [channelId, channel]);
 
   // Check for canvas in hash with validation
   const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -182,6 +183,10 @@ const ChatView = (): ReactElement => {
 
   if (channelId === undefined) {
     void navigate('/chat', { replace: true });
+  }
+
+  if (channel?.type === ChannelType.EMAIL && channelId) {
+    return <Navigate to={`/support/${channelId}`} replace />;
   }
 
   // Check for the problematic URL pattern on mobile:

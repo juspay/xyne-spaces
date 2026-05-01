@@ -1,7 +1,7 @@
 import React, { ReactElement, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
-import { Activity } from '@xyne/shared';
+import { Activity, ChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
 import { useChannel } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
@@ -26,6 +26,7 @@ interface ActivityItemCardProps {
   badgeColorClass?: string;
   description: ReactNode;
   targetPath: string;
+  supportTargetPath?: string | undefined;
   children: ReactNode;
   className?: string;
   actorAction?: string;
@@ -41,6 +42,7 @@ export const ActivityItemCard = ({
   badgeColorClass,
   description,
   targetPath,
+  supportTargetPath,
   children,
   className,
   actorAction,
@@ -64,8 +66,13 @@ export const ActivityItemCard = ({
     if (target.closest('a')) {
       return;
     }
-    if (targetPath) {
-      void navigate(targetPath);
+
+    const isDeskChannel = channel?.type === ChannelType.EMAIL;
+    const path = isDeskChannel
+      ? (supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
+      : targetPath;
+    if (path) {
+      void navigate(path);
     }
   };
 
