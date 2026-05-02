@@ -542,6 +542,102 @@ export class GoogleService {
 
   // ─── Email sender (reply) ────────────────────────────────────────────────
 
+  static async listContacts(
+    encryptedCredentials: string,
+    sourceId: string,
+  ): Promise<Array<{ name: string | null; email: string }>> {
+    const credentials = JSON.parse(decrypt(encryptedCredentials)) as GoogleCredentials;
+    const externalSourceRepo = new ExternalSourceRepository();
+    const oauth2Client = GoogleService.createOAuth2Client(credentials);
+    oauth2Client.on('tokens', async tokens => {
+      try {
+        if (tokens.access_token) credentials.accessToken = tokens.access_token;
+        if (tokens.refresh_token) credentials.refreshToken = tokens.refresh_token;
+        await externalSourceRepo.update(sourceId, {
+          credentials: encrypt(JSON.stringify(credentials)),
+        });
+      } catch (error) {
+        logger.warn(`${TAG} Failed to persist refreshed Google tokens`, error);
+      }
+    });
+
+    const people = google.people({ version: 'v1', auth: oauth2Client as any });
+    const seen = new Map<string, { name: string | null; email: string }>();
+
+    const harvest = (
+      sources: Array<{
+        names?: Array<{ displayName?: string | null }> | null;
+        emailAddresses?: Array<{ value?: string | null }> | null;
+      } | null | undefined>,
+    ): void => {
+      for (const person of sources) {
+        if (!person) continue;
+        const name = person.names?.[0]?.displayName ?? null;
+        for (const ea of person.emailAddresses ?? []) {
+          const email = (ea.value || '').trim().toLowerCase();
+          if (!email || !email.includes('@')) continue;
+          if (!seen.has(email)) seen.set(email, { name, email });
+        }
+      }
+    };
+
+    const PAGE_SIZE = 1000;
+    const MAX_CONTACTS = 10_000;
+
+    let connectionsCount = 0;
+    let otherCount = 0;
+
+    try {
+      let pageToken: string | undefined = undefined;
+      while (true) {
+        const res: { data: { connections?: any[] | null; nextPageToken?: string | null } } =
+          await people.people.connections.list({
+            resourceName: 'people/me',
+            pageSize: PAGE_SIZE,
+            personFields: 'names,emailAddresses',
+            ...(pageToken ? { pageToken } : {}),
+          });
+        const before = seen.size;
+        harvest(res.data.connections ?? []);
+        connectionsCount += seen.size - before;
+        pageToken = res.data.nextPageToken ?? undefined;
+        if (!pageToken || seen.size >= MAX_CONTACTS) break;
+      }
+    } catch (err) {
+      logger.warn(`${TAG} Failed to list Google connections`, getErrorMessage(err));
+    }
+
+    if (seen.size < MAX_CONTACTS) {
+      try {
+        let pageToken: string | undefined = undefined;
+        while (true) {
+          const res: { data: { otherContacts?: any[] | null; nextPageToken?: string | null } } =
+            await people.otherContacts.list({
+              pageSize: PAGE_SIZE,
+              readMask: 'names,emailAddresses',
+              ...(pageToken ? { pageToken } : {}),
+            });
+          const before = seen.size;
+          harvest(res.data.otherContacts ?? []);
+          otherCount += seen.size - before;
+          pageToken = res.data.nextPageToken ?? undefined;
+          if (!pageToken || seen.size >= MAX_CONTACTS) break;
+        }
+      } catch (err) {
+        logger.warn(`${TAG} Failed to list Google other contacts`, getErrorMessage(err));
+      }
+    }
+    
+    logger.info(`${TAG} listContacts result`, {
+      sourceId,
+      total: seen.size,
+      myContacts: connectionsCount,
+      otherContacts: otherCount,
+    });
+
+    return Array.from(seen.values());
+  }
+
   /**
    * Create a Gmail email sender from encrypted credentials.
    * The googleapis OAuth2 client auto-refreshes expired access tokens via the

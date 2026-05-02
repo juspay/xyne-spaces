@@ -14,7 +14,10 @@ import { config } from '../config/env';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
 import { AttachmentUploadError } from '../integrations/core/baseMailReplySender';
 
-export interface PendingChannelData {
+export type PendingChannelData = PendingChannelCreate | PendingChannelReconnect;
+
+export interface PendingChannelCreate {
+  mode?: 'create';
   name: string;
   description?: string;
   visibility: string;
@@ -22,6 +25,19 @@ export interface PendingChannelData {
   userId: string;
   workspaceId: string;
   assigneeUserGroupId?: string;
+}
+
+export interface PendingChannelReconnect {
+  mode: 'reconnect';
+  userId: string;
+  channelId: string;
+  expectedEmail: string;
+}
+
+export function isReconnectChannelData(
+  data: PendingChannelData,
+): data is PendingChannelReconnect {
+  return data.mode === 'reconnect';
 }
 
 interface MicrosoftCredentials {
@@ -170,7 +186,7 @@ export class MicrosoftDeskService {
   // ─── Channel Setup ───
 
   async createChannelAndSource(
-    channelData: PendingChannelData,
+    channelData: PendingChannelCreate,
     credentials: { accessToken: string; refreshToken?: string; email: string; expiresAt?: string },
     publicUrl: string,
   ): Promise<{ channelId: string }> {
@@ -246,7 +262,7 @@ export class MicrosoftDeskService {
         data: {
           name: sourceName,
           sourceType: 'microsoft',
-          displayName: `Microsoft (${credentials.email})`,
+          displayName: credentials.email,
           channelId: channel.id,
           boardId: board?.id, // @deprecated - kept for backward compatibility
           credentials: encryptedCredentials,
@@ -325,7 +341,8 @@ export class MicrosoftDeskService {
           client_secret: clientSecret,
           refresh_token: credentials.refreshToken,
           grant_type: 'refresh_token',
-          scope: 'openid email offline_access Mail.Read Mail.Send Mail.ReadWrite',
+          scope:
+            'openid email offline_access Mail.Read Mail.Send Mail.ReadWrite Contacts.Read People.Read',
         }),
       }
     );
@@ -359,6 +376,106 @@ export class MicrosoftDeskService {
     return credentials.accessToken;
   }
 
+  static async listContacts(
+    encryptedCredentials: string,
+    sourceId: string,
+  ): Promise<Array<{ name: string | null; email: string }>> {
+    const accessToken = await MicrosoftDeskService.getValidAccessToken(
+      encryptedCredentials,
+      sourceId,
+    );
+    const seen = new Map<string, { name: string | null; email: string }>();
+
+    const upsert = (name: string | null, rawEmail: string | null | undefined): void => {
+      const email = (rawEmail || '').trim().toLowerCase();
+      if (!email || !email.includes('@')) return;
+      if (!seen.has(email)) seen.set(email, { name, email });
+    };
+
+    const PAGE_SIZE = 999;
+    const MAX_CONTACTS = 10_000;
+
+    let myContactsCount = 0;
+    let peopleCount = 0;
+
+    try {
+      let url: string | null =
+        `${config.microsoftGraph.baseUrl}/me/contacts?$top=${PAGE_SIZE}&$select=displayName,emailAddresses`;
+      while (url) {
+        const res: Response = await fetch(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!res.ok) {
+          logger.warn(`Microsoft /me/contacts non-OK ${res.status}`);
+          break;
+        }
+        const json = (await res.json()) as {
+          value?: Array<{
+            displayName?: string | null;
+            emailAddresses?: Array<{ name?: string | null; address?: string | null }> | null;
+          }>;
+          '@odata.nextLink'?: string;
+        };
+        const before = seen.size;
+        for (const c of json.value ?? []) {
+          const name = c.displayName ?? null;
+          for (const ea of c.emailAddresses ?? []) {
+            upsert(name || ea.name || null, ea.address);
+          }
+        }
+        myContactsCount += seen.size - before;
+        url = json['@odata.nextLink'] ?? null;
+        if (seen.size >= MAX_CONTACTS) break;
+      }
+    } catch (err) {
+      logger.warn('Microsoft /me/contacts fetch threw', err);
+    }
+
+    // Relevant People (auto-aggregated frequent contacts) — also paginates.
+    if (seen.size < MAX_CONTACTS) {
+      try {
+        let url: string | null =
+          `${config.microsoftGraph.baseUrl}/me/people?$top=${PAGE_SIZE}&$select=displayName,scoredEmailAddresses`;
+        while (url) {
+          const res: Response = await fetch(url, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (!res.ok) {
+            logger.warn(`Microsoft /me/people non-OK ${res.status}`);
+            break;
+          }
+          const json = (await res.json()) as {
+            value?: Array<{
+              displayName?: string | null;
+              scoredEmailAddresses?: Array<{ address?: string | null }> | null;
+            }>;
+            '@odata.nextLink'?: string;
+          };
+          const before = seen.size;
+          for (const p of json.value ?? []) {
+            const name = p.displayName ?? null;
+            for (const ea of p.scoredEmailAddresses ?? []) {
+              upsert(name, ea.address);
+            }
+          }
+          peopleCount += seen.size - before;
+          url = json['@odata.nextLink'] ?? null;
+          if (seen.size >= MAX_CONTACTS) break;
+        }
+      } catch (err) {
+        logger.warn('Microsoft /me/people fetch threw', err);
+      }
+    }
+
+    logger.info(`[MicrosoftDeskService] listContacts result`, {
+      sourceId,
+      total: seen.size,
+      myContacts: myContactsCount,
+      relevantPeople: peopleCount,
+    });
+
+    return Array.from(seen.values());
+  }
 
   private static async deleteDraft(accessToken: string, draftId: string): Promise<void> {
     try {

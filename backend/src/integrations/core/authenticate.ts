@@ -66,7 +66,9 @@ export async function authenticate(
     }
 
     if (!source.isActive) {
-      logger.warn(`Sync request received for inactive source: ${resolvedSourceName}`);
+      logger.warn(
+        `Skipping ingest for disconnected source: ${resolvedSourceName} (isActive=false)`,
+      );
       res.status(403).json({
         error: 'Source is inactive',
         sourceName: resolvedSourceName,

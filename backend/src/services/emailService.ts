@@ -29,6 +29,7 @@ import {
   VespaInsertionStatus,
   MessageDirection,
   ExternalEntityType,
+  TicketPriority,
 } from '@prisma/client';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
@@ -112,6 +113,26 @@ export interface CreateConversationFromEmailParams {
   boardId: string;
   stageName: string;
   userGroupId?: string;
+}
+
+const SUBJECT_PREFIX_REGEX = /^(\s*(re|fwd|fw)\s*:\s*)+/i;
+
+function derivePriorityFromSubject(subject: string): TicketPriority {
+  const normalizedSubject = (subject || '').replace(SUBJECT_PREFIX_REGEX, '').toLowerCase();
+
+  if (/\b(critical|sev0|p0)\b/.test(normalizedSubject)) {
+    return TicketPriority.CRITICAL;
+  }
+
+  if (/\b(urgent|high|sev1|p1)\b/.test(normalizedSubject)) {
+    return TicketPriority.HIGH;
+  }
+
+  if (/\b(medium|normal|sev2|p2)\b/.test(normalizedSubject)) {
+    return TicketPriority.MEDIUM;
+  }
+
+  return TicketPriority.LOW;
 }
 
 export class EmailService {
@@ -503,8 +524,8 @@ export class EmailService {
 
       // Generate xyneId and create ticket
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
-      const ticketTitle =
-        (emailSubject ?? '').replace(/^(\s*(re|fwd|fw)\s*:\s*)+/i, '').trim() || emailSubject;
+      const ticketTitle = (emailSubject ?? '').replace(SUBJECT_PREFIX_REGEX, '').trim() || emailSubject;
+      const ticketPriority = derivePriorityFromSubject(emailSubject);
       const createdTicket = await tx.ticket.create({
         data: {
           title: ticketTitle,
@@ -519,6 +540,7 @@ export class EmailService {
           boardId,
           lastEmailAt: receivedAt ?? new Date(),
           stageName: firstStage.name,
+          priority: ticketPriority,
           ...(userGroup && { userGroupId: groupId }),
           ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
           ...(receivedAt && { createdAt: receivedAt }),
@@ -931,6 +953,7 @@ export class EmailService {
       const xyneId = await TicketIdService.generateTicketId(tx, projectId);
 
       // Create ticket using transaction client
+      const ticketPriority = derivePriorityFromSubject(emailSubject);
       return await tx.ticket.create({
         data: {
           title: emailSubject,
@@ -944,6 +967,7 @@ export class EmailService {
           workspaceId: channel.workspaceId,
           boardId: boardId,
           stageName: stageName,
+          priority: ticketPriority,
           ...(userGroupId && { userGroupId }),
           lastEmailAt: new Date(),
         }

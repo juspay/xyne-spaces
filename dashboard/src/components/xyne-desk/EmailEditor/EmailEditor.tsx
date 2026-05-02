@@ -1,0 +1,132 @@
+import { useEffect, useRef, type ReactElement } from 'react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import LinkExtension from '@tiptap/extension-link';
+import { EditorToolbar } from '../../ui/EditorToolbar';
+import { TableExtensions } from '../../ui/TipTapExtensions';
+
+interface EmailEditorProps {
+  value: string;
+  onChange: (html: string) => void;
+  onAddFiles?: (files: File[]) => void;
+  onSendShortcut?: () => void;
+  onBlur?: () => void;
+  placeholder?: string;
+  disabled?: boolean;
+  readOnly?: boolean;
+  className?: string;
+}
+
+export const EmailEditor = ({
+  value,
+  onChange,
+  onAddFiles,
+  onSendShortcut,
+  onBlur,
+  placeholder = 'Compose email...',
+  disabled = false,
+  readOnly = false,
+  className = '',
+}: EmailEditorProps): ReactElement => {
+  const cb = useRef({ onChange, onAddFiles, onSendShortcut, onBlur });
+  cb.current = { onChange, onAddFiles, onSendShortcut, onBlur };
+  const lastEmittedRef = useRef('');
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        paragraph: { HTMLAttributes: { style: 'margin: 0 0 0.75em 0;' } },
+        bulletList: {
+          HTMLAttributes: {
+            style: 'padding-left: 1.5em; margin: 0.5em 0; list-style-type: disc;',
+          },
+        },
+        orderedList: {
+          HTMLAttributes: {
+            style: 'padding-left: 1.5em; margin: 0.5em 0; list-style-type: decimal;',
+          },
+        },
+        blockquote: {
+          HTMLAttributes: {
+            style:
+              'border-left: 3px solid #d0d7de; padding-left: 12px; margin: 0.5em 0; color: #57606a;',
+          },
+        },
+      }),
+      LinkExtension.configure({ openOnClick: false }),
+      Placeholder.configure({ placeholder }),
+      ...TableExtensions,
+    ],
+    content: value || '',
+    editable: !disabled && !readOnly,
+    onUpdate: ({ editor }) => {
+      const html = editor.getHTML();
+      lastEmittedRef.current = html;
+      cb.current.onChange(html);
+    },
+    onBlur: () => cb.current.onBlur?.(),
+    editorProps: {
+      attributes: {
+        class:
+          'tiptap email-composer-editor prose prose-sm dark:prose-invert max-w-none focus:outline-none px-4 py-3 min-h-full',
+      },
+      handleKeyDown: (_view, event) => {
+        if (
+          event.key === 'Enter' &&
+          (event.metaKey || event.ctrlKey) &&
+          cb.current.onSendShortcut
+        ) {
+          event.preventDefault();
+          cb.current.onSendShortcut();
+          return true;
+        }
+        return false;
+      },
+      handlePaste: (_view, event) => {
+        const files = event.clipboardData?.files;
+        if (files && files.length > 0 && cb.current.onAddFiles) {
+          event.preventDefault();
+          cb.current.onAddFiles(Array.from(files));
+          return true;
+        }
+        return false;
+      },
+      handleDrop: (_view, event) => {
+        const files = event.dataTransfer?.files;
+        if (files && files.length > 0) {
+          event.preventDefault();
+          return true;
+        }
+        return false;
+      },
+    },
+  });
+
+  // Push external value changes (AI accept, draft load, post-send clear).
+  useEffect(() => {
+    if (!editor || value === lastEmittedRef.current) return;
+    editor.commands.setContent(value || '', { emitUpdate: false });
+    const normalized = editor.getHTML();
+    lastEmittedRef.current = normalized;
+    if (normalized !== value) cb.current.onChange(normalized);
+  }, [value, editor]);
+
+  useEffect(() => {
+    editor?.setEditable(!disabled && !readOnly);
+  }, [editor, disabled, readOnly]);
+
+  return (
+    <div className={`flex flex-col min-h-0 ${className}`}>
+      <div className='flex-shrink-0 border-b border-border px-2 py-1'>
+        <EditorToolbar editor={editor} />
+      </div>
+      {/* Padding lives on the ProseMirror element (via editorProps class)
+          so clicks anywhere in the visible area land on the editor and
+          focus it natively — no wrapper-level click handler needed. */}
+      <div className='flex-1 min-h-0 overflow-y-auto text-sm cursor-text [&>div]:h-full'>
+        <EditorContent editor={editor} />
+      </div>
+    </div>
+  );
+};

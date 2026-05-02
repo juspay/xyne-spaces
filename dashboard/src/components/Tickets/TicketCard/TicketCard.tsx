@@ -158,6 +158,19 @@ export const TicketCard: React.FC<TicketCardProps> = ({
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
+  // Hover tooltip content — full timestamp behind the compact date label.
+  const formatCreatedDateTime = (timestamp?: number | null): string | null => {
+    if (!timestamp) return null;
+    return new Date(timestamp).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
+
   // assignee component
   const renderAssignee = () => {
     if (!showAssignee) return null;
@@ -599,9 +612,14 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 {showCreatedAt && (
                   <div className='flex flex-col gap-0.5'>
                     <span className='text-xs text-muted-foreground'>Created at</span>
-                    <span className='text-xs text-foreground'>
-                      {formatCreatedDate(ticket.createdAt)}
-                    </span>
+                    <Tooltip
+                      content={formatCreatedDateTime(ticket.createdAt) ?? 'Unknown'}
+                      side='top'
+                    >
+                      <span className='text-xs text-foreground'>
+                        {formatCreatedDate(ticket.createdAt)}
+                      </span>
+                    </Tooltip>
                   </div>
                 )}
 

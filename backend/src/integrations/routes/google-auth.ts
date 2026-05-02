@@ -30,11 +30,17 @@ type PendingChannelData = {
 // Redis-backed CSRF state store. Replaces the previous in-memory Map so OAuth
 // state survives across server restarts and multi-instance deployments. TTL is
 // enforced by Redis itself — no manual eviction needed.
-type OAuthStateValue = { channelId?: string; channelData?: PendingChannelData; timestamp: number };
+export type OAuthStateValue = {
+  channelId?: string;
+  channelData?: PendingChannelData;
+  mode?: 'reconnect';
+  expectedEmail?: string;
+  timestamp: number;
+};
 const OAUTH_STATE_KEY_PREFIX = 'google_oauth_state:';
 const OAUTH_STATE_TTL_SECONDS = 60 * 60;
 
-async function setOAuthState(state: string, value: OAuthStateValue): Promise<void> {
+export async function setOAuthState(state: string, value: OAuthStateValue): Promise<void> {
   await redisService.set(
     `${OAUTH_STATE_KEY_PREFIX}${state}`,
     JSON.stringify(value),
@@ -57,7 +63,7 @@ async function deleteOAuthState(state: string): Promise<void> {
   await redisService.del(`${OAUTH_STATE_KEY_PREFIX}${state}`);
 }
 
-function getFrontendUrl(req: Request): string {
+export function getFrontendUrl(req: Request): string {
   const originalHost = req.headers['x-original-host'];
   if (originalHost && typeof originalHost === 'string') {
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
@@ -69,14 +75,19 @@ function getFrontendUrl(req: Request): string {
 }
 
 
-const GMAIL_SCOPES = [
+export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/gmail.settings.basic',
   'https://mail.google.com/',
+  // Contacts — feeds the recipient suggestions in the desk composer.
+  // `contacts.readonly`: the user's Google Contacts directory.
+  // `contacts.other.readonly`: "Other contacts" (auto-saved frequent senders).
+  'https://www.googleapis.com/auth/contacts.readonly',
+  'https://www.googleapis.com/auth/contacts.other.readonly',
 ];
 
-function createOAuth2Client(redirectUri?: string) {
+export function createOAuth2Client(redirectUri?: string) {
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
@@ -233,6 +244,50 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         res.redirect(`${frontendUrl}/support?${params.toString()}`);
         return;
       }
+    }
+
+    if (stateData.mode === 'reconnect' && stateData.channelId && stateData.expectedEmail) {
+      const expected = stateData.expectedEmail.toLowerCase();
+      if (emailAddress.toLowerCase() !== expected) {
+        logger.warn(`${TAG} Reconnect email mismatch: got ${emailAddress}, expected ${expected}`);
+        const params = new URLSearchParams({
+          channel: stateData.channelId,
+          emailError: `This desk is bound to ${expected}. Please sign in with that account.`,
+        });
+        res.redirect(`${frontendUrl}/support?${params.toString()}`);
+        return;
+      }
+
+      const sourceRow = await db.externalSource.findFirst({
+        where: { channelId: stateData.channelId },
+        select: { id: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!sourceRow) {
+        res.redirect(
+          `${frontendUrl}/support?channel=${stateData.channelId}&emailError=no_source_to_reconnect`,
+        );
+        return;
+      }
+
+      const reEncrypted = await GoogleService.prepareExternalSourceNetwork({
+        emailAddress,
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+      });
+      await db.externalSource.update({
+        where: { id: sourceRow.id },
+        data: { credentials: reEncrypted.encryptedCredentials, isActive: true },
+      });
+
+      logger.info(`${TAG} Reconnected Gmail integration`, {
+        channelId: stateData.channelId,
+        sourceId: sourceRow.id,
+      });
+      res.redirect(
+        `${frontendUrl}/support?emailReconnected=true&channel=${stateData.channelId}&provider=google`,
+      );
+      return;
     }
 
     // Resolve or create the channel. Reuses the `sourceName` computed above.

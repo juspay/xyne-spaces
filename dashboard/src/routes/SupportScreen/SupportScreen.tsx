@@ -25,6 +25,7 @@ import {
   Wand2,
   Sparkles,
   Loader2,
+  Pencil,
   Users2,
   Lock,
   Hash,
@@ -82,7 +83,6 @@ import { mutators } from '../../zero/mutators';
 import * as Tabs from '@radix-ui/react-tabs';
 import { TicketDetails } from '../../components/Tickets/TicketDetails/TicketDetails';
 import { apiInstance } from '../../services/clients/apiClient';
-import TextareaAutosize from 'react-textarea-autosize';
 import { Button } from '../../components/ui/Button/Button';
 import Badge from '../../components/ui/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
@@ -118,6 +118,17 @@ import { AssigneePicker } from '../../components/Tickets/TicketListView/Assignee
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
 import { PriorityPicker } from '../../components/Tickets/TicketListView/PriorityPicker';
 import { EmailTagWithAvatar } from '../../components/xyne-desk/EmailTagWithAvatar/EmailTagWithAvatar';
+import { RecipientSuggestionsDropdown } from '../../components/xyne-desk/RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
+import { RephrasePrompt } from '../../components/xyne-desk/RephrasePrompt/RephrasePrompt';
+import { EmailEditor } from '../../components/xyne-desk/EmailEditor/EmailEditor';
+import {
+  buildContactPool,
+  buildSuggestions,
+  makeRecipientKeyDownHandler,
+  type RecipientField,
+} from '../../components/xyne-desk/EmailComposer/recipients';
+import { useComposerResize } from '../../components/xyne-desk/EmailComposer/useComposerResize';
+import { useComposerDragDrop } from '../../components/xyne-desk/EmailComposer/useComposerDragDrop';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { useEmailDraft, useEmailDraftOperations } from '../../hooks/useEmailDraft';
@@ -129,8 +140,12 @@ import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetch
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
 import { InboxAssigneeSettings } from '../../components/xyne-desk/InboxAssigneeSettings/InboxAssigneeSettings';
+import { DeskIntegrationCard } from '../../components/xyne-desk/DeskIntegrationCard/DeskIntegrationCard';
 import { useEmailChannelPreference } from '../../hooks/useEmailChannelPreference';
-import { useChannelConnectedEmail } from '../../hooks/useChannelConnectedEmail';
+import {
+  useChannelConnectedEmail,
+  clearChannelConnectedEmailCache,
+} from '../../hooks/useChannelConnectedEmail';
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
@@ -141,8 +156,8 @@ import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { DraftCard } from '../../components/xyne-desk/DraftCard/DraftCard';
-import { RefineInput } from '../../components/xyne-desk/RefineInput/RefineInput';
 import { useDeskAIDraft } from '../../hooks/useDeskAIDraft';
+import { useDeskContacts, clearDeskContactsCache } from '../../hooks/useDeskContacts';
 import { channelService, CreateChannelFormData } from '../../services/Chat/channelService';
 import { summarizeEmailThread } from '../../services/summarizeService';
 import { markdownToHtml } from '../../utils/clipboardUtils';
@@ -191,6 +206,9 @@ const ALL_CHANNELS_ID = 'all';
 // Email attachment limits — kept in sync with backend/src/routes/email.ts
 const MAX_EMAIL_ATTACHMENT_FILES = 10;
 const MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB per file
+
+const composerOpenByConv = new Map<string, boolean>();
+const rephrasePromptOpenByConv = new Map<string, boolean>();
 
 type Email = NonNullable<
   NonNullable<QueryResultType<typeof queries.supportTicketRowV2>>['emails']
@@ -251,14 +269,29 @@ const EmailAttachmentsRow = ({
   attachments: rows,
   conversationId,
   channelId,
+  body,
 }: {
   attachments: NonNullable<Email['attachments']>;
   conversationId?: string;
   channelId?: string;
+  body?: string;
 }): ReactElement | null => {
-  if (!rows || rows.length === 0) return null;
+  const inlineCids = new Set<string>();
+  if (body) {
+    const re = /cid:([^\s"'>]+)/gi;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(body)) !== null) {
+      if (match[1]) inlineCids.add(match[1].trim());
+    }
+  }
+  const visibleRows = rows.filter(r => {
+    const meta = r.metadata as { contentId?: string } | null | undefined;
+    return !(meta?.contentId && inlineCids.has(meta.contentId));
+  });
 
-  const images: AttachmentRef[] = rows
+  if (!visibleRows || visibleRows.length === 0) return null;
+
+  const images: AttachmentRef[] = visibleRows
     .filter(r => typeof r.mimetype === 'string' && r.mimetype.startsWith('image/'))
     .map(r => ({
       attachmentId: r.id,
@@ -281,7 +314,7 @@ const EmailAttachmentsRow = ({
 
   return (
     <div className='mt-3 flex flex-wrap gap-2'>
-      {rows.map(att => {
+      {visibleRows.map(att => {
         const isImage = typeof att.mimetype === 'string' && att.mimetype.startsWith('image/');
         const sizeLabel = att.size ? formatFileSize(att.size) : '';
 
@@ -466,20 +499,29 @@ const SupportScreen = (): ReactElement => {
   useEffect(() => {
     const emailError = searchParams.get('emailError');
     const emailConnected = searchParams.get('emailConnected');
+    const emailReconnected = searchParams.get('emailReconnected');
     const channelFromCallback = searchParams.get('channel');
 
-    if (emailConnected === 'true') {
+    if (emailConnected === 'true' || emailReconnected === 'true') {
       const provider = searchParams.get('provider') ?? 'Email';
+      const action = emailReconnected === 'true' ? 'reconnected' : 'connected';
       toast.success(
-        `${provider.charAt(0).toUpperCase() + provider.slice(1)} channel connected successfully`,
+        `${provider.charAt(0).toUpperCase() + provider.slice(1)} mailbox ${action} successfully`,
       );
+      // Bust the per-channel hook caches so the just-changed integration
+      // state propagates immediately. Without this, the contacts hook (5h
+      // TTL) would keep its pre-reconnect entry alive — the recipient
+      // dropdown would show empty/stale until the cache expired.
       if (channelFromCallback) {
+        clearChannelConnectedEmailCache(channelFromCallback);
+        clearDeskContactsCache(channelFromCallback);
         void navigate(`/support/${channelFromCallback}`, { replace: true });
       } else {
         setSearchParams(
           prev => {
             const p = new URLSearchParams(prev);
             p.delete('emailConnected');
+            p.delete('emailReconnected');
             p.delete('provider');
             p.delete('channel');
             return p;
@@ -1285,6 +1327,8 @@ const SupportScreen = (): ReactElement => {
                           currentAssigneeUserGroupId={emailChannelPreference?.assigneeUserGroupId}
                         />
                         <div className='border-t border-border' />
+                        <DeskIntegrationCard channelId={selectedChannelId} canManage />
+                        <div className='border-t border-border' />
                       </>
                     )}
                     <SignatureEditor />
@@ -1465,7 +1509,7 @@ const SupportTicketDetail = (): ReactElement => {
     xyneAIActor,
     snapshot => snapshot.context.xyneAIState === 'open',
   );
-  const [composerOpen, setComposerOpen] = useState<boolean>(false);
+  const [composerOpen, setComposerOpenState] = useState<boolean>(false);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [replyMode, setReplyMode] = useState<'reply' | 'replyAll'>('reply');
   const clearStoredRecipients = useCallback((cid: string | null | undefined): void => {
@@ -1548,6 +1592,33 @@ const SupportTicketDetail = (): ReactElement => {
   const channelId = ticket?.channelId || '';
   const conversationId = ticket?.conversationId ?? stateConversationId;
   const title = ticket?.title ?? null;
+
+  useEffect(() => {
+    if (!conversationId) {
+      setComposerOpenState(false);
+      return;
+    }
+    setComposerOpenState(composerOpenByConv.get(conversationId) ?? false);
+  }, [conversationId]);
+
+  const setComposerOpen: React.Dispatch<React.SetStateAction<boolean>> = useCallback(
+    next => {
+      setComposerOpenState(prev => {
+        const resolved = typeof next === 'function' ? next(prev) : next;
+        if (conversationId) {
+          if (resolved) composerOpenByConv.set(conversationId, true);
+          else composerOpenByConv.delete(conversationId);
+        }
+        return resolved;
+      });
+    },
+    [conversationId],
+  );
+
+  // Desk's connected mailbox — used as the "me" reference in thread headers
+  // and recipient summaries. Sourced from the existing `/channels/:id/connected-email`
+  // API via `useChannelConnectedEmail`. Empty string until loaded.
+  const deskEmail = useChannelConnectedEmail(channelId || null);
 
   useAskAiTicketContext({
     channelId: channelId || null,
@@ -1673,6 +1744,12 @@ const SupportTicketDetail = (): ReactElement => {
   const [emailSummaryError, setEmailSummaryError] = useState('');
   const [showEmailSummary, setShowEmailSummary] = useState(false);
   const emailSummaryAbortRef = useRef<AbortController | null>(null);
+  const threadScrollRef = useRef<HTMLDivElement>(null);
+  const scrollThreadToTop = (): void => {
+    requestAnimationFrame(() => {
+      threadScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  };
 
   // Reset summary when conversation changes or new emails arrive
   const emailCount = emails.length;
@@ -1818,7 +1895,7 @@ const SupportTicketDetail = (): ReactElement => {
         className='flex-1 overflow-hidden'
         autoSaveId='support-ticket-detail'
       >
-        <Panel defaultSize={50} minSize={30} maxSize={70}>
+        <Panel defaultSize={65} minSize={30} maxSize={70}>
           <div className='h-full flex flex-col overflow-hidden relative'>
             <div className='w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
               <div className='flex items-center gap-2 min-w-0'>
@@ -1888,9 +1965,14 @@ const SupportTicketDetail = (): ReactElement => {
                         onClick={() => {
                           if (emailSummaryState === 'idle' || emailSummaryState === 'error') {
                             setShowEmailSummary(true);
+                            scrollThreadToTop();
                             void fetchEmailSummary();
                           } else if (emailSummaryState === 'done') {
-                            setShowEmailSummary(prev => !prev);
+                            setShowEmailSummary(prev => {
+                              const next = !prev;
+                              if (next) scrollThreadToTop();
+                              return next;
+                            });
                           }
                         }}
                         disabled={emailSummaryState === 'loading'}
@@ -2002,189 +2084,191 @@ const SupportTicketDetail = (): ReactElement => {
                 </div>
               </div>
             </div>
-            {showEmailSummary &&
-              (emailSummaryState === 'loading' ||
-                emailSummaryState === 'done' ||
-                emailSummaryState === 'error') && (
-                <div
-                  className='flex-shrink-0 mx-6 mt-4 rounded-2xl p-px max-h-[40%] flex flex-col'
-                  style={{
-                    background:
-                      emailSummaryState === 'loading'
-                        ? 'linear-gradient(135deg, #FFB3B3, #FFCECE, #FFC0C0, #FFB3B3)'
-                        : 'linear-gradient(135deg, rgba(255,179,179,0.3), rgba(255,206,206,0.15), rgba(255,179,179,0.3))',
-                    backgroundSize: emailSummaryState === 'loading' ? '300% 300%' : '100% 100%',
-                    animation:
-                      emailSummaryState === 'loading' ? 'gradient-xy 3s ease infinite' : 'none',
-                  }}
-                >
-                  <div className='rounded-[calc(1rem-1px)] bg-background/95 dark:bg-background/90 backdrop-blur-xl overflow-hidden flex flex-col h-full'>
-                    {/* Header */}
-                    <div className='flex items-center justify-between px-4 py-2.5 shrink-0'>
-                      <div className='flex items-center gap-2.5'>
-                        <div className='relative flex items-center justify-center w-6 h-6'>
-                          {emailSummaryState === 'loading' && (
+            <div ref={threadScrollRef} className='flex-1 overflow-y-auto no-scrollbar px-6 py-4'>
+              {showEmailSummary &&
+                (emailSummaryState === 'loading' ||
+                  emailSummaryState === 'done' ||
+                  emailSummaryState === 'error') && (
+                  <div
+                    className='mb-4 rounded-2xl p-px'
+                    style={{
+                      background:
+                        emailSummaryState === 'loading'
+                          ? 'linear-gradient(135deg, #FFB3B3, #FFCECE, #FFC0C0, #FFB3B3)'
+                          : 'linear-gradient(135deg, rgba(255,179,179,0.3), rgba(255,206,206,0.15), rgba(255,179,179,0.3))',
+                      backgroundSize: emailSummaryState === 'loading' ? '300% 300%' : '100% 100%',
+                      animation:
+                        emailSummaryState === 'loading' ? 'gradient-xy 3s ease infinite' : 'none',
+                    }}
+                  >
+                    <div className='rounded-[calc(1rem-1px)] bg-background/95 dark:bg-background/90 backdrop-blur-xl overflow-hidden'>
+                      {/* Header */}
+                      <div className='flex items-center justify-between px-4 py-2.5 shrink-0'>
+                        <div className='flex items-center gap-2.5'>
+                          <div className='relative flex items-center justify-center w-6 h-6'>
+                            {emailSummaryState === 'loading' && (
+                              <div
+                                className='absolute inset-0 rounded-lg opacity-30 blur-[3px]'
+                                style={{
+                                  background: 'linear-gradient(135deg, #FFB3B3, #FFCECE, #FFC0C0)',
+                                  backgroundSize: '200% 200%',
+                                  animation: 'gradient-xy 2s ease infinite',
+                                }}
+                              />
+                            )}
                             <div
-                              className='absolute inset-0 rounded-lg opacity-30 blur-[3px]'
-                              style={{
-                                background: 'linear-gradient(135deg, #FFB3B3, #FFCECE, #FFC0C0)',
-                                backgroundSize: '200% 200%',
-                                animation: 'gradient-xy 2s ease infinite',
-                              }}
-                            />
-                          )}
-                          <div
-                            className='relative flex items-center justify-center w-6 h-6 rounded-lg'
-                            style={{ background: '#F87171' }}
-                          >
-                            <Sparkles size={12} className='text-white' />
-                          </div>
-                        </div>
-                        <span className='text-sm font-bold' style={{ color: '#1a1a1a' }}>
-                          AI Summary
-                        </span>
-                      </div>
-                      <div className='flex items-center gap-1'>
-                        {(emailSummaryState === 'done' || emailSummaryState === 'error') && (
-                          <Tooltip
-                            side='bottom'
-                            delayDuration={300}
-                            content={emailSummaryState === 'error' ? 'Retry' : 'Regenerate summary'}
-                          >
-                            <button
-                              type='button'
-                              onClick={() => void fetchEmailSummary(true)}
-                              className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                              data-track-category='Support'
-                              data-track-name='RegenerateEmailSummary'
+                              className='relative flex items-center justify-center w-6 h-6 rounded-lg'
+                              style={{ background: '#F87171' }}
                             >
-                              <RefreshCw size={13} />
-                            </button>
-                          </Tooltip>
+                              <Sparkles size={12} className='text-white' />
+                            </div>
+                          </div>
+                          <span className='text-sm font-bold' style={{ color: '#1a1a1a' }}>
+                            AI Summary
+                          </span>
+                        </div>
+                        <div className='flex items-center gap-1'>
+                          {(emailSummaryState === 'done' || emailSummaryState === 'error') && (
+                            <Tooltip
+                              side='bottom'
+                              delayDuration={300}
+                              content={
+                                emailSummaryState === 'error' ? 'Retry' : 'Regenerate summary'
+                              }
+                            >
+                              <button
+                                type='button'
+                                onClick={() => void fetchEmailSummary(true)}
+                                className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                                data-track-category='Support'
+                                data-track-name='RegenerateEmailSummary'
+                              >
+                                <RefreshCw size={13} />
+                              </button>
+                            </Tooltip>
+                          )}
+                          <button
+                            type='button'
+                            onClick={() => setShowEmailSummary(false)}
+                            className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                            data-track-category='Support'
+                            data-track-name='DismissEmailSummary'
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div className='px-4 pb-3'>
+                        {/* Loading state */}
+                        {emailSummaryState === 'loading' && (
+                          <div className='space-y-3'>
+                            <div className='space-y-2'>
+                              <div
+                                className='h-3 w-full rounded-full'
+                                style={{
+                                  background:
+                                    'linear-gradient(90deg, rgba(255,179,179,0.08), rgba(255,206,206,0.18), rgba(255,179,179,0.08))',
+                                  backgroundSize: '200% 100%',
+                                  animation: 'gradient-x 2s ease-in-out infinite',
+                                }}
+                              />
+                              <div
+                                className='h-3 w-3/4 rounded-full'
+                                style={{
+                                  background:
+                                    'linear-gradient(90deg, rgba(255,179,179,0.08), rgba(255,206,206,0.18), rgba(255,179,179,0.08))',
+                                  backgroundSize: '200% 100%',
+                                  animation: 'gradient-x 2s ease-in-out infinite 0.15s',
+                                }}
+                              />
+                            </div>
+                            <div className='space-y-2.5 pt-1'>
+                              {[1, 0.83, 0.66].map((width, idx) => (
+                                <div key={idx} className='flex items-center gap-2.5'>
+                                  <div
+                                    className='h-[5px] w-[5px] rounded-full shrink-0'
+                                    style={{
+                                      background: '#FFB3B3',
+                                      opacity: 0.6,
+                                      animation: `pulse 1.5s ease-in-out infinite ${idx * 0.2}s`,
+                                    }}
+                                  />
+                                  <div
+                                    className='h-3 rounded-full'
+                                    style={{
+                                      width: `${width * 100}%`,
+                                      background:
+                                        'linear-gradient(90deg, rgba(255,179,179,0.06), rgba(255,206,206,0.14), rgba(255,179,179,0.06))',
+                                      backgroundSize: '200% 100%',
+                                      animation: `gradient-x 2s ease-in-out infinite ${0.1 + idx * 0.15}s`,
+                                    }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         )}
-                        <button
-                          type='button'
-                          onClick={() => setShowEmailSummary(false)}
-                          className='p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                          data-track-category='Support'
-                          data-track-name='DismissEmailSummary'
-                        >
-                          <X size={14} />
-                        </button>
+
+                        {/* Done state */}
+                        {emailSummaryState === 'done' && (
+                          <div className='space-y-3'>
+                            {emailSummarySummary && (
+                              <p className='text-[13px] text-muted-foreground leading-relaxed'>
+                                {emailSummarySummary}
+                              </p>
+                            )}
+                            {emailSummaryPoints.length > 0 && (
+                              <>
+                                {emailSummarySummary && (
+                                  <div
+                                    className='h-px w-full'
+                                    style={{
+                                      background:
+                                        'linear-gradient(to right, transparent, rgba(255,179,179,0.2), transparent)',
+                                    }}
+                                  />
+                                )}
+                                <ul className='space-y-2'>
+                                  {emailSummaryPoints.map((point, i) => (
+                                    <li
+                                      key={i}
+                                      className='flex items-start gap-2.5 text-[13px] text-foreground leading-relaxed'
+                                    >
+                                      <span
+                                        className='h-[5px] w-[5px] mt-[7px] rounded-full shrink-0'
+                                        style={{ background: '#FF9B9B' }}
+                                      />
+                                      <span>{point}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Error state */}
+                        {emailSummaryState === 'error' && (
+                          <p className='text-sm text-destructive'>{emailSummaryError}</p>
+                        )}
                       </div>
-                    </div>
 
-                    {/* Content */}
-                    <div className='px-4 pb-3 overflow-y-auto no-scrollbar'>
-                      {/* Loading state */}
-                      {emailSummaryState === 'loading' && (
-                        <div className='space-y-3'>
-                          <div className='space-y-2'>
-                            <div
-                              className='h-3 w-full rounded-full'
-                              style={{
-                                background:
-                                  'linear-gradient(90deg, rgba(255,179,179,0.08), rgba(255,206,206,0.18), rgba(255,179,179,0.08))',
-                                backgroundSize: '200% 100%',
-                                animation: 'gradient-x 2s ease-in-out infinite',
-                              }}
-                            />
-                            <div
-                              className='h-3 w-3/4 rounded-full'
-                              style={{
-                                background:
-                                  'linear-gradient(90deg, rgba(255,179,179,0.08), rgba(255,206,206,0.18), rgba(255,179,179,0.08))',
-                                backgroundSize: '200% 100%',
-                                animation: 'gradient-x 2s ease-in-out infinite 0.15s',
-                              }}
-                            />
-                          </div>
-                          <div className='space-y-2.5 pt-1'>
-                            {[1, 0.83, 0.66].map((width, idx) => (
-                              <div key={idx} className='flex items-center gap-2.5'>
-                                <div
-                                  className='h-[5px] w-[5px] rounded-full shrink-0'
-                                  style={{
-                                    background: '#FFB3B3',
-                                    opacity: 0.6,
-                                    animation: `pulse 1.5s ease-in-out infinite ${idx * 0.2}s`,
-                                  }}
-                                />
-                                <div
-                                  className='h-3 rounded-full'
-                                  style={{
-                                    width: `${width * 100}%`,
-                                    background:
-                                      'linear-gradient(90deg, rgba(255,179,179,0.06), rgba(255,206,206,0.14), rgba(255,179,179,0.06))',
-                                    backgroundSize: '200% 100%',
-                                    animation: `gradient-x 2s ease-in-out infinite ${0.1 + idx * 0.15}s`,
-                                  }}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Done state */}
+                      {/* Footer */}
                       {emailSummaryState === 'done' && (
-                        <div className='space-y-3'>
-                          {emailSummarySummary && (
-                            <p className='text-[13px] text-muted-foreground leading-relaxed'>
-                              {emailSummarySummary}
-                            </p>
-                          )}
-                          {emailSummaryPoints.length > 0 && (
-                            <>
-                              {emailSummarySummary && (
-                                <div
-                                  className='h-px w-full'
-                                  style={{
-                                    background:
-                                      'linear-gradient(to right, transparent, rgba(255,179,179,0.2), transparent)',
-                                  }}
-                                />
-                              )}
-                              <ul className='space-y-2'>
-                                {emailSummaryPoints.map((point, i) => (
-                                  <li
-                                    key={i}
-                                    className='flex items-start gap-2.5 text-[13px] text-foreground leading-relaxed'
-                                  >
-                                    <span
-                                      className='h-[5px] w-[5px] mt-[7px] rounded-full shrink-0'
-                                      style={{ background: '#FF9B9B' }}
-                                    />
-                                    <span>{point}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </>
-                          )}
+                        <div
+                          className='px-4 py-1.5 shrink-0'
+                          style={{ borderTop: '1px solid rgba(255,179,179,0.12)' }}
+                        >
+                          <p className='text-[11px] text-muted-foreground/50'>
+                            AI-generated · may not be fully accurate
+                          </p>
                         </div>
                       )}
-
-                      {/* Error state */}
-                      {emailSummaryState === 'error' && (
-                        <p className='text-sm text-destructive'>{emailSummaryError}</p>
-                      )}
                     </div>
-
-                    {/* Footer */}
-                    {emailSummaryState === 'done' && (
-                      <div
-                        className='px-4 py-1.5 shrink-0'
-                        style={{ borderTop: '1px solid rgba(255,179,179,0.12)' }}
-                      >
-                        <p className='text-[11px] text-muted-foreground/50'>
-                          AI-generated · may not be fully accurate
-                        </p>
-                      </div>
-                    )}
                   </div>
-                </div>
-              )}
-            <div className='flex-1 overflow-y-auto no-scrollbar px-6 py-4 bg-background'>
+                )}
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
                   <EmailThread
@@ -2201,6 +2285,7 @@ const SupportTicketDetail = (): ReactElement => {
                       setReplyMode('reply');
                       setComposerOpen(true);
                     }}
+                    deskEmail={deskEmail}
                   />
                 </div>
               )}
@@ -2295,7 +2380,7 @@ const SupportTicketDetail = (): ReactElement => {
             <PanelResizeHandle className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
               <div className='w-[1px] h-full bg-border'></div>
             </PanelResizeHandle>
-            <Panel defaultSize={50} minSize={30} maxSize={70}>
+            <Panel defaultSize={35} minSize={30} maxSize={70}>
               <div
                 className='h-full flex flex-col overflow-hidden relative'
                 ref={dragAndDropAreaRef}
@@ -2354,7 +2439,7 @@ const SupportTicketDetail = (): ReactElement => {
                             </button>
                           </Tabs.Trigger>
                         </Tabs.List>
-                        <div className='flex items-center gap-1'>
+                        <div className='flex items-center gap-2 shrink-0'>
                           {/* Initiate Call Button */}
                           {conversationId && (
                             <ThreadCallButton
@@ -2364,6 +2449,31 @@ const SupportTicketDetail = (): ReactElement => {
                               testId='support-initiate-call-button'
                             />
                           )}
+                          <Tooltip content='Ask AI' side='bottom' delayDuration={300}>
+                            <button
+                              type='button'
+                              onClick={() => {
+                                if (isAIPanelOpen) {
+                                  xyneAIActor.send({ type: 'CLOSE' });
+                                } else {
+                                  xyneAIActor.send({ type: 'OPEN' });
+                                }
+                              }}
+                              className={cn(
+                                'h-8 w-8 flex items-center justify-center rounded-lg border border-border transition-colors',
+                                isAIPanelOpen ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
+                              )}
+                              aria-label='Toggle Ask AI panel'
+                              aria-pressed={isAIPanelOpen}
+                              data-track-category='Support'
+                              data-track-name='ToggleAIPanel'
+                              data-track-metadata={JSON.stringify({ source: 'right-panel-header' })}
+                            >
+                              <span className='inline-flex animate-ai-pop'>
+                                <XyneAIStar size={14} />
+                              </span>
+                            </button>
+                          </Tooltip>
                           <button
                             onClick={() => setIsRightPanelOpen(false)}
                             className='p-1.5 hover:bg-muted rounded transition-colors flex items-center justify-center'
@@ -2548,11 +2658,13 @@ const EmailThread = ({
   ticketId,
   emailReads,
   onReplyToEmail,
+  deskEmail,
 }: {
   collapseState: EmailCollapseState;
   ticketId?: string | null | undefined;
   emailReads?: ReadonlyArray<{ userId: string; lastReadEmailId: string }> | undefined;
   onReplyToEmail?: (emailId: string) => void;
+  deskEmail?: string | null | undefined;
 }): ReactElement => {
   const { sortedEmails, collapsedIds, toggleOne, lastEmailId } = collapseState;
   // Thread-level: upsert the current user's email_reads row with the id of
@@ -2571,6 +2683,7 @@ const EmailThread = ({
           onToggleCollapse={() => toggleOne(email.id)}
           isRead={isRead}
           {...(onReplyToEmail && { onReply: () => onReplyToEmail(email.id) })}
+          deskEmail={deskEmail}
         />
       ))}
     </div>
@@ -2598,6 +2711,7 @@ const EmailThreadItem = ({
   onToggleCollapse,
   isRead = true,
   onReply,
+  deskEmail,
 }: {
   email: Email;
   isCollapsed?: boolean;
@@ -2605,6 +2719,7 @@ const EmailThreadItem = ({
   onToggleCollapse?: () => void;
   isRead?: boolean;
   onReply?: () => void;
+  deskEmail?: string | null | undefined;
 }): ReactElement => {
   const { name: fromName, email: fromEmail } = parseFromField(email.from || '');
   const toList = email.to || [];
@@ -2729,6 +2844,7 @@ const EmailThreadItem = ({
           isCollapsed={isCollapsed}
           previewText={preview}
           isRead={isRead}
+          deskEmail={deskEmail}
           // extras={demergeButton}  // DISABLED: see commented handleDemerge block above
         />
       </div>
@@ -2752,6 +2868,7 @@ const EmailThreadItem = ({
                 attachments={email.attachments}
                 conversationId={email.conversationId}
                 channelId={email.channelId}
+                body={email.body}
               />
             )}
             {onReply && (
@@ -2810,7 +2927,10 @@ const EmailComposer = ({
   const [emails] = useCachedQuery(
     queries.getEmailsForTicket({ conversationId: conversationId || '' }),
   );
+  // Use the existing `useChannelConnectedEmail` API for the desk's mailbox
+  // address. Contacts still come from the desk-mailbox address book hook.
   const channelConnectedEmail = useChannelConnectedEmail(channelId || null);
+  const deskContacts = useDeskContacts(channelId);
   // Use email draft hooks
   const draftContent = useEmailDraft(conversationId);
   const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId, channelId);
@@ -2822,27 +2942,31 @@ const EmailComposer = ({
   });
   const [emailContent, setEmailContent] = useState<string>('');
 
-  // Persist the AI draft exactly once, on the streaming → finished transition.
-  // Two problems this avoids:
-  //  - writing during streaming (would hammer Zero on every chunk)
-  //  - re-firing whenever `saveDraft`'s identity flips. The underlying Zero
-  //    live query (`getDraftForConversation`) re-emits on every upsert, which
-  //    rebuilds the `saveDraft` callback, which re-triggers this effect —
-  //    a self-sustaining save loop that saturates the Zero socket.
-  const saveDraftRef = useRef(saveDraft);
+  const [isRephrasePromptOpen, setIsRephrasePromptOpenState] = useState<boolean>(() =>
+    conversationId ? (rephrasePromptOpenByConv.get(conversationId) ?? false) : false,
+  );
   useEffect(() => {
-    saveDraftRef.current = saveDraft;
-  }, [saveDraft]);
-  const wasStreamingRef = useRef(false);
-  useEffect(() => {
-    const justFinished = wasStreamingRef.current && !aiDraft.isStreaming;
-    wasStreamingRef.current = aiDraft.isStreaming;
-    if (!justFinished || !aiDraft.isDraftActive) return;
-    const content = aiDraft.draftContent?.trim();
-    if (content) saveDraftRef.current(aiDraft.draftContent);
-  }, [aiDraft.isStreaming, aiDraft.isDraftActive, aiDraft.draftContent]);
-  const [hasAcceptedDraft, setHasAcceptedDraft] = useState<boolean>(false);
+    if (!conversationId) {
+      setIsRephrasePromptOpenState(false);
+      return;
+    }
+    setIsRephrasePromptOpenState(rephrasePromptOpenByConv.get(conversationId) ?? false);
+  }, [conversationId]);
+  const setIsRephrasePromptOpen: React.Dispatch<React.SetStateAction<boolean>> = useCallback(
+    next => {
+      setIsRephrasePromptOpenState(prev => {
+        const resolved = typeof next === 'function' ? next(prev) : next;
+        if (conversationId) {
+          if (resolved) rephrasePromptOpenByConv.set(conversationId, true);
+          else rephrasePromptOpenByConv.delete(conversationId);
+        }
+        return resolved;
+      });
+    },
+    [conversationId],
+  );
   const [isSending, setIsSending] = useState<boolean>(false);
+  const aiActiveRef = useRef<boolean>(false);
   const users = useUsers();
   const [signatures] = useCachedQuery(queries.userEmailSignatures());
   const [selectedSignatureId, setSelectedSignatureId] = useState<string | null | undefined>(
@@ -2877,18 +3001,26 @@ const EmailComposer = ({
     setIsPreviewOpen(false);
   }, [conversationId]);
 
-  // Initialize email content from draft
+  // Initialize email content from draft. The composer now stores HTML
+  // (rich-text editor output) so we feed the saved HTML back in unchanged.
   useEffect(() => {
-    if (draftContent) {
-      const textContent = stripHtml(draftContent);
-      setEmailContent(textContent);
-    } else {
-      setEmailContent('');
-    }
+    setEmailContent(draftContent || '');
   }, [draftContent, conversationId]);
 
+  const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
+
   const toInputRef = React.useRef<HTMLInputElement>(null);
+  const ccInputRef = React.useRef<HTMLInputElement>(null);
+  const bccInputRef = React.useRef<HTMLInputElement>(null);
+  // Anchor the suggestion dropdowns to the row container, not the input — the
+  // input is `flex-1 min-w-[80px]` and shrinks to a narrow strip once a few
+  // tags are added, which would drag the dropdown's width and X with it.
+  const toRowRef = React.useRef<HTMLDivElement>(null);
+  const ccRowRef = React.useRef<HTMLDivElement>(null);
+  const bccRowRef = React.useRef<HTMLDivElement>(null);
   const [toInputValue, setToInputValue] = useState<string>('');
+  const [ccInputValue, setCcInputValue] = useState<string>('');
+  const [bccInputValue, setBccInputValue] = useState<string>('');
 
   // Recipient state
   const [toEmails, setToEmails] = useState<string[]>([]);
@@ -2898,11 +3030,18 @@ const EmailComposer = ({
   const [showBcc, setShowBcc] = useState<boolean>(false);
 
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
-  const [composerHeight, setComposerHeight] = useState<number>(320);
-  const [isResizingComposer, setIsResizingComposer] = useState<boolean>(false);
-  const resizeStartYRef = useRef<number>(0);
-  const resizeStartHeightRef = useRef<number>(320);
-  type RecipientField = 'to' | 'cc' | 'bcc';
+
+  const {
+    composerHeight,
+    setComposerHeight,
+    startResize: startComposerResize,
+    handleTouchStart: handleComposerResizeTouchStart,
+  } = useComposerResize({
+    enabled: isExpanded && !isSending,
+    useTallMinHeight: aiDraft.isDraftActive || isRephrasePromptOpen,
+  });
+
+  // Drag-and-drop chips between To / Cc / Bcc.
   const [dragOverField, setDragOverField] = useState<RecipientField | null>(null);
   const DRAG_MIME = 'application/x-xd-recipient';
 
@@ -2986,6 +3125,26 @@ const EmailComposer = ({
   const recipientsStorageKey = conversationId
     ? `xyne:emailDraft:recipients:${conversationId}`
     : null;
+
+  // Auto-grow the composer the first time the AI draft OR the rephrase
+  // prompt opens, so the side-by-side panel has room. Only bumps on the
+  // false → true edge so a user-shrunk size isn't overridden.
+  useEffect(() => {
+    const sideBySideActive = (aiDraft.isDraftActive || isRephrasePromptOpen) && hasEmailBody;
+    if (sideBySideActive && !aiActiveRef.current) {
+      setComposerHeight(h => Math.max(h, 520));
+    }
+    aiActiveRef.current = sideBySideActive;
+  }, [aiDraft.isDraftActive, isRephrasePromptOpen, hasEmailBody]);
+
+  // The rephrase prompt only renders in the side-by-side layout (which
+  // requires user content). Auto-close it if the user clears the body while
+  // it's open, so its state doesn't get orphaned.
+  useEffect(() => {
+    if (isRephrasePromptOpen && !hasEmailBody) {
+      setIsRephrasePromptOpen(false);
+    }
+  }, [hasEmailBody, isRephrasePromptOpen]);
 
   useEffect(() => {
     if (recipientsStorageKey) {
@@ -3139,7 +3298,7 @@ const EmailComposer = ({
 
   const handleSendEmail = async (): Promise<void> => {
     // Allow attachment-only sends (no body) when at least one file is attached.
-    const hasContent = !!emailContent.trim();
+    const hasContent = hasEmailBody;
     const hasAttachments = attachments.length > 0;
     if ((!hasContent && !hasAttachments) || !conversationId || isSending || toEmails.length === 0) {
       return;
@@ -3156,10 +3315,17 @@ const EmailComposer = ({
       const activeSig = selectedSignatureId
         ? signatures?.find(s => s.id === selectedSignatureId)
         : null;
-      const bodyContent = hasContent ? await markdownToHtml(emailContent.trim()) : '';
-      const bodyHtml = activeSig
-        ? `${bodyContent}${bodyContent ? '<br>--<br>' : ''}${activeSig.content}`
+      // The editor produces HTML directly — no markdown→HTML conversion needed.
+      const bodyContent = hasContent ? emailContent : '';
+      const composedBody = activeSig
+        ? `${bodyContent}${bodyContent ? '<br><br>' : ''}${activeSig.content}`
         : bodyContent;
+      const uniqueToken = `<span style="font-size:1px;color:transparent;display:inline-block;line-height:0;">${
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      }</span>`;
+      const bodyHtml = `${composedBody}${uniqueToken}`;
       await apiInstance.post(`/email/${conversationId}/reply`, {
         body: bodyHtml,
         type: 'REPLY_ALL',
@@ -3183,44 +3349,51 @@ const EmailComposer = ({
     }
   };
 
+  // Shared validation+append for file-input, paste, and drag-and-drop. Uses
+  // the latest `attachments` value via the setter callback to avoid stale
+  // closures when several drops/pastes fire in quick succession.
+  const addFilesToAttachments = useCallback((files: File[]): void => {
+    if (files.length === 0) return;
+
+    setAttachments(prev => {
+      const accepted: File[] = [];
+      const rejectedTooLarge: string[] = [];
+      let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - prev.length;
+      let droppedForCount = 0;
+
+      for (const file of files) {
+        if (availableSlots <= 0) {
+          droppedForCount++;
+          continue;
+        }
+        if (file.size > MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES) {
+          rejectedTooLarge.push(file.name);
+          continue;
+        }
+        accepted.push(file);
+        availableSlots--;
+      }
+
+      if (rejectedTooLarge.length > 0) {
+        toast.error(
+          `Skipped ${rejectedTooLarge.length} file${rejectedTooLarge.length > 1 ? 's' : ''} over ${MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024)}MB: ${rejectedTooLarge.join(', ')}`,
+        );
+      }
+      if (droppedForCount > 0) {
+        toast.error(
+          `You can attach at most ${MAX_EMAIL_ATTACHMENT_FILES} files per email. Dropped ${droppedForCount}.`,
+        );
+      }
+
+      return accepted.length > 0 ? [...prev, ...accepted] : prev;
+    });
+  }, []);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const files = Array.from(e.target.files || []);
     // Reset input early so the same file can be selected again after a rejection.
     e.target.value = '';
-    if (files.length === 0) return;
-
-    const accepted: File[] = [];
-    const rejectedTooLarge: string[] = [];
-    let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - attachments.length;
-    let droppedForCount = 0;
-
-    for (const file of files) {
-      if (availableSlots <= 0) {
-        droppedForCount++;
-        continue;
-      }
-      if (file.size > MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES) {
-        rejectedTooLarge.push(file.name);
-        continue;
-      }
-      accepted.push(file);
-      availableSlots--;
-    }
-
-    if (rejectedTooLarge.length > 0) {
-      toast.error(
-        `Skipped ${rejectedTooLarge.length} file${rejectedTooLarge.length > 1 ? 's' : ''} over ${MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024)}MB: ${rejectedTooLarge.join(', ')}`,
-      );
-    }
-    if (droppedForCount > 0) {
-      toast.error(
-        `You can attach at most ${MAX_EMAIL_ATTACHMENT_FILES} files per email. Dropped ${droppedForCount}.`,
-      );
-    }
-
-    if (accepted.length > 0) {
-      setAttachments(prev => [...prev, ...accepted]);
-    }
+    addFilesToAttachments(files);
   };
 
   const handleRemoveAttachment = (index: number): void => {
@@ -3232,18 +3405,67 @@ const EmailComposer = ({
     setIsPreviewOpen(true);
   };
 
-  const handleToKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') {
-      e.preventDefault();
-      const email = toInputValue.trim().replace(',', '');
-      if (email && email.includes('@') && !toEmails.includes(email)) {
-        setToEmails([...toEmails, email]);
-        setToInputValue('');
-      }
-    } else if (e.key === 'Backspace' && !toInputValue && toEmails.length > 0) {
-      setToEmails(toEmails.slice(0, -1));
+  // ─── Recipient suggestions (org users + past thread participants) ─────────
+  const [activeSuggestField, setActiveSuggestField] = useState<RecipientField | null>(null);
+  const [suggestionIndex, setSuggestionIndex] = useState<number>(0);
+
+  const contactPool = useMemo(
+    () => buildContactPool(users, deskContacts, emails, channelConnectedEmail),
+    [users, deskContacts, emails, channelConnectedEmail],
+  );
+
+  const toSuggestions = useMemo(
+    () => buildSuggestions(contactPool, toInputValue, toEmails),
+    [contactPool, toInputValue, toEmails],
+  );
+  const ccSuggestions = useMemo(
+    () => buildSuggestions(contactPool, ccInputValue, ccEmails),
+    [contactPool, ccInputValue, ccEmails],
+  );
+  const bccSuggestions = useMemo(
+    () => buildSuggestions(contactPool, bccInputValue, bccEmails),
+    [contactPool, bccInputValue, bccEmails],
+  );
+
+  const handleSuggestionSelect = (field: RecipientField, email: string): void => {
+    if (field === 'to') {
+      if (!toEmails.includes(email)) setToEmails([...toEmails, email]);
+      setToInputValue('');
+    } else if (field === 'cc') {
+      if (!ccEmails.includes(email)) setCcEmails([...ccEmails, email]);
+      setCcInputValue('');
+    } else {
+      if (!bccEmails.includes(email)) setBccEmails([...bccEmails, email]);
+      setBccInputValue('');
     }
+    setSuggestionIndex(0);
   };
+
+  const focusSuggest = (field: RecipientField): void => {
+    setActiveSuggestField(field);
+    setSuggestionIndex(0);
+  };
+  const blurSuggest = (field: RecipientField): void => {
+    // Defer so a click on a dropdown row registers before we close it.
+    setTimeout(() => {
+      setActiveSuggestField(curr => (curr === field ? null : curr));
+    }, 0);
+  };
+
+  const closeSuggestions = (): void => setActiveSuggestField(null);
+  const handleToKeyDown = makeRecipientKeyDownHandler({
+    field: 'to',
+    inputValue: toInputValue,
+    emails: toEmails,
+    setEmails: setToEmails,
+    setInputValue: setToInputValue,
+    suggestions: toSuggestions,
+    suggestionIndex,
+    setSuggestionIndex,
+    activeSuggestField,
+    closeSuggestions,
+    onSuggestionSelect: handleSuggestionSelect,
+  });
 
   const handleToBlur = (): void => {
     const email = toInputValue.trim().replace(',', '');
@@ -3251,6 +3473,7 @@ const EmailComposer = ({
       setToEmails([...toEmails, email]);
       setToInputValue('');
     }
+    blurSuggest('to');
   };
 
   const collapsedDisplay = useMemo(() => {
@@ -3261,37 +3484,33 @@ const EmailComposer = ({
     return { visibleEmails, remainingCount: remainingCount > 0 ? remainingCount : 0 };
   }, [toEmails, ccEmails, bccEmails]);
 
-  // Input refs for Cc and Bcc
-  const ccInputRef = React.useRef<HTMLInputElement>(null);
-  const bccInputRef = React.useRef<HTMLInputElement>(null);
-  const [ccInputValue, setCcInputValue] = useState<string>('');
-  const [bccInputValue, setBccInputValue] = useState<string>('');
+  const handleCcKeyDown = makeRecipientKeyDownHandler({
+    field: 'cc',
+    inputValue: ccInputValue,
+    emails: ccEmails,
+    setEmails: setCcEmails,
+    setInputValue: setCcInputValue,
+    suggestions: ccSuggestions,
+    suggestionIndex,
+    setSuggestionIndex,
+    activeSuggestField,
+    closeSuggestions,
+    onSuggestionSelect: handleSuggestionSelect,
+  });
 
-  const handleCcKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') {
-      e.preventDefault();
-      const email = ccInputValue.trim().replace(',', '');
-      if (email && email.includes('@') && !ccEmails.includes(email)) {
-        setCcEmails([...ccEmails, email]);
-        setCcInputValue('');
-      }
-    } else if (e.key === 'Backspace' && !ccInputValue && ccEmails.length > 0) {
-      setCcEmails(ccEmails.slice(0, -1));
-    }
-  };
-
-  const handleBccKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') {
-      e.preventDefault();
-      const email = bccInputValue.trim().replace(',', '');
-      if (email && email.includes('@') && !bccEmails.includes(email)) {
-        setBccEmails([...bccEmails, email]);
-        setBccInputValue('');
-      }
-    } else if (e.key === 'Backspace' && !bccInputValue && bccEmails.length > 0) {
-      setBccEmails(bccEmails.slice(0, -1));
-    }
-  };
+  const handleBccKeyDown = makeRecipientKeyDownHandler({
+    field: 'bcc',
+    inputValue: bccInputValue,
+    emails: bccEmails,
+    setEmails: setBccEmails,
+    setInputValue: setBccInputValue,
+    suggestions: bccSuggestions,
+    suggestionIndex,
+    setSuggestionIndex,
+    activeSuggestField,
+    closeSuggestions,
+    onSuggestionSelect: handleSuggestionSelect,
+  });
 
   // Handle expand - auto-show Cc/Bcc if they have emails
   const handleExpand = (): void => {
@@ -3306,70 +3525,6 @@ const EmailComposer = ({
 
   const composerRef = useRef<HTMLDivElement>(null);
 
-  const startComposerResize = (clientY: number): void => {
-    if (!isExpanded || isSending) return;
-    resizeStartYRef.current = clientY;
-    resizeStartHeightRef.current = composerHeight;
-    setIsResizingComposer(true);
-  };
-
-  const handleComposerResizeTouchStart = (event: React.TouchEvent<HTMLDivElement>): void => {
-    const touch = event.touches[0];
-    if (!touch) return;
-    event.preventDefault();
-    startComposerResize(touch.clientY);
-  };
-
-  useEffect(() => {
-    if (!isResizingComposer) return undefined;
-
-    const MIN_HEIGHT = 260;
-    const MAX_HEIGHT = 760;
-
-    const handlePointerMove = (clientY: number): void => {
-      const deltaY = resizeStartYRef.current - clientY;
-      const nextHeight = Math.min(
-        MAX_HEIGHT,
-        Math.max(MIN_HEIGHT, resizeStartHeightRef.current + deltaY),
-      );
-      setComposerHeight(nextHeight);
-    };
-
-    const handleMouseMove = (event: MouseEvent): void => {
-      handlePointerMove(event.clientY);
-    };
-
-    const handleTouchMove = (event: TouchEvent): void => {
-      const touch = event.touches[0];
-      if (!touch) return;
-      event.preventDefault();
-      handlePointerMove(touch.clientY);
-    };
-
-    const stopResizing = (): void => {
-      setIsResizingComposer(false);
-    };
-
-    const prevUserSelect = document.body.style.userSelect;
-    const prevCursor = document.body.style.cursor;
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'row-resize';
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', stopResizing);
-    document.addEventListener('touchmove', handleTouchMove, { passive: false });
-    document.addEventListener('touchend', stopResizing);
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', stopResizing);
-      document.removeEventListener('touchmove', handleTouchMove);
-      document.removeEventListener('touchend', stopResizing);
-      document.body.style.userSelect = prevUserSelect;
-      document.body.style.cursor = prevCursor;
-    };
-  }, [isResizingComposer]);
-
   useEffect(() => {
     if (!onClose) return undefined;
     const handler = (e: KeyboardEvent): void => {
@@ -3378,7 +3533,7 @@ const EmailComposer = ({
       if (target && composerRef.current?.contains(target)) {
         e.preventDefault();
         e.stopPropagation();
-        if (emailContent) saveDraft(emailContent);
+        if (hasEmailBody) saveDraft(emailContent);
         onClose();
       }
     };
@@ -3386,12 +3541,22 @@ const EmailComposer = ({
     return () => document.removeEventListener('keydown', handler, true);
   }, [onClose, emailContent, saveDraft]);
 
+  const { isDraggingFiles, dragHandlers } = useComposerDragDrop(addFilesToAttachments);
+
   return (
     <div className='w-full p-4' ref={composerRef}>
       <div
         className={`border border-border rounded-xl relative flex flex-col overflow-hidden ${isSending ? 'opacity-60 pointer-events-none' : ''}`}
         style={isExpanded ? { height: `${composerHeight}px` } : undefined}
+        {...dragHandlers}
       >
+        {isDraggingFiles && (
+          <div className='absolute inset-0 z-30 flex items-center justify-center pointer-events-none rounded-xl border-2 border-dashed border-violet-400 bg-violet-50/70 dark:bg-violet-950/40'>
+            <span className='text-sm font-medium text-violet-700 dark:text-violet-200'>
+              Drop files to attach
+            </span>
+          </div>
+        )}
         {isExpanded && (
           <div
             className='h-4 flex-shrink-0 flex items-center justify-center cursor-row-resize touch-none'
@@ -3477,7 +3642,8 @@ const EmailComposer = ({
                 <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>To</span>
 
                 <div
-                  className={`flex-1 flex flex-wrap items-center gap-1.5 cursor-text min-h-[28px] rounded-md transition-colors ${dragOverField === 'to' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
+                  ref={toRowRef}
+                  className={`relative flex-1 flex flex-wrap items-center gap-1.5 cursor-text min-h-[28px] rounded-md transition-colors ${dragOverField === 'to' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
                   onClick={() => toInputRef.current?.focus()}
                   onKeyDown={e => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -3516,8 +3682,12 @@ const EmailComposer = ({
                     ref={toInputRef}
                     type='text'
                     value={toInputValue}
-                    onChange={e => setToInputValue(e.target.value)}
+                    onChange={e => {
+                      setToInputValue(e.target.value);
+                      setSuggestionIndex(0);
+                    }}
                     onKeyDown={handleToKeyDown}
+                    onFocus={() => focusSuggest('to')}
                     onBlur={handleToBlur}
                     placeholder={toEmails.length === 0 ? 'Add recipients...' : ''}
                     className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
@@ -3531,6 +3701,14 @@ const EmailComposer = ({
                       conversationId,
                       draftEmailId: draftId,
                     })}
+                  />
+                  <RecipientSuggestionsDropdown
+                    visible={activeSuggestField === 'to'}
+                    suggestions={toSuggestions}
+                    highlightedIndex={suggestionIndex}
+                    onSelect={email => handleSuggestionSelect('to', email)}
+                    onHighlight={setSuggestionIndex}
+                    anchorRef={toRowRef}
                   />
                 </div>
 
@@ -3576,7 +3754,8 @@ const EmailComposer = ({
                   <div className='w-[20px] flex-shrink-0' />
                   <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>Cc</span>
                   <div
-                    className={`flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'cc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
+                    ref={ccRowRef}
+                    className={`relative flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'cc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
                     onClick={() => ccInputRef.current?.focus()}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -3614,14 +3793,19 @@ const EmailComposer = ({
                       ref={ccInputRef}
                       type='text'
                       value={ccInputValue}
-                      onChange={e => setCcInputValue(e.target.value)}
+                      onChange={e => {
+                        setCcInputValue(e.target.value);
+                        setSuggestionIndex(0);
+                      }}
                       onKeyDown={handleCcKeyDown}
+                      onFocus={() => focusSuggest('cc')}
                       onBlur={() => {
                         const email = ccInputValue.trim().replace(',', '');
                         if (email && email.includes('@') && !ccEmails.includes(email)) {
                           setCcEmails([...ccEmails, email]);
                           setCcInputValue('');
                         }
+                        blurSuggest('cc');
                       }}
                       placeholder={ccEmails.length === 0 ? 'Add recipients...' : ''}
                       className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
@@ -3635,6 +3819,14 @@ const EmailComposer = ({
                         draftEmailId: draftId,
                       })}
                     />
+                    <RecipientSuggestionsDropdown
+                      visible={activeSuggestField === 'cc'}
+                      suggestions={ccSuggestions}
+                      highlightedIndex={suggestionIndex}
+                      onSelect={email => handleSuggestionSelect('cc', email)}
+                      onHighlight={setSuggestionIndex}
+                      anchorRef={ccRowRef}
+                    />
                   </div>
                 </div>
               )}
@@ -3646,7 +3838,8 @@ const EmailComposer = ({
                     Bcc
                   </span>
                   <div
-                    className={`flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'bcc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
+                    ref={bccRowRef}
+                    className={`relative flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'bcc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
                     onClick={() => bccInputRef.current?.focus()}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -3683,14 +3876,19 @@ const EmailComposer = ({
                       ref={bccInputRef}
                       type='text'
                       value={bccInputValue}
-                      onChange={e => setBccInputValue(e.target.value)}
+                      onChange={e => {
+                        setBccInputValue(e.target.value);
+                        setSuggestionIndex(0);
+                      }}
                       onKeyDown={handleBccKeyDown}
+                      onFocus={() => focusSuggest('bcc')}
                       onBlur={() => {
                         const email = bccInputValue.trim().replace(',', '');
                         if (email && email.includes('@') && !bccEmails.includes(email)) {
                           setBccEmails([...bccEmails, email]);
                           setBccInputValue('');
                         }
+                        blurSuggest('bcc');
                       }}
                       placeholder={bccEmails.length === 0 ? 'Add recipients...' : ''}
                       data-track-category='SUPPORT'
@@ -3703,6 +3901,14 @@ const EmailComposer = ({
                       className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
                       disabled={isSending}
                     />
+                    <RecipientSuggestionsDropdown
+                      visible={activeSuggestField === 'bcc'}
+                      suggestions={bccSuggestions}
+                      highlightedIndex={suggestionIndex}
+                      onSelect={email => handleSuggestionSelect('bcc', email)}
+                      onHighlight={setSuggestionIndex}
+                      anchorRef={bccRowRef}
+                    />
                   </div>
                 </div>
               )}
@@ -3710,49 +3916,112 @@ const EmailComposer = ({
           )}
         </div>
 
-        <div className='flex-1 min-h-0 overflow-y-auto'>
-          {aiDraft.isDraftActive ? (
-            <DraftCard
-              draftContent={aiDraft.draftContent}
-              isStreaming={aiDraft.isStreaming}
-              onAccept={() => {
-                const content = aiDraft.acceptDraft();
-                setEmailContent(content);
-                if (content) saveDraft(content);
-                setHasAcceptedDraft(true);
-              }}
-              onReject={() => {
-                aiDraft.rejectDraft();
-                setEmailContent('');
-                deleteDraft();
-              }}
-              onRefine={(instruction: string) => aiDraft.refineDraft(instruction)}
-            />
-          ) : (
-            <TextareaAutosize
-              minRows={5}
-              maxRows={20}
-              placeholder='Compose email...'
-              value={emailContent}
-              onChange={e => setEmailContent(e.target.value)}
-              onBlur={() => saveDraft(emailContent)}
-              onKeyDown={e => {
-                if (
-                  e.key === 'Enter' &&
-                  (e.metaKey || e.ctrlKey) &&
-                  (emailContent.trim() || attachments.length > 0) &&
-                  conversationId &&
-                  !isSending &&
-                  toEmails.length > 0
-                ) {
-                  e.preventDefault();
-                  void handleSendEmail();
-                }
-              }}
-              className='w-full px-4 py-3 focus:outline-none text-sm resize-none bg-background'
-              disabled={isSending}
-            />
-          )}
+        <div className='flex-1 min-h-0 flex flex-col'>
+          {(() => {
+            const sideBySide = hasEmailBody && (aiDraft.isDraftActive || isRephrasePromptOpen);
+            const aiOnlyFull = aiDraft.isDraftActive && !hasEmailBody;
+
+            const draftCard = aiDraft.isDraftActive ? (
+              <DraftCard
+                draftContent={aiDraft.draftContent}
+                isStreaming={aiDraft.isStreaming}
+                onAccept={() => {
+                  const content = aiDraft.acceptDraft();
+                  void (async (): Promise<void> => {
+                    const html = content ? await markdownToHtml(content) : '';
+                    setEmailContent(html);
+                    if (html) saveDraft(html);
+                  })();
+                }}
+                onReject={() => {
+                  aiDraft.rejectDraft();
+                }}
+                onRefine={(instruction: string) => aiDraft.refineDraft(instruction)}
+              />
+            ) : null;
+
+            const rephraseCard = isRephrasePromptOpen ? (
+              <RephrasePrompt
+                disabled={aiDraft.isStreaming}
+                onSubmit={instruction => {
+                  // Send plain text to the AI — feeding it raw HTML tags
+                  // muddies the rephrase prompt's instructions.
+                  aiDraft.rephraseDraft(instruction, stripHtml(emailContent));
+                  setIsRephrasePromptOpen(false);
+                }}
+                onClose={() => setIsRephrasePromptOpen(false)}
+              />
+            ) : null;
+
+            if (sideBySide) {
+              // Both columns rendered as bordered cards with matching headers
+              // so the user's draft and the AI panel feel like equal peers.
+              // Right column shows the AI draft if active, otherwise the
+              // rephrase prompt (chips + custom instruction).
+              return (
+                <div className='flex flex-row gap-3 items-stretch flex-1 min-h-0 px-4 pt-2 pb-3'>
+                  <div className='flex-1 min-w-0 flex flex-col border border-border rounded-xl bg-background overflow-hidden'>
+                    <div className='flex items-center gap-2 px-4 py-2.5 min-h-[3rem] border-b border-border bg-muted/30 flex-shrink-0'>
+                      <Pencil size={14} className='text-muted-foreground' />
+                      <span className='text-sm font-medium text-foreground'>Your draft</span>
+                    </div>
+                    <EmailEditor
+                      value={emailContent}
+                      onChange={setEmailContent}
+                      onAddFiles={addFilesToAttachments}
+                      onSendShortcut={() => {
+                        if (
+                          (hasEmailBody || attachments.length > 0) &&
+                          conversationId &&
+                          !isSending &&
+                          toEmails.length > 0
+                        ) {
+                          void handleSendEmail();
+                        }
+                      }}
+                      onBlur={() => {
+                        if (hasEmailBody) saveDraft(emailContent);
+                      }}
+                      readOnly={aiDraft.isDraftActive}
+                      disabled={isSending}
+                      className='flex-1 min-h-0'
+                    />
+                  </div>
+                  <div className='flex-1 min-w-0 flex flex-col min-h-0'>
+                    {draftCard ?? rephraseCard}
+                  </div>
+                </div>
+              );
+            }
+
+            if (aiOnlyFull) {
+              // No user text yet — give the AI card the entire body.
+              return <div className='flex-1 min-h-0 flex flex-col px-4 pt-2 pb-3'>{draftCard}</div>;
+            }
+
+            return (
+              <EmailEditor
+                value={emailContent}
+                onChange={setEmailContent}
+                onAddFiles={addFilesToAttachments}
+                onSendShortcut={() => {
+                  if (
+                    (hasEmailBody || attachments.length > 0) &&
+                    conversationId &&
+                    !isSending &&
+                    toEmails.length > 0
+                  ) {
+                    void handleSendEmail();
+                  }
+                }}
+                onBlur={() => {
+                  if (hasEmailBody) saveDraft(emailContent);
+                }}
+                disabled={isSending}
+                className='flex-1 min-h-0'
+              />
+            );
+          })()}
 
           {/* Attachments section */}
           {attachments.length > 0 && (
@@ -3903,36 +4172,37 @@ const EmailComposer = ({
               </Tooltip>
             )}
 
-            {/* Draft button */}
-            <Tooltip content='Generate AI draft reply' side='bottom' delayDuration={300}>
+            {/* Draft button — empty body generates from scratch; existing text
+                opens the Gmail-style "what would you like to do?" prompt. */}
+            <Tooltip
+              content={hasEmailBody ? 'Rewrite with AI' : 'Generate AI draft reply'}
+              side='bottom'
+              delayDuration={300}
+            >
               <button
                 type='button'
                 onClick={() => {
-                  aiDraft.triggerDraft();
+                  if (hasEmailBody) {
+                    setIsRephrasePromptOpen(true);
+                  } else {
+                    aiDraft.triggerDraft();
+                  }
                 }}
                 disabled={aiDraft.isStreaming || !emails?.length}
                 className='size-7 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
                 aria-label='Draft reply with AI'
                 data-track-category='Support'
                 data-track-name='TriggerAIDraft'
+                data-track-metadata={JSON.stringify({
+                  hasExistingText: hasEmailBody,
+                })}
               >
                 <Wand2 size={14} />
               </button>
             </Tooltip>
 
-            {/* Inline refine after draft accepted */}
-            {hasAcceptedDraft && emailContent && (
-              <div className='w-48'>
-                <RefineInput
-                  onSubmit={(instruction: string) => {
-                    aiDraft.refineDraft(instruction);
-                    setHasAcceptedDraft(false);
-                  }}
-                  disabled={aiDraft.isStreaming}
-                  placeholder='Refine draft...'
-                />
-              </div>
-            )}
+            {/* The action-bar refine input was removed — refining lives only
+                inside the AI panel itself (DraftCard's RefineInput). */}
 
             {onClose && (
               <>
@@ -3940,7 +4210,7 @@ const EmailComposer = ({
                 <button
                   className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
                   onClick={() => {
-                    if (emailContent) saveDraft(emailContent);
+                    if (hasEmailBody) saveDraft(emailContent);
                     onClose();
                   }}
                   disabled={isSending}
@@ -3977,7 +4247,7 @@ const EmailComposer = ({
               className='size-7 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
               onClick={() => void handleSendEmail()}
               disabled={
-                (!emailContent.trim() && attachments.length === 0) ||
+                (!hasEmailBody && attachments.length === 0) ||
                 !conversationId ||
                 isSending ||
                 toEmails.length === 0 ||

@@ -24,6 +24,7 @@ import { ExternalAttachmentService } from '@/services/externalAttachmentService'
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { AttachmentUploadError } from '@/integrations/core/baseMailReplySender';
+import { extractEmailAddress } from '@/utils/email';
 
 interface ReplyEmailRequest {
   body: string;
@@ -148,7 +149,8 @@ export class EmailController {
       if (!owner?.email) {
         return res.status(400).json({ error: 'Desk owner user not found or has no email.' });
       }
-      const fromEmailAddress = owner.email;
+      const fromEmailAddress =
+        extractEmailAddress(externalSource.displayName) ?? owner.email;
 
       logger.info(`[EmailController] Sending ${type} via ${externalSource.sourceType} for conversation ${conversationId}`);
 
@@ -388,6 +390,43 @@ export class EmailController {
         error: 'Failed to send email reply',
         message: error?.message,
       });
+    }
+  };
+
+  listContacts = async (req: Request, res: Response) => {
+    try {
+      const { channelId } = req.params;
+      if (!channelId) return res.status(400).json({ error: 'channelId required' });
+
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
+      const isMember = await this.channelParticipantRepo.isParticipant(channelId, userId);
+      if (!isMember) {
+        return res.status(403).json({ error: 'Not a member of this channel' });
+      }
+
+      const externalSource = await this.externalSourceRepo.findByChannelId(channelId);
+      if (!externalSource) {
+        return res.json({ contacts: [] });
+      }
+
+      let contacts: Array<{ name: string | null; email: string }> = [];
+      if (externalSource.sourceType === ExternalSourcePlatform.GOOGLE) {
+        contacts = await GoogleService.listContacts(externalSource.credentials, externalSource.id);
+      } else if (externalSource.sourceType === ExternalSourcePlatform.MICROSOFT) {
+        contacts = await MicrosoftDeskService.listContacts(
+          externalSource.credentials,
+          externalSource.id,
+        );
+      }
+      res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=3600');
+      return res.json({ contacts });
+    } catch (error: any) {
+      logger.error('[EmailController] listContacts error:', {
+        message: error?.message,
+        status: error?.response?.status,
+      });
+      return res.status(500).json({ error: 'Failed to list desk contacts' });
     }
   };
 }

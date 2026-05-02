@@ -63,7 +63,7 @@ export const SignatureEditor = (): ReactElement => {
             }}
             title={signatureEnabled ? 'Disable auto-append' : 'Enable auto-append'}
             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-              signatureEnabled ? 'bg-[#6276be]' : 'bg-secondary'
+              signatureEnabled ? 'bg-[#6276be] dark:bg-[#7986d0]' : 'bg-secondary'
             }`}
             data-track-category='email-signature'
             data-track-name='toggle-signature-enabled'
@@ -85,7 +85,7 @@ export const SignatureEditor = (): ReactElement => {
           type='button'
           onClick={() => setModal({ open: true, editing: undefined })}
           disabled={!signatureEnabled}
-          className='px-3 py-1.5 text-sm font-medium text-white bg-[#6276be] rounded-lg hover:bg-[#4f62a8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+          className='px-3 py-1.5 text-sm font-medium text-white bg-[#6276be] rounded-lg hover:bg-[#4f62a8] dark:hover:bg-[#7986d0] disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
           data-track-category='email-signature'
           data-track-name='open-create-signature'
         >
@@ -116,7 +116,7 @@ export const SignatureEditor = (): ReactElement => {
                 </span>
                 {sig.isDefault && (
                   <span
-                    className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors duration-300 ${signatureEnabled ? 'bg-[#eef0fb] text-[#6276be]' : 'bg-muted text-muted-foreground'}`}
+                    className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors duration-300 ${signatureEnabled ? 'bg-[#eef0fb] text-[#6276be] dark:bg-[#6276be]/20 dark:text-[#9aa6e0]' : 'bg-muted text-muted-foreground'}`}
                   >
                     Default
                   </span>

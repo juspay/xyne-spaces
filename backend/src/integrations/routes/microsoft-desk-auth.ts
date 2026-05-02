@@ -5,7 +5,12 @@
 
 import { Router, Request, Response } from 'express';
 import { authV2Middleware } from '../../middleware/authV2Middleware';
-import { microsoftDeskService } from '../../services/microsoftDeskService';
+import {
+  microsoftDeskService,
+  isReconnectChannelData,
+} from '../../services/microsoftDeskService';
+import { encrypt } from '../../services/encryptionService';
+import { db } from '../../database/client';
 import { logger } from '../../utils/logger';
 
 const router = Router();
@@ -16,7 +21,7 @@ function getFrontendUrl(): string {
   return url.trim();
 }
 
-function getBackendUrl(req: Request): string {
+export function getBackendUrl(req: Request): string {
   const originalHost = req.headers['x-original-host'];
   if (originalHost && typeof originalHost === 'string') {
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
@@ -30,6 +35,21 @@ function getBackendUrl(req: Request): string {
 function getPublicUrl(req: Request): string {
   return getBackendUrl(req);
 }
+
+export const MICROSOFT_OAUTH_SCOPES = [
+  'openid',
+  'email',
+  'offline_access',
+  'Mail.Read',
+  'Mail.Send',
+  'Mail.ReadWrite',
+  'Contacts.Read',
+  'People.Read',
+  'Contacts.Read.Shared',
+];
+
+/** Space-joined scope string for Microsoft's token-exchange API. */
+export const MICROSOFT_OAUTH_SCOPE_STRING = MICROSOFT_OAUTH_SCOPES.join(' ');
 
 /**
  * GET /api/integrations/microsoft/connect
@@ -70,7 +90,7 @@ router.get('/connect', authV2Middleware.authenticate, async (req: Request, res: 
 
     const authorizationUri = oauthClient.authorizeURL({
       redirect_uri: redirectUri,
-      scope: ['openid', 'email', 'offline_access', 'Mail.Read', 'Mail.Send', 'Mail.ReadWrite'],
+      scope: MICROSOFT_OAUTH_SCOPES,
       state,
       prompt: 'consent',
     } as Record<string, string | string[]>);
@@ -122,7 +142,7 @@ router.get('/callback', async (req: Request, res: Response) => {
     const tokenResult = await oauthClient.getToken({
       code: code as string,
       redirect_uri: redirectUri,
-      scope: 'openid email offline_access Mail.Read Mail.Send Mail.ReadWrite',
+      scope: MICROSOFT_OAUTH_SCOPE_STRING,
     });
 
     const { token } = tokenResult;
@@ -138,6 +158,61 @@ router.get('/callback', async (req: Request, res: Response) => {
     if (!email) {
       logger.error(`[${requestId}] Could not determine email from Microsoft profile`);
       res.redirect(`${frontendUrl}?error=no_email`);
+      return;
+    }
+
+
+    if (isReconnectChannelData(channelData)) {
+      const expected = channelData.expectedEmail.toLowerCase();
+      if (email.toLowerCase() !== expected) {
+        logger.warn(`[${requestId}] Reconnect email mismatch: got ${email}, expected ${expected}`);
+        res.redirect(
+          `${frontendUrl}/support?channel=${channelData.channelId}&emailError=${encodeURIComponent(
+            `This desk is bound to ${expected}. Please sign in with that account.`,
+          )}`,
+        );
+        return;
+      }
+
+      const source = await db.externalSource.findFirst({
+        where: { channelId: channelData.channelId },
+        select: { id: true, name: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!source) {
+        logger.error(`[${requestId}] No ExternalSource found for reconnect`);
+        res.redirect(`${frontendUrl}/support?channel=${channelData.channelId}&emailError=no_source`);
+        return;
+      }
+
+      const expiresAt = token.expires_at
+        ? new Date(token.expires_at as string).toISOString()
+        : undefined;
+      const reconnectCreds = {
+        accessToken,
+        refreshToken: (token.refresh_token as string) ?? undefined,
+        email,
+        expiresAt,
+      };
+      await db.externalSource.update({
+        where: { id: source.id },
+        data: {
+          credentials: encrypt(JSON.stringify(reconnectCreds)),
+          isActive: true,
+        },
+      });
+
+      try {
+        const webhookUrl = `${getPublicUrl(req)}/api/integrations/microsoft/webhook/${source.name}`;
+        await microsoftDeskService.registerGraphWebhook(accessToken, webhookUrl);
+      } catch (err) {
+        logger.warn(`[${requestId}] Failed to re-register webhook on reconnect`, err);
+      }
+
+      logger.info(`[${requestId}] Microsoft integration reconnected: ${channelData.channelId}`);
+      res.redirect(
+        `${frontendUrl}/support?emailReconnected=true&channel=${channelData.channelId}&provider=microsoft`,
+      );
       return;
     }
 
