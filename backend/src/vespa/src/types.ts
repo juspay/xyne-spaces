@@ -429,8 +429,13 @@ export interface VespaMailDocument extends VespaDocument {
    * Search filters on `entity contains "support_desk"`.
    */
   entity: string;
-  /** User IDs of channel participants — ACL enforced at query time */
-  permissions: string[];
+  /**
+   * Vespa reference to the parent chat_container doc.
+   * Permissions are imported live via `import field channelRef.permissions`
+   * (declared in mail.sd), so participant changes affect mail visibility
+   * without per-email re-feeds.
+   */
+  channelRef: string;
   from: string;
   to: string[];
   cc?: string[];
