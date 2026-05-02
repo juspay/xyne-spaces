@@ -982,13 +982,20 @@ export class ChannelController {
         return;
       }
 
+      res.setHeader('Cache-Control', 'private, no-cache');
+
       const source = await db.externalSource.findFirst({
-        where: { channelId, isActive: true },
-        select: { displayName: true, sourceType: true },
+        where: { channelId },
+        select: { displayName: true, sourceType: true, isActive: true },
+        orderBy: { createdAt: 'desc' },
       });
+      const hasSource = !!source;
+      const isConnected = source?.isActive === true;
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
       if (fromDisplay) {
-        res.status(200).json({ email: fromDisplay.toLowerCase() });
+        res
+          .status(200)
+          .json({ email: fromDisplay.toLowerCase(), isConnected, hasSource });
         return;
       }
 
@@ -1002,12 +1009,14 @@ export class ChannelController {
           select: { email: true },
         });
         if (owner?.email) {
-          res.status(200).json({ email: owner.email.toLowerCase() });
+          res
+            .status(200)
+            .json({ email: owner.email.toLowerCase(), isConnected, hasSource });
           return;
         }
       }
 
-      res.status(200).json({ email: null });
+      res.status(200).json({ email: null, isConnected, hasSource });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });

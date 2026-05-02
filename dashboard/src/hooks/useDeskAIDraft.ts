@@ -5,6 +5,7 @@ import {
   fetchSessionDetail,
 } from '../services/XyneAI/XyneAISessionsService';
 import type { Message } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { logger, Event } from '../utils/logger';
 
 interface UseDeskAIDraftOptions {
   channelId: string;
@@ -17,6 +18,7 @@ export interface UseDeskAIDraftReturn {
   isStreaming: boolean;
   isDraftActive: boolean;
   triggerDraft: () => void;
+  rephraseDraft: (instruction: string, sourceText: string) => void;
   refineDraft: (instruction: string) => void;
   acceptDraft: () => string;
   rejectDraft: () => void;
@@ -74,6 +76,27 @@ export function useDeskAIDraft({
   const ourStreamIdRef = useRef<string | null>(null);
 
   const threadId = channelId && conversationId ? `${channelId}_${conversationId}` : '';
+  const storageKey = threadId ? `xd-ai-draft:${threadId}` : '';
+
+  const writeStorage = useCallback(
+    (content: string): void => {
+      if (!storageKey || typeof window === 'undefined') return;
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ content }));
+      } catch {
+        /* quota / private mode — non-fatal */
+      }
+    },
+    [storageKey],
+  );
+  const clearStorage = useCallback((): void => {
+    if (!storageKey || typeof window === 'undefined') return;
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {
+      /* non-fatal */
+    }
+  }, [storageKey]);
 
   useEffect(() => {
     setDraftContent('');
@@ -83,6 +106,34 @@ export function useDeskAIDraft({
     ourStreamIdRef.current = null;
 
     if (!conversationId) return;
+
+    if (threadId) {
+      const active = xyneAIStreamManager.getActiveStream(threadId);
+      if (active) {
+        ourStreamIdRef.current = active.streamId;
+        if (active.sessionId) sessionIdRef.current = active.sessionId;
+        setIsDraftActive(true);
+        setIsStreaming(active.status === 'streaming');
+        const content = latestBotContent(active.messages);
+        if (content !== null) setDraftContent(content);
+      }
+    }
+
+    if (storageKey && typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { content?: string };
+          if (parsed?.content) {
+            setDraftContent(parsed.content);
+            setIsDraftActive(true);
+          }
+        }
+      } catch {
+        /* ignore corrupt entries */
+      }
+    }
+
     let cancelled = false;
     fetchSessionsByConversationId(conversationId)
       .then(sessions => {
@@ -92,11 +143,22 @@ export function useDeskAIDraft({
           sessionIdRef.current = first.sessionId;
         }
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        logger.warn(Event.DESK_AI_DRAFT_SESSIONS_FETCH_FAILED, {
+          conversationId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     return () => {
       cancelled = true;
     };
-  }, [conversationId]);
+  }, [conversationId, storageKey]);
+
+  useEffect(() => {
+    if (!isDraftActive) return;
+    if (!draftContent) return;
+    writeStorage(draftContent);
+  }, [draftContent, isDraftActive, writeStorage]);
 
   // Only mirror content/status for streams we started — sidebar streams share
   // the threadId but their output belongs in the sidebar, not the draft card.
@@ -163,7 +225,11 @@ export function useDeskAIDraft({
           ],
         );
       } catch (error) {
-        console.error('[useDeskAIDraft] startStream failed:', error);
+        logger.error(Event.DESK_AI_DRAFT_STREAM_FAILED, {
+          threadId,
+          conversationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         setIsStreaming(false);
       }
     },
@@ -174,12 +240,37 @@ export function useDeskAIDraft({
     void submit('Draft a reply for this ticket.', 'Draft a reply');
   }, [submit]);
 
+  const rephraseDraft = useCallback(
+    (instruction: string, sourceText: string) => {
+      const trimmedSource = sourceText.trim();
+      const trimmedInstruction = instruction.trim();
+      const parts = ['Draft a reply for this ticket.'];
+      if (trimmedSource) {
+        parts.push(
+          `The user has already started writing the following text in the composer — use it as a starting point and refine / expand it into a complete reply:\n"""\n${trimmedSource}\n"""`,
+        );
+      }
+      if (trimmedInstruction) {
+        parts.push(`Additional guidance from the user: "${trimmedInstruction}"`);
+      }
+      void submit(parts.join('\n\n'), trimmedInstruction || 'Refine draft');
+    },
+    [submit],
+  );
+
   const refineDraft = useCallback(
     (instruction: string) => {
-      const query = draftContent
-        ? `Refine this draft: ${instruction}\n\nCurrent draft:\n\n${draftContent}`
-        : instruction;
-      void submit(query, instruction);
+      const trimmedInstruction = instruction.trim();
+      const parts = ['Draft a reply for this ticket.'];
+      if (draftContent) {
+        parts.push(
+          `A previous AI draft was generated:\n"""\n${draftContent}\n"""\nRefine it per the user's guidance below.`,
+        );
+      }
+      if (trimmedInstruction) {
+        parts.push(`Refinement guidance from the user: "${trimmedInstruction}"`);
+      }
+      void submit(parts.join('\n\n'), trimmedInstruction || 'Refine draft');
     },
     [submit, draftContent],
   );
@@ -187,8 +278,9 @@ export function useDeskAIDraft({
   const acceptDraft = useCallback(() => {
     setIsDraftActive(false);
     ourStreamIdRef.current = null;
+    clearStorage();
     return draftContent;
-  }, [draftContent]);
+  }, [draftContent, clearStorage]);
 
   const rejectDraft = useCallback(() => {
     if (threadId && ourStreamIdRef.current) {
@@ -198,13 +290,15 @@ export function useDeskAIDraft({
     setIsDraftActive(false);
     setDraftContent('');
     setIsStreaming(false);
-  }, [threadId]);
+    clearStorage();
+  }, [threadId, clearStorage]);
 
   return {
     draftContent,
     isStreaming,
     isDraftActive,
     triggerDraft,
+    rephraseDraft,
     refineDraft,
     acceptDraft,
     rejectDraft,

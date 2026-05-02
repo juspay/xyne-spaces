@@ -57,4 +57,11 @@ router.post(
 // Send email reply (REPLY or REPLY_ALL)
 router.post('/:conversationId/reply', authMiddleware.authenticate, emailController.replyToEmail);
 
+router.get(
+  '/:channelId/contacts',
+  authMiddleware.authenticate,
+  emailController.listContacts,
+);
+
+
 export default router;

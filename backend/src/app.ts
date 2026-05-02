@@ -47,6 +47,7 @@ import { metricsMiddleware } from '@/middleware/metricsMiddleware';
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from '@/services/otel';
 import { externalSourceSyncRoutes } from '@/integrations';
 import googleAuthRoutes from '@/integrations/routes/google-auth';
+import deskIntegrationRoutes from '@/integrations/routes/desk-integration';
 import migrationRoutes from '@/migration';
 import { registerAllExternalSources } from '@/integrations/core/externalSourceRegistry';
 import publicUserRoutes from '@/routes/publicUserRoutes';
@@ -79,6 +80,7 @@ import cacConfigRoutes from '@/routes/cacConfig';
 import vespaBackfillRoutes from '@/routes/vespaBackfill';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import activitiesBackfillRoutes from '@/routes/activitiesBackfill';
+import externalSourceDisplayNameBackfillRoutes from '@/routes/externalSourceDisplayNameBackfill';
 import messageMetadataBackfillRoutes from '@/routes/messageMetadataBackfill';
 import channelRecapBackfillRoutes from '@/routes/channelRecapBackfill';
 import emailChannelUnreadBackfillRoutes from '@/routes/emailChannelUnreadBackfill';
@@ -210,6 +212,10 @@ export class App {
     // Google OAuth routes (public - no auth required)
     this.app.use('/api/integrations/google', googleAuthRoutes);
 
+    // Desk integration management (disconnect / reconnect-init) — auth-gated
+    // per-route via the desk-owner check inside each handler.
+    this.app.use('/api/integrations/desk', deskIntegrationRoutes);
+
     // Migration routes (body parsing handled in route file)
     this.app.use('/api/migration', migrationRoutes);
 
@@ -266,6 +272,15 @@ export class App {
     if (process.env.ENABLE_ACTIVITIES_BACKFILL_ROUTES === 'true') {
       this.app.use('/api/admin/activities-backfill', activitiesBackfillRoutes);
     }
+    // ExternalSource displayName cleanup ("Microsoft (email)" → "email").
+    this.app.use(
+      '/api/admin/external-source-displayname-backfill',
+      externalSourceDisplayNameBackfillRoutes,
+    );
+    this.app.use(
+      '/migrate/api/admin/external-source-displayname-backfill',
+      externalSourceDisplayNameBackfillRoutes,
+    );
     this.app.use('/migrate/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
     this.app.use('/api/admin/message-metadata-backfill', messageMetadataBackfillRoutes);
     this.app.use('/migrate/api/admin/channel-recap-backfill', channelRecapBackfillRoutes);

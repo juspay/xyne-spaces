@@ -178,6 +178,28 @@ export class XyneAIController {
       // Fetch CAC config with user email context (logging is done inside AgentsConfig.fetch)
       const agentsConfig = await AgentsConfig.fetch({ email: userInfo.userEmail });
 
+      let hasDeskSignature = false;
+      if (draft_mode && conversation_id) {
+        const conversation = await db.conversation.findUnique({
+          where: { conversationId: conversation_id },
+          select: { channelId: true },
+        });
+
+        if (conversation?.channelId) {
+          const preference = await db.emailChannelPreference.findUnique({
+            where: { channelId: conversation.channelId },
+            select: { ownerUserId: true },
+          });
+
+          if (preference?.ownerUserId) {
+            const signatureCount = await db.emailSignature.count({
+              where: { userId: preference.ownerUserId },
+            });
+            hasDeskSignature = signatureCount > 0;
+          }
+        }
+      }
+
       // Transform selection_contexts from snake_case to camelCase
       const transformedSelectionContexts = selection_contexts?.map(ctx => ({
         canvasViewAccessId: ctx.canvas_view_access_id,
@@ -208,7 +230,7 @@ export class XyneAIController {
         isRegenerate: is_regenerate,
         agentName: 'ask-ai',
         displayQuery: display_query,
-        ...(draft_mode && { systemPromptOverride: buildDraftEmailSystemPrompt(userInfo) }),
+        ...(draft_mode && { systemPromptOverride: buildDraftEmailSystemPrompt(userInfo, hasDeskSignature) }),
       };
 
       // Track metrics: context channels count

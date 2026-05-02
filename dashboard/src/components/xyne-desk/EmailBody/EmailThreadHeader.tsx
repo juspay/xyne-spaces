@@ -21,6 +21,7 @@ interface EmailThreadHeaderProps {
   previewText?: string;
   extras?: ReactNode;
   isRead?: boolean;
+  deskEmail?: string | null | undefined;
 }
 
 const EmailAvatar = ({ name, email }: { name: string; email: string | null }): JSX.Element => {
@@ -75,12 +76,13 @@ export const EmailThreadHeader = ({
   previewText,
   extras,
   isRead = true,
+  deskEmail,
 }: EmailThreadHeaderProps): JSX.Element => {
   const { user } = useAuth();
-  const currentUserEmail = user?.email ?? null;
+  const meEmail = deskEmail ?? user?.email ?? null;
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const recipientSummary = summarizeRecipients(to, cc, currentUserEmail);
+  const recipientSummary = summarizeRecipients(to, cc, meEmail);
   const date = formatEmailHeaderDate(createdAt);
 
   const fromValues: string[] = [];

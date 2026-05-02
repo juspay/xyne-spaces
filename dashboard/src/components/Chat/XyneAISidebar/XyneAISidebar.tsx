@@ -469,8 +469,7 @@ const XyneAISidebar = ({
       try {
         setIsLoadingConversation(true);
 
-        // Get thread conversation ID if in thread context
-        const threadConversationId = activeThreadInfo?.conversationId;
+        const threadConversationId = threadInfo?.conversationId;
 
         // Check if there's an active stream - if so, sync with it instead of loading from storage
         let activeStream;
@@ -595,7 +594,7 @@ const XyneAISidebar = ({
     void loadMostRecentConversation();
   }, [
     channelId,
-    activeThreadInfo?.conversationId,
+    threadInfo?.conversationId,
     scrollToBottom,
     startFreshChat,
     sessionsData,

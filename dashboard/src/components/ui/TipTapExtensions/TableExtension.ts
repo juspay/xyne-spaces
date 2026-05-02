@@ -4,39 +4,44 @@ import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import type { AnyExtension } from '@tiptap/core';
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+// Inline styles, not classes — the Tiptap editor, the iframe-rendered
+// email view, and the recipient's mail client all render the same way
+// because inline `style="..."` survives every sanitizer + UA stylesheet.
+const BORDER = '1px solid #d1d5db';
+const CELL_PADDING = '8px 12px';
+const HEADER_BG = '#f9fafb';
+
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 export const TableExtension = Table.configure({
   resizable: false,
   HTMLAttributes: {
-    class: 'chat-table border border-gray-300 border-collapse w-full',
+    class: 'chat-table',
+    style: `border-collapse: collapse; border: ${BORDER}; max-width: 100%;`,
   },
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
 export const TableRowExtension = TableRow.configure({
-  HTMLAttributes: {
-    class: 'chat-table-row last:border-b-0',
-  },
+  HTMLAttributes: { class: 'chat-table-row' },
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
 export const TableCellExtension = TableCell.configure({
   HTMLAttributes: {
-    class: 'chat-table-cell border border-gray-300 px-3 py-2',
+    class: 'chat-table-cell',
+    style: `border: ${BORDER}; padding: ${CELL_PADDING}; vertical-align: top;`,
   },
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
 export const TableHeaderExtension = TableHeader.configure({
   HTMLAttributes: {
-    class: 'chat-table-header border border-gray-300 px-3 py-2 bg-gray-50 font-semibold',
+    class: 'chat-table-header',
+    style: `border: ${BORDER}; padding: ${CELL_PADDING}; background: ${HEADER_BG}; font-weight: 600; text-align: left;`,
   },
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 export const TableExtensions: AnyExtension[] = [
   TableExtension,
   TableRowExtension,
   TableCellExtension,
   TableHeaderExtension,
 ];
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */

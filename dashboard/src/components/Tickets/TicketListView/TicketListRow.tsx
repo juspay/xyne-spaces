@@ -44,6 +44,18 @@ const formatDate = (date: Date): string => {
   return `${months[date.getMonth()]} ${date.getDate()}`;
 };
 
+// Full date + time used for the hover tooltip — gives users the exact
+// timestamp behind the compact "May 1" label on the row.
+const formatDateTime = (date: Date): string =>
+  date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+
 const extractSenderEmail = (fromEmailAddress: string | null | undefined): string | null => {
   if (!fromEmailAddress) return null;
   const bracketMatch = fromEmailAddress.match(/<([^>]+)>/);
@@ -166,56 +178,69 @@ export const TicketListRow = ({
         </span>
         <span
           className={cn(
-            'text-sm min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground',
+            'text-sm flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground',
             hasUnread ? 'font-semibold' : 'font-normal',
           )}
         >
           {ticket.title}
         </span>
-        {emailCount > 0 && (
-          <span
-            className='inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-sm bg-muted text-[10px] font-medium text-muted-foreground flex-shrink-0'
-            title={`${emailCount} email${emailCount === 1 ? '' : 's'}`}
-          >
-            {emailCount}
-          </span>
-        )}
-        {hasDraft && (
-          <Tooltip delayDuration={500} content='Unsent draft'>
+        <div className='w-[28px] flex-shrink-0'>
+          {emailCount > 0 && (
             <span
-              className='inline-flex items-center gap-1 h-[18px] px-1.5 rounded-sm bg-amber-100 text-[10px] font-medium text-amber-700 flex-shrink-0'
-              aria-label='Unsent draft'
+              className='inline-flex items-center justify-center w-[28px] h-[18px] px-1 rounded-sm bg-muted text-[10px] font-medium text-muted-foreground tabular-nums'
+              title={`${emailCount} email${emailCount === 1 ? '' : 's'}`}
             >
-              <Pencil size={10} />
-              Draft
+              {emailCount}
             </span>
-          </Tooltip>
-        )}
-        {!shouldHideDetails && displayEmail && (
-          <>
-            <span className='size-1 rounded-full bg-muted flex-shrink-0' />
-            <span
-              className={cn(
-                'text-xs flex-shrink-0 whitespace-nowrap',
-                hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
-              )}
-            >
-              {displayEmail}
-            </span>
-          </>
+          )}
+        </div>
+        <div className='w-[64px] flex justify-start flex-shrink-0'>
+          {hasDraft && (
+            <Tooltip delayDuration={500} content='Unsent draft'>
+              <span
+                className='inline-flex items-center gap-1 h-[18px] px-1.5 rounded-sm bg-amber-100 text-[10px] font-medium text-amber-700'
+                aria-label='Unsent draft'
+              >
+                <Pencil size={10} />
+                Draft
+              </span>
+            </Tooltip>
+          )}
+        </div>
+        {!shouldHideDetails && (
+          <div className='w-[200px] flex items-center gap-2 justify-end flex-shrink-0'>
+            {displayEmail && (
+              <>
+                <span className='size-1 rounded-full bg-muted flex-shrink-0' />
+                <span
+                  className={cn(
+                    'text-xs whitespace-nowrap overflow-hidden text-ellipsis',
+                    hasUnread
+                      ? 'text-foreground font-semibold'
+                      : 'text-muted-foreground font-normal',
+                  )}
+                  title={displayEmail}
+                >
+                  {displayEmail}
+                </span>
+              </>
+            )}
+          </div>
         )}
       </div>
       <div className='flex items-center justify-center gap-3 flex-shrink-0'>
         <StagePicker ticketId={ticket.id} stageName={ticket.stageName} stageLabel={statusLabel} />
         <AssigneePicker ticketId={ticket.id} assignedTo={ticket.assignedTo} />
-        <span
-          className={cn(
-            'text-xs whitespace-nowrap',
-            hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
-          )}
-        >
-          {formatDate(dueDate)}
-        </span>
+        <Tooltip delayDuration={300} content={formatDateTime(dueDate)} side='top'>
+          <span
+            className={cn(
+              'text-xs whitespace-nowrap w-[44px] text-right tabular-nums',
+              hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
+            )}
+          >
+            {formatDate(dueDate)}
+          </span>
+        </Tooltip>
       </div>
     </div>
   );

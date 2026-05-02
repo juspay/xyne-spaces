@@ -47,7 +47,8 @@ export const SignatureEditorModal = ({
     ],
     editorProps: {
       attributes: {
-        class: 'tiptap prose prose-sm focus:outline-none min-h-[120px] px-3 py-2 text-sm',
+        class:
+          'tiptap prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[120px] px-3 py-2 text-sm text-foreground',
       },
       handlePaste(view, event) {
         const items = Array.from(event.clipboardData?.items ?? []);
@@ -115,7 +116,7 @@ export const SignatureEditorModal = ({
           />
         </div>
 
-        <div className='border border-border rounded-xl overflow-hidden'>
+        <div className='border border-border rounded-xl overflow-hidden bg-background'>
           <EditorToolbar editor={editor} showImageUpload />
           <EditorContent editor={editor} />
         </div>
@@ -132,7 +133,7 @@ export const SignatureEditorModal = ({
                   onOpenChange(false);
                 }}
                 disabled={isSettingDefault}
-                className='px-4 py-2 text-sm font-medium text-[#6276be] border border-[#6276be] rounded-lg hover:bg-[#eef0fb] disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+                className='px-4 py-2 text-sm font-medium text-[#6276be] border border-[#6276be] rounded-lg hover:bg-[#eef0fb] dark:text-[#9aa6e0] dark:border-[#9aa6e0] dark:hover:bg-[#6276be]/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
                 data-track-category='email-signature'
                 data-track-name='set-default-signature'
               >
@@ -144,7 +145,7 @@ export const SignatureEditorModal = ({
             <button
               type='button'
               onClick={() => onOpenChange(false)}
-              className='px-4 py-2 text-sm font-medium text-muted-foreground bg-muted rounded-lg hover:bg-secondary transition-colors'
+              className='px-4 py-2 text-sm font-medium text-foreground bg-muted border border-border rounded-lg hover:bg-accent dark:hover:bg-white/10 transition-colors'
               data-track-category='email-signature'
               data-track-name='cancel-signature'
             >
@@ -154,7 +155,7 @@ export const SignatureEditorModal = ({
               type='button'
               onClick={() => void handleSave()}
               disabled={isSaving || name.trim() === ''}
-              className='px-4 py-2 text-sm font-medium text-white bg-[#6276be] rounded-lg hover:bg-[#4f62a8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+              className='px-4 py-2 text-sm font-medium text-white bg-[#6276be] rounded-lg hover:bg-[#4f62a8] dark:hover:bg-[#7986d0] disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
               data-track-category='email-signature'
               data-track-name={isEditMode ? 'update-signature' : 'create-signature'}
             >
