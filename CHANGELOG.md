@@ -1,3 +1,10 @@
+## [1.137.0](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.136.2...v1.137.0) (2026-05-02)
+
+
+### Features
+
+* xyne desk improvements ([fff5515](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/fff5515f91bbd43b4ab217b1e0035be16ede2952)), closes [#5824](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5824)
+
 ## [1.136.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.136.1...v1.136.2) (2026-05-02)
 
 
