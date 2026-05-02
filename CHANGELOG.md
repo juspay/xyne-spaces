@@ -1,3 +1,10 @@
+## [1.136.2](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.136.1...v1.136.2) (2026-05-02)
+
+
+### Bug Fixes
+
+* mail permission schema for desks ([9c2f79b](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/commit/9c2f79b4ae594aac252290ac733b281c08fae9cc)), closes [#5807](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/issues/5807)
+
 ## [1.136.1](https://ssh.bitbucket.juspay.net/XYNE/xyne-spaces/compare/v1.136.0...v1.136.1) (2026-05-01)
 
 
