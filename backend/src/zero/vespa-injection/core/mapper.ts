@@ -976,12 +976,6 @@ export const mapEmail = async (email: Email): Promise<VespaMailDocument> => {
   });
   const channelId = conversation?.channelId ?? '';
 
-  // 2. Channel participants → permissions (user IDs; new members auto-included on next ingest)
-  const participants = await db.channelParticipant.findMany({
-    where: { channelId },
-    select: { userId: true },
-  });
-  const permissions = participants.map(p => p.userId);
 
   // 3+4. Resolve source name via ExternalMessage → ExternalSource
   // Stays null if the lookup fails — intentional: null is visible, a hardcoded fallback is not.
@@ -1033,7 +1027,7 @@ export const mapEmail = async (email: Email): Promise<VespaMailDocument> => {
     app: sourceName,
     /** entity = "support_desk"; future: "personal" for Gmail */
     entity: 'support_desk',
-    permissions,
+    channelRef: getRef(channelSchema, channelId),
     from: email.from,
     to: email.to,
     cc: email.cc.length > 0 ? email.cc : undefined,
