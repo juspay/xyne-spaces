@@ -93,6 +93,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       type,        // 'messages' | 'attachments' | 'channels' | 'tickets' | 'files'
       subApp,      // 'canvas' | 'transcript' | 'RCA' - sub-app filter for files
       from,        // User name or ID
+      withUser,    // User ID for participant filter
       in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)
       // Unified filters (work for both slack and ticket)
       projectId,   // Project ID(s) - comma-separated
@@ -221,7 +222,11 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.ticket.createdBy = from;
       options.file.createdBy = from;
     }
-    
+
+    if (withUser) {
+      options.slack.participants = withUser
+    }
+
     // Map frontend 'in' filter to channelId
     if (inChannel) {
       options.slack.channelId = inChannel;

@@ -19,6 +19,7 @@ export interface SlackFilters {
   projectId?: string[];
   docType?: string[];
   senderId?: string[];
+  participants?: string[]; // Participant filter (user IDs) - matches userId, threadMentions, threadSenders
   // Date filters
   createdBefore?: string;       // Created before date (multiple formats)
   createdAfter?: string;        // Created after date (multiple formats)
@@ -34,17 +35,17 @@ export interface TicketFilters {
   channelId?: string[];
   status?: string[];
   ticketId?: string[];
-  priority?: string[];            // Filter by priority (HIGH, MEDIUM, LOW) - comma-separated
-  createdBy?: string[];         // Filter by ticket creator (for from: functionality)
+  priority?: string[]; // Filter by priority (HIGH, MEDIUM, LOW) - comma-separated
+  createdBy?: string[]; // Filter by ticket creator (for from: functionality)
   // New filters
-  boardId?: string[];           // Filter by board ID - comma-separated
-  tags?: string[];              // Filter by tags
-  createdBefore?: string;       // Created before date (multiple formats)
-  createdAfter?: string;        // Created after date (multiple formats)
-  createdOn?: string;           // Created on specific date (multiple formats)
-  createdRange?: string;        // Time keyword (today, yesterday, this week, etc.)
-  stage?: string[];              // Filter by ticket stage - comma-separated
-  assignedTo?: string[];        // Filter by assigned user ID - comma-separated
+  boardId?: string[]; // Filter by board ID - comma-separated
+  tags?: string[]; // Filter by tags
+  createdBefore?: string; // Created before date (multiple formats)
+  createdAfter?: string; // Created after date (multiple formats)
+  createdOn?: string; // Created on specific date (multiple formats)
+  createdRange?: string; // Time keyword (today, yesterday, this week, etc.)
+  stage?: string[]; // Filter by ticket stage - comma-separated
+  assignedTo?: string[]; // Filter by assigned user ID - comma-separated
 }
 
 export interface FileFilters {
@@ -99,9 +100,9 @@ buildYql(
   const schemaNames = schemas.join(', ');
   const whereConditions: string[] = [];
 
-  //Build search condition
-  const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
-  if (query && query.trim() && query !== '*') {
+    //Build search condition
+    const isTranscriptOnly = apps.length === 1 && apps[0].toLowerCase() === 'transcript';
+    if (query && query.trim() && query !== '*') {
       if (useFuzzy) {
         // Fuzzy: use text_fuzzy index
         whereConditions.push(`(
@@ -146,7 +147,7 @@ buildYql(
       or ({targetHits:${limit}} nearestNeighbor(qna_embeddings, e))
     )`);
       } else {
-        // Standard: no defaultIndex
+        // Standard: no defaultIndex - include both raw (for special chars) and default (for tokenization)
         whereConditions.push(`(
         (userInput(@query))
       or ({targetHits:${limit}} nearestNeighbor(text_embeddings, e))
@@ -157,22 +158,22 @@ buildYql(
     // Build app-specific conditions
     const appConditions: string[] = [];
 
-    if (apps.some(a => a.toLowerCase() === 'chat')) {
-      appConditions.push(this.buildChatConditions(slackFilters , userId));
+    if (apps.some((a) => a.toLowerCase() === 'chat')) {
+      appConditions.push(this.buildChatConditions(slackFilters, userId));
     }
 
-    if (apps.some(a => a.toLowerCase() === 'ticket')) {
+    if (apps.some((a) => a.toLowerCase() === 'ticket')) {
       appConditions.push(this.buildTicketConditions(ticketFilters, userId));
     }
 
-    if (apps.some(a => a.toLowerCase() === 'user')) {
+    if (apps.some((a) => a.toLowerCase() === 'user')) {
       appConditions.push(this.buildUserConditions());
     }
-    if (apps.some(a => a.toLowerCase() === 'file')) {
+    if (apps.some((a) => a.toLowerCase() === 'file')) {
       appConditions.push(this.buildFileConditions(fileFilters, userId));
     }
 
-    if (apps.some(a => a.toLowerCase() === 'transcript')) {
+    if (apps.some((a) => a.toLowerCase() === 'transcript')) {
       appConditions.push(this.buildMeetingConditions(meetingFilters));
     }
 
@@ -185,18 +186,18 @@ buildYql(
       whereConditions.push(`(${appConditions.join(' or ')})`);
     }
     let yql = `select * from sources ${schemaNames} where ${whereConditions.join(' and ')}`;
-     if (groupBy && apps.length!=1) {
+    if (groupBy && apps.length != 1) {
       const groupClause = this.buildGroupingClause(groupBy, limit);
       yql += `| ${groupClause}`;
     }
 
     return yql;
-}
+  }
   /**
    * Build YQL condition for user search
    * Applies to user schemas
    */
-private buildUserConditions(): string {
+  private buildUserConditions(): string {
     // User search is simple - just filter by docType
     return `docType contains "user"`;
   }
@@ -214,33 +215,44 @@ private buildUserConditions(): string {
     const subAppConditions: string[] = [];
 
     // Determine which subApps to include (default to ALL if not specified)
-    const subApps = filters.subApp && filters.subApp.length > 0
-      ? filters.subApp.map(s => s.trim())
-      : ['CANVAS', 'TRANSCRIPT', 'CHAT_ATTACHMENT', 'TICKET_ATTACHMENT', 'RCA'];
+    const subApps =
+      filters.subApp && filters.subApp.length > 0
+        ? filters.subApp.map((s) => s.trim())
+        : ['CANVAS', 'TRANSCRIPT', 'CHAT_ATTACHMENT', 'TICKET_ATTACHMENT', 'RCA'];
 
     if (filters.channelId && filters.channelId.length > 0) {
-      const channelIds = filters.channelId.map(c => `channelId contains "${c.trim()}"`).join(' or ');
+      const channelIds = filters.channelId
+        .map((c) => `channelId contains "${c.trim()}"`)
+        .join(' or ');
       conditions.push(`(${channelIds})`);
     }
 
     // Owner filter (created_by)
     if (filters.ownerId && filters.ownerId.length > 0) {
-      const ownerIds = filters.ownerId.map(id => `ownerId contains "${id.trim()}"`).join(' or ');
+      const ownerIds = filters.ownerId.map((id) => `ownerId contains "${id.trim()}"`).join(' or ');
       conditions.push(`(${ownerIds})`);
     }
-    
+
     // Canvas: require owner/permissions/isPrivate check
-    if (subApps.some(s => s === 'CANVAS')) {
-      subAppConditions.push(`((subApp contains "CANVAS") and (ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false"))`);
+    if (subApps.some((s) => s === 'CANVAS')) {
+      subAppConditions.push(
+        `((subApp contains "CANVAS") and (ownerId contains "${userId}" or permissions contains "${userId}" or isPrivate contains "false"))`
+      );
     }
 
     // Chat/Ticket/Transcript attachments: require owner/channelPermissions/isPrivate check
-    if (subApps.some(s => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT' || s === 'TRANSCRIPT')) {
-      subAppConditions.push(`((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT" or subApp contains "TRANSCRIPT") and (ownerId contains "${userId}" or channelPermissions contains "${userId}" or isPrivate contains "false"))`);
+    if (
+      subApps.some(
+        (s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT' || s === 'TRANSCRIPT'
+      )
+    ) {
+      subAppConditions.push(
+        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT" or subApp contains "TRANSCRIPT") and (ownerId contains "${userId}" or channelPermissions contains "${userId}" or isPrivate contains "false"))`
+      );
     }
 
     // RCA: no permission check (public)
-    if (subApps.some(s => s === 'RCA')) {
+    if (subApps.some((s) => s === 'RCA')) {
       subAppConditions.push(`subApp contains "RCA"`);
     }
 
@@ -250,7 +262,7 @@ private buildUserConditions(): string {
 
     // callType filter (e.g. HEADLESS for recordings)
     if (filters.callType && filters.callType.length > 0) {
-      const types = filters.callType.map(t => `callType contains "${t.trim()}"`).join(' or ');
+      const types = filters.callType.map((t) => `callType contains "${t.trim()}"`).join(' or ');
       conditions.push(`(${types})`);
     }
 
@@ -273,7 +285,9 @@ private buildUserConditions(): string {
       const rangeStart = parseDateToTimestamp(filters.createdOn, 'start');
       const rangeEnd = parseDateToTimestamp(filters.createdOn, 'end');
       if (rangeStart && rangeEnd) {
-        conditions.push(`(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`);
+        conditions.push(
+          `(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`
+        );
       }
     }
 
@@ -281,7 +295,9 @@ private buildUserConditions(): string {
     if (filters.createdRange) {
       const timeRange = parseTimeKeyword(filters.createdRange);
       if (timeRange) {
-        conditions.push(`(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`);
+        conditions.push(
+          `(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`
+        );
       }
     }
     return conditions.join(' and ');
@@ -290,34 +306,57 @@ private buildUserConditions(): string {
    * Build YQL condition for Slack app
    * Applies to message, channel, and attachment schemas
    */
-private buildChatConditions(filters: SlackFilters, userId: string): string {
+  private buildChatConditions(filters: SlackFilters, userId: string): string {
     const conditions: string[] = [];
     // DocType filter
     if (filters.docType && filters.docType.length > 0) {
-      const docTypes = filters.docType.map(t => `docType contains "${t.trim()}"`).join(' or ');
+      const docTypes = filters.docType.map((t) => `docType contains "${t.trim()}"`).join(' or ');
       conditions.push(`(${docTypes})`);
     } else {
-      conditions.push(`(docType contains "${VespaDocType.MESSAGE}" or docType contains "${VespaDocType.ATTACHMENT}")`);
+      conditions.push(
+        `(docType contains "${VespaDocType.MESSAGE}" or docType contains "${VespaDocType.ATTACHMENT}")`
+      );
     }
 
     // Project filter
     if (filters.projectId && filters.projectId.length > 0) {
-      const projects = filters.projectId.map(id => `projectId contains "${id.trim()}"`).join(' or ');
+      const projects = filters.projectId
+        .map((id) => `projectId contains "${id.trim()}"`)
+        .join(' or ');
       conditions.push(`(${projects})`);
     }
 
     // Channel filter
     if (filters.channelId && filters.channelId.length > 0) {
-      const channels = filters.channelId.map(id => `channelId contains "${id.trim()}"`).join(' or ');
+      const channels = filters.channelId
+        .map((id) => `channelId contains "${id.trim()}"`)
+        .join(' or ');
       conditions.push(`(${channels})`);
     }
 
     // Sender filter
     if (filters.senderId && filters.senderId.length > 0) {
-      const senders = filters.senderId.map(id => `userId contains "${id.trim()}"`).join(' or ');
+      const senders = filters.senderId.map((id) => `userId contains "${id.trim()}"`).join(' or ');
       conditions.push(`(${senders})`);
     }
-     if (filters.createdBefore) {
+
+    // Participants filter (with:) - user involved in any way (sent, mentioned, thread)
+    // Matches userId for direct messages, and threadMentions/threadSenders for thread participation
+    if (filters.participants && filters.participants.length > 0) {
+      const participantConditions = filters.participants
+        .map((id) => {
+          const trimmedId = id.trim();
+          return `(
+          userId contains "${trimmedId}" OR
+          threadMentions contains "${trimmedId}" OR
+          threadSenders contains "${trimmedId}"
+        )`;
+        })
+        .join(' or ');
+      conditions.push(`(${participantConditions})`);
+    }
+
+    if (filters.createdBefore) {
       const timestamp = parseDateToTimestamp(filters.createdBefore, 'start');
       if (timestamp) conditions.push(`createdAtTimestamp < ${timestamp}`);
     }
@@ -331,7 +370,9 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
       const rangeStart = parseDateToTimestamp(filters.createdOn, 'start');
       const rangeEnd = parseDateToTimestamp(filters.createdOn, 'end');
       if (rangeStart && rangeEnd) {
-        conditions.push(`(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`);
+        conditions.push(
+          `(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`
+        );
       }
     }
 
@@ -339,12 +380,14 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
     if (filters.createdRange) {
       const timeRange = parseTimeKeyword(filters.createdRange);
       if (timeRange) {
-        conditions.push(`(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`);
+        conditions.push(
+          `(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`
+        );
       }
     }
+    // Permissions check: user must have explicit permissions OR channel is public
+    conditions.push(`(permissions contains "${userId}" or isPrivate contains "false")`);
     // Exclude system messages
-    //Permissions check
-    conditions.push(`permissions contains "${userId}"`);
     conditions.push(`!(messageType contains "SYSTEM")`);
 
     // Optionally exclude bot messages (cmd-K toggle, default off → exclude)
@@ -367,62 +410,76 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
 
     // Project filter
     if (filters.projectId && filters.projectId.length > 0) {
-      const projects = filters.projectId.map(id => `projectId contains "${id.trim()}"`).join(' or ');
+      const projects = filters.projectId
+        .map((id) => `projectId contains "${id.trim()}"`)
+        .join(' or ');
       conditions.push(`(${projects})`);
-    }else{
+    } else {
       conditions.push(`permissions contains "${userId}"`);
     }
 
     // Channel filter
     if (filters.channelId && filters.channelId.length > 0) {
-      const channels = filters.channelId.map(id => `channelId contains "${id.trim()}"`).join(' or ');
+      const channels = filters.channelId
+        .map((id) => `channelId contains "${id.trim()}"`)
+        .join(' or ');
       conditions.push(`(${channels})`);
     }
 
     // Status filter
     if (filters.status && filters.status.length > 0) {
-      const statuses = filters.status.map(s => `status contains "${s.trim().toUpperCase()}"`).join(' or ');
+      const statuses = filters.status
+        .map((s) => `status contains "${s.trim().toUpperCase()}"`)
+        .join(' or ');
       conditions.push(`(${statuses})`);
     }
 
     // Ticket ID filter
     if (filters.ticketId && filters.ticketId.length > 0) {
-      const tickets = filters.ticketId.map(id => `docId contains "${id.trim()}"`).join(' or ');
+      const tickets = filters.ticketId.map((id) => `docId contains "${id.trim()}"`).join(' or ');
       conditions.push(`(${tickets})`);
     }
 
     if (filters.priority && filters.priority.length > 0) {
-      const priorities = filters.priority.map(p => `priority contains "${p.trim().toUpperCase()}"`).join(' or ');
+      const priorities = filters.priority
+        .map((p) => `priority contains "${p.trim().toUpperCase()}"`)
+        .join(' or ');
       conditions.push(`(${priorities})`);
     }
 
     // CreatedBy filter (for from: functionality)
     if (filters.createdBy && filters.createdBy.length > 0) {
-      const creators = filters.createdBy.map(id => `createdBy contains "${id.trim()}"`).join(' or ');
+      const creators = filters.createdBy
+        .map((id) => `createdBy contains "${id.trim()}"`)
+        .join(' or ');
       conditions.push(`(${creators})`);
     }
 
     // Board filter (array - comma-separated)
     if (filters.boardId && filters.boardId.length > 0) {
-      const boards = filters.boardId.map(id => `boardId contains "${id.trim()}"`).join(' or ');
+      const boards = filters.boardId.map((id) => `boardId contains "${id.trim()}"`).join(' or ');
       conditions.push(`(${boards})`);
     }
 
     // Tags filter (array)
     if (filters.tags && filters.tags.length > 0) {
-      const tagConditions = filters.tags.map(tag => `tags contains "${tag.trim()}"`).join(' or ');
+      const tagConditions = filters.tags.map((tag) => `tags contains "${tag.trim()}"`).join(' or ');
       conditions.push(`(${tagConditions})`);
     }
 
     // Stage filter
     if (filters.stage && filters.stage.length > 0) {
-      const stages = filters.stage.map(s => `stage contains "${s.trim().toUpperCase()}"`).join(' or ');
+      const stages = filters.stage
+        .map((s) => `stage contains "${s.trim().toUpperCase()}"`)
+        .join(' or ');
       conditions.push(`(${stages})`);
     }
 
     // AssignedTo filter (search by ID)
     if (filters.assignedTo && filters.assignedTo.length > 0) {
-      const assignees = filters.assignedTo.map(id => `assignedTo contains "${id.trim()}"`).join(' or ');
+      const assignees = filters.assignedTo
+        .map((id) => `assignedTo contains "${id.trim()}"`)
+        .join(' or ');
       conditions.push(`(${assignees})`);
     }
 
@@ -441,7 +498,9 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
       const rangeStart = parseDateToTimestamp(filters.createdOn, 'start');
       const rangeEnd = parseDateToTimestamp(filters.createdOn, 'end');
       if (rangeStart && rangeEnd) {
-        conditions.push(`(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`);
+        conditions.push(
+          `(createdAtTimestamp >= ${rangeStart} and createdAtTimestamp <= ${rangeEnd})`
+        );
       }
     }
 
@@ -449,7 +508,9 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
     if (filters.createdRange) {
       const timeRange = parseTimeKeyword(filters.createdRange);
       if (timeRange) {
-        conditions.push(`(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`);
+        conditions.push(
+          `(createdAtTimestamp >= ${timeRange.from} and createdAtTimestamp <= ${timeRange.to})`
+        );
       }
     }
 
@@ -468,25 +529,29 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
 
     // Platform filter
     if (filters.platform && filters.platform.length > 0) {
-      const platforms = filters.platform.map(p => `platform contains "${p.trim()}"`).join(' or ');
+      const platforms = filters.platform.map((p) => `platform contains "${p.trim()}"`).join(' or ');
       conditions.push(`(${platforms})`);
     }
 
     // Merchants filter
     if (filters.merchants && filters.merchants.length > 0) {
-      const merchantConditions = filters.merchants.map(m => `merchants contains "${m.trim()}"`).join(' or ');
+      const merchantConditions = filters.merchants
+        .map((m) => `merchants contains "${m.trim()}"`)
+        .join(' or ');
       conditions.push(`(${merchantConditions})`);
     }
 
     // Type filter
     if (filters.type && filters.type.length > 0) {
-      const types = filters.type.map(t => `type contains "${t.trim()}"`).join(' or ');
+      const types = filters.type.map((t) => `type contains "${t.trim()}"`).join(' or ');
       conditions.push(`(${types})`);
     }
 
     // Participants filter
     if (filters.participants && filters.participants.length > 0) {
-      const participantConditions = filters.participants.map(p => `participants contains "${p.trim()}"`).join(' or ');
+      const participantConditions = filters.participants
+        .map((p) => `participants contains "${p.trim()}"`)
+        .join(' or ');
       conditions.push(`(${participantConditions})`);
     }
 
@@ -594,24 +659,24 @@ private buildChatConditions(filters: SlackFilters, userId: string): string {
       case 'channelId':
         // Group by channel, show top results per channel
         return `all(group(channelId) max(${maxGroups}) each(max(5) each(output(summary()))))`;
-      
+
       case 'docType':
         // Group by document type (messages, channels, attachments, etc.)
         return `all(group(docType) max(10) each(max(10) each(output(summary()))))`;
-      
+
       case 'senderId':
       case 'userId':
         // Group by sender/user
         return `all(group(userId) max(${maxGroups}) each(max(5) each(output(summary()))))`;
-      
+
       case 'date':
         // Group by date (requires time buckets)
         return `all(group(time.date(createdAt)) max(30) each(max(10) each(output(summary()))))`;
-      
+
       case 'hour':
         // Group by hour
         return `all(group(time.hourofday(createdAt)) max(24) each(max(10) each(output(summary()))))`;
-      
+
       default:
         // Generic grouping by field
         return `all(group(${groupByField}) max(${maxGroups}) each(max(5) each(output(summary()))))`;

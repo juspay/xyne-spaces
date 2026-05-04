@@ -20,7 +20,7 @@ import { $createMentionNode, MentionData, $isMentionNode } from './MentionNode';
 import { MentionType } from './ChannelCommandMenu.types';
 
 export type ChannelTriggerType = '#' | 'in:' | 'in:#' | 'in:@';
-export type UserTriggerType = '@' | 'from:' | 'assignee:' | 'in:@';
+export type UserTriggerType = '@' | 'from:' | 'with:' | 'assignee:' | 'in:@';
 
 interface MentionPluginProps {
   onUserSearch?: (query: string | null, trigger?: UserTriggerType) => void;
@@ -65,13 +65,15 @@ export function MentionPlugin({
     // Debounce search to avoid too many calls
     const timeoutId = setTimeout(() => {
       if (triggerType === MentionType.USER && onUserSearch) {
-        // User triggers: '@' navigates to DM; 'from:'/'assignee:' create filter chips
+        // User triggers: '@' navigates to DM; 'from:'/'assignee:'/'with:' create filter chips
         const userTrigger: UserTriggerType =
           triggerText.current === '@'
             ? '@'
             : triggerText.current === 'assignee:'
               ? 'assignee:'
-              : 'from:';
+              : triggerText.current === 'with:'
+                ? 'with:'
+                : 'from:';
         onUserSearch(searchTerm, userTrigger);
       } else if (triggerType === MentionType.CHANNEL && onChannelSearch) {
         // Channel triggers today: '#' or 'in:'. Anything else falls back to
@@ -145,11 +147,21 @@ export function MentionPlugin({
             anchorNode.setTextContent(textBefore);
 
             // Create mention node
+            const normalizedPrefix: 'from:' | 'with:' | 'in:' | 'assignee:' | null =
+              trigger === 'from:'
+                ? 'from:'
+                : trigger === 'with:'
+                  ? 'with:'
+                  : trigger === 'assignee:'
+                    ? 'assignee:'
+                    : trigger?.startsWith('in:')
+                      ? 'in:'
+                      : null;
             const mentionData: MentionData = {
               id: item.id,
               name: item.name,
               type: type === MentionType.USER ? MentionType.USER : MentionType.CHANNEL,
-              prefix: trigger as 'from:' | 'in:' | 'assignee:',
+              ...(normalizedPrefix && { prefix: normalizedPrefix }),
               ...(item.email && { email: item.email }),
             };
             const mentionNode = $createMentionNode(mentionData);
@@ -196,14 +208,16 @@ export function MentionPlugin({
 
         // Normalize trigger to the correct prefix
         // 'in:#' and 'in:@' are trigger modifiers, but the actual prefix should be 'in:'
-        const normalizedPrefix: 'from:' | 'in:' | 'assignee:' | null =
+        const normalizedPrefix: 'from:' | 'with:' | 'in:' | 'assignee:' | null =
           trigger === 'from:'
             ? 'from:'
-            : trigger === 'assignee:'
-              ? 'assignee:'
-              : trigger?.startsWith('in:')
-                ? 'in:'
-                : null;
+            : trigger === 'with:'
+              ? 'with:'
+              : trigger === 'assignee:'
+                ? 'assignee:'
+                : trigger?.startsWith('in:')
+                  ? 'in:'
+                  : null;
 
         // Create mention node
         const mentionData: MentionData = {
@@ -513,8 +527,9 @@ export function MentionPlugin({
         // Look for trigger patterns before cursor
         const textBeforeCursor = textContent.substring(0, cursorOffset);
 
-        // Check for "from:" or "@" (user triggers)
+        // Check for "from:", "with:", or "@" (user triggers)
         const fromMatch = textBeforeCursor.match(/\bfrom:\s*(.*)$/i);
+        const withMatch = textBeforeCursor.match(/\bwith:\s*(.*)$/i);
         const atMatch = textBeforeCursor.match(/@(\S*)$/);
 
         const assigneeMatch = textBeforeCursor.match(/\bassignee:\s*(.*)$/i);
@@ -532,6 +547,13 @@ export function MentionPlugin({
             text: 'from:',
             query: (fromMatch[1] || '').replace(/^@/, '').trim(),
             index: textBeforeCursor.lastIndexOf('from:'),
+          };
+        } else if (withMatch) {
+          trigger = {
+            type: 'user',
+            text: 'with:',
+            query: (withMatch[1] || '').replace(/^@/, '').trim(),
+            index: textBeforeCursor.lastIndexOf('with:'),
           };
         } else if (assigneeMatch) {
           trigger = {

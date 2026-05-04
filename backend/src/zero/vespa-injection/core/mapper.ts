@@ -157,18 +157,14 @@ export const getThreadInfo = async (
     return { messages: [], threadMentions: [], threadSenders: [] };
   }
 
-  // Extract mentions from all messages
+  // Extract mentions from all messages - store user IDs
   const mentionsPerMessage = await Promise.all(
     messages.map(m => extractMentionsFromContent(m.content))
   ) || [];
-  const threadMentions = mentionsPerMessage.flatMap(mentions => mentions?.map(v => v.username) || []);
+  const threadMentions = mentionsPerMessage.flatMap(mentions => mentions?.map(v => v.userId) || []);
 
-  // Get sender names
-  const senderIds = [...new Set(messages.map(msg => msg.senderId))];
-  const senders = await db.user.findMany({
-    where: { id: { in: senderIds } },
-  }) || [];
-  const threadSenders = senders.map(s => s.name).filter(Boolean) as string[];
+  // Get unique sender IDs directly from messages
+  const threadSenders = [...new Set(messages.map(msg => msg.senderId))];
 
   return { messages, threadMentions, threadSenders };
 };

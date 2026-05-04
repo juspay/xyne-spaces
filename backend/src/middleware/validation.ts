@@ -64,7 +64,7 @@ export const validateQuery = (schema: Joi.ObjectSchema) => {
  */
 export const validateSearchFilters = () => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const { priority, offset = 0, limit = 20, projectId, in: inChannel, from, on, after, before, range, board, ticketId, assignee, type } = req.query;
+    const { priority, offset = 0, limit = 20, projectId, in: inChannel, from, withUser, on, after, before, range, board, ticketId, assignee, type } = req.query;
 
     // Validate 'on' filter (specific date)
     if (on) {
@@ -141,6 +141,15 @@ export const validateSearchFilters = () => {
         }
       }
 
+      // Validate withUser (IDs)
+      if (withUser) {
+        const userIds = parseIds(withUser as string);
+        const validation = await validateUserIds(userIds);
+        if (validation.invalid.length > 0) {
+          return next(new AppError(`Invalid user IDs: ${validation.invalid.join(', ')}`, 400));
+        }
+      }
+ 
       // Validate docType (type parameter)
       if (type) {
         const docTypes = parseIds(type as string);

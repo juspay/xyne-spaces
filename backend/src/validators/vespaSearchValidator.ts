@@ -63,6 +63,18 @@ export const vespaSearchQuerySchema = Joi.object({
       'alternatives.types': 'From must be a string or array of user IDs'
     }),
 
+  withUser: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'With must be a string or array of user IDs'
+    }),
+  
   in: Joi.alternatives()
     .try(
       Joi.array().items(Joi.string()),
