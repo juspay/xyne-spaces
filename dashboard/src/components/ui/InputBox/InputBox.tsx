@@ -10,7 +10,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { NodeType as PMNodeType, Node as PMNode } from '@tiptap/pm/model';
 import StarterKit from '@tiptap/starter-kit';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
-import { Extension } from '@tiptap/core';
+import { Extension, textblockTypeInputRule } from '@tiptap/core';
 import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
@@ -219,6 +219,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       }));
     }, [attachmentsMap]);
     const [isFocused, setIsFocused] = useState(false);
+    const [isInCodeBlock, setIsInCodeBlock] = useState(false);
     const [content, setContent] = useState('');
     const [isSending, setIsSending] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -437,7 +438,16 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           getCustomEmojis: () => customEmojisRef.current || [],
         }),
         TextEmoticonExtension,
-        CodeBlockLowlight.configure({
+        CodeBlockLowlight.extend({
+          addInputRules() {
+            return [
+              textblockTypeInputRule({
+                find: /^```$/,
+                type: this.type,
+              }),
+            ];
+          },
+        }).configure({
           lowlight,
           defaultLanguage: 'plaintext',
           HTMLAttributes: {
@@ -480,8 +490,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       onBlur: () => {
         setIsFocused(false);
       },
+      onSelectionUpdate: ({ editor }) => {
+        setIsInCodeBlock(editor.isActive('codeBlock'));
+      },
       onUpdate: ({ editor }) => {
         setContent(editor.getText().trim());
+        setIsInCodeBlock(editor.isActive('codeBlock'));
         handleTyping?.();
         notifyTyping(); // Notify the typing state context
 
@@ -1091,12 +1105,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-6 break-words
                   text-foreground placeholder:text-muted-foreground
                   [&_a]:pointer-events-none
+                  [&_p.is-editor-empty:before]:hidden
                   ${emojiSizeClass}
-                  ${typeof placeholder !== 'string' ? '[&_p.is-editor-empty:before]:hidden' : ''}
                 `}
               />
-              {typeof placeholder !== 'string' &&
-                (!content || (editor && editor.isEmpty)) &&
+              {!content &&
+                !isInCodeBlock &&
                 !editor?.isActive('bulletList') &&
                 !editor?.isActive('orderedList') &&
                 !editor?.isActive('blockquote') && (
