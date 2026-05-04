@@ -1,12 +1,28 @@
 /**
  * HTTP client for the Xyne Spaces backend.
  *
- * Reads XYNE_SPACES_URL and XYNE_SPACES_TOKEN (google_access_token) from env.
- * Calls backend API routes directly: /api/query, /api/search, /api/memory/search.
+ * Default auth/base URL are read from env:
+ * - XYNE_SPACES_URL (legacy)
+ * - SPACES_BACKEND_URL (preferred fallback)
+ * - XYNE_SPACES_TOKEN
+ * - XYNE_SPACES_SESSION_ID
+ *
+ * Callers can override auth per request for user-scoped routes.
  */
 
-const BASE_URL = (process.env["XYNE_SPACES_URL"] ?? "").replace(/\/+$/, "");
-const TOKEN = process.env["XYNE_SPACES_TOKEN"] ?? "";
+export interface SpacesAuthContext {
+  token?: string;
+  sessionId?: string;
+  baseUrl?: string;
+}
+
+function resolveBaseUrl(override?: string): string {
+  const raw = override
+    ?? process.env["XYNE_SPACES_URL"]
+    ?? process.env["SPACES_BACKEND_URL"]
+    ?? "";
+  return raw.replace(/\/+$/, "");
+}
 
 // Extract Spaces userId from the JWT token's `sub` claim
 function extractUserIdFromToken(token: string): string {
@@ -20,15 +36,29 @@ function extractUserIdFromToken(token: string): string {
   }
 }
 
-export const CURRENT_USER_ID = extractUserIdFromToken(TOKEN);
+const DEFAULT_TOKEN = process.env["XYNE_SPACES_TOKEN"] ?? "";
 
-export async function spacesFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const url = `${BASE_URL}${path}`;
+export const CURRENT_USER_ID = extractUserIdFromToken(DEFAULT_TOKEN);
+
+export async function spacesFetch(path: string, init?: RequestInit, auth?: SpacesAuthContext): Promise<unknown> {
+  const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
+  const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
+  const baseUrl = resolveBaseUrl(auth?.baseUrl);
+
+  if (!baseUrl) {
+    throw new Error("Spaces base URL is not configured. Set SPACES_BACKEND_URL (preferred) or XYNE_SPACES_URL.");
+  }
+  if (!token) {
+    throw new Error("Spaces auth token is missing for this request.");
+  }
+
+  const url = new URL(path, `${baseUrl}/`).toString();
   const response = await fetch(url, {
     ...init,
     headers: {
-      Authorization: `Bearer ${TOKEN}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      ...(sessionId ? { "x-session-id": sessionId } : {}),
       ...(init?.headers as Record<string, string> | undefined),
     },
     signal: init?.signal ?? AbortSignal.timeout(30_000),
@@ -53,27 +83,27 @@ export interface QueryAST {
   select?: Record<string, unknown>;
 }
 
-export async function interact(ast: QueryAST): Promise<unknown> {
+export async function interact(ast: QueryAST, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(ast);
   console.error(`[spaces-client] POST /api/query ${payload}`);
   const result = (await spacesFetch("/api/query", {
     method: "POST",
     body: payload,
-  })) as { data: unknown };
+  }, auth)) as { data: unknown };
   return result.data;
 }
 
-export async function search(params: Record<string, string>): Promise<unknown> {
+export async function search(params: Record<string, string>, auth?: SpacesAuthContext): Promise<unknown> {
   const qs = new URLSearchParams(params).toString();
   console.error(`[spaces-client] GET /api/search?${qs}`);
-  return spacesFetch(`/api/search?${qs}`);
+  return spacesFetch(`/api/vespaSearch?${qs}`, undefined, auth);
 }
 
-export async function memorySearch(body: Record<string, unknown>): Promise<unknown> {
+export async function memorySearch(body: Record<string, unknown>, auth?: SpacesAuthContext): Promise<unknown> {
   const payload = JSON.stringify(body);
   console.error(`[spaces-client] POST /api/memory/search ${payload}`);
   return spacesFetch("/api/memory/search", {
     method: "POST",
     body: payload,
-  });
+  }, auth);
 }

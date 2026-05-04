@@ -12,6 +12,7 @@ interface McpServerTools {
   readonly serverType: string;
   readonly serverName: string;
   readonly tools: McpToolInfo[];
+  readonly writeTools: readonly string[];
 }
 
 interface AuthResponse<T> {
@@ -33,11 +34,20 @@ async function authFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return body.data;
 }
 
+/** A group of MCP tools from one server, with write tool info preserved */
+export interface McpToolGroup {
+  serverType: string;
+  serverName: string;
+  tools: ToolDefinition[];
+  writeTools: string[];
+}
+
 export async function loadMcpToolsForUser(
   userId: string,
   toolPermissions?: Record<string, string>,
+  agentSlug?: string,
 ): Promise<{
-  tools: ToolDefinition[];
+  groups: McpToolGroup[];
   cleanup: () => Promise<void>;
   getPendingActions: () => Array<Record<string, unknown>>;
 }> {
@@ -47,25 +57,36 @@ export async function loadMcpToolsForUser(
   );
 
   if (servers.length === 0) {
-    return { tools: [], cleanup: async () => {}, getPendingActions: () => [] };
+    return { groups: [], cleanup: async () => {}, getPendingActions: () => [] };
   }
 
   const pendingActions: Array<Record<string, unknown>> = [];
-
-  const tools: ToolDefinition[] = [];
+  const groups: McpToolGroup[] = [];
 
   for (const server of servers) {
+    // query-routing tools are only available to the investigation-agent
+    if (server.serverType === "query-routing" && agentSlug !== "investigation-agent") {
+      continue;
+    }
+
+    const tools: ToolDefinition[] = [];
+
     for (const mcpTool of server.tools) {
       const toolKey = `${server.serverType}__${mcpTool.name}`;
       const permission = permissions[toolKey] ?? "allow";
 
+      const safeName = `${server.serverName}__${mcpTool.name}`.replace(/[^a-zA-Z0-9_.\-]/g, "_");
       const definition: ToolDefinition = {
-        name: `${server.serverName}__${mcpTool.name}`,
+        name: safeName,
         label: `${server.serverName}/${mcpTool.name}`,
         description: mcpTool.description || `Tool ${mcpTool.name} from ${server.serverName}`,
         parameters: Type.Unsafe(mcpTool.inputSchema),
         async execute(_toolCallId, params) {
-          const result = await authFetch<{ content: string; pendingAction?: Record<string, unknown> }>(
+          const result = await authFetch<{
+            content: string;
+            citations?: import("xyne-claw-shared").Citation[];
+            pendingAction?: Record<string, unknown>;
+          }>(
             `/claw/api/v1/users/${encodeURIComponent(userId)}/mcp/call`,
             {
               method: "POST",
@@ -74,12 +95,20 @@ export async function loadMcpToolsForUser(
                 tool: mcpTool.name,
                 params: params as Record<string, unknown>,
                 permission,
+                agentSlug,
               }),
             },
           );
 
           if (result.pendingAction) {
             pendingActions.push(result.pendingAction);
+          }
+
+          // Stash structured citations keyed by toolCallId so agent.ts can
+          // attach them to the recorded ToolInvocation in tool_execution_end.
+          if (result.citations && result.citations.length > 0) {
+            const { recordCitations } = await import("./citations.js");
+            recordCitations(_toolCallId, result.citations);
           }
 
           return {
@@ -90,9 +119,17 @@ export async function loadMcpToolsForUser(
       };
       tools.push(definition);
     }
+
+    groups.push({
+      serverType: server.serverType,
+      serverName: server.serverName,
+      tools,
+      writeTools: [...(server.writeTools ?? [])],
+    });
   }
 
-  console.log(`[mcp] Loaded ${tools.length} tools for user ${userId}`);
+  const totalTools = groups.reduce((sum, g) => sum + g.tools.length, 0);
+  console.log(`[mcp] Loaded ${totalTools} tools in ${groups.length} groups for user ${userId}`);
 
-  return { tools, cleanup: async () => {}, getPendingActions: () => pendingActions };
+  return { groups, cleanup: async () => {}, getPendingActions: () => pendingActions };
 }

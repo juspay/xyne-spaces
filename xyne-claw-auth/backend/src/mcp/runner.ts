@@ -1,21 +1,13 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./types.js";
-import { grafanaAdapter } from "./adapters/grafana.js";
-import { bitbucketAdapter } from "./adapters/bitbucket.js";
-import { kibanaAdapter } from "./adapters/kibana.js";
-import { xyneSpacesAdapter } from "./adapters/xyne-spaces.js";
-
-const ADAPTERS: Record<string, McpAdapter> = {
-  grafana: grafanaAdapter,
-  bitbucket: bitbucketAdapter,
-  kibana: kibanaAdapter,
-  "xyne-spaces": xyneSpacesAdapter,
-};
+import { STATIC_ADAPTERS } from "./static-adapters.js";
+import { resolveConnectorDefinition } from "./connector-definitions.js";
 
 interface McpSession {
   client: Client;
-  transport: StdioClientTransport;
+  transport: StdioClientTransport | StreamableHTTPClientTransport;
 }
 
 const sessions = new Map<string, McpSession>();
@@ -35,21 +27,35 @@ async function getOrCreateSession(
     return existing.client;
   }
 
-  const adapter = ADAPTERS[serverType];
-  if (!adapter) {
-    throw new Error(`No adapter for server type: ${serverType}`);
+  const definition = await resolveConnectorDefinition(serverType);
+  if (!definition) {
+    throw new Error(`No connector definition for server type: ${serverType}`);
   }
 
-  const { cmd, args, env } = adapter.buildCommand(credentials);
+  let transport: StdioClientTransport | StreamableHTTPClientTransport;
 
-  const transport = new StdioClientTransport({
-    command: cmd,
-    args,
-    env: { ...process.env, ...env } as Record<string, string>,
-  });
+  if (definition.transport === "http") {
+    // Remote MCP server — connect over Streamable HTTP
+    const { url, headers } = definition.buildHttpConfig(credentials);
+    if (!url) throw new Error(`Missing HTTP URL in connector definition for ${serverType}`);
+    transport = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: {
+        headers,
+      },
+    });
+  } else {
+    // Local MCP server — spawn child process over stdio
+    const { cmd, args, env } = definition.buildStdioCommand(credentials);
+    if (!cmd) throw new Error(`Missing stdio command in connector definition for ${serverType}`);
+    transport = new StdioClientTransport({
+      command: cmd,
+      args: [...args],
+      env: { ...process.env, ...env } as Record<string, string>,
+    });
+  }
 
   const client = new Client({ name: "xyne-claw-auth", version: "0.1.0" });
-  await client.connect(transport);
+  await client.connect(transport as Parameters<typeof client.connect>[0]);
 
   transport.onclose = () => {
     sessions.delete(key);
@@ -74,7 +80,9 @@ export async function listToolsForUser(
     inputSchema: t.inputSchema as Record<string, unknown>,
   }));
 
-  return { serverType, serverName, tools };
+  const definition = await resolveConnectorDefinition(serverType);
+  const writeTools = definition?.writeTools ?? [];
+  return { serverType, serverName, tools, writeTools };
 }
 
 export async function callTool(
@@ -98,7 +106,14 @@ export async function callTool(
       throw new Error(text || "MCP tool returned an error");
     }
 
-    return { content: text };
+    // MCP `_meta` is a free-form metadata field. Tools surface structured
+    // citations there so we can attach them to the invocation record without
+    // grepping the markdown body for IDs (Tier 1 citation propagation).
+    const meta = (result as { _meta?: { citations?: unknown } })._meta;
+    const citations = Array.isArray(meta?.citations) ? meta.citations as McpCallResult["citations"] : undefined;
+    return citations && citations.length > 0
+      ? { content: text, citations }
+      : { content: text };
   }
 
   return { content: JSON.stringify(result) };
@@ -126,9 +141,13 @@ export async function evictAllSessionsForUser(userId: string): Promise<void> {
 }
 
 export function hasAdapter(serverType: string): boolean {
-  return serverType in ADAPTERS;
+  return serverType in STATIC_ADAPTERS;
+}
+
+export function getAdapter(serverType: string): McpAdapter | undefined {
+  return STATIC_ADAPTERS[serverType];
 }
 
 export function getAdapters(): Record<string, McpAdapter> {
-  return ADAPTERS;
+  return STATIC_ADAPTERS;
 }

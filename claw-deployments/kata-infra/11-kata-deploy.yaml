@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kata-deploy
+  namespace: kube-system
+spec:
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      name: kata-deploy
+  template:
+    metadata:
+      labels:
+        name: kata-deploy
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: cloud.google.com/gke-nodepool
+                operator: In
+                values:
+                - kata-sandbox-ng
+                - xyne-claw-kata-ng
+                - kata-claw-c2-ng
+      containers:
+      - name: kube-kata
+        image: quay.io/kata-containers/kata-deploy:3.3.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - bash
+        - -c
+        - /opt/kata-artifacts/scripts/kata-deploy.sh install
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: DEBUG
+          value: "false"
+        - name: SHIMS
+          value: qemu
+        - name: DEFAULT_SHIM
+          value: qemu
+        - name: CREATE_RUNTIMECLASSES
+          value: "false"
+        - name: CREATE_DEFAULT_RUNTIMECLASS
+          value: "false"
+        - name: ALLOWED_HYPERVISOR_ANNOTATIONS
+          value: "default_memory default_vcpus"
+        - name: SNAPSHOTTER_HANDLER_MAPPING
+          value: ""
+        - name: AGENT_HTTPS_PROXY
+          value: ""
+        - name: AGENT_NO_PROXY
+          value: ""
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - bash
+              - -c
+              - /opt/kata-artifacts/scripts/kata-deploy.sh cleanup
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - mountPath: /etc/crio/
+          name: crio-conf
+        - mountPath: /etc/containerd/
+          name: containerd-conf
+        - mountPath: /opt/kata/
+          name: kata-artifacts
+        - mountPath: /usr/local/bin/
+          name: local-bin
+      dnsPolicy: ClusterFirst
+      hostPID: true
+      serviceAccountName: kata-deploy
+      tolerations:
+      - effect: NoSchedule
+        key: workload
+        value: xyne-claw
+      volumes:
+      - hostPath:
+          path: /etc/crio/
+          type: ""
+        name: crio-conf
+      - hostPath:
+          path: /etc/containerd/
+          type: ""
+        name: containerd-conf
+      - hostPath:
+          path: /opt/kata/
+          type: DirectoryOrCreate
+        name: kata-artifacts
+      - hostPath:
+          path: /usr/local/bin/
+          type: ""
+        name: local-bin
+  updateStrategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate

@@ -12,7 +12,9 @@ import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
+import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
+import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
 import {
   enqueueDelayedJob,
   enqueueCronJob,
@@ -22,6 +24,28 @@ import {
 } from "../queue/scheduled-jobs-queue.js";
 
 const router = Router();
+
+// ── Auth helpers ────────────────────────────────────────────────────
+
+/**
+ * Resolve the userId filter to apply for list/read operations.
+ *
+ * - Browser requests (JWT cookie or x-user-id header): always scoped to the requester.
+ *   Admins may pass `?userId=<other>` to look at someone else's jobs.
+ * - S2S requests (no requesterId set): no implicit filter; the caller decides.
+ */
+async function resolveScopedUserId(
+  req: Request,
+  explicitUserId?: string,
+): Promise<string | undefined> {
+  const requesterId = getRequesterId(req);
+  if (!requesterId) return explicitUserId; // S2S — trust caller
+  if (explicitUserId && explicitUserId !== requesterId) {
+    if (await isClawAdmin(requesterId)) return explicitUserId;
+    return requesterId; // non-admin attempting cross-user read — clamp to self
+  }
+  return requesterId;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -36,7 +60,7 @@ function decryptStoredField(stored: string): string {
 router.post("/", async (req: Request, res: Response) => {
   try {
     const {
-      userId, agentSlug, task, context,
+      userId: bodyUserId, agentSlug, task, context,
       channelId, conversationId,
       type, delayMs, cronExpression,
       label, maxRuns,
@@ -53,6 +77,15 @@ router.post("/", async (req: Request, res: Response) => {
       label?: string;
       maxRuns?: number;
     };
+
+    // Force userId from the authed requester; only S2S (no requesterId) or admins
+    // can create jobs owned by someone else.
+    const requesterId = getRequesterId(req);
+    const userId = requesterId
+      ? (bodyUserId && bodyUserId !== requesterId && (await isClawAdmin(requesterId))
+          ? bodyUserId
+          : requesterId)
+      : bodyUserId;
 
     if (!userId || !agentSlug || !task || !type) {
       res.status(400).json({ success: false, error: "userId, agentSlug, task, and type are required" });
@@ -161,10 +194,12 @@ router.post("/", async (req: Request, res: Response) => {
 
 router.get("/", async (req: Request, res: Response) => {
   try {
-    const { userId, status } = req.query as { userId?: string; status?: string };
+    const { userId: qUserId, status, agentSlug } = req.query as { userId?: string; status?: string; agentSlug?: string };
+    const userId = await resolveScopedUserId(req, qUserId);
     const where: Record<string, unknown> = {};
     if (userId) where["userId"] = userId;
     if (status) where["status"] = status;
+    if (agentSlug) where["agentSlug"] = agentSlug;
 
     const rows = await prisma.scheduledJob.findMany({
       where,
@@ -185,12 +220,54 @@ router.get("/", async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /runs — list runs across jobs (filter by agentSlug) ─────────
+
+router.get("/runs", async (req: Request, res: Response) => {
+  try {
+    const { agentSlug, userId: qUserId } = req.query as { agentSlug?: string; userId?: string };
+    if (!agentSlug) {
+      res.status(400).json({ success: false, error: "agentSlug is required" });
+      return;
+    }
+
+    const userId = await resolveScopedUserId(req, qUserId);
+    const jobWhere: Record<string, unknown> = { agentSlug };
+    if (userId) jobWhere["userId"] = userId;
+
+    const jobIds = await prisma.scheduledJob.findMany({
+      where: jobWhere,
+      select: { id: true },
+    });
+
+    const runs = await prisma.scheduledJobRun.findMany({
+      where: { scheduledJobId: { in: jobIds.map((j) => j.id) } },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: {
+        scheduledJob: {
+          select: { label: true, task: true, cronExpression: true },
+        },
+      },
+    });
+
+    res.json({ success: true, data: runs });
+  } catch (err) {
+    console.error("[scheduled-jobs] List runs error:", err);
+    res.status(500).json({ success: false, error: "Failed to list runs" });
+  }
+});
+
 // ── GET /:id — get single job ───────────────────────────────────────
 
 router.get("/:id", async (req: Request<{ id: string }>, res: Response) => {
   try {
     const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
     if (!row) {
+      res.status(404).json({ success: false, error: "Not found" });
+      return;
+    }
+    const requesterId = getRequesterId(req);
+    if (requesterId && row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
@@ -210,6 +287,17 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
   try {
     const row = await prisma.scheduledJob.findUnique({ where: { id: req.params.id } });
     if (!row) {
+      res.status(404).json({ success: false, error: "Not found" });
+      return;
+    }
+    // Delete is restricted to the job owner or a CLAW_ADMIN — S2S callers
+    // can't delete jobs on behalf of users.
+    const requesterId = getRequesterId(req);
+    if (!requesterId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+    if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
       res.status(404).json({ success: false, error: "Not found" });
       return;
     }
@@ -245,11 +333,80 @@ router.post("/:id/result", async (req: Request<{ id: string }>, res: Response) =
     status?: string;
     result?: string;
     error?: string;
+    toolsUsed?: string[];
+    toolInvocations?: unknown;
+    tokenUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
   };
 
   console.log(`[scheduled-jobs/result] Job ${id}: status=${payload.status}`);
   res.json({ success: true });
+
+  // Finalize AgentRun + save assistant ChatMessage (fire-and-forget)
+  if (payload.sessionId) {
+    const status = payload.status === "completed" ? "completed" : "failed";
+    agentRunRepository.finalize(payload.sessionId, {
+      status,
+      result: payload.result ?? null,
+      error: payload.error ?? null,
+      ...(payload.toolsUsed ? { toolsUsed: payload.toolsUsed } : {}),
+      ...(payload.toolInvocations !== undefined ? { toolInvocations: payload.toolInvocations } : {}),
+      ...(payload.tokenUsage ? { tokenUsage: payload.tokenUsage } : {}),
+    }).catch(() => {});
+
+    if (payload.result?.trim()) {
+      const run = await agentRunRepository.findBySessionId(payload.sessionId).catch(() => null);
+      if (run?.conversationId && run.agentSlug && run.userId) {
+        chatMessageRepository.create({
+          conversationId: run.conversationId,
+          agentSlug: run.agentSlug,
+          userId: run.userId,
+          role: "assistant",
+          content: payload.result,
+          status: "completed",
+        }).catch(() => {});
+      }
+    }
+  }
+
+  // Persist run result — find existing run by sessionId or create new
+  try {
+    if (payload.sessionId) {
+      const updated = await prisma.scheduledJobRun.updateMany({
+        where: { scheduledJobId: id, sessionId: payload.sessionId },
+        data: {
+          status: payload.status ?? "unknown",
+          result: payload.result ?? null,
+          error: payload.error ?? null,
+          completedAt: new Date(),
+        },
+      });
+      if (updated.count === 0) {
+        await prisma.scheduledJobRun.create({
+          data: {
+            scheduledJobId: id,
+            sessionId: payload.sessionId,
+            status: payload.status ?? "unknown",
+            result: payload.result ?? null,
+            error: payload.error ?? null,
+            completedAt: new Date(),
+          },
+        });
+      }
+    } else {
+      await prisma.scheduledJobRun.create({
+        data: {
+          scheduledJobId: id,
+          status: payload.status ?? "unknown",
+          result: payload.result ?? null,
+          error: payload.error ?? null,
+          completedAt: new Date(),
+        },
+      });
+    }
+  } catch (err) {
+    console.error(`[scheduled-jobs/result] Failed to persist run for job ${id}:`, err);
+  }
 
   if (payload.status !== "completed" || !payload.result) return;
 

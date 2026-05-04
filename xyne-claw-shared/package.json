@@ -7,16 +7,22 @@
   "exports": {
     ".": "./src/index.ts",
     "./tools": "./src/tools/index.ts",
-    "./tools/pgm": "./src/tools/pgm/index.ts"
+    "./tools/pgm": "./src/tools/pgm/index.ts",
+    "./tools/google": "./src/tools/google/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@xyne/kata-sdk": "file:../packages/kata-sdk",
+    "pdf-parse": "^2.4.5",
+    "pptxgenjs": "^4.0.1",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pdf-parse": "^1.1.5",
     "typescript": "^5.7.0"
   }
 }

@@ -6,6 +6,7 @@
  */
 
 import { interact, search, memorySearch, spacesFetch, CURRENT_USER_ID } from "./xyne-spaces-client.js";
+import type { Citation } from "xyne-claw-shared";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -13,6 +14,10 @@ interface ToolResult {
   [key: string]: unknown;
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
+  /** MCP `_meta` field — out-of-band metadata callers can read. We use it
+   *  to propagate structured citations from tools through the MCP transport
+   *  to xyne-claw's invocation record (see Tier 1 design). */
+  _meta?: { citations?: Citation[]; [k: string]: unknown };
 }
 
 export interface ToolDef {
@@ -26,8 +31,77 @@ function ok(text: string): ToolResult {
   return { content: [{ type: "text", text }] };
 }
 
+function okCited(text: string, citations: Citation[]): ToolResult {
+  return citations.length > 0
+    ? { content: [{ type: "text", text }], _meta: { citations } }
+    : { content: [{ type: "text", text }] };
+}
+
 function err(message: string): ToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+/**
+ * Push a thread citation `(channelId, conversationId)` into `out`, deduping
+ * by the composite key. Used by every tool that surfaces messages, tickets,
+ * search hits, or activity entries with both IDs available.
+ */
+function pushThreadCitation(
+  out: Citation[],
+  seen: Set<string>,
+  channelId: string | undefined | null,
+  conversationId: string | undefined | null,
+  label?: string,
+): void {
+  if (!channelId || !conversationId) return;
+  const key = `${channelId}/${conversationId}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  out.push({ kind: "thread", channelId, conversationId, ...(label ? { label } : {}) });
+}
+
+function pushCanvasCitation(out: Citation[], seen: Set<string>, viewAccessId: string | undefined | null, label?: string): void {
+  if (!viewAccessId || seen.has(`canvas/${viewAccessId}`)) return;
+  seen.add(`canvas/${viewAccessId}`);
+  out.push({ kind: "canvas", viewAccessId, ...(label ? { label } : {}) });
+}
+
+/**
+ * Single-query batch resolver: takes a list of channelIds and returns a
+ * Map<channelId, { name, scopeType }>. Used by tools that emit thread
+ * citations to enrich them with display name + channel type so the
+ * citation block renders as e.g. "Ticket XYNE-123 in #testing-claw (TICKET)"
+ * instead of an opaque "Spaces thread".
+ */
+async function resolveChannelInfo(channelIds: Iterable<string>): Promise<Map<string, { name?: string; scopeType?: string }>> {
+  const ids = [...new Set(Array.from(channelIds).filter(Boolean))];
+  if (ids.length === 0) return new Map();
+  try {
+    const rows = (await interact({
+      model: "channel",
+      operation: "findMany",
+      where: { id: { in: ids } },
+      take: ids.length,
+    })) as Array<{ id: string; name?: string; scopeType?: string }>;
+    const out = new Map<string, { name?: string; scopeType?: string }>();
+    for (const r of rows) {
+      out.set(r.id, { ...(r.name ? { name: r.name } : {}), ...(r.scopeType ? { scopeType: r.scopeType } : {}) });
+    }
+    return out;
+  } catch {
+    // Non-fatal — citations still work without channel display info.
+    return new Map();
+  }
+}
+
+function applyChannelInfo(citations: Citation[], info: Map<string, { name?: string; scopeType?: string }>): void {
+  for (const c of citations) {
+    if (c.kind !== "thread" || !c.channelId) continue;
+    const meta = info.get(c.channelId);
+    if (!meta) continue;
+    if (meta.name && !c.channelName) c.channelName = meta.name;
+    if (meta.scopeType && !c.channelType) c.channelType = meta.scopeType;
+  }
 }
 
 // ── spaces-search ────────────────────────────────────────────────────
@@ -35,8 +109,11 @@ function err(message: string): ToolResult {
 const spacesSearch: ToolDef = {
   name: "spaces-search",
   description:
-    "Search across all connected apps in Spaces — messages, tickets, files, channels, users. " +
-    "Supports filters like app, type, date range, priority, status, tags, and more.",
+    "Fast Vespa-powered search across all connected apps in Spaces — messages, tickets, files, channels, users. " +
+    "This is much faster than reading individual conversations. Use this when looking for specific topics, keywords, or people. " +
+    "IMPORTANT: For ticket-related queries (ticket status, ticket list, ticket details, finding tickets by label/tag/assignee), " +
+    "ALWAYS use spaces-tickets instead — it has richer filters and returns structured ticket data. " +
+    "Only use spaces-search for tickets when doing free-text keyword search across ticket content.",
   inputSchema: {
     type: "object",
     properties: {
@@ -65,7 +142,7 @@ const spacesSearch: ToolDef = {
       const query = String(args["query"] ?? "").trim();
       if (!query && !args["filterOnly"]) return err("A search query is required. Set filterOnly=true to search by filters only.");
       const params: Record<string, string> = {};
-      if (query) params["query"] = query;
+      if (query) params["q"] = query;
       params["limit"] = String(args["limit"] ?? 10);
       if (args["offset"]) params["offset"] = String(args["offset"]);
       if (args["apps"]) params["apps"] = String(args["apps"]);
@@ -83,6 +160,8 @@ const spacesSearch: ToolDef = {
       if (args["range"]) params["range"] = String(args["range"]);
       if (args["filterOnly"]) params["filterOnly"] = "true";
 
+      console.log(args);
+
       const data = (await search(params)) as {
         success: boolean;
         data?: {
@@ -95,21 +174,42 @@ const spacesSearch: ToolDef = {
 
       if (!data.success || !data.data) return err("Search failed.");
 
+      const citations: Citation[] = [];
+      const seen = new Set<string>();
+      const harvest = (r: SearchResult): void => {
+        const sc = r.searchContext ?? {};
+        const meta = r.metadata ?? {};
+        const channelId = (sc["channelId"] as string | undefined) ?? (meta["channelId"] as string | undefined);
+        const conversationId = (sc["conversationId"] as string | undefined) ?? (meta["conversationId"] as string | undefined);
+        pushThreadCitation(citations, seen, channelId, conversationId, r.title || r.type);
+      };
+
       if (data.data.grouped && data.data.groups) {
         const groups = data.data.groups;
         if (groups.length === 0) return ok(`No results found for "${args["query"]}".`);
         const parts: string[] = [];
         for (const group of groups) {
           parts.push(`--- ${group.groupValue} (${group.count}) ---`);
-          for (const r of group.results) parts.push(formatSearchResult(r));
+          for (const r of group.results) {
+            parts.push(formatSearchResult(r));
+            harvest(r);
+          }
           parts.push("");
         }
-        return ok(parts.join("\n"));
+        const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+        applyChannelInfo(citations, channelInfo);
+        return okCited(parts.join("\n"), citations);
       }
 
       const results = data.data.results ?? [];
       if (results.length === 0) return ok(`No results found for "${args["query"]}".`);
-      return ok(`Found ${data.data.totalCount ?? results.length} result(s):\n\n${results.map(formatSearchResult).join("\n\n")}`);
+      for (const r of results) harvest(r);
+      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+      applyChannelInfo(citations, channelInfo);
+      return okCited(
+        `Found ${data.data.totalCount ?? results.length} result(s):\n\n${results.map(formatSearchResult).join("\n\n")}`,
+        citations,
+      );
     } catch (e) {
       return err(`Search error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -141,6 +241,12 @@ function formatSearchResult(r: SearchResult): string {
   if (sc) {
     if (sc["senderName"]) lines.push(`  From: ${sc["senderName"]}`);
     if (sc["xyneId"]) lines.push(`  ID: ${sc["xyneId"]}`);
+    if (sc["conversationId"]) lines.push(`  conversationId: ${sc["conversationId"]}`);
+    if (sc["channelId"]) lines.push(`  channelId: ${sc["channelId"]}`);
+  }
+  if (meta) {
+    if (meta["conversationId"]) lines.push(`  conversationId: ${meta["conversationId"]}`);
+    if (meta["channelId"]) lines.push(`  channelId: ${meta["channelId"]}`);
   }
   return lines.join("\n");
 }
@@ -170,11 +276,11 @@ const spacesMemorySearch: ToolDef = {
         offset: args["offset"] ?? 0,
         includeSummary: true,
         includeQuery: true,
+        reviewStatus: "verified",
       };
       if (args["query"]) body["query"] = args["query"];
       if (args["docType"]) body["docType"] = args["docType"];
       if (args["tags"]) body["tags"] = args["tags"];
-      if (args["reviewStatus"]) body["reviewStatus"] = args["reviewStatus"];
 
       const data = (await memorySearch(body)) as {
         success?: boolean;
@@ -211,13 +317,69 @@ const spacesMemorySearch: ToolDef = {
   },
 };
 
+// ── spaces-memory-create ────────────────────────────────────────────
+
+const spacesMemoryCreate: ToolDef = {
+  name: "spaces-memory-create",
+  description:
+    "Save a fact or SOP to the Spaces knowledge base. Use this to store important information, " +
+    "learnings, decisions, or standard operating procedures that should be remembered for future reference.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      docType: { type: "string", enum: ["fact", "sop"], description: "Type: 'fact' for individual facts/decisions, 'sop' for standard operating procedures" },
+      content: { type: "string", description: "The content to store — the fact, decision, procedure, or knowledge to remember" },
+      query: { type: "string", description: "A short summary or question this knowledge answers (used for search retrieval)" },
+      tags: { type: "array", items: { type: "string" }, description: "Tags for categorization (e.g. ['deployment', 'auth', 'runbook'])" },
+    },
+    required: ["docType", "content"],
+  },
+  async handler(args) {
+    try {
+      const docType = args["docType"] as string;
+      const content = args["content"] as string;
+      const query = (args["query"] as string | undefined) ?? "";
+      const tags = (args["tags"] as string[] | undefined) ?? [];
+      const docId = `memory-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      const document = {
+        docId,
+        docType,
+        userId: CURRENT_USER_ID,
+        sessionId: `manual-${docId}`,
+        userQuery: query,
+        chatSummary: [query || content.slice(0, 200)],
+        rawContent: content,
+        tags,
+        filePointers: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        agentUsed: "xyne-claw",
+        modelUsed: [],
+        reviewStatus: "pending",
+      };
+
+      await spacesFetch("/api/memory/index", {
+        method: "POST",
+        body: JSON.stringify(document),
+      });
+
+      return ok(`Memory saved (${docType}): ${docId}\nQuery: ${query || "(none)"}\nTags: ${tags.length > 0 ? tags.join(", ") : "(none)"}\nContent: ${content.slice(0, 200)}${content.length > 200 ? "..." : ""}`);
+    } catch (e) {
+      return err(`Memory create error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 // ── spaces-tickets ───────────────────────────────────────────────────
 
 const spacesTickets: ToolDef = {
   name: "spaces-tickets",
   description:
-    "List and filter tickets in Spaces. Filter by status, priority, assignee, board, project, or stage. " +
-    "Returns ticket details including assignee, tags, stage, and conversation ID.",
+    "PRIMARY tool for all ticket queries. ALWAYS use this when the user asks about tickets, ticket status, ticket lists, " +
+    "or anything ticket-related. Filter by status, priority, assignee, board, project, tags, or stage. " +
+    "Returns structured ticket details including assignee, tags, stage, and conversation ID. " +
+    "Prefer this over spaces-search for ticket queries — it returns richer, more accurate data.",
   inputSchema: {
     type: "object",
     properties: {
@@ -228,6 +390,7 @@ const spacesTickets: ToolDef = {
       boardId: { type: "string", description: "Filter by board ID" },
       projectId: { type: "string", description: "Filter by project ID" },
       stageName: { type: "string", description: "Filter by stage name" },
+      tags: { type: "string", description: "Filter by tag name(s), comma-separated (e.g. 'April-Launch,Q2')" },
       limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max tickets (default 20)" },
       offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
     },
@@ -240,6 +403,12 @@ const spacesTickets: ToolDef = {
       if (args["boardId"]) baseWhere["boardId"] = { equals: args["boardId"] };
       if (args["projectId"]) baseWhere["projectId"] = { equals: args["projectId"] };
       if (args["stageName"]) baseWhere["stageName"] = { equals: args["stageName"] };
+      if (args["tags"]) {
+        const tagNames = (args["tags"] as string).split(",").map((t) => t.trim()).filter(Boolean);
+        if (tagNames.length > 0) {
+          baseWhere["tags"] = { some: { name: { in: tagNames } } };
+        }
+      }
 
       const take = (args["limit"] as number | undefined) ?? 20;
       const skip = (args["offset"] as number | undefined) ?? 0;
@@ -251,7 +420,7 @@ const spacesTickets: ToolDef = {
         tags: { select: { name: true } },
       };
 
-      const userId = (args["assignedTo"] as string | undefined) ?? (CURRENT_USER_ID || undefined);
+      const userId = args["assignedTo"] as string | undefined;
 
       // If we have a user to scope to, fetch both assigned + created and merge
       if (userId && !args["createdBy"]) {
@@ -265,7 +434,7 @@ const spacesTickets: ToolDef = {
           if (!seen.has(t.id)) { seen.add(t.id); merged.push(t); }
         }
         merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-        return formatTickets(merged.slice(0, take));
+        return await formatTickets(merged.slice(0, take));
       }
 
       // Explicit createdBy filter only
@@ -274,28 +443,34 @@ const spacesTickets: ToolDef = {
       }
 
       const rows = (await interact({ model: "ticket", operation: "findMany", where: baseWhere, orderBy: [{ updatedAt: "desc" }], take, skip, include })) as TicketRow[];
-      return formatTickets(rows);
+      return await formatTickets(rows);
     } catch (e) {
       return err(`Tickets error: ${e instanceof Error ? e.message : String(e)}`);
     }
   },
 };
 
-function formatTickets(rows: TicketRow[]): ToolResult {
+async function formatTickets(rows: TicketRow[]): Promise<ToolResult> {
   if (!rows || rows.length === 0) return ok("No tickets found.");
+  const citations: Citation[] = [];
+  const seen = new Set<string>();
   const lines = rows.map((t) => {
     const parts = [`[${t.xyneId}] ${t.title}`];
-    parts.push(`  Status: ${t.statusV2} · Priority: ${t.priority}${t.stageName ? ` · Stage: ${t.stageName}` : ""}`);
+    parts.push(`  Board Status: ${t.statusV2} (workflow state, not PR verification) · Priority: ${t.priority}${t.stageName ? ` · Stage: ${t.stageName}` : ""}`);
     if (t.assignedToUser) parts.push(`  Assigned: ${t.assignedToUser.name}`);
     if (t.createdByUser) parts.push(`  Created by: ${t.createdByUser.name}`);
     if (t.board) parts.push(`  Board: ${t.board.name}${t.project ? ` · Project: ${t.project.name}` : ""}`);
     if (t.tags && t.tags.length > 0) parts.push(`  Tags: ${t.tags.map((tg) => tg.name).join(", ")}`);
     if (t.eta) parts.push(`  ETA: ${new Date(t.eta).toLocaleDateString()}`);
+    if (t.channelId) parts.push(`  ChannelID: ${t.channelId}`);
     if (t.conversationId) parts.push(`  ConversationID: ${t.conversationId}`);
     parts.push(`  Updated: ${new Date(t.updatedAt).toLocaleString()}`);
+    pushThreadCitation(citations, seen, t.channelId, t.conversationId, `Ticket ${t.xyneId}`);
     return parts.join("\n");
   });
-  return ok(`${rows.length} ticket(s):\n\n${lines.join("\n\n")}`);
+  const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+  applyChannelInfo(citations, channelInfo);
+  return okCited(`${rows.length} ticket(s):\n\n${lines.join("\n\n")}`, citations);
 }
 
 interface TicketRow {
@@ -308,6 +483,7 @@ interface TicketRow {
   eta?: string;
   createdAt: string;
   updatedAt: string;
+  channelId?: string;
   conversationId?: string;
   assignedToUser?: { name: string } | null;
   createdByUser?: { name: string } | null;
@@ -359,7 +535,19 @@ const spacesMessages: ToolDef = {
         return `[${time}] ${sender}${attach}: ${m.content}`;
       });
 
-      return ok(`${rows.length} message(s):\n\n${lines.join("\n")}`);
+      const context: string[] = [];
+      const channelId = rows.find((m) => m.channelId)?.channelId;
+      if (channelId) context.push(`channelId: ${channelId}`);
+      context.push(`conversationId: ${conversationId}`);
+      const header = context.length > 0 ? `${context.join(" · ")}\n\n` : "";
+
+      const citations: Citation[] = [];
+      const seen = new Set<string>();
+      pushThreadCitation(citations, seen, channelId, conversationId, "Spaces thread");
+      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+      applyChannelInfo(citations, channelInfo);
+
+      return okCited(`${rows.length} message(s):\n\n${header}${lines.join("\n")}`, citations);
     } catch (e) {
       return err(`Messages error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -372,6 +560,8 @@ interface MessageRow {
   msgType: string;
   createdAt: string;
   hasAttachment: boolean;
+  channelId?: string;
+  conversationId?: string;
   sender?: { name: string } | null;
 }
 
@@ -412,6 +602,8 @@ const spacesMessageDetail: ToolDef = {
         `From: ${m.sender?.name ?? "unknown"} (${m.sender?.email ?? ""})`,
         `Type: ${m.msgType}${m.edited ? " (edited)" : ""}`,
         `Date: ${new Date(m.createdAt).toLocaleString()}`,
+        ...(m.channelId ? [`channelId: ${m.channelId}`] : []),
+        ...(m.conversationId ? [`conversationId: ${m.conversationId}`] : []),
         `\n${m.content}`,
       ];
 
@@ -424,7 +616,13 @@ const spacesMessageDetail: ToolDef = {
         parts.push("\n[Has attachments]");
       }
 
-      return ok(parts.join("\n"));
+      const citations: Citation[] = [];
+      const seen = new Set<string>();
+      pushThreadCitation(citations, seen, m.channelId, m.conversationId, `Message ${m.messageId}`);
+      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+      applyChannelInfo(citations, channelInfo);
+
+      return okCited(parts.join("\n"), citations);
     } catch (e) {
       return err(`Message detail error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -438,6 +636,8 @@ interface MessageDetailRow {
   createdAt: string;
   edited: boolean;
   hasAttachment: boolean;
+  channelId?: string;
+  conversationId?: string;
   sender?: { name: string; email: string } | null;
   reactions?: Array<{ emojiName: string; userId: string }>;
   reactionCounts?: Array<{ emojiName: string; count: number }>;
@@ -456,21 +656,27 @@ interface AttachmentRow {
 const spacesChannels: ToolDef = {
   name: "spaces-channels",
   description:
-    "List channels in Spaces. Can filter by visibility (PUBLIC/PRIVATE) and scope type (DEFAULT/DM/TICKET/GROUP_DM). " +
-    "Returns channel name, participant count, project, and last activity.",
+    "List channels in Spaces. Can filter by channel name, visibility (PUBLIC/PRIVATE), scope type (DEFAULT/DM/TICKET/GROUP_DM), " +
+    "and participant name. Use the name filter to find a specific channel by name. " +
+    "To find a DM between two people, use scopeType='DM' and participantName to filter by one of them. " +
+    "Returns channel name, members, conversation ID, and last activity.",
   inputSchema: {
     type: "object",
     properties: {
+      name: { type: "string", description: "Filter by channel name (case-insensitive partial match). Use this to find a specific channel." },
       visibility: { type: "string", enum: ["PUBLIC", "PRIVATE"], description: "Filter by visibility" },
       scopeType: { type: "string", enum: ["DEFAULT", "DM", "TICKET", "DOCUMENT", "GROUP_DM"], description: "Filter by scope type" },
+      participantName: { type: "string", description: "Filter channels by participant name (partial match)" },
       limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max channels (default 20)" },
     },
   },
   async handler(args) {
     try {
       const where: Record<string, unknown> = {};
+      if (args["name"]) where["name"] = { contains: args["name"] as string, mode: "insensitive" };
       if (args["visibility"]) where["visibility"] = { equals: args["visibility"] };
       if (args["scopeType"]) where["scopeType"] = { equals: args["scopeType"] };
+      if (args["participantName"]) where["participants"] = { some: { user: { name: { contains: args["participantName"] as string } } } };
 
       const rows = (await interact({
         model: "channel",
@@ -480,6 +686,7 @@ const spacesChannels: ToolDef = {
         take: (args["limit"] as number | undefined) ?? 20,
         include: {
           project: { select: { name: true } },
+          participants: { select: { user: { select: { name: true } } } },
         },
       })) as ChannelRow[];
 
@@ -488,8 +695,13 @@ const spacesChannels: ToolDef = {
       const lines = rows.map((c) => {
         const parts = [`#${c.name} (${c.scopeType}, ${c.visibility})`];
         if (c.description) parts.push(`  ${c.description}`);
-        parts.push(`  Participants: ${c.participantCount}${c.project ? ` · Project: ${c.project.name}` : ""}`);
+        const memberNames = (c as unknown as { participants?: Array<{ user?: { name?: string } }> }).participants
+          ?.map((p) => p.user?.name).filter(Boolean) ?? [];
+        if (memberNames.length > 0) parts.push(`  Members: ${memberNames.join(", ")}`);
+        else parts.push(`  Participants: ${c.participantCount}`);
+        if (c.project) parts.push(`  Project: ${c.project.name}`);
         if (c.lastActivityAt) parts.push(`  Last active: ${new Date(c.lastActivityAt).toLocaleString()}`);
+        if (c.conversationId) parts.push(`  ConversationID: ${c.conversationId}`);
         parts.push(`  ID: ${c.id}`);
         return parts.join("\n");
       });
@@ -510,6 +722,7 @@ interface ChannelRow {
   visibility: string;
   participantCount: number;
   lastActivityAt?: string;
+  conversationId?: string;
   project?: { name: string } | null;
 }
 
@@ -577,7 +790,9 @@ const spacesActivity: ToolDef = {
   },
   async handler(args) {
     try {
-      const where: Record<string, unknown> = {};
+      const where: Record<string, unknown> = {
+        userId: { equals: CURRENT_USER_ID },
+      };
       if (args["classification"]) where["classification"] = { equals: args["classification"] };
       if (args["unreadOnly"] === true) where["isRead"] = { equals: false };
 
@@ -591,6 +806,8 @@ const spacesActivity: ToolDef = {
 
       if (!rows || rows.length === 0) return ok("No activity found.");
 
+      const citations: Citation[] = [];
+      const seen = new Set<string>();
       const lines = rows.map((a) => {
         const when = new Date(a.createdAt).toLocaleString();
         const read = a.isRead ? "" : " (unread)";
@@ -599,11 +816,25 @@ const spacesActivity: ToolDef = {
         if (a.conversationId) refs.push(`conversationId: ${a.conversationId}`);
         if (a.ticketId) refs.push(`ticketId: ${a.ticketId}`);
         if (a.channelId) refs.push(`channelId: ${a.channelId}`);
+        if (a.conversationId && a.channelId) {
+          const key = `${a.channelId}/${a.conversationId}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            citations.push({
+              kind: "thread",
+              channelId: a.channelId,
+              conversationId: a.conversationId,
+              ...(a.ticketId ? { label: `Ticket ${a.ticketId}` } : {}),
+            });
+          }
+        }
         const refStr = refs.length > 0 ? `\n    ${refs.join(" · ")}` : "";
         return `[${when}] ${a.actorAction}${read}${a.classification ? ` · ${a.classification}` : ""}${refStr}`;
       });
 
-      return ok(`${rows.length} activity entries:\n\n${lines.join("\n")}`);
+      const channelInfo = await resolveChannelInfo(citations.map((c) => c.channelId).filter((v): v is string => !!v));
+      applyChannelInfo(citations, channelInfo);
+      return okCited(`${rows.length} activity entries:\n\n${lines.join("\n")}`, citations);
     } catch (e) {
       return err(`Activity error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -676,6 +907,227 @@ interface ProjectRow {
   updatedAt?: string;
 }
 
+// ── spaces-project-team-members ─────────────────────────────────────
+
+const spacesProjectTeamMembers: ToolDef = {
+  name: "spaces-project-team-members",
+  description:
+    "Get all unique team members for a project by aggregating participants across every channel in the project. " +
+    "Returns user IDs, names, and emails. Use this to identify who belongs to a project team.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string", description: "Project ID (use spaces-projects to find project IDs)" },
+    },
+    required: ["projectId"],
+  },
+  async handler(args) {
+    try {
+      const projectId = String(args["projectId"] ?? "");
+      if (!projectId) return err("projectId is required");
+
+      const channels = (await interact({
+        model: "channel",
+        operation: "findMany",
+        where: { projectId: { equals: projectId } },
+        take: 200,
+      })) as Array<{ id: string; name?: string }>;
+
+      if (!channels || channels.length === 0) return ok(`No channels found for project ${projectId}.`);
+
+      const channelIds = channels.map((c) => c.id);
+
+      const participants = (await interact({
+        model: "channelParticipant",
+        operation: "findMany",
+        where: { channelId: { in: channelIds } },
+        take: 1000,
+      })) as Array<{ userId: string }>;
+
+      const uniqueUserIds = [...new Set(participants.map((p) => p.userId))];
+      if (uniqueUserIds.length === 0) return ok(`No team members found in any channel for project ${projectId}.`);
+
+      const users = (await interact({
+        model: "user",
+        operation: "findMany",
+        where: { id: { in: uniqueUserIds } },
+        take: 1000,
+      })) as UserRow[];
+
+      const lines = [
+        `Project ID: ${projectId}`,
+        `Channels: ${channels.length}`,
+        `Team members: ${users.length}`,
+        "",
+        "Members:",
+      ];
+      for (const u of users) {
+        lines.push(`  ${u.name} (${u.email})`);
+        lines.push(`    ID: ${u.id}`);
+      }
+
+      return ok(lines.join("\n"));
+    } catch (e) {
+      return err(`Project team members error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+// ── spaces-canvases ─────────────────────────────────────────────────
+
+const spacesCanvases: ToolDef = {
+  name: "spaces-canvases",
+  description:
+    "Search and list Canvas documents in Spaces (collaborative docs, Quarto bundles, slides). " +
+    "Filter by title, channel, visibility, doc type. Returns canvas IDs, titles, channel, creator, and last-edited time.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      search: { type: "string", description: "Filter by canvas title (case-insensitive partial match)" },
+      channelId: { type: "string", description: "Filter by channel ID" },
+      visibility: { type: "string", enum: ["PUBLIC", "PRIVATE", "ORG", "CHANNEL"], description: "Filter by visibility" },
+      docType: { type: "string", enum: ["Canvas", "Quarto"], description: "Filter by document type" },
+      createdBy: { type: "string", description: "Filter by creator user ID" },
+      limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max results (default 20)" },
+      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
+    },
+  },
+  async handler(args) {
+    try {
+      const where: Record<string, unknown> = {};
+      if (args["search"]) where["title"] = { contains: args["search"] as string, mode: "insensitive" };
+      if (args["channelId"]) where["channelId"] = { equals: args["channelId"] };
+      if (args["visibility"]) where["visibility"] = { equals: args["visibility"] };
+      if (args["docType"]) where["docType"] = { equals: args["docType"] };
+      if (args["createdBy"]) where["createdBy"] = { equals: args["createdBy"] };
+
+      const rows = (await interact({
+        model: "canvas",
+        operation: "findMany",
+        where,
+        orderBy: [{ updatedAt: "desc" }],
+        take: (args["limit"] as number | undefined) ?? 20,
+        skip: (args["offset"] as number | undefined) ?? 0,
+      })) as CanvasRow[];
+
+      if (!rows || rows.length === 0) return ok(args["search"] ? `No canvases found matching "${args["search"]}".` : "No canvases found.");
+
+      const citations: Citation[] = [];
+      const seen = new Set<string>();
+      const lines = rows.map((c) => {
+        const parts = [c.title];
+        parts.push(`  Type: ${c.docType ?? "Canvas"} · Visibility: ${c.visibility}`);
+        if (c.channelId) parts.push(`  ChannelID: ${c.channelId}`);
+        if (c.createdBy) parts.push(`  Created by: ${c.createdBy}`);
+        if (c.lastEditedAt) parts.push(`  Last edited: ${new Date(c.lastEditedAt).toLocaleString()}`);
+        else if (c.updatedAt) parts.push(`  Updated: ${new Date(c.updatedAt).toLocaleString()}`);
+        parts.push(`  ID: ${c.id}`);
+        if (c.viewAccessId) {
+          pushCanvasCitation(citations, seen, c.viewAccessId, c.title);
+        }
+        return parts.join("\n");
+      });
+
+      return okCited(`${rows.length} canvas(es):\n\n${lines.join("\n\n")}`, citations);
+    } catch (e) {
+      return err(`Canvases error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+interface CanvasRow {
+  id: string;
+  title: string;
+  docType?: string;
+  visibility: string;
+  channelId?: string;
+  createdBy?: string;
+  lastEditedAt?: string;
+  updatedAt?: string;
+  viewAccessId?: string;
+}
+
+// ── spaces-calls ────────────────────────────────────────────────────
+
+const spacesCalls: ToolDef = {
+  name: "spaces-calls",
+  description:
+    "Search and list calls/meetings in Spaces. Filter by title, channel, status (ACTIVE/ENDED/SCHEDULED), " +
+    "call type (VIDEO/AUDIO), or time range. Returns call IDs, titles, organizer, channel, status, and timing.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      search: { type: "string", description: "Filter by call title (case-insensitive partial match)" },
+      channelId: { type: "string", description: "Filter by channel ID" },
+      status: { type: "string", enum: ["ACTIVE", "ENDED", "SCHEDULED", "CANCELLED"], description: "Filter by call status" },
+      callType: { type: "string", enum: ["VIDEO", "AUDIO"], description: "Filter by call type" },
+      organizerId: { type: "string", description: "Filter by organizer user ID" },
+      createdByUserId: { type: "string", description: "Filter by creator user ID" },
+      isRecurring: { type: "boolean", description: "Filter recurring calls only" },
+      limit: { type: "number", minimum: 1, maximum: 50, default: 20, description: "Max results (default 20)" },
+      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset" },
+    },
+  },
+  async handler(args) {
+    try {
+      const where: Record<string, unknown> = {};
+      if (args["search"]) where["title"] = { contains: args["search"] as string, mode: "insensitive" };
+      if (args["channelId"]) where["channelId"] = { equals: args["channelId"] };
+      if (args["status"]) where["status"] = { equals: args["status"] };
+      if (args["callType"]) where["callType"] = { equals: args["callType"] };
+      if (args["organizerId"]) where["organizerId"] = { equals: args["organizerId"] };
+      if (args["createdByUserId"]) where["createdByUserId"] = { equals: args["createdByUserId"] };
+      if (typeof args["isRecurring"] === "boolean") where["isRecurring"] = { equals: args["isRecurring"] };
+
+      const rows = (await interact({
+        model: "call",
+        operation: "findMany",
+        where,
+        orderBy: [{ lastActivityAt: "desc" }],
+        take: (args["limit"] as number | undefined) ?? 20,
+        skip: (args["offset"] as number | undefined) ?? 0,
+      })) as CallRow[];
+
+      if (!rows || rows.length === 0) return ok(args["search"] ? `No calls found matching "${args["search"]}".` : "No calls found.");
+
+      const lines = rows.map((c) => {
+        const parts = [c.title ?? "(untitled call)"];
+        parts.push(`  Type: ${c.callType ?? "VIDEO"} · Status: ${c.status}`);
+        if (c.description) parts.push(`  ${c.description}`);
+        if (c.channelId) parts.push(`  ChannelID: ${c.channelId}`);
+        if (c.organizerId) parts.push(`  Organizer: ${c.organizerId}`);
+        if (c.startsAt) parts.push(`  Starts: ${new Date(c.startsAt).toLocaleString()}`);
+        if (c.endsAt) parts.push(`  Ends: ${new Date(c.endsAt).toLocaleString()}`);
+        if (c.isRecurring) parts.push(`  Recurring: ${c.recurrenceRule ?? "yes"}`);
+        if (c.roomLink) parts.push(`  Link: ${c.roomLink}`);
+        parts.push(`  ID: ${c.id}`);
+        return parts.join("\n");
+      });
+
+      return ok(`${rows.length} call(s):\n\n${lines.join("\n\n")}`);
+    } catch (e) {
+      return err(`Calls error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+interface CallRow {
+  id: string;
+  title?: string;
+  description?: string;
+  callType?: string;
+  status: string;
+  channelId?: string;
+  organizerId?: string;
+  createdByUserId?: string;
+  startsAt?: string;
+  endsAt?: string;
+  isRecurring?: boolean;
+  recurrenceRule?: string;
+  roomLink?: string;
+  lastActivityAt?: string;
+}
+
 // ── spaces-boards ───────────────────────────────────────────────────
 
 const spacesBoards: ToolDef = {
@@ -742,26 +1194,31 @@ interface BoardRow {
 const spacesSendMessage: ToolDef = {
   name: "spaces-send-message",
   description:
-    "Send a message in Spaces by replying to an existing conversation thread. " +
-    "Use the conversationId from spaces-tickets or spaces-messages results (NOT channelId or ticketId).",
+    "Send a message as the bot in Spaces. Supports HTML content for @mentions. " +
+    "Use conversationId to reply in a thread, or channelId to post in a channel. " +
+    "For @mentions, use HTML: <span data-mention=\"\" data-mention-type=\"user\" data-user-id=\"USER_ID\" data-username=\"NAME\" class=\"chat-input-mention\">@NAME</span>",
   inputSchema: {
     type: "object",
     properties: {
-      conversationId: { type: "string", description: "The conversationId to send the message to" },
-      content: { type: "string", description: "Message content to send" },
+      conversationId: { type: "string", description: "Reply in this conversation thread" },
+      channelId: { type: "string", description: "Post in this channel (use if no conversationId)" },
+      content: { type: "string", description: "Message content (supports HTML for mentions)" },
     },
-    required: ["conversationId", "content"],
+    required: ["content"],
   },
   async handler(args) {
+    // This handler is intercepted at the /mcp/call level in mcp.ts
+    // and posted as bot using the agent's app token.
+    // This code only runs if called directly (not through /mcp/call).
     try {
-      const conversationId = String(args["conversationId"]);
+      const conversationId = args["conversationId"] as string | undefined;
+      const channelId = args["channelId"] as string | undefined;
       const content = String(args["content"]);
-      const data = (await spacesFetch(`/api/chat/postMessage/${conversationId}`, {
+      const data = (await spacesFetch(`/api/conversations/${conversationId ?? channelId}/messages`, {
         method: "POST",
         body: JSON.stringify({ content }),
       })) as { messageId: string; conversationId: string };
-
-      return ok(`Message sent. messageId: ${data.messageId}, conversationId: ${data.conversationId}`);
+      return ok(`Message sent. messageId: ${data.messageId}`);
     } catch (e) {
       return err(`Send message error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -783,7 +1240,7 @@ const spacesCreateTicket: ToolDef = {
       projectId: { type: "string", description: "Project ID (use spaces-projects to find)" },
       boardId: { type: "string", description: "Board ID (use spaces-boards to find)" },
       channelId: { type: "string", description: "Channel ID (use spaces-channels to find)" },
-      priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"], description: "Ticket priority" },
+      priority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Ticket priority" },
       assignedTo: { type: "string", description: "User ID to assign (use spaces-users to find)" },
       eta: { type: "string", description: "Due date as ISO 8601 string" },
       tags: { type: "array", items: { type: "string" }, description: "Tags to apply" },
@@ -936,11 +1393,218 @@ const webfetchTool: ToolDef = {
   },
 };
 
+// ── spaces-whoami ─────────────────────────────────────────────────────
+
+const spacesWhoami: ToolDef = {
+  name: "spaces-whoami",
+  description:
+    "Returns the current user's Spaces profile — userId, name, email. " +
+    "Call this first to get the userId needed for filtering other tools (e.g. assignedTo, from, createdBy).",
+  inputSchema: { type: "object", properties: {} },
+  async handler() {
+    try {
+      if (!CURRENT_USER_ID) return err("Could not determine current user from token.");
+      const rows = (await interact({
+        model: "user",
+        operation: "findMany",
+        where: { id: { equals: CURRENT_USER_ID } },
+        take: 1,
+      })) as Array<{ id: string; name: string; email: string }>;
+      const u = rows?.[0];
+      if (!u) return ok(`Current user ID: ${CURRENT_USER_ID} (profile not found)`);
+      return ok(`Current user:\n- ID: ${u.id}\n- Name: ${u.name}\n- Email: ${u.email}`);
+    } catch (e) {
+      return err(`Whoami error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+// ── spaces-publish-docs ─────────────────────────────────────────────
+
+const spacesPublishDocs: ToolDef = {
+  name: "spaces-publish-docs",
+  description:
+    "Publish a Quarto book or documentation to Xyne Spaces. " +
+    "Accepts a base64-encoded zip of the rendered HTML output and uploads it. " +
+    "Returns the published docs URL on success.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      zipBase64: { type: "string", description: "Base64-encoded zip file containing the rendered HTML output" },
+      userRepo: { type: "string", description: "Unique identifier in org/repo/branch format (e.g. 'pgm-agent/my-program/main')" },
+      title: { type: "string", description: "Display title for the published docs" },
+      entryFile: { type: "string", description: "Entry HTML file name (default: index.html)" },
+      channelId: { type: "string", description: "Channel ID to publish to, or omit for personal/private docs" },
+      docType: { type: "string", enum: ["book", "docs", "website", "slides"], description: "Document type (default: book)" },
+    },
+    required: ["zipBase64", "userRepo", "title"],
+  },
+  async handler(params) {
+    try {
+      const zipBase64 = params["zipBase64"] as string;
+      const userRepo = params["userRepo"] as string;
+      const title = params["title"] as string;
+      const entryFile = (params["entryFile"] as string) || "index.html";
+      const channelId = params["channelId"] as string | undefined;
+      const docType = (params["docType"] as string) || "book";
+
+      if (!zipBase64 || !userRepo || !title) {
+        return err("zipBase64, userRepo, and title are required");
+      }
+
+      const zipBuffer = Buffer.from(zipBase64, "base64");
+      console.error(`[spaces-publish-docs] Publishing ${title} (${(zipBuffer.length / 1024).toFixed(0)} KB) as ${userRepo}`);
+
+      const formData = new FormData();
+      formData.append("docs", new Blob([zipBuffer], { type: "application/zip" }), "docs.zip");
+      formData.append("userRepo", userRepo);
+      formData.append("title", title);
+      formData.append("entryFile", entryFile);
+      formData.append("docType", docType);
+      if (channelId) formData.append("channelId", channelId);
+
+      const baseUrl = (process.env["XYNE_SPACES_URL"] ?? "").replace(/\/+$/, "");
+      const token = process.env["XYNE_SPACES_TOKEN"] ?? "";
+      const sessionId = process.env["XYNE_SPACES_SESSION_ID"] ?? "";
+      const url = `${baseUrl}/api/docs/publish`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(sessionId ? { "x-session-id": sessionId } : {}),
+        },
+        body: formData,
+        signal: AbortSignal.timeout(120_000),
+      });
+
+      const result = (await response.json()) as Record<string, unknown>;
+
+      if (response.ok && result["success"]) {
+        return ok(`Published successfully!\n- URL: ${result["docsUrl"]}\n- Title: ${title}\n- UserRepo: ${userRepo}`);
+      } else {
+        return err(`Publish failed (${response.status}): ${result["error"] || "Unknown error"}`);
+      }
+    } catch (e) {
+      return err(`Publish error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+// ── spaces-create-canvas ─────────────────────────────────────────────
+
+const spacesCreateCanvas: ToolDef = {
+  name: "spaces-create-canvas",
+  description:
+    "Create a new canvas in Xyne Spaces from markdown content. " +
+    "The canvas is shared collaboratively (BlockNote + Y-Sweet) and owned by the Ask-AI bot plus the current user. " +
+    "Returns the canvas URL on success. Use this when the user asks to create a document, notes, meeting summary, or any rich-text artifact.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "Canvas title (shown in the canvas list and tab)." },
+      markdown: {
+        type: "string",
+        description:
+          "The markdown content for the canvas. Headings, lists, tables, code blocks, and links are all preserved. Max 5MB.",
+      },
+    },
+    required: ["title", "markdown"],
+  },
+  async handler(params) {
+    try {
+      const title = String(params["title"] ?? "").trim();
+      const markdown = String(params["markdown"] ?? "");
+      if (!title) return err("title is required");
+      if (!markdown) return err("markdown is required");
+
+      const result = (await spacesFetch("/api/canvas", {
+        method: "POST",
+        body: JSON.stringify({ title, markdown }),
+      })) as { success?: boolean; url?: string | null; message?: string; error?: string };
+
+      if (!result.success) return err(result.error ?? "Failed to create canvas");
+      return ok(result.message ?? `Canvas created.\nURL: ${result.url ?? "(unknown)"}`);
+    } catch (e) {
+      return err(`Create canvas error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
+// ── spaces-edit-canvas ───────────────────────────────────────────────
+
+const spacesEditCanvas: ToolDef = {
+  name: "spaces-edit-canvas",
+  description:
+    "Replace the contents of an existing canvas. Requires edit access (owner, editor, or an edit link). " +
+    "Pass the viewAccessId (the ID from the canvas URL: /chat/canvas/<viewAccessId>) and the new markdown. " +
+    "Returns the canvas URL on success.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      viewAccessId: {
+        type: "string",
+        description: "viewAccessId of the canvas to edit — the ID that appears in the canvas URL.",
+      },
+      content: {
+        type: "string",
+        description: "New markdown content to replace the canvas body. Max 5MB.",
+      },
+      title: { type: "string", description: "Optional new title for the canvas." },
+    },
+    required: ["viewAccessId", "content"],
+  },
+  async handler(params) {
+    try {
+      const viewAccessId = String(params["viewAccessId"] ?? "").trim();
+      const content = String(params["content"] ?? "");
+      const title = params["title"] ? String(params["title"]) : undefined;
+      if (!viewAccessId) return err("viewAccessId is required");
+      if (!content) return err("content is required");
+
+      const result = (await spacesFetch(`/api/canvas/view/${encodeURIComponent(viewAccessId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content, ...(title ? { title } : {}) }),
+      })) as { success?: boolean; url?: string | null; message?: string; error?: string };
+
+      if (!result.success) return err(result.error ?? "Failed to edit canvas");
+      return ok(result.message ?? `Canvas updated.\nURL: ${result.url ?? "(unknown)"}`);
+    } catch (e) {
+      return err(`Edit canvas error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 // ── Export ────────────────────────────────────────────────────────────
 
+// ── spaces-trigger-agent ────────────────────────────────────────────
+
+const spacesTriggerAgent: ToolDef = {
+  name: "spaces-trigger-agent",
+  description:
+    "Trigger another agent to start working on a task. " +
+    "The target agent will receive the task in the same conversation thread. " +
+    "Use this to hand off work to specialized agents (e.g. trigger doctor-agent to investigate a bug).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      targetAgent: { type: "string", description: "Slug of the agent to trigger (e.g. 'doctor-agent', 'pgm-agent')" },
+      task: { type: "string", description: "Task description for the target agent" },
+      conversationId: { type: "string", description: "Conversation thread to continue in (from Session Metadata)" },
+      channelId: { type: "string", description: "Channel where the conversation is happening (from Session Metadata)" },
+    },
+    required: ["targetAgent", "task"],
+  },
+  async handler() {
+    // Intercepted at /mcp/call level — this handler should not be called directly
+    return ok("Agent triggered.");
+  },
+};
+
 export const tools: ToolDef[] = [
+  spacesWhoami,
   spacesSearch,
   spacesMemorySearch,
+  spacesMemoryCreate,
   spacesTickets,
   spacesMessages,
   spacesMessageDetail,
@@ -948,9 +1612,16 @@ export const tools: ToolDef[] = [
   spacesUsers,
   spacesActivity,
   spacesProjects,
+  spacesProjectTeamMembers,
+  spacesCanvases,
+  spacesCalls,
   spacesBoards,
   spacesSendMessage,
   spacesCreateTicket,
   spacesScheduleCall,
+  spacesPublishDocs,
+  spacesCreateCanvas,
+  spacesEditCanvas,
+  spacesTriggerAgent,
   webfetchTool,
 ];

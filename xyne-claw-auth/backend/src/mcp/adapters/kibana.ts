@@ -1,8 +1,9 @@
-import type { McpAdapter } from "../types.js";
+import type { StdioMcpAdapter } from "../types.js";
 
-export const kibanaAdapter: McpAdapter = {
+export const kibanaAdapter: StdioMcpAdapter = {
+  transport: "stdio",
   type: "kibana",
-  pennyDrop: { name: "list_indices", params: {} },
+  healthCheck: { name: "list_indices", params: {} },
   credentialFields: [
     { name: "url", label: "Elasticsearch URL", type: "text", placeholder: "https://your-elasticsearch.example.com" },
     { name: "apiKey", label: "API Key", type: "password", placeholder: "Enter your Elasticsearch API key" },

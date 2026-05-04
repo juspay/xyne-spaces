@@ -13,4 +13,5 @@ export {
   pgmPush,
   pgmPull,
   pgmRender,
+  pgmPublish,
 } from "./tools.js";

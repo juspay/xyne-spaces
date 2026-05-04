@@ -19,6 +19,10 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/claw/, ""),
       },
+      "/api/auth": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
       "/claw/api/v1": {
         target: "http://localhost:3003",
         changeOrigin: true,

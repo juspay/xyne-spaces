@@ -16,17 +16,21 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.19.0",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@prisma/client": "^6.0.0",
     "@sinclair/typebox": "^0.34.49",
     "bullmq": "^5.72.0",
     "express": "^4.21.0",
+    "jszip": "^3.10.1",
+    "multer": "^2.1.1",
     "tsx": "^4.19.0",
     "xyne-claw-shared": "file:../../xyne-claw-shared",
     "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
+    "@types/multer": "^2.1.0",
     "@types/node": "^22.0.0",
     "prisma": "^6.0.0",
     "typescript": "^5.7.0",

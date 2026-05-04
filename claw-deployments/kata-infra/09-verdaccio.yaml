@@ -1,0 +1,109 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: verdaccio-storage
+  namespace: xyne-apps
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: verdaccio-config
+  namespace: xyne-apps
+data:
+  config.yaml: |
+    storage: /verdaccio/storage
+    auth:
+      htpasswd:
+        file: /verdaccio/conf/htpasswd
+        max_users: -1
+    uplinks:
+      npmjs:
+        url: https://registry.npmjs.org/
+        timeout: 60s
+        maxage: 10m
+    packages:
+      '@*/*':
+        access: $all
+        publish: $all
+        proxy: npmjs
+      '**':
+        access: $all
+        publish: $all
+        proxy: npmjs
+    listen: 'http://0.0.0.0:4873'
+    server:
+      keepAliveTimeout: 60
+    web:
+      enable: false
+    log:
+      - { type: stdout, format: pretty, level: warn }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verdaccio
+  namespace: xyne-apps
+  labels:
+    app: verdaccio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: verdaccio
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: verdaccio
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: verdaccio
+          image: verdaccio/verdaccio:5
+          env:
+            - name: VERDACCIO_PORT
+              value: "4873"
+          ports:
+            - containerPort: 4873
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "2Gi"
+          volumeMounts:
+            - name: storage
+              mountPath: /verdaccio/storage
+            - name: config
+              mountPath: /verdaccio/conf/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: verdaccio-storage
+        - name: config
+          configMap:
+            name: verdaccio-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: verdaccio
+  namespace: xyne-apps
+spec:
+  selector:
+    app: verdaccio
+  ports:
+    - port: 4873
+      targetPort: 4873

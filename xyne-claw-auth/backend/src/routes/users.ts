@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { hasAdapter } from "../mcp/runner.js";
+import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { syncToolsForServer } from "../tool-sync.js";
 
 const router = Router();
@@ -88,7 +88,7 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   });
 
   // Sync tools
-  if (hasAdapter(serverType)) {
+  if (await hasConnectorDefinition(serverType)) {
     syncToolsForServer(userId, serverType, server.name, credentials).catch((err) => {
       console.error(`[users] tool sync failed for ${serverType}:`, err);
     });

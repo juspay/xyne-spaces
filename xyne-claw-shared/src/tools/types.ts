@@ -22,10 +22,16 @@ export interface PendingQuestion {
   options: string[];
 }
 
+export interface PendingResponse {
+  responseId: string;
+  message: string;
+}
+
 export interface ToolExecutionContext {
   config: Record<string, string>;
   meta?: Record<string, string>;
   pendingQuestions?: PendingQuestion[];
+  pendingResponses?: PendingResponse[];
 }
 
 export interface ToolDefinition {
@@ -41,6 +47,8 @@ export interface ToolDefinition {
   inputSchema: ToolInputSchema;
   /** Config keys this tool needs, with defaults */
   configSchema?: Record<string, ConfigField>;
+  /** Mark as write tool — always requires user approval before execution */
+  isWriteTool?: boolean;
   /** The actual implementation — runs inside xyne-claw */
   execute: (params: Record<string, unknown>, context?: ToolExecutionContext) => Promise<string>;
 }

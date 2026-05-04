@@ -1,7 +1,7 @@
 import type { ToolDefinition } from "../types.js";
 
 export const SCHEDULE_CONFIG_SCHEMA = {
-  CLAW_AUTH_URL: {
+  XYNE_CLAW_AUTH_URL: {
     label: "Claw Auth Service URL",
     default: "http://localhost:3003",
     required: true as const,
@@ -39,7 +39,7 @@ export const scheduleTask: ToolDefinition = {
     if (!userId) return "Error: Cannot schedule — no user identity available in execution context.";
     if (!agentSlug) return "Error: Cannot schedule — no agent slug available in execution context.";
 
-    const authUrl = context.config["CLAW_AUTH_URL"] ?? "http://localhost:3003";
+    const authUrl = context.config["XYNE_CLAW_AUTH_URL"] ?? "http://localhost:3003";
     const type = params["type"] as string;
 
     const body: Record<string, unknown> = {

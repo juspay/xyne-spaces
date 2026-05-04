@@ -1,0 +1,20 @@
+# Warmpool for the agent-workspace gVisor sandbox template.
+# Pre-warms 3 pods so xyne-claw `sandbox-repo-setup` calls always have
+# a Ready pod waiting (with the prebake step already complete: clone +
+# npm ci × 3 + nix build .#xyne-space-services). Each pod takes ~5-8 min
+# to do its prebake on first boot, but once Ready it sits idle until
+# claimed; replenishment happens transparently when one is consumed.
+#
+# Renamed from `kata-workspace-warmpool` to drop the misleading "kata"
+# prefix — the pool was originally tied to the kata-qemu template; we
+# repointed it at agent-workspace-gvisor-template (no kata, no docker)
+# in phase 2 of the gVisor pivot.
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxWarmPool
+metadata:
+  name: agent-workspace-warmpool
+  namespace: xyne-apps
+spec:
+  replicas: 2
+  sandboxTemplateRef:
+    name: agent-workspace-gvisor-template

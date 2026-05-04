@@ -18,3 +18,13 @@ export const LITELLM = {
 export const AGENT = {
   thinkingLevel: process.env["XYNE_CLAW_THINKING"] ?? "medium",
 } as const;
+
+// When set, claw publishes a one-shot progress event with a noVNC preview URL
+// the moment a sandbox session is acquired, so claw-auth can post a clickable
+// link into the Spaces channel where the user can watch (and drive) the
+// agent's headed chromium-B over noVNC. Path mode in sandbox-router-ws:
+//   ${baseUrl}/claw-preview/<sandboxId>/  →  redirects to vnc.html?autoconnect=…
+// Empty string disables the announce.
+export const SANDBOX_PREVIEW = {
+  baseUrl: process.env["SANDBOX_PREVIEW_BASE_URL"] ?? "https://app.spaces.sandbox.xyne.juspay.net",
+} as const;

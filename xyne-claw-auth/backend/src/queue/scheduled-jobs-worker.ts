@@ -2,6 +2,7 @@ import { Worker, type Job } from "bullmq";
 import { redisService } from "../redis.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
+import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import type { ScheduledJobData } from "./scheduled-jobs-queue.js";
 
 let worker: Worker<ScheduledJobData> | undefined;
@@ -21,23 +22,75 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
   // Fire the agent via the local /run endpoint
   const callbackUrl = `${CONFIG.selfUrl}/claw/api/v1/scheduled-jobs/${scheduledJobId}/result`;
 
+  // Use a unique conversationId per run so the agent gets a fresh session
+  // instead of resuming the thread's ongoing conversation.
+  const runConversationId = `scheduled_${scheduledJobId}_${Date.now()}`;
+  const scheduledContext = [
+    "## Scheduled Job",
+    "This is an automated scheduled task — NOT a reply to a user message.",
+    "Execute the task below independently. Do not reference or respond to previous messages in the thread.",
+    "",
+    ...(context ? [`## Additional Context`, context] : []),
+  ].join("\n");
+
   const res = await fetch(`${CONFIG.selfUrl}/claw/api/v1/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       userId,
       task,
-      context,
+      context: scheduledContext,
       agentSlug,
       channelId,
-      conversationId,
+      conversationId: runConversationId,
       callbackUrl,
     }),
   });
 
   const body = (await res.json()) as { success: boolean; sessionId?: string; error?: string };
+
   if (!body.success) {
+    // Persist failed run
+    await prisma.scheduledJobRun.create({
+      data: {
+        scheduledJobId,
+        status: "failed",
+        error: body.error ?? "unknown",
+        completedAt: new Date(),
+      },
+    });
     throw new Error(`/run failed: ${body.error ?? "unknown"}`);
+  }
+
+  // Persist started run with sessionId
+  await prisma.scheduledJobRun.create({
+    data: {
+      scheduledJobId,
+      sessionId: body.sessionId ?? null,
+      status: "started",
+    },
+  });
+
+  // Track the run for the Agent Control Center
+  if (body.sessionId) {
+    await agentRunRepository.start({
+      sessionId: body.sessionId,
+      userId,
+      agentSlug,
+      triggerSource: "scheduled",
+      task,
+      conversationId: runConversationId,
+      scheduledJobId,
+      ...(channelId ? { channelId } : {}),
+    }).catch((e) => console.warn(`[scheduler] AgentRun.start failed:`, e instanceof Error ? e.message : e));
+    await chatMessageRepository.create({
+      conversationId: runConversationId,
+      agentSlug,
+      userId,
+      role: "user",
+      content: task,
+      status: "completed",
+    }).catch((e) => console.warn(`[scheduler] ChatMessage.create failed:`, e instanceof Error ? e.message : e));
   }
 
   console.log(`[scheduler] Job ${scheduledJobId} → session ${body.sessionId}`);
