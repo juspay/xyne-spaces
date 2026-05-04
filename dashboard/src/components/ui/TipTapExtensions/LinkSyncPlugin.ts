@@ -11,6 +11,13 @@ function ensureProtocol(url: string): string {
   return `https://${url}`;
 }
 
+function isUrlText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  return /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed) || /^www\./i.test(trimmed);
+}
+
 /**
  * LinkSyncPlugin: Keeps link mark href in sync with the visible text.
  *
@@ -42,6 +49,8 @@ export const LinkSyncPlugin = Extension.create({
             if (!linkMark) return;
 
             const nodeText = node.text || '';
+            if (!isUrlText(nodeText)) return;
+
             const currentHref = linkMark.attrs['href'] as string;
 
             const expectedHref = ensureProtocol(nodeText.trim());
