@@ -395,6 +395,7 @@ export function MiniCallView({
               <ThreadMessages
                 channelId={channelId}
                 conversationId={conversationId}
+                ticketId={null}
                 onClose={onToggleThread}
               />
 

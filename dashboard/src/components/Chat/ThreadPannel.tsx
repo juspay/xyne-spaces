@@ -79,7 +79,7 @@ type UnderTicketTabType = 'replies' | 'workflows' | 'rca';
 interface ThreadMessagesProps {
   channelId?: string;
   conversationId?: string;
-  ticketId?: string;
+  ticketId?: string | null;
   onClose?: () => void;
   showHeader?: boolean;
   underTicketView?: boolean;
@@ -128,7 +128,7 @@ export const ThreadMessages = ({
 
   const channelId = propChannelId || paramChannelId;
   const conversationId = propConversationId || paramConversationId;
-  const ticketId = propTicketId || paramTicketId;
+  const ticketId = propTicketId !== undefined ? propTicketId || undefined : paramTicketId;
   const messageLoadStartTimeRef = useRef<number | null>(null);
 
   // Measure thread-panel header row, title, and actions to dynamically detect overflow
