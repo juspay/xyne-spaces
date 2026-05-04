@@ -1,0 +1,44 @@
+import type { ChatActionResponse } from "@/apps/types";
+import type {
+	SlackChatPostMessageResponse,
+	SlackChatUpdateResponse,
+} from "../types";
+
+export function transformPostMessageResponse(
+	result: ChatActionResponse,
+	channelId: string,
+	text: string,
+	appId: string,
+): SlackChatPostMessageResponse {
+	return {
+		ok: true,
+		channel: channelId,
+		ts: result.messageId,
+		message: {
+			type: "message",
+			subtype: "bot_message",
+			ts: result.messageId,
+			bot_id: appId,
+			text,
+			thread_ts: result.conversationId,
+		},
+	};
+}
+
+export function transformUpdateResponse(
+	result: ChatActionResponse,
+	channelId: string,
+	text: string,
+	userId: string,
+): SlackChatUpdateResponse {
+	return {
+		ok: true,
+		channel: channelId,
+		ts: result.messageId,
+		text,
+		message: {
+			text,
+			user: userId,
+		},
+	};
+}

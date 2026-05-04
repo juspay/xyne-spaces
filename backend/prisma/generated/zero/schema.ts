@@ -1508,6 +1508,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     ownerUserId: string().optional(),
     assigneeUserGroupId: string().optional(),
     boardId: string().optional(),
+    sendAsEmail: string().optional(),
   })
   .primaryKey("channelId");
 

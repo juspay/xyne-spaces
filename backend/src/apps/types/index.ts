@@ -245,6 +245,7 @@ export interface ChannelListItem {
     name: string;
     description?: string;
     scopeType: string;
+    visibility?: string;
     projectId: string;
     createdBy: string;
     createdAt: Date;

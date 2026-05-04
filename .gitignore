@@ -207,6 +207,9 @@ lotus/ios/lotus.xcodeproj/project.xcworkspace/
 
 # Agents
 .sisyphus/
+.agents/
+skills-lock.json
+
 .airborne
 
 # Sandbox environments (agent worktrees)
