@@ -29,10 +29,7 @@ export const API_BASE_URL = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/api`
   : `${protocol}://${hostname}${backendPort}/api`;
 
-const normalizeUrl = (url: string): string => url.replace(/\/+$/, '');
-export const APPS_PUBLIC_BASE_URL = normalizeUrl(
-  import.meta.env.VITE_APPS_PUBLIC_BASE_URL || `https://spaces.xyne.juspay.net/api/apps`,
-);
+export const APPS_PUBLIC_BASE_URL = `${API_BASE_URL}/apps`;
 
 // Zero Cache
 const zeroCachePort = isLocalhost ? ':4848' : isDockerTestEnv ? ':5173' : '';
