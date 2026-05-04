@@ -278,7 +278,7 @@ export const pdfMachine = createMachine(
           containerWidth = Math.max(document.documentElement.clientWidth - 32, 320);
         }
 
-        const scale = Math.min(Math.max(containerWidth / vp.width, 0.5), 2.0);
+        const scale = Math.min(Math.max(containerWidth / vp.width, 0.2), 2.0);
 
         return {
           scale,
