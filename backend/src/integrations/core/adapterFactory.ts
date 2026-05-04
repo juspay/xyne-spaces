@@ -34,6 +34,7 @@ export class AdapterFactory {
         transformer.postprocess?.bind(transformer),
       refetch: refetcher?.refetch.bind(refetcher),
       sendMailReply: mailReplySender?.sendReply.bind(mailReplySender),
+      sendMailNew: mailReplySender?.sendNew.bind(mailReplySender),
     };
 
     adapterRegistry.register(platform, adapter);

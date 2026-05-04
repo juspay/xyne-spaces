@@ -39,17 +39,26 @@ interface ThreadEmail {
  * Merge org users, desk-mailbox contacts, and thread participants into a
  * single de-duplicated suggestion pool. Priority: org > desk > thread,
  * since org users have the most reliable name data. The desk's own
- * mailbox is excluded from every source.
+ * mailbox AND any configured send-as alias / DL are excluded from every
+ * source — suggesting either would let users mail the desk itself.
+ *
+ * `selfEmails` accepts a string or list so callers can pass the bound
+ * mailbox + alias together; legacy single-string callers still work.
  */
 export const buildContactPool = (
   users: ReadonlyArray<User>,
   deskContacts: ReadonlyArray<DeskContact>,
   threadEmails: ReadonlyArray<ThreadEmail> | null | undefined,
-  selfEmail: string,
+  selfEmails: string | ReadonlyArray<string | null | undefined>,
 ): RecipientSuggestion[] => {
   const map = new Map<string, RecipientSuggestion>();
-  const self = selfEmail.trim();
-  const isSelf = (email: string): boolean => Boolean(self) && email === self;
+  const selfSet = new Set<string>(
+    (Array.isArray(selfEmails) ? selfEmails : [selfEmails])
+      .filter((s): s is string => !!s)
+      .map(s => s.trim().toLowerCase())
+      .filter(s => s.length > 0),
+  );
+  const isSelf = (email: string): boolean => selfSet.has(email);
 
   for (const u of users) {
     const email = (u.email || '').toLowerCase().trim();

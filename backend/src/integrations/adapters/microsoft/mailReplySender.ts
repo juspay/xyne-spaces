@@ -3,6 +3,7 @@ import {
   BaseMailReplySender,
   MailReplyContext,
   MailReplyResult,
+  NewMailContext,
 } from '../../core/baseMailReplySender';
 
 /**
@@ -20,7 +21,22 @@ export class MicrosoftMailReplySender extends BaseMailReplySender {
       bcc: ctx.bcc,
       threadId: ctx.latestExternalThreadId,
       latestExternalMessageId: ctx.latestExternalMessageId,
+      ...(ctx.fromEmailAddress && { fromEmailAddress: ctx.fromEmailAddress }),
       ...(ctx.fileAttachments?.length && { attachments: ctx.fileAttachments }),
     });
+  }
+
+  async sendNew(ctx: NewMailContext): Promise<MailReplyResult> {
+    const sender = MicrosoftDeskService.createEmailSender(ctx.encryptedCredentials, ctx.sourceId);
+    const { messageId, threadId } = await sender.sendNewEmail({
+      subject: ctx.subject,
+      content: ctx.body,
+      to: ctx.to,
+      cc: ctx.cc,
+      bcc: ctx.bcc,
+      ...(ctx.fromEmailAddress && { fromEmailAddress: ctx.fromEmailAddress }),
+      ...(ctx.fileAttachments?.length && { attachments: ctx.fileAttachments }),
+    });
+    return { messageId, threadId };
   }
 }

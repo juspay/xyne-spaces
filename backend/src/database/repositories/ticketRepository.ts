@@ -568,6 +568,13 @@ export class TicketRepository {
     });
   }
 
+  async findFirstByConversationId(conversationId: string) {
+    return await prisma.ticket.findFirst({
+      where: { conversationId },
+      select: { id: true },
+    });
+  }
+
   /**
    * Find ticket by xyneId with minimal fields for meet callback
    */

@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Sparkles, X, ArrowRight } from 'lucide-react';
 
+export interface RephraseQuickAction {
+  label: string;
+  instruction: string;
+}
+
 interface RephrasePromptProps {
   onSubmit: (instruction: string) => void;
   onClose: () => void;
   disabled?: boolean;
+  title?: string;
+  placeholder?: string;
+  quickActions?: ReadonlyArray<RephraseQuickAction>;
 }
 
-const QUICK_INSTRUCTIONS: ReadonlyArray<{ label: string; instruction: string }> = [
+const DEFAULT_QUICK_ACTIONS: ReadonlyArray<RephraseQuickAction> = [
   { label: 'Formalize', instruction: 'Make it more formal and professional.' },
   { label: 'Shorten', instruction: 'Make it more concise without losing meaning.' },
   { label: 'Elaborate', instruction: 'Expand with more detail and context.' },
@@ -19,6 +27,9 @@ export const RephrasePrompt = ({
   onSubmit,
   onClose,
   disabled = false,
+  title = 'What would you like to do with this text?',
+  placeholder = 'Or describe how to change it…',
+  quickActions = DEFAULT_QUICK_ACTIONS,
 }: RephrasePromptProps): ReactElement => {
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -52,9 +63,7 @@ export const RephrasePrompt = ({
             >
               <Sparkles size={12} className='text-white' />
             </div>
-            <span className='text-sm font-bold text-foreground'>
-              What would you like to do with this text?
-            </span>
+            <span className='text-sm font-bold text-foreground'>{title}</span>
           </div>
           <button
             type='button'
@@ -72,7 +81,7 @@ export const RephrasePrompt = ({
             pinned to the bottom of the card so it stays grounded as a
             composer-style entry point. */}
         <div className='px-4 py-3 flex flex-wrap gap-1.5 flex-1 min-h-0 content-start overflow-y-auto'>
-          {QUICK_INSTRUCTIONS.map(opt => (
+          {quickActions.map(opt => (
             <button
               key={opt.label}
               type='button'
@@ -108,7 +117,7 @@ export const RephrasePrompt = ({
                 }
               }}
               disabled={disabled}
-              placeholder='Or describe how to change it…'
+              placeholder={placeholder}
               className='w-full text-sm border border-border rounded-lg bg-background pl-3 pr-9 py-2 outline-none focus:border-red-300 placeholder:text-muted-foreground/60 disabled:opacity-50'
               data-track-category='AIDraft'
               data-track-name='RephraseCustomInput'

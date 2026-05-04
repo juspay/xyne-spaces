@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
 import Tooltip from '../../ui/Tooltip';
 import { useUsers } from '../../../hooks/useUsers';
+import { parseFromField } from '../EmailComposer/helpers';
 
 interface EmailTagWithAvatarProps {
   email: string;
@@ -23,11 +24,13 @@ export const EmailTagWithAvatar = ({
   onDragStart,
   onDragEnd,
 }: EmailTagWithAvatarProps): ReactElement => {
+  const parsed = useMemo(() => parseFromField(email), [email]);
+  const cleanEmail = parsed.email ?? email;
   const user = useMemo(() => {
-    return users.find(u => u.email.toLowerCase() === email.toLowerCase());
-  }, [users, email]);
+    return users.find(u => u.email.toLowerCase() === cleanEmail.toLowerCase());
+  }, [users, cleanEmail]);
 
-  const namePart = email.split('@')[0] || email;
+  const namePart = cleanEmail.split('@')[0] || cleanEmail;
   const fallbackDisplayName = namePart
     .split(/[._-]/)
     .map(word => (word.charAt(0) ?? '').toUpperCase() + word.slice(1))
@@ -37,7 +40,7 @@ export const EmailTagWithAvatar = ({
   const initialLetter = (user?.name?.charAt(0) ?? namePart.charAt(0) ?? '').toUpperCase();
 
   return (
-    <Tooltip content={email} side='top' delayDuration={300}>
+    <Tooltip content={cleanEmail} side='top' delayDuration={300}>
       <div
         className={`inline-flex items-center gap-2 rounded-lg border border-input bg-background py-1 px-1.5 ${draggable && !disabled ? 'cursor-grab active:cursor-grabbing' : ''}`}
         draggable={draggable && !disabled ? true : undefined}

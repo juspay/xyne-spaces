@@ -329,6 +329,43 @@ export class ExternalSourceCore {
       }
     }
 
+    if (isEmailChannel && !existingExtMsg && normalizedData.emailData) {
+      const threadEmail = await this.emailRepo.findFirstByThreadAndChannel(
+        normalizedData.externalThreadId,
+        source.channelId,
+      );
+      if (threadEmail) {
+        const conversation = await this.conversationRepo.findById(threadEmail.conversationId);
+        if (conversation) {
+          logger.info('[EMAIL_THREAD_FOUND] Existing thread matched by externalThreadId', {
+            conversationId: conversation.conversationId,
+            externalThreadId: normalizedData.externalThreadId,
+            channelId: source.channelId,
+          });
+
+          const uploadedFilesForThread =
+            AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
+
+          const { email } = await emailService.addEmailToConversation({
+            conversationId: conversation.conversationId,
+            emailSubject: normalizedData.emailData.subject || '',
+            emailBody: normalizedData.content,
+            emailTo: normalizedData.emailData.to || [],
+            emailFrom: normalizedData.emailData.from || '',
+            emailCc: normalizedData.emailData.cc || [],
+            emailBcc: normalizedData.emailData.bcc || [],
+            externalThreadId: normalizedData.externalThreadId,
+            externalMessageId: normalizedData.externalId,
+            emailType: EmailType.DEFAULT,
+            uploadedFiles: uploadedFilesForThread,
+            receivedAt: normalizedData.metadata.timestamp,
+          });
+
+          return { conversation, email, isNew: false };
+        }
+      }
+    }
+
     // For email channels, check Vespa for duplicate conversation
     // This handles cases where tickets were created manually (not via Zoho)
     if (isEmailChannel && !existingExtMsg && normalizedData.emailData) {

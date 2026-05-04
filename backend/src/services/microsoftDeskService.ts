@@ -662,6 +662,12 @@ export class MicrosoftDeskService {
     return {
       /**
        * Reply to a conversation — handles Graph message ID lookup internally.
+       *
+       * `fromEmailAddress` triggers a send-as flow: an address the auth'd user
+       * has Send-As / Send-on-Behalf permission for (a shared mailbox or DL
+       * configured in Exchange Admin Center). Graph honors the override on
+       * the message body's `from` field; when omitted the user's primary
+       * mailbox sends as-is.
        */
       async replyToConversation(params: {
         content: string;
@@ -671,11 +677,25 @@ export class MicrosoftDeskService {
         bcc?: string[];
         latestExternalMessageId: string;
         threadId: string;
+        fromEmailAddress?: string;
         /** Optional inline attachments (e.g. an ICS calendar invite or user-uploaded files). */
         attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
       }): Promise<{ threadId: string; messageId: string }> {
-        const { content, subject, to, cc, bcc, latestExternalMessageId, threadId, attachments } = params;
+        const {
+          content,
+          subject,
+          to,
+          cc,
+          bcc,
+          latestExternalMessageId,
+          threadId,
+          fromEmailAddress,
+          attachments,
+        } = params;
         const accessToken = await getAccessToken();
+        const fromOverride = fromEmailAddress
+          ? { from: { emailAddress: { address: fromEmailAddress } } }
+          : {};
 
         let graphMessageId: string | null = null;
 
@@ -715,6 +735,9 @@ export class MicrosoftDeskService {
         if (graphMessageId) {
           // 1. Create a reply draft — draft.internetMessageId is stable
           //    from this point through send and into Sent Items.
+          //    NB: `from` is intentionally NOT set in the createReply body —
+          //    Graph silently ignores it there. The reliable path is a
+          //    follow-up PATCH on the draft (step 1b below).
           const createReplyResponse = await fetch(
             `${config.microsoftGraph.baseUrl}/me/messages/${graphMessageId}/createReply`,
             {
@@ -745,6 +768,39 @@ export class MicrosoftDeskService {
             internetMessageId: string;
             conversationId: string;
           };
+
+          // 1b. Patch the draft's `from` to the send-as alias / DL when one
+          //     was requested. Graph rejects with 403 if the auth'd user
+          //     lacks Send-As permission on that mailbox / DL — surfaces
+          //     here before send so the user gets a clear "permission
+          //     missing" error instead of a silently-from-my-mailbox mail.
+          if (fromEmailAddress) {
+            const patchResponse = await fetch(
+              `${config.microsoftGraph.baseUrl}/me/messages/${draft.id}`,
+              {
+                method: 'PATCH',
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  from: { emailAddress: { address: fromEmailAddress } },
+                }),
+              },
+            );
+
+            if (!patchResponse.ok) {
+              const errorBody = await patchResponse.text();
+              await MicrosoftDeskService.deleteDraft(accessToken, draft.id);
+              logger.error(
+                `Microsoft draft PATCH from-override failed: ${patchResponse.status} ${errorBody}`,
+                { fromEmailAddress },
+              );
+              throw new Error(
+                `Cannot send as ${fromEmailAddress}: the connected mailbox lacks Send-As permission on this address. Grant Send-As in Exchange Admin Center, then try again. (Graph: ${patchResponse.status})`,
+              );
+            }
+          }
 
           if (attachments?.length) {
             const settled = await Promise.allSettled(
@@ -783,6 +839,40 @@ export class MicrosoftDeskService {
             throw new Error(`Failed to send reply: ${sendResponse.status}`);
           }
 
+          // 3. Post-send verification. Even with the PATCH succeeding, some
+          //    Send-As edge cases (DL nesting, recently-granted permissions
+          //    not yet propagated) cause Graph to silently fall back to the
+          //    user's primary mailbox at send time. Query the sent item's
+          //    actual `from` and warn loudly so the user knows the
+          //    recipient saw the wrong address — without raising the cost
+          //    of every successful send.
+          if (fromEmailAddress) {
+            try {
+              const sentLookup = await fetch(
+                `${config.microsoftGraph.baseUrl}/me/messages/${draft.id}?$select=from`,
+                { headers: { Authorization: `Bearer ${accessToken}` } },
+              );
+              if (sentLookup.ok) {
+                const sentBody = (await sentLookup.json()) as {
+                  from?: { emailAddress?: { address?: string } };
+                };
+                const actual = sentBody.from?.emailAddress?.address?.toLowerCase();
+                const requested = fromEmailAddress.toLowerCase();
+                if (actual && actual !== requested) {
+                  logger.warn(
+                    `Microsoft reply: send-as override silently dropped by Graph. requested=${requested} actual=${actual} — user likely lacks Send-As permission on the alias/DL`,
+                    { draftId: draft.id, internetMessageId: draft.internetMessageId },
+                  );
+                }
+              }
+            } catch (verifyErr) {
+              logger.warn(
+                'Microsoft reply: send-as post-send verification failed',
+                verifyErr,
+              );
+            }
+          }
+
           logger.info(`Microsoft reply sent: ${draft.internetMessageId}`);
           return { threadId: draft.conversationId, messageId: draft.internetMessageId };
         }
@@ -797,6 +887,7 @@ export class MicrosoftDeskService {
             toRecipients: formatRecipients(to),
             ...(cc && cc.length > 0 && { ccRecipients: formatRecipients(cc) }),
             ...(bcc && bcc.length > 0 && { bccRecipients: formatRecipients(bcc) }),
+            ...fromOverride,
           },
           saveToSentItems: true,
         };
@@ -817,16 +908,31 @@ export class MicrosoftDeskService {
         }
 
         const sentItemsResponse = await fetch(
-          `${config.microsoftGraph.baseUrl}/me/mailFolders/sentitems/messages?$top=1&$orderby=sentDateTime desc&$select=internetMessageId,conversationId`,
+          `${config.microsoftGraph.baseUrl}/me/mailFolders/sentitems/messages?$top=1&$orderby=sentDateTime desc&$select=internetMessageId,conversationId,from`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
 
         if (sentItemsResponse.ok) {
           const result = (await sentItemsResponse.json()) as {
-            value: Array<{ internetMessageId: string; conversationId: string }>;
+            value: Array<{
+              internetMessageId: string;
+              conversationId: string;
+              from?: { emailAddress?: { address?: string } };
+            }>;
           };
           const sent = result.value?.[0];
           if (sent?.internetMessageId && sent?.conversationId) {
+            const actualFrom = sent.from?.emailAddress?.address;
+            if (
+              fromEmailAddress &&
+              actualFrom &&
+              actualFrom.toLowerCase() !== fromEmailAddress.toLowerCase()
+            ) {
+              logger.warn(
+                `Microsoft reply (sendMail fallback): send-as override silently dropped. requested=${fromEmailAddress.toLowerCase()} actual=${actualFrom.toLowerCase()} — user likely lacks Send-As permission`,
+                { internetMessageId: sent.internetMessageId },
+              );
+            }
             logger.info(`Microsoft email sent successfully: ${sent.internetMessageId}`);
             return { threadId: sent.conversationId, messageId: sent.internetMessageId };
           }
@@ -834,6 +940,99 @@ export class MicrosoftDeskService {
 
         logger.warn('Microsoft email sent but unable to resolve internetMessageId from sent items');
         throw new Error('Sent email but could not resolve message ID');
+      },
+
+      async sendNewEmail(params: {
+        subject: string;
+        content: string;
+        to: string[];
+        cc?: string[];
+        bcc?: string[];
+        fromEmailAddress?: string;
+        attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+      }): Promise<{ threadId: string; messageId: string; fromEmail: string }> {
+        const accessToken = await getAccessToken();
+
+        const sendMailPayload: Record<string, unknown> = {
+          message: {
+            subject: params.subject,
+            body: { contentType: 'html', content: params.content },
+            toRecipients: formatRecipients(params.to),
+            ...(params.cc?.length && { ccRecipients: formatRecipients(params.cc) }),
+            ...(params.bcc?.length && { bccRecipients: formatRecipients(params.bcc) }),
+            ...(params.fromEmailAddress && {
+              from: { emailAddress: { address: params.fromEmailAddress } },
+            }),
+            ...(params.attachments?.length && {
+              attachments: params.attachments.map(a => ({
+                '@odata.type': '#microsoft.graph.fileAttachment',
+                name: a.name,
+                contentType: a.contentType,
+                contentBytes: Buffer.isBuffer(a.content)
+                  ? a.content.toString('base64')
+                  : Buffer.from(a.content).toString('base64'),
+              })),
+            }),
+          },
+          saveToSentItems: true,
+        };
+
+        const sendMailResponse = await fetch(`${config.microsoftGraph.baseUrl}/me/sendMail`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(sendMailPayload),
+        });
+
+        if (!sendMailResponse.ok) {
+          const errorBody = await sendMailResponse.text();
+          logger.error(`Microsoft sendMail (new) failed: ${sendMailResponse.status} ${errorBody}`);
+          throw new Error(`Failed to send email: ${sendMailResponse.status}`);
+        }
+
+        const sentItemsResponse = await fetch(
+          `${config.microsoftGraph.baseUrl}/me/mailFolders/sentitems/messages?$top=1&$orderby=sentDateTime desc&$select=internetMessageId,conversationId,from`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+
+        if (!sentItemsResponse.ok) {
+          throw new Error('Sent email but could not look up sent item for IDs');
+        }
+
+        const sentResult = (await sentItemsResponse.json()) as {
+          value: Array<{
+            internetMessageId: string;
+            conversationId: string;
+            from?: { emailAddress?: { address?: string } };
+          }>;
+        };
+        const sent = sentResult.value?.[0];
+
+        if (!sent?.internetMessageId || !sent?.conversationId) {
+          throw new Error('Sent email but could not resolve message ID from sent items');
+        }
+
+        const fromEmail =
+          sent.from?.emailAddress?.address ||
+          (await microsoftDeskService.resolveEmail(accessToken).catch(() => null)) ||
+          '';
+
+        if (
+          params.fromEmailAddress &&
+          fromEmail &&
+          fromEmail.toLowerCase() !== params.fromEmailAddress.toLowerCase()
+        ) {
+          logger.warn(
+            `Microsoft new email: send-as override silently dropped by Graph. requested=${params.fromEmailAddress.toLowerCase()} actual=${fromEmail.toLowerCase()} — user likely lacks Send-As permission on the alias/DL`,
+            { internetMessageId: sent.internetMessageId },
+          );
+        }
+
+        logger.info(`Microsoft new email sent: ${sent.internetMessageId}`);
+        return {
+          threadId: sent.conversationId,
+          messageId: sent.internetMessageId,
+          fromEmail,
+        };
       },
     };
   }

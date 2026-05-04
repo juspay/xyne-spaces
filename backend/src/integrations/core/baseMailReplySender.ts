@@ -19,12 +19,25 @@ export interface MailReplyContext {
   latestExternalThreadId: string;
   /** External message id of the most recent email — used as In-Reply-To. */
   latestExternalMessageId: string;
+  fromEmailAddress?: string;
   fileAttachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
 }
 
 export interface MailReplyResult {
   threadId: string;
   messageId?: string;
+}
+
+export interface NewMailContext {
+  encryptedCredentials: string;
+  sourceId: string;
+  subject: string;
+  body: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  fromEmailAddress?: string;
+  fileAttachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
 }
 
 export class AttachmentUploadError extends Error {
@@ -41,4 +54,5 @@ export class AttachmentUploadError extends Error {
 
 export abstract class BaseMailReplySender {
   abstract sendReply(ctx: MailReplyContext): Promise<MailReplyResult>;
+  abstract sendNew(ctx: NewMailContext): Promise<MailReplyResult>;
 }

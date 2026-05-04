@@ -7,10 +7,19 @@ import {
 import type { Message } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { logger, Event } from '../utils/logger';
 
+export interface DeskAIDraftHeaders {
+  from?: string | null;
+  to?: ReadonlyArray<string> | null;
+  cc?: ReadonlyArray<string> | null;
+  signatureWillBeAppended?: boolean;
+}
+
 interface UseDeskAIDraftOptions {
   channelId: string;
   conversationId: string;
   ticketId?: string | null;
+  mode?: 'reply' | 'compose';
+  headers?: DeskAIDraftHeaders;
 }
 
 export interface UseDeskAIDraftReturn {
@@ -64,10 +73,30 @@ const loadPriorMessages = async (
   }
 };
 
+const renderHeaderBlock = (headers?: DeskAIDraftHeaders): string => {
+  if (!headers) return '';
+  const lines: string[] = [];
+  if (headers.from?.trim()) lines.push(`From: ${headers.from.trim()}`);
+  const to = (headers.to ?? []).filter(s => s && s.trim());
+  if (to.length) lines.push(`To: ${to.join(', ')}`);
+  const cc = (headers.cc ?? []).filter(s => s && s.trim());
+  if (cc.length) lines.push(`Cc: ${cc.join(', ')}`);
+
+  if (lines.length === 0) return '';
+
+  const signOffRule = headers.signatureWillBeAppended
+    ? 'IMPORTANT: Do NOT include any closing or valediction (no "Best regards,", "Thanks,", "Sincerely,", etc.) and do NOT include any sign-off name. The body must end immediately after the final sentence of the message — the user has a signature block that will be appended verbatim after it.'
+    : 'Sign-off rule: treat the `From:` email above as the sender. Use a neutral closing ("Best regards,", "Thanks,") followed on the next line by the sender derived from the `From:` address (e.g. for `support@acme.com` use "Support Team"; for a personal mailbox derive from the local-part). Do NOT pull a sign-off name from prior messages in the conversation, the ticket creator, or any other source — the `From:` address is the only authoritative sender.';
+
+  return `\n\n${lines.join('\n')}\n\n${signOffRule}`;
+};
+
 export function useDeskAIDraft({
   channelId,
   conversationId,
   ticketId,
+  mode = 'reply',
+  headers,
 }: UseDeskAIDraftOptions): UseDeskAIDraftReturn {
   const [draftContent, setDraftContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -75,7 +104,14 @@ export function useDeskAIDraft({
   const sessionIdRef = useRef<string | null>(null);
   const ourStreamIdRef = useRef<string | null>(null);
 
-  const threadId = channelId && conversationId ? `${channelId}_${conversationId}` : '';
+  const isComposeMode = mode === 'compose';
+  const threadId = channelId
+    ? isComposeMode
+      ? `${channelId}_compose`
+      : conversationId
+        ? `${channelId}_${conversationId}`
+        : ''
+    : '';
   const storageKey = threadId ? `xd-ai-draft:${threadId}` : '';
 
   const writeStorage = useCallback(
@@ -105,7 +141,7 @@ export function useDeskAIDraft({
     sessionIdRef.current = null;
     ourStreamIdRef.current = null;
 
-    if (!conversationId) return;
+    if (!isComposeMode && !conversationId) return;
 
     if (threadId) {
       const active = xyneAIStreamManager.getActiveStream(threadId);
@@ -134,6 +170,9 @@ export function useDeskAIDraft({
       }
     }
 
+    if (isComposeMode || !conversationId) {
+      return;
+    }
     let cancelled = false;
     fetchSessionsByConversationId(conversationId)
       .then(sessions => {
@@ -152,13 +191,18 @@ export function useDeskAIDraft({
     return () => {
       cancelled = true;
     };
-  }, [conversationId, storageKey]);
+  }, [conversationId, storageKey, isComposeMode]);
 
   useEffect(() => {
     if (!isDraftActive) return;
     if (!draftContent) return;
-    writeStorage(draftContent);
-  }, [draftContent, isDraftActive, writeStorage]);
+    if (!isStreaming) {
+      writeStorage(draftContent);
+      return;
+    }
+    const handle = setTimeout(() => writeStorage(draftContent), 250);
+    return () => clearTimeout(handle);
+  }, [draftContent, isDraftActive, isStreaming, writeStorage]);
 
   // Only mirror content/status for streams we started — sidebar streams share
   // the threadId but their output belongs in the sidebar, not the draft card.
@@ -178,7 +222,8 @@ export function useDeskAIDraft({
 
   const submit = useCallback(
     async (query: string, displayContent: string) => {
-      if (!threadId || !channelId || !conversationId) return;
+      if (!threadId || !channelId) return;
+      if (!isComposeMode && !conversationId) return;
 
       setIsDraftActive(true);
       setIsStreaming(true);
@@ -195,12 +240,12 @@ export function useDeskAIDraft({
             query,
             channelIds: [],
             conversationId: sessionIdRef.current || '',
-            threadConversationId: conversationId,
+            ...(!isComposeMode && conversationId && { threadConversationId: conversationId }),
             webSearchEnabled: true,
             deepResearchEnabled: false,
             researchContext: null,
             attachments: [],
-            ...(ticketId && { ticketIds: [ticketId] }),
+            ...(!isComposeMode && ticketId && { ticketIds: [ticketId] }),
             localUserMessageId: userMessageId,
             suppressCompletionToast: true,
             draftMode: true,
@@ -233,21 +278,27 @@ export function useDeskAIDraft({
         setIsStreaming(false);
       }
     },
-    [threadId, channelId, conversationId, ticketId],
+    [threadId, channelId, conversationId, ticketId, isComposeMode],
   );
 
+  const basePrompt =
+    (isComposeMode
+      ? 'Draft a brand-new email. Write the full body — an appropriate greeting and the message itself. Do not include the subject line and do not append a signature block (the user has those configured separately).'
+      : 'Draft a reply for this ticket.') + renderHeaderBlock(headers);
+
   const triggerDraft = useCallback(() => {
-    void submit('Draft a reply for this ticket.', 'Draft a reply');
-  }, [submit]);
+    const display = isComposeMode ? 'Draft an email' : 'Draft a reply';
+    void submit(basePrompt, display);
+  }, [submit, basePrompt, isComposeMode]);
 
   const rephraseDraft = useCallback(
     (instruction: string, sourceText: string) => {
       const trimmedSource = sourceText.trim();
       const trimmedInstruction = instruction.trim();
-      const parts = ['Draft a reply for this ticket.'];
+      const parts = [basePrompt];
       if (trimmedSource) {
         parts.push(
-          `The user has already started writing the following text in the composer — use it as a starting point and refine / expand it into a complete reply:\n"""\n${trimmedSource}\n"""`,
+          `The user has already started writing the following text in the composer — use it as a starting point and refine / expand it:\n"""\n${trimmedSource}\n"""`,
         );
       }
       if (trimmedInstruction) {
@@ -255,13 +306,13 @@ export function useDeskAIDraft({
       }
       void submit(parts.join('\n\n'), trimmedInstruction || 'Refine draft');
     },
-    [submit],
+    [submit, basePrompt],
   );
 
   const refineDraft = useCallback(
     (instruction: string) => {
       const trimmedInstruction = instruction.trim();
-      const parts = ['Draft a reply for this ticket.'];
+      const parts = [basePrompt];
       if (draftContent) {
         parts.push(
           `A previous AI draft was generated:\n"""\n${draftContent}\n"""\nRefine it per the user's guidance below.`,
@@ -272,7 +323,7 @@ export function useDeskAIDraft({
       }
       void submit(parts.join('\n\n'), trimmedInstruction || 'Refine draft');
     },
-    [submit, draftContent],
+    [submit, draftContent, basePrompt],
   );
 
   const acceptDraft = useCallback(() => {

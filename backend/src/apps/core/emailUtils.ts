@@ -1,8 +1,9 @@
-import { EmailType } from '@prisma/client';
+import { EmailType, UserType } from '@prisma/client';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { decodeCursor, paginateResults } from './paginationUtils';
-import { EmailRepliesCursor, EmailRepliesItem, EmailRepliesResponse } from '../types';
+import { EmailRepliesCursor, EmailRepliesItem, EmailRepliesResponse, AppEventType, BaseAppEvent, EmailEventPayload } from '../types';
+import { handleEventSubscriptionsForUsers } from './eventSubscriptionUtils';
 
 /**
  * Get all emails in a conversation thread with cursor-based pagination
@@ -82,5 +83,54 @@ export async function getEmailReplies(
   } catch (error) {
     logger.error('[EMAIL-REPLIES] Error fetching email replies:', error);
     throw error;
+  }
+}
+
+export async function dispatchEmailEventForEmailId(emailId: string): Promise<void> {
+  try {
+    const email = await repositories.emails.findById(emailId);
+    if (!email) return;
+    // Only fire for incoming mail. Outgoing REPLY / REPLY_ALL rows are mail
+    // we sent ourselves and must not be re-broadcast to subscribed apps.
+    if (email.type !== EmailType.DEFAULT) return;
+
+    const channelParticipants = await repositories.channelParticipants.getChannelParticipants(
+      email.channelId,
+    );
+    const participantUserIds = channelParticipants.map(p => p.userId);
+    if (participantUserIds.length === 0) return;
+
+    const appUsers = await repositories.users.findMany({
+      where: { id: { in: participantUserIds }, userType: UserType.APP },
+    });
+    const appUserIds = appUsers.map(u => u.id);
+    if (appUserIds.length === 0) return;
+
+    const ticket = await repositories.tickets.findFirstByConversationId(email.conversationId);
+
+    const payload: EmailEventPayload = {
+      conversationId: email.conversationId,
+      subject: email.subject,
+      content: email.body,
+      to: email.to,
+      from: email.from,
+      recipients: [...email.cc, ...email.bcc],
+      parentId: email.id,
+      id: email.id,
+      ticketId: ticket?.id ?? '',
+    };
+
+    const event: BaseAppEvent = {
+      eventType: AppEventType.EMAIL,
+      payload,
+      timestamp: new Date().toISOString(),
+    };
+
+    await handleEventSubscriptionsForUsers(event, appUserIds);
+  } catch (error) {
+    logger.error('[dispatchEmailEventForEmailId] Failed to dispatch EMAIL event', {
+      emailId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }

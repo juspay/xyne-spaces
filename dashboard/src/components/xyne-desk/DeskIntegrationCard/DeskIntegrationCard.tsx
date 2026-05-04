@@ -67,11 +67,12 @@ export const DeskIntegrationCard = ({
             {connectedEmail}
           </span>
         </div>
-        {!canManage && (
-          <p className='text-xs text-muted-foreground'>
-            Only the desk owner can disconnect or reconnect this integration.
-          </p>
-        )}
+        {/* Non-managers (neither channel creator nor desk owner) get no
+            action UI and no "you can't do this" copy — just the read-only
+            email display above. The server-side ACL on the disconnect /
+            reconnect endpoints is the authoritative gate; this is purely
+            visual cleanup so the panel doesn't advertise actions the
+            user can't take. */}
         {canManage && (
           <div className='flex items-center gap-2 pt-1'>
             <Button

@@ -25,6 +25,7 @@ import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { AttachmentUploadError } from '@/integrations/core/baseMailReplySender';
 import { extractEmailAddress } from '@/utils/email';
+import { emailService } from '@/services/emailService';
 
 interface ReplyEmailRequest {
   body: string;
@@ -149,8 +150,17 @@ export class EmailController {
       if (!owner?.email) {
         return res.status(400).json({ error: 'Desk owner user not found or has no email.' });
       }
+      // Resolution priority for the From address on outbound mail:
+      //   1. Admin-configured Gmail send-as alias (`preference.sendAsEmail`) —
+      //      explicit user intent, highest priority.
+      //   2. The bound mailbox from the OAuth integration, with `extractEmailAddress`
+      //      cleaning legacy displayName wrappers like "Microsoft (foo@bar.com)".
+      //   3. Owner's user-account email — last-resort fallback when there's no
+      //      integration or the displayName doesn't contain a parseable email.
       const fromEmailAddress =
-        extractEmailAddress(externalSource.displayName) ?? owner.email;
+        preference.sendAsEmail ||
+        extractEmailAddress(externalSource.displayName) ||
+        owner.email;
 
       logger.info(`[EmailController] Sending ${type} via ${externalSource.sourceType} for conversation ${conversationId}`);
 
@@ -183,6 +193,7 @@ export class EmailController {
           bcc: bccRecipients,
           latestExternalMessageId: latestEmail.externalMessageId,
           threadId: latestEmail.externalThreadId,
+          ...(fromEmailAddress && { fromEmailAddress }),
           ...(fileAttachments.length > 0 && { attachments: fileAttachments }),
         });
       } else if (externalSource.sourceType === ExternalSourcePlatform.GOOGLE) {
@@ -199,6 +210,7 @@ export class EmailController {
             bcc: bccRecipients,
             threadId: initialEmail.externalThreadId,
             latestExternalMessageId: latestEmail.externalMessageId,
+            ...(fromEmailAddress && { fromEmailAddress }),
             ...(fileAttachments.length > 0 && { attachments: fileAttachments }),
           });
         } catch (sendErr: any) {
@@ -427,6 +439,277 @@ export class EmailController {
         status: error?.response?.status,
       });
       return res.status(500).json({ error: 'Failed to list desk contacts' });
+    }
+  };
+
+  composeEmail = async (req: Request, res: Response) => {
+    try {
+      const {
+        channelId,
+        to,
+        cc = [],
+        bcc = [],
+        subject,
+        body,
+      } = req.body as {
+        channelId?: string;
+        to?: string[];
+        cc?: string[];
+        bcc?: string[];
+        subject?: string;
+        body?: string;
+      };
+      const attachmentIds: string[] = Array.isArray(req.body.attachmentIds)
+        ? req.body.attachmentIds
+        : [];
+
+      if (!channelId) {
+        return res.status(400).json({ error: 'channelId is required' });
+      }
+      if (!Array.isArray(to) || to.length === 0) {
+        return res.status(400).json({ error: 'At least one recipient is required' });
+      }
+      if (typeof subject !== 'string' || subject.trim().length === 0) {
+        return res.status(400).json({ error: 'Subject is required' });
+      }
+      const hasContent = typeof body === 'string' && body.trim().length > 0;
+      if (!hasContent && attachmentIds.length === 0) {
+        return res.status(400).json({ error: 'Body or at least one attachment is required' });
+      }
+
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: 'Unauthenticated' });
+      }
+
+      const isMember = await this.channelParticipantRepo.isParticipant(channelId, userId);
+      if (!isMember) {
+        return res.status(403).json({ error: 'Not a member of this channel' });
+      }
+
+      const channel = await this.channelRepo.findById(channelId);
+      if (!channel) {
+        return res.status(404).json({ error: 'Channel not found' });
+      }
+      if (channel.type !== 'EMAIL') {
+        return res.status(400).json({ error: 'Channel must be of type EMAIL' });
+      }
+
+      const externalSource = await this.externalSourceRepo.findByChannelId(channel.id);
+      if (!externalSource) {
+        return res.status(404).json({ error: 'External source not found for channel' });
+      }
+
+      const adapter = adapterRegistry.getAdapter(externalSource.name);
+      if (!adapter.sendMailNew) {
+        return res.status(400).json({
+          error: `Provider ${externalSource.sourceType} does not support new mail`,
+        });
+      }
+
+      const safeSubject = subject.trim();
+      const safeBody = hasContent ? body : '';
+
+      // Resolve send-as before dispatching so the provider sets the right
+      // `From:` header (Gmail alias / Graph send-as / DL). Priority mirrors
+      // the reply path:
+      //   1. Admin-configured alias on EmailChannelPreference.sendAsEmail
+      //   2. Bound mailbox from the OAuth integration (cleaned of legacy
+      //      "Microsoft (foo@bar)" wrappers via extractEmailAddress)
+      //   3. Owner's user-account email — last-resort fallback
+      const preference = await this.emailChannelPreferenceRepo.findByChannelId(channel.id);
+      let ownerEmail = '';
+      if (preference?.ownerUserId) {
+        const owner = await this.userRepo.findById(preference.ownerUserId);
+        ownerEmail = owner?.email || '';
+      }
+      const fromEmail =
+        preference?.sendAsEmail ||
+        extractEmailAddress(externalSource.displayName) ||
+        ownerEmail ||
+        externalSource.displayName ||
+        '';
+
+      const { attachments: fileAttachments, stagedRowIds: stagedAttachmentRowIds } =
+        await new ExternalAttachmentService().prepareOutboundAttachments({ attachmentIds });
+
+      const sendResult = await adapter.sendMailNew({
+        encryptedCredentials: externalSource.credentials,
+        sourceId: externalSource.id,
+        subject: safeSubject,
+        body: safeBody,
+        to: [...new Set(to)],
+        cc: [...new Set(cc)],
+        bcc: [...new Set(bcc)],
+        ...(fromEmail && { fromEmailAddress: fromEmail }),
+        ...(fileAttachments.length > 0 && { fileAttachments }),
+      });
+
+      const externalMessageId = sendResult.messageId || sendResult.threadId;
+
+      try {
+        let boardId: string | undefined =
+          preference?.boardId ?? externalSource.boardId ?? undefined;
+        if (!boardId && channel.projectId) {
+          const firstBoard = await db.board.findFirst({
+            where: { projectId: channel.projectId },
+            orderBy: { createdAt: 'asc' },
+            select: { id: true },
+          });
+          boardId = firstBoard?.id;
+        }
+
+        const created = await emailService.createConversationWithEmail({
+          channelId,
+          userId,
+          ...(boardId && { boardId }),
+          emailSubject: safeSubject,
+          emailBody: safeBody,
+          emailTo: [...new Set(to)],
+          emailFrom: fromEmail,
+          emailCc: [...new Set(cc)],
+          emailBcc: [...new Set(bcc)],
+          externalThreadId: sendResult.threadId,
+          externalMessageId,
+          receivedAt: new Date(),
+        });
+
+        if (!created || !('conversation' in created) || !('ticket' in created) || !('email' in created)) {
+          logger.warn('[EmailController] composeEmail: conversation creation skipped', { created });
+          return res.status(200).json({
+            success: true,
+            sent: true,
+            threadId: sendResult.threadId,
+          });
+        }
+
+        const { conversation, ticket, email: newEmail } = created;
+
+        try {
+          await this.externalMessageRepo.create({
+            externalSourceId: externalSource.id,
+            externalId: externalMessageId,
+            externalThreadId: sendResult.threadId,
+            entityId: newEmail.id,
+            direction: MessageDirection.OUTGOING,
+            entityType: ExternalEntityType.EMAIL,
+          });
+        } catch (error) {
+          if (
+            !(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+          ) {
+            logger.warn('[EmailController] Failed to create ExternalMessage record:', error);
+          }
+        }
+
+        if (stagedAttachmentRowIds.length > 0) {
+          try {
+            // Atomic two-phase rebind: if the second updateMany throws after
+            // the first commits, the rows would otherwise be left with
+            // entityType=EMAIL + entityId=newEmail.id but conversationId=NULL,
+            // breaking any read path that filters attachments by both.
+            // $transaction ensures all-or-nothing.
+            await db.$transaction([
+              db.messageAttachment.updateMany({
+                where: { id: { in: stagedAttachmentRowIds } },
+                data: {
+                  entityType: AttachmentEntityType.EMAIL,
+                  entityId: newEmail.id,
+                },
+              }),
+              db.messageAttachment.updateMany({
+                where: { id: { in: stagedAttachmentRowIds } },
+                data: { conversationId: conversation.conversationId },
+              }),
+            ]);
+          } catch (error) {
+            logger.warn(
+              `[EmailController] Failed to rebind staged attachments to email ${newEmail.id}:`,
+              error,
+            );
+          }
+        }
+
+        logger.info('[EmailController] new email sent', {
+          event: 'email_compose_sent',
+          channelName: channel.name,
+          ticketId: ticket.id,
+          userEmail: req.user?.email,
+        });
+
+        return res.status(200).json({
+          success: true,
+          sent: true,
+          ticketId: ticket.id,
+          ticketXyneId: ticket.xyneId,
+          conversationId: conversation.conversationId,
+          channelId,
+          emailId: newEmail.id,
+          threadId: sendResult.threadId,
+        });
+      } catch (postSendError: any) {
+        logger.error(
+          '[EmailController] new email sent but failed to create local ticket/conversation',
+          {
+            channelId,
+            threadId: sendResult.threadId,
+            externalMessageId,
+            message: postSendError?.message,
+          },
+        );
+
+        if (stagedAttachmentRowIds.length > 0) {
+          try {
+            await db.messageAttachment.deleteMany({
+              where: { id: { in: stagedAttachmentRowIds } },
+            });
+          } catch (cleanupError) {
+            logger.warn(
+              '[EmailController] Failed to clean up orphaned staged attachments',
+              { stagedAttachmentRowIds, error: cleanupError },
+            );
+          }
+        }
+        return res.status(200).json({
+          success: true,
+          sent: true,
+          threadId: sendResult.threadId,
+          warning:
+            postSendError?.message ||
+            'Email sent, but xyne could not record it. It will appear when the recipient replies.',
+        });
+      }
+    } catch (error: any) {
+      if (error instanceof AttachmentUploadError) {
+        return res.status(422).json({
+          error: 'attachment_upload_failed',
+          message: error.message,
+          failedAttachments: error.failedAttachments,
+        });
+      }
+
+      const responseData = error?.response?.data;
+      const oauthError =
+        typeof responseData === 'object' && responseData !== null
+          ? {
+              providerError: responseData.error,
+              providerErrorDescription: responseData.error_description,
+              providerMessage:
+                typeof responseData.error === 'object'
+                  ? responseData.error.message
+                  : undefined,
+            }
+          : undefined;
+      logger.error('[EmailController] Failed to send new email', {
+        message: error?.message,
+        code: error?.code,
+        status: error?.response?.status,
+        ...oauthError,
+      });
+      return res.status(500).json({
+        error: 'Failed to send new email',
+        message: error?.message,
+      });
     }
   };
 }

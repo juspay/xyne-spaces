@@ -21,6 +21,10 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
     }
 
     await this.verifyChannelParticipant(args.channelId, tx, 'insert');
+
+    if (args.sendAsEmail != null) {
+      this.assertSendAsEmailGate(channel.createdBy, args.ownerUserId ?? null, 'insert');
+    }
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'email_channel_preferences'>>, tx: Transaction<Schema>): Promise<void> {
@@ -43,6 +47,24 @@ export class EmailChannelPreferencesACL extends BaseACL<'email_channel_preferenc
     }
 
     await this.verifyChannelParticipant(preference.channelId, tx, 'update');
+
+    if (args.sendAsEmail !== undefined) {
+      this.assertSendAsEmailGate(channel.createdBy, preference.ownerUserId ?? null, 'update');
+    }
+  }
+
+  private assertSendAsEmailGate(
+    channelCreatedBy: string,
+    preferenceOwnerUserId: string | null,
+    operation: 'insert' | 'update',
+  ): void {
+    const userId = this.ctx.userID;
+    if (userId === channelCreatedBy) return;
+    if (preferenceOwnerUserId && preferenceOwnerUserId === userId) return;
+    throw new MutationACLError(
+      `Email channel preference ${operation} failed: only the desk owner or creator can change the send-as alias`,
+      'email_channel_preferences',
+    );
   }
 
   async canDelete(_args: DeleteID<TableSchema<'email_channel_preferences'>>, _tx: Transaction<Schema>): Promise<void> {

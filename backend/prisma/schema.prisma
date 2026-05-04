@@ -1854,6 +1854,7 @@ model EmailChannelPreference {
   ownerUserId          String?  // User ID who owns this preference (no FK constraint)
   assigneeUserGroupId  String?  // User group ID for assignee (no FK constraint)
   boardId              String?  // Target board for ticket creation (no FK constraint)
+  sendAsEmail          String?  // Optional alias email for outbound replies (e.g. support@...)
 
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
