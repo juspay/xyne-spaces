@@ -384,6 +384,7 @@ export function FullCallView({
           <ThreadMessages
             channelId={channelId}
             conversationId={conversationId}
+            ticketId={null}
             onClose={onToggleThread}
           />
         </div>
