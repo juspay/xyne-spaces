@@ -10,11 +10,15 @@ import {
   Mail,
   MailOpen,
   CheckCheck,
+  Calendar,
+  ChevronLeft,
+  Loader2,
 } from 'lucide-react';
 import { useRecapData } from '../../hooks/useRecapData';
 import { RecapSubscription, RecapCard } from './RecapPanel.types';
 import { getYesterdayIST, formatRecapDate } from './RecapPanel.utils';
 import RecapSettings from './RecapSettings';
+import { RecapCalendarView } from './RecapCalendarView';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -67,6 +71,14 @@ const RecapPanel = (): ReactElement => {
   // Stable random greeting for this session
   const [greeting] = useState(() => getRandomGreeting());
 
+  // Calendar view state
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  // Use the recap data hook with selected date for historical view
+  const { recapData: historicalRecapData, isLoading: isLoadingHistorical } =
+    useRecapData(selectedDate);
+
   // Auto-open settings modal for first-time users when they click "Choose Channels"
   // The modal is opened via handleOpenSettings
 
@@ -94,17 +106,24 @@ const RecapPanel = (): ReactElement => {
     }
   }, [subscriptions, recapData]);
 
+  // Determine if we're in historical view based on selectedDate, not just data presence
+  const isHistoricalView = selectedDate !== null;
+
   // Split cards into unread and read sections (moved up to be used in handleMarkAllAsRead)
   const { unreadCards, readCards } = useMemo(() => {
-    if (!recapData) {
+    const dataToUse = isHistoricalView ? historicalRecapData : recapData;
+    if (!dataToUse) {
       return { unreadCards: [], readCards: [] };
     }
 
     const unread: RecapCard[] = [];
     const read: RecapCard[] = [];
 
-    for (const card of recapData.cards) {
-      if (markedAsReadChannels.has(card.channelId)) {
+    for (const card of dataToUse.cards) {
+      // For historical data, consider all as read since it's past date
+      if (isHistoricalView) {
+        read.push(card);
+      } else if (markedAsReadChannels.has(card.channelId)) {
         read.push(card);
       } else {
         unread.push(card);
@@ -112,7 +131,7 @@ const RecapPanel = (): ReactElement => {
     }
 
     return { unreadCards: unread, readCards: read };
-  }, [recapData, markedAsReadChannels]);
+  }, [recapData, historicalRecapData, markedAsReadChannels, isHistoricalView]);
 
   // Handle settings open/close
   const handleOpenSettings = useCallback((): void => {
@@ -121,6 +140,26 @@ const RecapPanel = (): ReactElement => {
 
   const handleCloseSettings = useCallback((): void => {
     setIsSettingsOpen(false);
+  }, []);
+
+  // Get today's date string for the Today button
+  const getTodayDateStr = useCallback((): string => {
+    return new Date().toLocaleDateString('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  }, []);
+
+  // Handle date selection
+  const handleSelectDate = useCallback((dateStr: string): void => {
+    setSelectedDate(dateStr);
+    setShowCalendar(false);
+  }, []);
+
+  // Handle going back to current day's recap
+  const handleBackToCurrent = useCallback((): void => {
+    setSelectedDate(null);
   }, []);
 
   // Handle mark all as read
@@ -138,7 +177,20 @@ const RecapPanel = (): ReactElement => {
         timestamp: now,
       }),
     );
-  }, [unreadCards.length, zero]);
+
+    // Also mark all unread channels as viewed (messages read)
+    // This ensures the channels appear as "read" in the sidebar
+    unreadCards.forEach(card => {
+      zero.mutate(
+        mutators.channel.markChannelAsViewed({
+          channelId: card.channelId,
+          timestamp: now,
+          draftMessageId: crypto.randomUUID(),
+          draftMessage: '',
+        }),
+      );
+    });
+  }, [unreadCards, zero]);
 
   // Handle when settings is saved - track if this was a first-time save
   const handleSettingsSaved = useCallback((): void => {
@@ -162,6 +214,22 @@ const RecapPanel = (): ReactElement => {
     const pointCitation = pointCitations?.[pointKey];
     const messageId = pointCitation?.messageId ?? drilldown?.messageId ?? undefined;
     const conversationId = pointCitation?.conversationId ?? drilldown?.conversationId ?? undefined;
+
+    const now = Date.now();
+
+    // Mark the channel recap as read when user clicks a citation
+    if (!historicalRecapData && !markedAsReadChannels.has(channelId)) {
+      const { dateObj: yesterdayDate } = getYesterdayIST();
+      const yesterdayTimestamp = yesterdayDate.getTime();
+
+      zero.mutate(
+        mutators.recap.markChannelRecapAsRead({
+          channelId,
+          recapDate: yesterdayTimestamp,
+          timestamp: now,
+        }),
+      );
+    }
 
     // Always navigate within the recap route so thread view opens inside RecapPanel context
     if (conversationId && messageId) {
@@ -205,24 +273,72 @@ const RecapPanel = (): ReactElement => {
               timestamp: now,
             }),
           );
+
+          // Also mark the channel as viewed (messages read)
+          // This ensures the channel appears as "read" in the sidebar
+          zero.mutate(
+            mutators.channel.markChannelAsViewed({
+              channelId,
+              timestamp: now,
+              draftMessageId: crypto.randomUUID(),
+              draftMessage: '',
+            }),
+          );
         }
         // Zero will auto-sync the subscriptions, no need to refresh
-      } catch (error) {
-        console.error('Error toggling read status:', error);
+      } catch {
+        // Error handling silently
       }
     },
     [zero],
   );
 
+  // Helper to get previous day date string
+  const getPreviousDayDateStr = (dateStr: string): string => {
+    const date = new Date(dateStr);
+    const prevDate = new Date(date);
+    prevDate.setDate(date.getDate() - 1);
+    return prevDate.toLocaleDateString('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  };
+
   // Render recap cards content (left/center panel)
   const renderRecapCards = (): ReactElement => {
-    if (!recapData || recapData.cards.length === 0) {
+    // Show loading spinner when fetching historical data
+    if (isLoadingHistorical && selectedDate) {
+      return (
+        <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
+          <Loader2 className='text-blue-500 mb-4 animate-spin' size={48} />
+          <p className='text-muted-foreground text-lg font-medium'>
+            Loading recap for {formatRecapDate(getPreviousDayDateStr(selectedDate))}...
+          </p>
+        </div>
+      );
+    }
+
+    const dataToUse = historicalRecapData || recapData;
+
+    // Show messages if no recap available for historical date
+    if (!dataToUse || dataToUse.cards.length === 0) {
+      const displayDate = selectedDate
+        ? getPreviousDayDateStr(selectedDate)
+        : historicalRecapData?.date || '';
       return (
         <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
           <Clock className='text-muted-foreground mb-4' size={48} />
           <p className='text-muted-foreground text-lg font-medium'>
-            Nothing important happened yesterday.
+            {historicalRecapData
+              ? `No recap available for ${formatRecapDate(displayDate)}.`
+              : 'Nothing important happened yesterday.'}
           </p>
+          {historicalRecapData && (
+            <p className='text-sm text-muted-foreground/80 mt-2'>
+              Messages from that day are still available in the channel.
+            </p>
+          )}
           <p className='text-xs text-muted-foreground/60 text-center mt-4'>
             This tool uses AI to generate responses, so some information may be inaccurate.
           </p>
@@ -232,7 +348,7 @@ const RecapPanel = (): ReactElement => {
 
     // Render a single recap card
     const renderCard = (card: RecapCard): ReactElement => {
-      const isRead = markedAsReadChannels.has(card.channelId);
+      const isRead = isHistoricalView ? true : markedAsReadChannels.has(card.channelId);
       const isShowingCustom = card.hasCustomRecap && !customViewChannels.has(card.channelId);
 
       // Pick which summary/citations to display based on toggle state
@@ -347,28 +463,30 @@ const RecapPanel = (): ReactElement => {
             <span className={`text-muted-foreground ${isMobile ? 'text-xs' : 'text-sm'}`}>
               {displayMessageCount} {isMobile ? 'messages' : 'messages summarized'}
             </span>
-            <button
-              onClick={() => void handleToggleRead(card.channelId, isRead)}
-              className={`flex items-center gap-1.5 text-xs font-medium transition-colors px-2.5 py-1 rounded-md border ${
-                isRead
-                  ? 'border-blue-500/30 text-blue-600 hover:bg-blue-500/10'
-                  : 'border-green-500/30 text-green-600 hover:bg-green-500/10'
-              }`}
-              data-track-category='RECAP_PANEL'
-              data-track-name={isRead ? 'MARK_AS_UNREAD' : 'MARK_AS_READ'}
-            >
-              {isRead ? (
-                <>
-                  <MailOpen size={13} />
-                  <span>Mark as unread</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle size={13} />
-                  <span>Mark as read</span>
-                </>
-              )}
-            </button>
+            {!isHistoricalView && (
+              <button
+                onClick={() => void handleToggleRead(card.channelId, isRead)}
+                className={`flex items-center gap-1.5 text-xs font-medium transition-colors px-2.5 py-1 rounded-md border ${
+                  isRead
+                    ? 'border-blue-500/30 text-blue-600 hover:bg-blue-500/10'
+                    : 'border-green-500/30 text-green-600 hover:bg-green-500/10'
+                }`}
+                data-track-category='RECAP_PANEL'
+                data-track-name={isRead ? 'MARK_AS_UNREAD' : 'MARK_AS_READ'}
+              >
+                {isRead ? (
+                  <>
+                    <MailOpen size={13} />
+                    <span>Mark as unread</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle size={13} />
+                    <span>Mark as read</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       );
@@ -392,11 +510,18 @@ const RecapPanel = (): ReactElement => {
         {/* Header Section - fixed at top */}
         <div className='text-center p-5 pb-4 flex-shrink-0'>
           <h2 className={`${isMobile ? 'text-lg' : 'text-2xl'} font-semibold text-foreground mb-1`}>
-            {greeting}
+            {isHistoricalView ? 'Historical Recap' : greeting}
           </h2>
           <p className='text-sm text-muted-foreground'>
-            Recapping {recapData.meta.totalMessages} messages from {formatRecapDate(recapData.date)}
+            {isHistoricalView && selectedDate
+              ? `Recapping ${dataToUse.meta.totalMessages} messages from ${formatRecapDate(getPreviousDayDateStr(selectedDate))}`
+              : `Recapping ${dataToUse.meta.totalMessages} messages from ${formatRecapDate(dataToUse.date)}`}
           </p>
+          {isHistoricalView && selectedDate && (
+            <p className='text-xs text-muted-foreground/70 mt-1'>
+              Selected {formatRecapDate(selectedDate)} · Recaps cover the previous day
+            </p>
+          )}
         </div>
 
         {/* Scrollable content area with sections */}
@@ -412,16 +537,18 @@ const RecapPanel = (): ReactElement => {
                     ({unreadCards.length})
                   </span>
                 </div>
-                <button
-                  onClick={handleMarkAllAsRead}
-                  className='flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-green-600 bg-green-500/10 hover:bg-green-500/20 rounded-md border border-green-500/30 transition-colors'
-                  title='Mark all as read'
-                  data-track-category='RECAP_PANEL'
-                  data-track-name='MARK_ALL_AS_READ'
-                >
-                  <CheckCheck size={12} />
-                  <span>Mark all as read</span>
-                </button>
+                {!isHistoricalView && (
+                  <button
+                    onClick={handleMarkAllAsRead}
+                    className='flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-green-600 bg-green-500/10 hover:bg-green-500/20 rounded-md border border-green-500/30 transition-colors'
+                    title='Mark all as read'
+                    data-track-category='RECAP_PANEL'
+                    data-track-name='MARK_ALL_AS_READ'
+                  >
+                    <CheckCheck size={12} />
+                    <span>Mark all as read</span>
+                  </button>
+                )}
               </div>
               {unreadCards.map(card => (
                 <div key={card.channelId}>{renderCard(card)}</div>
@@ -433,7 +560,7 @@ const RecapPanel = (): ReactElement => {
           {readCards.length > 0 && (
             <div className='mb-6'>
               {renderSectionHeader(
-                'Read Recap',
+                isHistoricalView ? 'Recap' : 'Read Recap',
                 readCards.length,
                 <MailOpen size={16} className='text-green-500' />,
               )}
@@ -444,7 +571,8 @@ const RecapPanel = (): ReactElement => {
           )}
 
           {/* Footer with time saved - enhanced with gradient */}
-          {recapData.meta.estimatedTimeSavedMinutes > 0 && (
+          {/* Show for both current and historical recaps */}
+          {dataToUse.meta.estimatedTimeSavedMinutes > 0 && (
             <div className='rounded-2xl p-6 text-center bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 border-2 border-green-200 mb-5 mt-2 shadow-lg'>
               <h3 className='text-lg font-bold text-gray-900 mb-2'>
                 🎉 <span className='text-green-600'>Rejoice!</span>
@@ -452,9 +580,9 @@ const RecapPanel = (): ReactElement => {
               <p className='text-sm text-gray-700 mb-2'>
                 You saved about{' '}
                 <span className='font-semibold text-green-600'>
-                  {recapData.meta.estimatedTimeSavedMinutes} minutes
+                  {dataToUse.meta.estimatedTimeSavedMinutes} minutes
                 </span>{' '}
-                catching up on {recapData.meta.totalMessages} messages in {recapData.cards.length}{' '}
+                catching up on {dataToUse.meta.totalMessages} messages in {dataToUse.cards.length}{' '}
                 channels.
               </p>
               <p className='text-xs text-gray-500'>Time well spent! ✨</p>
@@ -510,19 +638,71 @@ const RecapPanel = (): ReactElement => {
           <div className='p-4 bg-background border-b border-border flex-shrink-0'>
             <div className='flex items-center justify-between'>
               <div className='flex items-center gap-2'>
+                {selectedDate && (
+                  <button
+                    onClick={handleBackToCurrent}
+                    className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
+                    title='Back to today'
+                    data-track-category='RECAP_PANEL'
+                    data-track-name='BACK_TO_TODAY'
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                )}
                 <h3 className='font-bold text-foreground text-xl'>Recap</h3>
                 <Sparkles size={20} className='text-blue-500' />
               </div>
-              <button
-                onClick={handleOpenSettings}
-                className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200'
-                aria-label='Settings'
-                title='Manage channels'
-                data-track-category='RECAP_PANEL'
-                data-track-name='OPEN_SETTINGS'
-              >
-                <Settings size={18} />
-              </button>
+              <div className='flex items-center gap-1'>
+                {/* Calendar Button with Dropdown */}
+                <div className='relative'>
+                  <button
+                    onClick={() => setShowCalendar(!showCalendar)}
+                    className={`p-1.5 rounded-md transition-colors duration-200 ${
+                      showCalendar
+                        ? 'text-blue-500 bg-blue-500/10'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }`}
+                    aria-label='View past recaps'
+                    title='View past recaps'
+                    data-track-category='RECAP_PANEL'
+                    data-track-name='OPEN_CALENDAR'
+                  >
+                    <Calendar size={18} />
+                  </button>
+
+                  {/* Calendar Dropdown - positioned below the button */}
+                  {showCalendar && (
+                    <div className='absolute top-full mt-2 right-0 z-50 w-[300px]'>
+                      <div className='bg-background rounded-xl shadow-2xl border border-border overflow-hidden'>
+                        <RecapCalendarView
+                          onDateSelect={dateStr => {
+                            const todayStr = getTodayDateStr();
+                            if (dateStr === null || dateStr === todayStr) {
+                              handleBackToCurrent();
+                            } else {
+                              void handleSelectDate(dateStr);
+                            }
+                            setShowCalendar(false);
+                          }}
+                          selectedDate={selectedDate}
+                          onClose={() => setShowCalendar(false)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={handleOpenSettings}
+                  className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200'
+                  aria-label='Settings'
+                  title='Manage channels'
+                  data-track-category='RECAP_PANEL'
+                  data-track-name='OPEN_SETTINGS'
+                >
+                  <Settings size={18} />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -546,6 +726,24 @@ const RecapPanel = (): ReactElement => {
         onClose={handleCloseSettings}
         onSaved={handleSettingsSaved}
       />
+
+      {/* Click outside handler for calendar dropdown */}
+      {showCalendar && (
+        <div
+          className='fixed inset-0 z-40'
+          onClick={() => setShowCalendar(false)}
+          onKeyDown={e => {
+            if (e.key === 'Escape') {
+              setShowCalendar(false);
+            }
+          }}
+          role='button'
+          tabIndex={0}
+          aria-label='Close calendar'
+          data-track-category='RECAP_PANEL'
+          data-track-name='CLOSE_CALENDAR_OUTSIDE_CLICK'
+        />
+      )}
     </>
   );
 };

@@ -13,3 +13,5 @@ export type {
   ChannelListItemProps,
   RecapSettingsProps,
 } from './RecapPanel.types';
+
+export { RecapCalendarView } from './RecapCalendarView';

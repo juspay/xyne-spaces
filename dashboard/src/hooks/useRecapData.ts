@@ -5,6 +5,7 @@ import { queries } from '../zero/queries';
 import { useAllChannels, useUserChannelStatuses } from './useChannels';
 import { useAuth } from './useAuth';
 import { ChannelUserStatus, ChannelRecap } from '@xyne/shared';
+import { subDays } from 'date-fns';
 
 // Type definitions for recap summary data structure
 // New format: per-point citation data embedded directly (like ask AI)
@@ -238,16 +239,43 @@ const processRecapCards = (
 };
 
 /**
+ * Computes the target timestamp and date string for recap queries.
+ * For historical dates: parses the date and subtracts 1 day (recaps cover previous day's activity).
+ * For current dates: returns yesterday's date in IST.
+ */
+const computeRecapDate = (
+  dateOverride?: string | null,
+): { timestamp: number; dateStr: string; isHistorical: boolean } => {
+  if (dateOverride) {
+    // Parse the selected date (e.g., "2026-04-27") and subtract 1 day
+    // because recaps summarize the PREVIOUS day's activity
+    const selectedDate = new Date(`${dateOverride}T00:00:00Z`);
+    const recapDate = subDays(selectedDate, 1);
+    const y = recapDate.getFullYear();
+    const m = String(recapDate.getMonth() + 1).padStart(2, '0');
+    const d = String(recapDate.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+    const timestamp = new Date(dateStr + 'T00:00:00Z').getTime();
+    return { timestamp, dateStr, isHistorical: true };
+  }
+
+  const { timestamp, dateStr } = getYesterdayIST();
+  return { timestamp, dateStr, isHistorical: false };
+};
+
+/**
  * Hook to manage all recap-related data using Zero for real-time sync
  * - Subscriptions and recaps are fetched via Zero
  * - Data is cached until midnight IST (when new recaps are generated)
+ * @param dateOverride - Optional date string (YYYY-MM-DD) to fetch historical recaps
  */
-export const useRecapData = () => {
-  // Get yesterday's date info - stable for the day
-  const { timestamp: yesterdayTimestamp, dateStr: yesterdayDateStr } = useMemo(
-    () => getYesterdayIST(),
-    [],
-  );
+export const useRecapData = (dateOverride?: string | null) => {
+  // Get target date info - either historical or yesterday's date
+  const {
+    timestamp: targetTimestamp,
+    dateStr: targetDateStr,
+    isHistorical,
+  } = useMemo(() => computeRecapDate(dateOverride), [dateOverride]);
 
   // Get current user ID for custom recap separation
   const { user: currentUser } = useAuth();
@@ -278,9 +306,9 @@ export const useRecapData = () => {
   const recapQueryArgs = useMemo(
     () => ({
       channelIds: hasSubscriptions ? channelIds : [],
-      recapDate: yesterdayTimestamp,
+      recapDate: targetTimestamp,
     }),
-    [channelIds, yesterdayTimestamp, hasSubscriptions],
+    [channelIds, targetTimestamp, hasSubscriptions],
   );
 
   // Fetch daily recaps for subscribed channels via Zero (cached)
@@ -319,34 +347,36 @@ export const useRecapData = () => {
     return Math.max(0, Math.ceil(sourceMinutes - recapMinutes));
   }, [processedData.totalMessages, processedData.totalRecapWords]);
 
-  // Determine hasUnreadRecap
+  // Determine hasUnreadRecap - only applicable for current (non-historical) recaps
   const hasUnreadRecap = useMemo(() => {
+    if (isHistorical) return false; // Historical recaps are always considered "read"
     if (!subscriptionsData || subscriptionsData.length === 0) return false;
     return subscriptionsData.some(sub => {
       if (!sub.lastSeenRecapDate) return true;
-      return sub.lastSeenRecapDate < yesterdayTimestamp;
+      return sub.lastSeenRecapDate < targetTimestamp;
     });
-  }, [subscriptionsData, yesterdayTimestamp]);
+  }, [subscriptionsData, targetTimestamp, isHistorical]);
 
   // Calculate unread count - count of channels with recaps that haven't been seen
   const unreadCount = useMemo(() => {
+    if (isHistorical) return 0; // Historical recaps have no unread count
     if (!subscriptionsData || subscriptionsData.length === 0) return 0;
     if (!dailyRecapsData || dailyRecapsData.length === 0) return 0;
 
-    // Get channel IDs that have recaps for yesterday
+    // Get channel IDs that have recaps for the target date
     const recapChannelIds = new Set(
       (dailyRecapsData as ChannelRecap[]).map(recap => recap.channelId),
     );
 
     // Count subscriptions where:
-    // 1. Channel has a recap for yesterday
-    // 2. User hasn't seen it (lastSeenRecapDate is null or less than yesterday's timestamp)
+    // 1. Channel has a recap for the target date
+    // 2. User hasn't seen it (lastSeenRecapDate is null or less than target timestamp)
     return subscriptionsData.filter(sub => {
       if (!recapChannelIds.has(sub.channelId)) return false;
       if (!sub.lastSeenRecapDate) return true;
-      return sub.lastSeenRecapDate < yesterdayTimestamp;
+      return sub.lastSeenRecapDate < targetTimestamp;
     }).length;
-  }, [subscriptionsData, dailyRecapsData, yesterdayTimestamp]);
+  }, [subscriptionsData, dailyRecapsData, targetTimestamp, isHistorical]);
 
   // Build final RecapData object
   const recapData: RecapData | null = useMemo(() => {
@@ -355,36 +385,30 @@ export const useRecapData = () => {
 
     if (!configured) {
       return {
-        date: yesterdayDateStr,
+        date: targetDateStr,
         configured: false,
         hasUnreadRecap: false,
         cards: [],
         meta: {
           totalMessages: 0,
           estimatedTimeSavedMinutes: 0,
-          date: yesterdayDateStr,
+          date: targetDateStr,
         },
       };
     }
 
     return {
-      date: yesterdayDateStr,
+      date: targetDateStr,
       configured: true,
       hasUnreadRecap,
       cards: processedData.cards,
       meta: {
         totalMessages: processedData.totalMessages,
         estimatedTimeSavedMinutes,
-        date: yesterdayDateStr,
+        date: targetDateStr,
       },
     };
-  }, [
-    subscriptionsData,
-    yesterdayDateStr,
-    hasUnreadRecap,
-    processedData,
-    estimatedTimeSavedMinutes,
-  ]);
+  }, [subscriptionsData, targetDateStr, hasUnreadRecap, processedData, estimatedTimeSavedMinutes]);
 
   // Loading states - cached queries return null initially, hook returns empty array initially
   const isLoadingSubscriptions = !allUserStatuses;
