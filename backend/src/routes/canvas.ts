@@ -18,4 +18,6 @@ router.post(
   canvasController.handleMentions
 );
 
+router.post('/create', canvasController.createCanvas);
+
 export default router;
