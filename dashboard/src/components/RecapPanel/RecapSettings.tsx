@@ -63,6 +63,15 @@ const ChannelListItem = ({
   const { displayName } = useChannelDisplayName(channel, currentUserId || '');
   const channelStats = (channel as VisibleChannel).channelStats;
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  // Local draft for editing without affecting parent state until saved
+  const [localDraft, setLocalDraft] = useState(customPrompt);
+
+  // Sync local draft when popover opens or customPrompt changes externally
+  useEffect(() => {
+    if (isPopoverOpen) {
+      setLocalDraft(customPrompt);
+    }
+  }, [isPopoverOpen, customPrompt]);
 
   const getIcon = (): ReactElement => {
     return channel.visibility === ChannelVisibility.PRIVATE ? (
@@ -136,7 +145,6 @@ const ChannelListItem = ({
             sideOffset={8}
             className='p-0'
             onOpenAutoFocus={e => e.preventDefault()}
-            onPointerDownOutside={e => e.preventDefault()}
           >
             <div className='p-4 w-80'>
               <div className='flex items-center gap-2 mb-3'>
@@ -145,10 +153,8 @@ const ChannelListItem = ({
               </div>
               <textarea
                 placeholder='e.g. "Focus on bugs and blockers. Highlight action items."'
-                value={customPrompt}
-                onChange={e =>
-                  onCustomPromptChange(e.target.value.slice(0, MAX_CUSTOM_PROMPT_LENGTH))
-                }
+                value={localDraft}
+                onChange={e => setLocalDraft(e.target.value.slice(0, MAX_CUSTOM_PROMPT_LENGTH))}
                 rows={3}
                 className='w-full bg-muted/50 border border-input rounded-md px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none leading-relaxed'
                 data-track-category='RECAP_SETTINGS'
@@ -156,9 +162,9 @@ const ChannelListItem = ({
               />
               <div className='flex justify-end mt-1'>
                 <span
-                  className={`text-xs ${customPrompt.length >= MAX_CUSTOM_PROMPT_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
+                  className={`text-xs ${localDraft.length >= MAX_CUSTOM_PROMPT_LENGTH ? 'text-red-500' : 'text-muted-foreground'}`}
                 >
-                  {customPrompt.length}/{MAX_CUSTOM_PROMPT_LENGTH}
+                  {localDraft.length}/{MAX_CUSTOM_PROMPT_LENGTH}
                 </span>
               </div>
               <div className='flex items-center justify-between mt-3'>
@@ -166,7 +172,10 @@ const ChannelListItem = ({
                 <div className='flex gap-2'>
                   <button
                     type='button'
-                    onClick={() => onCustomPromptChange('')}
+                    onClick={() => {
+                      setLocalDraft('');
+                      onCustomPromptChange('');
+                    }}
                     className='px-2.5 py-1 text-xs rounded border border-input text-muted-foreground hover:text-foreground hover:bg-accent transition-colors'
                     data-track-category='RECAP_SETTINGS'
                     data-track-name='CLEAR_CUSTOM_PROMPT'
@@ -175,7 +184,10 @@ const ChannelListItem = ({
                   </button>
                   <button
                     type='button'
-                    onClick={() => setIsPopoverOpen(false)}
+                    onClick={() => {
+                      onCustomPromptChange(localDraft);
+                      setIsPopoverOpen(false);
+                    }}
                     className='px-2.5 py-1 text-xs rounded bg-blue-500 text-white hover:bg-blue-600 transition-colors font-medium'
                     data-track-category='RECAP_SETTINGS'
                     data-track-name='SAVE_CUSTOM_PROMPT'
