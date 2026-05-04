@@ -39,6 +39,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   const [imageTab, setImageTab] = useState<'url' | 'upload'>('upload');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imagePopoverRef = useRef<HTMLDivElement>(null);
+  const linkSelectionRef = useRef<{ from: number; to: number } | null>(null);
 
   useEffect(() => {
     if (!editor) return;
@@ -127,6 +128,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     if (!editor) return;
 
     const { from, to } = editor.state.selection;
+    let selectionRange = { from, to };
     let selectedText = editor.state.doc.textBetween(from, to);
     const previousUrl = editor.getAttributes('link')['href'] as string | undefined;
 
@@ -134,9 +136,11 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
     if (editor.isActive('link')) {
       editor.chain().extendMarkRange('link').run();
       const { from: newFrom, to: newTo } = editor.state.selection;
+      selectionRange = { from: newFrom, to: newTo };
       selectedText = editor.state.doc.textBetween(newFrom, newTo);
     }
 
+    linkSelectionRef.current = selectionRange;
     const hasTextSelected = selectedText.length > 0;
     setHasSelection(hasTextSelected);
     setLinkText(selectedText);
@@ -153,44 +157,36 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       finalUrl = `https://${finalUrl}`;
     }
 
-    const { from, to } = editor.state.selection;
-    const textToInsert =
-      linkText.trim() || (hasSelection ? editor.state.doc.textBetween(from, to) : linkUrl);
+    const selectionRange = linkSelectionRef.current ?? editor.state.selection;
+    const { from, to } = selectionRange;
+    const selectedText = from === to ? '' : editor.state.doc.textBetween(from, to);
+    const textToInsert = linkText.trim() || (hasSelection ? selectedText : linkUrl.trim());
+    const linkEnd = from + textToInsert.length;
 
-    if (hasSelection) {
-      editor
-        .chain()
-        .focus()
-        .deleteRange({ from, to })
-        .insertContent({
-          type: 'text',
-          text: textToInsert,
-          marks: [{ type: 'link', attrs: { href: finalUrl } }],
-        })
-        .run();
-    } else {
-      const currentPos = from;
-      editor
-        .chain()
-        .focus()
-        .insertContent({
-          type: 'text',
-          text: textToInsert,
-          marks: [{ type: 'link', attrs: { href: finalUrl } }],
-        })
-        .insertContent(' ')
-        .setTextSelection(currentPos + textToInsert.length)
-        .run();
+    const chain = editor
+      .chain()
+      .focus()
+      .insertContentAt({ from, to }, textToInsert)
+      .setTextSelection({ from, to: linkEnd })
+      .setLink({ href: finalUrl })
+      .setTextSelection(linkEnd);
+
+    if (!hasSelection) {
+      chain.insertContent(' ');
     }
+
+    chain.run();
 
     setOpen(false);
     setLinkText('');
     setLinkUrl('');
+    linkSelectionRef.current = null;
   }, [editor, linkUrl, linkText, hasSelection]);
 
   const removeLink = useCallback(() => {
     editor?.chain().focus().extendMarkRange('link').unsetLink().run();
     setOpen(false);
+    linkSelectionRef.current = null;
   }, [editor]);
 
   const handleBulletList = useCallback(() => {
