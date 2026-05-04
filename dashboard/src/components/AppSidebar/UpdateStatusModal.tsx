@@ -235,9 +235,21 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
   };
 
   const handleClearStatus = (): void => {
+    // Mutate to clear the status completely
+    zero.mutate(
+      mutators.userPresence.upsert({
+        statusEmoji: null,
+        statusContent: null,
+        statusExpiryAt: null,
+        timestamp: Date.now(),
+        presenceId: uuidv4(),
+      }),
+    );
+
     setStatusText('');
     setSelectedEmoji(undefined);
     setIsEmojiAutoAssigned(false);
+    setHasExistingStatus(false);
   };
 
   const handleSuggestionClick = (emoji: string, text: string, expiry: string): void => {
@@ -446,10 +458,11 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
               {isEditingMode && (
                 <button
                   onClick={handleClearStatus}
-                  className='flex-shrink-0 text-muted-foreground hover:text-muted-foreground'
+                  className='flex-shrink-0 flex items-center gap-1 text-muted-foreground hover:text-muted-foreground'
                   data-track-category='Update_User_Status_Modal'
                   data-track-name='Clear_Status_In_Modal'
                 >
+                  <span className='text-xs opacity-60'>(Clear status)</span>
                   <X className='size-4' />
                 </button>
               )}
