@@ -822,6 +822,101 @@ class NotificationService {
     return { deliveredViaApp };
   }
 
+  async createChannelMessageNotifications(
+    userIds: string[],
+    messageId: string,
+    conversationId: string,
+    channelId: string,
+    channelName: string,
+    senderId: string,
+    senderName: string,
+    cleanContent: string,
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = userIds.filter(id => id !== senderId);
+
+    if (recipientIds.length === 0) {
+      return { deliveredUserIds: [] };
+    }
+
+    getNotificationJobsExpected().add(recipientIds.length, {
+      platform: 'desktop',
+      message_type: 'channel',
+    });
+
+    const { desktopUsers, mobileUsers } = await notificationFilterService.filterUsers(
+      recipientIds,
+      channelId,
+      false,
+      'channel_message',
+    );
+
+    logger.info(`[Notification] Filtered channel message recipients`, {
+      original: recipientIds.length,
+      desktopUsers: desktopUsers.length,
+      mobileUsers: mobileUsers.length,
+      channelId,
+    });
+
+    const notificationData = {
+      title: `New message in ${channelName}`,
+      message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
+      type: NotificationType.CHANNEL_MESSAGE,
+      relatedEntityType: 'message' as const,
+      relatedEntityId: messageId,
+      actionUrl: `/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
+      metadata: {
+        channelId,
+        conversationId,
+        messageId,
+        senderId,
+        senderName,
+        channelTitle: channelName,
+        messageType: 'channel_message',
+      },
+    };
+
+    getNotificationJobsExpected().add(desktopUsers.length, {
+      platform: 'desktop',
+      message_type: 'channel',
+    });
+    const desktopResults = await Promise.allSettled(
+      desktopUsers.map(async userId => {
+        const result = await this.createNotification(userId, notificationData, {
+          sendDesktop: true,
+          sendMobile: false,
+        });
+        return { userId, deliveredViaApp: result.deliveredViaApp };
+      }),
+    );
+
+    getNotificationJobsExpected().add(mobileUsers.length, {
+      platform: 'mobile',
+      message_type: 'channel',
+    });
+    const mobileResults = await Promise.allSettled(
+      mobileUsers.map(async userId => {
+        const result = await this.createNotification(userId, notificationData, {
+          sendDesktop: false,
+          sendMobile: true,
+        });
+        return { userId, deliveredViaApp: result.deliveredViaApp };
+      }),
+    );
+
+    const deliveredUserIds = [
+      ...desktopResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+      ...mobileResults
+        .filter((r): r is PromiseFulfilledResult<{ userId: string; deliveredViaApp: boolean }> => r.status === 'fulfilled')
+        .filter(r => r.value.deliveredViaApp)
+        .map(r => r.value.userId),
+    ];
+
+    return { deliveredUserIds: [...new Set(deliveredUserIds)] };
+  }
+
   async createMentionNotifications(
     userIds: string[],
     messageId: string,
@@ -1326,6 +1421,7 @@ class NotificationService {
       TICKET_STATUS_CHANGE: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       TICKET_ASSIGNMENT: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       TICKET_REASSIGNMENT: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
+      CHANNEL_MESSAGE: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       MENTION: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       DIRECT_MESSAGE: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
       WORKFLOW_COMPLETION: { browserEnabled: true, emailEnabled: false, slackEnabled: false },
@@ -1350,6 +1446,7 @@ class NotificationService {
       'TICKET_STATUS_CHANGE',
       'TICKET_ASSIGNMENT',
       'TICKET_REASSIGNMENT',
+      'CHANNEL_MESSAGE',
       'MENTION',
       'DIRECT_MESSAGE',
       'WORKFLOW_COMPLETION',
