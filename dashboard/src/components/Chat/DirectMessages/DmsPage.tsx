@@ -2,12 +2,13 @@ import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
 import { Search, PenBox, ArrowLeft, X, HelpCircle } from 'lucide-react';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { DmListItem } from './DmListItem';
-import { useNavigate, Outlet, useLocation, useParams, Link } from 'react-router-dom';
+import { useNavigate, Outlet, useParams, Link } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { channelService, CreateDmRequest } from '../../../services/Chat/channelService';
 import { AddDmForm, CreateDmFormData } from '../AddDmForm/AddDmForm';
 import { Dialog } from '../../ui/Dialog';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { usePath } from '../../../hooks/usePath';
 import { MobileProfileMenu } from '../../ui/MobileProfileMenu/MobileProfileMenu';
 
 import { useAuthContextValues } from '../../../hooks/useAuth';
@@ -99,14 +100,11 @@ const MOBILE_ITEM_HEIGHT = 65;
 const DmsPage = (): ReactElement => {
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
-  const location = useLocation();
-  const isOnIndexRoute = location.pathname === '/chat/dm';
+  const { channelId } = useParams<{ channelId: string }>();
+  const isOnIndexRoute = usePath() === '/chat/dm';
 
   const dmPanelRef = useRef<ImperativePanelHandle>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-
-  // All hooks must be called before any conditional returns
-  const { channelId } = useParams<{ channelId: string }>();
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const context = useAuthContextValues();
 

@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useRef, useCallback } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import ChatDirectory from '../../components/Chat/ChatDirectory/ChatDirectory';
 import ConversationPrefetcher from '../../components/Chat/ConversationPrefetcher';
 import MobileChatDirectory from '../../components/Chat/ChatDirectory/MobileChatDirectory';
@@ -16,6 +16,7 @@ import {
 import { useUserChannelStatuses } from '../../hooks/useChannels';
 import { TypingStateProvider } from '../../contexts/TypingStateContext';
 import { cn } from '../../utils/classNames';
+import { usePath } from '../../hooks/usePath';
 
 interface ChatScreenProps {
   shouldStackThread?: boolean;
@@ -26,21 +27,18 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
   const isInPanelWebview = useIsInPanelWebview();
   const channelData = useAllVisibleChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
-  const location = useLocation();
-  // Full-screen pages (no directory sidebar)
-  // Note: /chat/dm and /chat/dm/* show DmsPage (which has its own sidebar), not ChatDirectory
-  // /chat/bookmarks/* shows BookmarksPage with its own sidebar
-  // /chat/activity/* shows ActivityListView with its own sidebar
+  const pathnameWithoutWorkspace = usePath();
+
   const isFullScreenPage =
-    location.pathname === '/chat/activity' ||
-    location.pathname.startsWith('/chat/activity/') ||
-    location.pathname === '/chat/my-tickets' ||
-    location.pathname === '/chat/threads' ||
-    location.pathname === '/chat/bookmarks' ||
-    location.pathname.startsWith('/chat/bookmarks/') ||
-    (location.pathname.startsWith('/chat/canvas') &&
-      !location.pathname.startsWith('/chat/dir/canvas')) ||
-    location.pathname.startsWith('/chat/dm');
+    pathnameWithoutWorkspace === '/chat/activity' ||
+    pathnameWithoutWorkspace.startsWith('/chat/activity/') ||
+    pathnameWithoutWorkspace === '/chat/my-tickets' ||
+    pathnameWithoutWorkspace === '/chat/threads' ||
+    pathnameWithoutWorkspace === '/chat/bookmarks' ||
+    pathnameWithoutWorkspace.startsWith('/chat/bookmarks/') ||
+    (pathnameWithoutWorkspace.startsWith('/chat/canvas') &&
+      !pathnameWithoutWorkspace.startsWith('/chat/dir/canvas')) ||
+    pathnameWithoutWorkspace.startsWith('/chat/dm');
   const { isWideScreen, containerRef } = useResizablePanel({ isMobile });
   const chatSidebarPanelRef = useRef<ImperativePanelHandle>(null);
 
@@ -95,7 +93,8 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
           >
             {/* LEFT PANEL (Sidebar) - Mobile shows only on directory root, web always shows */}
             {isMobile ? (
-              location.pathname === '/chat/dir' || location.pathname === '/chat/dir/' ? (
+              pathnameWithoutWorkspace === '/chat/dir' ||
+              pathnameWithoutWorkspace === '/chat/dir/' ? (
                 <Panel ref={chatSidebarPanelRef} defaultSize={20} minSize={15} maxSize={30}>
                   <aside className='w-full h-full'>
                     <MobileChatDirectory
@@ -139,7 +138,8 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
           <>
             {/* Mobile: Only show directory sidebar on directory root */}
             {isMobile ? (
-              location.pathname === '/chat/dir' || location.pathname === '/chat/dir/' ? (
+              pathnameWithoutWorkspace === '/chat/dir' ||
+              pathnameWithoutWorkspace === '/chat/dir/' ? (
                 <aside className='h-full min-[500px]:px-4 border-r border-border w-screen'>
                   <MobileChatDirectory
                     channelData={channelData}
@@ -156,9 +156,9 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
               </aside>
             )}
             {/* Conversation overlay */}
-            {location.pathname !== '/chat/dir' &&
-              location.pathname !== '/chat/dir/' &&
-              !location.pathname.startsWith('/chat/dir/my-tickets') && (
+            {pathnameWithoutWorkspace !== '/chat/dir' &&
+              pathnameWithoutWorkspace !== '/chat/dir/' &&
+              !pathnameWithoutWorkspace.startsWith('/chat/dir/my-tickets') && (
                 <div className='absolute inset-0 z-50 bg-background'>
                   <main data-id='chat-screen' className='h-full overflow-hidden'>
                     <Outlet context={{ shouldStackThread }} />
