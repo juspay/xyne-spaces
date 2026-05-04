@@ -17,11 +17,16 @@ import { uploadMultiple, uploadConfig } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
 import { FlowController } from '../controllers/flowController';
 import { webhookLimiter } from '@/middleware/rateLimiters';
+import { PlatformAdapterRegistry } from '../platform-adapters/types';
+import { SlackAdapter } from '../platform-adapters/slack';
 
 const router = Router();
 const appController = new AppController();
 const chatController = new ChatController();
 const flowController = new FlowController();
+const platformRegistry = new PlatformAdapterRegistry();
+
+platformRegistry.register(new SlackAdapter());
 
 router.post('/webhooks/:workspaceId/:appId/:secret', webhookLimiter, incomingWebhookController.handleIncoming);
 
@@ -38,37 +43,37 @@ router.patch('/incoming-webhooks/:webhookId', authMiddleware.authenticate, autho
 router.post('/incoming-webhooks/:webhookId/revoke', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.revokeWebhook);
 
 // User-initiated app action dispatch (user auth, not app token)
-router.post('/chat/action', authMiddleware.authenticate, chatController.dispatchAction);
+router.post("/chat/action", authMiddleware.authenticate, chatController.dispatchAction);
 
 // Channel routes
-router.use('/channel', authenticateApp, channelRoutes);
+router.use("/channel", authenticateApp, channelRoutes);
 
 // Chat routes
-router.use('/chat', authenticateApp, chatRoutes);
+router.use("/chat", authenticateApp, chatRoutes);
 
 // File routes
-router.use('/files', uploadMultiple, authenticateApp, fileRoutes);
+router.use("/files", uploadMultiple, authenticateApp, fileRoutes);
 
 // Ticket routes
-router.use('/ticket', authenticateApp, ticketRoutes);
+router.use("/ticket", authenticateApp, ticketRoutes);
 
 // User routes
-router.use('/user', authenticateApp, userRoutes);
-
-// Channel routes
-router.use('/channel', authenticateApp, channelRoutes);
+router.use("/user", authenticateApp, userRoutes);
 
 // User Group routes
-router.use('/usergroups', authenticateApp, userGroupRoutes);
+router.use("/usergroups", authenticateApp, userGroupRoutes);
 
 // Email routes
-router.use('/email', authenticateApp, emailRoutes);
+router.use("/email", authenticateApp, emailRoutes);
 
 // PR check callback (called by dispatchAction when user clicks "Run PR Check" button)
 // No auth needed here - dispatchAction is already authenticated and validates the request
-router.use('/pr-check', prCheckCallbackRouter);
+router.use("/pr-check", prCheckCallbackRouter);
 
 // Flow UI route
-router.post('/flow/action', authMiddleware.authenticate, flowController.executeAction);
+router.post("/flow/action", authMiddleware.authenticate, flowController.executeAction);
+
+// Platform adapter routes
+platformRegistry.mountAll(router);
 
 export default router;
