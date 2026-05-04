@@ -1,5 +1,5 @@
 import { ReactElement, useState, useRef, useCallback } from 'react';
-import { Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
+import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { FileText, Plus, ArrowLeft, Info, Loader2 } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { useZero } from '../../../hooks/useZero';
@@ -21,6 +21,7 @@ import {
   type ImperativePanelHandle,
 } from 'react-resizable-panels';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { usePath } from '../../../hooks/usePath';
 import { canvasService } from '../../../services/Canvas/canvasService';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
@@ -28,11 +29,10 @@ type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 const CanvasPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
-  const location = useLocation();
   const { user } = useAuth();
   const z = useZero();
 
-  const isOnIndexRoute = location.pathname === '/chat/canvas';
+  const isOnIndexRoute = usePath() === '/chat/canvas';
 
   const canvasPanelRef = useRef<ImperativePanelHandle>(null);
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
