@@ -2,12 +2,42 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as docx from 'docx-preview';
 import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useMobileZoom } from '../../hooks/useMobileZoom';
+
+/**
+ * Standard US Letter page width in pixels at 96 DPI.
+ * US Letter paper size is 8.5 inches × 11 inches.
+ * Standard screen resolution is 96 pixels per inch (PPI).
+ * 8.5 inches × 96 PPI = 816 pixels.
+ * This constant is used for calculating mobile zoom scaling to fit
+ * DOCX pages within the viewport width on Mobile Screens.
+ */
+const PAGE_WIDTH = 816;
 
 export const DocxViewer: React.FC<BaseViewerProps> = ({ source }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { isMobile } = usePlatform();
+
+  // Mobile zoom hook for pinch-to-zoom
+  const {
+    scale: mobileZoomScale,
+    transformOrigin,
+    resetZoom,
+  } = useMobileZoom({
+    enabled: Boolean(isMobile),
+    containerRef,
+    targetRef: contentRef,
+    minScale: 1,
+    maxScale: 3,
+  });
+
+  // Reset zoom when source changes
+  useEffect(() => {
+    resetZoom();
+  }, [source, resetZoom]);
 
   useEffect(() => {
     let mounted = true;
@@ -73,7 +103,7 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source }) => {
 
       // After rendering, remove any inline width constraints and make it responsive
       if (containerRef.current) {
-        makeResponsive(containerRef.current);
+        makeResponsive(containerRef.current, isMobile);
       }
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'Failed to load document';
@@ -113,15 +143,39 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source }) => {
       )}
 
       <div
-        ref={containerRef}
-        className={`docx-container bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} flex-wrap align-center justify-center mt-[65px] mb-[65px]`}
-      />
+        ref={contentRef}
+        style={{
+          transform: isMobile ? `scale(${mobileZoomScale})` : undefined,
+          transformOrigin,
+          transition: isMobile ? 'transform 0.05s ease-out' : undefined,
+        }}
+        className='w-full'
+      >
+        <div
+          ref={containerRef}
+          className={`docx-container bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} flex-wrap align-center justify-center mt-[65px] mb-[65px] max-w-full overflow-x-hidden`}
+        />
+      </div>
     </div>
   );
 };
 
 // Post-render: Make DOCX responsive (Tailwind approach)
-function makeResponsive(root: HTMLElement): void {
+function makeResponsive(root: HTMLElement, isMobile: boolean): void {
+  const containerWidth = root.clientWidth;
+  // On mobile, calculate zoom to fit pages to viewport width
+  if (isMobile) {
+    const targetWidth = containerWidth - 32;
+    const zoom = Math.min(targetWidth / PAGE_WIDTH, 1);
+
+    if (zoom < 1) {
+      const wrapper = root.querySelector('.docx-wrapper, .docx') as HTMLElement;
+      if (wrapper) {
+        wrapper.style.zoom = String(zoom);
+      }
+    }
+  }
+
   // Remove width constraints from all wrappers
   root.querySelectorAll('.docx, .docx-wrapper').forEach(el => {
     const wrapper = el as HTMLElement;

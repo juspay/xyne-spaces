@@ -4,6 +4,7 @@ import { BaseViewerProps } from './utils';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { useScope, useShortcutById } from '../../shortcuts';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useMobileZoom } from '../../hooks/useMobileZoom';
 import { Menu } from '@base-ui/react/menu';
 import { cn } from '../../utils/classNames';
 import { attachmentViewerActor } from '../../machines/attachmentViewerMachine';
@@ -62,6 +63,24 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
       }
       return '';
     }, [attachmentId, source]);
+
+    // Mobile zoom hook for pinch-to-zoom
+    const {
+      scale: mobileZoomScale,
+      transformOrigin,
+      resetZoom,
+    } = useMobileZoom({
+      enabled: Boolean(isMobile && isImmersiveMode),
+      containerRef,
+      targetRef: videoRef,
+      minScale: 1,
+      maxScale: 5,
+    });
+
+    // Reset zoom when source/attachmentId changes
+    useEffect(() => {
+      resetZoom();
+    }, [streamUrl, resetZoom]);
 
     useEffect((): (() => void) => {
       // Cleanup object URL if created from File
@@ -406,7 +425,9 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
           )}
           style={{
             willChange: 'transform',
-            transform: 'translate3d(0, 0, 0)',
+            transform: isMobile ? `scale(${mobileZoomScale})` : 'translate3d(0, 0, 0)',
+            transformOrigin: isMobile ? transformOrigin : undefined,
+            transition: isMobile ? 'transform 0.05s ease-out' : undefined,
             objectFit: 'contain',
             ...(!isImmersiveMode && width && height
               ? { width: `${width}px`, height: `${height}px` }

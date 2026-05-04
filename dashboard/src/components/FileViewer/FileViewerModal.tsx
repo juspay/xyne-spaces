@@ -534,6 +534,17 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
     const touch = e.touches[0];
     if (!touch) return;
     touchMoveRef.current = { x: touch.clientX, y: touch.clientY };
+
+    // Allow vertical scrolling - don't block if vertical movement dominates
+    const start = touchStartRef.current;
+    if (start) {
+      const dx = Math.abs(touch.clientX - start.x);
+      const dy = Math.abs(touch.clientY - start.y);
+      // If vertical movement is greater than horizontal, allow default scroll
+      if (dy > dx) {
+        return;
+      }
+    }
   };
 
   const handleTouchEnd = () => {
@@ -1176,6 +1187,17 @@ export const AttachmentGalleryModal: React.FC = () => {
     const touch = e.touches[0];
     if (!touch) return;
     touchMoveRef.current = { x: touch.clientX, y: touch.clientY };
+
+    // Allow vertical scrolling - don't block if vertical movement dominates
+    const start = touchStartRef.current;
+    if (start) {
+      const dx = Math.abs(touch.clientX - start.x);
+      const dy = Math.abs(touch.clientY - start.y);
+      // If vertical movement is greater than horizontal, allow default scroll
+      if (dy > dx) {
+        return;
+      }
+    }
   };
 
   const handleTouchEnd = () => {

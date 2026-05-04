@@ -7,6 +7,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import pdfMachine from '../../machines/pdfMachine';
 import { BaseViewerProps } from './utils';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useMobileZoom } from '../../hooks/useMobileZoom';
 
 // Memoized PageWrapper to prevent unnecessary re-renders
 const PageWrapper = memo(
@@ -25,13 +26,54 @@ PageWrapper.displayName = 'PageWrapper';
 
 export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const pdfContentRef = useRef<HTMLDivElement>(null);
   const [currentVisiblePage, setCurrentVisiblePage] = useState<number>(1);
   const [pageInput, setPageInput] = useState<string | null>(null);
   const { isMobile } = usePlatform();
 
   const [state, send] = useMachine(pdfMachine);
 
-  const { numPages, scale, heightMap, error } = state.context;
+  const { numPages, scale: pdfScale, heightMap, error } = state.context;
+
+  // Mobile zoom hook for pinch-to-zoom in carousel mode
+  // Disable zoom when disableGestures is true (standalone mode) to allow normal scrolling
+  const {
+    scale: mobileZoomScale,
+    transformOrigin,
+    resetZoom,
+    isPinching,
+  } = useMobileZoom({
+    enabled: Boolean(isMobile),
+    containerRef,
+    targetRef: pdfContentRef,
+    minScale: 1,
+    maxScale: 3,
+  });
+
+  // Use pdfScale directly for Page rendering - CSS transform handles visual zoom
+  // This prevents white flashes from canvas recreation during pinch
+  const scale = pdfScale;
+
+  // Track cumulative zoom to apply to machine after pinch ends
+  const pendingScaleMultiplierRef = useRef(1);
+
+  // Apply accumulated scale to machine when pinch ends
+  useEffect(() => {
+    if (!isPinching && pendingScaleMultiplierRef.current !== 1) {
+      const newScale = pdfScale * pendingScaleMultiplierRef.current;
+      // Clamp scale to reasonable bounds
+      const clampedScale = Math.min(Math.max(newScale, 0.5), 3);
+      send({ type: 'SCALE_CHANGED', scale: clampedScale });
+      pendingScaleMultiplierRef.current = 1;
+    }
+  }, [isPinching, pdfScale, send]);
+
+  // Update pending multiplier during pinch
+  useEffect(() => {
+    if (isPinching) {
+      pendingScaleMultiplierRef.current = mobileZoomScale;
+    }
+  }, [mobileZoomScale, isPinching]);
 
   /* --------------------------- Load on mount ---------------------------- */
   useEffect(() => {
@@ -42,6 +84,11 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
       initialPage: 1,
     });
   }, [source, send]);
+
+  // Reset zoom when source changes
+  useEffect(() => {
+    resetZoom();
+  }, [source, resetZoom]);
 
   /* --------------------------- Virtualizer ------------------------------ */
   const rowVirtualizer = useVirtualizer({
@@ -176,6 +223,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
     <div
       data-pdf-container
       className={`relative w-full h-full flex flex-col bg-gray-100 dark:bg-[#1E1E1E]`}
+      style={{ touchAction: isMobile ? 'none' : 'auto' }}
     >
       {/* Navigation Controls */}
       {numPages && (
@@ -270,9 +318,13 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({ source }) => {
       <div ref={containerRef} className='overflow-auto flex-1'>
         <Document file={source} loading={null} error={null}>
           <div
+            ref={pdfContentRef}
             style={{
               height: rowVirtualizer.getTotalSize(),
               position: 'relative',
+              transform: isMobile ? `scale(${mobileZoomScale})` : undefined,
+              transformOrigin,
+              transition: isMobile ? 'transform 0.05s ease-out' : undefined,
             }}
             className='w-full flex justify-center'
           >
