@@ -1,0 +1,219 @@
+# =====================================================================
+# agent-workspace-gvisor-template — non-privileged gVisor sandbox.
+#
+# Strategy: reuse `xyne-spaces-runner` directly — same image the in-cluster
+# nix-runner workflow pods use (`nix-runnner-coder-workflow`,
+# `nix-runner-stage-approval-workflow`, `nix-runner-xyne-spaces-plan-review-loop`).
+# We don't need to build a custom image for phase 1; we just need a long-
+# running pod where we can `kubectl exec -- nix run .#xyne-space-services`
+# and confirm the Nix services come up.
+#
+# postStart mirrors the workflow runner's SSH-wiring exactly so anyone who
+# already understands those pods understands this one. Differences from
+# workflow runners: gvisor RuntimeClass, non-privileged enforced caps,
+# memory limit (gVisor REQUIRES it).
+#
+# Required nodepool (already created):
+#   gvisor-c2-ng (c2-standard-8, --sandbox=type=gvisor, autoscale 0->3)
+# =====================================================================
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxTemplate
+metadata:
+  name: agent-workspace-gvisor-template
+  namespace: xyne-apps
+spec:
+  podTemplate:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+    spec:
+      # runtimeClassName: gvisor          # disabled — gVisor's pipe IPC
+      # breaks Nix's builder hook (https://github.com/google/gvisor/issues/1923,
+      # "reading a line: Input/output error"). The workflow nix-runner pods
+      # don't use gvisor either; they get isolation from non-privileged +
+      # capabilities-drop-ALL + standard kernel namespaces. Pod still
+      # schedules on gvisor-c2-ng (tolerations + nodeSelector cover it),
+      # just runs with default runc. Re-enable when gvisor's Nix
+      # compatibility is fixed.
+      automountServiceAccountToken: false
+
+      # fsGroup makes kubelet chgrp every Secret/ConfigMap volume to gid
+      # 1000 (nixuser's group), so the 0420 defaultMode lets nixuser read
+      # /tmp/ssh-keys/* and /tmp/attic/token via the group-read bit.
+      # Without this, the secret volumes are root:root and nixuser hits
+      # EACCES.
+      securityContext:
+        fsGroup: 1000
+
+      # Service hostnames map to localhost. When these services run via
+      # docker-compose they live on a compose network where each service
+      # name (`redis`, `postgres`, …) resolves to its container IP. Under
+      # Nix process-compose they're all plain processes on the same pod's
+      # loopback, so anything that reads docker-compose-style hostnames
+      # (livekit's redis_address, zero's upstream URL, etc.) needs the
+      # hostnames pointed at 127.0.0.1. kubelet writes these into
+      # /etc/hosts before the container starts.
+      hostAliases:
+        - ip: "127.0.0.1"
+          hostnames:
+            - localhost
+            - redis
+            - postgres
+            - zero
+            - zero-cache
+            - livekit
+            - fake-gcs
+            - y-sweet
+            - ysweet
+            - transcription-agent
+            - transcription
+
+      # Explicit DNS — gVisor's runsc on GKE Sandbox doesn't carry over
+      # the kubelet ClusterFirst resolv.conf cleanly; pods end up with
+      # 8.8.8.8/1.1.1.1 only and in-cluster service names fail with
+      # ENOTFOUND. `dnsPolicy: None` + dnsConfig tells kubelet to write
+      # /etc/resolv.conf with EXACTLY these values, replacing whatever
+      # default runsc would inject. Same result as the kata postStart
+      # `printf > /etc/resolv.conf` trick, but declarative — no sudo,
+      # no postStart, no initContainer.
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 10.20.0.10        # kube-dns ClusterIP (kubectl get svc kube-dns -n kube-system)
+          - 8.8.8.8           # Google DNS fallback
+          - 1.1.1.1           # Cloudflare DNS fallback
+        searches:
+          - xyne-apps.svc.cluster.local
+          - svc.cluster.local
+          - cluster.local
+        options:
+          - name: ndots
+            value: "5"
+
+      tolerations:
+        - key: workload
+          value: xyne-claw
+          effect: NoSchedule
+        - key: sandbox.gke.io/runtime
+          value: gvisor
+          effect: NoSchedule
+
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cloud.google.com/gke-nodepool
+                    operator: In
+                    values: [gvisor-c2-ng]
+                  - key: sandbox.gke.io/runtime
+                    operator: In
+                    values: [gvisor]
+
+      volumes:
+        - name: ssh-key
+          secret:
+            defaultMode: 0420
+            secretName: bitbucket-ssh-key
+            items:
+              - { key: bitbucketPrivateKey, path: id_rsa }
+              - { key: known_hosts,         path: known_hosts }
+        - name: attic-token
+          secret:
+            defaultMode: 0400
+            secretName: attic-token
+            items:
+              - { key: token, path: token }
+
+      containers:
+        - name: workspace
+          # Bumped by `scripts/build-agent-workspace.sh` (prints the
+          # kubectl-patch command at the end of each build).
+          image: asia.gcr.io/xyne-spaces/agent-workspace:02ce3e4f09-v9
+          imagePullPolicy: IfNotPresent
+
+          # In-cluster npm registry — every `npm install` / `npm ci` from
+          # sandbox-repo-setup hits verdaccio first (cached) and falls
+          # through to npmjs.org for misses. Mirrors what the workflow
+          # nix-runner postStart does. Audit/fund/update-notifier off for
+          # faster, cleaner installs in the sandbox.
+          env:
+            - name: NPM_CONFIG_REGISTRY
+              value: http://verdaccio.xyne-apps.svc.cluster.local:4873/
+            - name: NPM_CONFIG_AUDIT
+              value: "false"
+            - name: NPM_CONFIG_FUND
+              value: "false"
+            - name: NPM_CONFIG_UPDATE_NOTIFIER
+              value: "false"
+            # process-compose's terminal init uses TERM to look up
+            # terminfo capabilities; without it set, TUI initialization
+            # crashes with `terminal entry not found: term not set` even
+            # when --tui=false is passed (some paths touch terminfo).
+            - name: TERM
+              value: xterm
+            # Git identity for any commit/push from inside the sandbox.
+            # GIT_AUTHOR_* + GIT_COMMITTER_* override system+user config
+            # at the command level — no /etc/gitconfig or ~/.gitconfig
+            # needed in the image, no `git config --global` postStart.
+            - name: GIT_AUTHOR_NAME
+              value: "Xyne Workflow Bot"
+            - name: GIT_AUTHOR_EMAIL
+              value: "john.doe@gmail.com"
+            - name: GIT_COMMITTER_NAME
+              value: "Xyne Workflow Bot"
+            - name: GIT_COMMITTER_EMAIL
+              value: "john.doe@gmail.com"
+
+          ports:
+            - containerPort: 8888
+
+          # Server now opens :8888 within seconds of container start
+          # (entrypoint runs prebake in the background, then `exec`s into the
+          # node server). Probe needs to flip Ready well under the agent-
+          # sandbox controller's 5-min warmPoolReadinessGracePeriod, otherwise
+          # warmpool sandboxes get reaped mid-prebake and the claim cycle
+          # churns. 30s initial + 5s period × 6 failures = first probe at 30s,
+          # then up to 30s grace before NotReady.
+          readinessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 6
+            timeoutSeconds: 3
+            successThreshold: 1
+
+          # gVisor REQUIRES limits.memory. Sized for: Nix process-compose +
+          # postgres/redis/livekit/zero-cache/fake-gcs/y-sweet/transcription
+          # + backend & dashboard dev servers. Bump if dashboard rebuild +
+          # ML model loading bursts past 12Gi.
+          resources:
+            requests:
+              cpu: "2"
+              memory: "8Gi"
+            limits:
+              cpu: "4"
+              memory: "12Gi"
+
+          securityContext:
+            runAsNonRoot: true       # Required by GKE Agent Sandbox docs.
+            runAsUser: 1000          # nixuser, set explicitly via useradd
+            runAsGroup: 1000         #   --uid 1000 in agent-workspace/Dockerfile
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+
+          volumeMounts:
+            - mountPath: /tmp/ssh-keys
+              name: ssh-key
+              readOnly: true
+            - mountPath: /tmp/attic
+              name: attic-token
+              readOnly: true
+
+          # No postStart — DNS is wired via the pod-level dnsPolicy/dnsConfig
+          # above (kubelet writes /etc/resolv.conf at pod creation), and SSH
+          # + attic login happen in entrypoint.sh.

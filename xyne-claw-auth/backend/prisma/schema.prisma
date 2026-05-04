@@ -8,40 +8,269 @@ datasource db {
 }
 
 model User {
-  id          String   @id
-  email       String   @unique
-  name        String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  connections UserMcpConnection[]
-  identities  GatewayIdentity[]
-  agents      Agent[]
+  id           String   @id
+  email        String   @unique
+  name         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  connections  UserMcpConnection[]
+  identities   GatewayIdentity[]
+  agents       Agent[]
+  agentConfigs UserAgentConfig[]
+  roles        UserRole[]
+  sharedAgents AgentShare[]
+  skills           Skill[]
+  providerCredentials UserProviderCredentials[]
+  subagentConfigs     UserSubagentConfig[]
 
   @@map("users")
 }
 
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  role      String
+  grantedBy String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@map("user_roles")
+}
+
+model UserAgentConfig {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentSlug    String
+  provider     String   @default("spaces")
+  chainConfig  Json?    /// Per-user agent chain config: { onComplete, onFailure }
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, agentSlug])
+  @@map("user_agent_configs")
+}
+
+model UserProviderCredentials {
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider     String   /// "spaces" | "copilot" | "claude"
+  encryptedKey String?  @db.Text
+  iv           String?
+  authTag      String?
+  model        String?
+  baseUrl      String?
+  authType     String?  /// "api_key" (default) | "oauth_token" — how to send the credential at runtime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@id([userId, provider])
+  @@map("user_provider_credentials")
+}
+
+model UserSubagentConfig {
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subagentName String
+  provider     String   /// references UserProviderCredentials.provider
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@id([userId, subagentName])
+  @@map("user_subagent_configs")
+}
+
 model Agent {
-  id                   String   @id @default(cuid())
-  slug                 String   @unique
+  id                   String           @id @default(cuid())
+  slug                 String           @unique
   name                 String
-  description          String   @default("")
-  systemPrompt         String   @db.Text
-  scope                String   @default("global")
+  description          String           @default("")
+  systemPrompt         String           @db.Text
+  scope                String           @default("global")
   ownerUserId          String?
-  owner                User?    @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  enabled              Boolean  @default(true)
-  isDefault            Boolean  @default(false)
-  color                String   @default("#6366f1")
-  modelId              String   @default("")
-  config               Json     @default("{}")
-  spacesAppId          String?  @unique
+  owner                User?            @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  enabled              Boolean          @default(true)
+  isDefault            Boolean          @default(false)
+  color                String           @default("#6366f1")
+  modelId              String           @default("")
+  config               Json             @default("{}")
+  spacesAppId          String?          @unique
   spacesAppUserId      String?
   spacesAppToken       String?  @db.Text
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+  promotedBy           String?
+  promotedAt           DateTime?
   tools                AgentTool[]
+  skills               AgentSkill[]
+  shares               AgentShare[]
 
   @@map("agents")
+}
+
+model AgentShare {
+  id        String   @id @default(cuid())
+  agentId   String
+  userId    String
+  role      String   @default("VIEWER")
+  sharedBy  String?
+  createdAt DateTime @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, userId])
+  @@map("agent_shares")
+}
+
+model AgentRun {
+  id               String    @id @default(cuid())
+  sessionId        String    @unique
+  userId           String
+  agentSlug        String
+  triggerSource    String    /// "spaces" | "scheduled" | "chat" | "api"
+  status           String    @default("running") /// "running" | "completed" | "failed" | "cancelled"
+  currentToolLabel String?
+  task             String    @db.Text
+  conversationId   String?
+  scheduledJobId   String?
+  channelId        String?
+  result           String?   @db.Text
+  error            String?   @db.Text
+  toolsUsed        String[]  @default([])
+  toolInvocations  Json?     /// Array<ToolInvocation> with args, result (truncated), durationMs, isError
+  tokensIn         Int?
+  tokensOut        Int?
+  tokensCacheRead  Int?
+  tokensCacheWrite Int?
+  rating           String?   /// "up" | "down"
+  ratingComment    String?   @db.Text
+  ratedAt          DateTime?
+  startedAt        DateTime  @default(now())
+  completedAt      DateTime?
+
+  @@index([userId, status, startedAt])
+  @@index([agentSlug, startedAt])
+  @@map("agent_runs")
+}
+
+model ChatMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  agentSlug      String
+  userId         String
+  role           String   // "user" | "assistant"
+  content        String   @db.Text
+  status         String   @default("completed")
+  createdAt      DateTime @default(now())
+
+  attachments    ChatAttachment[]
+
+  @@index([conversationId, createdAt])
+  @@index([userId, agentSlug])
+  @@map("chat_messages")
+}
+
+model ChatAttachment {
+  id               String       @id @default(cuid())
+  chatMessageId    String?
+  uploaderUserId   String
+  storageProvider  String       @default("gcs")
+  url              String       // GCS object path (bucket-relative)
+  thumbnailUrl     String?
+  originalFilename String
+  mimeType         String
+  size             Int
+  width            Int?
+  height           Int?
+  metadata         Json?
+  createdAt        DateTime     @default(now())
+
+  chatMessage      ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: Cascade)
+
+  @@index([chatMessageId])
+  @@index([uploaderUserId, createdAt])
+  @@map("chat_attachments")
+}
+
+model AgentRequest {
+  id          String   @id @default(cuid())
+  targetType  String   @default("agent") // "agent" | "skill"
+  agentId     String?
+  agentSlug   String?
+  skillId     String?
+  skillSlug   String?
+  requestType String   // "push_to_spaces" | "push_to_global"
+  requesterId String
+  status      String   @default("pending") // "pending" | "approved" | "rejected"
+  reviewerId  String?
+  reviewNote  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([requesterId])
+  @@map("agent_requests")
+}
+
+enum AgentAuditEvent {
+  AGENT_PROMOTED
+  AGENT_DEMOTED
+  AGENT_SHARED
+  AGENT_UNSHARED
+  ROLE_GRANTED
+  ROLE_REVOKED
+  AGENT_CREATED
+  AGENT_DELETED
+  REQUEST_CREATED
+  REQUEST_APPROVED
+  REQUEST_REJECTED
+}
+
+model AgentAuditLog {
+  id          String          @id @default(cuid())
+  actorUserId String?
+  eventType   AgentAuditEvent
+  targetId    String
+  description String
+  metadata    Json?
+  createdAt   DateTime        @default(now())
+
+  @@map("agent_audit_logs")
+}
+
+model Skill {
+  id           String           @id @default(cuid())
+  slug         String           @unique
+  name         String
+  label        String           @default("")
+  description  String           @default("")
+  content      String           @db.Text
+  source       String           @default("seeded")
+  scope        String           @default("global")
+  ownerUserId  String?
+  owner        User?            @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  enabled      Boolean          @default(true)
+  promotedBy   String?
+  promotedAt   DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  agents       AgentSkill[]
+
+  @@map("skills")
+}
+
+model AgentSkill {
+  id      String @id @default(cuid())
+  agentId String
+  agent   Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  skillId String
+  skill   Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, skillId])
+  @@map("agent_skills")
 }
 
 model Tool {
@@ -103,11 +332,22 @@ model McpServer {
   type        String
   url         String
   description String?
+  enabled     Boolean  @default(true)
+  transport   String   @default("stdio")
+  credentialSchema    Json?
+  credentialForm      Json?
+  launchConfigTemplate Json?
+  httpConfigTemplate   Json?
+  healthcheckSpec      Json?
+  writeToolPolicy      Json?
+  connectorMeta        Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   connections UserMcpConnection[]
 
   @@unique([type])
+  @@index([enabled])
+  @@index([transport])
   @@map("mcp_servers")
 }
 
@@ -148,8 +388,26 @@ model ScheduledJob {
   label            String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  runs             ScheduledJobRun[]
 
   @@index([status])
   @@index([userId])
+  @@index([agentSlug])
   @@map("scheduled_jobs")
+}
+
+model ScheduledJobRun {
+  id              String       @id @default(cuid())
+  scheduledJobId  String
+  scheduledJob    ScheduledJob @relation(fields: [scheduledJobId], references: [id], onDelete: Cascade)
+  sessionId       String?
+  status          String
+  result          String?      @db.Text
+  error           String?      @db.Text
+  startedAt       DateTime     @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime     @default(now())
+
+  @@index([scheduledJobId])
+  @@map("scheduled_job_runs")
 }

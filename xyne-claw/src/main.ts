@@ -2,8 +2,14 @@ import express from "express";
 import { SERVER } from "./config.js";
 import { initStore } from "./store.js";
 import { runRouter } from "./routes/run.js";
+import { startSessionCleanup } from "./session-store.js";
+import { pruneStaleWorktrees, prewarmConfiguredRepos } from "./workspace.js";
 
 initStore();
+startSessionCleanup();
+pruneStaleWorktrees().catch((err) => console.warn("[workspace] Prune failed:", err));
+// Kick off pre-clones in background — first user request shouldn't pay the cold-clone cost.
+prewarmConfiguredRepos().catch((err) => console.warn("[workspace] Prewarm failed:", err));
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));

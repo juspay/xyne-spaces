@@ -1,0 +1,104 @@
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxTemplate
+metadata:
+  name: kata-workspace-docker-dev-template
+  namespace: xyne-apps
+spec:
+  podTemplate:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+        io.katacontainers.config.hypervisor.default_memory: "12288"
+        io.katacontainers.config.hypervisor.default_vcpus: "4"
+    spec:
+      runtimeClassName: kata-qemu
+      tolerations:
+        - key: workload
+          value: xyne-claw
+          effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cloud.google.com/gke-nodepool
+                    operator: In
+                    values:
+                      - kata-claw-c2-ng
+      volumes:
+        - name: ssh-key
+          secret:
+            defaultMode: 420
+            items:
+              - key: bitbucketPrivateKey
+                path: id_rsa
+              - key: known_hosts
+                path: known_hosts
+            secretName: bitbucket-ssh-key
+        - name: github-ssh-key
+          secret:
+            defaultMode: 420
+            items:
+              - key: id_rsa
+                path: id_rsa
+              - key: id_rsa.pub
+                path: id_rsa.pub
+            secretName: github-ssh-key
+      containers:
+        - name: workspace
+          image: asia.gcr.io/xyne-spaces/kata-workspace:7861a0e189-v15
+          ports:
+            - containerPort: 8888
+          readinessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 10
+            periodSeconds: 3
+            failureThreshold: 20
+          resources:
+            requests:
+              cpu: "4"
+              memory: "12Gi"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /tmp/ssh-keys
+              name: ssh-key
+              readOnly: true
+            - mountPath: /tmp/github-ssh-keys
+              name: github-ssh-key
+              readOnly: true
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    chmod 700 /root/.ssh
+                    if [ -f /tmp/ssh-keys/id_rsa ]; then
+                      cat /tmp/ssh-keys/id_rsa > /root/.ssh/id_rsa
+                      chmod 600 /root/.ssh/id_rsa
+                    fi
+                    if [ -f /tmp/github-ssh-keys/id_rsa ]; then
+                      sed 's/^[[:space:]]*//' /tmp/github-ssh-keys/id_rsa > /root/.ssh/github_id_rsa
+                      chmod 600 /root/.ssh/github_id_rsa
+                    fi
+                    if [ -f /tmp/github-ssh-keys/id_rsa.pub ]; then
+                      sed 's/^[[:space:]]*//' /tmp/github-ssh-keys/id_rsa.pub > /root/.ssh/github_id_rsa.pub
+                      chmod 644 /root/.ssh/github_id_rsa.pub
+                    fi
+                    printf 'Host github.com\n  HostName github.com\n  User git\n  IdentityFile /root/.ssh/github_id_rsa\n  IdentitiesOnly yes\nHost bitbucket.juspay.net\n  HostName ssh.bitbucket.juspay.net\n  User git\n  IdentityFile /root/.ssh/id_rsa\n  IdentitiesOnly yes\n' > /root/.ssh/config
+                    chmod 600 /root/.ssh/config
+                    touch /root/.ssh/known_hosts
+                    if [ -f /tmp/ssh-keys/known_hosts ]; then
+                      cat /tmp/ssh-keys/known_hosts >> /root/.ssh/known_hosts
+                    fi
+                    ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null || true
+                    ssh-keyscan -t rsa,ecdsa,ed25519 ssh.bitbucket.juspay.net >> /root/.ssh/known_hosts 2>/dev/null || true
+                    chmod 644 /root/.ssh/known_hosts
+                    npm config set registry http://verdaccio.xyne-apps.svc.cluster.local:4873/
+                    mkdir -p /root/.config/pnpm
+                    printf 'registry=http://verdaccio.xyne-apps.svc.cluster.local:4873/\n' > /root/.npmrc
+                    printf 'nameserver 10.20.0.10\nnameserver 8.8.8.8\nnameserver 1.1.1.1\nsearch xyne-apps.svc.cluster.local svc.cluster.local cluster.local\n' > /etc/resolv.conf

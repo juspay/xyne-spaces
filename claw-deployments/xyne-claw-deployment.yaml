@@ -1,0 +1,197 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xyne-claw
+  namespace: xyne-apps
+  labels:
+    app: xyne-claw
+    version: b2df2ed1f8
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: xyne-claw
+      version: b2df2ed1f8
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: xyne-claw
+        version: b2df2ed1f8
+    spec:
+      runtimeClassName: kata-qemu
+      tolerations:
+      - key: workload
+        value: xyne-claw
+        effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: cloud.google.com/gke-nodepool
+                operator: In
+                values:
+                - xyne-claw-kata-ng
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      serviceAccount: xyne-claw
+      serviceAccountName: xyne-claw
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: xyne-claw
+        image: asia.gcr.io/xyne-spaces/xyne-claw:6cf7403b55
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        ports:
+        - containerPort: 80
+          protocol: TCP
+        env:
+        - name: NODE_OPTIONS
+          value: --max-old-space-size=11264
+        - name: PORT
+          value: "80"
+        - name: XYNE_CLAW_PORT
+          value: "80"
+        - name: LITELLM_URL
+          value: https://grid.ai.example.com
+        - name: LITELLM_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: LITELLM_API_KEY
+              name: litellm-claw
+        - name: LITELLM_MODEL
+          value: private-large
+        - name: XYNE_CLAW_S2S_KEY
+          valueFrom:
+            secretKeyRef:
+              key: XYNE_CLAW_S2S_KEY
+              name: xyne-claw-s2s-key
+        - name: INTERNAL_S2S_KEY
+          valueFrom:
+            secretKeyRef:
+              key: XYNE_CLAW_S2S_KEY
+              name: xyne-claw-s2s-key
+        - name: XYNE_PGM_DATA_PATH
+          value: /app/xyne-claw/data/pgm
+        - name: GCS_PROJECT_ID
+          value: xyne-spaces
+        - name: GCS_BUCKET_NAME
+          value: xyne-claw
+        - name: XYNE_CLAW_AUTH_URL
+          value: http://xyne-claw-auth.xyne-apps.svc.cluster.local:3003
+        - name: RESEARCH_AGENT_URL
+          value: <research-agent-url>
+        - name: RESEARCH_AGENT_API_KEY
+          valueFrom:
+            secretKeyRef:
+              key: RESEARCH_AGNET_API_KEY
+              name: research-agent-api-key
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - |
+                mkdir -p /root/.ssh
+                chmod 700 /root/.ssh
+                if [ -f /tmp/ssh-keys/id_rsa ]; then
+                  cat /tmp/ssh-keys/id_rsa > /root/.ssh/id_rsa
+                  chmod 600 /root/.ssh/id_rsa
+                fi
+                if [ -f /tmp/github-ssh-keys/id_rsa ]; then
+                  sed 's/^[[:space:]]*//' /tmp/github-ssh-keys/id_rsa > /root/.ssh/github_id_rsa
+                  chmod 600 /root/.ssh/github_id_rsa
+                fi
+                if [ -f /tmp/github-ssh-keys/id_rsa.pub ]; then
+                  sed 's/^[[:space:]]*//' /tmp/github-ssh-keys/id_rsa.pub > /root/.ssh/github_id_rsa.pub
+                  chmod 644 /root/.ssh/github_id_rsa.pub
+                fi
+                cat >> /root/.ssh/config << 'EOFCONFIG'
+                Host github.com
+                  HostName github.com
+                  User git
+                  IdentityFile /root/.ssh/github_id_rsa
+                  IdentitiesOnly yes
+                EOFCONFIG
+                chmod 600 /root/.ssh/config
+                if [ -f /tmp/ssh-keys/known_hosts ]; then
+                  cat /tmp/ssh-keys/known_hosts > /root/.ssh/known_hosts
+                else
+                  touch /root/.ssh/known_hosts
+                fi
+                ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null || true
+                ssh-keyscan -t rsa,ecdsa,ed25519 ssh.bitbucket.juspay.net >> /root/.ssh/known_hosts 2>/dev/null || true
+                echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> /root/.ssh/known_hosts
+                echo "github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=" >> /root/.ssh/known_hosts
+                echo "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKrunivqI2bdI8Ih6h68fOvW0oUwMBvJ1iBOuEspLTvpqMaHyDVRSHJ9dkD/P8rS7pLGpF4JvQSvqLJMrVJ3vXNpIx3QLTHf2C0Vc3RQDOl4bqLIUMv8hLhtZKmPTiPMYFaAV8YmFRq9KpfQSFUgWDcZXQl9f0HdLiKlHfFLLNPMXMVDJ2jP+Vgp8L+nJYVqHv7VwQQmYF6hYbPfFgdXQnFfJWxBHfR7sHdHgHpXQnMnPj6xYS2mYmKh2jCyqJQvCfG5pNJGpvHfLGN5nX7vhBm7tZL6pLGpF4JvQvLJM" >> /root/.ssh/known_hosts
+                chmod 644 /root/.ssh/known_hosts
+        livenessProbe:
+          failureThreshold: 10
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          successThreshold: 1
+          tcpSocket:
+            port: 80
+          timeoutSeconds: 10
+        readinessProbe:
+          failureThreshold: 10
+          initialDelaySeconds: 45
+          periodSeconds: 5
+          successThreshold: 1
+          tcpSocket:
+            port: 80
+          timeoutSeconds: 20
+        resources:
+          requests:
+            cpu: "4"
+            memory: 11Gi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /app/xyne-claw/data/pgm
+          name: pgm-data
+        - mountPath: /app/xyne-claw/data/sessions
+          name: sessions-data
+        - mountPath: /tmp/ssh-keys
+          name: ssh-key
+          readOnly: true
+        - mountPath: /tmp/github-ssh-keys
+          name: github-ssh-key
+          readOnly: true
+      volumes:
+      - emptyDir: {}
+        name: pgm-data
+      - name: sessions-data
+        persistentVolumeClaim:
+          claimName: xyne-claw-sessions-pvc
+      - name: ssh-key
+        secret:
+          defaultMode: 420
+          items:
+          - key: bitbucketPrivateKey
+            path: id_rsa
+          - key: known_hosts
+            path: known_hosts
+          secretName: bitbucket-ssh-key
+      - name: github-ssh-key
+        secret:
+          defaultMode: 420
+          items:
+          - key: id_rsa
+            path: id_rsa
+          - key: id_rsa.pub
+            path: id_rsa.pub
+          secretName: github-ssh-key

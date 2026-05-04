@@ -1,25 +1,24 @@
-import { getAdapters } from "./mcp/runner.js";
+import { resolveConnectorDefinition } from "./mcp/connector-definitions.js";
 
 interface ValidationResult {
   readonly valid: boolean;
   readonly error?: string;
 }
 
-export function isValidServerType(type: string): boolean {
-  return type in getAdapters();
+export async function isValidServerType(type: string): Promise<boolean> {
+  return (await resolveConnectorDefinition(type)) !== undefined;
 }
 
-export function validateCredentials(
+export async function validateCredentials(
   serverType: string,
   credentials: Record<string, unknown>,
-): ValidationResult {
-  const adapters = getAdapters();
-  const adapter = adapters[serverType];
-  if (!adapter) {
+): Promise<ValidationResult> {
+  const definition = await resolveConnectorDefinition(serverType);
+  if (!definition) {
     return { valid: false, error: `Unknown server type: ${serverType}` };
   }
 
-  for (const field of adapter.credentialFields) {
+  for (const field of definition.credentialFields) {
     if (field.optional) continue;
     const val = credentials[field.name];
     if (typeof val !== "string" || val.trim().length === 0) {

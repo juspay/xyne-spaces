@@ -17,6 +17,8 @@
     "@mariozechner/pi-coding-agent": "0.58.3",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@sinclair/typebox": "^0.34.0",
+    "@upstash/context7-mcp": "^2.1.7",
+    "deepwiki-mcp": "^0.0.6",
     "express": "^4.21.0",
     "jsonwebtoken": "^9.0.3",
     "tsx": "^4.19.0",

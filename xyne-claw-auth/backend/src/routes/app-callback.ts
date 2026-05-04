@@ -52,11 +52,12 @@ router.post("/callback", async (req: Request, res: Response) => {
     context?: Record<string, unknown>;
     messageId?: string;
     conversationId?: string;
+    callerUserId?: string;
   };
 
-  const { actionId, context = {}, messageId } = payload;
+  const { actionId, context = {}, messageId, callerUserId } = payload;
 
-  console.log(`[app-callback] actionId=${actionId} messageId=${messageId}`);
+  console.log(`[app-callback] actionId=${actionId} messageId=${messageId} callerUserId=${callerUserId}`);
 
   // Acknowledge immediately
   res.json({ success: true });
@@ -74,6 +75,12 @@ router.post("/callback", async (req: Request, res: Response) => {
 
     if (!questionId || !answer || !answerUserId) {
       console.error("[app-callback] Missing user-answer fields");
+      return;
+    }
+
+    // Verify caller is the intended user (XYNE-12145)
+    if (callerUserId && callerUserId !== answerUserId) {
+      console.error(`[app-callback] Unauthorized: caller ${callerUserId} != expected ${answerUserId}`);
       return;
     }
 
@@ -154,9 +161,134 @@ router.post("/callback", async (req: Request, res: Response) => {
       return;
     }
 
+    // Verify caller is the intended user (XYNE-12145)
+    if (callerUserId && callerUserId !== writeUserId) {
+      console.error(`[app-callback] Unauthorized: caller ${callerUserId} != expected ${writeUserId}`);
+      return;
+    }
+
     try {
-      const { callTool, hasAdapter } = await import("../mcp/runner.js");
-      if (!hasAdapter(serverType)) {
+      // Google (custom) tools — execute directly via xyne-claw-shared
+      if (serverType === "google") {
+        const { getAllCustomTools } = await import("xyne-claw-shared");
+        const toolDef = getAllCustomTools().find((t) => t.slug === tool);
+        if (!toolDef) {
+          console.error(`[app-callback] Unknown Google tool: ${tool}`);
+          return;
+        }
+
+        // Fetch a valid Google access token (auto-refreshes if expired)
+        const connection = await prisma.userMcpConnection.findFirst({
+          where: { userId: writeUserId, mcpServer: { type: "google" } },
+        });
+        if (!connection) {
+          console.error(`[app-callback] No Google connection for user ${writeUserId}`);
+          return;
+        }
+        const decryptedCreds = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
+        const creds = JSON.parse(decryptedCreds) as { accessToken: string; refreshToken: string; expires: number };
+
+        let accessToken = creds.accessToken;
+
+        // Refresh if expired (60s buffer)
+        if (Date.now() > creds.expires - 60_000) {
+          const clientId = process.env["GOOGLE_CLIENT_ID"]!;
+          const clientSecret = process.env["GOOGLE_CLIENT_SECRET"]!;
+          const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              client_id: clientId,
+              client_secret: clientSecret,
+              refresh_token: creds.refreshToken,
+              grant_type: "refresh_token",
+            }),
+          });
+          if (refreshRes.ok) {
+            const tokens = (await refreshRes.json()) as { access_token: string; expires_in: number };
+            accessToken = tokens.access_token;
+            // Update stored token
+            const { encrypt } = await import("../crypto.js");
+            const newCreds = { accessToken, refreshToken: creds.refreshToken, expires: Date.now() + tokens.expires_in * 1000 };
+            const encrypted = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
+            await prisma.userMcpConnection.update({
+              where: { id: connection.id },
+              data: { encryptedCreds: encrypted.ciphertext, iv: encrypted.iv, authTag: encrypted.authTag },
+            });
+          } else {
+            console.error(`[app-callback] Google token refresh failed: ${refreshRes.status}`);
+            return;
+          }
+        }
+
+        const result = await toolDef.execute(params, { config: { GOOGLE_ACCESS_TOKEN: accessToken } });
+        console.log(`[app-callback] Google write action approved: ${tool} → ${result.slice(0, 100)}`);
+        return;
+      }
+
+      // Microsoft (custom) tools — execute directly via xyne-claw-shared
+      if (serverType === "microsoft") {
+        const { getAllCustomTools } = await import("xyne-claw-shared");
+        const toolDef = getAllCustomTools().find((t) => t.slug === tool);
+        if (!toolDef) {
+          console.error(`[app-callback] Unknown Microsoft tool: ${tool}`);
+          return;
+        }
+
+        // Fetch a valid Microsoft access token (auto-refreshes if expired)
+        const connection = await prisma.userMcpConnection.findFirst({
+          where: { userId: writeUserId, mcpServer: { type: "microsoft" } },
+        });
+        if (!connection) {
+          console.error(`[app-callback] No Microsoft connection for user ${writeUserId}`);
+          return;
+        }
+        const decryptedCreds = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
+        const creds = JSON.parse(decryptedCreds) as { accessToken: string; refreshToken: string; expires: number };
+
+        let accessToken = creds.accessToken;
+
+        // Refresh if expired (60s buffer) — Microsoft rotates refresh tokens
+        if (Date.now() > creds.expires - 60_000) {
+          const clientId = process.env["MICROSOFT_CLIENT_ID"]!;
+          const clientSecret = process.env["MICROSOFT_CLIENT_SECRET"]!;
+          const tenantId = process.env["MICROSOFT_TENANT_ID"] ?? "common";
+          const refreshRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              client_id: clientId,
+              client_secret: clientSecret,
+              refresh_token: creds.refreshToken,
+              grant_type: "refresh_token",
+            }),
+          });
+          if (refreshRes.ok) {
+            const tokens = (await refreshRes.json()) as { access_token: string; refresh_token: string; expires_in: number };
+            accessToken = tokens.access_token;
+            // Update stored token (Microsoft rotates refresh tokens)
+            const { encrypt } = await import("../crypto.js");
+            const newCreds = { accessToken, refreshToken: tokens.refresh_token, expires: Date.now() + tokens.expires_in * 1000 };
+            const encrypted = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
+            await prisma.userMcpConnection.update({
+              where: { id: connection.id },
+              data: { encryptedCreds: encrypted.ciphertext, iv: encrypted.iv, authTag: encrypted.authTag },
+            });
+          } else {
+            console.error(`[app-callback] Microsoft token refresh failed: ${refreshRes.status}`);
+            return;
+          }
+        }
+
+        const result = await toolDef.execute(params, { config: { MICROSOFT_ACCESS_TOKEN: accessToken } });
+        console.log(`[app-callback] Microsoft write action approved: ${tool} → ${result.slice(0, 100)}`);
+        return;
+      }
+
+      // MCP-based tools — execute via MCP runner
+      const { callTool } = await import("../mcp/runner.js");
+      const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
+      if (!(await hasConnectorDefinition(serverType))) {
         console.error(`[app-callback] No adapter for ${serverType}`);
         return;
       }
@@ -188,6 +320,12 @@ router.post("/callback", async (req: Request, res: Response) => {
   const targetChannelId = context["targetChannelId"] as string | undefined;
 
   if (targetConversationId && messageContent && targetChannelId && mentionedUserId) {
+    // Verify caller is the intended user (XYNE-12145)
+    if (callerUserId && callerUserId !== mentionedUserId) {
+      console.error(`[app-callback] Unauthorized: caller ${callerUserId} != expected ${mentionedUserId}`);
+      return;
+    }
+
     try {
       const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
       const url = `${CONFIG.spacesBackendUrl}/api/internal/postAsUser`;

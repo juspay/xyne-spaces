@@ -1,0 +1,980 @@
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactElement } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { ChevronLeft, Send, Square, Loader2, Plus, MessageSquare, ImagePlus, X, AtSign, Hash, Ticket, FileText, Phone } from "lucide-react";
+import {
+  sendChatMessage,
+  pollChatMessages,
+  listChatConversations,
+  listRuns,
+  uploadChatAttachments,
+  chatAttachmentDownloadUrl,
+  listAgents,
+  getUserAgentConfig,
+  setUserAgentConfig,
+  listProviderCredentials,
+  upsertProviderCredential,
+  listClaudeModelsForUser,
+  listCopilotModelsForUser,
+  listCodexModelsForUser,
+  approveChatAction,
+  cancelChatRun,
+  type ChatMsg,
+  type ConversationSummary,
+  type AgentRun,
+  type ToolInvocation,
+  type UserAgentConfig,
+  type ProviderCredential,
+  type PendingAction,
+  type ContextItem,
+  type ContextSearchType,
+} from "../lib/api";
+import type { Agent } from "../lib/types";
+import { MessageBubble } from "./MessageBubble";
+import { ContextPicker } from "./ContextPicker";
+
+interface Props {
+  userId: string;
+}
+
+interface ProviderOption {
+  id: string;
+  label: string;
+  needsCreds: boolean;
+}
+
+const PROVIDERS: ProviderOption[] = [
+  { id: "spaces", label: "Spaces (Default)", needsCreds: false },
+  { id: "copilot", label: "GitHub Copilot", needsCreds: true },
+  { id: "claude", label: "Anthropic Claude", needsCreds: true },
+  { id: "codex", label: "OpenAI (Codex)", needsCreds: true },
+];
+
+const MAX_CONTEXT_TOTAL = 20;
+const MAX_CONTEXT_PER_TYPE = 5;
+
+export function AgentChat({ userId }: Props) {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const slug = searchParams.get("agent") ?? "";
+
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [providerConfig, setProviderConfig] = useState<UserAgentConfig | null>(null);
+  const [providerCreds, setProviderCreds] = useState<ProviderCredential[]>([]);
+  const [savingProvider, setSavingProvider] = useState(false);
+  // Live model catalog for the active provider's credential.
+  const [providerModels, setProviderModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
+
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [input, setInput] = useState("");
+  const [convId, setConvId] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  // Streaming state (Tier 1/2/3): populated from SSE events during an active run.
+  // Scoped to the id of the currently-streaming assistant placeholder message.
+  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
+  const [liveInvocations, setLiveInvocations] = useState<ToolInvocation[]>([]);
+  const [liveReasoning, setLiveReasoning] = useState<string>("");
+  // Per-message reasoning (client-side only — the backend doesn't persist it yet).
+  // Survives after streaming ends so the collapsible "Thought" block stays on the bubble.
+  // Keyed by assistant message id; cleared when the conversation is switched.
+  const [reasoningByMsgId, setReasoningByMsgId] = useState<Map<string, string>>(new Map());
+  // Per-message pending write-tool actions (client-side only — once approved
+  // or declined they're removed from the map). Same Map pattern as reasoning.
+  const [pendingActionsByMsgId, setPendingActionsByMsgId] = useState<Map<string, PendingAction[]>>(new Map());
+  // Transient attachments streamed while the agent is still running (blob URLs
+  // pointing at base64 payloads in memory). Cleared on finalize — the final
+  // `done` event ships canonical GCS-backed attachments on the message itself.
+  const [streamingAttachmentsByMsgId, setStreamingAttachmentsByMsgId] = useState<Map<string, Array<{ id: string; mimeType: string; originalFilename: string; size: number; blobUrl: string }>>>(new Map());
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [pendingFiles, setPendingFiles] = useState<Array<{ file: File; previewUrl: string }>>([]);
+  const [showContextPicker, setShowContextPicker] = useState(false);
+  const [contextQuery, setContextQuery] = useState("");
+  const [contextTab, setContextTab] = useState<ContextSearchType>("all");
+  const [selectedContext, setSelectedContext] = useState<ContextItem[]>([]);
+  const [contextToast, setContextToast] = useState<string | null>(null);
+  const contextToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [localPreviews, setLocalPreviews] = useState<Map<string, string>>(new Map());
+  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeAbortRef = useRef<AbortController | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+
+  // Load agents once (all agents the user can chat with)
+  useEffect(() => {
+    listAgents(userId)
+      .then((list) => {
+        const visible = list.filter((a) => a.enabled);
+        setAgents(visible);
+        // If URL has no agent, pick the first one
+        if (!slug && visible.length > 0) {
+          const first = visible[0]!;
+          setSearchParams({ agent: first.slug }, { replace: true });
+        }
+      })
+      .catch((err) => console.error("[agent-chat] listAgents error:", err))
+      .finally(() => setAgentsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per userId
+  }, [userId]);
+
+  // When the selected agent changes, reset chat state and load fresh data.
+  useEffect(() => {
+    if (!slug) return;
+    activeAbortRef.current?.abort();
+    activeAbortRef.current = null;
+    activeSessionIdRef.current = null;
+    setMessages([]);
+    setRuns([]);
+    setConvId(null);
+    setWaiting(false);
+    setProgress(null);
+    setStreamingMsgId(null);
+    setLiveReasoning("");
+    setLiveInvocations([]);
+    setReasoningByMsgId(new Map());
+    setShowContextPicker(false);
+    setContextQuery("");
+    setContextTab("all");
+    setSelectedContext([]);
+    setContextToast(null);
+    setLoadingHistory(true);
+
+    Promise.all([
+      listChatConversations(slug, userId).catch(() => []),
+      getUserAgentConfig(slug, userId).catch(() => null),
+      listProviderCredentials(userId).catch(() => []),
+    ])
+      .then(([convs, cfg, creds]) => {
+        setConversations(convs);
+        setProviderConfig(cfg);
+        setProviderCreds(creds);
+        // Deep-link: ?conv=<id> lands on a specific conversation (e.g. from Control Center "Open chat")
+        const deepLinked = searchParams.get("conv");
+        const target = deepLinked && convs.some((c) => c.conversationId === deepLinked)
+          ? deepLinked
+          : (convs[0]?.conversationId ?? null);
+        if (target) loadConversation(target);
+      })
+      .finally(() => setLoadingHistory(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when selected agent changes
+  }, [slug, userId]);
+
+  // Scroll to bottom on new messages
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      if (contextToastTimeoutRef.current) {
+        clearTimeout(contextToastTimeoutRef.current);
+      }
+      activeAbortRef.current?.abort();
+    };
+  }, []);
+
+  const loadConversation = useCallback(async (id: string) => {
+    if (!slug) return;
+    setConvId(id);
+    setReasoningByMsgId(new Map()); // reasoning is per-session, not persisted in DB
+    try {
+      const [msgs, runList] = await Promise.all([
+        pollChatMessages(slug, id),
+        listRuns(userId, { conversationId: id, agentSlug: slug, limit: 100 }).catch(() => []),
+      ]);
+      setMessages(msgs);
+      setRuns(runList);
+    } catch {
+      setMessages([]);
+      setRuns([]);
+    }
+  }, [slug, userId]);
+
+  const handleApproveAction = useCallback(async (msgId: string, pa: PendingAction) => {
+    if (!slug) return;
+    // Execute the action on the server. On success, append the tool's result
+    // to the assistant message's content so the user sees what happened, and
+    // remove the action from the pending map so the buttons collapse.
+    const resultText = await approveChatAction(slug, userId, pa);
+    setMessages((prev) => prev.map((m) => m.id === msgId
+      ? { ...m, content: `${m.content}\n\n**${pa.tool}** → ${resultText}`.trim() }
+      : m,
+    ));
+    setPendingActionsByMsgId((prev) => {
+      const next = new Map(prev);
+      const rest = (next.get(msgId) ?? []).filter((p) => p.signature !== pa.signature);
+      if (rest.length === 0) next.delete(msgId); else next.set(msgId, rest);
+      return next;
+    });
+  }, [slug, userId]);
+
+  const handleDeclineAction = useCallback((msgId: string, pa: PendingAction) => {
+    // No server call for decline — the signed action just gets dropped locally.
+    setPendingActionsByMsgId((prev) => {
+      const next = new Map(prev);
+      const rest = (next.get(msgId) ?? []).filter((p) => p.signature !== pa.signature);
+      if (rest.length === 0) next.delete(msgId); else next.set(msgId, rest);
+      return next;
+    });
+  }, []);
+
+  const refreshRuns = useCallback(async (id: string) => {
+    if (!slug) return;
+    try {
+      const runList = await listRuns(userId, { conversationId: id, agentSlug: slug, limit: 100 });
+      setRuns(runList);
+    } catch { /* no-op */ }
+  }, [slug, userId]);
+
+  const runByAssistantMsgId = useMemo(() => {
+    const map = new Map<string, AgentRun>();
+    const assistantIds: string[] = messages.filter((m) => m.role === "assistant").map((m) => m.id);
+    const orderedRuns = runs.slice().sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+    assistantIds.forEach((id, i) => {
+      const r = orderedRuns[i];
+      if (r) map.set(id, r);
+    });
+    return map;
+  }, [messages, runs]);
+
+  const startNewChat = () => {
+    activeAbortRef.current?.abort();
+    activeAbortRef.current = null;
+    activeSessionIdRef.current = null;
+    setConvId(null);
+    setMessages([]);
+    setProgress(null);
+    setWaiting(false);
+    setStreamingMsgId(null);
+    setSelectedContext([]);
+    setShowContextPicker(false);
+    setContextQuery("");
+    setContextTab("all");
+    setContextToast(null);
+  };
+
+  const refreshConversations = useCallback(() => {
+    if (!slug) return;
+    listChatConversations(slug, userId).then(setConversations).catch((err) => console.error("[agent-chat] refresh error:", err));
+  }, [slug, userId]);
+
+  const handleAgentChange = useCallback((nextSlug: string) => {
+    if (!nextSlug || nextSlug === slug) return;
+    setSearchParams({ agent: nextSlug }, { replace: true });
+  }, [slug, setSearchParams]);
+
+  const handleProviderChange = useCallback(async (nextProvider: string) => {
+    if (!slug || !nextProvider || nextProvider === providerConfig?.provider) return;
+    setSavingProvider(true);
+    try {
+      const updated = await setUserAgentConfig(slug, userId, { provider: nextProvider });
+      setProviderConfig(updated);
+    } catch (err) {
+      console.error("[agent-chat] provider save error:", err);
+    } finally {
+      setSavingProvider(false);
+    }
+  }, [slug, userId, providerConfig?.provider]);
+
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    const additions: Array<{ file: File; previewUrl: string }> = [];
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      if (file.size > 25 * 1024 * 1024) { console.warn("[agent-chat] skipping image > 25MB"); continue; }
+      additions.push({ file, previewUrl: URL.createObjectURL(file) });
+    }
+    setPendingFiles((prev) => [...prev, ...additions]);
+    e.target.value = "";
+  }, []);
+
+  const removeImage = useCallback((idx: number) => {
+    setPendingFiles((prev) => {
+      const removed = prev[idx];
+      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
+
+  const showContextOverflowToast = useCallback((message: string) => {
+    setContextToast(message);
+    if (contextToastTimeoutRef.current) {
+      clearTimeout(contextToastTimeoutRef.current);
+    }
+    contextToastTimeoutRef.current = setTimeout(() => setContextToast(null), 2500);
+  }, []);
+
+  const addSelectedContext = useCallback((item: ContextItem) => {
+    if (selectedContext.some((ctx) => ctx.type === item.type && ctx.id === item.id)) return;
+    if (selectedContext.length >= MAX_CONTEXT_TOTAL) {
+      showContextOverflowToast(`Maximum ${MAX_CONTEXT_TOTAL} context items reached.`);
+      return;
+    }
+    const sameTypeCount = selectedContext.filter((ctx) => ctx.type === item.type).length;
+    if (sameTypeCount >= MAX_CONTEXT_PER_TYPE) {
+      showContextOverflowToast(`Maximum ${MAX_CONTEXT_PER_TYPE} ${item.type} items allowed.`);
+      return;
+    }
+    setSelectedContext((prev) => [...prev, item]);
+  }, [selectedContext, showContextOverflowToast]);
+
+  const removeSelectedContext = useCallback((item: Pick<ContextItem, "type" | "id">) => {
+    setSelectedContext((prev) => prev.filter((ctx) => !(ctx.type === item.type && ctx.id === item.id)));
+  }, []);
+
+  const isAbortError = useCallback((err: unknown): boolean => {
+    if (err instanceof DOMException && err.name === "AbortError") return true;
+    return err instanceof Error && err.name === "AbortError";
+  }, []);
+
+  const handleStop = useCallback(async () => {
+    if (!waiting || !slug) return;
+    const sessionId = activeSessionIdRef.current;
+    let conversationIdForRefresh = convId;
+
+    if (sessionId) {
+      try {
+        const cancelled = await cancelChatRun(slug, userId, sessionId);
+        if (cancelled.conversationId) {
+          conversationIdForRefresh = cancelled.conversationId;
+          setConvId(cancelled.conversationId);
+        }
+      } catch (err) {
+        console.error("[agent-chat] cancel failed:", err);
+      }
+    }
+
+    activeAbortRef.current?.abort();
+    activeAbortRef.current = null;
+    activeSessionIdRef.current = null;
+    setWaiting(false);
+    setProgress(null);
+
+    if (streamingMsgId) {
+      setMessages((prev) => prev.map((m) => m.id === streamingMsgId
+        ? { ...m, status: "cancelled" }
+        : m));
+      setStreamingAttachmentsByMsgId((prev) => {
+        const list = prev.get(streamingMsgId);
+        if (!list) return prev;
+        list.forEach((e) => URL.revokeObjectURL(e.blobUrl));
+        const next = new Map(prev);
+        next.delete(streamingMsgId);
+        return next;
+      });
+    }
+
+    setStreamingMsgId(null);
+    setLiveReasoning("");
+    setLiveInvocations([]);
+
+    refreshConversations();
+    if (conversationIdForRefresh) {
+      const refreshId = conversationIdForRefresh;
+      await refreshRuns(refreshId);
+      setTimeout(() => {
+        loadConversation(refreshId).catch(() => {});
+      }, 1000);
+    }
+  }, [waiting, slug, convId, userId, streamingMsgId, refreshConversations, refreshRuns, loadConversation]);
+
+  const handleSend = useCallback(async () => {
+    if ((!input.trim() && pendingFiles.length === 0 && selectedContext.length === 0) || !slug || waiting) return;
+    const msg = input.trim()
+      || (pendingFiles.length > 0
+        ? `Sent ${pendingFiles.length} image(s)`
+        : `Attached ${selectedContext.length} context item(s)`);
+    const files = pendingFiles.map((p) => p.file);
+    const previews = pendingFiles.map((p) => p.previewUrl);
+    const contextToSend = selectedContext.map((item) => ({
+      type: item.type,
+      id: item.id,
+      title: item.title,
+      ...(typeof item.meta?.["conversationId"] === "string" && item.meta["conversationId"].trim().length > 0
+        ? { threadId: item.meta["conversationId"].trim() }
+        : {}),
+    }));
+    setInput("");
+    setPendingFiles([]);
+    setShowContextPicker(false);
+    setContextQuery("");
+    setContextTab("all");
+    setContextToast(null);
+    setWaiting(true);
+    setProgress(null);
+
+    let uploaded: Awaited<ReturnType<typeof uploadChatAttachments>> = [];
+    if (files.length > 0) {
+      try {
+        uploaded = await uploadChatAttachments(slug, userId, files);
+      } catch (err) {
+        previews.forEach((u) => URL.revokeObjectURL(u));
+        setWaiting(false);
+        setMessages((prev) => [
+          ...prev,
+          { id: `err-${Date.now()}`, conversationId: convId ?? "", role: "assistant", content: err instanceof Error ? err.message : "Upload failed", status: "failed", createdAt: new Date().toISOString() },
+        ]);
+        return;
+      }
+    }
+
+    if (uploaded.length > 0) {
+      setLocalPreviews((prev) => {
+        const next = new Map(prev);
+        uploaded.forEach((a, i) => { if (previews[i]) next.set(a.id, previews[i]!); });
+        return next;
+      });
+    } else {
+      previews.forEach((u) => URL.revokeObjectURL(u));
+    }
+
+    const tempId = `tmp-${Date.now()}`;
+    const tempUser: ChatMsg = {
+      id: tempId,
+      conversationId: convId ?? "",
+      role: "user",
+      content: msg,
+      status: "completed",
+      createdAt: new Date().toISOString(),
+      ...(contextToSend.length > 0 ? { contextItems: contextToSend } : {}),
+      ...(uploaded.length ? { attachments: uploaded } : {}),
+    };
+
+    // Create the assistant placeholder RIGHT ALONGSIDE the user message.
+    // It stays at this id through streaming AND final — no unmount, no flash.
+    // Content fills in from onTextDelta; invocations/reasoning render in the footer
+    // via live state that's keyed to this id while `streamingMsgId === asstId`.
+    const asstId = `asst-${Date.now()}`;
+    setStreamingMsgId(asstId);
+    setMessages((prev) => [
+      ...prev,
+      tempUser,
+      { id: asstId, conversationId: convId ?? "", role: "assistant", content: "", status: "running", createdAt: new Date().toISOString() },
+    ]);
+
+    // Reset streaming state for the new request.
+    setLiveInvocations([]);
+    setLiveReasoning("");
+
+    const attachmentIds = uploaded.map((a) => a.id);
+    const controller = new AbortController();
+    activeAbortRef.current = controller;
+    activeSessionIdRef.current = null;
+
+    sendChatMessage(slug, msg, userId, convId ?? undefined, {
+      onRunMeta: ({ sessionId }) => {
+        activeSessionIdRef.current = sessionId;
+      },
+      onProgress: (toolLabel) => setProgress(toolLabel),
+      onInvocation: (inv) => setLiveInvocations((prev) => {
+        // Merge semantics keyed by toolCallId:
+        //   - First message (tool_execution_start) → pending row appears
+        //   - Second message (tool_execution_end) → replaces with completed row
+        //   - Retries / duplicates with same id → keep the most recent
+        // No toolCallId (legacy) → append as-is.
+        if (!inv.toolCallId) return [...prev, inv];
+        const idx = prev.findIndex((p) => p.toolCallId === inv.toolCallId);
+        if (idx === -1) return [...prev, inv];
+        const next = prev.slice();
+        next[idx] = inv;
+        return next;
+      }),
+      onReasoningDelta: (delta) => {
+        setLiveReasoning((prev) => prev + delta);
+        // Also persist on the per-message map so the block stays visible AFTER
+        // streaming ends (the backend doesn't currently save reasoning, so this
+        // is a client-side memory of it that lives as long as the session).
+        setReasoningByMsgId((prev) => {
+          const next = new Map(prev);
+          next.set(asstId, (next.get(asstId) ?? "") + delta);
+          return next;
+        });
+      },
+      onTextDelta: (delta) => {
+        // Write the text delta directly onto the assistant placeholder so
+        // the bubble is rendered through <MessageBubble> (same Markdown pipeline)
+        // from the very first character. No separate streaming card, no swap.
+        setMessages((prev) => prev.map((m) => m.id === asstId ? { ...m, content: m.content + delta } : m));
+      },
+      onAttachment: (att) => {
+        // Turn the base64 payload into a same-tab blob URL so the bubble can
+        // download it immediately. The final `done` event ships the persisted
+        // GCS-backed version, at which point this entry is discarded.
+        try {
+          const byteChars = atob(att.data);
+          const byteNumbers = new Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+          const bytes = new Uint8Array(byteNumbers);
+          const blob = new Blob([bytes], { type: att.mimeType });
+          const blobUrl = URL.createObjectURL(blob);
+          const entry = {
+            id: `streaming-${asstId}-${att.fileName}`,
+            mimeType: att.mimeType,
+            originalFilename: att.fileName,
+            size: bytes.length,
+            blobUrl,
+          };
+          setStreamingAttachmentsByMsgId((prev) => {
+            const next = new Map(prev);
+            const list = next.get(asstId) ?? [];
+            if (list.some((e) => e.originalFilename === att.fileName)) return prev;
+            next.set(asstId, [...list, entry]);
+            return next;
+          });
+        } catch (err) {
+          console.warn("[chat] streamed attachment decode failed:", err);
+        }
+      },
+    }, attachmentIds.length > 0 ? attachmentIds : undefined, contextToSend.length > 0 ? contextToSend : undefined, controller.signal).then(async (res) => {
+      setConvId(res.conversationId);
+      setProgress(null);
+      refreshConversations();
+
+      // Fetch runs first so the placeholder's footer can switch from live
+      // invocations to the persisted AgentRun data in the same render.
+      await refreshRuns(res.conversationId);
+
+      // Finalize the placeholder IN-PLACE: same id, updated content + status.
+      // The bubble stays mounted; only its content/status/footer re-render.
+      setMessages((prev) => prev.map((m) => {
+        if (m.id !== asstId) return m;
+        return {
+          ...m,
+          conversationId: res.conversationId,
+          content: res.reply?.content ?? m.content,
+          status: (res.reply?.status as "completed" | "failed" | "cancelled" | undefined) ?? "completed",
+          ...(res.reply?.attachments?.length ? { attachments: res.reply.attachments } : {}),
+        };
+      }).map((m) => m.id === tempUser.id ? { ...m, conversationId: res.conversationId } : m));
+      // Attach any pending write-tool approvals to this message so MessageBubble
+      // can render Approve/Decline cards under the reply. Same pattern Spaces
+      // uses for its thread-message approval buttons.
+      if (res.reply?.pendingActions?.length) {
+        setPendingActionsByMsgId((prev) => {
+          const next = new Map(prev);
+          next.set(asstId, res.reply!.pendingActions!);
+          return next;
+        });
+      }
+      activeAbortRef.current = null;
+      activeSessionIdRef.current = null;
+      setStreamingMsgId(null);
+      setWaiting(false);
+      setLiveReasoning("");
+      setLiveInvocations([]);
+      // Streamed attachments are now redundant (the canonical persisted
+      // versions rode in on res.reply.attachments and were merged onto the
+      // assistant message). Revoke the blob URLs and drop the entry.
+      setStreamingAttachmentsByMsgId((prev) => {
+        const list = prev.get(asstId);
+        if (!list) return prev;
+        list.forEach((e) => URL.revokeObjectURL(e.blobUrl));
+        const next = new Map(prev);
+        next.delete(asstId);
+        return next;
+      });
+    }).catch((err) => {
+      activeAbortRef.current = null;
+      activeSessionIdRef.current = null;
+      setProgress(null);
+      setWaiting(false);
+      setStreamingMsgId(null);
+      setLiveReasoning("");
+      setLiveInvocations([]);
+      setStreamingAttachmentsByMsgId((prev) => {
+        const list = prev.get(asstId);
+        if (!list) return prev;
+        list.forEach((e) => URL.revokeObjectURL(e.blobUrl));
+        const next = new Map(prev);
+        next.delete(asstId);
+        return next;
+      });
+
+      if (isAbortError(err)) {
+        setMessages((prev) => prev.map((m) => m.id === asstId
+          ? { ...m, status: "cancelled" }
+          : m));
+        return;
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { id: `err-${Date.now()}`, conversationId: convId ?? "", role: "assistant", content: "Failed to get response", status: "failed", createdAt: new Date().toISOString() },
+      ]);
+    });
+  }, [input, pendingFiles, selectedContext, slug, userId, convId, waiting, refreshConversations, refreshRuns, isAbortError]);
+
+  const selectedContextKeys = useMemo(
+    () => new Set(selectedContext.map((item) => `${item.type}:${item.id}`)),
+    [selectedContext],
+  );
+
+  const credByProvider = useMemo(() => new Map(providerCreds.map((c) => [c.provider, c] as const)), [providerCreds]);
+  const currentProvider = providerConfig?.provider ?? "spaces";
+  const currentCred = credByProvider.get(currentProvider);
+  const currentModel = currentCred?.model ?? "";
+  const showModelPicker = currentProvider !== "spaces" && Boolean(currentCred?.hasApiKey);
+
+  // Fetch the live model list whenever the active provider has configured credentials.
+  useEffect(() => {
+    if (!showModelPicker) { setProviderModels([]); return; }
+    setModelsLoading(true);
+    const fetcher =
+      currentProvider === "claude" ? listClaudeModelsForUser :
+      currentProvider === "codex" ? listCodexModelsForUser :
+      currentProvider === "copilot" ? listCopilotModelsForUser :
+      null;
+    if (!fetcher) { setProviderModels([]); setModelsLoading(false); return; }
+    fetcher(userId)
+      .then((rows) => setProviderModels(rows.map((r) => ({ id: (r as { id: string }).id, name: ((r as { name?: string; displayName?: string }).displayName ?? (r as { name?: string }).name ?? (r as { id: string }).id) }))))
+      .catch(() => setProviderModels([]))
+      .finally(() => setModelsLoading(false));
+  }, [currentProvider, userId, showModelPicker]);
+
+  const handleModelChange = useCallback(async (nextModel: string) => {
+    if (!nextModel || nextModel === currentModel) return;
+    setSavingModel(true);
+    try {
+      await upsertProviderCredential(userId, currentProvider, { model: nextModel });
+      // Refresh local creds so the dropdown reflects the new model.
+      const fresh = await listProviderCredentials(userId);
+      setProviderCreds(fresh);
+    } catch (err) {
+      console.error("[agent-chat] model save error:", err);
+    } finally {
+      setSavingModel(false);
+    }
+  }, [userId, currentProvider, currentModel]);
+
+  if (agentsLoading) {
+    return (
+      <div className="flex h-[calc(100vh-120px)] items-center justify-center text-sm text-zinc-500">
+        <Loader2 size={14} className="mr-2 animate-spin" /> Loading agents…
+      </div>
+    );
+  }
+
+  if (agents.length === 0) {
+    return (
+      <div className="flex h-[calc(100vh-120px)] items-center justify-center text-sm text-zinc-500">
+        No agents available. Create one from the Dashboard first.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-[calc(100vh-120px)] flex-col">
+      {/* Header: back, agent picker, provider picker */}
+      <div className="flex items-center gap-3 border-b border-zinc-800 pb-4">
+        <button onClick={() => navigate("/")} className="text-zinc-400 hover:text-zinc-200">
+          <ChevronLeft size={20} />
+        </button>
+        <h2 className="text-lg font-semibold">Chat</h2>
+
+        <div className="ml-2 flex items-center gap-2">
+          <label className="text-xs text-zinc-500">Agent</label>
+          <select
+            value={slug}
+            onChange={(e) => handleAgentChange(e.target.value)}
+            className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none"
+          >
+            {agents.map((a) => (
+              <option key={a.slug} value={a.slug}>{a.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-zinc-500">Provider</label>
+          <select
+            value={currentProvider}
+            onChange={(e) => handleProviderChange(e.target.value)}
+            disabled={savingProvider}
+            className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none disabled:opacity-50"
+          >
+            {PROVIDERS.map((p) => {
+              const available = !p.needsCreds || Boolean(credByProvider.get(p.id)?.hasApiKey);
+              return (
+                <option key={p.id} value={p.id} disabled={!available}>
+                  {p.label}{p.needsCreds && !available ? " (not configured)" : ""}
+                </option>
+              );
+            })}
+          </select>
+          {savingProvider && <Loader2 size={12} className="animate-spin text-zinc-400" />}
+        </div>
+
+        {showModelPicker && (
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-zinc-500">Model</label>
+            <select
+              value={currentModel}
+              onChange={(e) => handleModelChange(e.target.value)}
+              disabled={savingModel || modelsLoading}
+              className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 focus:border-purple-500 focus:outline-none disabled:opacity-50"
+            >
+              {currentModel && !providerModels.some((m) => m.id === currentModel) && (
+                <option value={currentModel}>{currentModel}</option>
+              )}
+              {providerModels.length === 0 && !currentModel && (
+                <option value="" disabled>{modelsLoading ? "Loading…" : "No models"}</option>
+              )}
+              {providerModels.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+            {(savingModel || modelsLoading) && <Loader2 size={12} className="animate-spin text-zinc-400" />}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <div className="w-64 shrink-0 border-r border-zinc-800 overflow-y-auto">
+          <div className="p-3">
+            <button onClick={startNewChat}
+              className="flex w-full items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 transition hover:border-zinc-600 hover:text-zinc-100">
+              <Plus size={14} /> New Chat
+            </button>
+          </div>
+
+          {loadingHistory ? (
+            <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-500">
+              <Loader2 size={12} className="animate-spin" /> Loading...
+            </div>
+          ) : conversations.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-zinc-600">No conversations yet.</p>
+          ) : (
+            <div className="space-y-0.5 px-2">
+              {conversations.map((c) => (
+                <button key={c.conversationId} onClick={() => loadConversation(c.conversationId)}
+                  className={`flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition ${
+                    convId === c.conversationId ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-300"
+                  }`}>
+                  <MessageSquare size={14} className="mt-0.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">{c.title || "Untitled"}</p>
+                    <p className="text-xs text-zinc-600">{c.messageCount} msgs · {new Date(c.lastMessageAt).toLocaleDateString()}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Chat area */}
+        <div className="flex flex-1 flex-col">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            {messages.length === 0 && !waiting && (
+              <div className="flex h-full items-center justify-center">
+                <p className="text-sm text-zinc-600">Send a message to start chatting.</p>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {messages.map((m) => {
+                const isStreaming = m.id === streamingMsgId;
+                // Invocation source: live while streaming, persisted after.
+                const run = runByAssistantMsgId.get(m.id);
+                const msgInvocations = isStreaming ? liveInvocations : (run?.toolInvocations ?? []);
+                // Reasoning: live state while streaming, otherwise the sidecar map.
+                // The map outlives streaming so the collapsed "Thought" block persists.
+                const msgReasoning = isStreaming ? liveReasoning : reasoningByMsgId.get(m.id);
+                const imageUrls = m.attachments
+                  ?.filter((a) => a.mimeType.startsWith("image/"))
+                  .map((a) => localPreviews.get(a.id) ?? chatAttachmentDownloadUrl(a.id));
+                const fileAttachments = m.attachments
+                  ?.filter((a) => !a.mimeType.startsWith("image/"))
+                  .map((a) => ({
+                    id: a.id,
+                    name: a.originalFilename,
+                    mimeType: a.mimeType,
+                    ...(typeof a.size === "number" ? { size: a.size } : {}),
+                    url: chatAttachmentDownloadUrl(a.id),
+                  })) ?? [];
+                // Merge in any mid-session streamed attachments (not yet
+                // persisted). Filtered to ones whose filename isn't already
+                // in m.attachments — the final `done` event rewrites the
+                // message with the canonical GCS-backed versions.
+                const persistedNames = new Set(fileAttachments.map((a) => a.name));
+                const streamingEntries = (streamingAttachmentsByMsgId.get(m.id) ?? [])
+                  .filter((e) => !persistedNames.has(e.originalFilename))
+                  .map((e) => ({
+                    id: e.id,
+                    name: e.originalFilename,
+                    mimeType: e.mimeType,
+                    size: e.size,
+                    url: e.blobUrl,
+                  }));
+                const allFileAttachments = [...fileAttachments, ...streamingEntries];
+
+                const msgPending = pendingActionsByMsgId.get(m.id);
+                return (
+                  <MessageBubble
+                    key={m.id}
+                    message={{
+                      id: m.id,
+                      role: m.role as "user" | "assistant",
+                      content: m.content,
+                      status: m.status as "completed" | "failed" | "running" | "cancelled" | undefined,
+                      ...(m.contextItems?.length ? { contextItems: m.contextItems } : {}),
+                      ...(imageUrls?.length ? { images: imageUrls } : {}),
+                      ...(allFileAttachments.length ? { files: allFileAttachments } : {}),
+                      ...(msgReasoning ? { reasoning: msgReasoning } : {}),
+                      ...(msgInvocations.length > 0 ? { invocations: msgInvocations } : {}),
+                      ...(isStreaming ? { streaming: true } : {}),
+                      ...(msgPending?.length ? {
+                        pendingActions: msgPending,
+                        onApproveAction: (pa) => handleApproveAction(m.id, pa),
+                        onDeclineAction: (pa) => handleDeclineAction(m.id, pa),
+                      } : {}),
+                    }}
+                    userId={userId}
+                  />
+                );
+              })}
+
+              <div ref={bottomRef} />
+            </div>
+          </div>
+
+          {/* Input */}
+          <div className="border-t border-zinc-800 px-4 py-4">
+            {contextToast && (
+              <div className="mb-2 rounded-lg border border-amber-700/70 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                {contextToast}
+              </div>
+            )}
+
+            {selectedContext.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {selectedContext.map((item) => (
+                  <div key={`${item.type}:${item.id}`} className={`flex max-w-full items-center gap-2 rounded-full border px-2.5 py-1 text-xs ${contextBadgeClass(item.type)}`}>
+                    {contextIcon(item.type)}
+                    <span className="truncate">{item.title}</span>
+                    <button
+                      onClick={() => removeSelectedContext(item)}
+                      className="rounded-full p-0.5 text-zinc-300 transition hover:bg-zinc-700 hover:text-white"
+                      title="Remove context"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Image previews */}
+            {pendingFiles.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {pendingFiles.map((p, idx) => (
+                  <div key={idx} className="group relative">
+                    <img src={p.previewUrl} alt={p.file.name} className="h-16 w-16 rounded-lg border border-zinc-700 object-cover" />
+                    <button
+                      onClick={() => removeImage(idx)}
+                      className="absolute -right-1.5 -top-1.5 hidden rounded-full bg-zinc-700 p-0.5 text-zinc-300 hover:bg-red-600 hover:text-white group-hover:block"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="relative">
+              {showContextPicker && (
+                <div className="absolute bottom-full left-0 z-30 mb-2">
+                  <ContextPicker
+                    slug={slug}
+                    userId={userId}
+                    open={showContextPicker}
+                    tab={contextTab}
+                    query={contextQuery}
+                    selectedKeys={selectedContextKeys}
+                    onTabChange={setContextTab}
+                    onQueryChange={setContextQuery}
+                    onSelect={addSelectedContext}
+                    onClose={() => setShowContextPicker(false)}
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} className="hidden" />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={waiting}
+                  className="flex items-center rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-zinc-400 transition hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-50"
+                  title="Attach images"
+                >
+                  <ImagePlus size={16} />
+                </button>
+                <button
+                  onClick={() => setShowContextPicker((prev) => !prev)}
+                  disabled={waiting}
+                  className={`relative flex items-center rounded-lg border px-3 py-2.5 text-zinc-400 transition disabled:opacity-50 ${
+                    showContextPicker
+                      ? "border-cyan-600 bg-cyan-500/10 text-cyan-300"
+                      : "border-zinc-700 bg-zinc-800 hover:border-zinc-600 hover:text-zinc-200"
+                  }`}
+                  title="Attach context"
+                >
+                  <AtSign size={16} />
+                  {selectedContext.length > 0 && (
+                    <span className="absolute -right-1.5 -top-1.5 rounded-full bg-cyan-500 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-950">
+                      {selectedContext.length}
+                    </span>
+                  )}
+                </button>
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                  placeholder="Type a message..."
+                  disabled={waiting}
+                  className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none disabled:opacity-50"
+                  autoFocus
+                />
+                {waiting ? (
+                  <button
+                    onClick={handleStop}
+                    className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-500"
+                  >
+                    <Square size={14} />
+                    Stop
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSend}
+                    disabled={!input.trim() && pendingFiles.length === 0 && selectedContext.length === 0}
+                    className="flex items-center gap-1.5 rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-purple-500 disabled:opacity-50"
+                  >
+                    <Send size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function contextBadgeClass(type: ContextItem["type"]): string {
+  if (type === "channel") return "border-cyan-700/70 bg-cyan-500/10 text-cyan-300";
+  if (type === "ticket") return "border-amber-700/70 bg-amber-500/10 text-amber-300";
+  if (type === "canvas") return "border-emerald-700/70 bg-emerald-500/10 text-emerald-300";
+  return "border-fuchsia-700/70 bg-fuchsia-500/10 text-fuchsia-300";
+}
+
+function contextIcon(type: ContextItem["type"]): ReactElement {
+  if (type === "channel") return <Hash size={12} className="shrink-0" />;
+  if (type === "ticket") return <Ticket size={12} className="shrink-0" />;
+  if (type === "canvas") return <FileText size={12} className="shrink-0" />;
+  return <Phone size={12} className="shrink-0" />;
+}

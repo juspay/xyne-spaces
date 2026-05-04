@@ -10,11 +10,20 @@ import { webhookRouter } from "./routes/webhook.js";
 import { appCallbackRouter } from "./routes/app-callback.js";
 import { agentsRouter } from "./routes/agents.js";
 import { toolsRouter } from "./routes/tools.js";
+import { skillsRouter } from "./routes/skills.js";
+import { adminRouter } from "./routes/admin.js";
+import { agentChatRouter, agentChatInternalRouter } from "./routes/agent-chat.js";
+import { googleOAuthRouter, googleCallbackRouter } from "./routes/google-oauth.js";
+import { microsoftOAuthRouter, microsoftCallbackRouter } from "./routes/microsoft-oauth.js";
 import { scheduledJobsRouter } from "./routes/scheduled-jobs.js";
 import { pendingQuestionsRouter } from "./routes/pending-questions.js";
+import { settingsRouter } from "./routes/settings.js";
+import { runsRouter } from "./routes/runs.js";
 import { initScheduledJobsWorker, closeWorker } from "./queue/scheduled-jobs-worker.js";
 import { closeQueue } from "./queue/scheduled-jobs-queue.js";
-import { restoreScheduledJobs } from "./queue/restore-jobs.js";
+import { initRunRecoveryWorker, closeRunRecoveryWorker } from "./queue/run-recovery-worker.js";
+
+import { requireAuth, requireS2S } from "./middleware/require-auth.js";
 import { redisService } from "./redis.js";
 
 const app = express();
@@ -31,25 +40,37 @@ app.use(`${BASE}/users`, usersRouter);
 app.use(`${BASE}/users`, connectionsRouter);
 app.use(`${BASE}/users`, mcpRouter);
 app.use(`${BASE}/gateways`, gatewaysRouter);
-app.use(`${BASE}/agents`, agentsRouter);
-app.use(`${BASE}/tools`, toolsRouter);
+app.use(`${BASE}/agents`, requireAuth, agentsRouter);
+app.use(`${BASE}/tools`, requireAuth, toolsRouter);
+app.use(`${BASE}/skills`, requireAuth, skillsRouter);
+app.use(`${BASE}/admin`, requireAuth, adminRouter);
+app.use(`${BASE}/agent-chat`, requireAuth, agentChatRouter);
+app.use(`${BASE}/internal/agent-chat`, requireS2S, agentChatInternalRouter); // progress/callback from xyne-claw
+app.use(`${BASE}/users`, googleOAuthRouter);
+app.use(BASE, googleCallbackRouter);
+app.use(`${BASE}/users`, microsoftOAuthRouter);
+app.use(BASE, microsoftCallbackRouter);
 app.use(BASE, runRouter);
 app.use(`${BASE}/webhook`, webhookRouter);
 app.use(`${BASE}/app`, appCallbackRouter);
-app.use(`${BASE}/scheduled-jobs`, scheduledJobsRouter);
+app.use(`${BASE}/scheduled-jobs`, requireAuth, scheduledJobsRouter);
 app.use(`${BASE}/pending-questions`, pendingQuestionsRouter);
+app.use(`${BASE}/settings`, requireAuth, settingsRouter);
+app.use(`${BASE}/runs`, requireAuth, runsRouter);
 
 const server = app.listen(CONFIG.port, () => {
   console.log(`[xyne-claw-auth] Server listening on port ${CONFIG.port}`);
   initScheduledJobsWorker();
-  restoreScheduledJobs().catch((err) => {
-    console.error("[xyne-claw-auth] Failed to restore scheduled jobs:", err);
-  });
+  initRunRecoveryWorker();
+  // Jobs persist in Redis. A full Redis wipe loses schedulers; there is no
+  // auto-reconcile from Postgres. If that ever happens, restore by iterating
+  // active ScheduledJob rows and calling enqueueCronJob / enqueueDelayedJob.
 });
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`[xyne-claw-auth] ${signal}. Shutting down.`);
   await closeWorker().catch(() => {});
+  await closeRunRecoveryWorker().catch(() => {});
   await closeQueue().catch(() => {});
   await redisService.disconnect().catch(() => {});
   server.close(() => process.exit(0));
