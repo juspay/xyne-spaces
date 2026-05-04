@@ -27,11 +27,13 @@ import { logger } from '@/utils/logger';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 
 const PENDING_ENTITY_PREFIX = 'pending-email:';
+const PENDING_COMPOSE_ENTITY_PREFIX = 'pending-compose:';
 
 interface UploadContext {
   files: Express.Multer.File[];
   externalSource: ExternalSource;
-  conversationId: string;
+  conversationId?: string;
+  channelId: string;
   userId: string;
   workspaceId: string;
 }
@@ -85,6 +87,7 @@ export class ZohoUploadController {
         files,
         externalSource,
         conversationId,
+        channelId: channel.id,
         userId: req.user?.id ?? 'system',
         workspaceId: channel.workspaceId,
       });
@@ -96,6 +99,50 @@ export class ZohoUploadController {
       });
     } catch (error: any) {
       logger.error('[emailUpload] Failed to upload attachments:', error);
+      return res.status(500).json({
+        error: 'Failed to upload attachments',
+        message: error?.message ?? 'unknown',
+      });
+    }
+  };
+
+  uploadComposeAttachments = async (req: Request, res: Response) => {
+    try {
+      const { channelId } = req.params;
+      const files = req.files as Express.Multer.File[] | undefined;
+
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: 'No files uploaded' });
+      }
+
+      const channel = await this.channelRepo.findById(channelId);
+      if (!channel) return res.status(404).json({ error: 'Channel not found' });
+
+      const externalSource = await this.externalSourceRepo.findByChannelId(channel.id);
+      if (!externalSource) return res.status(404).json({ error: 'External source not found' });
+
+      const uploader = this.uploaders[externalSource.sourceType];
+      if (!uploader) {
+        return res
+          .status(400)
+          .json({ error: `Unsupported source type: ${externalSource.sourceType}` });
+      }
+
+      const { ids: attachmentIds, failures } = await uploader({
+        files,
+        externalSource,
+        channelId: channel.id,
+        userId: req.user?.id ?? 'system',
+        workspaceId: channel.workspaceId,
+      });
+
+      return res.status(200).json({
+        success: true,
+        attachmentIds,
+        ...(failures.length > 0 && { failures }),
+      });
+    } catch (error: any) {
+      logger.error('[emailUpload] Failed to upload compose attachments:', error);
       return res.status(500).json({
         error: 'Failed to upload attachments',
         message: error?.message ?? 'unknown',
@@ -186,7 +233,9 @@ export class ZohoUploadController {
     const uploaded = await uploadFiles(ctx.files);
     if (uploaded.length === 0) return { ids: [], failures: [] };
 
-    const pendingEntityId = `${PENDING_ENTITY_PREFIX}${ctx.conversationId}`;
+    const pendingEntityId = ctx.conversationId
+      ? `${PENDING_ENTITY_PREFIX}${ctx.conversationId}`
+      : `${PENDING_COMPOSE_ENTITY_PREFIX}${ctx.channelId}`;
 
     const results = await Promise.allSettled(
       uploaded.map(file =>
@@ -203,7 +252,7 @@ export class ZohoUploadController {
           uploadedByUserId: ctx.userId,
           createdBy: ctx.userId,
           storageProvider: config.fileStorage.provider,
-          conversationId: ctx.conversationId,
+          conversationId: ctx.conversationId ?? null,
           workspaceId: ctx.workspaceId,
           metadata: { pending: true, pendingEntityId, ...(file.metadata ?? {}) },
         }),

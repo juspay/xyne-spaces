@@ -48,6 +48,7 @@ export class EmailChannelPreferenceRepository {
     ownerUserId?: string;
     assigneeUserGroupId?: string;
     boardId?: string;
+    sendAsEmail?: string | null;
   }) {
     await this.validateEmailChannel(data.channelId);
 
@@ -66,6 +67,7 @@ export class EmailChannelPreferenceRepository {
       ownerUserId?: string;
       assigneeUserGroupId?: string;
       boardId?: string;
+      sendAsEmail?: string | null;
     }
   ) {
     await this.validateEmailChannel(channelId);
@@ -85,6 +87,7 @@ export class EmailChannelPreferenceRepository {
     ownerUserId?: string;
     assigneeUserGroupId?: string;
     boardId?: string;
+    sendAsEmail?: string | null;
   }) {
     await this.validateEmailChannel(data.channelId);
 
@@ -95,6 +98,7 @@ export class EmailChannelPreferenceRepository {
         ...(data.ownerUserId !== undefined && { ownerUserId: data.ownerUserId }),
         ...(data.assigneeUserGroupId !== undefined && { assigneeUserGroupId: data.assigneeUserGroupId }),
         ...(data.boardId !== undefined && { boardId: data.boardId }),
+        ...(data.sendAsEmail !== undefined && { sendAsEmail: data.sendAsEmail }),
       },
     });
   }

@@ -64,6 +64,7 @@ interface ReplyParams {
   bcc?: string[];
   threadId: string;
   latestExternalMessageId: string;
+  fromEmailAddress?: string;
   /** Optional file attachments (e.g. ICS calendar invite or user-uploaded files). */
   attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
 }
@@ -189,7 +190,7 @@ export class GoogleService {
     startDate: string;
     endDate: string;
     maxMessages?: number;
-  }): Promise<string[]> {
+  }): Promise<Array<{ id: string; threadId: string }>> {
     const { startDate, endDate, maxMessages = 2000 } = params;
     const afterUnix = Math.floor(Date.parse(startDate) / 1000);
     const beforeUnix = Math.floor(Date.parse(endDate) / 1000);
@@ -197,7 +198,7 @@ export class GoogleService {
       throw new Error('Invalid startDate or endDate');
     }
 
-    const messageIds: string[] = [];
+    const messages: Array<{ id: string; threadId: string }> = [];
     let pageToken: string | undefined;
 
     try {
@@ -205,19 +206,21 @@ export class GoogleService {
         const response = await this.gmail.users.messages.list({
           userId: 'me',
           q: `after:${afterUnix} before:${beforeUnix}`,
-          maxResults: Math.min(500, maxMessages - messageIds.length),
+          maxResults: Math.min(500, maxMessages - messages.length),
           ...(pageToken && { pageToken }),
         });
 
         for (const msg of response.data.messages || []) {
-          if (msg.id) messageIds.push(msg.id);
-          if (messageIds.length >= maxMessages) break;
+          if (msg.id) {
+            messages.push({ id: msg.id, threadId: msg.threadId ?? msg.id });
+          }
+          if (messages.length >= maxMessages) break;
         }
 
         pageToken = response.data.nextPageToken ?? undefined;
-      } while (pageToken && messageIds.length < maxMessages);
+      } while (pageToken && messages.length < maxMessages);
 
-      return messageIds;
+      return messages;
     } catch (error) {
       logger.error(`${TAG} Failed to list messages by date range`, error);
       throw new Error(`Failed to list messages by date range: ${getErrorMessage(error)}`);
@@ -668,7 +671,7 @@ export class GoogleService {
         const { inReplyTo, references } = await fetchThreadingHeaders(gmail, params.latestExternalMessageId);
 
         const mime = await buildMimeMessage({
-          from: credentials.email,
+          from: params.fromEmailAddress || credentials.email,
           to: params.to,
           cc: params.cc,
           bcc: params.bcc,
@@ -689,6 +692,38 @@ export class GoogleService {
 
         logger.info(`${TAG} Gmail reply sent`, { messageId, threadId });
         return { messageId, threadId };
+      },
+
+      async sendNewEmail(params: {
+        subject: string;
+        content: string;
+        to: string[];
+        cc?: string[];
+        bcc?: string[];
+        fromEmailAddress?: string;
+        attachments?: Array<{ name: string; contentType: string; content: Buffer | string }>;
+      }): Promise<{ messageId: string; threadId: string; fromEmail: string }> {
+        const fromHeader = params.fromEmailAddress || credentials.email;
+        const mime = await buildMimeMessage({
+          from: fromHeader,
+          to: params.to,
+          cc: params.cc,
+          bcc: params.bcc,
+          subject: params.subject,
+          body: params.content,
+          ...(params.attachments && { attachments: params.attachments }),
+        });
+
+        const response = await gmail.users.messages.send({
+          userId: 'me',
+          requestBody: { raw: base64UrlEncode(mime) },
+        });
+
+        const messageId = response.data.id || '';
+        const threadId = response.data.threadId || messageId;
+
+        logger.info(`${TAG} Gmail new email sent`, { messageId, threadId, from: fromHeader });
+        return { messageId, threadId, fromEmail: fromHeader };
       },
     };
   }

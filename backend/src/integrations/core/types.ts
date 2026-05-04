@@ -205,6 +205,12 @@ export interface ExternalSourceAdapter {
    * thread/message id to anchor on).
    */
   sendMailReply?(ctx: MailReplyContext): Promise<MailReplyResult>;
+
+  /**
+   * Optional: outbound new-email sender (no thread anchor).
+   * Present ⇒ this provider can initiate brand-new email threads from xyne desk.
+   */
+  sendMailNew?(ctx: NewMailContext): Promise<MailReplyResult>;
 }
 
-import type { MailReplyContext, MailReplyResult } from './baseMailReplySender';
+import type { MailReplyContext, MailReplyResult, NewMailContext } from './baseMailReplySender';

@@ -109,6 +109,16 @@ export class EmailRepository {
     });
   }
 
+  async findFirstByThreadAndChannel(
+    externalThreadId: string,
+    channelId: string,
+  ): Promise<Email | null> {
+    return await this.db.email.findFirst({
+      where: { externalThreadId, channelId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async updateConversationId(emailId: string, conversationId: string): Promise<Email> {
     return await this.db.email.update({
       where: { id: emailId },

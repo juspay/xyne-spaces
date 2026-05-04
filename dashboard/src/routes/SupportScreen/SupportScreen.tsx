@@ -18,9 +18,6 @@ import {
   Paperclip,
   Link as LinkIcon,
   Settings,
-  Signature,
-  Minimize2,
-  Trash2,
   Plus,
   Wand2,
   Sparkles,
@@ -32,29 +29,13 @@ import {
   Inbox,
   CheckCheck,
 } from 'lucide-react';
-import { XyneAIStar } from '../../components/icons/xyne-ai';
-import Tooltip from '../../components/ui/Tooltip';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '../../components/ui/dropdown-menu';
 import { ChannelVisibility } from '@xyne/shared';
-import React, {
-  ReactElement,
-  useMemo,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  type DragEvent,
-} from 'react';
+import React, { ReactElement, useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { cn } from '../../utils/classNames';
+import Tooltip from '../../components/ui/Tooltip';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
@@ -70,7 +51,6 @@ import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
-import { useUsers } from '../../hooks/useUsers';
 import * as Popover from '@radix-ui/react-popover';
 import { UserSubmenu } from '../../components/Tickets/TicketFilters/Submenus/UserSubmenu/UserSubmenu';
 import { PrioritySubmenu } from '../../components/Tickets/TicketFilters/Submenus/PrioritySubmenu/PrioritySubmenu';
@@ -82,7 +62,6 @@ import JoinChannel from '../../components/Chat/JoinChannel/JoinChannel';
 import { mutators } from '../../zero/mutators';
 import * as Tabs from '@radix-ui/react-tabs';
 import { TicketDetails } from '../../components/Tickets/TicketDetails/TicketDetails';
-import { apiInstance } from '../../services/clients/apiClient';
 import { Button } from '../../components/ui/Button/Button';
 import Badge from '../../components/ui/Badge';
 import { useAuthContextValues } from '../../hooks/useAuth';
@@ -117,31 +96,23 @@ import { getUserDisplayName } from '../../utils/userDisplayName';
 import { AssigneePicker } from '../../components/Tickets/TicketListView/AssigneePicker';
 import { StagePicker } from '../../components/Tickets/TicketListView/StagePicker';
 import { PriorityPicker } from '../../components/Tickets/TicketListView/PriorityPicker';
-import { EmailTagWithAvatar } from '../../components/xyne-desk/EmailTagWithAvatar/EmailTagWithAvatar';
-import { RecipientSuggestionsDropdown } from '../../components/xyne-desk/RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
-import { RephrasePrompt } from '../../components/xyne-desk/RephrasePrompt/RephrasePrompt';
-import { EmailEditor } from '../../components/xyne-desk/EmailEditor/EmailEditor';
-import {
-  buildContactPool,
-  buildSuggestions,
-  makeRecipientKeyDownHandler,
-  type RecipientField,
-} from '../../components/xyne-desk/EmailComposer/recipients';
-import { useComposerResize } from '../../components/xyne-desk/EmailComposer/useComposerResize';
-import { useComposerDragDrop } from '../../components/xyne-desk/EmailComposer/useComposerDragDrop';
+import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
+import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
+import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
-import { useEmailDraft, useEmailDraftOperations } from '../../hooks/useEmailDraft';
+import { useEmailDraft } from '../../hooks/useEmailDraft';
 import { useMarkEmailRead } from '../../hooks/useMarkEmailRead';
-import { AttachmentPreview } from '../../components/ui/files/AttachmentPreview';
-import { MediaViewer } from '../../components/ui/files';
 import { formatFileSize } from '../../components/ui/utils/files';
 import { createPreviewUrl, downloadFile } from '../../services/clients/fileFetchService';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 import { SignatureEditor } from '../../components/xyne-desk/SignatureEditor/SignatureEditor';
-import { InboxAssigneeSettings } from '../../components/xyne-desk/InboxAssigneeSettings/InboxAssigneeSettings';
+import { InboxSettings } from '../../components/xyne-desk/InboxSettings/InboxSettings';
 import { DeskIntegrationCard } from '../../components/xyne-desk/DeskIntegrationCard/DeskIntegrationCard';
-import { useEmailChannelPreference } from '../../hooks/useEmailChannelPreference';
+import {
+  useEmailChannelPreference,
+  useUpdateEmailChannelPreference,
+} from '../../hooks/useEmailChannelPreference';
 import {
   useChannelConnectedEmail,
   clearChannelConnectedEmailCache,
@@ -155,12 +126,10 @@ import { useMutation } from '@tanstack/react-query';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelector } from '@xstate/react';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
-import { DraftCard } from '../../components/xyne-desk/DraftCard/DraftCard';
-import { useDeskAIDraft } from '../../hooks/useDeskAIDraft';
-import { useDeskContacts, clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { channelService, CreateChannelFormData } from '../../services/Chat/channelService';
 import { summarizeEmailThread } from '../../services/summarizeService';
-import { markdownToHtml } from '../../utils/clipboardUtils';
 import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { ThreadCallButton } from '../../components/Call/ThreadCallButton/ThreadCallButton';
@@ -203,12 +172,7 @@ const ChannelInfoModal = ({
 
 const ALL_CHANNELS_ID = 'all';
 
-// Email attachment limits — kept in sync with backend/src/routes/email.ts
-const MAX_EMAIL_ATTACHMENT_FILES = 10;
-const MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB per file
-
 const composerOpenByConv = new Map<string, boolean>();
-const rephrasePromptOpenByConv = new Map<string, boolean>();
 
 type Email = NonNullable<
   NonNullable<QueryResultType<typeof queries.supportTicketRowV2>>['emails']
@@ -398,6 +362,91 @@ const SupportScreen = (): ReactElement => {
 
   // Fetch email channel preference for assignee user group and boardId
   const emailChannelPreference = useEmailChannelPreference(selectedChannelId);
+  const selectedChannelForSettings = useVisibleChannel(selectedChannelId ?? '');
+
+  // Inbox settings panel form state — drafts for owner + assignee user group with a single
+  // Save button rendered in the panel header.
+  const updateEmailChannelPreference = useUpdateEmailChannelPreference();
+  const currentInboxOwnerUserId = emailChannelPreference?.ownerUserId ?? null;
+  const currentInboxAssigneeUserGroupId = emailChannelPreference?.assigneeUserGroupId ?? null;
+  const currentInboxSendAsEmail = emailChannelPreference?.sendAsEmail ?? null;
+  const [draftInboxOwnerUserId, setDraftInboxOwnerUserId] = useState<string | null>(
+    currentInboxOwnerUserId,
+  );
+  const [draftInboxAssigneeUserGroupId, setDraftInboxAssigneeUserGroupId] = useState<string | null>(
+    currentInboxAssigneeUserGroupId,
+  );
+  const [draftInboxSendAsEmail, setDraftInboxSendAsEmail] = useState<string | null>(
+    currentInboxSendAsEmail,
+  );
+  const [isSavingInboxSettings, setIsSavingInboxSettings] = useState(false);
+
+  useEffect(() => {
+    setDraftInboxOwnerUserId(currentInboxOwnerUserId);
+  }, [currentInboxOwnerUserId]);
+
+  useEffect(() => {
+    setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
+  }, [currentInboxAssigneeUserGroupId]);
+
+  useEffect(() => {
+    setDraftInboxSendAsEmail(currentInboxSendAsEmail);
+  }, [currentInboxSendAsEmail]);
+
+  const canEditSendAsEmail =
+    !!userID &&
+    !!selectedChannelForSettings &&
+    (selectedChannelForSettings.createdBy === userID || currentInboxOwnerUserId === userID);
+
+  const inboxSettingsHasChanges =
+    !!selectedChannelId &&
+    (draftInboxOwnerUserId !== currentInboxOwnerUserId ||
+      draftInboxAssigneeUserGroupId !== currentInboxAssigneeUserGroupId ||
+      (canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail));
+
+  const handleSaveInboxSettings = useCallback(async () => {
+    if (!selectedChannelId) {
+      return;
+    }
+    setIsSavingInboxSettings(true);
+    try {
+      await updateEmailChannelPreference.mutateAsync({
+        channelId: selectedChannelId,
+        ...(draftInboxOwnerUserId !== currentInboxOwnerUserId && draftInboxOwnerUserId
+          ? { ownerUserId: draftInboxOwnerUserId }
+          : {}),
+        ...(draftInboxAssigneeUserGroupId !== currentInboxAssigneeUserGroupId
+          ? { assigneeUserGroupId: draftInboxAssigneeUserGroupId }
+          : {}),
+        ...(canEditSendAsEmail && draftInboxSendAsEmail !== currentInboxSendAsEmail
+          ? { sendAsEmail: draftInboxSendAsEmail }
+          : {}),
+      });
+    } catch (error) {
+      setDraftInboxOwnerUserId(currentInboxOwnerUserId);
+      setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
+      setDraftInboxSendAsEmail(currentInboxSendAsEmail);
+      console.error('Failed to update email channel preference:', error);
+    } finally {
+      setIsSavingInboxSettings(false);
+    }
+  }, [
+    selectedChannelId,
+    draftInboxOwnerUserId,
+    currentInboxOwnerUserId,
+    draftInboxAssigneeUserGroupId,
+    currentInboxAssigneeUserGroupId,
+    canEditSendAsEmail,
+    draftInboxSendAsEmail,
+    currentInboxSendAsEmail,
+    updateEmailChannelPreference,
+  ]);
+
+  const handleCancelInboxSettings = useCallback(() => {
+    setDraftInboxOwnerUserId(currentInboxOwnerUserId);
+    setDraftInboxAssigneeUserGroupId(currentInboxAssigneeUserGroupId);
+    setDraftInboxSendAsEmail(currentInboxSendAsEmail);
+  }, [currentInboxOwnerUserId, currentInboxAssigneeUserGroupId, currentInboxSendAsEmail]);
 
   // Fetch stages for the board configured in email channel preference
   const boardId = emailChannelPreference?.boardId;
@@ -460,6 +509,51 @@ const SupportScreen = (): ReactElement => {
   );
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
   const [showRefetchDialog, setShowRefetchDialog] = useState(false);
+  const [composeChannelId, setComposeChannelId] = useState<string | null>(null);
+  const [composeMinimized, setComposeMinimized] = useState(false);
+  const [composeKey, setComposeKey] = useState(0);
+
+  useEffect(() => {
+    if (composeChannelId && (ticketId || composeChannelId !== selectedChannelId)) {
+      setComposeMinimized(true);
+    }
+  }, [composeChannelId, ticketId, selectedChannelId]);
+
+  useEffect(() => {
+    if (!selectedChannelId || !userID) return;
+    if (composeChannelId === selectedChannelId) return;
+    try {
+      const raw = localStorage.getItem(`xyne:composeDraft:${userID}:${selectedChannelId}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        subject?: string;
+        body?: string;
+        to?: string[];
+        cc?: string[];
+        bcc?: string[];
+      };
+
+      const bodyText = parsed.body ? stripHtml(parsed.body) : '';
+      const hasDraft =
+        (parsed.subject?.trim().length ?? 0) > 0 ||
+        bodyText.trim().length > 0 ||
+        (parsed.to?.length ?? 0) > 0 ||
+        (parsed.cc?.length ?? 0) > 0 ||
+        (parsed.bcc?.length ?? 0) > 0;
+      if (!hasDraft) {
+        try {
+          localStorage.removeItem(`xyne:composeDraft:${userID}:${selectedChannelId}`);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      setComposeChannelId(selectedChannelId);
+      setComposeMinimized(true);
+    } catch {
+      /* corrupt JSON — ignore */
+    }
+  }, [selectedChannelId, userID, composeChannelId]);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoDefaultTab, setInfoDefaultTab] = useState<ChannelTab>('about');
 
@@ -1172,6 +1266,35 @@ const SupportScreen = (): ReactElement => {
                           <span>{selectedChannelFull.channelStats?.participantCount ?? 0}</span>
                         </button>
                       )}
+                    {/* Compose new email — visible only on a joined email channel */}
+                    {isSelectedChannelJoined && selectedChannelId && (
+                      <Tooltip content='Compose new email' side='bottom'>
+                        <button
+                          onClick={() => {
+                            // Re-clicking Compose while the modal is
+                            // minimized should expand it to the editor
+                            // again. Only remount the inner composer
+                            // when opening fresh (not when already open)
+                            // so an in-progress draft isn't lost.
+                            // Bump key (force inner remount) when opening a
+                            // different channel's compose, so the new mount
+                            // reads the correct localStorage draft.
+                            if (composeChannelId !== selectedChannelId) {
+                              setComposeKey(k => k + 1);
+                            }
+                            setComposeChannelId(selectedChannelId);
+                            setComposeMinimized(false);
+                          }}
+                          className='inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-input shadow-xs text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                          data-track-category='Support'
+                          data-track-name='OpenComposeEmail'
+                          data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
+                        >
+                          <Pencil size={14} />
+                          <span>Compose</span>
+                        </button>
+                      </Tooltip>
+                    )}
                     {/* View Toggle */}
                     <div className='flex items-center border border-border rounded-lg overflow-hidden'>
                       <button
@@ -1310,24 +1433,58 @@ const SupportScreen = (): ReactElement => {
                 <div className='absolute inset-0 z-10 bg-background flex flex-col overflow-y-auto'>
                   <div className='flex-shrink-0 h-14 px-4 border-b border-border flex items-center justify-between'>
                     <span className='text-sm font-semibold text-foreground'>Inbox Settings</span>
-                    <button
-                      onClick={() => void navigate(-1)}
-                      className='p-1.5 rounded hover:bg-accent text-muted-foreground transition-colors'
-                      data-track-category='inbox-settings'
-                      data-track-name='close-inbox-settings'
-                    >
-                      <X size={16} />
-                    </button>
+                    <div className='flex items-center gap-2'>
+                      {inboxSettingsHasChanges && (
+                        <>
+                          <Button
+                            size='sm'
+                            variant='outline'
+                            onClick={handleCancelInboxSettings}
+                            disabled={isSavingInboxSettings}
+                            data-track-category='inbox-settings'
+                            data-track-name='cancel-inbox-settings'
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            size='sm'
+                            onClick={() => void handleSaveInboxSettings()}
+                            disabled={isSavingInboxSettings || !draftInboxOwnerUserId}
+                            data-track-category='inbox-settings'
+                            data-track-name='save-inbox-settings'
+                          >
+                            {isSavingInboxSettings ? 'Saving...' : 'Save Changes'}
+                          </Button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => void navigate(-1)}
+                        className='p-1.5 rounded hover:bg-accent text-muted-foreground transition-colors'
+                        data-track-category='inbox-settings'
+                        data-track-name='close-inbox-settings'
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
                   </div>
                   <div className='p-4 space-y-6'>
                     {selectedChannelId && (
                       <>
-                        <InboxAssigneeSettings
-                          channelId={selectedChannelId}
-                          currentAssigneeUserGroupId={emailChannelPreference?.assigneeUserGroupId}
+                        <InboxSettings
+                          ownerUserId={draftInboxOwnerUserId}
+                          onOwnerChange={setDraftInboxOwnerUserId}
+                          assigneeUserGroupId={draftInboxAssigneeUserGroupId}
+                          onAssigneeChange={setDraftInboxAssigneeUserGroupId}
+                          sendAsEmail={draftInboxSendAsEmail}
+                          onSendAsEmailChange={setDraftInboxSendAsEmail}
+                          canEditSendAsEmail={canEditSendAsEmail}
+                          disabled={isSavingInboxSettings}
                         />
                         <div className='border-t border-border' />
-                        <DeskIntegrationCard channelId={selectedChannelId} canManage />
+                        <DeskIntegrationCard
+                          channelId={selectedChannelId}
+                          canManage={canEditSendAsEmail}
+                        />
                         <div className='border-t border-border' />
                       </>
                     )}
@@ -1464,6 +1621,41 @@ const SupportScreen = (): ReactElement => {
           }}
         />
       )}
+      {/* Compose new email — floating Gmail-style modal (lives in its own file).
+          Bound to the channel it was opened on: hidden when viewing another
+          channel or a ticket. State (draft + minimized) is preserved, so
+          returning to the channel reveals the modal again — collapsed, per
+          the auto-minimize effect. */}
+      {composeChannelId &&
+        composeChannelId === selectedChannelId &&
+        isSelectedChannelJoined &&
+        !ticketId && (
+          <ComposeEmailModal
+            open
+            channelId={composeChannelId}
+            channelName={selectedChannelName}
+            resetKey={composeKey}
+            minimized={composeMinimized}
+            onMinimizedChange={setComposeMinimized}
+            onClose={() => {
+              // X = "I'm done with this draft" — explicitly discard the
+              // compose body/recipients AND any unfinished AI draft for this
+              // channel. Minimize keeps both; only X clears.
+              try {
+                if (userID && composeChannelId) {
+                  localStorage.removeItem(`xyne:composeDraft:${userID}:${composeChannelId}`);
+                }
+                if (composeChannelId) {
+                  localStorage.removeItem(`xd-ai-draft:${composeChannelId}_compose`);
+                }
+              } catch {
+                /* ignore quota/access errors */
+              }
+              setComposeChannelId(null);
+              setComposeMinimized(false);
+            }}
+          />
+        )}
     </div>
   );
 };
@@ -2682,26 +2874,18 @@ const EmailThread = ({
           canCollapse={email.id !== lastEmailId}
           onToggleCollapse={() => toggleOne(email.id)}
           isRead={isRead}
-          {...(onReplyToEmail && { onReply: () => onReplyToEmail(email.id) })}
+          {...(onReplyToEmail &&
+            email.id !== lastEmailId && {
+              // Per-email Reply only on older messages — the latest already
+              // has the dedicated Reply / Reply all bar at the thread footer,
+              // so showing one here would be a duplicate.
+              onReply: () => onReplyToEmail(email.id),
+            })}
           deskEmail={deskEmail}
         />
       ))}
     </div>
   );
-};
-
-const parseFromField = (raw: string): { name: string; email: string | null } => {
-  const trimmed = (raw || '').trim();
-  if (!trimmed) return { name: 'Unknown', email: null };
-  const match = trimmed.match(/^"?([^"<]+?)"?\s*<([^>]+)>$/);
-  if (match) {
-    return { name: match[1]!.trim(), email: match[2]!.trim() };
-  }
-  const emailOnly = trimmed.match(/^<?([^\s<>@]+@[^\s<>]+)>?$/);
-  if (emailOnly) {
-    return { name: emailOnly[1]!.split('@')[0] ?? emailOnly[1]!, email: emailOnly[1]! };
-  }
-  return { name: trimmed, email: null };
 };
 
 const EmailThreadItem = ({
@@ -2891,1393 +3075,6 @@ const EmailThreadItem = ({
             )}
           </div>
         </div>
-      )}
-    </div>
-  );
-};
-
-const stripHtml = (html: string): string => {
-  if (!html) return '';
-  if (typeof document === 'undefined') return html;
-
-  const tmp = document.createElement('DIV');
-  tmp.innerHTML = html;
-  return tmp.textContent || tmp.innerText || '';
-};
-
-const EmailComposer = ({
-  conversationId,
-  onClose,
-  isAIPanelOpen,
-  onToggleAIPanel,
-  channelId,
-  ticketId,
-  replyToEmailId,
-  replyMode = 'reply',
-}: {
-  conversationId?: string | null | undefined;
-  onClose?: () => void;
-  isAIPanelOpen?: boolean;
-  onToggleAIPanel?: () => void;
-  channelId?: string;
-  ticketId?: string | null | undefined;
-  replyToEmailId?: string | null;
-  replyMode?: 'reply' | 'replyAll';
-}): ReactElement => {
-  const [emails] = useCachedQuery(
-    queries.getEmailsForTicket({ conversationId: conversationId || '' }),
-  );
-  // Use the existing `useChannelConnectedEmail` API for the desk's mailbox
-  // address. Contacts still come from the desk-mailbox address book hook.
-  const channelConnectedEmail = useChannelConnectedEmail(channelId || null);
-  const deskContacts = useDeskContacts(channelId);
-  // Use email draft hooks
-  const draftContent = useEmailDraft(conversationId);
-  const { saveDraft, deleteDraft, draftId } = useEmailDraftOperations(conversationId, channelId);
-
-  const aiDraft = useDeskAIDraft({
-    channelId: channelId || '',
-    conversationId: conversationId || '',
-    ticketId: ticketId ?? null,
-  });
-  const [emailContent, setEmailContent] = useState<string>('');
-
-  const [isRephrasePromptOpen, setIsRephrasePromptOpenState] = useState<boolean>(() =>
-    conversationId ? (rephrasePromptOpenByConv.get(conversationId) ?? false) : false,
-  );
-  useEffect(() => {
-    if (!conversationId) {
-      setIsRephrasePromptOpenState(false);
-      return;
-    }
-    setIsRephrasePromptOpenState(rephrasePromptOpenByConv.get(conversationId) ?? false);
-  }, [conversationId]);
-  const setIsRephrasePromptOpen: React.Dispatch<React.SetStateAction<boolean>> = useCallback(
-    next => {
-      setIsRephrasePromptOpenState(prev => {
-        const resolved = typeof next === 'function' ? next(prev) : next;
-        if (conversationId) {
-          if (resolved) rephrasePromptOpenByConv.set(conversationId, true);
-          else rephrasePromptOpenByConv.delete(conversationId);
-        }
-        return resolved;
-      });
-    },
-    [conversationId],
-  );
-  const [isSending, setIsSending] = useState<boolean>(false);
-  const aiActiveRef = useRef<boolean>(false);
-  const users = useUsers();
-  const [signatures] = useCachedQuery(queries.userEmailSignatures());
-  const [selectedSignatureId, setSelectedSignatureId] = useState<string | null | undefined>(
-    undefined,
-  );
-  const composerNavigate = useNavigate();
-  const signatureAutoAppend = localStorage.getItem('signature-auto-append-enabled') !== 'false';
-
-  useEffect(() => {
-    if (
-      signatures &&
-      signatures.length > 0 &&
-      signatureAutoAppend &&
-      selectedSignatureId === undefined
-    ) {
-      const defaultSig = signatures.find(s => s.isDefault);
-      setSelectedSignatureId(defaultSig?.id ?? signatures[0]?.id ?? null);
-    }
-  }, [signatures, signatureAutoAppend, selectedSignatureId]);
-
-  // Attachment state
-  const [attachments, setAttachments] = useState<File[]>([]);
-  const [isUploadingAttachments, setIsUploadingAttachments] = useState<boolean>(false);
-  const [previewFile, setPreviewFile] = useState<File | null>(null);
-  const [isPreviewOpen, setIsPreviewOpen] = useState<boolean>(false);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-  // Reset all composer state when switching conversations
-  useEffect(() => {
-    setAttachments([]);
-    setPreviewFile(null);
-    setIsPreviewOpen(false);
-  }, [conversationId]);
-
-  // Initialize email content from draft. The composer now stores HTML
-  // (rich-text editor output) so we feed the saved HTML back in unchanged.
-  useEffect(() => {
-    setEmailContent(draftContent || '');
-  }, [draftContent, conversationId]);
-
-  const hasEmailBody = useMemo(() => stripHtml(emailContent).trim().length > 0, [emailContent]);
-
-  const toInputRef = React.useRef<HTMLInputElement>(null);
-  const ccInputRef = React.useRef<HTMLInputElement>(null);
-  const bccInputRef = React.useRef<HTMLInputElement>(null);
-  // Anchor the suggestion dropdowns to the row container, not the input — the
-  // input is `flex-1 min-w-[80px]` and shrinks to a narrow strip once a few
-  // tags are added, which would drag the dropdown's width and X with it.
-  const toRowRef = React.useRef<HTMLDivElement>(null);
-  const ccRowRef = React.useRef<HTMLDivElement>(null);
-  const bccRowRef = React.useRef<HTMLDivElement>(null);
-  const [toInputValue, setToInputValue] = useState<string>('');
-  const [ccInputValue, setCcInputValue] = useState<string>('');
-  const [bccInputValue, setBccInputValue] = useState<string>('');
-
-  // Recipient state
-  const [toEmails, setToEmails] = useState<string[]>([]);
-  const [ccEmails, setCcEmails] = useState<string[]>([]);
-  const [bccEmails, setBccEmails] = useState<string[]>([]);
-  const [showCc, setShowCc] = useState<boolean>(false);
-  const [showBcc, setShowBcc] = useState<boolean>(false);
-
-  const [isExpanded, setIsExpanded] = useState<boolean>(true);
-
-  const {
-    composerHeight,
-    setComposerHeight,
-    startResize: startComposerResize,
-    handleTouchStart: handleComposerResizeTouchStart,
-  } = useComposerResize({
-    enabled: isExpanded && !isSending,
-    useTallMinHeight: aiDraft.isDraftActive || isRephrasePromptOpen,
-  });
-
-  // Drag-and-drop chips between To / Cc / Bcc.
-  const [dragOverField, setDragOverField] = useState<RecipientField | null>(null);
-  const DRAG_MIME = 'application/x-xd-recipient';
-
-  const setForField = useCallback(
-    (field: RecipientField, updater: (prev: string[]) => string[]): void => {
-      if (field === 'to') setToEmails(updater);
-      else if (field === 'cc') setCcEmails(updater);
-      else setBccEmails(updater);
-    },
-    [],
-  );
-
-  const moveRecipient = useCallback(
-    (from: RecipientField, to: RecipientField, email: string): void => {
-      if (from === to) return;
-      setForField(from, prev => prev.filter(e => e !== email));
-      setForField(to, prev => (prev.includes(email) ? prev : [...prev, email]));
-    },
-    [setForField],
-  );
-
-  const handleChipDragStart = useCallback(
-    (field: RecipientField, email: string) =>
-      (e: DragEvent<HTMLDivElement>): void => {
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData(DRAG_MIME, JSON.stringify({ field, email }));
-        // Plaintext fallback so OS-level drag indicators show something sensible.
-        e.dataTransfer.setData('text/plain', email);
-        setShowCc(true);
-        setShowBcc(true);
-      },
-    [],
-  );
-
-  const handleChipDragEnd = useCallback((): void => {
-    setDragOverField(null);
-  }, []);
-
-  const handleFieldDragOver = useCallback(
-    (field: RecipientField) =>
-      (e: DragEvent<HTMLDivElement>): void => {
-        if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        setDragOverField(prev => (prev === field ? prev : field));
-      },
-    [],
-  );
-
-  const handleFieldDragLeave = useCallback(
-    (field: RecipientField) =>
-      (e: DragEvent<HTMLDivElement>): void => {
-        // Ignore leave events fired when entering a child node; only clear the
-        // highlight when the cursor truly leaves this field's bounding box.
-        const related = e.relatedTarget as Node | null;
-        if (related && e.currentTarget.contains(related)) return;
-        setDragOverField(prev => (prev === field ? null : prev));
-      },
-    [],
-  );
-
-  const handleFieldDrop = useCallback(
-    (toField: RecipientField) =>
-      (e: DragEvent<HTMLDivElement>): void => {
-        const raw = e.dataTransfer.getData(DRAG_MIME);
-        if (!raw) return;
-        e.preventDefault();
-        try {
-          const parsed = JSON.parse(raw) as { field: RecipientField; email: string };
-          if (parsed.email && parsed.field) {
-            moveRecipient(parsed.field, toField, parsed.email);
-          }
-        } catch {
-          // ignore — payload not ours
-        }
-        setDragOverField(null);
-      },
-    [moveRecipient],
-  );
-
-  const recipientsStorageKey = conversationId
-    ? `xyne:emailDraft:recipients:${conversationId}`
-    : null;
-
-  // Auto-grow the composer the first time the AI draft OR the rephrase
-  // prompt opens, so the side-by-side panel has room. Only bumps on the
-  // false → true edge so a user-shrunk size isn't overridden.
-  useEffect(() => {
-    const sideBySideActive = (aiDraft.isDraftActive || isRephrasePromptOpen) && hasEmailBody;
-    if (sideBySideActive && !aiActiveRef.current) {
-      setComposerHeight(h => Math.max(h, 520));
-    }
-    aiActiveRef.current = sideBySideActive;
-  }, [aiDraft.isDraftActive, isRephrasePromptOpen, hasEmailBody]);
-
-  // The rephrase prompt only renders in the side-by-side layout (which
-  // requires user content). Auto-close it if the user clears the body while
-  // it's open, so its state doesn't get orphaned.
-  useEffect(() => {
-    if (isRephrasePromptOpen && !hasEmailBody) {
-      setIsRephrasePromptOpen(false);
-    }
-  }, [hasEmailBody, isRephrasePromptOpen]);
-
-  useEffect(() => {
-    if (recipientsStorageKey) {
-      try {
-        const raw = localStorage.getItem(recipientsStorageKey);
-        if (raw) {
-          const parsed = JSON.parse(raw) as {
-            to?: string[];
-            cc?: string[];
-            bcc?: string[];
-          };
-          if (parsed && Array.isArray(parsed.to)) {
-            setToEmails(parsed.to);
-            setCcEmails(parsed.cc ?? []);
-            setBccEmails(parsed.bcc ?? []);
-            setShowCc((parsed.cc ?? []).length > 0);
-            setShowBcc((parsed.bcc ?? []).length > 0);
-            return;
-          }
-        }
-      } catch {
-        // ignore storage errors (quota, parse) and fall through to compute
-      }
-    }
-    if (emails && emails.length > 0) {
-      const sortedEmailsAsc = [...emails].sort((a, b) => {
-        const aTime = a.createdAt || 0;
-        const bTime = b.createdAt || 0;
-        return aTime - bTime;
-      });
-      const initialEmail = sortedEmailsAsc[0];
-
-      const sortedEmailsDesc = [...emails].sort((a, b) => {
-        const aTime = a.createdAt || 0;
-        const bTime = b.createdAt || 0;
-        return bTime - aTime;
-      });
-      const latestEmail = sortedEmailsDesc[0];
-
-      const targetEmail = replyToEmailId
-        ? emails.find(e => e.id === replyToEmailId) || latestEmail
-        : latestEmail;
-
-      if (targetEmail && initialEmail && latestEmail) {
-        // Extract bare email from `"Name" <email@x.com>` for comparison.
-        const extractEmail = (raw: string): string => {
-          const m = raw.match(/<([^>]+)>/);
-          return (m ? (m[1] ?? raw) : raw).trim().toLowerCase();
-        };
-        const keyOf = (addr: string): string => extractEmail(addr);
-        const selfEmail = channelConnectedEmail; // already lowercased
-        const isSelf = (addr: string): boolean => !!selfEmail && extractEmail(addr) === selfEmail;
-
-        let nextTo: string[];
-        let nextCc: string[];
-        const nextBcc: string[] = [];
-        if (replyMode === 'replyAll') {
-          const replyAllSource = latestEmail;
-          const seen = new Set<string>();
-          const dedupedAppend = (out: string[], list: ReadonlyArray<string>): void => {
-            for (const e of list) {
-              if (isSelf(e)) continue;
-              const k = keyOf(e);
-              if (seen.has(k)) continue;
-              seen.add(k);
-              out.push(e);
-            }
-          };
-
-          nextTo = [];
-          if (replyAllSource.from && !isSelf(replyAllSource.from)) {
-            seen.add(keyOf(replyAllSource.from));
-            nextTo.push(replyAllSource.from);
-          }
-          dedupedAppend(nextTo, replyAllSource.to || []);
-
-          nextCc = [];
-          dedupedAppend(nextCc, replyAllSource.cc || []);
-        } else {
-          const senderIsSelf = !!targetEmail.from && isSelf(targetEmail.from);
-          nextTo = senderIsSelf
-            ? (targetEmail.to || []).filter(e => !isSelf(e))
-            : targetEmail.from
-              ? [targetEmail.from]
-              : [];
-          nextCc = [];
-        }
-
-        setToEmails(nextTo);
-        setCcEmails(nextCc);
-        setBccEmails(nextBcc);
-
-        setShowCc(nextCc.length > 0);
-        setShowBcc(nextBcc.length > 0);
-      }
-    }
-  }, [
-    emails,
-    conversationId,
-    channelConnectedEmail,
-    replyToEmailId,
-    replyMode,
-    recipientsStorageKey,
-  ]);
-
-  useEffect(() => {
-    if (!recipientsStorageKey) return;
-    if (toEmails.length === 0 && ccEmails.length === 0 && bccEmails.length === 0) {
-      try {
-        localStorage.removeItem(recipientsStorageKey);
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-    try {
-      localStorage.setItem(
-        recipientsStorageKey,
-        JSON.stringify({ to: toEmails, cc: ccEmails, bcc: bccEmails }),
-      );
-    } catch {
-      /* ignore quota errors */
-    }
-  }, [recipientsStorageKey, toEmails, ccEmails, bccEmails]);
-
-  // Upload attachments to Zoho to get attachmentIds for email
-  const uploadAttachments = async (files: File[]): Promise<string[]> => {
-    if (files.length === 0 || !conversationId) return [];
-
-    setIsUploadingAttachments(true);
-    try {
-      const formData = new FormData();
-      files.forEach(file => formData.append('files', file));
-
-      const response = await apiInstance.post<{ attachmentIds: string[] }>(
-        `/email/${conversationId}/upload-attachments`,
-        formData,
-        {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        },
-      );
-
-      return response.data?.attachmentIds || [];
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to upload attachments');
-      throw error;
-    } finally {
-      setIsUploadingAttachments(false);
-    }
-  };
-
-  const handleSendEmail = async (): Promise<void> => {
-    // Allow attachment-only sends (no body) when at least one file is attached.
-    const hasContent = hasEmailBody;
-    const hasAttachments = attachments.length > 0;
-    if ((!hasContent && !hasAttachments) || !conversationId || isSending || toEmails.length === 0) {
-      return;
-    }
-    setIsSending(true);
-    try {
-      let attachmentIds: string[] = [];
-
-      // Upload attachments if any
-      if (hasAttachments) {
-        attachmentIds = await uploadAttachments(attachments);
-      }
-
-      const activeSig = selectedSignatureId
-        ? signatures?.find(s => s.id === selectedSignatureId)
-        : null;
-      // The editor produces HTML directly — no markdown→HTML conversion needed.
-      const bodyContent = hasContent ? emailContent : '';
-      const composedBody = activeSig
-        ? `${bodyContent}${bodyContent ? '<br><br>' : ''}${activeSig.content}`
-        : bodyContent;
-      const uniqueToken = `<span style="font-size:1px;color:transparent;display:inline-block;line-height:0;">${
-        typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-      }</span>`;
-      const bodyHtml = `${composedBody}${uniqueToken}`;
-      await apiInstance.post(`/email/${conversationId}/reply`, {
-        body: bodyHtml,
-        type: 'REPLY_ALL',
-        to: toEmails,
-        cc: ccEmails,
-        bcc: bccEmails,
-        ...(attachmentIds.length > 0 && { attachmentIds }),
-      });
-
-      // Clear state after successful send
-      setEmailContent('');
-      deleteDraft();
-      setAttachments([]);
-      setToEmails([]);
-      setCcEmails([]);
-      setBccEmails([]);
-    } catch (error) {
-      console.warn('Failed to send email:', error);
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  // Shared validation+append for file-input, paste, and drag-and-drop. Uses
-  // the latest `attachments` value via the setter callback to avoid stale
-  // closures when several drops/pastes fire in quick succession.
-  const addFilesToAttachments = useCallback((files: File[]): void => {
-    if (files.length === 0) return;
-
-    setAttachments(prev => {
-      const accepted: File[] = [];
-      const rejectedTooLarge: string[] = [];
-      let availableSlots = MAX_EMAIL_ATTACHMENT_FILES - prev.length;
-      let droppedForCount = 0;
-
-      for (const file of files) {
-        if (availableSlots <= 0) {
-          droppedForCount++;
-          continue;
-        }
-        if (file.size > MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES) {
-          rejectedTooLarge.push(file.name);
-          continue;
-        }
-        accepted.push(file);
-        availableSlots--;
-      }
-
-      if (rejectedTooLarge.length > 0) {
-        toast.error(
-          `Skipped ${rejectedTooLarge.length} file${rejectedTooLarge.length > 1 ? 's' : ''} over ${MAX_EMAIL_ATTACHMENT_FILE_SIZE_BYTES / (1024 * 1024)}MB: ${rejectedTooLarge.join(', ')}`,
-        );
-      }
-      if (droppedForCount > 0) {
-        toast.error(
-          `You can attach at most ${MAX_EMAIL_ATTACHMENT_FILES} files per email. Dropped ${droppedForCount}.`,
-        );
-      }
-
-      return accepted.length > 0 ? [...prev, ...accepted] : prev;
-    });
-  }, []);
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    const files = Array.from(e.target.files || []);
-    // Reset input early so the same file can be selected again after a rejection.
-    e.target.value = '';
-    addFilesToAttachments(files);
-  };
-
-  const handleRemoveAttachment = (index: number): void => {
-    setAttachments(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handlePreviewAttachment = (file: File): void => {
-    setPreviewFile(file);
-    setIsPreviewOpen(true);
-  };
-
-  // ─── Recipient suggestions (org users + past thread participants) ─────────
-  const [activeSuggestField, setActiveSuggestField] = useState<RecipientField | null>(null);
-  const [suggestionIndex, setSuggestionIndex] = useState<number>(0);
-
-  const contactPool = useMemo(
-    () => buildContactPool(users, deskContacts, emails, channelConnectedEmail),
-    [users, deskContacts, emails, channelConnectedEmail],
-  );
-
-  const toSuggestions = useMemo(
-    () => buildSuggestions(contactPool, toInputValue, toEmails),
-    [contactPool, toInputValue, toEmails],
-  );
-  const ccSuggestions = useMemo(
-    () => buildSuggestions(contactPool, ccInputValue, ccEmails),
-    [contactPool, ccInputValue, ccEmails],
-  );
-  const bccSuggestions = useMemo(
-    () => buildSuggestions(contactPool, bccInputValue, bccEmails),
-    [contactPool, bccInputValue, bccEmails],
-  );
-
-  const handleSuggestionSelect = (field: RecipientField, email: string): void => {
-    if (field === 'to') {
-      if (!toEmails.includes(email)) setToEmails([...toEmails, email]);
-      setToInputValue('');
-    } else if (field === 'cc') {
-      if (!ccEmails.includes(email)) setCcEmails([...ccEmails, email]);
-      setCcInputValue('');
-    } else {
-      if (!bccEmails.includes(email)) setBccEmails([...bccEmails, email]);
-      setBccInputValue('');
-    }
-    setSuggestionIndex(0);
-  };
-
-  const focusSuggest = (field: RecipientField): void => {
-    setActiveSuggestField(field);
-    setSuggestionIndex(0);
-  };
-  const blurSuggest = (field: RecipientField): void => {
-    // Defer so a click on a dropdown row registers before we close it.
-    setTimeout(() => {
-      setActiveSuggestField(curr => (curr === field ? null : curr));
-    }, 0);
-  };
-
-  const closeSuggestions = (): void => setActiveSuggestField(null);
-  const handleToKeyDown = makeRecipientKeyDownHandler({
-    field: 'to',
-    inputValue: toInputValue,
-    emails: toEmails,
-    setEmails: setToEmails,
-    setInputValue: setToInputValue,
-    suggestions: toSuggestions,
-    suggestionIndex,
-    setSuggestionIndex,
-    activeSuggestField,
-    closeSuggestions,
-    onSuggestionSelect: handleSuggestionSelect,
-  });
-
-  const handleToBlur = (): void => {
-    const email = toInputValue.trim().replace(',', '');
-    if (email && email.includes('@') && !toEmails.includes(email)) {
-      setToEmails([...toEmails, email]);
-      setToInputValue('');
-    }
-    blurSuggest('to');
-  };
-
-  const collapsedDisplay = useMemo(() => {
-    const MAX_VISIBLE = 2;
-    const allUniqueEmails = Array.from(new Set([...toEmails, ...ccEmails, ...bccEmails]));
-    const visibleEmails = allUniqueEmails.slice(0, MAX_VISIBLE);
-    const remainingCount = allUniqueEmails.length - MAX_VISIBLE;
-    return { visibleEmails, remainingCount: remainingCount > 0 ? remainingCount : 0 };
-  }, [toEmails, ccEmails, bccEmails]);
-
-  const handleCcKeyDown = makeRecipientKeyDownHandler({
-    field: 'cc',
-    inputValue: ccInputValue,
-    emails: ccEmails,
-    setEmails: setCcEmails,
-    setInputValue: setCcInputValue,
-    suggestions: ccSuggestions,
-    suggestionIndex,
-    setSuggestionIndex,
-    activeSuggestField,
-    closeSuggestions,
-    onSuggestionSelect: handleSuggestionSelect,
-  });
-
-  const handleBccKeyDown = makeRecipientKeyDownHandler({
-    field: 'bcc',
-    inputValue: bccInputValue,
-    emails: bccEmails,
-    setEmails: setBccEmails,
-    setInputValue: setBccInputValue,
-    suggestions: bccSuggestions,
-    suggestionIndex,
-    setSuggestionIndex,
-    activeSuggestField,
-    closeSuggestions,
-    onSuggestionSelect: handleSuggestionSelect,
-  });
-
-  // Handle expand - auto-show Cc/Bcc if they have emails
-  const handleExpand = (): void => {
-    setIsExpanded(true);
-    if (ccEmails.length > 0) {
-      setShowCc(true);
-    }
-    if (bccEmails.length > 0) {
-      setShowBcc(true);
-    }
-  };
-
-  const composerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!onClose) return undefined;
-    const handler = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return;
-      const target = e.target as Node | null;
-      if (target && composerRef.current?.contains(target)) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (hasEmailBody) saveDraft(emailContent);
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', handler, true);
-    return () => document.removeEventListener('keydown', handler, true);
-  }, [onClose, emailContent, saveDraft]);
-
-  const { isDraggingFiles, dragHandlers } = useComposerDragDrop(addFilesToAttachments);
-
-  return (
-    <div className='w-full p-4' ref={composerRef}>
-      <div
-        className={`border border-border rounded-xl relative flex flex-col overflow-hidden ${isSending ? 'opacity-60 pointer-events-none' : ''}`}
-        style={isExpanded ? { height: `${composerHeight}px` } : undefined}
-        {...dragHandlers}
-      >
-        {isDraggingFiles && (
-          <div className='absolute inset-0 z-30 flex items-center justify-center pointer-events-none rounded-xl border-2 border-dashed border-violet-400 bg-violet-50/70 dark:bg-violet-950/40'>
-            <span className='text-sm font-medium text-violet-700 dark:text-violet-200'>
-              Drop files to attach
-            </span>
-          </div>
-        )}
-        {isExpanded && (
-          <div
-            className='h-4 flex-shrink-0 flex items-center justify-center cursor-row-resize touch-none'
-            onMouseDown={e => {
-              e.preventDefault();
-              startComposerResize(e.clientY);
-            }}
-            onTouchStart={handleComposerResizeTouchStart}
-            onKeyDown={() => {}}
-            role='button'
-            tabIndex={0}
-            aria-label='Resize composer'
-          >
-            <div className='h-1 w-14 rounded-full bg-muted-foreground/30' />
-          </div>
-        )}
-        <div className='px-4 pt-3 pb-2 border-b border-border'>
-          {!isExpanded ? (
-            <button
-              type='button'
-              className='w-full flex items-center gap-2 cursor-pointer text-left py-1'
-              onClick={handleExpand}
-              data-track-category='SUPPORT'
-              data-track-name='ExpandReplyComposer'
-              data-track-metadata={JSON.stringify({
-                toCount: toEmails.length,
-                ccCount: ccEmails.length,
-                bccCount: bccEmails.length,
-                conversationId,
-                draftEmailId: draftId,
-              })}
-            >
-              <ReplyAll size={16} className='text-foreground flex-shrink-0' />
-              <span className='text-sm text-foreground font-medium flex-shrink-0'>Reply to</span>
-              <div className='flex items-center gap-1.5 flex-wrap flex-1 min-w-0'>
-                {collapsedDisplay.visibleEmails.map(raw => {
-                  const parsed = parseFromField(raw);
-                  const displayName = parsed.email ? parsed.name : raw;
-                  const initial = (displayName.charAt(0) || '?').toUpperCase();
-                  const tooltip = parsed.email ? `${parsed.name} <${parsed.email}>` : raw;
-                  return (
-                    <span
-                      key={raw}
-                      className='inline-flex items-center gap-1.5 bg-muted/60 rounded-md px-1.5 py-0.5 max-w-full'
-                      title={tooltip}
-                    >
-                      <span className='w-4 h-4 rounded-[3px] bg-border flex items-center justify-center flex-shrink-0'>
-                        <span className='text-[9px] font-medium text-muted-foreground'>
-                          {initial}
-                        </span>
-                      </span>
-                      <span className='text-sm text-foreground truncate'>{displayName}</span>
-                    </span>
-                  );
-                })}
-                {collapsedDisplay.remainingCount > 0 && (
-                  <span className='text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded hover:bg-border'>
-                    +{collapsedDisplay.remainingCount}
-                  </span>
-                )}
-              </div>
-            </button>
-          ) : (
-            <>
-              <div className='flex items-start gap-2'>
-                <button
-                  type='button'
-                  onClick={() => setIsExpanded(false)}
-                  className='flex-shrink-0 p-0.5 hover:bg-muted rounded transition-colors mt-0.5'
-                  title='Collapse'
-                  data-track-category='SUPPORT'
-                  data-track-name='CollapseReplyComposer'
-                  data-track-metadata={JSON.stringify({
-                    toEmails: toEmails,
-                    ccEmails: ccEmails,
-                    bccEmails: bccEmails,
-                    conversationId,
-                    draftEmailId: draftId,
-                  })}
-                >
-                  <ReplyAll size={16} className='text-muted-foreground' />
-                </button>
-                <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>To</span>
-
-                <div
-                  ref={toRowRef}
-                  className={`relative flex-1 flex flex-wrap items-center gap-1.5 cursor-text min-h-[28px] rounded-md transition-colors ${dragOverField === 'to' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
-                  onClick={() => toInputRef.current?.focus()}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      toInputRef.current?.focus();
-                    }
-                  }}
-                  onDragOver={handleFieldDragOver('to')}
-                  onDragLeave={handleFieldDragLeave('to')}
-                  onDrop={handleFieldDrop('to')}
-                  role='button'
-                  tabIndex={0}
-                  data-track-category='SUPPORT'
-                  data-track-name='FocusToField'
-                  data-track-metadata={JSON.stringify({
-                    toEmails: toEmails,
-                    ccEmails: ccEmails,
-                    bccEmails: bccEmails,
-                    conversationId,
-                    draftEmailId: draftId,
-                  })}
-                >
-                  {toEmails.map(email => (
-                    <EmailTagWithAvatar
-                      key={email}
-                      email={email}
-                      onRemove={() => setToEmails(toEmails.filter(e => e !== email))}
-                      disabled={isSending}
-                      users={users}
-                      draggable
-                      onDragStart={handleChipDragStart('to', email)}
-                      onDragEnd={handleChipDragEnd}
-                    />
-                  ))}
-                  <input
-                    ref={toInputRef}
-                    type='text'
-                    value={toInputValue}
-                    onChange={e => {
-                      setToInputValue(e.target.value);
-                      setSuggestionIndex(0);
-                    }}
-                    onKeyDown={handleToKeyDown}
-                    onFocus={() => focusSuggest('to')}
-                    onBlur={handleToBlur}
-                    placeholder={toEmails.length === 0 ? 'Add recipients...' : ''}
-                    className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
-                    disabled={isSending}
-                    data-track-category='SUPPORT'
-                    data-track-name='EditToField'
-                    data-track-metadata={JSON.stringify({
-                      toEmails: toEmails,
-                      ccEmails: ccEmails,
-                      bccEmails: bccEmails,
-                      conversationId,
-                      draftEmailId: draftId,
-                    })}
-                  />
-                  <RecipientSuggestionsDropdown
-                    visible={activeSuggestField === 'to'}
-                    suggestions={toSuggestions}
-                    highlightedIndex={suggestionIndex}
-                    onSelect={email => handleSuggestionSelect('to', email)}
-                    onHighlight={setSuggestionIndex}
-                    anchorRef={toRowRef}
-                  />
-                </div>
-
-                {/* Cc/Bcc buttons on the right - Gmail style */}
-                <div className='flex items-center gap-1 flex-shrink-0 mt-0.5'>
-                  {!showCc && (
-                    <button
-                      onClick={() => setShowCc(true)}
-                      className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                      data-track-category='SUPPORT'
-                      data-track-name='ShowCcField'
-                      data-track-metadata={JSON.stringify({
-                        ccMails: ccEmails,
-                        bccCount: bccEmails.length,
-                        conversationId,
-                        draftEmailId: draftId,
-                      })}
-                    >
-                      Cc
-                    </button>
-                  )}
-                  {!showBcc && (
-                    <button
-                      onClick={() => setShowBcc(true)}
-                      className='text-sm text-muted-foreground hover:text-foreground px-1 transition-colors'
-                      data-track-category='SUPPORT'
-                      data-track-name='ShowBccField'
-                      data-track-metadata={JSON.stringify({
-                        ccCount: ccEmails.length,
-                        bccEmails: bccEmails,
-                        conversationId,
-                        draftEmailId: draftId,
-                      })}
-                    >
-                      Bcc
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {showCc && (
-                <div className='flex items-start gap-2 mt-1'>
-                  <div className='w-[20px] flex-shrink-0' />
-                  <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>Cc</span>
-                  <div
-                    ref={ccRowRef}
-                    className={`relative flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'cc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
-                    onClick={() => ccInputRef.current?.focus()}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        ccInputRef.current?.focus();
-                      }
-                    }}
-                    onDragOver={handleFieldDragOver('cc')}
-                    onDragLeave={handleFieldDragLeave('cc')}
-                    onDrop={handleFieldDrop('cc')}
-                    role='button'
-                    tabIndex={0}
-                    data-track-category='SUPPORT'
-                    data-track-name='FocusCcField'
-                    data-track-metadata={JSON.stringify({
-                      ccCount: ccEmails.length,
-                      bccCount: bccEmails.length,
-                      conversationId,
-                      draftEmailId: draftId,
-                    })}
-                  >
-                    {ccEmails.map(email => (
-                      <EmailTagWithAvatar
-                        key={email}
-                        email={email}
-                        onRemove={() => setCcEmails(ccEmails.filter(e => e !== email))}
-                        disabled={isSending}
-                        users={users}
-                        draggable
-                        onDragStart={handleChipDragStart('cc', email)}
-                        onDragEnd={handleChipDragEnd}
-                      />
-                    ))}
-                    <input
-                      ref={ccInputRef}
-                      type='text'
-                      value={ccInputValue}
-                      onChange={e => {
-                        setCcInputValue(e.target.value);
-                        setSuggestionIndex(0);
-                      }}
-                      onKeyDown={handleCcKeyDown}
-                      onFocus={() => focusSuggest('cc')}
-                      onBlur={() => {
-                        const email = ccInputValue.trim().replace(',', '');
-                        if (email && email.includes('@') && !ccEmails.includes(email)) {
-                          setCcEmails([...ccEmails, email]);
-                          setCcInputValue('');
-                        }
-                        blurSuggest('cc');
-                      }}
-                      placeholder={ccEmails.length === 0 ? 'Add recipients...' : ''}
-                      className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
-                      disabled={isSending}
-                      data-track-category='SUPPORT'
-                      data-track-name='EditCcField'
-                      data-track-metadata={JSON.stringify({
-                        ccEmails: ccEmails,
-                        bccCount: bccEmails.length,
-                        conversationId,
-                        draftEmailId: draftId,
-                      })}
-                    />
-                    <RecipientSuggestionsDropdown
-                      visible={activeSuggestField === 'cc'}
-                      suggestions={ccSuggestions}
-                      highlightedIndex={suggestionIndex}
-                      onSelect={email => handleSuggestionSelect('cc', email)}
-                      onHighlight={setSuggestionIndex}
-                      anchorRef={ccRowRef}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {showBcc && (
-                <div className='flex items-start gap-2 mt-1'>
-                  <div className='w-[20px] flex-shrink-0' />
-                  <span className='text-sm text-foreground font-medium flex-shrink-0 mt-1'>
-                    Bcc
-                  </span>
-                  <div
-                    ref={bccRowRef}
-                    className={`relative flex-1 flex flex-wrap items-center gap-1.5 min-h-[28px] cursor-text rounded-md transition-colors ${dragOverField === 'bcc' ? 'outline-dashed outline-1 outline-primary/40 outline-offset-2' : ''}`}
-                    onClick={() => bccInputRef.current?.focus()}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        bccInputRef.current?.focus();
-                      }
-                    }}
-                    onDragOver={handleFieldDragOver('bcc')}
-                    onDragLeave={handleFieldDragLeave('bcc')}
-                    onDrop={handleFieldDrop('bcc')}
-                    role='button'
-                    tabIndex={0}
-                    data-track-category='SUPPORT'
-                    data-track-name='FocusBccField'
-                    data-track-metadata={JSON.stringify({
-                      bccCount: bccEmails,
-                      conversationId,
-                      draftEmailId: draftId,
-                    })}
-                  >
-                    {bccEmails.map(email => (
-                      <EmailTagWithAvatar
-                        key={email}
-                        email={email}
-                        onRemove={() => setBccEmails(bccEmails.filter(e => e !== email))}
-                        disabled={isSending}
-                        users={users}
-                        draggable
-                        onDragStart={handleChipDragStart('bcc', email)}
-                        onDragEnd={handleChipDragEnd}
-                      />
-                    ))}
-                    <input
-                      ref={bccInputRef}
-                      type='text'
-                      value={bccInputValue}
-                      onChange={e => {
-                        setBccInputValue(e.target.value);
-                        setSuggestionIndex(0);
-                      }}
-                      onKeyDown={handleBccKeyDown}
-                      onFocus={() => focusSuggest('bcc')}
-                      onBlur={() => {
-                        const email = bccInputValue.trim().replace(',', '');
-                        if (email && email.includes('@') && !bccEmails.includes(email)) {
-                          setBccEmails([...bccEmails, email]);
-                          setBccInputValue('');
-                        }
-                        blurSuggest('bcc');
-                      }}
-                      placeholder={bccEmails.length === 0 ? 'Add recipients...' : ''}
-                      data-track-category='SUPPORT'
-                      data-track-name='EditBccField'
-                      data-track-metadata={JSON.stringify({
-                        bccEmails: bccEmails,
-                        conversationId,
-                        draftEmailId: draftId,
-                      })}
-                      className='flex-1 min-w-[80px] text-sm py-1 outline-none bg-transparent'
-                      disabled={isSending}
-                    />
-                    <RecipientSuggestionsDropdown
-                      visible={activeSuggestField === 'bcc'}
-                      suggestions={bccSuggestions}
-                      highlightedIndex={suggestionIndex}
-                      onSelect={email => handleSuggestionSelect('bcc', email)}
-                      onHighlight={setSuggestionIndex}
-                      anchorRef={bccRowRef}
-                    />
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        <div className='flex-1 min-h-0 flex flex-col'>
-          {(() => {
-            const sideBySide = hasEmailBody && (aiDraft.isDraftActive || isRephrasePromptOpen);
-            const aiOnlyFull = aiDraft.isDraftActive && !hasEmailBody;
-
-            const draftCard = aiDraft.isDraftActive ? (
-              <DraftCard
-                draftContent={aiDraft.draftContent}
-                isStreaming={aiDraft.isStreaming}
-                onAccept={() => {
-                  const content = aiDraft.acceptDraft();
-                  void (async (): Promise<void> => {
-                    const html = content ? await markdownToHtml(content) : '';
-                    setEmailContent(html);
-                    if (html) saveDraft(html);
-                  })();
-                }}
-                onReject={() => {
-                  aiDraft.rejectDraft();
-                }}
-                onRefine={(instruction: string) => aiDraft.refineDraft(instruction)}
-              />
-            ) : null;
-
-            const rephraseCard = isRephrasePromptOpen ? (
-              <RephrasePrompt
-                disabled={aiDraft.isStreaming}
-                onSubmit={instruction => {
-                  // Send plain text to the AI — feeding it raw HTML tags
-                  // muddies the rephrase prompt's instructions.
-                  aiDraft.rephraseDraft(instruction, stripHtml(emailContent));
-                  setIsRephrasePromptOpen(false);
-                }}
-                onClose={() => setIsRephrasePromptOpen(false)}
-              />
-            ) : null;
-
-            if (sideBySide) {
-              // Both columns rendered as bordered cards with matching headers
-              // so the user's draft and the AI panel feel like equal peers.
-              // Right column shows the AI draft if active, otherwise the
-              // rephrase prompt (chips + custom instruction).
-              return (
-                <div className='flex flex-row gap-3 items-stretch flex-1 min-h-0 px-4 pt-2 pb-3'>
-                  <div className='flex-1 min-w-0 flex flex-col border border-border rounded-xl bg-background overflow-hidden'>
-                    <div className='flex items-center gap-2 px-4 py-2.5 min-h-[3rem] border-b border-border bg-muted/30 flex-shrink-0'>
-                      <Pencil size={14} className='text-muted-foreground' />
-                      <span className='text-sm font-medium text-foreground'>Your draft</span>
-                    </div>
-                    <EmailEditor
-                      value={emailContent}
-                      onChange={setEmailContent}
-                      onAddFiles={addFilesToAttachments}
-                      onSendShortcut={() => {
-                        if (
-                          (hasEmailBody || attachments.length > 0) &&
-                          conversationId &&
-                          !isSending &&
-                          toEmails.length > 0
-                        ) {
-                          void handleSendEmail();
-                        }
-                      }}
-                      onBlur={() => {
-                        if (hasEmailBody) saveDraft(emailContent);
-                      }}
-                      readOnly={aiDraft.isDraftActive}
-                      disabled={isSending}
-                      className='flex-1 min-h-0'
-                    />
-                  </div>
-                  <div className='flex-1 min-w-0 flex flex-col min-h-0'>
-                    {draftCard ?? rephraseCard}
-                  </div>
-                </div>
-              );
-            }
-
-            if (aiOnlyFull) {
-              // No user text yet — give the AI card the entire body.
-              return <div className='flex-1 min-h-0 flex flex-col px-4 pt-2 pb-3'>{draftCard}</div>;
-            }
-
-            return (
-              <EmailEditor
-                value={emailContent}
-                onChange={setEmailContent}
-                onAddFiles={addFilesToAttachments}
-                onSendShortcut={() => {
-                  if (
-                    (hasEmailBody || attachments.length > 0) &&
-                    conversationId &&
-                    !isSending &&
-                    toEmails.length > 0
-                  ) {
-                    void handleSendEmail();
-                  }
-                }}
-                onBlur={() => {
-                  if (hasEmailBody) saveDraft(emailContent);
-                }}
-                disabled={isSending}
-                className='flex-1 min-h-0'
-              />
-            );
-          })()}
-
-          {/* Attachments section */}
-          {attachments.length > 0 && (
-            <div className='px-4 pb-3'>
-              <div className='flex flex-wrap gap-2'>
-                {attachments.map((file, index) => (
-                  <AttachmentPreview
-                    key={`${file.name}-${file.size}-${index}`}
-                    file={file}
-                    onRemove={() => handleRemoveAttachment(index)}
-                    onPreview={() => handlePreviewAttachment(file)}
-                    isUploading={isUploadingAttachments && index === attachments.length - 1}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {selectedSignatureId && (
-            <div className='px-4 pb-3'>
-              <div className='border-t border-border pt-2'>
-                <p className='text-xs text-muted-foreground mb-1'>--</p>
-                <div
-                  className='text-sm text-muted-foreground prose prose-sm max-w-none'
-                  dangerouslySetInnerHTML={{
-                    __html: signatures?.find(s => s.id === selectedSignatureId)?.content ?? '',
-                  }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className='px-3 py-1.5 flex items-center justify-between'>
-          <div className='flex items-center gap-0.5'>
-            {/* Attachment button */}
-            <div>
-              <input
-                ref={fileInputRef}
-                type='file'
-                multiple
-                className='hidden'
-                onChange={handleFileSelect}
-                disabled={isSending || isUploadingAttachments}
-              />
-              <Tooltip content='Attach files' side='bottom' delayDuration={300}>
-                <button
-                  type='button'
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isSending || isUploadingAttachments}
-                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-                  aria-label='Attach files'
-                  data-track-category='SUPPORT'
-                  data-track-name='AddEmailAttachment'
-                  data-track-metadata={JSON.stringify({
-                    conversationId,
-                    attachmentCount: attachments.length,
-                  })}
-                >
-                  <Paperclip size={14} />
-                </button>
-              </Tooltip>
-            </div>
-
-            {/* Signature selector */}
-            {signatures.length > 0 ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type='button'
-                    className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
-                    title={
-                      selectedSignatureId
-                        ? (signatures.find(s => s.id === selectedSignatureId)?.name ?? 'Signature')
-                        : 'No signature'
-                    }
-                    data-track-category='email-compose'
-                    data-track-name='select-signature'
-                  >
-                    <Signature size={14} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align='start' side='top'>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      const base = channelId ? `/support/${channelId}` : '/support';
-                      void composerNavigate(`${base}?openSettings=signatures`);
-                    }}
-                    className='text-xs text-muted-foreground'
-                  >
-                    Manage signatures
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onClick={() => setSelectedSignatureId(null)}
-                    className={!selectedSignatureId ? 'font-medium' : ''}
-                  >
-                    No signature
-                  </DropdownMenuItem>
-                  {signatures.map(sig => (
-                    <DropdownMenuItem
-                      key={sig.id}
-                      onClick={() => setSelectedSignatureId(sig.id)}
-                      className={selectedSignatureId === sig.id ? 'font-medium' : ''}
-                    >
-                      {sig.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <Tooltip content='Add signature' side='bottom' delayDuration={300}>
-                <button
-                  type='button'
-                  onClick={() => {
-                    const base = channelId ? `/support/${channelId}` : '/support';
-                    void composerNavigate(`${base}?openSettings=signatures`);
-                  }}
-                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
-                  aria-label='Add signature'
-                  data-track-category='email-compose'
-                  data-track-name='add-signature'
-                >
-                  <Signature size={14} />
-                </button>
-              </Tooltip>
-            )}
-          </div>
-          <div className='flex items-center gap-0.5'>
-            {/* Ask AI button */}
-            {onToggleAIPanel && (
-              <Tooltip content='Ask AI' side='bottom' delayDuration={300}>
-                <button
-                  type='button'
-                  onClick={onToggleAIPanel}
-                  className={cn(
-                    'size-7 flex items-center justify-center rounded-full transition-colors',
-                    isAIPanelOpen ? 'bg-[#F3EEFF]' : 'hover:bg-muted',
-                  )}
-                  aria-label='Toggle Ask AI panel'
-                  data-track-category='Support'
-                  data-track-name='ToggleAIPanel'
-                >
-                  <span className='inline-flex animate-ai-pop'>
-                    <XyneAIStar size={14} />
-                  </span>
-                </button>
-              </Tooltip>
-            )}
-
-            {/* Draft button — empty body generates from scratch; existing text
-                opens the Gmail-style "what would you like to do?" prompt. */}
-            <Tooltip
-              content={hasEmailBody ? 'Rewrite with AI' : 'Generate AI draft reply'}
-              side='bottom'
-              delayDuration={300}
-            >
-              <button
-                type='button'
-                onClick={() => {
-                  if (hasEmailBody) {
-                    setIsRephrasePromptOpen(true);
-                  } else {
-                    aiDraft.triggerDraft();
-                  }
-                }}
-                disabled={aiDraft.isStreaming || !emails?.length}
-                className='size-7 flex items-center justify-center rounded-full text-primary hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
-                aria-label='Draft reply with AI'
-                data-track-category='Support'
-                data-track-name='TriggerAIDraft'
-                data-track-metadata={JSON.stringify({
-                  hasExistingText: hasEmailBody,
-                })}
-              >
-                <Wand2 size={14} />
-              </button>
-            </Tooltip>
-
-            {/* The action-bar refine input was removed — refining lives only
-                inside the AI panel itself (DraftCard's RefineInput). */}
-
-            {onClose && (
-              <>
-                <div className='w-px h-4 bg-border mx-1' />
-                <button
-                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground transition-colors'
-                  onClick={() => {
-                    if (hasEmailBody) saveDraft(emailContent);
-                    onClose();
-                  }}
-                  disabled={isSending}
-                  aria-label='Minimize reply'
-                  title='Minimize (keeps draft)'
-                  data-track-category='Support'
-                  data-track-name='MinimizeReplyComposer'
-                >
-                  <Minimize2 size={14} />
-                </button>
-                <button
-                  className='size-7 flex items-center justify-center rounded-full text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors'
-                  onClick={() => {
-                    deleteDraft();
-                    setEmailContent('');
-                    setAttachments([]);
-                    setToEmails([]);
-                    setCcEmails([]);
-                    setBccEmails([]);
-                    onClose();
-                  }}
-                  disabled={isSending}
-                  aria-label='Discard reply'
-                  title='Discard draft'
-                  data-track-category='Support'
-                  data-track-name='DiscardReplyComposer'
-                >
-                  <Trash2 size={14} />
-                </button>
-              </>
-            )}
-            <div className='w-px h-4 bg-border mx-1' />
-            <button
-              className='size-7 flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-colors'
-              onClick={() => void handleSendEmail()}
-              disabled={
-                (!hasEmailBody && attachments.length === 0) ||
-                !conversationId ||
-                isSending ||
-                toEmails.length === 0 ||
-                aiDraft.isDraftActive
-              }
-              aria-label='Send email'
-              title={aiDraft.isDraftActive ? 'Accept the AI draft to enable Send' : 'Send (⌘↵)'}
-              data-track-category='Support'
-              data-track-name='SendEmailReply'
-              data-track-metadata={JSON.stringify({
-                conversationId,
-                attachmentCount: attachments.length,
-              })}
-            >
-              {isSending ? <RefreshCw size={14} className='animate-spin' /> : <ArrowUp size={14} />}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Media viewer for attachment preview */}
-      {previewFile && (
-        <MediaViewer
-          file={previewFile}
-          isOpen={isPreviewOpen}
-          onClose={() => {
-            setIsPreviewOpen(false);
-            setPreviewFile(null);
-          }}
-        />
       )}
     </div>
   );

@@ -25,15 +25,21 @@ export function useUpdateEmailChannelPreference() {
   const updatePreference = useCallback(
     ({
       channelId,
+      ownerUserId,
       assigneeUserGroupId,
+      sendAsEmail,
     }: {
       channelId: string;
+      ownerUserId?: string;
       assigneeUserGroupId?: string | null;
+      sendAsEmail?: string | null;
     }): Promise<void> => {
       zero.mutate(
         mutators.emailChannelPreference.upsert({
           channelId,
-          assigneeUserGroupId,
+          ...(ownerUserId !== undefined ? { ownerUserId } : {}),
+          ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
+          ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
         }),
       );
       return Promise.resolve();

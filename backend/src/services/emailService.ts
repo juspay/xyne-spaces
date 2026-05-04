@@ -57,6 +57,8 @@ import { repositories } from '@/database/repositories';
 import { TicketIdService } from './ticketIdService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateDescription } from './agents/description-generator';
+import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
+import { v4 as uuidv4 } from 'uuid';
 
 interface UserInfo {
   id: string;
@@ -113,6 +115,46 @@ export interface CreateConversationFromEmailParams {
   boardId: string;
   stageName: string;
   userGroupId?: string;
+}
+
+export interface IngestEmailThreadParams {
+  channelId: string;
+  externalThreadId: string;
+  externalSourceId: string;
+  userId: string;
+  emails: Array<{
+    externalMessageId: string;
+    subject: string;
+    body: string;
+    from: string;
+    to: string[];
+    cc?: string[];
+    bcc?: string[];
+    receivedAt: Date;
+    type?: EmailType;
+    uploadedFiles?: UploadedFileResult[];
+  }>;
+  ticketMetadata?: Record<string, unknown>;
+  sourceName?: string;
+}
+
+export interface IngestEmailThreadResult {
+  conversationId: string;
+  ticketId?: string;
+  ticketXyneId?: string;
+  inserted: number;
+  duplicates: number;
+  isNew: boolean;
+  blocked?: boolean;
+}
+
+interface ThreadTxResult {
+  conversationId: string;
+  ticketId?: string;
+  ticketXyneId?: string;
+  inserted: number;
+  duplicates: number;
+  isNew: boolean;
 }
 
 const SUBJECT_PREFIX_REGEX = /^(\s*(re|fwd|fw)\s*:\s*)+/i;
@@ -567,6 +609,9 @@ export class EmailService {
 
     // --- Side effects (outside transaction) ---
 
+    // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
+    void dispatchEmailEventForEmailId(email.id);
+
     this.pushVespaJobForTicket(ticket.id, userId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
@@ -813,6 +858,10 @@ export class EmailService {
       };
 
       const email = await this.emailRepository.create(emailData);
+
+      // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
+      void dispatchEmailEventForEmailId(email.id);
+
       const ticketRow = await this.prisma.ticket.findFirst({
         where: { conversationId },
         select: { id: true, lastEmailAt: true },
@@ -1103,7 +1152,7 @@ export class EmailService {
     if (!owner?.email) {
       throw new Error(`Desk owner user ${preference.ownerUserId} not found or has no email.`);
     }
-    const fromEmailAddress = owner.email;
+    const fromEmailAddress = preference.sendAsEmail || owner.email;
 
     const to = params.to?.length
       ? params.to
@@ -1130,6 +1179,7 @@ export class EmailService {
       initialExternalThreadId: initialEmail.externalThreadId,
       latestExternalThreadId: latestEmail.externalThreadId,
       latestExternalMessageId: latestEmail.externalMessageId,
+      fromEmailAddress,
       ...(params.fileAttachments && { fileAttachments: params.fileAttachments }),
     });
 
@@ -1172,6 +1222,331 @@ export class EmailService {
       threadId: sent.threadId,
       externalMessageId,
       externalSourceType: externalSource.sourceType,
+    };
+  }
+
+  async ingestEmailThread(params: IngestEmailThreadParams): Promise<IngestEmailThreadResult> {
+    const {
+      channelId,
+      externalThreadId,
+      externalSourceId,
+      userId,
+      ticketMetadata,
+      sourceName,
+    } = params;
+
+    if (params.emails.length === 0) {
+      return { conversationId: '', inserted: 0, duplicates: 0, isNew: false };
+    }
+
+    const emails = [...params.emails].sort((a, b) => {
+      const at = a.receivedAt?.getTime() ?? 0;
+      const bt = b.receivedAt?.getTime() ?? 0;
+      return at - bt;
+    });
+
+    const firstEmail = emails[0]!;
+    const channel = await this.channelRepository.findById(channelId);
+    if (!channel) throw new Error(`Channel not found: ${channelId}`);
+    if (channel.type !== ChannelType.EMAIL) {
+      throw new Error(
+        `[EmailService] refusing to ingest into non-EMAIL channel ${channelId} (type=${channel.type})`,
+      );
+    }
+
+    const projectId = channel.projectId;
+    if (sourceName) {
+      try {
+        const ctx = createBlockingContext({
+          sourceName,
+          email: firstEmail.from,
+          emailSubject: firstEmail.subject,
+        });
+        if (
+          superpositionClient.isReady() &&
+          (await superpositionClient.getBooleanValue('blocked', false, ctx))
+        ) {
+          return { conversationId: '', inserted: 0, duplicates: 0, isNew: false, blocked: true };
+        }
+      } catch (error) {
+        logger.error('[EmailService] Superposition check failed, proceeding', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const existingFirstEmail = await this.emailRepository.findFirstByThreadAndChannel(
+      externalThreadId,
+      channelId,
+    );
+
+    let boardId: string | undefined;
+    let groupId: string | null = null;
+    if (!existingFirstEmail) {
+      const preference =
+        await this.emailChannelPreferenceRepository.findByChannelId(channelId);
+      const externalSource = await this.prisma.externalSource.findUnique({
+        where: { id: externalSourceId },
+        select: { boardId: true },
+      });
+      boardId =
+        preference?.boardId ?? externalSource?.boardId ?? undefined;
+      if (!boardId) {
+        const firstBoard = await this.prisma.board.findFirst({
+          where: { projectId },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        });
+        boardId = firstBoard?.id;
+      }
+      if (!boardId) {
+        throw new Error(
+          `[EmailService] No board configured for channel ${channelId} (project ${projectId})`,
+        );
+      }
+      groupId = preference?.assigneeUserGroupId ?? null;
+    }
+
+    const emailRowIds = emails.map(() => uuidv4());
+    const emailRows = emails.map((e, i) => ({
+      id: emailRowIds[i]!,
+      type: e.type ?? EmailType.DEFAULT,
+      subject: e.subject,
+      body: e.body,
+      to: e.to,
+      from: e.from,
+      cc: e.cc ?? [],
+      bcc: e.bcc ?? [],
+      channelId,
+      externalThreadId,
+      externalMessageId: e.externalMessageId,
+      ...(e.receivedAt && { createdAt: e.receivedAt }),
+    }));
+
+    let txResult: ThreadTxResult;
+    try {
+      txResult = await this.prisma.$transaction(async tx => {
+        let conversationId: string;
+        let ticketId: string | undefined;
+        let ticketXyneId: string | undefined;
+        let isNew: boolean;
+
+        if (existingFirstEmail) {
+          conversationId = existingFirstEmail.conversationId;
+          isNew = false;
+          const ticketRow = await tx.ticket.findFirst({
+            where: { conversationId },
+            select: { id: true, xyneId: true },
+          });
+          ticketId = ticketRow?.id;
+          ticketXyneId = ticketRow?.xyneId;
+        } else {
+          const stages = await tx.stage.findMany({
+            where: { boardId: boardId! },
+            orderBy: { sequenceNumber: 'asc' },
+          });
+          if (stages.length === 0) {
+            throw new Error(`No stages found for board ${boardId}`);
+          }
+          const firstStage = stages[0]!;
+
+          const conv = await tx.conversation.create({
+            data: {
+              channelId,
+              createdBy: userId,
+              initialMessageId: 'temp',
+              ...(firstEmail.receivedAt && {
+                createdAt: firstEmail.receivedAt,
+                lastActivityAt: firstEmail.receivedAt,
+              }),
+            },
+          });
+          conversationId = conv.conversationId;
+
+          const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+          const ticketTitle =
+            (firstEmail.subject ?? '').replace(/^(\s*(re|fwd|fw)\s*:\s*)+/i, '').trim() ||
+            firstEmail.subject;
+          const createdTicket = await tx.ticket.create({
+            data: {
+              title: ticketTitle,
+              description: firstEmail.body,
+              createdBy: userId,
+              updatedBy: userId,
+              conversationId,
+              channelId,
+              workspaceId: channel.workspaceId,
+              xyneId,
+              projectId,
+              boardId: boardId!,
+              lastEmailAt: firstEmail.receivedAt ?? new Date(),
+              stageName: firstStage.name,
+              ...(groupId && { userGroupId: groupId }),
+              ...(ticketMetadata && { metadata: ticketMetadata as Prisma.InputJsonValue }),
+              ...(firstEmail.receivedAt && { createdAt: firstEmail.receivedAt }),
+            },
+          });
+          ticketId = createdTicket.id;
+          ticketXyneId = createdTicket.xyneId;
+          await syncConversationTicketMdFromPrismaTicket(tx, createdTicket);
+
+          // Seed the conversation's initial message inside the same tx so we
+          // never leave a `'temp'` sentinel in `Conversation.initialMessageId`
+          // pointing at no real Message row. Doing this post-tx (the previous
+          // shape) meant any failure between tx commit and the seeding update
+          // stranded the conversation forever; the catch-and-log there was a
+          // permanent data-rot vector, not a transient blip.
+          const initialMessage = await tx.message.create({
+            data: {
+              conversationId,
+              senderId: userId,
+              content: '',
+              hasAttachment: true,
+              metadata: { ticketId: createdTicket.id },
+            },
+          });
+          await tx.conversation.update({
+            where: { conversationId },
+            data: {
+              initialMessageId: initialMessage.messageId,
+              ticketId: createdTicket.id,
+            },
+          });
+
+          isNew = true;
+        }
+
+        const emailInsert = await tx.email.createMany({
+          data: emailRows.map(row => ({ ...row, conversationId })),
+          skipDuplicates: true,
+        });
+
+        await tx.externalMessage.createMany({
+          data: emailRows.map(row => ({
+            externalSourceId,
+            externalId: row.externalMessageId,
+            externalThreadId,
+            entityType: ExternalEntityType.EMAIL,
+            entityId: row.id,
+            messageId: row.id,
+            direction: MessageDirection.INCOMING,
+          })),
+          skipDuplicates: true,
+        });
+
+        const latestReceived = emails.reduce<Date | null>((acc, e) => {
+          if (!e.receivedAt) return acc;
+          return acc && acc > e.receivedAt ? acc : e.receivedAt;
+        }, null);
+        if (ticketId && latestReceived) {
+          await tx.ticket.update({
+            where: { id: ticketId },
+            data: { lastEmailAt: latestReceived },
+          });
+        }
+
+        if (emailInsert.count > 0) {
+          await tx.channelUserStatus.updateMany({
+            where: { channelId, isDeleted: false },
+            data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
+          });
+        }
+
+        return {
+          conversationId,
+          ticketId,
+          ticketXyneId,
+          inserted: emailInsert.count,
+          duplicates: emails.length - emailInsert.count,
+          isNew,
+        };
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        logger.warn('[EmailService] ingestEmailThread hit unique conflict, treating as duplicate', {
+          channelId,
+          externalThreadId,
+        });
+        return {
+          conversationId: existingFirstEmail?.conversationId ?? '',
+          inserted: 0,
+          duplicates: emails.length,
+          isNew: false,
+        };
+      }
+      throw error;
+    }
+
+    const insertedEmails = emailRows.map((row, i) => ({
+      id: row.id,
+      body: emails[i]!.body,
+      externalMessageId: row.externalMessageId,
+      uploadedFiles: emails[i]!.uploadedFiles ?? [],
+    }));
+
+    // Initial message + conversation pointer are now seeded inside the
+    // transaction above. Only the metadata md sync (which reads committed
+    // rows for its query) runs here; if it fails the data is still
+    // consistent — only the cached md field is stale, recoverable on next
+    // write to the conversation.
+    if (txResult.isNew && txResult.ticketId) {
+      try {
+        await messageMetadataService.syncInitialMessageMd(txResult.conversationId);
+      } catch (error) {
+        logger.warn('[EmailService] failed to sync initial message md', error);
+      }
+    }
+
+    for (const e of insertedEmails) {
+      void dispatchEmailEventForEmailId(e.id);
+    }
+
+    for (const e of insertedEmails) {
+      this.pushVespaJobForMail(e.id, userId).catch(error => {
+        logger.error(`[EmailService] Vespa job push failed for mail ${e.id}:`, error);
+      });
+    }
+    if (txResult.isNew && txResult.ticketId) {
+      this.pushVespaJobForTicket(txResult.ticketId, userId).catch(error => {
+        logger.error(
+          `[EmailService] Vespa job push failed for ticket ${txResult.ticketId}:`,
+          error,
+        );
+      });
+    }
+
+    for (const e of insertedEmails) {
+      if (e.uploadedFiles.length > 0) {
+        try {
+          await this.createEmailAttachments(
+            e.id,
+            txResult.conversationId,
+            userId,
+            channel.workspaceId,
+            e.uploadedFiles,
+          );
+        } catch (error) {
+          logger.warn(
+            `[EmailService] createEmailAttachments failed for email ${e.id}`,
+            error,
+          );
+        }
+      }
+    }
+
+    try {
+      await this.channelRepository.updateLastActivity(channelId);
+    } catch (error) {
+      logger.warn('[EmailService] updateLastActivity failed', error);
+    }
+
+    return {
+      conversationId: txResult.conversationId,
+      ticketId: txResult.ticketId,
+      ticketXyneId: txResult.ticketXyneId,
+      inserted: txResult.inserted,
+      duplicates: txResult.duplicates,
+      isNew: txResult.isNew,
     };
   }
 }

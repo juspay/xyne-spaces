@@ -43,7 +43,7 @@ const handleAttachmentUploadErrors = (
   return next(err);
 };
 
-// Upload attachments to Zoho
+// Upload attachments for a reply (conversation-scoped)
 router.post(
   '/:conversationId/upload-attachments',
   authMiddleware.authenticate,
@@ -54,8 +54,22 @@ router.post(
   zohoUploadController.uploadAttachments
 );
 
+// Upload attachments for compose (channel-scoped — no conversation yet)
+router.post(
+  '/channels/:channelId/upload-attachments',
+  authMiddleware.authenticate,
+  (req, res, next) =>
+    upload.array('files', MAX_ATTACHMENT_FILES)(req, res, err =>
+      handleAttachmentUploadErrors(err, req, res, next),
+    ),
+  zohoUploadController.uploadComposeAttachments,
+);
+
 // Send email reply (REPLY or REPLY_ALL)
 router.post('/:conversationId/reply', authMiddleware.authenticate, emailController.replyToEmail);
+
+// Initiate a brand-new outbound email from an email channel
+router.post('/compose', authMiddleware.authenticate, emailController.composeEmail);
 
 router.get(
   '/:channelId/contacts',

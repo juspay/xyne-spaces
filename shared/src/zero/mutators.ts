@@ -5660,8 +5660,9 @@ export const mutators = defineMutators({
         channelId: z.string(),
         ownerUserId: z.string().optional(),
         assigneeUserGroupId: z.string().optional().nullable(),
+        sendAsEmail: z.string().optional().nullable(),
       }),
-      async ({ tx, ctx, args: { channelId, ownerUserId, assigneeUserGroupId } }) => {
+      async ({ tx, ctx, args: { channelId, ownerUserId, assigneeUserGroupId, sendAsEmail } }) => {
         const existing = await tx.run(
           zql.email_channel_preferences.where('channelId', channelId).one(),
         );
@@ -5670,12 +5671,14 @@ export const mutators = defineMutators({
             channelId,
             ...(ownerUserId !== undefined ? { ownerUserId } : {}),
             ...(assigneeUserGroupId !== undefined ? { assigneeUserGroupId } : {}),
+            ...(sendAsEmail !== undefined ? { sendAsEmail } : {}),
           });
         } else {
           await tx.mutate.email_channel_preferences.insert({
             channelId,
             ownerUserId: ownerUserId ?? ctx.userID,
             assigneeUserGroupId: assigneeUserGroupId ?? null,
+            sendAsEmail: sendAsEmail ?? null,
           });
         }
       },

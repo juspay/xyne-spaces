@@ -8,17 +8,18 @@ import { ExternalSource } from '@prisma/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
-import { externalSourceCore } from '../../core/core';
-import { adapterRegistry } from '../../core/adapterRegistry';
 import { BaseRefetch, RefetchOptions, RefetchResult } from '../../core/baseRefetch';
-import { ExternalSourcePlatform } from '../../core/types';
 import { MicrosoftTransformer } from './transformer';
 import { preDownloadGraphAttachments } from './attachments';
 import { GraphMailMessage } from './types';
+import { emailService } from '@/services/emailService';
+import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
+import { AttachmentConversionService } from '@/services/externalAttachmentService';
 
 const TAG = '[MicrosoftRefetch]';
 const RANGE_MAX_MESSAGES = 2000;
 const transformer = new MicrosoftTransformer();
+const preferenceRepo = new EmailChannelPreferenceRepository();
 
 const GRAPH_MESSAGE_FIELDS = [
   'id', 'subject', 'body', 'bodyPreview', 'from',
@@ -36,9 +37,15 @@ export class MicrosoftRefetch extends BaseRefetch {
         '[MicrosoftRefetch] startDate and endDate are required — manual refetch is range-only',
       );
     }
-    const accessToken = await MicrosoftDeskService.getValidAccessToken(source.credentials, source.id);
+    if (!source.channelId) {
+      throw new Error(`[MicrosoftRefetch] source ${source.name} has no channel binding`);
+    }
 
-    // Step 1: list message ids
+    const accessToken = await MicrosoftDeskService.getValidAccessToken(source.credentials, source.id);
+    const preference = await preferenceRepo.findByChannelId(source.channelId);
+    const userId = preference?.ownerUserId ?? source.displayName;
+
+    // Step 1: list message ids in the window.
     const value = await this.listMessagesInRange(
       accessToken,
       options.startDate,
@@ -52,82 +59,102 @@ export class MicrosoftRefetch extends BaseRefetch {
       distinctThreads: new Set(value.map(m => m.conversationId ?? m.id)).size,
     });
 
-    // Step 2: ingest each — fetch full message, transform, sync
+    // Step 2: group by conversationId.
+    const groupedByThread = new Map<string, GraphMessageStub[]>();
+    for (const m of value) {
+      const threadId = m.conversationId ?? m.id;
+      const bucket = groupedByThread.get(threadId);
+      if (bucket) bucket.push(m);
+      else groupedByThread.set(threadId, [m]);
+    }
+
+    // Step 3: process threads in parallel up to batchSize. Each thread's
+    // messages flow into a single ingestEmailThread call.
     let processed = 0;
     let newTickets = 0;
     let skipped = 0;
     const errors: string[] = [];
 
-    const ingestOne = async (id: string): Promise<void> => {
+    const ingestThread = async (
+      threadId: string,
+      stubs: GraphMessageStub[],
+    ): Promise<void> => {
       try {
-        const msgResponse = await fetch(
-          `${config.microsoftGraph.baseUrl}/me/messages/${id}?$select=${GRAPH_MESSAGE_FIELDS}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } },
+        const sortedIds = stubs
+          .slice()
+          .sort((a, b) => a.receivedDateTime.localeCompare(b.receivedDateTime))
+          .map(s => s.id);
+
+        const fetched = await Promise.all(
+          sortedIds.map(async id => {
+            const msgResponse = await fetch(
+              `${config.microsoftGraph.baseUrl}/me/messages/${id}?$select=${GRAPH_MESSAGE_FIELDS}`,
+              { headers: { Authorization: `Bearer ${accessToken}` } },
+            );
+            if (!msgResponse.ok) throw new Error(`fetch message ${id}: ${msgResponse.status}`);
+            const email = (await msgResponse.json()) as GraphMailMessage;
+
+            const preDownloadedAttachments = email.hasAttachments
+              ? await preDownloadGraphAttachments({
+                  accessToken,
+                  graphMessageId: id,
+                  sourceName: source.name,
+                })
+              : [];
+
+            const parsed = await transformer.transform({
+              emails: [email],
+              ...(preDownloadedAttachments.length > 0 && { preDownloadedAttachments }),
+            });
+            if (!parsed.success || !parsed.data) throw new Error(parsed.error);
+            return {
+              data: parsed.data,
+              uploadedFiles:
+                AttachmentConversionService.convertDownloadedToUploaded(preDownloadedAttachments),
+            };
+          }),
         );
-        if (!msgResponse.ok) throw new Error(`fetch message ${id}: ${msgResponse.status}`);
 
-        const email = (await msgResponse.json()) as GraphMailMessage;
+        const validParsed = fetched.filter(
+          d => !!d.data.emailData?.from && !!d.data.emailData?.to,
+        );
+        if (validParsed.length === 0) return;
 
-        const preDownloadedAttachments = email.hasAttachments
-          ? await preDownloadGraphAttachments({
-              accessToken,
-              graphMessageId: id,
-              sourceName: source.name,
-            })
-          : [];
-
-        const parsed = await transformer.transform({
-          emails: [email],
-          ...(preDownloadedAttachments.length > 0 && { preDownloadedAttachments }),
+        const result = await emailService.ingestEmailThread({
+          channelId: source.channelId!,
+          externalThreadId: threadId,
+          externalSourceId: source.id,
+          userId,
+          ticketMetadata: validParsed[0]!.data.metadata,
+          emails: validParsed.map(({ data: d, uploadedFiles }) => ({
+            externalMessageId: d.externalId,
+            subject: d.emailData!.subject ?? '',
+            body: d.content,
+            from: d.emailData!.from!,
+            to: d.emailData!.to ?? [],
+            cc: d.emailData!.cc ?? [],
+            bcc: d.emailData!.bcc ?? [],
+            receivedAt: d.metadata.timestamp,
+            uploadedFiles,
+          })),
         });
-        if (!parsed.success || !parsed.data) throw new Error(parsed.error);
 
-        const result = await externalSourceCore.sync(
-          adapterRegistry.getAdapter(ExternalSourcePlatform.MICROSOFT),
-          source.name,
-          parsed.data,
-        );
-        if (result.action === 'duplicate') {
-          skipped++;
-        } else {
-          processed++;
-          if (result.isNew) newTickets++;
-        }
+        processed += result.inserted;
+        skipped += result.duplicates;
+        if (result.isNew) newTickets += 1;
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
-        logger.warn(`${TAG} ingest failed for ${id}`, { error: errMsg });
+        logger.warn(`${TAG} thread ${threadId} ingest failed`, { error: errMsg });
         errors.push(errMsg);
       }
     };
 
     const { batchSize, batchDelayMs } = config.emailFetch;
-    const groupedByThread = new Map<string, GraphMessageStub[]>();
-    for (const m of value) {
-      const threadId = m.conversationId ?? m.id;
-      const bucket = groupedByThread.get(threadId);
-      if (bucket) {
-        bucket.push(m);
-      } else {
-        groupedByThread.set(threadId, [m]);
-      }
-    }
-    const threadGroups = Array.from(groupedByThread.values()).map(group =>
-      group
-        .slice()
-        .sort((a, b) => a.receivedDateTime.localeCompare(b.receivedDateTime))
-        .map(m => m.id),
-    );
-
-    for (let i = 0; i < threadGroups.length; i += batchSize) {
-      const batch = threadGroups.slice(i, i + batchSize);
-      await Promise.all(
-        batch.map(async messageIds => {
-          for (const id of messageIds) {
-            await ingestOne(id);
-          }
-        }),
-      );
-      if (batchDelayMs > 0 && i + batchSize < threadGroups.length) {
+    const threadEntries = Array.from(groupedByThread.entries());
+    for (let i = 0; i < threadEntries.length; i += batchSize) {
+      const batch = threadEntries.slice(i, i + batchSize);
+      await Promise.all(batch.map(([threadId, stubs]) => ingestThread(threadId, stubs)));
+      if (batchDelayMs > 0 && i + batchSize < threadEntries.length) {
         await new Promise(resolve => setTimeout(resolve, batchDelayMs));
       }
     }
