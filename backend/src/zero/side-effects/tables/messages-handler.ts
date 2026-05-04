@@ -318,6 +318,30 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // so mentions inside a thread can use the 'thread_mention' context which passes
     // for THREADS_ONLY users (in addition to ALL and MENTIONS_ONLY).
     const isReply = conversation.initialMessageId && conversation.initialMessageId !== messageId;
+    const mentionedUserIdSet = new Set(notificationUserIds);
+
+    if (!isReply) {
+      const channelMessageRecipientIds = channelParticipants
+        .map(participant => participant.userId)
+        .filter(userId => userId !== senderId && !mentionedUserIdSet.has(userId));
+
+      if (channelMessageRecipientIds.length > 0) {
+        try {
+          await notificationService.createChannelMessageNotifications(
+            channelMessageRecipientIds,
+            messageId,
+            conversationId,
+            channelId,
+            channelName,
+            senderId,
+            senderName,
+            cleanContent,
+          );
+        } catch (error) {
+          logger.error('[SIDE-EFFECT] Spaces channel message notifications failed', { error });
+        }
+      }
+    }
 
     if (notificationUserIds.length > 0) {
       await handleUnreadCount(

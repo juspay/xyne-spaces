@@ -7,12 +7,17 @@ const prisma = DatabaseClient.getInstance();
  * The type of notification being delivered, used to gate which NotificationLevel
  * values allow the notification through in Layer 3 of the evaluation.
  *
- * - 'mention'        → passes for ALL and MENTIONS_ONLY; blocked by THREADS_ONLY
- * - 'thread_reply'   → passes for ALL and THREADS_ONLY; blocked by MENTIONS_ONLY
- * - 'thread_mention' → passes for ALL, MENTIONS_ONLY, and THREADS_ONLY (a direct @mention
- *                      inside a thread — relevant to both mention and thread subscribers)
+ * - 'channel_message' → passes only for ALL
+ * - 'mention'         → passes for ALL and MENTIONS_ONLY; blocked by THREADS_ONLY
+ * - 'thread_reply'    → passes for ALL and THREADS_ONLY; blocked by MENTIONS_ONLY
+ * - 'thread_mention'  → passes for ALL, MENTIONS_ONLY, and THREADS_ONLY (a direct @mention
+ *                       inside a thread — relevant to both mention and thread subscribers)
  */
-export type NotificationContext = 'mention' | 'thread_reply' | 'thread_mention';
+export type NotificationContext =
+  | 'channel_message'
+  | 'mention'
+  | 'thread_reply'
+  | 'thread_mention';
 
 interface UserNotificationSettings {
   userId: string;
@@ -34,12 +39,15 @@ function parseTimestamp(value: Date | number | null | undefined): number | null 
  * the specified context.
  *
  * NotificationLevel semantics:
- *   ALL           – every notification type passes (mentions + thread replies + everything)
+ *   ALL           – every notification type passes (channel posts + mentions + thread replies)
  *   MENTIONS_ONLY – only explicit @mentions pass; thread replies are suppressed even if subscribed
  *   THREADS_ONLY  – only thread replies the user is subscribed to pass; standalone mentions are suppressed
  */
 function isLevelAllowed(level: NotificationLevel, context: NotificationContext): boolean {
   switch (context) {
+    case 'channel_message':
+      // Top-level channel posts should only notify users explicitly set to ALL.
+      return level === NotificationLevel.ALL;
     case 'mention':
       // Mentions pass for ALL and MENTIONS_ONLY; THREADS_ONLY blocks them
       return level === NotificationLevel.ALL || level === NotificationLevel.MENTIONS_ONLY;
@@ -66,9 +74,10 @@ function isLevelAllowed(level: NotificationLevel, context: NotificationContext):
  * 1. Global pause (UserPresence.notificationsPausedUntil) — suppresses ALL notifications if active;
  *    user receives nothing on any device while paused.
  * 2. Per-device notification level filtered by notification context:
- *    - 'mention':        ALL or MENTIONS_ONLY passes; THREADS_ONLY blocks.
- *    - 'thread_reply':   ALL or THREADS_ONLY passes; MENTIONS_ONLY blocks (even for subscribed threads).
- *    - 'thread_mention': ALL, MENTIONS_ONLY, or THREADS_ONLY passes.
+ *    - 'channel_message': ALL passes.
+ *    - 'mention':         ALL or MENTIONS_ONLY passes; THREADS_ONLY blocks.
+ *    - 'thread_reply':    ALL or THREADS_ONLY passes; MENTIONS_ONLY blocks (even for subscribed threads).
+ *    - 'thread_mention':  ALL, MENTIONS_ONLY, or THREADS_ONLY passes.
  */
 function evaluateNotificationSettings(
   settings: UserNotificationSettings,
@@ -114,8 +123,9 @@ function evaluateNotificationSettings(
  * 1. Global pause — if active, user is excluded from both lists entirely.
  * 2. Channel-level settings:
  *    - desktopNotificationLevel filtered by `context`:
- *        'mention'      → ALL or MENTIONS_ONLY passes; THREADS_ONLY blocks.
- *        'thread_reply' → ALL or THREADS_ONLY passes; MENTIONS_ONLY blocks (even for subscribed threads).
+ *        'channel_message' → ALL passes.
+ *        'mention'         → ALL or MENTIONS_ONLY passes; THREADS_ONLY blocks.
+ *        'thread_reply'    → ALL or THREADS_ONLY passes; MENTIONS_ONLY blocks (even for subscribed threads).
  * 3. Thread subscription state has the lowest priority and is evaluated upstream
  *    (callers should only pass subscribed-thread recipients for 'thread_reply' context).
  *
@@ -213,8 +223,8 @@ export async function filterUsers(
     // For regular channels: apply global pause + notification level (gated by context)
     const settings: UserNotificationSettings = {
       userId,
-      desktopNotificationLevel: channelStatus.desktopNotificationLevel ?? NotificationLevel.ALL,
-      mobileNotificationLevel: channelStatus.mobileNotificationLevel ?? null,
+      desktopNotificationLevel: channelStatus.desktopNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
+      mobileNotificationLevel: channelStatus.mobileNotificationLevel ?? NotificationLevel.MENTIONS_ONLY,
       globalPausedUntil,
     };
 
