@@ -357,6 +357,10 @@ export class SearchService {
       params['from'] = filters.from;
     }
 
+    if (filters.with) {
+      params['withUser'] = filters.with;
+    }
+
     if (filters.in) {
       params['in'] = filters.in;
     }

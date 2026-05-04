@@ -128,6 +128,7 @@ export interface VespaSearchFilters {
   query: string;
   type?: string; // 'messages' | 'attachments' | 'channels' | 'tickets' | 'users'
   from?: string; // User IDs
+  with?: string; // User ID for participant filter (matches userId, threadMentions, threadSenders)
   in?: string; // Channel IDs
   offset?: number;
   limit?: number;

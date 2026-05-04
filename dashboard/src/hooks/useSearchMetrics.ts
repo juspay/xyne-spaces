@@ -455,11 +455,15 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       const hasFromMention = selectedMentions.some(
         m => m.type === MentionType.USER && (m.prefix === 'from:' || !m.prefix),
       );
+      const hasWithMention = selectedMentions.some(
+        m => m.type === MentionType.USER && m.prefix === 'with:',
+      );
       const hasAssigneeMention = selectedMentions.some(
         m => m.type === MentionType.USER && m.prefix === 'assignee:',
       );
       const hasChannelMention = selectedMentions.some(m => m.type === MentionType.CHANNEL);
       if (hasFromMention) sessionFiltersRef.current.add('from');
+      if (hasWithMention) sessionFiltersRef.current.add('with');
       if (hasAssigneeMention) sessionFiltersRef.current.add('assignee');
       if (hasChannelMention) sessionFiltersRef.current.add('in');
 
@@ -905,6 +909,28 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.from = fromMentions.map(user => user.id).join(',');
             }
 
+            const withMentions = userMentions.filter(m => m.prefix === 'with:');
+            if (withMentions.length > 0) {
+              searchFilters.type = VespaDocTypes.MESSAGES;
+              searchFilters.with = withMentions.map(user => user.id).join(',');
+            }
+
+            // With: filter doesn't apply to Files/Tickets/etc - return empty results for non-Messages tabs
+            if (
+              withMentions.length > 0 &&
+              activeTab !== TabType.MESSAGES &&
+              activeTab !== TabType.ALL
+            ) {
+              setSearchResults([]);
+              setPaginationState(prev => ({
+                ...prev,
+                [activeTab]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
+              }));
+              setIsSearching(false);
+              pendingSearchCountRef.current -= 1;
+              return;
+            }
+
             const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);
             if (channelMentions.length > 0) {
               searchFilters.in = channelMentions.map(m => m.id).join(',');
@@ -1202,6 +1228,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           return;
         }
 
+        const withMentions = userMentions.filter(m => m.prefix === 'with:');
+
+        // With: filter doesn't apply to Files/Tickets/etc - return empty for non-Messages tabs
+        if (
+          withMentions.length > 0 &&
+          activeTab !== TabType.MESSAGES &&
+          activeTab !== TabType.ALL
+        ) {
+          setIsLoadingMore(false);
+          return;
+        }
+
         // Handle type filter - only send backend-valid types (strip local types like users/people/channels)
         if (typeFilter) {
           const backendTypes = getBackendTypes(parseTypeFilter(typeFilter));
@@ -1224,6 +1262,11 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
         if (fromMentions.length > 0) {
           searchFilters.from = fromMentions.map(user => user.id).join(',');
+        }
+
+        if (withMentions.length > 0) {
+          searchFilters.type = VespaDocTypes.MESSAGES;
+          searchFilters.with = withMentions.map(user => user.id).join(',');
         }
 
         const channelMentions = selectedMentions.filter(m => m.type === MentionType.CHANNEL);

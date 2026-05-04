@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import {
   DecoratorNode,
   EditorConfig,
@@ -11,11 +11,16 @@ import Avatar from '../../ui/Avatar/Avatar';
 import { Hash } from 'lucide-react';
 import { MentionType } from './ChannelCommandMenu.types';
 
+// Memoized avatar component to prevent unnecessary re-renders on keystrokes
+const MentionAvatar = memo(function MentionAvatar({ userId }: { userId: string }) {
+  return <Avatar userId={userId} size='sm' className='rounded-none flex-shrink-0 size-3' />;
+});
+
 export interface MentionData {
   id: string;
   name: string;
   type: 'user' | 'channel';
-  prefix?: 'from:' | 'in:' | 'assignee:';
+  prefix?: 'from:' | 'with:' | 'in:' | 'assignee:';
   email?: string;
   photoLink?: string;
 }
@@ -78,31 +83,7 @@ export class MentionNode extends DecoratorNode<React.JSX.Element> {
   }
 
   override decorate(): React.JSX.Element {
-    const baseClasses =
-      'mention-node inline-flex items-center gap-1.5 px-1.5 py-1 m-0.5 rounded bg-muted text-foreground text-xs font-medium cursor-pointer h-6';
-
-    return (
-      <span
-        className={baseClasses}
-        data-lexical-mention='true'
-        data-mention-id={this.__mentionData.id}
-        data-mention-type={`mention-${this.__mentionData.type}`}
-        style={{ verticalAlign: 'baseline', lineHeight: '1.5', display: 'inline-flex' }}
-      >
-        {this.__mentionData.type === MentionType.USER ? (
-          <Avatar
-            userId={this.__mentionData.id}
-            size='sm'
-            className='rounded-none flex-shrink-0 size-3'
-          />
-        ) : (
-          <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
-            <Hash size={12} className='text-foreground' />
-          </div>
-        )}
-        <span className='leading-tight'>{this.getTextContent()}</span>
-      </span>
-    );
+    return <MentionNodeContent mentionData={this.__mentionData} />;
   }
 
   getMentionData(): MentionData {
@@ -149,4 +130,34 @@ export function $createMentionNode(mentionData: MentionData): MentionNode {
 
 export function $isMentionNode(node: LexicalNode | null | undefined): node is MentionNode {
   return node instanceof MentionNode;
+}
+
+// Separate component for the mention content to enable proper memoization
+function MentionNodeContent({ mentionData }: { mentionData: MentionData }): React.JSX.Element {
+  const baseClasses =
+    'mention-node inline-flex items-center gap-1.5 px-1.5 py-1 m-0.5 rounded bg-muted text-foreground text-xs font-medium cursor-pointer h-6';
+
+  // Get the display text using the same logic as getTextContent
+  const displayText = mentionData.prefix
+    ? `${mentionData.prefix} ${mentionData.name}`
+    : `${mentionData.type === MentionType.USER ? 'from: ' : 'in: '}${mentionData.name}`;
+
+  return (
+    <span
+      className={baseClasses}
+      data-lexical-mention='true'
+      data-mention-id={mentionData.id}
+      data-mention-type={`mention-${mentionData.type}`}
+      style={{ verticalAlign: 'baseline', lineHeight: '1.5', display: 'inline-flex' }}
+    >
+      {mentionData.type === MentionType.USER ? (
+        <MentionAvatar userId={mentionData.id} />
+      ) : (
+        <div className='flex items-center justify-center flex-shrink-0 size-4 rounded-sm'>
+          <Hash size={12} className='text-foreground' />
+        </div>
+      )}
+      <span className='leading-tight'>{displayText}</span>
+    </span>
+  );
 }
