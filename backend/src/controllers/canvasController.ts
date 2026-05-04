@@ -15,6 +15,8 @@ import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { v4 as uuidv4 } from 'uuid';
 import { ActivityClassification } from '@prisma/client';
+import {initializeYSweetDoc} from '../utils/ysweetUtils.js';
+import { convertMarkdownToBlockNote, getCanvasUrl } from '../services/canvasService.js';
 
 export class CanvasController {
   private messageAttachmentRepository: MessageAttachmentRepository;
@@ -22,6 +24,82 @@ export class CanvasController {
   constructor(messageAttachmentRepository: MessageAttachmentRepository) {
     this.messageAttachmentRepository = messageAttachmentRepository;
   }
+
+createCanvas = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(403).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { title, markdown, visibility } = req.body;
+      if (!title || !markdown) {
+        res.status(400).json({ error: 'Title and markdown are required' });
+        return;
+      }
+      const prisma = DatabaseClient.getInstance();
+      const now = new Date();
+
+      // USE THE AUTHENTICATED USER, NOT A BOT
+      const creatorId = userId;
+
+      const canvasId = uuidv4();
+      const viewAccessId = uuidv4();
+      const participantId = uuidv4();
+
+      const blocks = await convertMarkdownToBlockNote(markdown);
+
+      await prisma.$transaction([
+        prisma.canvas.create({
+          data: {
+            id: canvasId,
+            title,
+            content: [],
+            createdBy: creatorId,  // <-- AUTHENTICATED USER
+            viewAccessId,
+            editAccessId: null,
+            visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
+            isTemplate: false,
+            isCollaborative: true,
+            lastEditedBy: creatorId,
+            lastEditedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+        prisma.canvasParticipant.create({
+          data: {
+            id: participantId,
+            canvasId,
+            userId: creatorId,  // <-- AUTHENTICATED USER IS OWNER
+            role: 'OWNER',
+            joinedAt: now,
+            updatedAt: now,
+          },
+        }),
+      ]);
+
+      const ysweetInitialized = await initializeYSweetDoc(canvasId, blocks);
+      if (!ysweetInitialized) {
+        res.status(500).json({ error: 'Failed to initialize canvas content' });
+        return;
+      }
+
+      const canvasUrl = getCanvasUrl(viewAccessId);
+
+      res.status(201).json({
+        id: canvasId,
+        viewAccessId,
+        title,
+        url: canvasUrl,
+        visibility: visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
+      });
+    } catch (error) {
+      logger.error('[CANVAS-CREATE] Error:', error);
+      res.status(500).json({ error: 'Failed to create canvas' });
+    }
+  };
 
   uploadFile = async (req: Request, res: Response): Promise<void> => {
     try {
