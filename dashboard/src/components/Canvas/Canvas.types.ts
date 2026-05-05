@@ -90,18 +90,16 @@ export interface CanvasParticipant {
 }
 
 export interface CanvasListProps {
-  canvases: Canvas[];
   onSelect: (e: React.MouseEvent | KeyboardEvent, canvas: Canvas) => void;
   onDelete?: (canvasId: string) => void;
-  onDuplicate?: (canvasId: string) => void;
-  loading?: boolean;
+  onDuplicate?: (canvasId: string, canvas?: Canvas) => void;
   currentUserId?: string | undefined;
-  // XYNE-1287: Quarto docs support
-  quartoDocs?: Canvas[];
   showQuartoDocsFilter?: boolean;
   activeFilter?: 'all' | 'created_by_me' | 'quarto_docs';
   onFilterChange?: (filter: 'all' | 'created_by_me' | 'quarto_docs') => void;
   selectedCanvasId?: string;
+  paginated?: boolean;
+  channelId?: string;
 }
 
 export interface CanvasHeaderProps {

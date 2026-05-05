@@ -3,8 +3,6 @@ import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { FileText, Plus, ArrowLeft, Info, Loader2 } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { useZero } from '../../../hooks/useZero';
-import { useQuery } from '../../../hooks/useQuery';
-import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import type { Canvas } from '../Canvas.types';
 import { DocType } from '@xyne/shared';
@@ -38,13 +36,6 @@ const CanvasPanel = (): ReactElement => {
   const [activeFilter, setActiveFilter] = useState<FilterTab>('all');
   const [isCreatingCanvas, setIsCreatingCanvas] = useState(false);
   const [showPublishModal, setShowPublishModal] = useState(false);
-
-  // Fetch canvases
-  const [allCanvases] = useQuery(queries.userCanvases());
-  const [allQuartoDocs] = useQuery(queries.userQuartoDocs());
-
-  const canvases = (allCanvases as unknown as Canvas[]) || [];
-  const quartoDocs = (allQuartoDocs as unknown as Canvas[]) || [];
 
   const handleCreateCanvas = useCallback(async () => {
     setIsCreatingCanvas(true);
@@ -118,8 +109,8 @@ const CanvasPanel = (): ReactElement => {
   );
 
   const handleDuplicateCanvas = useCallback(
-    (id: string) => {
-      const originalCanvas = canvases.find(c => c.id === id);
+    (_id: string, canvas?: Canvas) => {
+      const originalCanvas = canvas;
       if (!originalCanvas) return;
 
       try {
@@ -149,7 +140,7 @@ const CanvasPanel = (): ReactElement => {
         });
       }
     },
-    [canvases, z, navigate],
+    [z, navigate],
   );
 
   // Render the left panel content
@@ -204,16 +195,14 @@ const CanvasPanel = (): ReactElement => {
       {/* Canvas List */}
       <div className='flex-1 overflow-hidden'>
         <CanvasList
-          canvases={canvases}
           onSelect={handleSelectCanvas}
           onDelete={handleDeleteCanvas}
           onDuplicate={handleDuplicateCanvas}
-          loading={!allCanvases}
           currentUserId={user?.id}
-          quartoDocs={quartoDocs}
           showQuartoDocsFilter={true}
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
+          paginated={true}
         />
       </div>
       <PublishDocsModal isOpen={showPublishModal} onClose={() => setShowPublishModal(false)} />

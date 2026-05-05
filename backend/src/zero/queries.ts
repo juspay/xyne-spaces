@@ -828,6 +828,35 @@ export const queries = defineQueries({
       return query.orderBy('updatedAt', 'desc').related('participants').related('channel');
     }
   ),
+  userCanvasesPaginated: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+      includeQuartoDocs: z.boolean().optional(),
+    }),
+    ({ ctx, args: { includeQuartoDocs, limit, start } }) => {
+      let query = zql.canvases.where((helpers) => {
+        return helpers.or(
+          helpers.cmp('createdBy', ctx.userID),
+          helpers.exists('participants', (p) => p.where('userId', ctx.userID))
+        );
+      });
+
+      if (!includeQuartoDocs) {
+        query = query.where((helpers) =>
+          helpers.or(helpers.cmp('docType', DocType.Canvas), helpers.cmp('docType', 'IS', null))
+        );
+      }
+
+      query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
+      }
+
+      return query.limit(limit).related('participants');
+    }
+  ),
 
   // Query for user's Quarto docs
   userQuartoDocs: defineQuery(({ ctx }) => {
@@ -843,6 +872,30 @@ export const queries = defineQueries({
       .related('participants')
       .related('channel');
   }),
+  userQuartoDocsPaginated: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.canvases
+        .where('docType', DocType.Quarto)
+        .where((helpers) => {
+          return helpers.or(
+            helpers.cmp('createdBy', ctx.userID),
+            helpers.exists('participants', (p) => p.where('userId', ctx.userID))
+          );
+        })
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
+      }
+
+      return query.limit(limit).related('participants');
+    }
+  ),
 
   getUsers: defineQuery(
     z.object({ updatedAt: z.number().optional() }).optional(),
@@ -1200,6 +1253,37 @@ export const queries = defineQueries({
       return query.orderBy('updatedAt', 'desc').related('participants').related('channel');
     }
   ),
+  channelCanvasesPaginated: defineQuery(
+    z.object({
+      channelId: z.string(),
+      includeQuartoDocs: z.boolean().optional(),
+      limit: z.number(),
+      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { channelId, includeQuartoDocs, limit, start } }) => {
+      let query = zql.canvases.where('channelId', channelId).where((helpers) => {
+        return helpers.or(
+          helpers.cmp('createdBy', ctx.userID),
+          helpers.cmp('visibility', CanvasVisibility.PUBLIC),
+          helpers.exists('participants', (p) => p.where('userId', ctx.userID))
+        );
+      });
+
+      if (!includeQuartoDocs) {
+        query = query.where((helpers) =>
+          helpers.or(helpers.cmp('docType', DocType.Canvas), helpers.cmp('docType', 'IS', null))
+        );
+      }
+
+      query = query.orderBy('updatedAt', 'desc').orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
+      }
+
+      return query.limit(limit).related('participants').related('channel');
+    }
+  ),
 
   // Query for Quarto docs in a channel
   // All channel-scoped Quarto docs are visible to all channel members
@@ -1211,6 +1295,26 @@ export const queries = defineQueries({
       .related('participants')
       .related('channel');
   }),
+  channelQuartoDocsPaginated: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ id: z.string(), updatedAt: z.number() }).nullable(),
+    }),
+    ({ args: { channelId, limit, start } }) => {
+      let query = zql.canvases
+        .where('channelId', channelId)
+        .where('docType', DocType.Quarto)
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ updatedAt: start.updatedAt, id: start.id }, { inclusive: false });
+      }
+
+      return query.limit(limit).related('participants').related('channel');
+    }
+  ),
 
   canvasParticipants: defineQuery(z.object({ canvasId: z.string() }), ({ args: { canvasId } }) => {
     return zql.canvas_participants.where('canvasId', canvasId).related('canvas');
