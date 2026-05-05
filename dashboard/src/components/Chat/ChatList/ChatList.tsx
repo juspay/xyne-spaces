@@ -33,6 +33,8 @@ const ChatList = ({
   const navigate = useNavigate();
   const { user } = useAuthContext();
   const location = useLocation();
+  const activityNavigationNonce =
+    (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevMessageLengthRef = useRef(0);
   const hasInitialScrolledRef = useRef<string | null>(null);
@@ -224,7 +226,13 @@ const ChatList = ({
       return (): void => clearTimeout(timeoutId);
     }
     return undefined;
-  }, [location.hash, scrollToOrigin, messagesWithDateSeparators.length]);
+  }, [
+    activityNavigationNonce,
+    location.hash,
+    location.key,
+    scrollToOrigin,
+    messagesWithDateSeparators.length,
+  ]);
 
   /**
    * Scroll to bottom on initial load if no saved position exists and no origin hash

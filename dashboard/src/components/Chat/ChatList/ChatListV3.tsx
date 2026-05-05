@@ -16,7 +16,7 @@ import { useCombinedMesseges } from './ChatListV2.utils';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { formatDatePill } from '../../../utils/dateUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { ArrowDown } from 'lucide-react';
 import { mutators } from '../../../zero/mutators';
@@ -151,6 +151,9 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const zero = useZero();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const activityNavigationNonce =
+    (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
   const { baseRoute } = useRouteContext();
   const { editingMessageId, requestEdit } = useEditContext();
   const channelParticipation = useGetChannelUserStatus(channelId);
@@ -196,6 +199,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const [newConversationBoundary, setNewConversationBoundary] =
     useState<NewConversationBoundary | null>(null);
 
+  const initialLinkedIdRef = useRef<string | null>(null);
   const [initialTopMostItemIndex, setInitialTopMostItemIndex] = useState<VirtuosoIndex | null>(
     () => {
       if (cachedConversations.length === 0) return null;
@@ -205,9 +209,11 @@ const ChatListV3: React.FC<ChatListProps> = ({
         const idx = cachedConversations.findIndex(c => c.conversationId === linkedConversationId);
         if (idx !== -1) {
           const isLast = idx === cachedConversations.length - 1;
+          const navigationKey = `${linkedConversationId}:${location.key}:${activityNavigationNonce}`;
+          initialLinkedIdRef.current = navigationKey;
           return {
             index: isLast ? firstItemIndex + idx : idx,
-            align: isLast ? ('end' as const) : ('center' as const),
+            align: isLast ? ('end' as const) : ('start' as const),
           };
         }
         return null;
@@ -216,7 +222,6 @@ const ChatListV3: React.FC<ChatListProps> = ({
       return { index: 'LAST' as const, align: 'end' as const };
     },
   );
-  const initialLinkedIdRef = useRef(linkedConversationId);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isNearBottomRef = useRef(false);
@@ -449,10 +454,12 @@ const ChatListV3: React.FC<ChatListProps> = ({
           index: isLast ? firstItemIndex + idx : idx,
           align: isLast ? 'end' : 'start',
         };
+        const navigationKey = `${linkedConversationId}:${location.key}:${activityNavigationNonce}`;
+        initialLinkedIdRef.current = navigationKey;
       }
     }
 
-    if (computed.index === 'LAST') {
+    if (computed.index === 'LAST' && !linkedConversationId) {
       const newConvIdx = computeNewConvIdx(
         combinedMessages,
         channelParticipation?.lastViewedAt,
@@ -468,36 +475,46 @@ const ChatListV3: React.FC<ChatListProps> = ({
     }
 
     setInitialTopMostItemIndex(computed);
-    lastAutoScrollKeyRef.current = lastConversationAutoScrollKey || undefined;
+    lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isInitialLoadComplete, combinedMessages, lastConversationAutoScrollKey]);
 
   useEffect(() => {
     if (!linkedItemCreatedAt || !linkedConversationId || !isInitialLoadComplete) return;
-    // Skip the very first linked id — already positioned by initialTopMostItemIndex
-    if (linkedConversationId === initialLinkedIdRef.current) return;
-    initialLinkedIdRef.current = linkedConversationId;
+    const navigationKey = `${linkedConversationId}:${location.key}:${activityNavigationNonce}`;
+    if (navigationKey === initialLinkedIdRef.current) return;
+    initialLinkedIdRef.current = navigationKey;
 
     const idx = combinedMessages.findIndex(
       item => item.data.conversationId === linkedConversationId,
     );
     if (idx !== -1) {
       const isLast = idx === combinedMessages.length - 1;
-      virtuosoRef.current?.scrollIntoView({
-        index: isLast ? firstItemIndex + idx : idx,
-        align: isLast ? 'end' : 'start',
-        behavior: 'smooth',
+      // align to the actual rendered node after Virtuoso re-measures row heights.
+      requestAnimationFrame(() => {
+        virtuosoRef.current?.scrollIntoView({
+          index: isLast ? firstItemIndex + idx : idx,
+          align: isLast ? 'end' : 'start',
+          behavior: 'smooth',
+        });
       });
     } else {
       setOldestConversationsAnchor(linkedItemCreatedAt);
       setNewConversationsAnchor(linkedItemCreatedAt);
     }
-  }, [linkedConversationId, isInitialLoadComplete]);
+  }, [linkedConversationId, activityNavigationNonce, isInitialLoadComplete]);
 
   useEffect(() => {
     if (!isInitialLoadComplete) return;
     const last = conversations[conversations.length - 1];
-    if (!last || lastConversationAutoScrollKey === lastAutoScrollKeyRef.current) return;
+    if (!last) return;
+
+    if (lastAutoScrollKeyRef.current === undefined) {
+      lastAutoScrollKeyRef.current = lastConversationAutoScrollKey;
+      return;
+    }
+
+    if (lastConversationAutoScrollKey === lastAutoScrollKeyRef.current) return;
     const lastInitMsg = getInitialMessageFromConversation(last);
     const isOwnMessage = lastInitMsg?.senderId === user?.id;
     if (isNearBottomRef.current || isOwnMessage) {

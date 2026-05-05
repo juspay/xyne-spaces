@@ -72,7 +72,11 @@ export const ActivityItemCard = ({
       ? (supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
       : targetPath;
     if (path) {
-      void navigate(path);
+      void navigate(path, {
+        state: {
+          activityNavigationNonce: Date.now(),
+        },
+      });
     }
   };
 

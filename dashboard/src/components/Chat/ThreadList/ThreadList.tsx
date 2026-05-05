@@ -56,6 +56,8 @@ const ThreadList = ({
   const { user } = useAuthContext();
   const { editingMessageId, requestEdit } = useEditContext();
   const location = useLocation();
+  const activityNavigationNonce =
+    (location.state as { activityNavigationNonce?: number } | null)?.activityNavigationNonce ?? 0;
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollContentRef = useRef<HTMLDivElement>(null);
   const hasAppliedInitialScrollRef = useRef(false);
@@ -118,10 +120,15 @@ const ThreadList = ({
   const [isNearBottom, setIsNearBottom] = useState(false);
   const [hasOverflow, setHasOverflow] = useState(false);
 
-  const { firstUnreadIndex, updateLastReadAt, savedScrollPosition, saveScrollPosition } =
-    useThreadReadTracking(conversationId, threadMessages, {
-      disableScrollTracking: enableCollapsing,
-    });
+  const {
+    firstUnreadIndex,
+    updateLastReadAt,
+    savedScrollPosition,
+    saveScrollPosition,
+    isTrackingHydrated,
+  } = useThreadReadTracking(conversationId, threadMessages, {
+    disableScrollTracking: enableCollapsing,
+  });
 
   const showFab = enableJumpFab && hasOverflow && !isNearBottom && threadMessages.length > 0;
 
@@ -148,7 +155,7 @@ const ThreadList = ({
     hasAppliedInitialScrollRef.current = false;
     setIsNearBottom(false);
     setHasOverflow(false);
-  }, [conversationId, location.key, location.hash]);
+  }, [conversationId, location.key, location.hash, activityNavigationNonce]);
 
   useThreadListInitialScroll({
     scrollContainerRef,
@@ -160,6 +167,7 @@ const ThreadList = ({
     savedScrollPosition,
     initialScrollOffset,
     isMessagesLoaded,
+    isTrackingHydrated,
     hasAppliedInitialScrollRef,
     setIsNearBottom,
   });
@@ -282,7 +290,7 @@ const ThreadList = ({
     return (): void => {
       observer.disconnect();
     };
-  }, [threadMessages]);
+  }, [threadMessages, location.key, location.hash, activityNavigationNonce]);
 
   /**
    * Track scroll position changes for persistence (debounced)
