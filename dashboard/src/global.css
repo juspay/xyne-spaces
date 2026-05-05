@@ -1214,6 +1214,28 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
   background: hsl(var(--muted-foreground));
 }
 
+/* DM List Item Message Preview - scoped override for codeblocks */
+[data-message-preview="true"] .message-html-root,
+[data-message-preview="true"] .message-html-root * {
+  display: inline !important;
+  white-space: nowrap !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+[data-message-preview="true"] .message-html-root br {
+  display: none !important;
+}
+
+[data-message-preview="true"] .message-html-root a {
+  color: var(--link-color) !important;
+  text-decoration: underline !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
 /* ----------------------------
    Tables
    ---------------------------- */
