@@ -163,7 +163,11 @@ const getRedirection = (
 
     const handleClick = (e: React.MouseEvent): void => {
       e.stopPropagation();
-      void navigate(url);
+      void navigate(url, {
+        state: {
+          activityNavigationNonce: Date.now(),
+        },
+      });
     };
 
     return (

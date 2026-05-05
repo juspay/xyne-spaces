@@ -9,12 +9,14 @@ export type ThreadScrollIntent =
   | { type: 'firstUnread'; index: number }
   | { type: 'saved'; position: number }
   | { type: 'bottom' }
-  | { type: 'noop' };
+  | { type: 'noop' }
+  | { type: 'wait' };
 
 export function deriveThreadScrollIntent(params: {
   hash: string;
   conversationId: string;
   enableCollapsing: boolean;
+  isTrackingHydrated: boolean;
   firstUnreadIndex: number | null;
   savedScrollPosition: number | null;
   initialScrollOffset: number | undefined;
@@ -23,6 +25,7 @@ export function deriveThreadScrollIntent(params: {
     hash,
     conversationId,
     enableCollapsing,
+    isTrackingHydrated,
     firstUnreadIndex,
     savedScrollPosition,
     initialScrollOffset,
@@ -37,6 +40,12 @@ export function deriveThreadScrollIntent(params: {
 
   if (originConversationId === conversationId && targetMessageId) {
     return { type: 'hash', messageId: targetMessageId };
+  }
+
+  // Do not commit fallback intent until thread tracking state is loaded.
+  // Without this, first render chooses initialScrollOffset (often 0) and locks there.
+  if (!isTrackingHydrated) {
+    return { type: 'wait' };
   }
 
   if (!enableCollapsing && firstUnreadIndex !== null) {
@@ -68,6 +77,8 @@ function isScrollReady(
   }
 
   switch (intent.type) {
+    case 'wait':
+      return false;
     case 'noop':
       return true;
     case 'hash':
@@ -89,6 +100,7 @@ export type UseThreadListInitialScrollArgs = {
   savedScrollPosition: number | null;
   initialScrollOffset: number | undefined;
   isMessagesLoaded: boolean;
+  isTrackingHydrated: boolean;
   hasAppliedInitialScrollRef: MutableRefObject<boolean>;
   setIsNearBottom: (value: boolean) => void;
 };
@@ -103,6 +115,7 @@ export function useThreadListInitialScroll({
   savedScrollPosition,
   initialScrollOffset,
   isMessagesLoaded,
+  isTrackingHydrated,
   hasAppliedInitialScrollRef,
   setIsNearBottom,
 }: UseThreadListInitialScrollArgs): void {
@@ -112,6 +125,7 @@ export function useThreadListInitialScroll({
         hash: location.hash,
         conversationId,
         enableCollapsing,
+        isTrackingHydrated,
         firstUnreadIndex,
         savedScrollPosition,
         initialScrollOffset,
@@ -121,6 +135,7 @@ export function useThreadListInitialScroll({
       enableCollapsing,
       firstUnreadIndex,
       initialScrollOffset,
+      isTrackingHydrated,
       location.hash,
       savedScrollPosition,
       isMessagesLoaded,
@@ -202,16 +217,15 @@ export function useThreadListInitialScroll({
     const needsDomNode = scrollIntent.type === 'hash' || scrollIntent.type === 'firstUnread';
 
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+      run();
+      if (!hasAppliedInitialScrollRef.current && needsDomNode) {
         run();
-        if (!hasAppliedInitialScrollRef.current && needsDomNode) {
-          run();
-        }
-      });
+      }
     });
   }, [
     conversationId,
     hasAppliedInitialScrollRef,
+    location.key,
     scrollContainerRef,
     scrollIntent,
     scrollReady,

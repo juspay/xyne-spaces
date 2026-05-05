@@ -13,6 +13,7 @@ interface UseThreadReadTrackingReturn {
   firstUnreadIndex: number | null;
   savedScrollPosition: number | null;
   saveScrollPosition: (scrollTop: number) => void;
+  isTrackingHydrated: boolean;
 }
 
 interface UseThreadReadTrackingOptions {
@@ -27,8 +28,10 @@ export const useThreadReadTracking = (
   const disableScrollTracking = options?.disableScrollTracking ?? false;
   const [lastReadAt, setLastReadAt] = useState<number | null>(null);
   const [savedScrollPosition, setSavedScrollPosition] = useState<number | null>(null);
+  const [isTrackingHydrated, setIsTrackingHydrated] = useState(false);
 
   useEffect(() => {
+    setIsTrackingHydrated(false);
     const tracking = getThreadTrackingSnapshot(conversationId);
     setLastReadAt(tracking?.lastReadAt ?? null);
     setSavedScrollPosition(disableScrollTracking ? null : (tracking?.scrollTop ?? null));
@@ -38,6 +41,7 @@ export const useThreadReadTracking = (
     // not from "now". The state will be updated when the user scrolls to bottom or
     // auto-scrolls, via updateLastReadAt().
     setThreadLastRead(conversationId, Date.now());
+    setIsTrackingHydrated(true);
   }, [conversationId, disableScrollTracking]);
 
   const updateLastReadAt = useCallback(() => {
@@ -75,5 +79,6 @@ export const useThreadReadTracking = (
     firstUnreadIndex,
     savedScrollPosition,
     saveScrollPosition,
+    isTrackingHydrated,
   };
 };
