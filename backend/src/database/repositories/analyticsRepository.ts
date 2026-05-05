@@ -209,9 +209,11 @@ export class AnalyticsRepository {
         m."conversationId", 
         m."metadata", 
         m."createdAt"
-      FROM "public"."messages" m
+      FROM "public"."messages_without_content" m
       INNER JOIN "public"."conversations" c 
         ON c."conversationId" = m."conversationId"
+      INNER JOIN "public"."channels" ch
+        ON ch."id" = c."channelId"
       WHERE 
         m."msgType" = 'USER'
         AND m."createdAt" >= ${gte}::timestamp
@@ -222,6 +224,10 @@ export class AnalyticsRepository {
           FROM "workflow"."external_sources" es
           WHERE es."channelId" = c."channelId"
             AND m."createdAt" < es."createdAt"
+        )
+        AND NOT (
+          ch."type" = 'EMAIL'
+          AND (c."parentMessageId" IS NULL OR m."messageId" = c."initialMessageId")
         )
     `);
 
