@@ -14,7 +14,6 @@ import {
   LookupType,
   TicketPriority,
   TicketStatusV2,
-  TicketTag,
   type User as UserType,
 } from '@xyne/shared';
 import {
@@ -504,9 +503,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     debounceMs: 2000,
   });
 
-  // Query all tickets in the project to extract available tags
-  const [projectTickets] = useCachedQuery(
-    queries.ticketsByProject({ projectId: selectedChannelProjectId }),
+  // Query tags only when the tags dropdown has been opened
+  const [tagsQueried, setTagsQueried] = useState(false);
+  const [projectTags] = useCachedQuery(
+    queries.tagsByProject({ projectId: selectedChannelProjectId }),
+    { enabled: tagsQueried },
   );
 
   const userGroupOptions = useUserGroups();
@@ -1123,25 +1124,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       });
   };
 
-  // get unique tags from all project tickets
+  // get unique tags from project
   const availableTags = useMemo(() => {
-    if (!projectTickets) return [];
+    if (!projectTags) return [];
 
     const tagSet = new Set<string>();
-    projectTickets.forEach(t => {
-      // Type guard to safely check for tags property
-      if ('tags' in t && Array.isArray(t.tags)) {
-        const ticketTags = t.tags as TicketTag[];
-        ticketTags.forEach(tag => {
-          if (tag?.name) {
-            tagSet.add(tag.name);
-          }
-        });
+    projectTags.forEach(tag => {
+      if (tag?.name) {
+        tagSet.add(tag.name);
       }
     });
 
     return Array.from(tagSet).sort();
-  }, [projectTickets]);
+  }, [projectTags]);
 
   // Helper functions for dynamic field value normalization
   const getSingleStringValue = (value: string | string[]): string => {
@@ -2232,6 +2227,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     onCreateOption={(value: string) => {
                       setNewTags(prev => [...prev, value]);
                       field.handleChange([...field.state.value, value]);
+                    }}
+                    onOpenChange={open => {
+                      if (open) setTagsQueried(true);
                     }}
                     placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
                     searchPlaceholder='Search labels'

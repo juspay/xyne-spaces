@@ -1187,6 +1187,13 @@ export const queries = defineQueries({
       .orderBy('createdAt', 'desc')
   ),
 
+  tagsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
+    return zql.ticket_tags
+      .whereExists('ticket', t =>
+        t.where('projectId', projectId)
+          .where('isArchived', false),
+      );
+  }),
 
   boardsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
     return zql.boards

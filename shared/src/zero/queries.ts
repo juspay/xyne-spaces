@@ -2009,6 +2009,13 @@ export const queries = defineQueries({
   getAllTicketTags: defineQuery(() => {
     return zql.ticket_tags;
   }),
+  tagsByProject: defineQuery(z.object({ projectId: z.string() }), ({ args: { projectId } }) => {
+    return zql.ticket_tags
+      .whereExists('ticket', t =>
+        t.where('projectId', projectId)
+          .where('isArchived', false),
+      );
+  }),
   // Query for ticket entity mappings by ticket ID
   getTicketEntityMappingsByTicketId: defineQuery(
     z.object({ ticketId: z.string() }),
