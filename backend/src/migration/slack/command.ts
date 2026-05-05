@@ -8,6 +8,7 @@ import { WebClient } from '@slack/web-api';
 import { logger } from '../../utils/logger';
 import { getSyncModal, getSyncJiraffeModal } from './utils/blockKit';
 import { verifySlackRequest } from './middleware/verifySlackRequest';
+import { handleSyncParticipantsCommand } from './syncParticipants';
 import { config } from '../../config/env';
 import { UserRepository } from '../../database/repositories/users';
 import { UserGroupRepository } from '../../database/repositories/userGroups';
@@ -18,7 +19,7 @@ const router = Router();
 /**
  * Check if user is authorized to run migration commands
  */
-async function checkUserAuthorization(user_id: string): Promise<{ authorized: boolean; message?: string }> {
+export async function checkUserAuthorization(user_id: string): Promise<{ authorized: boolean; message?: string }> {
   const approvedUsers = config.slackMigrationApprovals;
 
   if (approvedUsers.length > 0) {
@@ -179,12 +180,15 @@ router.post('/command', verifySlackRequest, async (req: Request, res: Response) 
       
       case '/sync-jiraffe':
         return await handleSyncJiraffeCommand(req, res);
-      
+
+      case '/sync-participants':
+        return await handleSyncParticipantsCommand(req, res);
+
       default:
         logger.warn('[Migration] Unknown command received', { command });
         return res.status(200).json({
           response_type: 'ephemeral',
-          text: `❌ Unknown command: ${command}\n\nAvailable commands: /sync, /sync-jiraffe`,
+          text: `❌ Unknown command: ${command}\n\nAvailable commands: /sync, /sync-jiraffe, /sync-participants`,
         });
     }
   } catch (error) {
