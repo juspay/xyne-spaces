@@ -192,6 +192,44 @@ export function getSyncJiraffeModal(channelId?: string) {
   };
 }
 
+export function getSyncParticipantsModal(channelId?: string) {
+  return {
+    type: 'modal',
+    callback_id: 'sync_participants_modal',
+    private_metadata: channelId ? JSON.stringify({ channel_id: channelId }) : undefined,
+    title: {
+      type: 'plain_text',
+      text: 'Sync Participants',
+    },
+    submit: {
+      type: 'plain_text',
+      text: 'Start Sync',
+    },
+    close: {
+      type: 'plain_text',
+      text: 'Cancel',
+    },
+    blocks: [
+      {
+        type: 'input',
+        block_id: 'xyne_space_channel_id',
+        label: {
+          type: 'plain_text',
+          text: 'Xyne Space Channel ID',
+        },
+        element: {
+          type: 'plain_text_input',
+          action_id: 'xyne_space_channel_input',
+          placeholder: {
+            type: 'plain_text',
+            text: 'Enter Xyne Space channel ID',
+          },
+        },
+      },
+    ],
+  };
+}
+
 export function getMigrationMessageBlocks(data: MigrationMessageData) {
   const optionsText = formatSyncOptions(data.syncOptions);
   const today = new Date().toISOString().split('T')[0]; // Get today's date in YYYY-MM-DD format

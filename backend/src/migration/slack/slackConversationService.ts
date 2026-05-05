@@ -289,7 +289,9 @@ async function validateInput(input: MigrationInput): Promise<void> {
  */
 export async function addChannelParticipantsBeforeMigration(
   slackChannelId: string,
-  xyneChannelId: string
+  xyneChannelId: string,
+  batchSync: boolean = false,
+  threadTs?: string
 ): Promise<void> {
   logger.info('[Migration] Preparing channel participants before migration', {
     slackChannelId,
@@ -435,17 +437,48 @@ export async function addChannelParticipantsBeforeMigration(
     // Add remaining members as MEMBER
     const memberUserIds = memberUsers.map((u) => u.xyneUserId);
     if (memberUserIds.length > 0) {
-      const result = await channelParticipantRepo.addParticipantsBatch(
-        xyneChannelId,
-        memberUserIds,
-        'MEMBER'
-      );
+      if (batchSync) {
+        const BATCH_SIZE = 50;
+        const PARTICIPANT_BATCH_DELAY_MS = 60000;
+        for (let i = 0; i < memberUserIds.length; i += BATCH_SIZE) {
+          const chunk = memberUserIds.slice(i, i + BATCH_SIZE);
+          const result = await channelParticipantRepo.addParticipantsBatch(xyneChannelId, chunk, 'MEMBER');
+          const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+          const totalBatches = Math.ceil(memberUserIds.length / BATCH_SIZE);
+          logger.info('[Migration] Participant batch added', {
+            xyneChannelId,
+            batchNum,
+            totalBatches,
+            addedCount: result.addedCount,
+            existingCount: result.existingCount,
+          });
+          await postMessage({
+            channelId: slackChannelId,
+            text: `✅ Batch ${batchNum}/${totalBatches}: added ${result.addedCount} participant(s).`,
+            threadTs,
+          });
+          if (i + BATCH_SIZE < memberUserIds.length) {
+            await postMessage({
+              channelId: slackChannelId,
+              text: `⏳ Waiting 60 seconds before next batch...`,
+              threadTs,
+            });
+            await new Promise((resolve) => setTimeout(resolve, PARTICIPANT_BATCH_DELAY_MS));
+          }
+        }
+      } else {
+        const result = await channelParticipantRepo.addParticipantsBatch(
+          xyneChannelId,
+          memberUserIds,
+          'MEMBER'
+        );
 
-      logger.info('[Migration] Channel participants batch added', {
-        xyneChannelId,
-        addedCount: result.addedCount,
-        existingCount: result.existingCount,
-      });
+        logger.info('[Migration] Channel participants batch added', {
+          xyneChannelId,
+          addedCount: result.addedCount,
+          existingCount: result.existingCount,
+        });
+      }
     }
 
     // Queue Vespa re-indexing for the channel (single job for all participants)

@@ -13,6 +13,7 @@ import { config } from '../../config/env';
 import { UserRepository } from '../../database/repositories/users';
 import { UserGroupRepository } from '../../database/repositories/userGroups';
 import { UserGroupMappingRepository } from '../../database/repositories/userGroupMappingRepository';
+import { handleSyncPinnedMessagesCommand } from './syncPinnedMessagesService';
 
 const router = Router();
 
@@ -183,12 +184,15 @@ router.post('/command', verifySlackRequest, async (req: Request, res: Response) 
 
       case '/sync-participants':
         return await handleSyncParticipantsCommand(req, res);
+      
+      case '/sync-pinned-messages':
+        return await handleSyncPinnedMessagesCommand(req, res);
 
       default:
         logger.warn('[Migration] Unknown command received', { command });
         return res.status(200).json({
           response_type: 'ephemeral',
-          text: `❌ Unknown command: ${command}\n\nAvailable commands: /sync, /sync-jiraffe, /sync-participants`,
+          text: `❌ Unknown command: ${command}\n\nAvailable commands: /sync, /sync-jiraffe, /sync-pinned-messages, /sync-participants`,
         });
     }
   } catch (error) {

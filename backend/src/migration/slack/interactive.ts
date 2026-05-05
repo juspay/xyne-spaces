@@ -7,6 +7,7 @@ import { Router, Request, Response } from 'express';
 import { logger } from '../../utils/logger';
 import { runMigration } from './slackConversationService';
 import { runMigrationJiraffe } from './slackJiraffeService';
+import { runSyncParticipants } from './syncParticipants';
 import { verifySlackRequest } from './middleware/verifySlackRequest';
 
 const router = Router();
@@ -118,6 +119,45 @@ router.post('/interactive', verifySlackRequest, async (req: Request, res: Respon
         )
         .catch((error) => {
           logger.error('[Migration] Error processing migration', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        });
+
+      return;
+    }
+
+    if (type === 'view_submission' && view?.callback_id === 'sync_participants_modal') {
+      const values = view.state.values || {};
+      const xyneSpaceChannelId = values.xyne_space_channel_id?.xyne_space_channel_input?.value;
+
+      if (!xyneSpaceChannelId) {
+        return res.status(200).json({
+          response_action: 'errors',
+          errors: { xyne_space_channel_id: 'Please enter a Xyne Space channel ID' },
+        });
+      }
+
+      let channelId = container?.channel_id;
+      if (!channelId && view.private_metadata) {
+        try {
+          const metadata = JSON.parse(view.private_metadata);
+          channelId = metadata.channel_id;
+        } catch (e) {
+          logger.warn('[Migration] Failed to parse private_metadata', { error: e });
+        }
+      }
+
+      if (!channelId) {
+        logger.error('[Migration] Channel ID not found for sync_participants_modal');
+        return res.status(200).json({ response_action: 'clear' });
+      }
+
+      res.status(200).json({ response_action: 'clear' });
+
+      Promise.resolve()
+        .then(() => runSyncParticipants({ slackChannelId: channelId, xyneSpaceChannelId, userId: user?.id }))
+        .catch((error) => {
+          logger.error('[Migration] Error processing sync-participants', {
             error: error instanceof Error ? error.message : 'Unknown error',
           });
         });
