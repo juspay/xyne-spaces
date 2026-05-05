@@ -98,7 +98,9 @@ export const DmListItem = ({
     return (
       <>
         {prefix}
-        <RenderMessageWithHTML message={sanitizedHtml} breakLongLinks={false} />
+        <span data-message-preview='true'>
+          <RenderMessageWithHTML message={sanitizedHtml} breakLongLinks={false} />
+        </span>
       </>
     );
   }, [sanitizedHtml, lastMessage, lastMessageSender, context.userID]);
@@ -188,7 +190,8 @@ export const DmListItem = ({
                 'min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[14px] font-normal leading-[1.35] text-muted-foreground',
                 // Make RenderMessageWithHTML output inline and preserve link styles
                 '[&_.message-html-root]:inline',
-                '[&_.message-html-root>*]:inline',
+                '[&_.message-html-root_*]:inline',
+                '[&_.message-html-root_pre]:!inline [&_.message-html-root_pre]:!whitespace-nowrap',
                 '[&_.message-html-root_br]:hidden',
                 '[&_.message-html-root_a]:!text-[var(--link-color)]',
                 '[&_.message-html-root_a]:!no-underline',
@@ -299,7 +302,8 @@ export const DmListItem = ({
                 unreadCount > 0 && 'text-foreground font-medium',
                 // Make RenderMessageWithHTML output inline and preserve link styles
                 '[&_.message-html-root]:inline',
-                '[&_.message-html-root>*]:inline',
+                '[&_.message-html-root_*]:inline',
+                '[&_.message-html-root_pre]:!inline [&_.message-html-root_pre]:!whitespace-nowrap',
                 '[&_.message-html-root_br]:hidden',
                 '[&_.message-html-root_a]:!text-[var(--link-color)]',
                 '[&_.message-html-root_a]:!no-underline',
