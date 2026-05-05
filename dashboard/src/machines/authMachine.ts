@@ -1065,8 +1065,13 @@ export const authMachine = createMachine(
           const urlParams = new URLSearchParams(window.location.search);
           const isAdmin = urlParams.get('isAdmin') === 'true';
 
+          const query = new URLSearchParams({ fixed: 'true' });
+          if (isAdmin) {
+            query.set('isAdmin', 'true');
+          }
+
           const response = await axios.post(
-            `${API_BASE_URL}/test/auth/login${isAdmin ? '?isAdmin=true' : ''}`,
+            `${API_BASE_URL}/test/auth/login?${query.toString()}`,
             {},
             {
               withCredentials: true,
