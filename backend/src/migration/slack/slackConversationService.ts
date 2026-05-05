@@ -287,7 +287,7 @@ async function validateInput(input: MigrationInput): Promise<void> {
  * First collects and validates all users, then batch adds if no failures
  * If any failures exist, posts error to Slack and throws without adding anyone
  */
-async function addChannelParticipantsBeforeMigration(
+export async function addChannelParticipantsBeforeMigration(
   slackChannelId: string,
   xyneChannelId: string
 ): Promise<void> {
