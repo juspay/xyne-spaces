@@ -863,7 +863,7 @@ class NotificationService {
       type: NotificationType.CHANNEL_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
-      actionUrl: `/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
+      actionUrl: `/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -959,13 +959,16 @@ class NotificationService {
       notificationContext,
     });
 
+    const mentionActionUrl = isThreadMessage
+      ? `/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
     const notificationData = {
       title,
       message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
       type: NotificationType.MENTION,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
-      actionUrl: `/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`,
+      actionUrl: mentionActionUrl,
       metadata: {
         channelId,
         conversationId,
