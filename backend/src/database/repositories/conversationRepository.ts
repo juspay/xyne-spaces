@@ -124,10 +124,19 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       throw new Error('Conversation not found');
     }
 
-    return await this.update(conversationId, {
+    const now = new Date();
+    const result = await this.update(conversationId, {
       replyCount: conversation.replyCount + 1,
-      lastActivityAt: new Date(),
+      lastActivityAt: now,
     });
+
+    // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
+    await this.db.conversationParticipant.updateMany({
+      where: { conversationId },
+      data: { lastReplyAt: now },
+    });
+
+    return result;
   }
 
   async decrementReplyCount(conversationId: string): Promise<Conversation> {

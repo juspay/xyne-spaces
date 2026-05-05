@@ -103,6 +103,7 @@ export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
           participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
           joinedAt: nowDate,
+          channelId,
         },
       });
 

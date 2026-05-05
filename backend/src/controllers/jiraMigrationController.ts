@@ -522,6 +522,7 @@ export class JiraMigrationController {
           participationType: 'AUTHOR',
           isSubscribed: true,
           joinedAt: now,
+          channelId,
         },
         update: {
           participationType: 'AUTHOR',

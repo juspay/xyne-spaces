@@ -1303,6 +1303,7 @@ export class JiraMigrationImportService {
     externalSourceId: string,
     issue: JiraIssue,
     conversationId: string,
+    channelId: string,
     fallbackUserId: string,
     unresolvedUsers: Map<string, UnresolvedJiraUser>,
   ): Promise<{
@@ -1424,6 +1425,7 @@ export class JiraMigrationImportService {
           participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
           joinedAt,
+          channelId,
         })),
         skipDuplicates: true,
       });
@@ -1448,6 +1450,14 @@ export class JiraMigrationImportService {
           ...(lastCommentAt && { lastActivityAt: lastCommentAt }),
         },
       });
+
+      // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
+      if (lastCommentAt) {
+        await db.conversationParticipant.updateMany({
+          where: { conversationId },
+          data: { lastReplyAt: lastCommentAt },
+        });
+      }
     }
 
     return { imported, skipped, lastCommentAt, commentMessageMap, comments };
@@ -2745,6 +2755,7 @@ export class JiraMigrationImportService {
                   participationType: ConversationParticipation.AUTHOR,
                   isSubscribed: true,
                   joinedAt: createdAt,
+                  channelId: channel.id,
                 },
                 update: {
                   participationType: ConversationParticipation.AUTHOR,
@@ -3048,7 +3059,7 @@ export class JiraMigrationImportService {
             | undefined;
 
           try {
-            const commentResult = await this.importComments(externalSourceId, issue, conversationId, fallbackUserId, unresolvedUsers);
+            const commentResult = await this.importComments(externalSourceId, issue, conversationId, channel.id, fallbackUserId, unresolvedUsers);
             importedComments += commentResult.imported;
             skippedComments += commentResult.skipped;
             importedCommentData = {

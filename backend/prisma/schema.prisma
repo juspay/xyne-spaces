@@ -1605,15 +1605,16 @@ model Channel {
   isArchived      Boolean                @default(false)
 
   // Relations
-  conversations      Conversation[]
-  participants       ChannelParticipant[]
-  participantsStatus ChannelUserStatus[]
-  createdByUser      User                 @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
-  project            Project              @relation(fields: [projectId], references: [id])
-  tickets            Ticket[]             @relation("TicketChannel")
-  calls              Call[]
-  channelStats       ChannelStats?
-  incomingWebhooks   AppIncomingWebhook[]
+  conversations              Conversation[]
+  participants               ChannelParticipant[]
+  conversationParticipants   ConversationParticipant[]
+  participantsStatus         ChannelUserStatus[]
+  createdByUser              User                 @relation("ChannelCreatedBy", fields: [createdBy], references: [id])
+  project                    Project              @relation(fields: [projectId], references: [id])
+  tickets                    Ticket[]             @relation("TicketChannel")
+  calls                      Call[]
+  channelStats               ChannelStats?
+  incomingWebhooks           AppIncomingWebhook[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -1756,15 +1757,19 @@ model ConversationParticipant {
   isSubscribed      Boolean                       @default(true) // Notification subscription status
   joinedAt          DateTime                      @default(now())
   lastReadAt        DateTime?                     // Track when user last read this thread conversation
+  lastReplyAt       DateTime?                     // Denormalized: set to conversation.lastActivityAt when a reply is sent. NULL = no replies.
+  channelId         String?                       // Denormalized from conversation.channelId for direct ACL check
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [conversationId])
+  channel      Channel?     @relation(fields: [channelId], references: [id])
   user         User         @relation(fields: [userId], references: [id])
 
   @@unique([conversationId, userId]) // One participation record per user per conversation
   @@index([conversationId]) // Fast conversation participant lookup
   @@index ([conversationId,participationType,joinedAt,id])
   @@index([userId]) // Fast user conversation lookup
+  @@index([userId, lastReplyAt(sort: Desc), id]) // For userConversationsPaginatedV2
 
   @@index([userId, id])
   @@map("conversation_participants")

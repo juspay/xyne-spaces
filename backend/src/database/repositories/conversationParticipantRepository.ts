@@ -7,6 +7,7 @@ export interface CreateConversationParticipantInput {
   userId: string;
   participationType?: ConversationParticipation;
   isSubscribed?: boolean;
+  channelId?: string;
 }
 
 export interface UpdateConversationParticipantInput {
@@ -43,6 +44,7 @@ export class ConversationParticipantRepository extends BaseRepository<
         userId: data.userId,
         participationType: data.participationType ?? null, // Can be AUTHOR, MENTIONED, or null (manual subscription)
         isSubscribed: data.isSubscribed ?? true, // Default to subscribed
+        ...(data.channelId && { channelId: data.channelId }),
       },
     });
   }
@@ -50,7 +52,8 @@ export class ConversationParticipantRepository extends BaseRepository<
   async createOrUpdateConversationParticipant(
     conversationId: string,
     userId: string,
-    participationType: ConversationParticipation
+    participationType: ConversationParticipation,
+    channelId?: string,
   ): Promise<ConversationParticipant> {
     await this.validateString(conversationId, 'conversationId');
     await this.validateString(userId, 'userId');
@@ -67,6 +70,7 @@ export class ConversationParticipantRepository extends BaseRepository<
         conversationId,
         userId,
         participationType,
+        ...(channelId && { channelId }),
       },
       update: {
         participationType,

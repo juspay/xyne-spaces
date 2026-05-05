@@ -862,6 +862,28 @@ export const queries = defineQueries({
       return query.limit(limit);
     },
   ),
+  userConversationsPaginatedV2: defineQuery(
+    z.object({
+      userId: z.string(),
+      limit: z.number(),
+      start: z.object({ lastReplyAt: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ args: { userId, limit, start } }) => {
+      let query = zql.conversation_participants
+        .where('userId', userId)
+        .where('lastReplyAt', 'IS NOT', null)
+        .related('conversation')
+        .orderBy('lastReplyAt', 'desc');
+
+      if (start) {
+        query = query.start(
+          { lastReplyAt: start.lastReplyAt, id: start.id },
+          { inclusive: false },
+        );
+      }
+      return query.limit(limit);
+    },
+  ),
   searchChannelParticipants: defineQuery(
     z.object({ channelId: z.string(), searchQuery: z.string() }),
     ({ args: { channelId, searchQuery } }) => {
