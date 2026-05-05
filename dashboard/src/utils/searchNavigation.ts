@@ -178,23 +178,23 @@ export const navigateToMessage = (
 };
 
 /**
- * Navigate to a specific mail inside a Desk thread.
+ * Navigate to a mail
  *
- * Target URL: /support/{xyneId}?conversationId={conversationId}&ticketId={ticketId}&mail={mailId}
+ * Target URL: /support/{channelId}/{xyneId}?conversationId={conversationId}&ticketId={ticketId}&mail={mailId}
  * The SupportScreen reads `mail` from the query string and scrolls to the
  * matching EmailThreadItem after the thread's emails have loaded.
  */
 export const navigateToMail = (result: DisplaySearchResult, navigate: NavigateFunction): void => {
-  const { xyneId, conversationId, ticketId, mailId } = result.searchContext || {};
-  if (!xyneId || !conversationId) {
-    toast.error('Cannot navigate to mail: missing conversation information');
+  const { xyneId, conversationId, ticketId, mailId, channelId } = result.searchContext || {};
+  if (!xyneId || !conversationId || !channelId) {
+    toast.error('Cannot navigate to mail: missing conversation or channel information');
     return;
   }
   const params = new URLSearchParams();
   params.set('conversationId', conversationId);
   if (ticketId) params.set('ticketId', ticketId);
   if (mailId) params.set('mail', mailId);
-  void navigate(`/support/${xyneId}?${params.toString()}`);
+  void navigate(`/support/${channelId}/${xyneId}?${params.toString()}`);
 };
 
 /**
