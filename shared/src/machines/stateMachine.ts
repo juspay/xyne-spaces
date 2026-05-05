@@ -437,7 +437,11 @@ export const stateMachine = setup({
     addUserDrafts: assign({
       draftMessages: ({ context, event }) => {
         if (event.type === 'ADD_USER_DRAFTS') {
-          return event.draftMessages;
+          return event.draftMessages.filter(d => {
+            const hasContent = d.content.trim() !== '';
+            const hasAttachments = (d.attachments?.length ?? 0) > 0;
+            return hasContent || hasAttachments;
+          });
         }
         return context.draftMessages;
       },
