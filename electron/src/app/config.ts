@@ -2,7 +2,7 @@
  * Application configuration constants
  */
 
-const { APP_ENV } = require('../../package.json');
+const { APP_ENV, SENTRY_DSN } = require('../../package.json');
 
 export interface CodeServerConfig {
   version: string;
@@ -59,7 +59,6 @@ const devConfig: AppConfig = {
   APP_NAME: 'Xyne Spaces DEV',
   APP_CONFIG: 'dev',
   APP_ID: "com.xyne.spaces.dev",
-  SENTRY_DSN: 'https://4ec5e3164a31edeb0db87ecf7c0978f3@o4507576052023296.ingest.us.sentry.io/4511031818846208',
   window: {
     width: 1200,
     height: 800,
@@ -125,7 +124,8 @@ const prodConfig: AppConfig = {
   agentInteract: {
     endpoint: "/api/query",
     method: "POST"
-  }
+  },
+  ...(SENTRY_DSN ? { SENTRY_DSN } : {}),
 };
 
 const sandboxConfig: AppConfig = {
@@ -140,7 +140,6 @@ const sandboxConfig: AppConfig = {
   APP_NAME: 'Xyne Spaces Sandbox',
   APP_CONFIG: 'sandbox',
   APP_ID: "com.xyne.spaces.sandbox",
-  SENTRY_DSN: 'https://4ec5e3164a31edeb0db87ecf7c0978f3@o4507576052023296.ingest.us.sentry.io/4511031818846208',
   window: {
     width: 1200,
     height: 800,
