@@ -180,6 +180,7 @@ const ChatListV3: React.FC<ChatListProps> = ({
   const [firstItemIndex, setFirstItemIndex] = useState(100000);
   const [stickyDate, setStickyDate] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [isFirstItemScrolledOff, setIsFirstItemScrolledOff] = useState(false);
 
   const rangeRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -713,6 +714,9 @@ const ChatListV3: React.FC<ChatListProps> = ({
       isNearBottomRef.current = range.endIndex >= lastIndex - 5;
       rangeRef.current = range;
 
+      // Track whether the first item has scrolled above the visible viewport
+      setIsFirstItemScrolledOff(range.startIndex > firstItemIndex);
+
       if (isNearBottomRef.current) fetchNewerMessages();
 
       if (latestConversationsListRef.current.length === 0 && !isNearBottomRef.current)
@@ -890,8 +894,8 @@ const ChatListV3: React.FC<ChatListProps> = ({
       data-testid='chat-message-list'
       className='flex-1 relative no-scrollbar min-h-0'
     >
-      {/* Sticky date pill overlay */}
-      {stickyDate && (
+      {/* Sticky date pill overlay — only shown when the first message has scrolled off-screen */}
+      {stickyDate && isFirstItemScrolledOff && (
         <div className='absolute top-0 left-0 right-0 z-10 pointer-events-none'>
           <div className='relative flex justify-center py-2'>
             <DatePill dateText={stickyDate} />
@@ -928,7 +932,8 @@ const ChatListV3: React.FC<ChatListProps> = ({
           const dateText = formatDatePill(item.createdAt);
           const showDatePill =
             !prevItem || item.createdAt.toDateString() !== prevItem.createdAt.toDateString();
-          const shouldHideInlineDatePill = showDatePill && dateText === stickyDate;
+          const shouldHideInlineDatePill =
+            showDatePill && dateText === stickyDate && isFirstItemScrolledOff && arrayIndex > 0;
 
           const isNewMessageBoundary =
             newConversationBoundary !== null && arrayIndex === newConversationBoundary.index;
