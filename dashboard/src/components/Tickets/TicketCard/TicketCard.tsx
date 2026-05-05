@@ -321,7 +321,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           <div className='bg-gradient-to-b from-xyne-purple-100 to-xyne-primary-100 w-1.5 self-stretch' />
         )}
         <div
-          className={cn('flex flex-col gap-2 w-full', isCompact ? 'p-0' : 'p-3 sm:p-4')}
+          className={cn('flex flex-col gap-2 w-full min-w-0', isCompact ? 'p-0' : 'p-3 sm:p-4')}
           ref={contentRef}
         >
           {/* Header Section */}
