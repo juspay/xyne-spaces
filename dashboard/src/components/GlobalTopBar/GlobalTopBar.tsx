@@ -17,12 +17,7 @@ import { invokeShortcut } from '../../shortcuts';
 import { toast } from 'sonner';
 import { Tooltip } from '../ui/Tooltip';
 import { WorkspaceSwitcher } from '../AppSidebar/WorkspaceSwitcher';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu';
+
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
 
 interface GlobalTopBarProps {
@@ -156,6 +151,7 @@ const GlobalTopBar = ({
   };
 
   const scheduleSupportMenuClose = (): void => {
+    if (menuTimerRef.current) clearTimeout(menuTimerRef.current);
     menuTimerRef.current = setTimeout(() => setSupportMenuOpen(false), 150);
   };
 
@@ -210,48 +206,61 @@ const GlobalTopBar = ({
             </Tooltip>
           )}
           {!isRecording && onOpenErrorReport && (
-            <DropdownMenu open={supportMenuOpen} onOpenChange={setSupportMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type='button'
-                  onMouseEnter={openSupportMenu}
-                  onMouseLeave={scheduleSupportMenuClose}
-                  className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] hover:bg-[var(--metrics-bar-hover-bg)]/80 transition-colors cursor-pointer'
-                  aria-label='support'
-                  data-track-category='ERROR_REPORT'
-                  data-track-name='OpenSupportMenu'
-                >
-                  <Headset size={14} className='text-[var(--metrics-bar-color)]' />
-                  <span>Support</span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align='end'
-                onMouseEnter={openSupportMenu}
-                onMouseLeave={scheduleSupportMenuClose}
+            <div
+              className='relative'
+              onMouseEnter={openSupportMenu}
+              onMouseLeave={scheduleSupportMenuClose}
+            >
+              <button
+                type='button'
+                className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] hover:bg-[var(--metrics-bar-hover-bg)]/80 transition-colors cursor-pointer'
+                aria-label='support'
+                aria-haspopup='true'
+                aria-expanded={supportMenuOpen}
+                data-track-category='ERROR_REPORT'
+                data-track-name='OpenSupportMenu'
               >
-                <DropdownMenuItem
-                  onSelect={onOpenErrorReport}
-                  data-track-category='ERROR_REPORT'
-                  data-track-name='OpenModal'
-                  className='flex items-center gap-2'
+                <Headset size={14} className='text-[var(--metrics-bar-color)]' />
+                <span>Support</span>
+              </button>
+              {supportMenuOpen && (
+                <div
+                  role='menu'
+                  className='absolute right-0 top-full mt-1 z-[60] min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md whitespace-nowrap'
                 >
-                  <AlertCircle className='size-4 shrink-0' />
-                  <span>Report issue</span>
-                </DropdownMenuItem>
-                {onViewMyTickets && (
-                  <DropdownMenuItem
-                    onSelect={onViewMyTickets}
+                  <button
+                    type='button'
+                    role='menuitem'
+                    className='relative flex w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground'
+                    onClick={() => {
+                      onOpenErrorReport();
+                      setSupportMenuOpen(false);
+                    }}
                     data-track-category='ERROR_REPORT'
-                    data-track-name='ViewMyTickets'
-                    className='flex items-center gap-2'
+                    data-track-name='OpenModal'
                   >
-                    <ExternalLink className='size-4 shrink-0' />
-                    <span>View my tickets</span>
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                    <AlertCircle className='size-4 shrink-0' />
+                    <span>Report issue</span>
+                  </button>
+                  {onViewMyTickets && (
+                    <button
+                      type='button'
+                      role='menuitem'
+                      className='relative flex w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground'
+                      onClick={() => {
+                        onViewMyTickets();
+                        setSupportMenuOpen(false);
+                      }}
+                      data-track-category='ERROR_REPORT'
+                      data-track-name='ViewMyTickets'
+                    >
+                      <ExternalLink className='size-4 shrink-0' />
+                      <span>View my tickets</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
