@@ -1321,10 +1321,12 @@ export const conversationParticipantTable = table('conversation_participants')
     id: string(),
     conversationId: string(),
     userId: string(),
+    channelId: string().optional(),
     participationType: enumeration<ConversationParticipation>().optional(),
     isSubscribed: boolean(),
     joinedAt: number(),
     lastReadAt: number().optional(),
+    lastReplyAt: number().optional(),
   })
   .primaryKey('id');
 
@@ -2871,6 +2873,11 @@ export const conversationParticipantTableRelationships = relationships(
       sourceField: ['conversationId'],
       destField: ['conversationId'],
       destSchema: conversationTable,
+    }),
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
     }),
     user: one({
       sourceField: ['userId'],

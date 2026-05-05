@@ -432,6 +432,7 @@ async function createNonParticipantSystemMessages(
         participationType: ConversationParticipation.AUTHOR,
         isSubscribed: true,
         joinedAt: now,
+        channelId: channelId,
       });
 
       logger.info(`✅ [NON-PARTICIPANT] Created new conversation ${newConversationId} with system message`);
@@ -721,6 +722,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.AUTHOR,
             isSubscribed: true,
             joinedAt: timestamp,
+            channelId: channelId,
           });
         },
       ),
@@ -1344,6 +1346,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.AUTHOR,
             isSubscribed: true,
             joinedAt: now,
+            channelId: channelId,
           });
         },
       ),
@@ -1546,6 +1549,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.AUTHOR,
             isSubscribed: true,
             joinedAt: now,
+            channelId: channelId,
           });
         },
       ),
@@ -1814,6 +1818,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.MENTIONED,
             isSubscribed: true,
             joinedAt: now,
+            channelId: channelId,
           });
 
           // Add mentioned users as MENTIONED participants within Zero transaction
@@ -1842,6 +1847,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   participationType: ConversationParticipation.MENTIONED,
                   isSubscribed: true,
                   joinedAt: now,
+                  channelId: channelId,
                 });
               }
             }
@@ -2237,6 +2243,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: ConversationParticipation.AUTHOR,
             isSubscribed: true,
             joinedAt: now,
+            channelId: targetChannelId,
           });
 
           logger.info(
@@ -2287,6 +2294,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             participationType: null as any, // Manual subscription (null = not AUTHOR/MENTIONED)
             isSubscribed: true,
             joinedAt: timestamp,
+            channelId: conversation.channelId,
           });
         }
       ),
@@ -2433,6 +2441,17 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
             lastActivityAt: timestamp,
           });
 
+          // Update lastReplyAt on all participants for this conversation
+          // (denormalized for userConversationsPaginatedV2 query)
+          const allParticipants = await tx.run(zql.conversation_participants
+            .where('conversationId', conversationId));
+          for (const p of allParticipants) {
+            await tx.mutate.conversation_participants.update({
+              id: p.id,
+              lastReplyAt: timestamp,
+            });
+          }
+
           if (showInChannel) {
             if (!childConversationId) {
               throw new Error('Child conversation ID is required when showInChannel is true');
@@ -2507,6 +2526,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               participationType: ConversationParticipation.AUTHOR,
               isSubscribed: true,
               joinedAt: timestamp,
+              channelId: conversation.channelId,
             });
           }
 
@@ -2536,6 +2556,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   participationType: ConversationParticipation.MENTIONED,
                   isSubscribed: true,
                   joinedAt: timestamp,
+                  channelId: conversation.channelId,
                 });
               }
             }
@@ -2563,6 +2584,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   participationType: ConversationParticipation.MENTIONED,
                   isSubscribed: true,
                   joinedAt: timestamp,
+                  channelId: conversation.channelId,
                 });
               }
             }
@@ -2718,6 +2740,10 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           const now = Date.now();
 
           // Add newly mentioned users as MENTIONED participants
+          // Look up conversation to get channelId for denormalized field
+          const mentionConversation = newlyMentionedUsers.length > 0
+            ? await tx.run(zql.conversations.where('conversationId', message.conversationId).one())
+            : null;
           if (newlyMentionedUsers.length > 0) {
             for (const userId of newlyMentionedUsers) {
               // Check if user is already a participant (could be AUTHOR or MENTIONED)
@@ -2735,6 +2761,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
                   participationType: ConversationParticipation.MENTIONED,
                   isSubscribed: true,
                   joinedAt: now,
+                  channelId: mentionConversation?.channelId,
                 });
               }
             }
@@ -4150,6 +4177,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               conversationId,
               userId: authData.sub,
               joinedAt: timestamp,
+              channelId: channelId,
               lastReadAt: timestamp,
               isSubscribed: false,
               participationType: null,

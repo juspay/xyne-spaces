@@ -217,6 +217,12 @@ export class TicketController {
         },
       });
 
+      // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
+      await db.conversationParticipant.updateMany({
+        where: { conversationId },
+        data: { lastReplyAt: now },
+      });
+
       // Add/update ticket creator as MENTIONED participant (subscribed by default)
       await db.conversationParticipant.upsert({
         where: {
@@ -232,6 +238,7 @@ export class TicketController {
           participationType: 'MENTIONED',
           isSubscribed: true,
           joinedAt: now,
+          channelId,
         },
         update: {
           participationType: 'MENTIONED',
@@ -565,6 +572,7 @@ export class TicketController {
               participationType: 'MENTIONED',
               isSubscribed: true,
               joinedAt: new Date(),
+              channelId,
             },
             update: {
               participationType: 'MENTIONED',
@@ -695,6 +703,7 @@ export class TicketController {
               participationType: 'MENTIONED',
               isSubscribed: true,
               joinedAt: new Date(),
+              channelId: ticket.channelId,
             },
             update: {
               participationType: 'MENTIONED',

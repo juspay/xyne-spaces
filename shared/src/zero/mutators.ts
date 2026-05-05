@@ -1002,6 +1002,7 @@ export const mutators = defineMutators({
           participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
           joinedAt: now,
+          channelId: channelId,
         });
       },
     ),
@@ -1144,6 +1145,7 @@ export const mutators = defineMutators({
           participationType: ConversationParticipation.AUTHOR,
           isSubscribed: true,
           joinedAt: now,
+          channelId: channelId,
         });
       },
     ),
@@ -1637,6 +1639,7 @@ export const mutators = defineMutators({
           isSubscribed: true,
           participationType: ConversationParticipation.AUTHOR,
           joinedAt: now,
+          channelId: targetChannelId,
         });
       },
     ),
@@ -1682,6 +1685,7 @@ export const mutators = defineMutators({
           userId: ctx.userID,
           isSubscribed: true,
           joinedAt: timestamp,
+          channelId: conversation.channelId,
         });
       },
     ),
@@ -2886,6 +2890,7 @@ export const mutators = defineMutators({
               conversationId,
               userId: ctx.userID,
               joinedAt: timestamp,
+              channelId: channelId,
               lastReadAt: timestamp,
               isSubscribed: false,
               participationType: null,

@@ -88,6 +88,7 @@ import setUpdatedAtTimeRoutes from '@/routes/setUpdatedAtTime';
 import ticketMetadataBackfillRoutes from '@/routes/ticketMetadataBackfill';
 import onCallSetNumbersBackfillRoutes from '@/routes/onCallSetNumbersBackfill';
 import ticketDuplicateBackfillRoutes from '@/routes/ticketDuplicateBackfill';
+import conversationParticipantBackfillRoutes from '@/routes/conversationParticipantBackfill';
 import productInsightsReclusterRoutes from '@/routes/productInsightsRecluster';
 import aiRoutes from '@/routes/aiRoutes';
 import productInsightsRoutes from '@/routes/productInsights';
@@ -291,6 +292,7 @@ export class App {
     this.app.use('/api/admin/ticket-metadata-backfill', ticketMetadataBackfillRoutes);
     // Ticket duplicate backfill route (always available, no vespa flag)
     this.app.use('/api/admin/ticket-duplicate-backfill', ticketDuplicateBackfillRoutes);
+    this.app.use('/api/admin/conversation-participant-backfill', conversationParticipantBackfillRoutes);
     // Product insights recluster route (admin-only)
     this.app.use('/api/admin/product-insights-recluster', productInsightsReclusterRoutes);
     this.app.use('/migrate/api/admin/on-call-set-numbers-backfill', onCallSetNumbersBackfillRoutes);

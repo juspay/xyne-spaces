@@ -143,12 +143,19 @@ Click **Run PR Check** to trigger Bit-Bot analysis.`;
     });
 
     // Increment conversation reply count
+    const replyNow = new Date();
     await db.conversation.update({
       where: { conversationId: ticket.conversationId },
       data: {
         replyCount: { increment: 1 },
-        lastActivityAt: new Date(),
+        lastActivityAt: replyNow,
       },
+    });
+
+    // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
+    await db.conversationParticipant.updateMany({
+      where: { conversationId: ticket.conversationId },
+      data: { lastReplyAt: replyNow },
     });
 
     logger.info(`[PR-Check-Approval] Created approval button ${messageId} for PR #${prId} in ticket ${ticketId}`);
