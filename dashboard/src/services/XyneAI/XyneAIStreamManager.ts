@@ -20,6 +20,8 @@ import type {
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ToolOutput as GeniusToolOutput } from 'cosmic-ai-genius';
 import type { ResearchContext } from '@xyne/shared';
+import type { AttachedContextItem } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
+import type { UserActivity } from '../../hooks/useUserActivity';
 import {
   xyneAIStreamStorage,
   type StreamRecord,
@@ -31,6 +33,7 @@ import { xyneAIActor } from '../../machines/xyneAIMachine';
 import XyneAIStreamWorker from './xyneAIStream.worker?worker';
 import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './xyneAIStream.worker';
 import { reactNativeBridge, NativeInboundMessageType } from '../../utils/reactNativeBridge';
+import { fetchV2ConversationMessages } from './XyneAISessionsV2Service';
 import { getAskAIErrorInfo } from '../../utils/askAIErrorMapping';
 
 export interface StreamState {
@@ -51,12 +54,15 @@ export interface StreamRequest {
   canvasIds?: string[] | undefined;
   ticketIds?: string[] | undefined;
   callIds?: string[] | undefined;
+  attachedContext?: AttachedContextItem[] | undefined;
+  activities?: UserActivity[] | undefined;
   conversationId: string;
   threadConversationId?: string | undefined;
   attachmentIds?: string[] | undefined;
   canvasViewAccessId?: string | null | undefined;
   webSearchEnabled: boolean;
   deepResearchEnabled?: boolean;
+  createCanvasEnabled?: boolean;
   researchContext?: ResearchContext | null | undefined;
   attachments: MessageAttachment[];
   parentMessageId?: string | undefined;
@@ -64,6 +70,7 @@ export interface StreamRequest {
   localUserMessageId?: string | undefined;
   suppressCompletionToast?: boolean | undefined;
   draftMode?: boolean | undefined;
+  version?: 'v1' | 'v2' | undefined;
 }
 
 type StreamSubscriber = (state: StreamState) => void;
@@ -109,6 +116,18 @@ const extractParticipants = (data: Record<string, unknown>): Participant[] | und
   const participants = extractNestedValue<unknown>(data, 'participants');
   return Array.isArray(participants) ? (participants as Participant[]) : undefined;
 };
+
+// Parse width/height from data URL if it's an image
+function parseAttachmentDimensions(data: string): { width?: number; height?: number } {
+  // Data URLs don't contain dimension info directly, but we can check if it's an image
+  // The dimensions will be set when the image is actually loaded/displayed
+  if (data.startsWith('data:image/')) {
+    // It's an image, but we can't get dimensions from the data URL string alone
+    // The MessageItem component will handle dimension detection when rendering
+    return {};
+  }
+  return {};
+}
 
 class XyneAIStreamManager {
   private static instance: XyneAIStreamManager;
@@ -228,11 +247,16 @@ class XyneAIStreamManager {
             deepResearchEnabled: record.deepResearchEnabled ?? false,
             researchContext: null,
             ...(record.attachments.length > 0 && {
-              attachments: record.attachments.map(att => ({
-                data: att.data,
-                mimeType: att.mimeType,
-                filename: att.filename,
-              })),
+              attachments: record.attachments
+                .filter(
+                  (att): att is MessageAttachment & { data: string; filename: string } =>
+                    !!att.data && !!att.filename,
+                )
+                .map(att => ({
+                  data: att.data,
+                  mimeType: att.mimeType,
+                  filename: att.filename,
+                })),
             }),
           },
         },
@@ -332,7 +356,10 @@ class XyneAIStreamManager {
 
     // Accumulate into rawContent
     streamData.rawContent += pendingDelta;
-    const currentRawContent = streamData.rawContent;
+
+    // Get the streamData reference for use in the functional update
+    // This ensures we always read the latest rawContent value
+    const currentStreamData = streamData;
 
     const updateMessages = (updater: (messages: Message[]) => Message[]): void => {
       streamState.messages = updater(streamState.messages);
@@ -344,10 +371,12 @@ class XyneAIStreamManager {
       prev.map(msg => {
         if (msg.id !== botMessageId) return msg;
 
-        const shouldClearStatus = currentRawContent.length > 30;
+        // Read rawContent here to ensure we have the latest accumulated value
+        const rawContent = currentStreamData.rawContent;
+        const shouldClearStatus = rawContent.length > 30;
 
         if (msg.agentType === 'summarizer') {
-          const partialOutput = parsePartialSummarizerJSON(currentRawContent);
+          const partialOutput = parsePartialSummarizerJSON(rawContent);
           if (partialOutput) {
             if (shouldClearStatus) {
               return {
@@ -363,12 +392,12 @@ class XyneAIStreamManager {
             };
           }
           if (shouldClearStatus) {
-            return { ...clearStatusMessage(msg), streamingContent: currentRawContent };
+            return { ...clearStatusMessage(msg), streamingContent: rawContent };
           }
-          return { ...msg, streamingContent: currentRawContent };
+          return { ...msg, streamingContent: rawContent };
         }
 
-        const parsed = parseStreamingContent(currentRawContent);
+        const parsed = parseStreamingContent(rawContent);
         if (shouldClearStatus) {
           return {
             ...clearStatusMessage(msg),
@@ -741,26 +770,41 @@ class XyneAIStreamManager {
           ...(request.ticketIds &&
             request.ticketIds.length > 0 && { ticketIds: request.ticketIds }),
           ...(request.callIds && request.callIds.length > 0 && { callIds: request.callIds }),
+          ...(request.attachedContext &&
+            request.attachedContext.length > 0 && { attachedContext: request.attachedContext }),
           conversationId: request.threadConversationId || '',
           sessionId: request.conversationId,
           webSearchEnabled: request.webSearchEnabled,
           deepResearchEnabled: request.deepResearchEnabled ?? false,
+          createCanvasEnabled: request.createCanvasEnabled ?? false,
           researchContext: request.researchContext
-            ? { type: request.researchContext.type, name: request.researchContext.name }
+            ? request.researchContext.id
+              ? {
+                  type: request.researchContext.type,
+                  id: request.researchContext.id,
+                  name: request.researchContext.name,
+                }
+              : { type: request.researchContext.type, name: request.researchContext.name }
             : null,
           ...(request.canvasViewAccessId && { canvasViewAccessId: request.canvasViewAccessId }),
           ...(request.attachmentIds &&
             request.attachmentIds.length > 0 && { messageAttachmentIds: request.attachmentIds }),
           ...(request.attachments.length > 0 && {
-            attachments: request.attachments.map(att => ({
-              data: att.data,
-              mimeType: att.mimeType,
-              filename: att.filename,
-            })),
+            attachments: request.attachments
+              .filter(
+                (att): att is MessageAttachment & { data: string; filename: string } =>
+                  !!att.data && !!att.filename,
+              )
+              .map(att => ({
+                data: att.data,
+                mimeType: att.mimeType,
+                filename: att.filename,
+              })),
           }),
           ...(request.parentMessageId && { parentMessageId: request.parentMessageId }),
           ...(request.isRegenerate && { isRegenerate: request.isRegenerate }),
           ...(request.draftMode && { draftMode: true }),
+          ...(request.version && { version: request.version }),
         },
       },
     };
@@ -797,6 +841,14 @@ class XyneAIStreamManager {
         if (data['sessionId'] && typeof data['sessionId'] === 'string') {
           result.sessionId = data['sessionId'];
           currentState.sessionId = data['sessionId'];
+          // Store sessionId on the bot message for later use (e.g., action approval)
+          updateMessages(prev =>
+            prev.map(msg =>
+              msg.id === botMessageId && msg.type === 'bot'
+                ? { ...msg, sessionId: data['sessionId'] as string }
+                : msg,
+            ),
+          );
         }
         if (data['traceId'] && typeof data['traceId'] === 'string') {
           result.traceId = data['traceId'];
@@ -859,6 +911,75 @@ class XyneAIStreamManager {
         this.handleToolOutput(data, botMessageId, toolOutputs, updateMessages);
         break;
 
+      // v2 events (xyne-claw integration)
+      case 'reasoning_delta': {
+        const reasoningDelta = data['reasoningDelta'] as string | undefined;
+        if (reasoningDelta) {
+          updateMessages(prev =>
+            prev.map(msg =>
+              msg.id === botMessageId
+                ? { ...msg, reasoning: (msg.reasoning ?? '') + reasoningDelta }
+                : msg,
+            ),
+          );
+        }
+        break;
+      }
+
+      case 'tool_invocation': {
+        const toolInvocation = data['toolInvocation'] as
+          | {
+              toolName: string;
+              toolCallId?: string;
+              args: Record<string, unknown>;
+              result?: string;
+              status: 'running' | 'completed' | 'error';
+              durationMs: number;
+              isError?: boolean;
+              subagentName?: string;
+              parentToolCallId?: string;
+              citations?: Array<{
+                label?: string;
+                kind: 'thread' | 'canvas' | 'ticket' | 'external';
+                channelId?: string;
+                conversationId?: string;
+                channelName?: string;
+                channelType?: string;
+                viewAccessId?: string;
+                ticketId?: string;
+                url?: string;
+              }>;
+            }
+          | undefined;
+
+        if (toolInvocation) {
+          updateMessages(prev =>
+            prev.map(msg => {
+              if (msg.id !== botMessageId) return msg;
+              const existingInvocations = msg.toolInvocations ?? [];
+              // Check if we already have this tool call (by toolCallId)
+              const existingIndex = toolInvocation.toolCallId
+                ? existingInvocations.findIndex(inv => inv.toolCallId === toolInvocation.toolCallId)
+                : -1;
+
+              let newInvocations;
+              if (existingIndex >= 0) {
+                // Update existing invocation
+                newInvocations = existingInvocations.map((inv, idx) =>
+                  idx === existingIndex ? { ...inv, ...toolInvocation } : inv,
+                );
+              } else {
+                // Add new invocation
+                newInvocations = [...existingInvocations, toolInvocation];
+              }
+
+              return { ...msg, toolInvocations: newInvocations };
+            }),
+          );
+        }
+        break;
+      }
+
       case 'complete':
       case 'done':
         this.handleCompletionEvent(
@@ -878,6 +999,7 @@ class XyneAIStreamManager {
           const localUserMessageId = streamData?.localUserMessageId;
           const serverUserMsgId = data['userMessageId'] as string | undefined;
           const serverBotMsgId = data['messageId'] as string | undefined;
+
           if (serverUserMsgId || serverBotMsgId) {
             updateMessages(prev =>
               prev.map(msg => {
@@ -1153,12 +1275,51 @@ class XyneAIStreamManager {
       }
     }
 
+    // For v2 (claw) responses, the complete event includes the full authoritative
+    // content from the agent. Prefer this over the accumulated rawContent from
+    // streaming deltas, which can have partial/broken markdown that causes
+    // rendering misalignment during streaming.
+    const finalContent =
+      typeof data['content'] === 'string' && data['content'].length > 0
+        ? data['content']
+        : rawContent;
+
     // Genius response
-    const finalParsed = parseStreamingContent(rawContent);
+    const finalParsed = parseStreamingContent(finalContent);
     const geniusCitationCount = Object.keys(finalParsed.citations ?? {}).length;
     if (geniusCitationCount > 0) {
       trackCitationsGenerated('genius', geniusCitationCount);
     }
+
+    // Extract pending actions from completion data (v2)
+    const pendingActions = data['pendingActions'] as
+      | Array<{
+          id: string;
+          serverType: string;
+          tool: string;
+          params: Record<string, unknown>;
+          signature: string;
+        }>
+      | undefined;
+
+    // Extract attachments from completion data (v2)
+    const completionAttachments = data['attachments'] as
+      | Array<{
+          fileName: string;
+          mimeType: string;
+          data: string;
+        }>
+      | undefined;
+
+    // Convert completion attachments to MessageAttachment format
+    const messageAttachments: MessageAttachment[] | undefined = completionAttachments?.map(att => ({
+      id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      filename: att.fileName,
+      mimeType: att.mimeType,
+      data: att.data,
+      // Parse dimensions if present in data URL or metadata
+      ...parseAttachmentDimensions(att.data),
+    }));
 
     updateMessages(prev =>
       prev.map(msg => {
@@ -1174,6 +1335,9 @@ class XyneAIStreamManager {
           ...(toolOutputs.length > 0 && { toolOutputs }),
           ...(userTags && { userTags }),
           ...(participants && participants.length > 0 && { participants }),
+          ...(pendingActions && pendingActions.length > 0 && { pendingActions }),
+          ...(messageAttachments &&
+            messageAttachments.length > 0 && { attachments: messageAttachments }),
         };
         if (traceId) updatedMsg.traceId = traceId;
         return updatedMsg;
@@ -1194,6 +1358,11 @@ class XyneAIStreamManager {
     // Persist completion
     void xyneAIStreamStorage.completeStream(streamId, finalResponse);
 
+    // Re-fetch messages from backend to get authoritative final state
+    // This fixes rendering misalignment issues caused by partial/broken markdown
+    // during streaming deltas (similar to refreshRuns pattern in claw chat)
+    void this.refreshMessagesFromBackend(streamId, threadId);
+
     // Show toast notification if sidebar is closed
     if (!this.isSidebarOpen && !currentState.suppressCompletionToast) {
       this.pendingCompletionNotifications.add(threadId);
@@ -1209,6 +1378,139 @@ class XyneAIStreamManager {
       }
       this.abortControllers.delete(streamId);
     }, 5000);
+  }
+
+  /**
+   * Re-fetch conversation messages from backend after streaming completes.
+   * This ensures the UI renders the authoritative final state rather than
+   * potentially misaligned incremental deltas from streaming.
+   */
+  private async refreshMessagesFromBackend(streamId: string, threadId: string): Promise<void> {
+    const currentState = this.activeStreams.get(threadId);
+    if (!currentState) return;
+
+    // Only refresh for v2 (claw-backed) streams that have a sessionId
+    const conversationId = currentState.sessionId;
+    if (!conversationId || !conversationId.startsWith('chat-')) {
+      return;
+    }
+
+    try {
+      const refreshedMessages = await fetchV2ConversationMessages(conversationId);
+
+      // Merge refreshed messages with current state, preserving streaming state
+      // and ensuring we don't overwrite messages that are still being processed
+      this.mergeRefreshedMessages(streamId, threadId, refreshedMessages);
+    } catch (error) {
+      console.warn('[XyneAIStreamManager] Failed to refresh messages from backend:', error);
+      // Don't throw - the stream already has the best-effort content from streaming
+    }
+  }
+
+  /**
+   * Merge refreshed messages from backend into the local stream state.
+   * Preserves message IDs and relationships while updating content to authoritative version.
+   */
+  private mergeRefreshedMessages(
+    streamId: string,
+    threadId: string,
+    refreshedMessages: Message[],
+  ): void {
+    const currentState = this.activeStreams.get(threadId);
+    if (!currentState || currentState.streamId !== streamId) return;
+
+    // Build a map of refreshed messages by ID for direct lookup
+    const refreshedById = new Map(refreshedMessages.map(m => [m.id, m]));
+
+    // Also build a positional index for v2 where server-assigned IDs
+    // differ from local temp IDs (e.g., "bot-123" vs "cmoomcbi...")
+    // Match by type + order within the conversation
+    const localBotMsgs = currentState.messages.filter(m => m.type === 'bot' && !m.isStreaming);
+    const refreshedBotMsgs = refreshedMessages.filter(m => m.type === 'bot');
+
+    // Update local messages with refreshed content from backend
+    const updatedMessages = currentState.messages.map(localMsg => {
+      if (localMsg.type === 'bot' && !localMsg.isStreaming) {
+        // First try direct ID match (works for v1 and v2 after ID sync)
+        const refreshed = refreshedById.get(localMsg.id);
+
+        // Fallback: match by positional index for v2 where IDs haven't synced yet
+        let positionalFallback: Message | undefined;
+        if (!refreshed) {
+          const localBotIndex = localBotMsgs.indexOf(localMsg);
+          if (localBotIndex >= 0 && localBotIndex < refreshedBotMsgs.length) {
+            positionalFallback = refreshedBotMsgs[localBotIndex];
+          }
+        }
+
+        const finalRefreshed = refreshed ?? positionalFallback;
+
+        if (finalRefreshed) {
+          // Preserve locally accumulated content which is more complete than
+          // backend content during the async refresh window
+          const localContent = localMsg.streamingContent || localMsg.content;
+          const refreshedContent = finalRefreshed.content || finalRefreshed.streamingContent || '';
+
+          // Use local content if backend content is empty/incomplete, otherwise prefer backend
+          const finalContent =
+            localContent.length >= refreshedContent.length ? localContent : refreshedContent;
+          const finalStreamingContent =
+            localContent.length >= refreshedContent.length
+              ? localMsg.streamingContent
+              : finalRefreshed.streamingContent || finalRefreshed.content;
+
+          const mergedMsg: Message = {
+            ...finalRefreshed,
+            // Keep local traceId if it was set during streaming
+            ...(localMsg.traceId && { traceId: localMsg.traceId }),
+            // Preserve locally accumulated content over potentially incomplete backend content
+            content: finalContent,
+            streamingContent: finalStreamingContent || finalContent,
+            // Keep the local ID to avoid breaking React keys and parent references
+            id: localMsg.id,
+          };
+          return mergedMsg;
+        }
+      }
+      return localMsg;
+    });
+
+    // Check if we have any user messages that need to be synced with server IDs
+    // The backend assigns permanent IDs that we should adopt
+    const localUserMsgs = currentState.messages.filter(m => m.type === 'user');
+    for (const localUserMsg of localUserMsgs) {
+      // Find matching user message in refreshed data
+      const matchingRefreshed = refreshedMessages.find(
+        rm => rm.type === 'user' && rm.content === localUserMsg.content,
+      );
+      if (matchingRefreshed && matchingRefreshed.id !== localUserMsg.id) {
+        // Update the ID to match server
+        const msgIndex = updatedMessages.findIndex(m => m.id === localUserMsg.id);
+        if (msgIndex !== -1 && msgIndex < updatedMessages.length) {
+          const targetMsg = updatedMessages[msgIndex];
+          if (targetMsg) {
+            updatedMessages[msgIndex] = {
+              ...targetMsg,
+              id: matchingRefreshed.id,
+            };
+            // Also update parent references pointing to this message
+            for (let i = 0; i < updatedMessages.length; i++) {
+              const msg = updatedMessages[i];
+              if (msg && msg.parentId === localUserMsg.id) {
+                updatedMessages[i] = { ...msg, parentId: matchingRefreshed.id };
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Update state if changed
+    if (JSON.stringify(updatedMessages) !== JSON.stringify(currentState.messages)) {
+      currentState.messages = updatedMessages;
+      this.notifySubscribers({ ...currentState });
+      void xyneAIStreamStorage.updateMessages(streamId, updatedMessages);
+    }
   }
 
   /**

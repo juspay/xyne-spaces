@@ -570,6 +570,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         task: message.trim(),
         conversationId,
         agentSlug: slug,
+        __persistedByCaller: true,
         ...(userProvider ? { provider: userProvider } : {}),
         ...(Object.keys(subagentProviders).length > 0 ? { subagentProviders } : {}),
         ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
@@ -856,6 +857,20 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
 router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
   try {
     const messages = await chatMessageRepository.findByConversation(req.params.convId);
+    
+    // Fetch agent runs for this conversation to get tool invocations
+    // Get userId from request (x-user-id header for API calls, session for web)
+    const userId = getRequesterId(req);
+
+    const agentRuns = await agentRunRepository.listByUser(userId || "", { conversationId: req.params.convId });
+    
+    const toolInvocationsByRun = new Map<string, unknown[]>();
+    for (const run of agentRuns) {
+      if (run.toolInvocations && Array.isArray(run.toolInvocations)) {
+        toolInvocationsByRun.set(run.sessionId, run.toolInvocations as unknown[]);
+      }
+    }
+    
     // Strip internal GCS paths from attachment metadata before sending to client
     const serialized = messages.map((m) => {
       const attachmentsRaw = (m as unknown as { attachments?: Array<{ id: string; mimeType: string; originalFilename: string; width: number | null; height: number | null }> }).attachments ?? [];
@@ -868,7 +883,19 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       }));
       return { ...m, attachments };
     });
-    res.json({ success: true, data: serialized });
+    
+    // Include tool invocations in the response
+    // Aggregate all tool invocations from all runs in this conversation
+    const allToolInvocations: unknown[] = [];
+    for (const invocations of toolInvocationsByRun.values()) {
+      allToolInvocations.push(...invocations);
+    }
+    
+    res.json({ 
+      success: true, 
+      data: serialized,
+      ...(allToolInvocations.length > 0 && { toolInvocations: allToolInvocations }),
+    });
   } catch (err) {
     console.error("[agent-chat] messages error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });

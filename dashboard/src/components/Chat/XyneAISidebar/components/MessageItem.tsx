@@ -1,5 +1,14 @@
 import { ReactElement, useState, useMemo, useEffect } from 'react';
-import { Globe, Pencil, RefreshCw, ChevronLeft, ChevronRight, Download, Check } from 'lucide-react';
+import {
+  Globe,
+  Pencil,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Check,
+  Loader2,
+} from 'lucide-react';
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useNavigate } from 'react-router-dom';
@@ -18,6 +27,8 @@ import {
 } from 'cosmic-ai-genius';
 import { PptSlideViewer } from '../../../PptSlideViewer';
 import type { PptSlide } from '../../../PptSlideViewer';
+import { PdfPageViewer } from '../../../PdfPageViewer';
+import { PptxViewer } from '../../../PptxViewer';
 import { Tooltip } from '../../../ui/Tooltip';
 import { UserHoverWrapper } from '../../../ui/UserMentionPopover/UserMentionPopover';
 import { useAuth } from '../../../../hooks/useAuth';
@@ -34,6 +45,135 @@ import type {
   Participant,
   SelectionContext,
 } from '../utils/XyneAITypes';
+import { ReasoningBlock } from './ReasoningBlock';
+import { ToolInvocationList } from './ToolInvocationList';
+import { PendingActionBlock } from './PendingActionBlock';
+import type { ToolInvocation, ClawCitation } from '../utils/XyneAITypes';
+import { Link2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+
+// Aggregated Citations Component - displays all citations from tool invocations
+const AggregatedCitations = ({
+  toolInvocations,
+}: {
+  toolInvocations: ToolInvocation[] | undefined;
+}): ReactElement | null => {
+  if (!toolInvocations || toolInvocations.length === 0) return null;
+
+  // Collect all citations from all tool invocations
+  const allCitations: ClawCitation[] = [];
+  const seenKeys = new Set<string>();
+
+  const collectCitations = (inv: ToolInvocation) => {
+    if (inv.citations && inv.citations.length > 0) {
+      for (const citation of inv.citations) {
+        // Create a unique key for deduplication
+        const key =
+          citation.url ||
+          `${citation.kind}-${citation.channelId}-${citation.conversationId}-${citation.viewAccessId}-${citation.ticketId}`;
+
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          allCitations.push(citation);
+        }
+      }
+    }
+
+    // Check nested invocations (if any)
+    if (inv.parentToolCallId === undefined) {
+      // This is a parent invocation, find its children
+      const children = toolInvocations.filter(child => child.parentToolCallId === inv.toolCallId);
+      for (const child of children) {
+        collectCitations(child);
+      }
+    }
+  };
+
+  // Start with root invocations (those without parent)
+  const rootInvocations = toolInvocations.filter(inv => !inv.parentToolCallId);
+  for (const inv of rootInvocations) {
+    collectCitations(inv);
+  }
+
+  if (allCitations.length === 0) return null;
+
+  return (
+    <div className='space-y-2'>
+      <h3 className='text-xs font-semibold text-muted-foreground uppercase tracking-wide'>
+        Citations ({allCitations.length})
+      </h3>
+      <ul className='space-y-1.5'>
+        {allCitations.map((citation, idx) => {
+          const url = buildCitationUrl(citation);
+          const label = getCitationLabel(citation);
+
+          return (
+            <li key={idx} className='flex items-start gap-1.5'>
+              <Link2 size={10} className='mt-0.5 shrink-0 text-muted-foreground/50' />
+              {url ? (
+                <Link
+                  to={url}
+                  className='break-all text-xs text-blue-500 hover:text-blue-600 hover:underline'
+                >
+                  {label}
+                </Link>
+              ) : (
+                <span className='break-all text-xs text-muted-foreground'>{label}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+};
+
+// Build a URL for a citation based on its kind
+function buildCitationUrl(citation: ClawCitation): string | null {
+  if (citation.kind === 'external' && citation.url) {
+    return citation.url;
+  }
+
+  if (citation.kind === 'thread' && citation.channelId && citation.conversationId) {
+    // Use relative URL with hash fragment to open thread panel (matches v1 format)
+    return `/chat/dir/${citation.channelId}/${citation.conversationId}#origin=${citation.conversationId}`;
+  }
+
+  if (citation.kind === 'canvas' && citation.viewAccessId) {
+    // Use relative URL to preserve workspace prefix
+    return `/chat/canvas/${citation.viewAccessId}`;
+  }
+
+  if (
+    citation.kind === 'ticket' &&
+    citation.ticketId &&
+    citation.channelId &&
+    citation.conversationId
+  ) {
+    // Ticket URL format: /chat/dir/{channelId}/{conversationId}/{ticketId}?selectedTab=thread
+    return `/chat/dir/${citation.channelId}/${citation.conversationId}/${citation.ticketId}?selectedTab=thread`;
+  }
+
+  return null;
+}
+
+// Get a display label for a citation
+function getCitationLabel(citation: ClawCitation): string {
+  if (citation.label) return citation.label;
+
+  if (citation.kind === 'thread') {
+    if (citation.channelName) {
+      return `Thread in #${citation.channelName}`;
+    }
+    return 'Spaces thread';
+  }
+
+  if (citation.kind === 'canvas') return 'Canvas';
+  if (citation.kind === 'ticket') return `Ticket ${citation.ticketId || ''}`.trim();
+  if (citation.kind === 'external') return 'Source link';
+
+  return 'Reference';
+}
 
 // ─── Image Component with Download Button (Sidebar only) ─────────────────────
 
@@ -320,28 +460,284 @@ interface MessageItemProps {
   onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
 }
 
+// Image preview component that fetches with auth and creates blob URL
+const AttachmentImagePreview = ({
+  attachment,
+  displayName,
+  onDownload,
+  isDownloading,
+}: {
+  attachment: MessageAttachment;
+  displayName: string;
+  onDownload: () => void;
+  isDownloading: boolean;
+}): ReactElement => {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const hasBase64Data = !!attachment.data;
+  const attachmentId = attachment.id;
+
+  useEffect(() => {
+    let blobUrl: string | null = null;
+    let isMounted = true;
+
+    const loadImage = async (): Promise<void> => {
+      // Case 1: Streaming with base64 data - use directly
+      if (hasBase64Data && attachment.data) {
+        setImageUrl(`data:${attachment.mimeType};base64,${attachment.data}`);
+        setIsLoading(false);
+        return;
+      }
+
+      // Case 2: Persisted attachment with ID - fetch via authenticated API
+      if (attachmentId && !attachmentId.startsWith('temp-')) {
+        try {
+          const { apiInstance } = await import('../../../../services/clients/apiClient');
+          const downloadUrl = `/xyne-ai/v2/attachments/${attachmentId}/download`;
+
+          const response = await apiInstance.get(downloadUrl, {
+            responseType: 'blob',
+          });
+
+          if (!isMounted) return;
+
+          blobUrl = URL.createObjectURL(response.data as Blob);
+          setImageUrl(blobUrl);
+          setIsLoading(false);
+        } catch (err) {
+          console.error('[AttachmentImagePreview] Failed to load image:', err);
+          if (isMounted) {
+            setError('Failed to load image');
+            setIsLoading(false);
+          }
+        }
+      } else {
+        // No valid image source
+        setIsLoading(false);
+      }
+    };
+
+    void loadImage();
+
+    return () => {
+      isMounted = false;
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    };
+  }, [attachment.data, attachment.mimeType, attachmentId, hasBase64Data]);
+
+  if (isLoading) {
+    return (
+      <div className='relative rounded-lg overflow-hidden border border-border bg-card max-w-[300px] h-[150px] flex items-center justify-center'>
+        <Loader2 size={24} className='animate-spin text-muted-foreground' />
+      </div>
+    );
+  }
+
+  if (error || !imageUrl) {
+    return (
+      <div className='relative rounded-lg overflow-hidden border border-border bg-card max-w-[300px] p-4 text-center'>
+        <span className='text-sm text-muted-foreground'>{error || 'Image unavailable'}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className='relative group/image rounded-lg overflow-hidden border border-border bg-card max-w-[300px]'>
+      <img src={imageUrl} alt={displayName} className='w-full h-auto' loading='lazy' />
+      {/* Download button overlay */}
+      <button
+        onClick={onDownload}
+        disabled={isDownloading}
+        className='absolute top-2 right-2 p-1.5 rounded-md bg-background/90 backdrop-blur-sm border border-border shadow-sm opacity-0 group-hover/image:opacity-100 transition-all duration-200 hover:bg-background disabled:opacity-50'
+        title='Download image'
+        data-track-category='xyne-ai'
+        data-track-name='download-image'
+      >
+        {isDownloading ? (
+          <Loader2 size={14} className='animate-spin text-muted-foreground' />
+        ) : (
+          <Download size={14} className='text-muted-foreground' />
+        )}
+      </button>
+    </div>
+  );
+};
+
 // Attachment preview component
 const AttachmentPreview = ({ attachment }: { attachment: MessageAttachment }): ReactElement => {
   const isImage = attachment.mimeType.startsWith('image/');
+  const isPdf = attachment.mimeType === 'application/pdf';
+  const hasBase64Data = !!attachment.data;
+  const attachmentId = attachment.id;
+  const displayName = attachment.originalFilename || attachment.filename || 'Unnamed file';
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  // Handle download for v2 attachments (from claw-auth)
+  const handleDownload = async (): Promise<void> => {
+    setIsDownloading(true);
+    try {
+      // If we have base64 data (streaming attachment), download directly
+      if (hasBase64Data && attachment.data) {
+        // Decode base64 to binary
+        const byteCharacters = atob(attachment.data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: attachment.mimeType });
+
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = displayName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
+        return;
+      }
+
+      // Otherwise, fetch from API using the real attachment ID
+      if (!attachmentId || attachmentId.startsWith('temp-')) {
+        const { toast } = await import('sonner');
+        toast.error('Attachment not available for download yet');
+        return;
+      }
+
+      // For v2 attachments, use the xyne-ai v2 download endpoint
+      const downloadUrl = `/xyne-ai/v2/attachments/${attachmentId}/download`;
+
+      // Import dynamically to avoid circular deps
+      const { apiInstance } = await import('../../../../services/clients/apiClient');
+
+      const response = await apiInstance.get(downloadUrl, {
+        responseType: 'blob',
+      });
+
+      const blob = response.data as Blob;
+      const blobUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = displayName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('[AttachmentPreview] Download failed:', error);
+      const { toast } = await import('sonner');
+      toast.error('Download failed', {
+        description: error instanceof Error ? error.message : 'Failed to download file',
+      });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  // Render PDF viewer for PDF attachments
+  if (isPdf) {
+    const downloadUrl =
+      hasBase64Data && attachment.data
+        ? `data:application/pdf;base64,${attachment.data}`
+        : attachmentId && !attachmentId.startsWith('temp-')
+          ? `/xyne-ai/v2/attachments/${attachmentId}/download`
+          : '';
+
+    return (
+      <PdfPageViewer
+        attachmentId={attachmentId || ''}
+        downloadUrl={downloadUrl}
+        filename={displayName}
+        title={displayName.replace(/\.pdf$/i, '')}
+        base64Data={attachment.data}
+      />
+    );
+  }
+
+  // Render PPTX viewer for PowerPoint attachments
+  const isPptx =
+    attachment.mimeType ===
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+    attachment.mimeType === 'application/vnd.ms-powerpoint' ||
+    displayName.toLowerCase().endsWith('.pptx') ||
+    displayName.toLowerCase().endsWith('.ppt');
+
+  if (isPptx) {
+    const downloadUrl =
+      hasBase64Data && attachment.data
+        ? `data:${attachment.mimeType};base64,${attachment.data}`
+        : attachmentId && !attachmentId.startsWith('temp-')
+          ? `/xyne-ai/v2/attachments/${attachmentId}/download`
+          : '';
+
+    // Get slide data from attachment metadata (from xyne-claw)
+    const slides = attachment.metadata?.slideJson as PptSlide[] | undefined;
+
+    return (
+      <PptxViewer
+        attachmentId={attachmentId || ''}
+        downloadUrl={downloadUrl}
+        filename={displayName}
+        title={displayName.replace(/\.(pptx|ppt)$/i, '')}
+        base64Data={attachment.data}
+        slides={slides}
+        slideCount={slides?.length}
+      />
+    );
+  }
+
+  // Render image preview for both streaming and persisted attachments
+  if (isImage) {
+    return (
+      <AttachmentImagePreview
+        attachment={attachment}
+        displayName={displayName}
+        onDownload={() => void handleDownload()}
+        isDownloading={isDownloading}
+      />
+    );
+  }
 
   return (
     <div className='flex items-center gap-2 p-2 rounded-lg bg-card border border-border'>
-      {isImage ? (
-        <div className='relative w-full max-w-[200px] rounded overflow-hidden'>
-          <img
-            src={`data:${attachment.mimeType};base64,${attachment.data}`}
-            alt={attachment.filename}
-            className='w-full h-auto'
-          />
-        </div>
+      {attachmentId ? (
+        // File attachment with ID - clickable download
+        <button
+          onClick={() => void handleDownload()}
+          disabled={isDownloading}
+          className='flex items-center gap-2 hover:opacity-80 transition-opacity disabled:opacity-50'
+          data-track-category='xyne-ai'
+          data-track-name='attachment-download'
+        >
+          <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
+            <FileDocumentIcon color='currentColor' size={20} className='text-muted-foreground' />
+          </div>
+          <div className='flex flex-col overflow-hidden text-left'>
+            <span className="text-sm font-medium text-foreground font-['Inter'] truncate">
+              {displayName}
+            </span>
+            <span className="text-xs text-muted-foreground font-['Inter']">
+              {attachment.mimeType}
+              {hasBase64Data && ' (preview)'}
+              {isDownloading ? ' (downloading...)' : ' (click to download)'}
+            </span>
+          </div>
+        </button>
       ) : (
+        // File attachment without ID - show only
         <div className='flex items-center gap-2'>
           <div className='flex-shrink-0 w-8 h-8 flex items-center justify-center bg-muted rounded'>
             <FileDocumentIcon color='currentColor' size={20} className='text-muted-foreground' />
           </div>
           <div className='flex flex-col overflow-hidden'>
             <span className="text-sm font-medium text-foreground font-['Inter'] truncate">
-              {attachment.filename}
+              {displayName}
             </span>
             <span className="text-xs text-muted-foreground font-['Inter']">
               {attachment.mimeType}
@@ -831,6 +1227,9 @@ export const MessageItem = React.memo(
       prev.message.isStreaming === next.message.isStreaming &&
       prev.message.toolOutputs === next.message.toolOutputs &&
       prev.message.summarizerOutput === next.message.summarizerOutput &&
+      prev.message.reasoning === next.message.reasoning &&
+      prev.message.toolInvocations === next.message.toolInvocations &&
+      prev.message.pendingActions === next.message.pendingActions &&
       prev.feedbackValue === next.feedbackValue
     );
   },
@@ -860,6 +1259,111 @@ const MessageContent = ({
 
   return (
     <div className='space-y-4 max-w-full'>
+      {/* v2: Reasoning Block */}
+      {message.reasoning && message.reasoning.length > 0 && (
+        <ReasoningBlock text={message.reasoning} streaming={message.isStreaming} />
+      )}
+
+      {/* v2: Tool Invocations */}
+      {message.toolInvocations && message.toolInvocations.length > 0 && (
+        <ToolInvocationList invocations={message.toolInvocations} />
+      )}
+
+      {/* v2: Pending Actions (Human-in-the-loop) */}
+      {message.pendingActions && message.pendingActions.length > 0 && (
+        <PendingActionBlock
+          actions={message.pendingActions}
+          onApprove={async (action, index) => {
+            // Handle approve action - call the backend API
+            try {
+              const { apiInstance } = await import('../../../../services/clients/apiClient');
+              // Find the stream state to get the sessionId
+              const { xyneAIStreamManager } =
+                await import('../../../../services/XyneAI/XyneAIStreamManager');
+              const activeStreams = xyneAIStreamManager.getAllActiveStreams();
+              let sessionId = message.sessionId;
+
+              // If message doesn't have sessionId, try to find it from active streams
+              if (!sessionId) {
+                for (const [, state] of activeStreams) {
+                  const hasMessage = state.messages.some(m => m.id === message.id);
+                  if (hasMessage) {
+                    sessionId = state.sessionId;
+                    break;
+                  }
+                }
+              }
+
+              if (!sessionId) {
+                throw new Error('Could not find sessionId for this message');
+              }
+
+              // Generate actionId if not present (use sessionId + tool + index for uniqueness)
+              const actionId = action.id || `${sessionId}-${action.tool}-${index}`;
+
+              // Send all required fields including signature and tool info
+              await apiInstance.post('/xyne-ai/v2/action', {
+                sessionId,
+                actionId,
+                approved: true,
+                params: action.params,
+                serverType: action.serverType,
+                tool: action.tool,
+                signature: action.signature,
+              });
+            } catch (err) {
+              console.error('Failed to approve action:', err);
+              throw err;
+            }
+          }}
+          onDecline={(action, index) => {
+            void (async () => {
+              // Handle decline action - call the backend API
+              try {
+                const { apiInstance } = await import('../../../../services/clients/apiClient');
+                // Find the stream state to get the sessionId
+                const { xyneAIStreamManager } =
+                  await import('../../../../services/XyneAI/XyneAIStreamManager');
+                const activeStreams = xyneAIStreamManager.getAllActiveStreams();
+                let sessionId = message.sessionId;
+
+                // If message doesn't have sessionId, try to find it from active streams
+                if (!sessionId) {
+                  for (const [, state] of activeStreams) {
+                    const hasMessage = state.messages.some(m => m.id === message.id);
+                    if (hasMessage) {
+                      sessionId = state.sessionId;
+                      break;
+                    }
+                  }
+                }
+
+                if (!sessionId) {
+                  console.error('Could not find sessionId for this message');
+                  return;
+                }
+
+                // Generate actionId if not present (use sessionId + tool + index for uniqueness)
+                const actionId = action.id || `${sessionId}-${action.tool}-${index}`;
+
+                // Send all required fields including signature and tool info
+                await apiInstance.post('/xyne-ai/v2/action', {
+                  sessionId,
+                  actionId,
+                  approved: false,
+                  params: action.params,
+                  serverType: action.serverType,
+                  tool: action.tool,
+                  signature: action.signature,
+                });
+              } catch (err) {
+                console.error('Failed to decline action:', err);
+              }
+            })();
+          }}
+        />
+      )}
+
       {/* Tool Outputs */}
       {message.toolOutputs && message.toolOutputs.length > 0 && (
         <ToolOutputsSection toolOutputs={message.toolOutputs} />
@@ -957,6 +1461,17 @@ const MessageContent = ({
           onCitationClick={onCitationClick}
         />
       )}
+
+      {/* Bot Message Attachments (e.g., generated PDFs from artifacts tool) */}
+      {message.attachments && message.attachments.length > 0 && (
+        <div className='space-y-2'>
+          {message.attachments.map((attachment, index) => (
+            <AttachmentPreview key={index} attachment={attachment} />
+          ))}
+        </div>
+      )}
+      {/* v2: Aggregated Citations from all tool invocations - moved to end of message */}
+      <AggregatedCitations toolInvocations={message.toolInvocations} />
     </div>
   );
 };

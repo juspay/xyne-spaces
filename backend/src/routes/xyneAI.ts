@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { XyneAIController } from '@/controllers/xyneAIController';
+import { xyneAIControllerFactory } from '@/controllers/xyneAIControllerFactory';
+import { authMiddleware } from '@/middleware/auth';
 
 const router = Router();
-const xyneAIController = new XyneAIController();
 
 /**
  * Xyne AI Routes
@@ -11,6 +11,8 @@ const xyneAIController = new XyneAIController();
  * 
  * Single unified endpoint for the AI assistant.
  * Handles both normal questions and summary requests.
+ * 
+ * Version switching: Set ASK_AI_VERSION=v2 in environment to use xyne-claw
  */
 
 /**
@@ -37,7 +39,7 @@ const xyneAIController = new XyneAIController();
  * - error: { type: 'error', error }
  * - end: { type: 'end' }
  */
-router.post('/', xyneAIController.query);
+router.post('/', xyneAIControllerFactory.query);
 
 /**
  * Feedback endpoint for Xyne AI responses
@@ -55,7 +57,7 @@ router.post('/', xyneAIController.query);
  *   "success": true
  * }
  */
-router.post('/feedback', xyneAIController.feedback);
+router.post('/feedback', xyneAIControllerFactory.feedback);
 
 /**
  * List available products for Research Agent
@@ -65,7 +67,7 @@ router.post('/feedback', xyneAIController.feedback);
  * Response:
  * [{ id: string, name: string }]
  */
-router.get('/list-products', xyneAIController.listProducts);
+router.get('/list-products', xyneAIControllerFactory.listProducts);
 
 /**
  * List available repositories for Research Agent
@@ -75,19 +77,19 @@ router.get('/list-products', xyneAIController.listProducts);
  * Response:
  * [{ id: string, name: string }]
  */
-router.get('/list-repositories', xyneAIController.listRepositories);
+router.get('/list-repositories', xyneAIControllerFactory.listRepositories);
 
 // GET /api/xyne-ai/config - Public endpoint returning web search config
-router.get('/config', xyneAIController.getConfig);
+router.get('/config', xyneAIControllerFactory.getConfig);
 
 // GET /api/xyne-ai/memories - Get all memories for current user
-router.get('/memories', xyneAIController.getMemories);
+router.get('/memories', xyneAIControllerFactory.getMemories);
 
 // DELETE /api/xyne-ai/memories/:id - Delete a single memory
-router.delete('/memories/:id', xyneAIController.deleteMemory);
+router.delete('/memories/:id', xyneAIControllerFactory.deleteMemory);
 
 // DELETE /api/xyne-ai/memories - Clear all memories for current user
-router.delete('/memories', xyneAIController.clearMemories);
+router.delete('/memories', xyneAIControllerFactory.clearMemories);
 
 // ============================================================================
 // Session Management Endpoints
@@ -99,28 +101,28 @@ router.delete('/memories', xyneAIController.clearMemories);
  * List all Ask AI sessions for the authenticated user.
  * Returns lightweight metadata (no messages).
  */
-router.get('/sessions', xyneAIController.getSessions);
+router.get('/sessions', xyneAIControllerFactory.getSessions);
 
 /**
  * GET /api/xyne-ai/sessions/:sessionId
  *
  * Get a single session with all messages transformed to frontend format.
  */
-router.get('/sessions/:sessionId', xyneAIController.getSessionDetail);
+router.get('/sessions/:sessionId', xyneAIControllerFactory.getSessionDetail);
 
 /**
  * PATCH /api/xyne-ai/sessions/:sessionId/star
  *
  * Toggle star status for a session.
  */
-router.patch('/sessions/:sessionId/star', xyneAIController.toggleStar);
+router.patch('/sessions/:sessionId/star', xyneAIControllerFactory.toggleStar);
 
 /**
  * PATCH /api/xyne-ai/sessions/:sessionId/rename
  *
  * Rename a session. Body: { title: string }
  */
-router.patch('/sessions/:sessionId/rename', xyneAIController.renameSession);
+router.patch('/sessions/:sessionId/rename', xyneAIControllerFactory.renameSession);
 
 /**
  * PATCH /api/xyne-ai/sessions/:sessionId/metadata
@@ -128,13 +130,37 @@ router.patch('/sessions/:sessionId/rename', xyneAIController.renameSession);
  * Update session metadata (branchSelections, feedbackMap, title).
  * Body: { branchSelections?: Record<string, string>, feedbackMap?: Record<string, number>, title?: string }
  */
-router.patch('/sessions/:sessionId/metadata', xyneAIController.updateSessionMetadata);
+router.patch('/sessions/:sessionId/metadata', xyneAIControllerFactory.updateSessionMetadata);
 
 /**
  * DELETE /api/xyne-ai/sessions/:sessionId
  *
  * Delete a session and all its messages.
  */
-router.delete('/sessions/:sessionId', xyneAIController.deleteSessionEndpoint);
+router.delete('/sessions/:sessionId', xyneAIControllerFactory.deleteSessionEndpoint);
+
+// ============================================================================
+// v2 Specific Endpoints (xyne-claw)
+// ============================================================================
+
+// Note: Webhook endpoints (/v2/callback, /v2/progress) have been removed.
+// Now using SSE streaming via claw-auth's /run/stream endpoint.
+// Events flow: xyne-claw → claw-auth (internal) → Spaces backend (SSE) → Frontend (SSE)
+
+/**
+ * POST /api/xyne-ai/v2/action
+ * 
+ * Approve or decline a pending write action (human-in-the-loop)
+ */
+router.post('/v2/action', authMiddleware.authenticate, xyneAIControllerFactory.handleActionApproval);
+
+// GET /api/xyne-ai/v2/conversations - List user's AI conversations from claw
+router.get('/v2/conversations', authMiddleware.authenticate, xyneAIControllerFactory.listConversations);
+
+// GET /api/xyne-ai/v2/conversations/:convId/messages - Get conversation messages from claw
+router.get('/v2/conversations/:convId/messages', authMiddleware.authenticate, xyneAIControllerFactory.getConversationMessages);
+
+// GET /api/xyne-ai/v2/attachments/:attachmentId/download - Download attachment from claw
+router.get('/v2/attachments/:attachmentId/download', authMiddleware.authenticate, xyneAIControllerFactory.downloadAttachment);
 
 export default router;

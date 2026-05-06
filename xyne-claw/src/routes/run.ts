@@ -21,7 +21,7 @@ interface ActiveRunControl {
 const activeRuns = new Map<string, ActiveRunControl>();
 
 router.post("/run", validateS2SKey, (req, res: Response) => {
-  const { userId, userName, userEmail, task, context, conversationId, callbackUrl, systemPrompt, agentConfig, agentSlug, channelId, cwd: requestCwd, repoUrl, eventType, traceId, skills, provider, subagentProviders, providerConfigs, progressUrl, attachments, contextFiles } = req.body as {
+  const { userId, userName, userEmail, task, context, conversationId, callbackUrl, systemPrompt, agentConfig, agentSlug, channelId, cwd: requestCwd, repoUrl, eventType, traceId, skills, provider, subagentProviders, providerConfigs, progressUrl, attachments, contextFiles, additionalInstructions, researchContext } = req.body as {
     userId?: string;
     userName?: string;
     userEmail?: string;
@@ -44,6 +44,8 @@ router.post("/run", validateS2SKey, (req, res: Response) => {
     progressUrl?: string;
     attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
     contextFiles?: Array<{ path: string; content: string }>;
+    additionalInstructions?: string;
+    researchContext?: { type: string; id?: string; name: string; repositoryId?: string; productId?: string };
   };
 
   if (!userId || typeof userId !== "string" || userId.trim().length === 0) {
@@ -70,7 +72,7 @@ router.post("/run", validateS2SKey, (req, res: Response) => {
   activeRuns.set(sessionId, { abortController });
 
   // Process in background
-  processTask(sessionId, userId.trim(), task.trim(), context, userName, userEmail, conversationId, callbackUrl, systemPrompt, agentConfig, agentSlug, channelId, requestCwd, repoUrl, eventType, traceId, skills, provider, subagentProviders, providerConfigs, progressUrl, attachments, contextFiles, abortController.signal)
+  processTask(sessionId, userId.trim(), task.trim(), context, userName, userEmail, conversationId, callbackUrl, systemPrompt, agentConfig, agentSlug, channelId, requestCwd, repoUrl, eventType, traceId, skills, provider, subagentProviders, providerConfigs, progressUrl, attachments, contextFiles, additionalInstructions, researchContext, abortController.signal)
     .finally(() => {
       activeRuns.delete(sessionId);
     });
@@ -117,6 +119,8 @@ async function processTask(
   progressUrl: string | undefined,
   attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
   contextFiles: Array<{ path: string; content: string }> | undefined,
+  additionalInstructions: string | undefined,
+  researchContext: { type: string; id?: string; name: string; repositoryId?: string; productId?: string } | undefined,
   abortSignal?: AbortSignal,
 ): Promise<void> {
   let mcpCleanup: (() => Promise<void>) | undefined;
@@ -237,6 +241,10 @@ async function processTask(
       effectiveConfig,
       meta,
       (att) => pushAttachment(progressUrl, sessionId, att),
+      researchContext,
+      progressUrl,
+      sessionId,
+      SERVER.s2sKey,
     );
 
     // Load deepwiki/context7/playwright MCP tool groups (stdio transport, cached).
@@ -388,6 +396,11 @@ async function processTask(
       const copilotNote = `\n\n${COPILOT_SYSTEM_INSTRUCTION}`;
       fullContext = fullContext ? `${fullContext}${copilotNote}` : copilotNote;
     }
+    // Inject additional instructions if provided (backend-contextual guidance not shown in UI)
+    if (additionalInstructions) {
+      const instructionsNote = `\n\n## Additional Instructions\n${additionalInstructions}`;
+      fullContext = fullContext ? `${fullContext}${instructionsNote}` : instructionsNote;
+    }
 
     // Key sessions by conversationId + agentSlug so each agent has its own session per thread
     const sessionKey = conversationId && agentSlug ? `${conversationId}_${agentSlug}` : conversationId;
@@ -436,6 +449,7 @@ async function processTask(
       sessionId,
       userId,
       conversationId: conversationId ?? null,
+      agentSlug: agentSlug ?? null,
       status: "completed",
       result: result.text,
       toolsUsed: combinedToolsUsed,
@@ -467,6 +481,7 @@ async function processTask(
         sessionId,
         userId,
         conversationId: conversationId ?? null,
+        agentSlug: agentSlug ?? null,
         status: "failed",
         error: err instanceof Error ? err.message : "Internal error",
       });

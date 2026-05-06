@@ -822,3 +822,6 @@ async function getRawSessionMetadata(sessionId: string): Promise<Record<string, 
     return {};
   }
 }
+
+// Export singleton instance for factory
+export const xyneAIController = new XyneAIController();

@@ -14,6 +14,11 @@ import * as researchAgent from "./research-agent/index.js";
 import * as sandbox from "./sandbox/index.js";
 import * as sandboxPw from "./sandbox-pw/index.js";
 import * as createPpt from "./create-ppt/index.js";
+import * as createPdf from "./create-pdf/index.js";
+import * as genius from "./genius/index.js";
+import * as webSearch from "./web-search/index.js";
+import * as deepResearch from "./deep-research/index.js";
+import * as generateImage from "./generate-image/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -99,6 +104,20 @@ register(researchAgent.reviewPullRequest);
 // Register create-ppt tools
 register(createPpt.createPptTool);
 register(createPpt.editPptTool);
+
+// Register create-pdf tools
+register(createPdf.createPdfTool);
+register(createPdf.editPdfTool);
+
+// Register genius tool
+register(genius.geniusTool);
+
+// Register web-search and deep-research tools
+register(webSearch.webSearchTool);
+register(deepResearch.deepResearchTool);
+
+// Register generate-image tool
+register(generateImage.generateImageTool);
 
 // Register sandbox tools
 register(sandbox.sandboxCreate);

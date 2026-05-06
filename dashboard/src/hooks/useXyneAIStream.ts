@@ -6,6 +6,9 @@ import type {
   UserTag,
 } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ResearchContext } from '@xyne/shared';
+import type { AttachedContextItem } from '../components/Chat/XyneAISidebar/components/ContextPickerPanel';
+import type { UserActivity } from '../hooks/useUserActivity';
+import { useAskAIVersion } from './useAskAIVersion';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 
 interface UseXyneAIStreamParams {
@@ -21,10 +24,29 @@ interface UseXyneAIStreamParams {
   deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
   createCanvasEnabled?: boolean;
+  isV2?: boolean;
   channelId?: string | undefined; // Added for thread ID construction
   ticketIds?: string[];
   canvasIds?: string[];
   callIds?: string[];
+  attachedContext?: AttachedContextItem[];
+  activities?: UserActivity[]; // User activities to include as context
+}
+
+/**
+ * Convert user activities to attached context items for v2 API
+ */
+function activitiesToAttachedContext(activities: UserActivity[]): AttachedContextItem[] {
+  return activities.map((activity, index) => ({
+    type: 'activity' as const,
+    id: `activity-${index}`,
+    title: activity.eventName,
+    eventName: activity.eventName,
+    eventCategory: activity.eventCategory,
+    timestamp: activity.timestamp,
+    metadata: activity.contextMetadata ?? {},
+    relatedData: (activity.relatedData ?? {}) as Record<string, unknown>,
+  }));
 }
 
 // Canvas creation instruction appended when createCanvasEnabled is true
@@ -56,12 +78,18 @@ export const useXyneAIStream = ({
   deepResearchEnabled = false,
   researchContext,
   createCanvasEnabled = false,
+  isV2 = false,
   channelId,
   ticketIds,
   canvasIds,
   callIds,
+  attachedContext,
+  activities,
 }: UseXyneAIStreamParams) => {
   const currentStreamIdRef = useRef<string | null>(null);
+
+  // Get Ask AI version from user settings
+  const { askAIVersion } = useAskAIVersion();
 
   // Compute thread ID for stream manager
   const threadId = channelId
@@ -177,9 +205,9 @@ export const useXyneAIStream = ({
         internalQuery = internalQuery + canvasContextHint;
       }
 
-      // Append hidden canvas instruction when create canvas is enabled
-      // This forces the LLM to create a canvas with the output at the end
-      if (createCanvasEnabled) {
+      // Append hidden canvas instruction when create canvas is enabled (v1 only)
+      // For v2, canvas creation is handled via additionalInstructions in the backend
+      if (createCanvasEnabled && !isV2) {
         internalQuery = internalQuery + '\n\n' + CANVAS_CREATION_INSTRUCTION;
       }
 
@@ -240,6 +268,15 @@ export const useXyneAIStream = ({
         ? [...currentMessages, userMessage, botMessage]
         : [...currentMessages, botMessage];
 
+      // Convert activities to attachedContext for v2 API
+      const activityContext =
+        activities && activities.length > 0 ? activitiesToAttachedContext(activities) : undefined;
+
+      // Merge with existing attachedContext
+      const combinedAttachedContext = activityContext
+        ? [...(attachedContext ?? []), ...activityContext]
+        : attachedContext;
+
       // Start stream via the global stream manager
       // The stream manager will notify subscribers which will update messages with the streaming content
       const streamId = await xyneAIStreamManager.startStream(
@@ -254,6 +291,7 @@ export const useXyneAIStream = ({
           canvasViewAccessId,
           webSearchEnabled,
           deepResearchEnabled,
+          createCanvasEnabled,
           researchContext,
           attachments,
           parentMessageId,
@@ -262,6 +300,8 @@ export const useXyneAIStream = ({
           ticketIds,
           canvasIds,
           callIds,
+          attachedContext: combinedAttachedContext,
+          version: askAIVersion,
         },
         allMessages,
       );
@@ -279,10 +319,14 @@ export const useXyneAIStream = ({
       webSearchEnabled,
       deepResearchEnabled,
       createCanvasEnabled,
+      isV2,
       syncMessagesRef,
       ticketIds,
       canvasIds,
       callIds,
+      attachedContext,
+      activities,
+      askAIVersion,
     ],
   );
 

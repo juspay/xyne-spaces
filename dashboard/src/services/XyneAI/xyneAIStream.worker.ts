@@ -16,11 +16,23 @@ export interface WorkerStartStreamMessage {
       canvasIds?: string[];
       ticketIds?: string[];
       callIds?: string[];
+      attachedContext?: Array<{
+        type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity';
+        id: string;
+        title: string;
+        threadId?: string;
+        eventName?: string;
+        eventCategory?: string;
+        timestamp?: string;
+        metadata?: Record<string, unknown>;
+        relatedData?: Record<string, unknown>;
+      }>;
       conversationId: string;
       sessionId: string;
       webSearchEnabled: boolean;
       deepResearchEnabled?: boolean;
-      researchContext?: { type: string; name: string } | null;
+      createCanvasEnabled?: boolean;
+      researchContext?: { type: string; id?: string; name: string } | null;
       canvasViewAccessId?: string;
       messageAttachmentIds?: string[];
       attachments?: Array<{
@@ -31,6 +43,7 @@ export interface WorkerStartStreamMessage {
       parentMessageId?: string;
       isRegenerate?: boolean;
       draftMode?: boolean;
+      version?: 'v1' | 'v2';
     };
   };
 }
@@ -109,10 +122,15 @@ async function executeStream(
           requestBody.ticketIds.length > 0 && { ticket_ids: requestBody.ticketIds }),
         ...(requestBody.callIds &&
           requestBody.callIds.length > 0 && { call_ids: requestBody.callIds }),
+        ...(requestBody.attachedContext &&
+          requestBody.attachedContext.length > 0 && {
+            attached_context: requestBody.attachedContext,
+          }),
         conversation_id: requestBody.conversationId,
         session_id: requestBody.sessionId,
         web_search_enabled: requestBody.webSearchEnabled,
         deep_research_enabled: requestBody.deepResearchEnabled ?? false,
+        create_canvas_enabled: requestBody.createCanvasEnabled ?? false,
         research_context: requestBody.researchContext ?? null,
         ...(requestBody.canvasViewAccessId && {
           canvas_view_access_id: requestBody.canvasViewAccessId,
@@ -134,6 +152,7 @@ async function executeStream(
         }),
         ...(requestBody.isRegenerate && { is_regenerate: requestBody.isRegenerate }),
         ...(requestBody.draftMode && { draft_mode: true }),
+        ...(requestBody.version && { version: requestBody.version }),
         /* eslint-enable @typescript-eslint/naming-convention */
       }),
       signal: abortController.signal,

@@ -1600,9 +1600,105 @@ const spacesTriggerAgent: ToolDef = {
   },
 };
 
+// ── spaces-meeting-insights ─────────────────────────────────────────
+
+const spacesMeetingInsights: ToolDef = {
+  name: "spaces-meeting-insights",
+  description:
+    "Semantic search over AI-analyzed meeting data (Google Meet, Zoom, etc.) covering summaries, " +
+    "action items, pain points, merchant discussions, decisions, Q&A, and participant-level insights. " +
+    "Use this when the user asks about meeting content, action items from calls, what was discussed, " +
+    "decisions made, or anything related to meetings/transcripts. " +
+    "Prefer this over spaces-search for meeting-related queries.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "The topic or question to search for in meeting insights — e.g. 'sales targets', 'action items', 'pain points', 'merchant feedback'. Can be empty if using filters only." },
+      platform: { type: "string", description: "Filter by meeting platform(s), comma-separated: google-meet, zoom" },
+      participants: { type: "string", description: "Filter by participant email(s), comma-separated (e.g. 'user@example.com')" },
+      callType: { type: "string", description: "Filter by meeting/call type (e.g. 'sales-call', 'onboarding')" },
+      before: { type: "string", description: "Filter meetings before this date (e.g. '2024-01-01' or '15 Mar 26')" },
+      after: { type: "string", description: "Filter meetings after this date" },
+      on: { type: "string", description: "Filter meetings on this specific date" },
+      range: { type: "string", description: "Filter by time keyword: today, yesterday, this week, last week, last 7 days, this month, last month, last 30 days, recent" },
+      limit: { type: "number", minimum: 1, maximum: 20, default: 10, description: "Max results (default 10)" },
+    },
+    required: [],
+  },
+  async handler(args) {
+    try {
+      const query = String(args["query"] ?? "").trim();
+      const params: Record<string, string> = {
+        q: query,
+        type: "transcript",
+        limit: String(args["limit"] ?? 10),
+      };
+      if (args["platform"]) params["callType"] = String(args["platform"]);
+      if (args["participants"]) params["from"] = String(args["participants"]);
+      if (args["callType"]) params["callType"] = String(args["callType"]);
+      if (args["before"]) params["before"] = String(args["before"]);
+      if (args["after"]) params["after"] = String(args["after"]);
+      if (args["on"]) params["on"] = String(args["on"]);
+      if (args["range"]) params["range"] = String(args["range"]);
+      if (!query) params["filterOnly"] = "true";
+
+      const data = (await search(params)) as {
+        success: boolean;
+        data?: {
+          results?: Array<{
+            id: string;
+            type: string;
+            title: string;
+            subtitle?: string;
+            context?: string;
+            metadata?: Record<string, unknown>;
+            searchContext?: Record<string, unknown>;
+          }>;
+          totalCount?: number;
+        };
+      };
+
+      if (!data.success || !data.data) return err("Meeting insights search failed.");
+
+      const results = data.data.results ?? [];
+      if (results.length === 0) {
+        return ok(query ? `No meeting insights found for "${query}".` : "No meeting insights found.");
+      }
+
+      const formatted = results.map((r, idx) => {
+        const lines: string[] = [];
+        lines.push(`### ${idx + 1}. ${r.title || "Untitled Meeting"}`);
+        if (r.subtitle) lines.push(`**${r.subtitle}**`);
+
+        const context = r.context ?? "";
+        if (context) {
+          const cleaned = context.replace(/<\/?[^>]+>/g, "").slice(0, 2000);
+          lines.push(cleaned);
+        }
+
+        const meta = r.metadata ?? {};
+        const sc = r.searchContext ?? {};
+        const metaParts: string[] = [];
+        if (meta["timestamp"]) metaParts.push(`Date: ${meta["timestamp"]}`);
+        if (meta["channelName"]) metaParts.push(`Channel: #${meta["channelName"]}`);
+        if (sc["senderName"]) metaParts.push(`Participants: ${sc["senderName"]}`);
+        if (meta["platform"]) metaParts.push(`Platform: ${meta["platform"]}`);
+        if (metaParts.length > 0) lines.push(metaParts.join(" · "));
+
+        return lines.join("\n");
+      }).join("\n\n---\n\n");
+
+      return ok(`Found ${data.data.totalCount ?? results.length} meeting insight(s):\n\n${formatted}`);
+    } catch (e) {
+      return err(`Meeting insights search error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  },
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
   spacesSearch,
+  spacesMeetingInsights,
   spacesMemorySearch,
   spacesMemoryCreate,
   spacesTickets,

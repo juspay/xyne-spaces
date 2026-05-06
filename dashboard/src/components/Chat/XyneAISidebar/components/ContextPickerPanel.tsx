@@ -41,6 +41,70 @@ export interface ContextSelections {
   transcripts: SelectedTranscript[];
   recordings: SelectedRecording[];
 }
+
+// Attached context item for v2 API
+export interface AttachedContextItem {
+  type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity';
+  id: string;
+  title: string;
+  threadId?: string;
+  // For activity items
+  eventName?: string;
+  eventCategory?: string;
+  timestamp?: string;
+  metadata?: Record<string, unknown>;
+  relatedData?: Record<string, unknown>;
+}
+
+/**
+ * Convert ContextSelections to attachedContext format for v2 API
+ */
+export function toAttachedContext(selections: ContextSelections): AttachedContextItem[] {
+  const items: AttachedContextItem[] = [];
+
+  for (const channel of selections.channels) {
+    items.push({
+      type: 'channel',
+      id: channel.id,
+      title: channel.name,
+    });
+  }
+
+  for (const ticket of selections.tickets) {
+    items.push({
+      type: 'ticket',
+      id: ticket.id,
+      title: ticket.title,
+    });
+  }
+
+  for (const canvas of selections.canvases) {
+    items.push({
+      type: 'canvas',
+      id: canvas.id,
+      title: canvas.title,
+    });
+  }
+
+  // Transcripts and recordings are both treated as 'call' type
+  for (const transcript of selections.transcripts) {
+    items.push({
+      type: 'call',
+      id: transcript.id,
+      title: transcript.title,
+    });
+  }
+
+  for (const recording of selections.recordings) {
+    items.push({
+      type: 'call',
+      id: recording.id,
+      title: recording.title,
+    });
+  }
+
+  return items;
+}
 import { saveRecents } from '../../../../utils/contextPickerRecents';
 import { toast } from 'sonner';
 

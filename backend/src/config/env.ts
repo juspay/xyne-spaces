@@ -214,6 +214,13 @@ const envSchema = Joi.object({
   VESPA_QUERY_URL: Joi.string().uri().default(''),
   // Microsoft Graph API
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default(''),
+  // XYNE Claw Integration (Ask AI v2)
+  XYNE_CLAW_URL: Joi.string().uri().default(''),
+  XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
+  XYNE_CLAW_AUTH_URL: Joi.string().uri().default(''),
+  ASK_AI_VERSION: Joi.string().valid('v1', 'v2').default('v1'),
+  // Internal S2S key for service-to-service communication
+  INTERNAL_S2S_KEY: Joi.string().allow('').default(''),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -499,6 +506,14 @@ export const config = {
   },
   microsoftGraph: {
     baseUrl: envVars.MICROSOFT_GRAPH_BASE_URL as string,
+  },
+  xyneClaw: {
+    url: envVars.XYNE_CLAW_URL as string,
+    s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
+    authUrl: envVars.XYNE_CLAW_AUTH_URL as string,
+  },
+  askAI: {
+    version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
   },
   emailFetch: {
     batchSize: envVars.EMAIL_FETCH_BATCH_SIZE as number,

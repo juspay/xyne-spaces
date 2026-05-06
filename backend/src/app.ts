@@ -389,6 +389,7 @@ export class App {
 
     this.app.post('/api/internal/postAsUser', validateS2SKey, new ChatController().postMessage);
 
+
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes

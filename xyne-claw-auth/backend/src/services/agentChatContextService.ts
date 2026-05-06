@@ -1,7 +1,7 @@
 import { interact, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call";
-export type ContextSearchType = ContextType | "all";
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity";
+export type ContextSearchType = Exclude<ContextType, "activity"> | "all";
 
 export interface ContextItem {
   id: string;
@@ -16,11 +16,25 @@ export interface AttachedContextRef {
   id: string;
   title: string;
   threadId?: string;
+  // Activity-specific fields
+  eventName?: string;
+  eventCategory?: string;
+  timestamp?: string;
+  metadata?: Record<string, unknown>;
+  relatedData?: Record<string, unknown>;
 }
 
 export interface ContextFile {
   path: string;
   content: string;
+}
+
+export interface ActivityContext {
+  eventName: string;
+  eventCategory?: string;
+  timestamp?: string;
+  metadata?: Record<string, unknown>;
+  relatedData?: Record<string, unknown>;
 }
 
 interface ChannelRow {
@@ -101,7 +115,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
 
   const items: AttachedContextRef[] = [];
   const seen = new Set<string>();
-  const perTypeCounts: Record<ContextType, number> = {
+  const perTypeCounts: Record<Exclude<ContextType, "activity">, number> = {
     channel: 0,
     ticket: 0,
     canvas: 0,
@@ -114,7 +128,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     const type = obj["type"];
     const id = obj["id"];
     const title = obj["title"];
-    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call" };
+    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|activity" };
     if (typeof id !== "string" || id.trim().length === 0) return { items: [], error: "attachedContext.id must be a non-empty string" };
     if (typeof title !== "string" || title.trim().length === 0) return { items: [], error: "attachedContext.title must be a non-empty string" };
     const threadId = obj["threadId"];
@@ -122,20 +136,42 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
       return { items: [], error: "attachedContext.threadId must be a non-empty string when provided" };
     }
 
-    if (perTypeCounts[type] >= PER_TYPE_LIMIT) {
+    // Only apply per-type limit for non-activity types
+    if (type !== "activity" && perTypeCounts[type] >= PER_TYPE_LIMIT) {
       return { items: [], error: `attachedContext exceeds ${PER_TYPE_LIMIT} items for type ${type}` };
     }
 
     const key = `${type}:${id.trim()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    perTypeCounts[type] += 1;
-    items.push({
+    if (type !== "activity") {
+      perTypeCounts[type] += 1;
+    }
+    
+    // Build item with all activity-specific fields if applicable
+    const item: AttachedContextRef = {
       type,
       id: id.trim(),
       title: title.trim(),
       ...(typeof threadId === "string" && threadId.trim().length > 0 ? { threadId: threadId.trim() } : {}),
-    });
+    };
+    
+    // Add activity-specific fields if this is an activity
+    if (type === "activity") {
+      const eventName = obj["eventName"];
+      const eventCategory = obj["eventCategory"];
+      const timestamp = obj["timestamp"];
+      const metadata = obj["metadata"];
+      const relatedData = obj["relatedData"];
+      
+      if (typeof eventName === "string") item.eventName = eventName;
+      if (typeof eventCategory === "string") item.eventCategory = eventCategory;
+      if (typeof timestamp === "string") item.timestamp = timestamp;
+      if (metadata && typeof metadata === "object") item.metadata = metadata as Record<string, unknown>;
+      if (relatedData && typeof relatedData === "object") item.relatedData = relatedData as Record<string, unknown>;
+    }
+    
+    items.push(item);
   }
 
   return { items };
@@ -347,7 +383,28 @@ async function resolveSection(item: AttachedContextRef, auth?: SpacesAuthContext
   if (item.type === "channel") return resolveChannelSection(item, auth);
   if (item.type === "ticket") return resolveTicketSection(item, auth);
   if (item.type === "canvas") return resolveCanvasSection(item, auth);
+  if (item.type === "activity") return resolveActivitySection(item);
   return resolveCallSection(item, auth);
+}
+
+async function resolveActivitySection(item: AttachedContextRef): Promise<ResolvedContextSection> {
+  const lines: string[] = [
+    `Activity: ${item.eventName || item.title}`,
+    `Category: ${item.eventCategory || "N/A"}`,
+    ...(item.timestamp ? [`Timestamp: ${item.timestamp}`] : []),
+  ];
+
+  if (item.metadata && Object.keys(item.metadata).length > 0) {
+    lines.push("", "Metadata:");
+    lines.push(JSON.stringify(item.metadata, null, 2));
+  }
+
+  if (item.relatedData && Object.keys(item.relatedData).length > 0) {
+    lines.push("", "Related Data:");
+    lines.push(JSON.stringify(item.relatedData, null, 2));
+  }
+
+  return { header: `Activity "${item.title}"`, inlineText: lines.join("\n") };
 }
 
 async function resolveChannelSection(item: AttachedContextRef, auth?: SpacesAuthContext): Promise<ResolvedContextSection> {
@@ -557,12 +614,13 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function isContextType(value: unknown): value is ContextType {
-  return value === "channel" || value === "ticket" || value === "canvas" || value === "call";
+  return value === "channel" || value === "ticket" || value === "canvas" || value === "call" || value === "activity";
 }
 
 function labelForType(type: ContextType): string {
   if (type === "channel") return "Channel";
   if (type === "ticket") return "Ticket";
   if (type === "canvas") return "Canvas";
+  if (type === "activity") return "Activity";
   return "Call";
 }
