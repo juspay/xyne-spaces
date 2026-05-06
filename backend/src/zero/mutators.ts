@@ -9510,6 +9510,35 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
               id,
               userId: authData.sub,
               channelSortOrder,
+              enterSendsMessage: true,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            });
+          }
+        },
+      ),
+      setEnterSendsMessage: defineMutator(
+        z.object({
+          id: z.string(),
+          enterSendsMessage: z.boolean(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, enterSendsMessage, timestamp } }) => {
+          const existing = await tx.run(
+            zql.user_preferences.where('userId', authData.sub).one(),
+          );
+          if (existing) {
+            await tx.mutate.user_preferences.update({
+              id: existing.id,
+              enterSendsMessage,
+              updatedAt: timestamp,
+            });
+          } else {
+            await tx.mutate.user_preferences.insert({
+              id,
+              userId: authData.sub,
+              channelSortOrder: ChannelSortOrder.RECENCY,
+              enterSendsMessage,
               createdAt: timestamp,
               updatedAt: timestamp,
             });

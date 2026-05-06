@@ -1112,6 +1112,7 @@ export const userPreferenceTable = table('user_preferences')
     userId: string(),
     askai_custom_instruction: string().optional(), // Custom instructions for Ask AI
     channelSortOrder: enumeration<ChannelSortOrder>(), // Sidebar channel sort
+    enterSendsMessage: boolean(), // true: Enter sends, false: Shift+Enter sends
     createdAt: number(),
     updatedAt: number(),
   })

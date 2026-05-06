@@ -23,6 +23,7 @@ import { Button } from '../ui/Button/Button';
 import { useCurrentUserAssignmentState } from '../../hooks/useAssignmentState';
 import { useTheme } from '../../hooks/useTheme';
 import { useAILandingDefault } from '../../hooks/useAILandingDefault';
+import { useEnterSendsMessage } from '../../hooks/useEnterSendsMessage';
 import { useDebugSettings } from '../../hooks/useDebugSettings';
 import { MeetingDetectionToggle } from './MeetingDetectionToggle';
 import { isElectronApp } from '../../utils/electronApp';
@@ -47,6 +48,7 @@ const Settings = (): ReactElement => {
   const user = useSelf();
   const { theme, changeTheme } = useTheme();
   const { aiLandingDefault, setAiLandingDefault } = useAILandingDefault();
+  const { enterSendsMessage, setEnterSendsMessage } = useEnterSendsMessage();
   const { settings: debugSettings, toggleSendIndicators } = useDebugSettings();
   const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
@@ -594,6 +596,27 @@ const Settings = (): ReactElement => {
             id='ai-landing-default'
             checked={aiLandingDefault}
             onCheckedChange={setAiLandingDefault}
+          />
+        </div>
+      </div>
+
+      <hr className='border-border w-full' />
+      {/* Messaging preferences */}
+      <div className='space-y-3'>
+        <p className='text-sm font-medium text-foreground'>Messaging</p>
+        <div className='flex items-center justify-between gap-3'>
+          <div className='flex-1 min-w-0'>
+            <p className='text-sm text-foreground'>Press Enter to send</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              {enterSendsMessage
+                ? 'Shift + Enter starts a new line'
+                : 'Shift + Enter sends the message'}
+            </p>
+          </div>
+          <Switch
+            id='enter-sends-message'
+            checked={enterSendsMessage}
+            onCheckedChange={setEnterSendsMessage}
           />
         </div>
       </div>

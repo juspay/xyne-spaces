@@ -58,6 +58,7 @@ import { MobileEditor } from './MobileEditor';
 import { useTypingState } from '../../../contexts/TypingStateContext';
 import { validateFile } from '../utils/files';
 import { useScope, useShortcutById } from '../../../shortcuts';
+import { useEnterSendsMessage } from '../../../hooks/useEnterSendsMessage';
 import { Dialog } from '../Dialog';
 import { CallTranscriptSelector } from '../../Chat/CallTranscriptSelector';
 import { EmojiClickData } from 'emoji-picker-react';
@@ -178,6 +179,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       clearDroppedFiles: providerClearDroppedFiles,
       getDroppedFilesForEntity,
     } = useDraftAttachments();
+    const { enterSendsMessage } = useEnterSendsMessage();
     const shareableOrigin = useShareableOrigin();
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
@@ -521,8 +523,33 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           // Check if screen width is below 500px
           const isMobile = window.innerWidth < 500;
 
-          // Shift+Enter: Create new line in special contexts
+          // Shift+Enter: new line (default) OR send message (when enterSendsMessage is false)
           if (event.key === 'Enter' && event.shiftKey) {
+            if (!enterSendsMessage && !isMobile && !disableEnterToSend) {
+              const mentionState = mentionPluginKey.getState(view.state);
+              const channelMentionState = channelMentionPluginKey.getState(view.state);
+              const commandState = commandPluginKey.getState(view.state);
+              const emojiSelectorState = emojiSelectorPluginKey.getState(view.state);
+              if (
+                (mentionState?.isOpen && mentionState.items.length > 0) ||
+                (channelMentionState?.isOpen && channelMentionState.items.length > 0) ||
+                (commandState?.isOpen && commandState.items.length > 0) ||
+                (emojiSelectorState?.isOpen && emojiSelectorState.items.length > 0)
+              ) {
+                return false;
+              }
+              if (
+                editor?.isActive('bulletList') ||
+                editor?.isActive('orderedList') ||
+                editor?.isActive('codeBlock') ||
+                editor?.isActive('blockquote')
+              ) {
+                return false;
+              }
+              event.preventDefault();
+              void handleSend();
+              return true;
+            }
             event.preventDefault();
             if (editor?.isActive('blockquote')) {
               editor.chain().focus().splitBlock().lift('blockquote').run();
@@ -561,7 +588,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             return true;
           }
 
-          // Enter key WITHOUT Shift: Send message (desktop only) or check special contexts
+          // Enter key WITHOUT Shift: Send message or new line depending on preference
           if (event.key === 'Enter' && !event.shiftKey) {
             const mentionState = mentionPluginKey.getState(view.state);
             const channelMentionState = channelMentionPluginKey.getState(view.state);
@@ -593,7 +620,12 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               return false;
             }
 
-            // On desktop: Send the message
+            // When enterSendsMessage is false, Enter creates a new line
+            if (!enterSendsMessage) {
+              return false;
+            }
+
+            // On desktop with enterSendsMessage enabled: Send the message
             event.preventDefault();
             void handleSend();
             return true;
