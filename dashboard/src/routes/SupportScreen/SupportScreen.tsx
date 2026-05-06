@@ -3,6 +3,7 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
   ChevronRight,
   RefreshCw,
   X,
@@ -995,7 +996,7 @@ const SupportScreen = (): ReactElement => {
                         data-track-category='Support'
                         data-track-name='CollapseChannelsSidebar'
                       >
-                        <ChevronDown className='size-4 text-muted-foreground' />
+                        <ChevronLeft className='size-4 text-muted-foreground' />
                       </button>
                     </div>
                   </div>
