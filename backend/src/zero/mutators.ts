@@ -512,6 +512,7 @@ export function createMutators(authData: AuthData, asyncTasks: Array<() => Promi
           entityId,
           entityType,
           metadata,
+          workspaceId: authData.workspaceId,
         });
       } catch (error) {
         logger.error('[Mutator] Failed to sync bookmark reminder job', {

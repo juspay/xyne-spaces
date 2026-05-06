@@ -138,7 +138,7 @@ class NotificationService {
         type: notificationType,
         relatedEntityType: 'workflow',
         relatedEntityId: workflowId,
-        actionUrl: `/tickets/${ticket.id}`,
+        actionUrl: `/${ticket.workspaceId}/tickets/${ticket.id}`,
         metadata: {
           workflowId,
           ticketId: ticket.id,
@@ -831,6 +831,7 @@ class NotificationService {
     senderId: string,
     senderName: string,
     cleanContent: string,
+    workspaceId: string,
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
 
@@ -863,7 +864,7 @@ class NotificationService {
       type: NotificationType.CHANNEL_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
-      actionUrl: `/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`,
+      actionUrl: `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -926,6 +927,7 @@ class NotificationService {
     senderId: string,
     senderName: string,
     cleanContent: string,
+    workspaceId: string,
     mentionType?: string,
     isDMChannel: boolean = false,
     isThreadMessage: boolean = false
@@ -960,8 +962,8 @@ class NotificationService {
     });
 
     const mentionActionUrl = isThreadMessage
-      ? `/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
     const notificationData = {
       title,
       message: `${senderName}: ${cleanContent.substring(0, 100)}${cleanContent.length > 100 ? '...' : ''}`,
@@ -1116,6 +1118,7 @@ class NotificationService {
     senderId: string,
     senderName: string,
     cleanContent: string,
+    workspaceId: string,
     isDMChannel: boolean = false
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = userIds.filter(id => id !== senderId);
@@ -1144,7 +1147,7 @@ class NotificationService {
       type: NotificationType.THREAD_REPLY,
       relatedEntityType: 'message' as const,
       relatedEntityId: replyMessageId,
-      actionUrl: `/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
+      actionUrl: `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -1197,6 +1200,7 @@ class NotificationService {
     senderId: string,
     senderName: string,
     cleanContent: string,
+    workspaceId: string,
     isDMChannel: boolean = true
   ): Promise<{ deliveredUserIds: string[] }> {
     if (recipientIds.length === 0) return { deliveredUserIds: [] };
@@ -1222,7 +1226,7 @@ class NotificationService {
       type: NotificationType.DIRECT_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: conversationId,
-      actionUrl: `/chat/dm/${channelId}#origin=${conversationId}&messageId=${messageId}`,
+      actionUrl: `/${workspaceId}/chat/dm/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         senderId,
         senderName,
@@ -1269,7 +1273,8 @@ class NotificationService {
     channelId: string,
     channelName: string,
     adderId: string,
-    adderName: string
+    adderName: string,
+    workspaceId: string
   ): Promise<void> {
     if (userIds.length === 0) return;
 
@@ -1284,7 +1289,7 @@ class NotificationService {
           type: NotificationType.DIRECT_MESSAGE,
           relatedEntityType: 'channel',
           relatedEntityId: channelId,
-          actionUrl: `/chat/dir/${channelId}`,
+          actionUrl: `/${workspaceId}/chat/dir/${channelId}`,
           metadata: {
             channelId,
             addedBy: adderId,
@@ -1491,6 +1496,7 @@ class NotificationService {
           title: true,
           channelId: true,
           conversationId: true,
+          workspaceId: true,
         },
       });
       if (!ticket) {
@@ -1499,8 +1505,8 @@ class NotificationService {
       }
 
       const actionUrl = ticket.channelId && ticket.conversationId
-        ? `/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
-        : `/tickets?tickets=${ticketId}`;
+        ? `/${ticket.workspaceId}/chat/dir/${ticket.channelId}?tab=tickets&ticketId=${ticketId}&conversationId=${ticket.conversationId}`
+        : `/${ticket.workspaceId}/tickets?tickets=${ticketId}`;
 
       await this.createNotification(assignedTo, {
         title: 'Ticket Assigned',

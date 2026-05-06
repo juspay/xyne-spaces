@@ -6,6 +6,7 @@ export interface EmailFetchJobData {
   sourceId: string;
   channelId: string;
   requesterUserId: string;
+  workspaceId: string;
   startDate?: string;
   endDate?: string;
 }

@@ -336,6 +336,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             senderId,
             senderName,
             cleanContent,
+            this.ctx.workspaceId,
           );
         } catch (error) {
           logger.error('[SIDE-EFFECT] Spaces channel message notifications failed', { error });
@@ -371,6 +372,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           senderId,
           senderName,
           cleanContent,
+          this.ctx.workspaceId,
           mentionType,
           isDMChannel,
           !!isReply
@@ -949,7 +951,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelName,
         senderUserId,
         senderName,
-        cleanContent
+        cleanContent,
+        this.ctx.workspaceId
       );
 
       slackRecipientEmails = getSlackRecipientEmails(replyEmails, deliveredUserIds, userEmailMap);
@@ -1055,7 +1058,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           channelId,
           senderId,
           senderName,
-          cleanContent
+          cleanContent,
+          this.ctx.workspaceId
         );
 
         slackRecipientEmails = getSlackRecipientEmails(recipientEmails, deliveredUserIds, userEmailMap);

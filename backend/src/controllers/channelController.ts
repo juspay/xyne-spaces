@@ -238,6 +238,9 @@ export class ChannelController {
       const cleanContent =
         messageContent.replace(/<[^>]*>/g, '').trim() || 'Sent a message';
 
+      // Fetch workspaceId for notification URL
+      const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
+
       // Send notifications to recipients (skip for self-DMs)
       if (recipientIds.length > 0) {
         await notificationService.createDirectMessageNotifications(
@@ -247,7 +250,8 @@ export class ChannelController {
           channelId,
           senderId,
           senderInfo.name,
-          cleanContent
+          cleanContent,
+          workspaceId
         );
 
         // Update unread counts for recipients (skip for self-DMs)
@@ -582,6 +586,9 @@ export class ChannelController {
         .map(p => p.userId)
         .filter(userId => userId !== senderId);
 
+      // Fetch workspaceId for notification URL
+      const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
+
       // Send notifications to recipients (skip for self-DMs)
       if (recipientIds.length > 0) {
         await notificationService.createDirectMessageNotifications(
@@ -591,7 +598,8 @@ export class ChannelController {
           channelId,
           senderId,
           senderInfo.name,
-          cleanContent
+          cleanContent,
+          workspaceId
         );
 
         // Update unread counts for recipients (skip for self-DMs)

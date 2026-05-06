@@ -27,6 +27,7 @@ interface MessageNotificationData {
   channelTitle: string;
   messageType: 'conversation_start' | 'thread_reply';
   mentionedUserIds?: string[]; // Users who were mentioned (to exclude from general notifications)
+  workspaceId: string; // Workspace ID for proper URL routing
 }
 
 export class NotificationHelper {
@@ -51,8 +52,8 @@ export class NotificationHelper {
       // Remove HTML tags from message content for clean notification
       const cleanContent = data.content.replace(/<[^>]*>/g, '');
 
-      // Build actionUrl based on message type
-      let actionUrl = `/chat/${data.channelId}`;
+      // Build actionUrl based on message type with workspaceId prefix for proper routing
+      let actionUrl = `/${data.workspaceId}/chat/${data.channelId}`;
       if (data.messageType === 'thread_reply') {
         // For thread replies, navigate directly to the thread and scroll to the specific message
         actionUrl += `/${data.conversationId}#origin=${data.conversationId}&messageId=${data.messageId}`;
@@ -124,7 +125,7 @@ export class NotificationHelper {
 
       // Remove HTML tags from message content for clean notification
       const cleanContent = data.content.replace(/<[^>]*>/g, '');
-      const actionUrl = `/chat/${data.channelId}/${data.conversationId}#origin=${data.conversationId}&messageId=${data.messageId}`;
+      const actionUrl = `/${data.workspaceId}/chat/${data.channelId}/${data.conversationId}#origin=${data.conversationId}&messageId=${data.messageId}`;
 
       // Filter out the sender and create notification promises
       const notificationPromises = participants
@@ -176,7 +177,7 @@ export class NotificationHelper {
     try {
       // Remove HTML tags from message content for clean notification
       const cleanContent = data.content.replace(/<[^>]*>/g, '');
-      const actionUrl = `/chat/${data.channelId}/${data.conversationId}#origin=${data.conversationId}&messageId=${data.messageId}`;
+      const actionUrl = `/${data.workspaceId}/chat/${data.channelId}/${data.conversationId}#origin=${data.conversationId}&messageId=${data.messageId}`;
 
       const notificationPromises = mentionedUserIds
         .filter(userId => userId !== data.senderId) // Don't notify sender if they mentioned themselves

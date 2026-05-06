@@ -376,6 +376,9 @@ class ScheduledCallNotificationService {
 
     const startTime = formatDateTimeShort(new Date(startsAt));
 
+    // Fetch workspaceId for notification URL
+    const workspaceId = await repositories.channels.getWorkspaceId(channelId);
+
     // Send notification to each participant
     const notificationPromises = participantsToNotify.map(async (participantId) => {
       try {
@@ -385,7 +388,7 @@ class ScheduledCallNotificationService {
           message: `You have a scheduled call "${title}" at ${startTime}`,
           relatedEntityType: 'call',
           relatedEntityId: callExternalId,
-          actionUrl: '/calls',
+          actionUrl: `/${workspaceId}/calls`,
           metadata: {
             callId,
             callExternalId,
@@ -431,6 +434,9 @@ class ScheduledCallNotificationService {
 
     const startTime = formatDateTimeShort(new Date(call.startsAt));
 
+    // Fetch workspaceId for notification URL
+    const workspaceId = await repositories.channels.getWorkspaceId(call.channelId);
+
     // Send notification + create activity for each participant
     const notificationPromises = participantIds.map(async (userId) => {
       try {
@@ -441,7 +447,7 @@ class ScheduledCallNotificationService {
           message: `Your call "${title}" starts in ${minutesUntilStart} minutes at ${startTime}`,
           relatedEntityType: 'call',
           relatedEntityId: call.externalId,
-          actionUrl: '/calls',
+          actionUrl: `/${workspaceId}/calls`,
           metadata: {
             callId: call.id,
             callExternalId: call.externalId,
@@ -573,6 +579,9 @@ class ScheduledCallNotificationService {
 
     const startTime = formatDateTimeShort(new Date(startsAt));
 
+    // Fetch workspaceId for notification URL
+    const workspaceId = await repositories.channels.getWorkspaceId(channelId);
+
     const notificationPromises = participantsToNotify.map(async (participantId) => {
       try {
         await notificationService.createNotification(participantId, {
@@ -581,7 +590,7 @@ class ScheduledCallNotificationService {
           message: `The scheduled call "${title}" has been updated — new time: ${startTime}`,
           relatedEntityType: 'call',
           relatedEntityId: callExternalId,
-          actionUrl: '/calls',
+          actionUrl: `/${workspaceId}/calls`,
           metadata: {
             callId,
             callExternalId,

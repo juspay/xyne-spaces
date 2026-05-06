@@ -56,7 +56,8 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
         channelId,
         channel?.scopeType === ChannelScopeType.GROUP_DM ? 'a group DM' : channelName,
         adderId,
-        adderName
+        adderName,
+        this.ctx.workspaceId
       );
 
       logger.info(`[ChannelParticipantsHandler] Notification sent for user ${userId} added to channel ${channelId} by ${adderName}`);
