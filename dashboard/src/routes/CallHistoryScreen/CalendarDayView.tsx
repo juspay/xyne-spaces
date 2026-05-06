@@ -44,6 +44,7 @@ interface CalendarDayViewProps {
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
+  onDeleteClick?: (call: Call) => void;
   onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
 }
 
@@ -62,6 +63,7 @@ interface DayViewCallCardProps {
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
+  onDeleteClick?: (call: Call) => void;
   onResizePointerDown: (e: React.PointerEvent, call: Call) => void;
 }
 
@@ -78,6 +80,7 @@ function DayViewCallCard({
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
+  onDeleteClick,
   onResizePointerDown,
 }: DayViewCallCardProps): ReactElement {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -216,6 +219,14 @@ function DayViewCallCard({
                   }
                 : undefined
             }
+            onDeleteClick={
+              onDeleteClick
+                ? () => {
+                    setOpenCallId(null);
+                    onDeleteClick(call);
+                  }
+                : undefined
+            }
           />
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
@@ -302,6 +313,7 @@ const CalendarDayView = ({
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
+  onDeleteClick,
   onCreateCallAtSlot,
 }: CalendarDayViewProps): ReactElement => {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -502,6 +514,7 @@ const CalendarDayView = ({
                     onGotoMessage={onGotoMessage}
                     onDownloadTranscript={onDownloadTranscript}
                     {...(onEditClick ? { onEditClick } : {})}
+                    {...(onDeleteClick ? { onDeleteClick } : {})}
                     onResizePointerDown={onResizePointerDown}
                   />
                 );
