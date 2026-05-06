@@ -160,6 +160,7 @@ router.post(
           sourceId: source.id,
           channelId,
           requesterUserId,
+          workspaceId: req.user!.workspaceId,
           ...(options ?? {}),
         });
         logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId });

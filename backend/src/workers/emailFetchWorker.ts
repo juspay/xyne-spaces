@@ -100,7 +100,7 @@ class EmailFetchWorker {
           skipped,
           errorCount: result.errors?.length ?? 0,
         },
-        `/support/${data.channelId}`,
+        `/${data.workspaceId}/support/${data.channelId}`,
       );
     } catch (err) {
       logger.error('[EMAIL-FETCH-WORKER] Failed to publish completion notification:', err);
@@ -137,7 +137,7 @@ class EmailFetchWorker {
           sourceId: data.sourceId,
           needsReauth,
         },
-        `/support/${data.channelId}`,
+        `/${data.workspaceId}/support/${data.channelId}`,
       );
     } catch (notifyErr) {
       logger.error('[EMAIL-FETCH-WORKER] Failed to publish failure notification:', notifyErr);

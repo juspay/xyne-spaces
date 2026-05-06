@@ -34,6 +34,7 @@ interface BookmarkReminderJobData {
   entityId: string;
   entityType: BookmarkEntityType;
   remindAt: string;
+  workspaceId: string;
 }
 
 interface SyncBookmarkReminderParams {
@@ -41,6 +42,7 @@ interface SyncBookmarkReminderParams {
   entityId: string;
   entityType: BookmarkEntityType;
   metadata: unknown;
+  workspaceId: string;
 }
 
 class BookmarkReminderService {
@@ -127,6 +129,7 @@ class BookmarkReminderService {
         entityId: params.entityId,
         entityType: params.entityType,
         remindAt: activeReminder.remindAt,
+        workspaceId: params.workspaceId,
       },
       {
         delay,
@@ -156,7 +159,7 @@ class BookmarkReminderService {
   }
 
   private async processReminderJob(job: Bull.Job<BookmarkReminderJobData>): Promise<void> {
-    const { userId, entityId, entityType, remindAt } = job.data;
+    const { userId, entityId, entityType, remindAt, workspaceId } = job.data;
 
     const bookmark = await db.bookmark.findUnique({
       where: {
@@ -192,6 +195,7 @@ class BookmarkReminderService {
     const { title, message, actionUrl, metadata } = this.buildNotificationPayload({
       entityId,
       reminder: activeReminder,
+      workspaceId,
     });
 
     await notificationService.createNotification(
@@ -251,9 +255,11 @@ class BookmarkReminderService {
   private buildNotificationPayload({
     entityId,
     reminder,
+    workspaceId,
   }: {
     entityId: string;
     reminder: ReminderMetadata;
+    workspaceId: string;
   }): {
     title: string;
     message: string;
@@ -285,6 +291,7 @@ class BookmarkReminderService {
       channelId,
       conversationId,
       initialMessageId,
+      workspaceId,
     });
 
     return {
@@ -310,13 +317,15 @@ class BookmarkReminderService {
     channelId,
     conversationId,
     initialMessageId,
+    workspaceId,
   }: {
     entityId: string;
     channelId?: string | undefined;
     conversationId?: string | undefined;
     initialMessageId?: string | undefined;
+    workspaceId: string;
   }): string {
-    const basePath = '/chat/bookmarks';
+    const basePath = `/${workspaceId}/chat/bookmarks`;
     if (!channelId || !conversationId) {
       return basePath;
     }

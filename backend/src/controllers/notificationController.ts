@@ -352,7 +352,7 @@ export class NotificationController {
         type: 'WORKFLOW_COMPLETION',
         relatedEntityType: 'test',
         relatedEntityId: 'test-' + Date.now(),
-        actionUrl: '/notifications',
+        actionUrl: `/${req.user!.workspaceId}/notifications`,
       });
 
       res.json({ success: true, message: 'Test notification created successfully' });
