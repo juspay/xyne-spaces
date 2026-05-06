@@ -380,7 +380,7 @@ const getMessageBubbleClassName = (
     isBookmarked &&
       variant !== 'pinned' &&
       !isPinned &&
-      !isShowInChannel && ['bg-blue-50/90 dark:bg-blue-500/10 rounded-sm'],
+      !isShowInChannel && ['bg-blue-50/90 rounded-sm message-bookmarked-bg'],
     variant === 'pinned' && 'bg-background border border-border shadow-sm rounded-xl',
     isHighlighted && 'highlight-message',
     isXyneBot && 'pt-5',
