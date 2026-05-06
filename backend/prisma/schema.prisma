@@ -1021,6 +1021,7 @@ model UserPreference {
   userId                  String   @unique  // One preference record per user
   askai_custom_instruction String?  // Custom instruction for Ask AI
   channelSortOrder         ChannelSortOrder @default(RECENCY) // Sidebar channel sort
+  enterSendsMessage        Boolean  @default(true) // true: Enter sends, false: Shift+Enter sends
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
