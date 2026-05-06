@@ -14,7 +14,7 @@ import { useNavigate } from 'react-router-dom';
 
 const PAGE_SIZE = 10;
 
-type Cursor = { lastActivityAt: number; id: string };
+type Cursor = { lastReplyAt: number; id: string };
 
 // Optimize ThreadRow with memo to prevent unnecessary re-renders of existing rows
 // during scrolling or when new data loads at the bottom.
@@ -91,13 +91,13 @@ ListContainer.displayName = 'ListContainer';
 const UserThreads = (): ReactElement => {
   const { user } = useAuthContext();
   const [allConversations, setAllConversations] = useState<
-    QueryResultType<typeof queries.userConversationsPaginated>
+    QueryResultType<typeof queries.userConversationsPaginatedV2>
   >([]);
   const [cursor, setCursor] = useState<Cursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
 
   const [currentBatch] = useQuery(
-    queries.userConversationsPaginated({
+    queries.userConversationsPaginatedV2({
       userId: user?.id || '',
       limit: PAGE_SIZE,
       start: cursor,
@@ -125,15 +125,19 @@ const UserThreads = (): ReactElement => {
     if (!hasMore || allConversations.length === 0) return;
 
     const lastItem = allConversations[allConversations.length - 1]!;
-    setCursor({
-      lastActivityAt: lastItem.lastActivityAt,
-      id: lastItem.conversationId,
-    });
+    setCursor(
+      lastItem.conversation?.lastActivityAt
+        ? {
+            lastReplyAt: lastItem.conversation.lastActivityAt,
+            id: lastItem.conversationId,
+          }
+        : null,
+    );
   }, [hasMore, allConversations]);
 
   // Memoize the itemContent callback
   const itemContent = useCallback(
-    (_index: number, c: QueryResultType<typeof queries.userConversationsPaginated>[number]) => (
+    (_index: number, c: QueryResultType<typeof queries.userConversationsPaginatedV2>[number]) => (
       <ThreadRow
         channelId={c.channelId ?? ''}
         conversationId={c.conversationId}
