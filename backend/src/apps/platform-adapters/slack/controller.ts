@@ -207,7 +207,7 @@ export class SlackController {
 
 		const context = getSlackAuthContext(req);
 		const channelId = getResolvedChannelId(req);
-		const args = transformPostMessage(
+		const args = await transformPostMessage(
 			{ ...parsed.data, channel: channelId },
 			context,
 		);
@@ -250,7 +250,7 @@ export class SlackController {
 		}
 
 		const context = getSlackAuthContext(req);
-		const args = transformUpdate(parsed.data);
+		const args = await transformUpdate(parsed.data);
 		const channelId = getResolvedChannelId(req);
 
 		const existingMessage = await repositories.messages.findById(args.messageId);

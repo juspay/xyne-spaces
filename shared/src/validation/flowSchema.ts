@@ -68,6 +68,7 @@ export const flowComponentStyleSchema = z.object({
   backgroundColor: z.string().optional(),
   borderRadius: z.string().optional(),
   border: z.string().optional(),
+  borderLeft: z.string().optional(),
 });
 
 // ============================================================================

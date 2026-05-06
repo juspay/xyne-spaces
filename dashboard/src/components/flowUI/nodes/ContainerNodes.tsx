@@ -16,7 +16,7 @@ export const CardNode: React.FC<ContainerNodeProps> = ({ node, children }) => {
 
 export const ColumnNode: React.FC<ContainerNodeProps> = ({ node, children }) => {
   return (
-    <div className='flex flex-col gap-3' style={node.style}>
+    <div className='flex flex-col gap-2 flex-1 min-w-0' style={node.style}>
       {children}
     </div>
   );
@@ -24,7 +24,7 @@ export const ColumnNode: React.FC<ContainerNodeProps> = ({ node, children }) => 
 
 export const RowNode: React.FC<ContainerNodeProps> = ({ node, children }) => {
   return (
-    <div className='flex flex-row gap-3 items-start flex-wrap' style={node.style}>
+    <div className='flex flex-row gap-3 items-stretch' style={node.style}>
       {children}
     </div>
   );
