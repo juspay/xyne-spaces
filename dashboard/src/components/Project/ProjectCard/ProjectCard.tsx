@@ -1,6 +1,9 @@
-import { ReactElement } from 'react';
+import { ReactElement, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../ui/Button';
+import { Copy, Check } from 'lucide-react';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { toast } from 'sonner';
 import type { Project } from '@xyne/shared';
 
 interface ProjectCardProps {
@@ -11,6 +14,7 @@ interface ProjectCardProps {
 
 export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): ReactElement => {
   const navigate = useNavigate();
+  const [copied, setCopied] = useState(false);
 
   const handleCardClick = (): void => {
     void navigate(`/listProjects/${project.id}`);
@@ -24,6 +28,19 @@ export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): Re
   const handleDeleteClick = (e?: React.MouseEvent<HTMLButtonElement>): void => {
     e?.stopPropagation();
     void onDelete(project.id);
+  };
+
+  const handleCopyId = (e: React.MouseEvent): void => {
+    e.stopPropagation();
+    copyTextToClipboard(project.id)
+      .then(() => {
+        toast.success('Project ID copied to clipboard');
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        toast.error('Failed to copy project ID');
+      });
   };
 
   return (
@@ -61,6 +78,21 @@ export const ProjectCard = ({ project, onEdit, onDelete }: ProjectCardProps): Re
       <div className='border-t border-border pt-4 mt-4'>
         <div className='text-xs text-muted-foreground mb-3'>
           <p>Created: {new Date(project.createdAt).toLocaleDateString()}</p>
+          <div className='flex items-center gap-1 mt-1'>
+            <span className='text-xs text-muted-foreground'>ID:</span>
+            <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[160px]'>
+              {project.id}
+            </code>
+            <Button
+              variant='ghost'
+              size='iconSm'
+              className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
+              onClick={handleCopyId}
+              title='Copy project ID'
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+            </Button>
+          </div>
         </div>
 
         <div className='flex gap-2'>
