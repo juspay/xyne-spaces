@@ -24,7 +24,8 @@ export enum WorkflowType {
   VERSION_BUMP_WORKFLOW = 'VERSION_BUMP_WORKFLOW',
   IT_SUPPORT_WORKFLOW = 'IT_SUPPORT_WORKFLOW',
   JUTILS_CODE_UPDATION = 'JUTILS_CODE_UPDATION',
-  SPECS_VERIFICATION_WORKFLOW = 'SPECS_VERIFICATION_WORKFLOW'
+  SPECS_VERIFICATION_WORKFLOW = 'SPECS_VERIFICATION_WORKFLOW',
+  ISSUE_WORKFLOW = 'ISSUE_WORKFLOW',
 }
 
 export enum WorkflowExecutionStatus {
@@ -585,6 +586,7 @@ export function getWorkflowTypeDisplayName(workflowType: WorkflowType): string {
     [WorkflowType.IT_SUPPORT_WORKFLOW]: 'IT Support Workflow',
     [WorkflowType.JUTILS_CODE_UPDATION]: 'jUtils Workflow',
     [WorkflowType.SPECS_VERIFICATION_WORKFLOW]: 'Specs Verification Workflow',
+    [WorkflowType.ISSUE_WORKFLOW]: 'Issue Workflow',
   };
   return displayNames[workflowType]
 }
