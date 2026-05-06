@@ -221,7 +221,7 @@ async function formatCommitAnalysisToBlockNote(
   title: string
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   const blocks: BlockNoteBlock[] = [];
-  const mentionedUserIds: string[] = [];
+  const mentionedUserIds = new Set<string>();
 
   const userLookupCache = new Map<string, { userId: string; username: string; userEmail: string; userPicture: string } | null>();
   const userRepository = new UserRepository();
@@ -466,7 +466,7 @@ async function formatCommitAnalysisToBlockNote(
         },
       });
       // Track mentioned user for notifications
-      mentionedUserIds.push(authorUser.userId);
+      mentionedUserIds.add(authorUser.userId);
     } else {
       // display username if not found
       authorContent.push({ type: 'text', text: pr.author.displayName, styles: {} });
@@ -577,6 +577,5 @@ async function formatCommitAnalysisToBlockNote(
       content: [],
     });
   }
-
-  return { blocks, mentionedUserIds };
+  return { blocks, mentionedUserIds: [...mentionedUserIds] };
 }
