@@ -225,14 +225,12 @@ const ThreadList = ({
   })();
 
   const firstUnreadReplyIndex = useMemo(() => {
-    if (!conversationParticipant?.lastReadAt || !visibleMessages || visibleMessages.length <= 1) {
+    const lastReadAt = conversationParticipant?.lastReadAt;
+    if (typeof lastReadAt !== 'number' || !visibleMessages || visibleMessages.length <= 1) {
       return -1;
     }
     return visibleMessages.findIndex(
-      (m, i) =>
-        i > 0 &&
-        new Date(m.createdAt).getTime() > conversationParticipant.lastReadAt! &&
-        m.senderId !== user?.id,
+      (m, i) => i > 0 && new Date(m.createdAt).getTime() > lastReadAt && m.senderId !== user?.id,
     );
   }, [visibleMessages, conversationParticipant?.lastReadAt, user?.id]);
 
