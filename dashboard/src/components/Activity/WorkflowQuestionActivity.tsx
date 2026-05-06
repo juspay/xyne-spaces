@@ -7,9 +7,11 @@ import { useUser } from '../../hooks/useUsers';
 export const WorkflowQuestionActivity = ({
   activity,
   isExpanded,
+  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
+  isSelected?: boolean;
 }): ReactElement | null => {
   const workflowId = activity.actionSourceId;
   const ticketIdValue = activity.ticketId;
@@ -55,6 +57,7 @@ export const WorkflowQuestionActivity = ({
       description={<span className='text-muted-foreground text-sm'>workflow needs input</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
+      isSelected={isSelected}
       actorAction={activity.actorAction}
     >
       {isExpanded ? expandedContent : condensedContent}

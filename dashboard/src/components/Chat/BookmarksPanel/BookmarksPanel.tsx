@@ -1,7 +1,8 @@
-import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useParams } from 'react-router-dom';
 import { BookmarkEntityType, type Bookmark as BookmarkRow } from '@xyne/shared';
 import { Bookmark, ArrowLeft } from 'lucide-react';
+import { useShortcut } from '../../../shortcuts';
 import { BookmarkItem } from '../BookmarkItem/BookmarkItem';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
@@ -96,6 +97,7 @@ const BookmarksPanel = (): ReactElement => {
   const backPath = lastVisitedChannelId ? `/chat/dir/${lastVisitedChannelId}` : '/chat/dir';
 
   const bookmarksPanelRef = useRef<ImperativePanelHandle>(null);
+  const bookmarkListRef = useRef<HTMLDivElement>(null);
 
   const { bookmarks } = useUserBookmarks();
   const [optimisticCompletedBookmarks, setOptimisticCompletedBookmarks] = useState<BookmarkRow[]>(
@@ -212,6 +214,51 @@ const BookmarksPanel = (): ReactElement => {
     return prioritizedBookmarks;
   }, [activeTab, completedBookmarks, prioritizedBookmarks, reminderBookmarks]);
 
+  // j/k keyboard navigation through bookmarks list
+  const bookmarkNavIdx = useRef(-1);
+  const [keyboardNavEntityId, setKeyboardNavEntityId] = useState<string | null>(null);
+
+  const navigateBookmark = useCallback(
+    (delta: number) => {
+      if (visibleBookmarks.length === 0) return;
+      const nextIdx =
+        bookmarkNavIdx.current < 0
+          ? delta > 0
+            ? 0
+            : visibleBookmarks.length - 1
+          : Math.max(0, Math.min(visibleBookmarks.length - 1, bookmarkNavIdx.current + delta));
+      bookmarkNavIdx.current = nextIdx;
+
+      const targetId = visibleBookmarks[nextIdx]?.entityId;
+      if (!targetId) return;
+      // Set nofocus on the target item so it navigates without focusing chat input
+      setKeyboardNavEntityId(targetId);
+      requestAnimationFrame(() => {
+        const el = bookmarkListRef.current?.querySelector<HTMLElement>(
+          `[data-testid="bookmark-item-${targetId}"]`,
+        );
+        if (el) {
+          el.scrollIntoView({ block: 'nearest' });
+          el.click();
+        }
+      });
+    },
+    [visibleBookmarks],
+  );
+
+  useShortcut('j', () => navigateBookmark(1), {
+    scope: 'global',
+    description: 'Next bookmark',
+    category: 'Bookmarks',
+    enabled: !isMobile && visibleBookmarks.length > 0,
+  });
+  useShortcut('k', () => navigateBookmark(-1), {
+    scope: 'global',
+    description: 'Previous bookmark',
+    category: 'Bookmarks',
+    enabled: !isMobile && visibleBookmarks.length > 0,
+  });
+
   // Render the left panel content (exact same UI)
   const renderLeftPanel = (): ReactElement => (
     <div className='flex-1 h-full flex flex-col overflow-hidden bg-background'>
@@ -267,7 +314,7 @@ const BookmarksPanel = (): ReactElement => {
       </div>
 
       {/* Bookmarks List */}
-      <div className='flex-1 overflow-y-auto'>
+      <div ref={bookmarkListRef} className='flex-1 overflow-y-auto'>
         {visibleBookmarks.length === 0 ? (
           <div className='flex flex-col items-center justify-center h-full p-8 text-center'>
             <Bookmark className='text-muted-foreground mb-4' size={48} />
@@ -281,36 +328,41 @@ const BookmarksPanel = (): ReactElement => {
         ) : (
           <div>
             {visibleBookmarks.map(bookmark => (
-              <BookmarkItem
+              <div
                 key={bookmark.id}
-                entityId={bookmark.entityId}
-                entityType={bookmark.entityType}
-                bookmarkMetadata={bookmark.metadata}
-                showChannelName={true}
-                enableReminder={!isMobile && activeTab !== 'complete'}
-                isMobile={isMobile}
-                showActions={activeTab !== 'complete'}
-                {...(activeTab === 'complete'
-                  ? {}
-                  : {
-                      onMarkedDone: (): void => {
-                        setOptimisticCompletedBookmarks(prev => {
-                          const completedBookmark: BookmarkRow = {
-                            ...bookmark,
-                            isDeleted: false,
-                            isCompleted: true,
-                            updatedAt: Date.now(),
-                            metadata: upsertBookmarkCompletionMetadata(
-                              bookmark.metadata,
-                            ) as BookmarkRow['metadata'],
-                          };
-                          const withoutDuplicate = prev.filter(item => item.id !== bookmark.id);
-                          return [completedBookmark, ...withoutDuplicate];
-                        });
-                        triggerCompleteTabFlash();
-                      },
-                    })}
-              />
+                className={cn(keyboardNavEntityId === bookmark.entityId && 'bg-accent')}
+              >
+                <BookmarkItem
+                  entityId={bookmark.entityId}
+                  entityType={bookmark.entityType}
+                  bookmarkMetadata={bookmark.metadata}
+                  showChannelName={true}
+                  enableReminder={!isMobile && activeTab !== 'complete'}
+                  isMobile={isMobile}
+                  showActions={activeTab !== 'complete'}
+                  nofocus={keyboardNavEntityId === bookmark.entityId}
+                  {...(activeTab === 'complete'
+                    ? {}
+                    : {
+                        onMarkedDone: (): void => {
+                          setOptimisticCompletedBookmarks(prev => {
+                            const completedBookmark: BookmarkRow = {
+                              ...bookmark,
+                              isDeleted: false,
+                              isCompleted: true,
+                              updatedAt: Date.now(),
+                              metadata: upsertBookmarkCompletionMetadata(
+                                bookmark.metadata,
+                              ) as BookmarkRow['metadata'],
+                            };
+                            const withoutDuplicate = prev.filter(item => item.id !== bookmark.id);
+                            return [completedBookmark, ...withoutDuplicate];
+                          });
+                          triggerCompleteTabFlash();
+                        },
+                      })}
+                />
+              </div>
             ))}
           </div>
         )}

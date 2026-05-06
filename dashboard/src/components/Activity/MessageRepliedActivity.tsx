@@ -10,9 +10,11 @@ import { useRouteContext } from '../../hooks/useRouteContext';
 export const MessageRepliedActivity = ({
   activity,
   isExpanded = true,
+  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
+  isSelected?: boolean;
 }): ReactElement | null => {
   const message = activity.message;
   const sender = useUser(message?.senderId ?? '');
@@ -37,6 +39,7 @@ export const MessageRepliedActivity = ({
       targetPath={targetPath}
       supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
+      isSelected={isSelected}
     >
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} variant='default' contentOnly={true} />

@@ -18,53 +18,126 @@ import { EmailFetchActivity } from './EmailFetchActivity';
 interface ActivityItemProps {
   activity: ActivityWithRelated;
   isExpanded: boolean;
+  isSelected?: boolean;
 }
 
-export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): ReactElement | null => {
+export const ActivityItem = ({
+  activity,
+  isExpanded,
+  isSelected = false,
+}: ActivityItemProps): ReactElement | null => {
   switch (activity.actorAction) {
     case 'mentioned_user':
       if (activity.canvasId) {
-        return <CanvasMentionActivity activity={activity} isExpanded={isExpanded} />;
+        return (
+          <CanvasMentionActivity
+            activity={activity}
+            isExpanded={isExpanded}
+            isSelected={isSelected}
+          />
+        );
       }
-      return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <MessageMentionActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'group_mention':
-      return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <MessageMentionActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'direct_message':
-      return <DirectMessageActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <DirectMessageActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'replied':
-      return <MessageRepliedActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <MessageRepliedActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'replied_v2':
-      return <MessageRepliedActivityV2 activity={activity} isExpanded={isExpanded} />;
+      return (
+        <MessageRepliedActivityV2
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'added':
-      return <ReactionAddedActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <ReactionAddedActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'added_v2':
-      return <ReactionAddedActivityV2 activity={activity} isExpanded={isExpanded} />;
+      return (
+        <ReactionAddedActivityV2
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'removed':
-      return <ReactionAddedActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <ReactionAddedActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'eta_warning':
     case 'eta_breach':
     case 'stage_eta_breach':
-      return <EtaActivity activity={activity} isExpanded={isExpanded} />;
+      return <EtaActivity activity={activity} isExpanded={isExpanded} isSelected={isSelected} />;
 
     case 'paused_from_assignment':
     case 'resumed_from_assignment':
-      return <AssignmentPauseActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <AssignmentPauseActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'ticket_assigned':
-      return <TicketAssignmentActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <TicketAssignmentActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'ticket_status':
     case 'ticket_eta':
     case 'ticket_board':
-      return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <TicketUpdateActivity activity={activity} isExpanded={isExpanded} isSelected={isSelected} />
+      );
 
     case 'ticket_pr_created':
     case 'ticket_pr_updated':
@@ -72,17 +145,31 @@ export const ActivityItem = ({ activity, isExpanded }: ActivityItemProps): React
     case 'ticket_pr_declined':
     case 'ticket_pr_reviewer_assigned':
     case 'ticket_qa_assigned':
-      return <TicketUpdateActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <TicketUpdateActivity activity={activity} isExpanded={isExpanded} isSelected={isSelected} />
+      );
 
     case 'workflow_question':
-      return <WorkflowQuestionActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <WorkflowQuestionActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'scheduled_call':
     case 'call_reminder':
     case 'call_updated':
     case 'meeting_accepted':
     case 'meeting_declined':
-      return <ScheduledCallActivity activity={activity} isExpanded={isExpanded} />;
+      return (
+        <ScheduledCallActivity
+          activity={activity}
+          isExpanded={isExpanded}
+          isSelected={isSelected}
+        />
+      );
 
     case 'email_fetch_completed':
     case 'email_fetch_failed':

@@ -1,5 +1,5 @@
 import { ReactElement, useState, useRef, useCallback } from 'react';
-import { Outlet, useNavigate, Link } from 'react-router-dom';
+import { Outlet, useNavigate, useParams, Link } from 'react-router-dom';
 import { FileText, Plus, ArrowLeft, Info, Loader2 } from 'lucide-react';
 import { CanvasList } from '../CanvasList';
 import { useZero } from '../../../hooks/useZero';
@@ -27,6 +27,7 @@ type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 const CanvasPanel = (): ReactElement => {
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
+  const { canvasId } = useParams<{ canvasId?: string }>();
   const { user } = useAuth();
   const z = useZero();
 
@@ -200,9 +201,10 @@ const CanvasPanel = (): ReactElement => {
           onDuplicate={handleDuplicateCanvas}
           currentUserId={user?.id}
           showQuartoDocsFilter={true}
+          paginated={true}
           activeFilter={activeFilter}
           onFilterChange={setActiveFilter}
-          paginated={true}
+          {...(canvasId ? { selectedCanvasId: canvasId } : {})}
         />
       </div>
       <PublishDocsModal isOpen={showPublishModal} onClose={() => setShowPublishModal(false)} />

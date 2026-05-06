@@ -7,11 +7,13 @@ import { useUser } from '../../hooks/useUsers';
 interface TicketAssignmentActivityProps {
   activity: ActivityWithRelated;
   isExpanded: boolean;
+  isSelected?: boolean;
 }
 
 export const TicketAssignmentActivity = ({
   activity,
   isExpanded,
+  isSelected,
 }: TicketAssignmentActivityProps): ReactElement | null => {
   const ticket = activity.ticket;
   const actorId = activity.actorId || 'system';
@@ -84,6 +86,7 @@ export const TicketAssignmentActivity = ({
       targetPath={targetPath}
       supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
+      isSelected={isSelected}
     >
       {isExpanded ? expandedContent : condensedContent}
     </ActivityItemCard>

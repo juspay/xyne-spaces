@@ -168,7 +168,10 @@ export default function RecordingsScreen(): ReactElement {
   };
 
   const handleRecordingClick = (recording: Recording): void => {
-    void navigate(`/recordings/${recording.externalId}`);
+    const recordingIds = recordings.map(r => r.externalId);
+    void navigate(`/recordings/${recording.externalId}`, {
+      state: { recordingIds },
+    });
   };
 
   // ─── Loading State ───────────────────────────────────────────────

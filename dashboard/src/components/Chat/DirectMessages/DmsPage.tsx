@@ -1,8 +1,9 @@
-import { ReactElement, useState, useRef, useCallback, useEffect } from 'react';
+import { ReactElement, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Search, PenBox, ArrowLeft, X, HelpCircle } from 'lucide-react';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { DmListItem } from './DmListItem';
 import { useNavigate, Outlet, useParams, Link } from 'react-router-dom';
+import { useShortcut } from '../../../shortcuts';
 import { useMutation } from '@tanstack/react-query';
 import { channelService, CreateDmRequest } from '../../../services/Chat/channelService';
 import { AddDmForm, CreateDmFormData } from '../AddDmForm/AddDmForm';
@@ -160,6 +161,43 @@ const DmsPage = (): ReactElement => {
       setShowDmSearchDropdown(false);
     }
   }, [channelId, setDmSearchQuery, setShowDmSearchDropdown]);
+
+  // j/k keyboard navigation through DM list
+  const currentDmIndex = useMemo(
+    () => (channelId ? directMessages.findIndex(ch => ch.id === channelId) : -1),
+    [channelId, directMessages],
+  );
+
+  const navigateDm = useCallback(
+    (delta: number) => {
+      if (directMessages.length === 0) return;
+      const nextIndex =
+        currentDmIndex < 0
+          ? delta > 0
+            ? 0
+            : directMessages.length - 1
+          : Math.max(0, Math.min(directMessages.length - 1, currentDmIndex + delta));
+      const next = directMessages[nextIndex];
+      if (next && next.id !== channelId) {
+        virtuosoRef.current?.scrollToIndex({ index: nextIndex, align: 'center' });
+        void navigate(`/chat/dm/${next.id}?fromDM=true&nofocus=1`);
+      }
+    },
+    [directMessages, currentDmIndex, channelId, navigate],
+  );
+
+  useShortcut('j', () => navigateDm(1), {
+    scope: 'global',
+    description: 'Next DM',
+    category: 'DMs',
+    enabled: !isMobile && directMessages.length > 0,
+  });
+  useShortcut('k', () => navigateDm(-1), {
+    scope: 'global',
+    description: 'Previous DM',
+    category: 'DMs',
+    enabled: !isMobile && directMessages.length > 0,
+  });
 
   // Handle DM selection from search dropdown
   const handleDmSelect = useCallback(

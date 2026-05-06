@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 
 export async function checkRateLimit(endpoint: string, identifier: string): Promise<boolean> {
   try {
-    const maxRequests = parseInt(process.env.ZERO_MAX_REQUESTS || '100', 10);
+    const maxRequests = parseInt(process.env.ZERO_MAX_REQUESTS || '300', 10);
     const windowSeconds = parseInt(process.env.ZERO_REQUEST_WINDOW || '60', 10);
     const redis = redisService.getClient();
     const key = `rate:${endpoint}:${identifier}`;
