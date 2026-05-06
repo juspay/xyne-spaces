@@ -36,6 +36,7 @@ const DEFAULT_TITLE_GENERATOR_MODEL = 'glm-flash-experimental';
 const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash-experimental';
 const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
+const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
 
 // Nudge agents defaults
 const DEFAULT_NUDGE_CREATE_TICKET_MODEL = 'glm-flash-experimental';
@@ -78,6 +79,7 @@ const CAC_KEYS = {
   nudgeCreateTicketModel: 'nudge_create_ticket_model_name',
   nudgeRelatedTicketModel: 'nudge_related_ticket_model_name',
   nudgeRelatedMessageModel: 'nudge_related_message_model_name',
+  classificationModel: 'email_classification_model_name',
   // Xyne AI per-tool soft token budgets
   xyneAiToolBudgetSearchRelevantContent: 'xyne_ai_tool_budget_search_relevant_content',
   xyneAiToolBudgetFetchChannelMessages: 'xyne_ai_tool_budget_fetch_channel_messages',
@@ -117,6 +119,9 @@ export class AgentsConfig {
   public readonly nudgeRelatedTicketModelName: string;
   public readonly nudgeRelatedMessageModelName: string;
 
+  // Email classification config
+  public readonly classificationModelName: string;
+
   // Xyne AI per-tool soft token budgets
   public readonly xyneAiToolBudgetSearchRelevantContent: number;
   public readonly xyneAiToolBudgetFetchChannelMessages: number;
@@ -142,6 +147,7 @@ export class AgentsConfig {
     nudgeCreateTicketModelName: string,
     nudgeRelatedTicketModelName: string,
     nudgeRelatedMessageModelName: string,
+    classificationModelName: string,
     xyneAiToolBudgetSearchRelevantContent: number,
     xyneAiToolBudgetFetchChannelMessages: number,
     xyneAiToolBudgetFetchThreadMessages: number,
@@ -163,6 +169,7 @@ export class AgentsConfig {
     this.nudgeCreateTicketModelName = nudgeCreateTicketModelName;
     this.nudgeRelatedTicketModelName = nudgeRelatedTicketModelName;
     this.nudgeRelatedMessageModelName = nudgeRelatedMessageModelName;
+    this.classificationModelName = classificationModelName;
     this.xyneAiToolBudgetSearchRelevantContent = xyneAiToolBudgetSearchRelevantContent;
     this.xyneAiToolBudgetFetchChannelMessages = xyneAiToolBudgetFetchChannelMessages;
     this.xyneAiToolBudgetFetchThreadMessages = xyneAiToolBudgetFetchThreadMessages;
@@ -222,6 +229,7 @@ export class AgentsConfig {
       const nudgeCreateTicketModelName = getValue<string>(CAC_KEYS.nudgeCreateTicketModel, DEFAULT_NUDGE_CREATE_TICKET_MODEL);
       const nudgeRelatedTicketModelName = getValue<string>(CAC_KEYS.nudgeRelatedTicketModel, DEFAULT_NUDGE_RELATED_TICKET_MODEL);
       const nudgeRelatedMessageModelName = getValue<string>(CAC_KEYS.nudgeRelatedMessageModel, DEFAULT_NUDGE_RELATED_MESSAGE_MODEL);
+      const classificationModelName = getValue<string>(CAC_KEYS.classificationModel, DEFAULT_CLASSIFICATION_MODEL);
 
       // Extract Xyne AI tool budget values
       const xyneAiToolBudgetSearchRelevantContent = getValue<number>(CAC_KEYS.xyneAiToolBudgetSearchRelevantContent, DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_RELEVANT_CONTENT);
@@ -313,6 +321,12 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.nudgeRelatedMessageModel);
       }
 
+      if (CAC_KEYS.classificationModel in allConfigs) {
+        fromCAC.push(CAC_KEYS.classificationModel);
+      } else {
+        usingDefaults.push(CAC_KEYS.classificationModel);
+      }
+
       if (CAC_KEYS.xyneAiToolBudgetSearchRelevantContent in allConfigs) {
         fromCAC.push(CAC_KEYS.xyneAiToolBudgetSearchRelevantContent);
       } else {
@@ -361,7 +375,7 @@ export class AgentsConfig {
         usingDefaults.push(CAC_KEYS.xyneAiHistoryCompactionTarget);
       }
 
-      const totalKeys = 20;
+      const totalKeys = 21;
       if (usingDefaults.length === totalKeys) {
         logger.debug('[Agents Config] All configs using DEFAULTS (not configured in CAC)', {
           xyneAiTracingEnabled: `${xyneAiTracingEnabled} (default)`,
@@ -433,6 +447,7 @@ export class AgentsConfig {
         nudgeCreateTicketModelName,
         nudgeRelatedTicketModelName,
         nudgeRelatedMessageModelName,
+        classificationModelName,
         xyneAiToolBudgetSearchRelevantContent,
         xyneAiToolBudgetFetchChannelMessages,
         xyneAiToolBudgetFetchThreadMessages,
@@ -458,6 +473,7 @@ export class AgentsConfig {
         DEFAULT_NUDGE_CREATE_TICKET_MODEL,
         DEFAULT_NUDGE_RELATED_TICKET_MODEL,
         DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,
+        DEFAULT_CLASSIFICATION_MODEL,
         DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_RELEVANT_CONTENT,
         DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_CHANNEL_MESSAGES,
         DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_THREAD_MESSAGES,
@@ -484,6 +500,7 @@ export class AgentsConfig {
       DEFAULT_NUDGE_CREATE_TICKET_MODEL,
       DEFAULT_NUDGE_RELATED_TICKET_MODEL,
       DEFAULT_NUDGE_RELATED_MESSAGE_MODEL,
+      DEFAULT_CLASSIFICATION_MODEL,
       DEFAULT_XYNE_AI_TOOL_BUDGET_SEARCH_RELEVANT_CONTENT,
       DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_CHANNEL_MESSAGES,
       DEFAULT_XYNE_AI_TOOL_BUDGET_FETCH_THREAD_MESSAGES,

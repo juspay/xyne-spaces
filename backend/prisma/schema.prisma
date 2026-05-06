@@ -393,6 +393,9 @@ model Ticket {
   ticketType       String?           
   isArchived       Boolean           @default(false)
   lastEmailAt      DateTime          // Timestamp of most recent email in the ticket's conversation; powers Gmail-style ordering. No @default(now()) because Zero needs every write to flow through the application — every ticket-create call site sets this explicitly.
+  classificationData   Json?             // Full AI classification output (rawOutput, resolvedGroupId, isManualOverride, classifiedAt)
+  aiCategory           String?           // Top-level category from AI classification (indexed for querying)
+  aiSubCategory        String?           // Sub-category from AI classification
 
   // Relations
   createdByUser      User                   @relation("TicketCreatedBy", fields: [createdBy], references: [id])
@@ -1856,16 +1859,34 @@ model EmailSignature {
 }
 
 model EmailChannelPreference {
-  channelId            String   @id // Channel ID (no FK constraint) - Primary key
-  ownerUserId          String?  // User ID who owns this preference (no FK constraint)
-  assigneeUserGroupId  String?  // User group ID for assignee (no FK constraint)
-  boardId              String?  // Target board for ticket creation (no FK constraint)
-  sendAsEmail          String?  // Optional alias email for outbound replies (e.g. support@...)
+  channelId              String   @id // Channel ID (no FK constraint) - Primary key
+  ownerUserId            String?  // User ID who owns this preference (no FK constraint)
+  assigneeUserGroupId    String?  // User group ID for assignee (no FK constraint)
+  boardId                String?  // Target board for ticket creation (no FK constraint)
+  sendAsEmail            String?  // Optional alias email for outbound replies (e.g. support@...)
+  classificationEnabled  Boolean  @default(false)
+  classificationPrompt   String?  // Custom system prompt for the classification LLM
+  categoryField          String?  // Label for the top-level category
+  subCategoryField       String?  // Label for the sub-category
 
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
   @@map("email_channel_preferences")
+  @@schema("public")
+}
+
+model ClassificationMapping {
+  id         String   @id @default(cuid())
+  channelId  String
+  category   String
+  subCategory String?
+  userGroupId String
+  createdAt  DateTime @default(now())
+
+  @@index([channelId])
+  @@index([channelId, category])
+  @@map("classification_mappings")
   @@schema("public")
 }
 

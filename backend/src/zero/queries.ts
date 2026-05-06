@@ -2531,6 +2531,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  getClassificationMappings: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.classification_mappings.where('channelId', channelId).orderBy('createdAt', 'asc');
+    },
+  ),
+
   getCurrentUserPreference: defineQuery(z.object({}), ({ ctx }) => {
     return zql.user_preferences.where('userId', ctx.userID).one();
   }),

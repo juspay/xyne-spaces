@@ -62,6 +62,9 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     isArchived: false,
     workspaceId: workspaceId,
     lastEmailAt: summary.createdAt ?? now,
+    classificationData: null,
+    aiCategory: null,
+    aiSubCategory: null,
   };
 };
 

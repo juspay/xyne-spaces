@@ -59,6 +59,9 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateDescription } from './agents/description-generator';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { v4 as uuidv4 } from 'uuid';
+import { EmailClassificationService } from './emailClassificationService';
+
+const emailClassificationService = new EmailClassificationService();
 
 interface UserInfo {
   id: string;
@@ -615,6 +618,36 @@ export class EmailService {
     this.pushVespaJobForTicket(ticket.id, userId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
+
+    // Run AI classification in background — only for incoming emails on XyneDesk
+    // Falls back to channel's default assignee group if no mapping matches
+    void emailClassificationService
+      .classify(channelId, emailSubject, emailBody)
+      .then(async (classificationData) => {
+        if (!classificationData) return;
+        const { result, config } = classificationData;
+        const resolvedGroupId = await emailClassificationService.resolveUserGroup(result, config);
+        const effectiveGroupId = resolvedGroupId ?? groupId ?? null;
+        await emailClassificationService.storeOnTicket(ticket.id, result, effectiveGroupId);
+        if (resolvedGroupId) {
+          // Classification found a specific group — always use it over the default
+          await this.prisma.ticket.update({
+            where: { id: ticket.id },
+            data: { userGroupId: resolvedGroupId },
+          });
+          logger.info(`[Classification] Auto-assigned ticket ${ticket.id} to group ${resolvedGroupId}`);
+        } else if (groupId && !ticket.userGroupId) {
+          // No mapping matched — fall back to channel default only if nothing was set
+          await this.prisma.ticket.update({
+            where: { id: ticket.id },
+            data: { userGroupId: groupId },
+          });
+          logger.info(`[Classification] Fell back to default group ${groupId} for ticket ${ticket.id}`);
+        }
+      })
+      .catch((err) => {
+        logger.error(`[Classification] Background classification failed for ticket ${ticket.id}`, err);
+      });
 
     // Fire-and-forget: enrich the ticket description via the AI agent. Never
     // blocks ingestion; ticket keeps the raw email body if this fails or times out.

@@ -99,6 +99,7 @@ import pythonQueryRoutes from '@/routes/pythonQuery';
 import formsRoutes from '@/routes/forms';
 import unifiedBotRoutes from '@/routes/unifiedBotRoutes';
 import emailRoutes from '@/routes/email';
+import emailClassificationRoutes from '@/routes/emailClassification';
 // DISABLED: demerge-email feature commented out temporarily (frontend too).
 // import emailDemergeRoutes from '@/routes/emailDemerge';
 import docsRoutes from '@/routes/docs';
@@ -242,6 +243,7 @@ export class App {
 
     this.app.use('/api/health', healthRoutes);
     this.app.use('/api/email', emailRoutes);
+    this.app.use('/api/channels/:channelId/classification', authMiddleware.authenticate, emailClassificationRoutes);
     // DISABLED: demerge-email feature commented out temporarily.
     // Re-enable by uncommenting this mount + the import at the top of this file.
     // this.app.use('/api/email', emailDemergeRoutes);
