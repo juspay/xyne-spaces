@@ -302,7 +302,9 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
     <FlowContext.Provider value={contextValue}>
       <div
         className={
-          compact ? 'flow-ui-compact' : 'flow-ui-container rounded-lg border bg-white p-4 shadow-sm'
+          compact
+            ? 'flow-ui-compact'
+            : 'flow-ui-container max-w-2xl w-full rounded-lg border bg-white p-4 shadow-sm'
         }
       >
         {validatedFlow.title && (

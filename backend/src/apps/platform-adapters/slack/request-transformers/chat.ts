@@ -1,4 +1,5 @@
 import { SlackBlockKitParser } from "@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser";
+import { convertBlockKitToFlowJSON } from "@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitToFlowJSON";
 import type { TransformContext } from "../../types";
 import type {
 	SlackChatPostMessageRequest,
@@ -21,13 +22,34 @@ export interface UpdateMessageArgs {
 
 const blockKitParser = new SlackBlockKitParser();
 
-function processContent(
+/**
+ * Convert BlockKit payload to content string.
+ * When blocks or attachments are present, try to produce a FlowJSON data-div.
+ * Falls back to the HTML BlockKitParser if the converter returns null.
+ * Plain mrkdwn text is returned as-is (isMarkdown: true).
+ */
+async function processContent(
 	req: Pick<
 		SlackChatPostMessageRequest,
 		"text" | "blocks" | "attachments" | "mrkdwn"
 	>,
-): { content: string; isMarkdown: boolean } {
-	if (req.blocks || req.attachments) {
+): Promise<{ content: string; isMarkdown: boolean }> {
+	if (req.blocks?.length || req.attachments?.length) {
+		const flowJSON = await convertBlockKitToFlowJSON({
+			text: req.text,
+			blocks: req.blocks,
+			attachments: req.attachments,
+		});
+
+		if (flowJSON) {
+			const escapedJSON = JSON.stringify(flowJSON).replace(/"/g, "&quot;");
+			return {
+				content: `<div data-flow-json="${escapedJSON}">Flow JSON</div>`,
+				isMarkdown: false,
+			};
+		}
+
+		// Fallback: convert to HTML
 		return {
 			content: blockKitParser.parse({
 				text: req.text,
@@ -52,11 +74,11 @@ function processContent(
 	return { content: "", isMarkdown: false };
 }
 
-export function transformPostMessage(
+export async function transformPostMessage(
 	slackReq: SlackChatPostMessageRequest,
 	context: TransformContext,
-): PostMessageArgs {
-	const { content, isMarkdown } = processContent(slackReq);
+): Promise<PostMessageArgs> {
+	const { content, isMarkdown } = await processContent(slackReq);
 
 	return {
 		channelId: slackReq.channel,
@@ -68,10 +90,10 @@ export function transformPostMessage(
 	};
 }
 
-export function transformUpdate(
+export async function transformUpdate(
 	slackReq: SlackChatUpdateRequest,
-): UpdateMessageArgs {
-	const { content } = processContent(slackReq);
+): Promise<UpdateMessageArgs> {
+	const { content } = await processContent(slackReq);
 
 	return {
 		messageId: slackReq.ts,

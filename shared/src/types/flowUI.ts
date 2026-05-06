@@ -44,6 +44,7 @@ export interface FlowComponentStyle {
   backgroundColor?: string;
   borderRadius?: string;
   border?: string;
+  borderLeft?: string;
 }
 
 // Backward-compat aliases

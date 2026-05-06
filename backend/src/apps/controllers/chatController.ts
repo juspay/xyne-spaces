@@ -4,7 +4,8 @@ import { logger } from '@/utils/logger';
 import { findOrCreateConversation, updateConversation, getChannelHistory, getConversationReplies } from '../core/conversationUtils';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
-import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
+import { SlackAttachment, SlackBlock } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
+import { convertBlockKitToFlowJSON } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitToFlowJSON';
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
 import { MessageType } from '@xyne/shared';
@@ -16,6 +17,7 @@ import { redisService } from '@/services/redisService';
 const ChatActionBodySchema = z.object({
   text: z.string().optional(), // plain text or Slack BlockKit — processed through parser
   markdownText: z.string().optional(), // raw markdown (with optional frontmatter) — stored as-is
+  blocks: z.array(z.any()).optional(), // Slack BlockKit modern blocks
   attachments: z.array(z.any()).optional(),
   metadata: z.record(z.unknown()).optional(), // message metadata (e.g. hasAppActions, appId)
   userId: z.string().min(1, 'User ID is required').trim(),
@@ -141,6 +143,19 @@ export class ChatController {
   }
 
   /**
+   * Converts incoming Slack BlockKit (modern blocks + legacy attachments) to a FlowDefinition (v2).
+   * Delegates to the shared `convertBlockKitToFlowJSON` utility so other callers can reuse it directly.
+   * Returns null when there is nothing structured (plain-text only) so the caller falls back to HTML.
+   */
+  private processMessageContentFromBlockitToFlowJSON(
+    text?: string,
+    attachments?: SlackAttachment[],
+    blocks?: unknown[],
+  ) {
+    return convertBlockKitToFlowJSON({ text, blocks: blocks as SlackBlock[] | undefined, attachments }, config.slackBotToken);
+  }
+
+  /**
    * Post a message to a channel or conversation
    * POST /api/external-event/chat/postMessage
    *
@@ -175,6 +190,7 @@ export class ChatController {
         markdownText,
         flow,
         conversationId,
+        blocks,
         attachments,
         userId,
         uploadedFiles,
@@ -221,7 +237,14 @@ export class ChatController {
       } else if (contentFormat === ContentFormat.MARKDOWN) {
         content = text || '';
       } else {
-        content = await this.processMessageContent(text, attachments);
+        let flowJSON = await this.processMessageContentFromBlockitToFlowJSON(text, attachments, blocks);
+        if (flowJSON) {
+          const escapedJSON = JSON.stringify(flowJSON).replace(/"/g, '&quot;');
+          content = `<div data-flow-json="${escapedJSON}">Flow JSON</div>`;
+          isMarkdown = false;
+        } else {
+          content = await this.processMessageContent(text, attachments);
+        }
       }
 
       const result = await findOrCreateConversation(
@@ -277,7 +300,7 @@ export class ChatController {
         return;
       }
 
-      const { messageId, text, markdownText, flowJSON, attachments } = bodyResult.data;
+      const { messageId, text, markdownText, flowJSON, attachments,blocks } = bodyResult.data;
 
       let content: string;
 
@@ -298,7 +321,13 @@ export class ChatController {
       } else if (markdownText) {
         content = markdownText;
       } else {
-        content = await this.processMessageContent(text, attachments);
+        let flowJSON = await this.processMessageContentFromBlockitToFlowJSON(text, attachments, blocks);
+        if (flowJSON) {
+          const escapedJSON = JSON.stringify(flowJSON).replace(/"/g, '&quot;');
+          content = `<div data-flow-json="${escapedJSON}">Flow JSON</div>`;
+        } else {
+          content = await this.processMessageContent(text, attachments);
+        }
       }
 
       const result = await updateConversation(messageId, content);
