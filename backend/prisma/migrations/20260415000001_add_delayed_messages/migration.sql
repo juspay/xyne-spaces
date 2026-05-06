@@ -13,7 +13,7 @@ CREATE TABLE "public"."delayed_messages" (
     "status" "public"."DelayedMessageStatus" NOT NULL DEFAULT 'PENDING',
     "failureReason" TEXT,
     "sentAt" TIMESTAMP(3),
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "delayed_messages_pkey" PRIMARY KEY ("id")

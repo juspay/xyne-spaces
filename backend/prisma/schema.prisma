@@ -3424,7 +3424,7 @@ model DelayedMessage {
   status          DelayedMessageStatus @default(PENDING)
   failureReason   String?                // Error details if status=FAILED
   sentAt          DateTime?              // Actual send time (set when status=SENT)
-  createdAt       DateTime               @default(now())
+  createdAt       DateTime
   updatedAt       DateTime               @updatedAt
 
   @@index([senderId, status])
