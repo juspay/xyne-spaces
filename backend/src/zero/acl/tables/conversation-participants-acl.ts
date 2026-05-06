@@ -48,7 +48,14 @@ export class ConversationParticipantsACL extends BaseACL<'conversation_participa
       .where('id', args.id)
       .one());
 
-    if (participantInfo?.userId != this.ctx.userID) {
+    // Allow updating denormalized system fields (lastReplyAt, channelId) on any
+    // participant row if the updater is a channel member. These fields are synced
+    // by the system when replies are sent, not user-controlled.
+    const isSystemFieldUpdate = Object.keys(args).every(
+      k => ['id', 'lastReplyAt', 'channelId'].includes(k)
+    );
+
+    if (!isSystemFieldUpdate && participantInfo?.userId != this.ctx.userID) {
       throw new MutationACLError('Conversation participant update failed: you can only modify your own participant details', 'conversation_participants')
     }
     if (participantInfo) {
