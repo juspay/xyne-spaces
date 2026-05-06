@@ -48,6 +48,7 @@ interface CalendarWeekViewProps {
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
+  onDeleteClick?: (call: Call) => void;
   onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
 }
 
@@ -70,6 +71,7 @@ interface WeekViewCallCardProps {
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
+  onDeleteClick?: (call: Call) => void;
   onResizePointerDown: (e: React.PointerEvent, call: Call) => void;
 }
 
@@ -87,6 +89,7 @@ function WeekViewCallCard({
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
+  onDeleteClick,
   onResizePointerDown,
 }: WeekViewCallCardProps): ReactElement {
   const { isMobile } = usePlatform();
@@ -232,6 +235,14 @@ function WeekViewCallCard({
                   }
                 : undefined
             }
+            onDeleteClick={
+              onDeleteClick
+                ? () => {
+                    setOpenCallId(null);
+                    onDeleteClick(call);
+                  }
+                : undefined
+            }
           />
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
@@ -339,6 +350,7 @@ const CalendarWeekView = ({
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
+  onDeleteClick,
   onCreateCallAtSlot,
 }: CalendarWeekViewProps): ReactElement => {
   const { isMobile } = usePlatform();
@@ -608,6 +620,7 @@ const CalendarWeekView = ({
                             onGotoMessage={onGotoMessage}
                             onDownloadTranscript={onDownloadTranscript}
                             {...(onEditClick ? { onEditClick } : {})}
+                            {...(onDeleteClick ? { onDeleteClick } : {})}
                             onResizePointerDown={onResizePointerDown}
                           />
                         );

@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Users,
   Pencil,
+  Trash2,
   ExternalLink,
   MapPin,
 } from 'lucide-react';
@@ -32,6 +33,7 @@ interface CalendarCallPopupProps {
   onGotoMessage?: () => void;
   onDownloadTranscript?: () => void;
   onEditClick?: (() => void) | undefined;
+  onDeleteClick?: (() => void) | undefined;
 }
 
 function formatPopupDate(startsAt: number | string): string {
@@ -126,6 +128,7 @@ const CalendarCallPopup = ({
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
+  onDeleteClick,
 }: CalendarCallPopupProps): React.ReactElement => {
   const isEnded = call.status === CallStatus.ENDED;
   const isRecurring = !!call.recurringSeriesId;
@@ -419,6 +422,20 @@ const CalendarCallPopup = ({
               <Pencil className='size-4' />
             </button>
           )}
+          {!isEnded &&
+            !isExternalCalendar &&
+            currentUserId === organizerUserId &&
+            onDeleteClick && (
+              <button
+                onClick={onDeleteClick}
+                title='Delete call'
+                data-track-category='Calls'
+                data-track-name='popup-delete-call'
+                className='text-muted-foreground hover:text-destructive transition-colors p-0.5 cursor-pointer'
+              >
+                <Trash2 className='size-4' />
+              </button>
+            )}
           {isEnded && onGotoMessage && (
             <button
               onClick={onGotoMessage}

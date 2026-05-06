@@ -1047,6 +1047,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
                   onEditClick={call => handleEditClick(call)}
+                  onDeleteClick={call => handleDeleteClick(call)}
                   onCreateCall={handleCreateCallOnDay}
                 />
               )}
@@ -1059,6 +1060,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
                   onEditClick={call => handleEditClick(call)}
+                  onDeleteClick={call => handleDeleteClick(call)}
                   onCreateCallAtSlot={handleCreateCallAtSlot}
                 />
               )}
@@ -1071,6 +1073,7 @@ const CallHistoryScreen = (): ReactElement => {
                   onGotoMessage={call => handleGotoTranscript(call)}
                   onDownloadTranscript={call => handleDownloadTranscript(call)}
                   onEditClick={call => handleEditClick(call)}
+                  onDeleteClick={call => handleDeleteClick(call)}
                   onCreateCallAtSlot={handleCreateCallAtSlot}
                 />
               )}

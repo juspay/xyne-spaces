@@ -23,6 +23,7 @@ interface CalendarMonthViewProps {
   onGotoMessage: (call: Call) => void;
   onDownloadTranscript: (call: Call) => void;
   onEditClick?: (call: Call) => void;
+  onDeleteClick?: (call: Call) => void;
   onCreateCall?: (date: Date) => void;
 }
 
@@ -56,6 +57,7 @@ const CalendarMonthView = ({
   onGotoMessage,
   onDownloadTranscript,
   onEditClick,
+  onDeleteClick,
   onCreateCall,
 }: CalendarMonthViewProps): ReactElement => {
   const { isMobile } = usePlatform();
@@ -258,6 +260,14 @@ const CalendarMonthView = ({
                                           }
                                         : undefined
                                     }
+                                    onDeleteClick={
+                                      onDeleteClick
+                                        ? () => {
+                                            setOpenCallId(null);
+                                            onDeleteClick(call);
+                                          }
+                                        : undefined
+                                    }
                                   />
                                 </PopoverPrimitive.Content>
                               </PopoverPrimitive.Portal>
@@ -414,6 +424,15 @@ const CalendarMonthView = ({
                                                       setOpenOverflowCallId(null);
                                                       setOpenOverflowDay(null);
                                                       onEditClick(call);
+                                                    }
+                                                  : undefined
+                                              }
+                                              onDeleteClick={
+                                                onDeleteClick
+                                                  ? () => {
+                                                      setOpenOverflowCallId(null);
+                                                      setOpenOverflowDay(null);
+                                                      onDeleteClick(call);
                                                     }
                                                   : undefined
                                               }
