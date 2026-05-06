@@ -1,8 +1,12 @@
-import React, { ReactElement, ReactNode } from 'react';
+import React, { createContext, ReactElement, ReactNode, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { Activity, ChannelType } from '@xyne/shared';
 import { mutators } from '../../zero/mutators';
+
+/** Ref-based context: when current=true, ActivityItemCard appends ?nofocus=1 to navigation. */
+const NofocusRefContext = createContext<React.RefObject<boolean>>({ current: false });
+export const NofocusRefProvider = NofocusRefContext.Provider;
 import { useChannel } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../hooks/useAuth';
@@ -30,6 +34,7 @@ interface ActivityItemCardProps {
   children: ReactNode;
   className?: string;
   actorAction?: string;
+  isSelected?: boolean | undefined;
 }
 
 export const ActivityItemCard = ({
@@ -46,11 +51,13 @@ export const ActivityItemCard = ({
   children,
   className,
   actorAction,
+  isSelected,
 }: ActivityItemCardProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
   const zero = useZero();
   const { isMobile } = usePlatform();
+  const nofocusRef = useContext(NofocusRefContext);
 
   const channel = useChannel(channelId || '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, context.userID);
@@ -71,12 +78,25 @@ export const ActivityItemCard = ({
     const path = isDeskChannel
       ? (supportTargetPath ?? (channelId ? `/support/${channelId}` : ''))
       : targetPath;
+
     if (path) {
-      void navigate(path, {
-        state: {
-          activityNavigationNonce: Date.now(),
-        },
-      });
+      if (nofocusRef.current) {
+        const separator = path.includes('?') ? '&' : '?';
+        const hashIdx = path.indexOf('#');
+        const pathWithoutHash = hashIdx >= 0 ? path.slice(0, hashIdx) : path;
+        const hash = hashIdx >= 0 ? path.slice(hashIdx) : '';
+        void navigate(`${pathWithoutHash}${separator}nofocus=1${hash}`, {
+          state: {
+            activityNavigationNonce: Date.now(),
+          },
+        });
+      } else {
+        void navigate(path, {
+          state: {
+            activityNavigationNonce: Date.now(),
+          },
+        });
+      }
     }
   };
 
@@ -97,9 +117,14 @@ export const ActivityItemCard = ({
       onClick={handleClick}
       className={cn(
         'group flex w-full items-start gap-3 p-4 text-left transition-colors duration-150 h-auto rounded-none border-b border-border',
-        !activity.isRead ? 'bg-muted hover:bg-accent' : 'bg-card hover:bg-muted',
+        isSelected
+          ? 'bg-accent'
+          : !activity.isRead
+            ? 'bg-muted hover:bg-accent'
+            : 'bg-card hover:bg-muted',
         className,
       )}
+      data-activity-id={activity.id}
       data-track-category='ACTIVITY'
       data-track-name='OPEN_ACTIVITY_ITEM'
       data-track-metadata={JSON.stringify({

@@ -8,9 +8,11 @@ import { getUserDisplayName, isUserDeactivated } from '../../utils/userDisplayNa
 export const AssignmentPauseActivity = ({
   activity,
   isExpanded,
+  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
+  isSelected?: boolean;
 }): ReactElement | null => {
   const isPaused = activity.actorAction === 'paused_from_assignment';
 
@@ -54,6 +56,7 @@ export const AssignmentPauseActivity = ({
       description={<span className='text-muted-foreground text-sm'>ticket assignment</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
+      isSelected={isSelected}
       actorAction={activity.actorAction}
     >
       {isExpanded ? (

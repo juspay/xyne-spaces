@@ -10,9 +10,11 @@ import { useRouteContext } from '../../hooks/useRouteContext';
 export const MessageMentionActivity = ({
   activity,
   isExpanded,
+  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
+  isSelected?: boolean;
 }): ReactElement | null => {
   const message = activity.message;
   const sender = useUser(message?.senderId ?? '');
@@ -41,6 +43,7 @@ export const MessageMentionActivity = ({
       targetPath={targetPath}
       supportTargetPath={supportTargetPath}
       isExpanded={isExpanded}
+      isSelected={isSelected}
       className='flex items-start'
     >
       {isExpanded ? (

@@ -9,9 +9,14 @@ import { ActivityItemCard } from './ActivityItemCard';
 interface EtaActivityProps {
   activity: Activity;
   isExpanded: boolean;
+  isSelected?: boolean;
 }
 
-export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactElement | null => {
+export const EtaActivity = ({
+  activity,
+  isExpanded,
+  isSelected,
+}: EtaActivityProps): ReactElement | null => {
   const [ticket] = useQuery(queries.ticketById({ ticketId: activity.actionSourceId }));
   const ticketXyneId = ticket?.xyneId || activity.actionSourceId;
   const etaDate = ticket?.eta ? new Date(ticket.eta) : null;
@@ -62,6 +67,7 @@ export const EtaActivity = ({ activity, isExpanded }: EtaActivityProps): ReactEl
       description={<span className='text-muted-foreground text-sm'>ticket in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
+      isSelected={isSelected}
     >
       {isExpanded ? (
         expandedContent

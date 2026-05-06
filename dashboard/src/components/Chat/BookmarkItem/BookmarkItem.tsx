@@ -56,6 +56,7 @@ export interface BookmarkItemProps {
   enableReminder?: boolean; // Optional: enable reminder functionality (default: false)
   isMobile?: boolean; // Optional: whether rendering on mobile device
   showActions?: boolean; // Optional: show hover actions toolbar (default: true)
+  nofocus?: boolean; // Optional: append ?nofocus=1 to navigation URL
   onMarkedDone?: () => void;
 }
 
@@ -68,6 +69,7 @@ export const BookmarkItem = ({
   enableReminder = false,
   isMobile = false,
   showActions = true,
+  nofocus = false,
   onMarkedDone,
 }: BookmarkItemProps): ReactElement | null => {
   const navigate = useNavigate();
@@ -110,11 +112,12 @@ export const BookmarkItem = ({
   // If it's a thread reply, navigate to the thread view (channelId/conversationId)
   // Otherwise, navigate to the channel view with conversation highlighted
   // Use baseRoute to determine context: /chat/bookmarks -> /chat/bookmarks/:channelId, else /chat/dir/:channelId
+  const nofocusParam = nofocus ? '?nofocus=1' : '';
   const messageLink =
     messageChannelId && conversationId
       ? isThreadReply
-        ? `${baseRoute}/${messageChannelId}/${conversationId}#origin=${conversationId}&messageId=${message.messageId}`
-        : `${baseRoute}/${messageChannelId}#origin=${conversationId}&messageId=${message.messageId}`
+        ? `${baseRoute}/${messageChannelId}/${conversationId}${nofocusParam}#origin=${conversationId}&messageId=${message.messageId}`
+        : `${baseRoute}/${messageChannelId}${nofocusParam}#origin=${conversationId}&messageId=${message.messageId}`
       : '#';
 
   const handleClick = (e: React.MouseEvent): void => {

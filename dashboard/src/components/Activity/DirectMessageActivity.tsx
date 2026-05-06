@@ -10,9 +10,11 @@ import { useRouteContext } from '../../hooks/useRouteContext';
 export const DirectMessageActivity = ({
   activity,
   isExpanded,
+  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
+  isSelected?: boolean;
 }): ReactElement | null => {
   const message = activity.message;
   const sender = useUser(message?.senderId ?? '');
@@ -38,6 +40,7 @@ export const DirectMessageActivity = ({
       description={<span className='text-muted-foreground text-sm'>sent you a DM in</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
+      isSelected={isSelected}
       className='flex items-start'
     >
       {isExpanded ? (

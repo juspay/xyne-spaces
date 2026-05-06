@@ -2,9 +2,10 @@
  * Recording Detail Screen - View individual recording with transcript and summary
  */
 
-import { ReactElement, useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { recordingService, RecordingDetail } from '../../services/Recording/recordingService';
+import { useShortcut } from '../../shortcuts';
 import {
   ArrowLeft,
   Clock,
@@ -31,9 +32,14 @@ import { formatRecordingDuration, logRecordingError } from '../../utils/recordin
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import { usePlatform } from '../../hooks/usePlatform';
 
+interface RecordingNavState {
+  recordingIds?: string[];
+}
+
 export default function RecordingDetailScreen(): ReactElement {
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
 
   const [recording, setRecording] = useState<RecordingDetail | null>(null);
@@ -48,6 +54,42 @@ export default function RecordingDetailScreen(): ReactElement {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
+  // j/k keyboard navigation between recordings
+  const navState = location.state as RecordingNavState | null;
+  const recordingIds = navState?.recordingIds;
+
+  const currentIndex = useMemo(
+    () => (recordingIds && recordingId ? recordingIds.indexOf(recordingId) : -1),
+    [recordingIds, recordingId],
+  );
+  const canNavigateNext = currentIndex >= 0 && currentIndex < (recordingIds?.length ?? 0) - 1;
+  const canNavigatePrevious = currentIndex > 0;
+
+  const navigateRecording = useCallback(
+    (delta: number) => {
+      if (!recordingIds) return;
+      const nextIdx = currentIndex + delta;
+      const nextId = recordingIds[nextIdx];
+      if (nextId) {
+        void navigate(`/recordings/${nextId}`, { state: { recordingIds } });
+      }
+    },
+    [recordingIds, currentIndex, navigate],
+  );
+
+  useShortcut('j', () => navigateRecording(1), {
+    scope: 'global',
+    description: 'Next recording',
+    category: 'Recordings',
+    enabled: canNavigateNext,
+  });
+  useShortcut('k', () => navigateRecording(-1), {
+    scope: 'global',
+    description: 'Previous recording',
+    category: 'Recordings',
+    enabled: canNavigatePrevious,
+  });
+
   // Query the message for sharing using Zero - same pattern as ShareRecordingHandler
   const [message] = useCachedQuery(
     queries.getMessageForActivityV2({ messageId: recording?.messageId ?? '' }),
@@ -61,7 +103,10 @@ export default function RecordingDetailScreen(): ReactElement {
 
   const loadRecording = async (id: string): Promise<void> => {
     try {
-      setLoading(true);
+      // Only show full-page loader on initial load, not when switching recordings
+      if (!recording) {
+        setLoading(true);
+      }
       setError(null);
       const data = await recordingService.getRecordingDetail(id);
       setRecording(data);

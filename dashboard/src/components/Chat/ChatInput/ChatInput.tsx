@@ -137,8 +137,10 @@ export const ChatInput = forwardRef<InputBoxHandle, ChatInputProps>(
 
     // TipTap requires editor.commands.focus(), not DOM .focus().
     // Skips if already focused by TipTap's autofocus or usePageAutoFocus.
+    // Also skips when autoFocus is null (keyboard navigation via ?nofocus=1).
     useEffect(() => {
-      if (hasAutoFocusedRef.current || isMobile || isXyneAIOpen) return;
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- autoFocus intentionally not in deps; read once on mount
+      if (hasAutoFocusedRef.current || isMobile || isXyneAIOpen || autoFocus === null) return;
       hasAutoFocusedRef.current = true;
 
       const rafId = requestAnimationFrame(() => {

@@ -11,9 +11,11 @@ import { renderEmoji } from '../../utils/customEmojiUtils';
 export const ReactionAddedActivityV2 = ({
   activity,
   isExpanded = true,
+  isSelected,
 }: {
   activity: ActivityWithRelated;
   isExpanded: boolean;
+  isSelected?: boolean;
 }): ReactElement | null => {
   const message = activity.message;
   const actorUser = useUser(activity.actorId); // Most recent reactor
@@ -72,6 +74,7 @@ export const ReactionAddedActivityV2 = ({
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}
       isExpanded={isExpanded}
+      isSelected={isSelected}
     >
       {isExpanded ? (
         <MessageBubble message={message} showAvatar={false} contentOnly={true} variant='default' />

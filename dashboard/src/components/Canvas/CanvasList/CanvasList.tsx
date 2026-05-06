@@ -37,7 +37,8 @@ import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { useQuery } from '../../../hooks/useQuery';
 import { useCanvasPrefetch } from '../../../hooks/useCanvasPrefetch';
 import { useCachedQuery } from '@xyne/shared/hooks';
-import { Virtuoso } from 'react-virtuoso';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { useShortcut } from '../../../shortcuts';
 
 type FilterTab = 'all' | 'created_by_me' | 'quarto_docs';
 type CanvasCursor = { id: string; updatedAt: number };
@@ -177,6 +178,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const [isNextPageLoading, setIsNextPageLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const canvasVirtuosoRef = useRef<VirtuosoHandle>(null);
 
   const { prefetchTopCanvases, handleMouseEnter, handleMouseLeave } = useCanvasPrefetch();
 
@@ -293,6 +295,41 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
     return filtered;
   }, [activeFilter, currentUserId, isQuartoDocs, rawItems, searchQuery]);
+
+  // j/k keyboard navigation through canvas list
+  const canvasSelectedIdx = useRef(-1);
+
+  const navigateCanvas = useCallback(
+    (delta: number) => {
+      if (filteredCanvases.length === 0) return;
+      const nextIdx =
+        canvasSelectedIdx.current < 0
+          ? delta > 0
+            ? 0
+            : filteredCanvases.length - 1
+          : Math.max(0, Math.min(filteredCanvases.length - 1, canvasSelectedIdx.current + delta));
+      canvasSelectedIdx.current = nextIdx;
+      const targetId = filteredCanvases[nextIdx]?.id;
+      if (!targetId) return;
+      canvasVirtuosoRef.current?.scrollToIndex({ index: nextIdx, align: 'center' });
+      // Navigate directly with nofocus instead of clicking (avoids auto-focus in canvas editor)
+      void navigate(`/chat/canvas/${targetId}?nofocus=1`);
+    },
+    [filteredCanvases],
+  );
+
+  useShortcut('j', () => navigateCanvas(1), {
+    scope: 'global',
+    description: 'Next canvas',
+    category: 'Canvas',
+    enabled: !isMobile && filteredCanvases.length > 0,
+  });
+  useShortcut('k', () => navigateCanvas(-1), {
+    scope: 'global',
+    description: 'Previous canvas',
+    category: 'Canvas',
+    enabled: !isMobile && filteredCanvases.length > 0,
+  });
 
   const requestNextPage = useCallback((): void => {
     if (!paginated || !hasMore || isLoadingNext || !nextCursor) {
@@ -715,6 +752,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           </div>
         ) : (
           <Virtuoso
+            ref={canvasVirtuosoRef}
             key={`${channelId ?? 'user'}:${activeFilter}`}
             className='h-full'
             data={filteredCanvases}

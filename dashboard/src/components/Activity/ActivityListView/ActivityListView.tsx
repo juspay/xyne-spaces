@@ -18,6 +18,7 @@ import {
   MoreVertical,
 } from 'lucide-react';
 import { ActivityItem } from '../ActivityItem';
+import { NofocusRefProvider } from '../ActivityItemCard';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as Switch from '@radix-ui/react-switch';
 import { Badge } from '../../ui/Badge';
@@ -29,8 +30,9 @@ import {
   EVENTS,
   EVENT_PROPERTIES,
 } from '../../../services/Analytics/mixpanelService';
-import { Virtuoso } from 'react-virtuoso';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Skeleton } from '../../ui/Skeleton';
+import { useShortcut } from '../../../shortcuts';
 import { extractUserMentions } from '../../../utils/mentionParser';
 import {
   PanelGroup,
@@ -415,6 +417,73 @@ const ActivityListView = (): ReactElement => {
     });
   }, [activities, activeTab, showUnreadOnly, visibleTabs]);
 
+  // j/k keyboard navigation through activity list.
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const activityVirtuosoRef = useRef<VirtuosoHandle>(null);
+  const nofocusRef = useRef(false);
+
+  // Sync selection when user clicks an activity manually
+  useEffect(() => {
+    const container = document.querySelector('[data-component="ActivityList"]');
+    if (!container) return;
+    const handler = (e: Event) => {
+      const activityEl = (e.target as HTMLElement).closest<HTMLElement>('[data-activity-id]');
+      const id = activityEl?.getAttribute('data-activity-id');
+      if (id) setSelectedActivityId(id);
+    };
+    container.addEventListener('click', handler, true);
+    return () => container.removeEventListener('click', handler, true);
+  }, []);
+
+  const navigateActivity = useCallback(
+    (delta: number) => {
+      const container = document.querySelector('[data-component="ActivityList"]');
+      if (!container) return;
+      const items = Array.from(container.querySelectorAll<HTMLElement>('[data-activity-id]'));
+      if (items.length === 0) return;
+
+      let currentIdx = -1;
+      if (selectedActivityId) {
+        currentIdx = items.findIndex(
+          el => el.getAttribute('data-activity-id') === selectedActivityId,
+        );
+      }
+
+      const nextIdx =
+        currentIdx < 0
+          ? delta > 0
+            ? 0
+            : items.length - 1
+          : Math.max(0, Math.min(items.length - 1, currentIdx + delta));
+      if (nextIdx === currentIdx && currentIdx >= 0) return;
+
+      const nextEl = items[nextIdx];
+      if (!nextEl) return;
+      const activityId = nextEl.getAttribute('data-activity-id');
+      if (!activityId) return;
+
+      setSelectedActivityId(activityId);
+      nextEl.scrollIntoView({ block: 'nearest' });
+      nofocusRef.current = true;
+      nextEl.click();
+      nofocusRef.current = false;
+    },
+    [selectedActivityId],
+  );
+
+  useShortcut('j', () => navigateActivity(1), {
+    scope: 'global',
+    description: 'Next activity',
+    category: 'Activity',
+    enabled: !isMobile && filteredActivities.length > 0,
+  });
+  useShortcut('k', () => navigateActivity(-1), {
+    scope: 'global',
+    description: 'Previous activity',
+    category: 'Activity',
+    enabled: !isMobile && filteredActivities.length > 0,
+  });
+
   const markActiveTabUnread = () => {
     const filters: {
       actorAction?: string;
@@ -532,19 +601,24 @@ const ActivityListView = (): ReactElement => {
           style={{ height: 'calc(100vh - 200px)' }}
           className='relative min-h-0 basis-0 grow flex flex-col'
         >
-          <Virtuoso
-            className='no-scrollbar'
-            style={{ height: '100%' }}
-            data={activityList}
-            endReached={handleEndReached}
-            computeItemKey={(_, activity) => activity.id}
-            overscan={{ main: 2000, reverse: 500 }} // Prefetch ~25 items ahead (at ~80px each)
-            itemContent={(_, activity) => (
-              <div className='min-h-[0.5px]'>
-                <ActivityItem activity={activity} isExpanded={isExpanded} />
-              </div>
-            )}
-          />
+          <NofocusRefProvider value={nofocusRef}>
+            <Virtuoso
+              ref={activityVirtuosoRef}
+              className='no-scrollbar'
+              style={{ height: '100%' }}
+              data={activityList}
+              endReached={handleEndReached}
+              computeItemKey={(_, activity) => activity.id}
+              overscan={{ main: 2000, reverse: 500 }}
+              itemContent={(_, activity) => (
+                <ActivityItem
+                  activity={activity}
+                  isExpanded={isExpanded}
+                  isSelected={selectedActivityId === activity.id}
+                />
+              )}
+            />
+          </NofocusRefProvider>
         </div>
       );
     }
