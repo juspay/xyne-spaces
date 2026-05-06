@@ -1827,6 +1827,11 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
  * MIDNIGHT THEME OVERRIDES — hardcoded color scoped overrides
  * ============================================================================ */
 
+/* --- Bookmarked message background --- */
+[data-theme="midnight"] .message-bookmarked-bg {
+  background-color: rgba(59, 130, 246, 0.1);
+}
+
 /* --- 2A: Status Badges --- */
 [data-theme="midnight"] .status-badge-opened {
   background-color: #1f2937 !important;
@@ -1894,6 +1899,13 @@ span.chat-input-special-mention[data-mention-type="here"]:hover {
 
 [data-theme="midnight"] .chat-input-field .ProseMirror::-webkit-scrollbar-thumb:hover {
   background: #6b7280;
+}
+
+[data-theme="midnight"] [data-testid="send-message-button"]:not(:disabled),
+[data-theme="midnight"] [data-testid="send-message-button"]:not(:disabled):hover,
+[data-theme="midnight"] div:has([data-testid="send-message-button"]).bg-primary {
+  background-color: var(--action-primary) !important;
+  color: var(--action-primary-foreground) !important;
 }
 
 [data-theme="midnight"] .theme-invert {

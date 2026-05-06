@@ -18,11 +18,11 @@ const Cell = React.memo(function Cell({
 }: CellProps) {
   return (
     <div
-      className='px-2 py-1 text-sm whitespace-nowrap overflow-hidden text-ellipsis'
+      className='px-2 py-1 text-sm whitespace-nowrap overflow-hidden text-ellipsis text-foreground border-border bg-background'
       style={{
         width,
-        borderRight: showRightBorder ? '1px solid #d1d5db' : 'none',
-        borderBottom: showBottomBorder ? '1px solid #d1d5db' : 'none',
+        borderRight: showRightBorder ? '1px solid hsl(var(--border))' : 'none',
+        borderBottom: showBottomBorder ? '1px solid hsl(var(--border))' : 'none',
         boxSizing: 'border-box',
       }}
     >
@@ -156,7 +156,7 @@ const CsvViewer: React.FC<BaseViewerProps> = ({ source }) => {
   }
 
   if (data.length === 0) {
-    return <div className='pt-[65px] p-4'>No data found in CSV file</div>;
+    return <div className='pt-[65px] p-4 text-foreground'>No data found in CSV file</div>;
   }
 
   // Compute visible columns once (outside row loops for performance)

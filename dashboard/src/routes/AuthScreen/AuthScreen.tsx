@@ -151,10 +151,10 @@ const AuthScreen = (): ReactElement => {
                   <div className='mb-8'>
                     <img src='/svgs/xyne.svg' alt='Xyne Logo' />
                   </div>
-                  <h2 className='text-lg lg:text-xl font-medium md:font-semibold text-slate-900'>
+                  <h2 className='text-lg lg:text-xl font-medium md:font-semibold text-foreground'>
                     Log in to Xyne Spaces
                   </h2>
-                  <p className='text-xs sm:text-sm md:text-sm text-slate-600'>
+                  <p className='text-xs sm:text-sm md:text-sm text-muted-foreground'>
                     {isLoading
                       ? 'Signing you in...'
                       : 'Communicate, collaborate & 10x your daily productivity'}
@@ -177,8 +177,10 @@ const AuthScreen = (): ReactElement => {
               {isSelectingWorkspace && (
                 <div className='flex flex-col gap-6'>
                   <div className='text-center'>
-                    <h3 className='text-lg font-semibold text-slate-900'>Select Workspace</h3>
-                    <p className='text-sm text-slate-600 mt-1'>Choose a workspace to continue</p>
+                    <h3 className='text-lg font-semibold text-foreground'>Select Workspace</h3>
+                    <p className='text-sm text-muted-foreground mt-1'>
+                      Choose a workspace to continue
+                    </p>
                   </div>
 
                   <div className='flex flex-col gap-3 max-h-64 overflow-y-auto'>
@@ -186,7 +188,7 @@ const AuthScreen = (): ReactElement => {
                       <button
                         key={workspace.id}
                         onClick={() => handleSelectWorkspace(workspace.id)}
-                        className='flex items-center gap-3 p-4 border border-slate-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all text-left'
+                        className='flex items-center gap-3 p-4 border border-border rounded-lg hover:border-blue-500 hover:bg-accent transition-all text-left'
                         data-track-category='Auth'
                         data-track-name='SelectWorkspace'
                         data-track-metadata={JSON.stringify({ workspaceId: workspace.id })}
@@ -195,8 +197,10 @@ const AuthScreen = (): ReactElement => {
                           <Building2 className='w-5 h-5 text-blue-600' />
                         </div>
                         <div className='flex-1'>
-                          <p className='font-medium text-slate-900'>{workspace.name}</p>
-                          <p className='text-xs text-slate-500 capitalize'>{workspace.role}</p>
+                          <p className='font-medium text-foreground'>{workspace.name}</p>
+                          <p className='text-xs text-muted-foreground capitalize'>
+                            {workspace.role}
+                          </p>
                         </div>
                         <ArrowRight className='w-5 h-5 text-slate-400' />
                       </button>
@@ -223,7 +227,7 @@ const AuthScreen = (): ReactElement => {
 
                   <button
                     onClick={handleGoogleSignIn}
-                    className='text-sm text-slate-600 hover:text-slate-800 text-center'
+                    className='text-sm text-muted-foreground hover:text-foreground text-center'
                     data-track-category='Auth'
                     data-track-name='TryDifferentAccount'
                   >
@@ -236,8 +240,8 @@ const AuthScreen = (): ReactElement => {
               {((isCreatingOrg && !userExistsButRemoved) || showCreateOrgForm) && (
                 <form onSubmit={handleCreateOrg} className='flex flex-col gap-4'>
                   <div className='text-center'>
-                    <h3 className='text-lg font-semibold text-slate-900'>Create Organization</h3>
-                    <p className='text-sm text-slate-600 mt-1'>Set up your new workspace</p>
+                    <h3 className='text-lg font-semibold text-foreground'>Create Organization</h3>
+                    <p className='text-sm text-muted-foreground mt-1'>Set up your new workspace</p>
                   </div>
 
                   {/* Duplicate Name Error Alert */}
@@ -254,7 +258,7 @@ const AuthScreen = (): ReactElement => {
                     <div>
                       <label
                         htmlFor='orgName'
-                        className='text-sm font-medium text-slate-700 mb-1 block'
+                        className='text-sm font-medium text-foreground mb-1 block'
                       >
                         Organization Name
                       </label>
@@ -269,10 +273,10 @@ const AuthScreen = (): ReactElement => {
                           }
                         }}
                         placeholder='Juspay Inc'
-                        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 ${
+                        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground ${
                           error?.toLowerCase().includes('already exists')
-                            ? 'border-amber-400 focus:ring-amber-500 bg-amber-50'
-                            : 'border-slate-300 focus:ring-blue-500'
+                            ? 'border-amber-400 focus:ring-amber-500'
+                            : 'border-border focus:ring-blue-500'
                         }`}
                         required
                         data-track-category='Auth'
@@ -288,7 +292,7 @@ const AuthScreen = (): ReactElement => {
                     <div>
                       <label
                         htmlFor='workspaceName'
-                        className='text-sm font-medium text-slate-700 mb-1 block'
+                        className='text-sm font-medium text-foreground mb-1 block'
                       >
                         Workspace Name
                       </label>
@@ -298,7 +302,7 @@ const AuthScreen = (): ReactElement => {
                         value={workspaceName}
                         onChange={e => setWorkspaceName(e.target.value)}
                         placeholder='Engineering'
-                        className='w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
+                        className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
                         required
                         data-track-category='Auth'
                         data-track-name='WorkspaceNameInput'
@@ -320,7 +324,7 @@ const AuthScreen = (): ReactElement => {
                     <button
                       type='button'
                       onClick={() => setShowCreateOrgForm(false)}
-                      className='text-sm text-slate-600 hover:text-slate-800'
+                      className='text-sm text-muted-foreground hover:text-foreground'
                       data-track-category='Auth'
                       data-track-name='BackToWorkspaceSelection'
                     >
@@ -333,13 +337,13 @@ const AuthScreen = (): ReactElement => {
               {/* Login Section */}
               {!isLoading && !isSelectingWorkspace && !isCreatingOrg && !showCreateOrgForm
                 ? !isEnrollmentFlow && (
-                    <div className='flex flex-col h-10 justify-center items-center'>
+                    <div className='flex flex-col gap-3 items-center'>
                       {/* Google Sign In Button */}
                       <div className='w-full max-w-[280px] md:max-w-[320px]'>
                         <button
                           disabled={isLoading}
                           onClick={handleGoogleSignIn}
-                          className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#10131F] text-[#525866] rounded-[10px] overflow-hidden h-12'
+                          className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
                           data-track-category='Auth'
                           data-track-name='GoogleSignIn'
                         >
@@ -356,11 +360,11 @@ const AuthScreen = (): ReactElement => {
                       </div>
                       {/* Microsoft Sign In Button */}
                       {providers?.microsoft && (
-                        <div className='w-full max-w-[280px] md:max-w-[320px] mt-3'>
+                        <div className='w-full max-w-[280px] md:max-w-[320px]'>
                           <button
                             disabled={isLoading}
                             onClick={handleMicrosoftSignIn}
-                            className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white rounded-[10px] overflow-hidden h-12'
+                            className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
                             data-track-category='Auth'
                             data-track-name='MicrosoftSignIn'
                           >
@@ -393,12 +397,12 @@ const AuthScreen = (): ReactElement => {
                         <div className='absolute inset-0 rounded-full bg-blue-600/20 animate-ping'></div>
                       </div>
                       <div className='text-center space-y-2'>
-                        <p className='text-lg sm:text-xl font-semibold text-slate-900'>
+                        <p className='text-lg sm:text-xl font-semibold text-foreground'>
                           {isLoggingInToWorkspace
                             ? 'Logging into workspace...'
                             : 'Signing you in...'}
                         </p>
-                        <p className='text-sm sm:text-base text-slate-600'>
+                        <p className='text-sm sm:text-base text-muted-foreground'>
                           Please wait while we authenticate your account
                         </p>
                       </div>
