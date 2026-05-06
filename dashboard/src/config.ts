@@ -29,7 +29,11 @@ export const API_BASE_URL = isElectronBundled
   ? `${ELECTRON_BACKEND_URL}/api`
   : `${protocol}://${hostname}${backendPort}/api`;
 
-export const APPS_PUBLIC_BASE_URL = `${API_BASE_URL}/apps`;
+export const APPS_PUBLIC_BASE_URL = isLocalhost
+  ? 'http://localhost:3001/api/apps'
+  : isSandBox
+    ? 'https://spaces.sandbox.xyne.juspay.net/api/apps'
+    : 'https://spaces.xyne.juspay.net/api/apps';
 
 // Zero Cache
 const zeroCachePort = isLocalhost ? ':4848' : isDockerTestEnv ? ':5173' : '';
