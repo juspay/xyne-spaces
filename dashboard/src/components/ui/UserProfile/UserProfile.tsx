@@ -12,6 +12,8 @@ import {
   Check,
   Camera,
   User as UserIcon,
+  Copy,
+  Hash,
   Mic,
   CheckCircle2,
 } from 'lucide-react';
@@ -34,6 +36,7 @@ import { channelService } from '../../../services/Chat/channelService';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { useAuth } from '../../../hooks/useAuth';
 import { toast } from 'sonner';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { useZero } from '../../../hooks/useZero';
 import SearchUser from '../SearchUser/SearchUser';
 import type { User } from '@xyne/shared';
@@ -79,6 +82,21 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
   // Picture upload state
   const [isUploadingPicture, setIsUploadingPicture] = useState(false);
   const pictureInputRef = useRef<HTMLInputElement>(null);
+
+  // Copy user ID state
+  const [copiedUserId, setCopiedUserId] = useState(false);
+
+  const handleCopyUserId = (): void => {
+    copyTextToClipboard(userId)
+      .then(() => {
+        toast.success('User ID copied to clipboard');
+        setCopiedUserId(true);
+        setTimeout(() => setCopiedUserId(false), 1500);
+      })
+      .catch(() => {
+        toast.error('Failed to copy user ID');
+      });
+  };
 
   // Voice signature state
   const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
@@ -631,6 +649,30 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, className, isO
       <div className='px-6 pb-4 pt-4'>
         <h3 className='text-sm font-semibold text-foreground mb-4'>Contact Information</h3>
         <div className='space-y-4'>
+          {/* User ID */}
+          <div className='flex items-start gap-3'>
+            <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+              <Hash className='size-4 text-muted-foreground' />
+            </div>
+            <div className='flex-1'>
+              <div className='text-sm font-semibold text-foreground leading-tight'>User ID</div>
+              <div className='flex items-center gap-1.5 mt-1'>
+                <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[200px] inline-block'>
+                  {userId}
+                </code>
+                <Button
+                  variant='ghost'
+                  size='iconSm'
+                  className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
+                  onClick={handleCopyUserId}
+                  title='Copy user ID'
+                >
+                  {copiedUserId ? <Check className='size-3' /> : <Copy className='size-3' />}
+                </Button>
+              </div>
+            </div>
+          </div>
+
           {/* Email Address */}
           <div className='flex items-start gap-3'>
             <div className='p-2 bg-muted rounded-lg flex-shrink-0'>

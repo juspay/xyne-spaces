@@ -1,7 +1,9 @@
-import { ReactElement } from 'react';
-import { Edit2, Trash2 } from 'lucide-react';
+import { ReactElement, useState } from 'react';
+import { Edit2, Trash2, Copy, Check } from 'lucide-react';
 import { EmptyState } from '../EmptyState';
 import { Button } from '../../ui/Button';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { toast } from 'sonner';
 import type { BoardWithStages } from '../BoardCard';
 
 interface BoardsTableProps {
@@ -11,6 +13,21 @@ interface BoardsTableProps {
 }
 
 export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): ReactElement => {
+  const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
+
+  const handleCopyId = (e: React.MouseEvent, boardId: string): void => {
+    e.stopPropagation();
+    copyTextToClipboard(boardId)
+      .then(() => {
+        toast.success('Board ID copied to clipboard');
+        setCopiedBoardId(boardId);
+        setTimeout(() => setCopiedBoardId(null), 1500);
+      })
+      .catch(() => {
+        toast.error('Failed to copy board ID');
+      });
+  };
+
   if (boards?.length === 0) {
     return (
       <EmptyState
@@ -29,7 +46,9 @@ export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): Rea
             <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Board Name
             </th>
-
+            <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
+              Board ID
+            </th>
             <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Created Date
             </th>
@@ -44,6 +63,22 @@ export const BoardsTable = ({ boards, onEdit, onDelete }: BoardsTableProps): Rea
               <tr key={board.id} className='hover:bg-muted transition-colors cursor-pointer'>
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <span className='text-sm font-medium text-muted-foreground'>{board.name}</span>
+                </td>
+                <td className='px-6 py-4 whitespace-nowrap'>
+                  <div className='flex items-center gap-1'>
+                    <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[140px] inline-block'>
+                      {board.id}
+                    </code>
+                    <Button
+                      variant='ghost'
+                      size='iconSm'
+                      className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
+                      onClick={e => handleCopyId(e, board.id)}
+                      title='Copy board ID'
+                    >
+                      {copiedBoardId === board.id ? <Check size={12} /> : <Copy size={12} />}
+                    </Button>
+                  </div>
                 </td>
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <div className='text-sm text-muted-foreground'>

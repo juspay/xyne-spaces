@@ -1,4 +1,4 @@
-import { ReactElement, useMemo } from 'react';
+import { ReactElement, useMemo, useState } from 'react';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { Button } from '../../ui/Button/Button';
@@ -6,6 +6,9 @@ import Avatar from '../../ui/Avatar/Avatar';
 import type { UserGroup, User } from '@xyne/shared';
 import { useUsers } from '../../../hooks/useUsers';
 import { useNavigate } from 'react-router-dom';
+import { Copy, Check } from 'lucide-react';
+import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { toast } from 'sonner';
 
 interface UserGroupListItemProps {
   userGroup: UserGroup;
@@ -24,6 +27,20 @@ export const UserGroupListItem = ({
     queries.getUserGroupMembers({ userGroupId: userGroup.id }),
   );
   const navigate = useNavigate();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyId = (e: React.MouseEvent): void => {
+    e.stopPropagation();
+    copyTextToClipboard(userGroup.id)
+      .then(() => {
+        toast.success('User Group ID copied to clipboard');
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        toast.error('Failed to copy user group ID');
+      });
+  };
 
   const allUsers = useUsers();
   const usersById = useMemo(() => {
@@ -34,7 +51,6 @@ export const UserGroupListItem = ({
     return map;
   }, [allUsers]);
 
-  // Extract users from mappings using userId and XState user store
   const members =
     userGroupMembers
       ?.map(mapping => usersById.get(mapping.userId))
@@ -73,6 +89,21 @@ export const UserGroupListItem = ({
               {userGroup.alias && (
                 <p className='text-xs text-muted-foreground'>Alias: {userGroup.alias}</p>
               )}
+              <div className='flex items-center gap-1 mt-0.5'>
+                <span className='text-xs text-muted-foreground'>ID:</span>
+                <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[160px]'>
+                  {userGroup.id}
+                </code>
+                <Button
+                  variant='ghost'
+                  size='iconSm'
+                  className='h-5 w-5 p-0 text-muted-foreground hover:text-foreground'
+                  onClick={handleCopyId}
+                  title='Copy user group ID'
+                >
+                  {copied ? <Check size={12} /> : <Copy size={12} />}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -84,7 +115,6 @@ export const UserGroupListItem = ({
 
             {memberCount > 0 && (
               <div className='flex items-center -space-x-2 z-0'>
-                {/* Show up to 3 member avatars */}
                 {members.slice(0, 3).map((member, index) => (
                   <div
                     key={member.id}
@@ -94,8 +124,6 @@ export const UserGroupListItem = ({
                     <Avatar userId={member.id} size='sm' showActiveStatus={false} />
                   </div>
                 ))}
-
-                {/* Show overflow indicator */}
                 {memberCount > 3 && (
                   <div
                     className='relative flex items-center justify-center w-5 h-5 bg-muted border border-white rounded-full text-xs font-medium text-muted-foreground'
